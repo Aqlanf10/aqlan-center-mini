@@ -300,6 +300,9 @@ export function HrPayrollPanel() {
 
   return (
     <section aria-label="إدارة المسير والصرف" className="space-y-4">
+      <p role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        الحضور والإجازات لا تعدّل مبلغ المسير تلقائيًا. لا تُحتسب خصومات الغياب والتأخير والإجازة غير المدفوعة أو أجور العمل الإضافي تلقائيًا. راجع سجلات الحضور والإجازات وسياسة الأجر المعتمدة قبل اعتماد المسير؛ ظهور خصم صفري لا يعني اكتمال هذه المراجعة.
+      </p>
       {/* Top Header: Period & Currency */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-navy-100 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
@@ -429,7 +432,7 @@ export function HrPayrollPanel() {
             </div>
           </div>
           <div className="rounded-2xl border border-rose-100 bg-rose-50/50 p-3 shadow-sm">
-            <div className="text-xs font-semibold text-rose-700">الخصميات والغياب</div>
+            <div className="text-xs font-semibold text-rose-700">الخصميات المسجلة</div>
             <div className="mt-1 font-mono text-lg font-bold text-rose-800">
               {formatAmount(activeRun.totalDeductionsMinor, activeRun.currency as Currency)}
             </div>

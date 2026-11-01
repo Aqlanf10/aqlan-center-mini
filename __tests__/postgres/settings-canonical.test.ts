@@ -67,6 +67,23 @@ describe("read", () => {
 });
 
 describe("write: the batch rule", () => {
+  it("keeps main's external patient-identity publication owner-only and photo fields locked", async () => {
+    const key = "lab.patient_identity_mode";
+    expect((await read("operational")).__canWrite).not.toContain(key);
+    expect((await read("owner")).__canWrite).toContain(key);
+    const before = await stored(key), beforeAudit = await audits(key);
+    await expect(update("operational", { [key]: "name" }, { __reason: "Synthetic publication review" }))
+      .rejects.toMatchObject({ code: "setting_not_granted" });
+    expect(await stored(key)).toBe(before);
+    expect(await audits(key)).toEqual(beforeAudit);
+    await update("owner", { [key]: "name" }, { __reason: "Synthetic publication review" });
+    expect(await stored(key)).toBe("name");
+    expect((await audits(key)).at(-1)?.actor).toBe(ACCOUNTS.owner.username);
+    for (const locked of ["clinic.login_photo_asset", "clinic.login_photo_visible"]) {
+      await expect(update("owner", { [locked]: locked.endsWith("visible") ? "true" : "synthetic" }))
+        .rejects.toMatchObject({ code: "setting_locked" });
+    }
+  });
   it("an operational editor saves an operational key; the audit row carries the canonical actor", async () => {
     const body = await update("operational", { "clinic.chairs": "4" });
     expect(body.__changed).toEqual(["clinic.chairs"]);

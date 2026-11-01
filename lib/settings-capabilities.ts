@@ -83,6 +83,11 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   "workflow.doctor_financial_view": k("authority"),
   "finance.reception_adds_opening_balance": k("authority"),
   // Integrations: the value sends data out of the clinic.
+  // Main adds external/public identity controls. Keep the existing owner-only
+  // integration boundary; a generic operational grant must not publish identity.
+  // Photo keys are additionally systemLocked and use their held dedicated route.
+  "lab.patient_identity_mode": k("integration"),
+  "clinic.login_photo_asset": k("integration"), "clinic.login_photo_visible": k("integration"),
   "reminders.auto_enabled": k("integration"), "messaging.consent_mode": k("integration"),
   "reminders.auto_template": k("integration"), "reminders.auto_language": k("integration"),
   "ai.clinical_external": k("integration"),

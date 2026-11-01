@@ -1,0 +1,74 @@
+[
+  {
+    "file": "__tests__/migrations.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/postgres/hr-composed-backup.test.ts",
+    "blocks": 2
+  },
+  {
+    "file": "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/postgres/patient-appointment-history-index.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/postgres/periodontal-restore.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/postgres/schema-ownership.test.ts",
+    "blocks": 2
+  },
+  {
+    "file": "__tests__/security-http/hr-temporal-history-ui.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/patient-appointment-history-schema.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/postgres/hr-runtime-registration.test.ts",
+    "blocks": 2
+  },
+  {
+    "file": "__tests__/postgres/debt-installments-storage.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/periodontal-schema.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/periodontal-candidate-chain.test.ts",
+    "blocks": 2
+  },
+  {
+    "file": "__tests__/schema-preflight-cli.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/postgres/_periodontal-fixture.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/lab-accounting-monetary-intent-route.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "__tests__/lab-accounting-fx-snapshot.test.ts",
+    "blocks": 1
+  },
+  {
+    "file": "scripts/verify-schema-ownership.ts",
+    "blocks": 3
+  },
+  {
+    "file": "docs/DATABASE_MIGRATIONS.md",
+    "blocks": 1
+  }
+]

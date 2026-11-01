@@ -1,3 +1,4 @@
+import { PrintMetadata } from "@/components/PrintDocument";
 import { formatMoney, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { hasLegacyHistory, planConsentIsCurrent, type HistoricalPlanItem } from "./legacy-treatment-view";
@@ -15,9 +16,9 @@ export function LegacyPlanPrintSummary({ plan, currency }: { plan: HistoricalPri
   const historicalItems = plan.items.filter(hasLegacyHistory);
   return (
     <section data-testid="legacy-plan-print-reference">
-      <div className="line"><span>رقم الخطة</span><span dir="ltr">#{plan.id}</span></div>
+      <PrintMetadata><div className="line"><span>رقم الخطة</span><span dir="ltr">#{plan.id}</span></div>
       <div className="line"><span>المريض</span><span>{plan.patientName}</span></div>
-      <div className="line"><span>موضوع الخطة</span><span>{plan.title}</span></div>
+      <div className="line"><span>موضوع الخطة</span><span>{plan.title}</span></div></PrintMetadata>
       <p style={{ fontWeight: 700, margin: "4mm 0" }}>مرجع تاريخي للقراءة فقط؛ لا ينشئ اتفاقًا جديدًا أو موافقة علاج أو مديونية جديدة.</p>
       <div className="line"><span>قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)</span><span>{formatMoney(plan.totalMinor, currency)}</span></div>
       <p style={{ margin: "3mm 0" }}>المستحق الحالي يؤخذ من حساب المريض فقط. مبالغ الاتفاقات التاريخية لا تثبت المنجَز قبل النظام أو باقي العلاج سريريًّا.</p>

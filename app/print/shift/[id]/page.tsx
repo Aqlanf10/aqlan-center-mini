@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, getSettingsSafe, getShift, shiftDrawerBreakdown } from "@/lib/db";
 import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
@@ -53,17 +54,17 @@ export default async function ShiftCloseReportPage({ params }: { params: Promise
       <div className="sheet sheet-a5">
         <PrintHeader settings={settings} title={`تقرير إقفال الوردية (Z) — رقم ${shift.id}`} compact />
 
-        <div className="line"><span>فُتحت</span><span>{opened.date} · {opened.time} — {shift.openedBy}</span></div>
+        <PrintMetadata><div className="line"><span>فُتحت</span><span>{opened.date} · {opened.time} — {shift.openedBy}</span></div>
         <div className="line">
           <span>أُقفلت</span>
           <span>{closed ? `${closed.date} · ${closed.time} — ${shift.closedBy ?? "—"}` : "مفتوحة — لم تُقفل بعد"}</span>
-        </div>
+        </div></PrintMetadata>
         {shift.expectedSource === "computed" && shift.status === "closed" ? (
           <p className="footer-note">وردية أُقفلت قبل حفظ المتوقَّع: المتوقَّع والفرق محسوبان بالقاعدة نفسها.</p>
         ) : null}
         <div className="rule-light" />
 
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+        <PrintTableFrame><table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
           <thead>
             <tr>
               <th style={{ textAlign: "right" }}>البند</th>
@@ -120,7 +121,7 @@ export default async function ShiftCloseReportPage({ params }: { params: Promise
               ))}
             </tr>
           </tbody>
-        </table>
+        </table></PrintTableFrame>
 
         {shift.differenceReason ? (
           <>

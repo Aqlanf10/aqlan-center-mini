@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { recordAudit, recordPlanInstallmentReminder } from "@/lib/db";
+import { recordPlanInstallmentReminders } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canHandleMoney } from "@/lib/roles";
 
@@ -31,58 +31,39 @@ export async function POST(request: Request) {
 
   // Bulk update
   if (Array.isArray(source.planIds)) {
-    const planIds = source.planIds.filter((id) => Number.isInteger(id) && Number(id) > 0);
-    if (planIds.length === 0) {
+    const planIds = source.planIds.filter((id) => Number.isSafeInteger(id) && Number(id) > 0 && Number(id) <= 2147483647);
+    if (planIds.length === 0 || planIds.length !== source.planIds.length) {
       return NextResponse.json({ message: "حدد الخطط أولاً." }, { status: 400 });
     }
 
-    // (TD-06) عطل القاعدة يرد برسالة عربية — كان هذا الفرع بلا معالجة فيسقط 500 بلا رسالة.
-    let results: Awaited<ReturnType<typeof recordPlanInstallmentReminder>>[];
+    if (planIds.length > 500) {
+      return NextResponse.json({ message: "اختر 500 خطة كحد أقصى." }, { status: 400 });
+    }
     try {
-      results = await Promise.all(planIds.map((id) => recordPlanInstallmentReminder(Number(id))));
+      const result = await recordPlanInstallmentReminders({ planIds: planIds.map(Number), bulk: true, actor: session.username, actorRole: session.role });
+      return NextResponse.json({ success: true, ...result });
     } catch {
       return NextResponse.json({ message: "تعذّر تسجيل تاريخ التذكير." }, { status: 500 });
     }
-    const lastReminderAt = results[0]?.lastReminderAt || new Date().toISOString();
-    // (TD-06) من نبّه المرضى بأقساطهم — سطرٌ لكل خطةٍ موجودة فعلًا؛ المعدود هو ما حُدِّث لا ما طُلب.
-    let updatedCount = 0;
-    for (const [index, id] of planIds.entries()) {
-      if (!results[index]?.found) continue;
-      updatedCount += 1;
-      await recordAudit({
-        action: "plan.installment_reminder", entity: "treatment_plans", entityId: Number(id),
-        details: { جماعي: true }, actor: session.username, actorRole: session.role,
-      });
-    }
 
-    return NextResponse.json({
-      success: true,
-      updatedCount,
-      lastReminderAt,
-    });
   }
 
   // Single plan update
   const planId = Number(source.planId);
-  if (!Number.isInteger(planId) || planId <= 0) {
+  if (!Number.isSafeInteger(planId) || planId <= 0 || planId > 2147483647) {
     return NextResponse.json({ message: "معرف الخطة غير صحيح." }, { status: 400 });
   }
 
-  const installmentNumber =
-    source.installmentNumber !== undefined && Number.isInteger(Number(source.installmentNumber))
-      ? Number(source.installmentNumber)
-      : undefined;
+  const installmentNumber = source.installmentNumber === undefined ? undefined : Number(source.installmentNumber);
+  if (installmentNumber !== undefined && (!Number.isSafeInteger(installmentNumber) || installmentNumber <= 0 || installmentNumber > 2147483647)) {
+    return NextResponse.json({ message: "رقم القسط غير صحيح." }, { status: 400 });
+  }
 
   try {
-    const res = await recordPlanInstallmentReminder(planId, installmentNumber);
-    if (!res.found) {
+    const res = await recordPlanInstallmentReminders({ planIds: [planId], installmentNumber, bulk: false, actor: session.username, actorRole: session.role });
+    if (res.updatedCount === 0) {
       return NextResponse.json({ message: "الخطة أو القسط غير موجود." }, { status: 404 });
     }
-    await recordAudit({
-      action: "plan.installment_reminder", entity: "treatment_plans", entityId: planId,
-      details: installmentNumber !== undefined ? { القسط: installmentNumber } : {},
-      actor: session.username, actorRole: session.role,
-    });
     return NextResponse.json({
       success: true,
       planId,

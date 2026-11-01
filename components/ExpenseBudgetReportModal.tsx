@@ -6,7 +6,9 @@ import { formatMoney, MINOR_UNITS, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { Icon } from "@/components/Icon";
 import { useSetting } from "@/components/SettingsProvider";
-import { ReportPrintIdentity } from "@/components/ReportPrintHeader";
+import { ReportPrintHeader, ReportPrintFooter } from "@/components/ReportPrintHeader";
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
+import printStyles from "./PrintReportModal.module.css";
 import { exportExpenseBudgetToExcel } from "@/lib/expenseBudgetExport";
 import type { ExpenseCategoryDTO, ExpenseBudgetSummary } from "@/lib/db";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -129,7 +131,7 @@ export function ExpenseBudgetReportModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-2 sm:p-4 backdrop-blur-sm overflow-y-auto print:p-0 print:bg-white print:static print:inset-auto">
+    <div id="expense-budget-report-modal" className={`${printStyles.modal} ${printStyles.landscape} fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-2 sm:p-4 backdrop-blur-sm overflow-y-auto print:p-0 print:bg-white print:static print:inset-auto`}>
       {/* Container */}
       <div className="relative w-full max-w-5xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[92vh] print:max-h-none print:shadow-none print:border-none print:rounded-none">
         {/* Modal Controls Header (Hidden in Print) */}
@@ -217,82 +219,29 @@ export function ExpenseBudgetReportModal({
         {/* Printable Area */}
         <div
           ref={printRef}
-          className="flex-1 overflow-y-auto p-6 sm:p-8 bg-white print:p-4 print:overflow-visible text-slate-900"
+          id="expense-budget-print-root"
+          className="print-document flex-1 overflow-y-auto p-6 sm:p-8 bg-white print:p-4 print:overflow-visible text-slate-900"
           dir="rtl"
         >
-          {/* Clinic Official Header */}
-          <div className="flex items-start justify-between gap-4 border-b-2 border-slate-800 pb-5 mb-5">
-            <div className="space-y-1">
-              {/* الشعار بجوار الاسم: تقريرٌ يُرفع للجرد أو يُرسل للمراجع الخارجي
-                  مستندٌ باسم المركز — والشعار يجعله يُعرف قبل أن يُقرأ. */}
-              <ReportPrintIdentity
-                clinicName={resolvedName}
-                clinicPhone={resolvedPhone}
-                clinicAddress={resolvedAddress}
-                logoClassName="h-16 w-16"
-              />
-              <p className="text-xs text-slate-600 font-medium pt-1">
-                قسم الإدارة المالية والمحاسبية • رقابة المصروفات التشغيلية والموازنات
-              </p>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="text-left space-y-0.5 text-xs">
-                <div className="inline-block px-2.5 py-1 rounded bg-teal-50 border border-teal-200 text-teal-800 font-bold text-[11px]">
-                  تقرير تدقيق معتمد
-                </div>
-                <div className="text-slate-500 font-mono text-[10px] pt-1">
-                  المرجع: {auditDocRef}
-                </div>
-                <div className="text-slate-500 text-[10px]">
-                  التاريخ: {today} | {reportTime}
-                </div>
-              </div>
-
-              {qrCodeDataUrl ? (
-                <img
-                  src={qrCodeDataUrl}
-                  alt="QR Code للتثبت الرقمي"
-                  className="h-16 w-16 rounded border border-slate-200 p-0.5 shadow-sm"
-                />
-              ) : (
-                <div className="h-16 w-16 rounded border border-slate-200 bg-slate-50 animate-pulse" />
-              )}
-            </div>
-          </div>
-
-          {/* Report Title & Scope */}
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 mb-6">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-base font-bold text-slate-800">
-                  كشف تدقيق بنود المصروفات التشغيلية والموازنة التقديرية
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  فترة التقرير: شهر <span className="font-bold text-slate-700">{month}</span> •
-                  العملة المحاسبية: <span className="font-bold text-slate-700">{baseCurrency}</span>
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs">
-                <span className="rounded-md bg-white px-2.5 py-1 font-semibold text-slate-700 border border-slate-200 shadow-xs">
-                  إجمالي البنود: {filteredRows.length}
-                </span>
-                {overBudgetCount > 0 ? (
-                  <span className="rounded-md bg-rose-50 px-2.5 py-1 font-semibold text-rose-700 border border-rose-200 shadow-xs">
-                    تجاوز الميزانية: {overBudgetCount}
-                  </span>
-                ) : (
-                  <span className="rounded-md bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 border border-emerald-200 shadow-xs">
-                    ضمن الميزانية تماماً
-                  </span>
-                )}
-              </div>
-            </div>
+          <ReportPrintHeader
+            title="كشف تدقيق بنود المصروفات التشغيلية والموازنة التقديرية"
+            subtitle="قسم الإدارة المالية والمحاسبية • رقابة المصروفات التشغيلية والموازنات"
+            clinicName={resolvedName} clinicPhone={resolvedPhone} clinicAddress={resolvedAddress}
+          />
+          <div className="flex items-center gap-4">
+            <PrintMetadata className="flex-1">
+              <div className="line"><span>المرجع</span><strong dir="ltr">{auditDocRef}</strong></div>
+              <div className="line"><span>التاريخ</span><strong><bdi>{today}</bdi> | {reportTime}</strong></div>
+              <div className="line"><span>فترة التقرير</span><strong>شهر <bdi>{month}</bdi></strong></div>
+              <div className="line"><span>العملة المحاسبية</span><strong>{baseCurrency}</strong></div>
+              <div className="line"><span>إجمالي البنود</span><strong>{filteredRows.length}</strong></div>
+              <div className="line"><span>تقرير تدقيق معتمد</span><strong>{overBudgetCount > 0 ? `تجاوز الميزانية: ${overBudgetCount}` : "ضمن الميزانية تماماً"}</strong></div>
+            </PrintMetadata>
+            {qrCodeDataUrl ? <img src={qrCodeDataUrl} alt="QR Code للتثبت الرقمي" className="print-watermark-protected h-16 w-16 shrink-0" /> : null}
           </div>
 
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <div className="print-document-kpis grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
             <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
               <span className="text-[11px] font-medium text-slate-500 block">إجمالي الميزانية التقديرية</span>
               <span className="text-sm sm:text-base font-bold text-slate-800 font-mono">
@@ -330,8 +279,8 @@ export function ExpenseBudgetReportModal({
           </div>
 
           {/* Detailed Audit Table */}
-          <div className="overflow-x-auto border border-slate-300 rounded-lg mb-6">
-            <table className="w-full border-collapse text-right text-xs">
+          <div className="print-document-table-container overflow-x-auto border border-slate-300 rounded-lg mb-6">
+            <PrintTableFrame><table className="w-full border-collapse text-right text-xs">
               <thead>
                 <tr className="bg-slate-800 text-white font-medium">
                   <th className="p-2.5 text-center border-b border-slate-700 w-10">م</th>
@@ -472,11 +421,11 @@ export function ExpenseBudgetReportModal({
                   </td>
                 </tr>
               </tfoot>
-            </table>
+            </table></PrintTableFrame>
           </div>
 
           {/* Audit Verification Statement */}
-          <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 mb-8 text-[11px] text-slate-600 space-y-1">
+          <div className="print-document-notes rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 mb-8 text-[11px] text-slate-600 space-y-1">
             <p className="font-semibold text-slate-800">
               إقرار التدقيق والترحيل المحاسبي:
             </p>
@@ -488,7 +437,7 @@ export function ExpenseBudgetReportModal({
           </div>
 
           {/* Official Signatures Section */}
-          <div className="grid grid-cols-3 gap-6 pt-4 border-t border-slate-300 text-center text-xs">
+          <div className="print-document-signatures grid grid-cols-3 gap-6 pt-4 border-t border-slate-300 text-center text-xs">
             <div className="space-y-12">
               <p className="font-bold text-slate-700">إعداد المحاسب القانوني</p>
               <div className="border-t border-dashed border-slate-400 w-3/4 mx-auto pt-1 text-[11px] text-slate-500">
@@ -510,6 +459,7 @@ export function ExpenseBudgetReportModal({
               </div>
             </div>
           </div>
+          <ReportPrintFooter clinicPhone={resolvedPhone} clinicAddress={resolvedAddress} />
         </div>
       </div>
     </div>

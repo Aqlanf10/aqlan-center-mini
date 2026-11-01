@@ -1,3 +1,4 @@
+import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getPatient, getSettingsSafe } from "@/lib/db";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
@@ -78,19 +79,7 @@ export default async function PostOpPrintPage({
         />
 
         {/* بيانات المريض */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1.2fr 0.8fr 1fr 1fr",
-            gap: "2mm",
-            backgroundColor: "#f8fafc",
-            border: "1px solid #cbd5e1",
-            borderRadius: "2mm",
-            padding: "2mm 3mm",
-            marginTop: "2mm",
-            fontSize: "8pt",
-          }}
-        >
+        <PrintMetadata>
           <div>
             <span style={{ color: "#64748b" }}>المريض: </span>
             <strong style={{ color: "#0f172a" }}>{patient.fullName}</strong>
@@ -111,7 +100,7 @@ export default async function PostOpPrintPage({
             <span style={{ color: "#64748b" }}>التاريخ: </span>
             <span>{friendlyDateLong(dateStr)}</span>
           </div>
-        </div>
+        </PrintMetadata>
 
         {/* عنوان الإجراء الطبي */}
         <div
@@ -269,7 +258,7 @@ export default async function PostOpPrintPage({
           <div>
             <span>طوارئ واستفسارات المركز: </span>
             <strong style={{ color: "#0f172a" }}>
-              {settings["clinic.phone"] || "المركز الطبي"}
+              <bdi dir="ltr">{settings["clinic.phone"] || "المركز الطبي"}</bdi>
             </strong>
           </div>
         </div>

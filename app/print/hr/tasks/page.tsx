@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { canUseTasks, listTasks } from "@/lib/hr";
 import { requireSession } from "@/lib/session";
 import { getSettingsSafe } from "@/lib/db";
@@ -39,12 +40,14 @@ export default async function HrTasksPrintPage({
   return (
     <div className="print-sheet hr-tasks-sheet" dir="rtl">
       <PrintHeader settings={settings} title="كشف المهام" />
-      <p className="report-meta">
-        صادر بتاريخ {friendlyDateLong(new Date().toISOString())} — النطاق: {scope === "mine" ? "مهامي" : "متابعة الفريق"} —
-        عدد المهام الظاهرة: {payload.tasks.length} — المتأخرات: {payload.overdueCount}
-      </p>
+      <PrintMetadata>
+        <div><span>صادر بتاريخ</span><span>{friendlyDateLong(new Date().toISOString())}</span></div>
+        <div><span>النطاق</span><span>{scope === "mine" ? "مهامي" : "متابعة الفريق"}</span></div>
+        <div><span>عدد المهام الظاهرة</span><span>{payload.tasks.length}</span></div>
+        <div><span>المتأخرات</span><span>{payload.overdueCount}</span></div>
+      </PrintMetadata>
 
-      <table className="report-table hr-tasks-table">
+      <PrintTableFrame><table className="report-table hr-tasks-table">
         <thead>
           <tr>
             <th>#</th>
@@ -81,7 +84,7 @@ export default async function HrTasksPrintPage({
             <tr><td colSpan={10} className="empty">لا مهام مطابقة.</td></tr>
           )}
         </tbody>
-      </table>
+      </table></PrintTableFrame>
 
       <section className="hr-salary-summary">
         <h3>الملخص بحالة كل مهمة</h3>

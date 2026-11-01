@@ -21,7 +21,9 @@
 .result { min-width: 0; }
 .paperHeading { border-bottom: 2px solid #162a3d; margin-bottom: 16px; padding-bottom: 12px; }
 .paperHeading h2 { font-size: 22px; font-weight: 700; margin-block: 3px; }
-.paperHeading p { margin-top: 5px; font-size: 13px; }
+.paperHeading > .screenOnly p { margin-top: 5px; font-size: 13px; }
+.identityMetadata > div { margin-top: 5px; font-size: 13px; }
+.identityMetadata > div > :first-child { margin-inline-end: .5em; }
 .paperHeading .clinicName { font-size: 18px; font-weight: 700; }
 .basis { border: 1px solid #acc5da; background: #eef5fa; border-radius: 10px; padding: 14px; font-size: 13px; line-height: 1.85; }
 .basis p { margin-top: 5px; }
@@ -132,9 +134,8 @@
   .report tr { break-inside: avoid; page-break-inside: avoid; }
   .report thead th, .report tfoot th, .report tfoot td { background: white; }
   .report .paperHeading, .report .counts > div { break-inside: avoid; }
-  .report .paperHeading { margin-bottom: 4mm; padding-bottom: 3mm; }
-  .report .paperHeading h2 { font-size: 17pt; }
-  .report .paperHeading p { font-size: 9pt; }
+  .report .paperHeading { margin-bottom: 4mm; padding-bottom: 0; border-bottom: 0; }
+  .report .identityMetadata > div { margin-top: 0; font-size: 9pt; }
   .report .basis, .report .warning { background: white; border-color: #777; border-radius: 0; font-size: 9pt; padding: 3mm; }
   .report .counts { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2mm; }
   .report .counts > div { background: white; border-radius: 0; padding: 2mm; }

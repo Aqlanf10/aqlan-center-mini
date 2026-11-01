@@ -90,3 +90,17 @@ describe.each([false, true])("Ceph page authorization (RSC=%s)", (rsc) => {
     expect((await authedGet(`/api/ceph/compare?first=${first}&second=${second}`, h.sessions.doctorB)).status).toBe(403);
   });
 });
+
+// These are the real print routes, not the workspace page or its API.
+describe("positive ceph print HTTP documents", () => {
+  it.each(["study", "comparison"])("renders the persisted %s document", async (kind) => {
+    const path = kind === "study" ? `/print/ceph/${first}` : `/print/ceph-compare?first=${first}&second=${second}`;
+    const response = await authedGet(path, h.sessions.admin);
+    const body = (await response.text()).replace(/<script[\s\S]*?<\/script>/g, "");
+    expect(response.status).toBe(200);
+    expect(body).toContain(patientMarker);
+    expect(body).toContain(kind === "study" ? "تقرير التحليل السيفالومتري" : "مقارنة");
+    expect(body).not.toMatch(/Application error|server error occurred/);
+    expect((await authedGet(path, h.sessions.doctorB)).status).toBe(404);
+  });
+});

@@ -3,14 +3,23 @@ import { chromium, type Browser, type Route } from "playwright";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { addDays } from "@/lib/schedule";
-import { baseUrl, harness } from "./_server";
+import { authedGet, baseUrl, harness } from "./_server";
 
 // Real built /lab page and session; only this page's catalog/quote/order endpoints
 // are fixture-backed. No lab order or financial transaction is written to the DB.
 let browser: Browser;
 let h: Awaited<ReturnType<typeof harness>>;
+let doctorId: number;
 beforeAll(async () => {
   h = await harness();
+  // Use the real authenticated active-doctor directory; do not fabricate a
+  // physician or weaken clinical admission for this pricing-only fixture.
+  const doctorsResponse = await authedGet("/api/parties?kind=doctor", h.sessions.admin);
+  expect(doctorsResponse.status).toBe(200);
+  const doctors = await doctorsResponse.json() as Array<{ id: number; kind: string; isActive: boolean }>;
+  const doctor = doctors.find(item => item.kind === "doctor" && item.isActive && Number.isSafeInteger(item.id) && item.id > 0);
+  expect(doctor).toBeDefined();
+  doctorId = doctor!.id;
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 afterAll(async () => { await browser?.close(); });
@@ -51,7 +60,8 @@ async function fixture() {
   await page.route("**/api/patients?q=*", (route) => json(route, [{ id: h.seeded.patientAId, fullName: "مريض تسعير تجريبي", patientNumber: "LAB-UI" }]));
   await page.route("**/api/lab", async (route) => {
     if (route.request().method() === "POST") {
-      orders.push(route.request().postDataJSON());
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      orders.push(body);
       await json(route, {}, 201);
     } else await json(route, { orders: [], labs: [] });
   });
@@ -77,6 +87,8 @@ async function fixture() {
   const equation = page.locator("[data-lab-pricing-equation]");
   const status = page.locator("[data-lab-pricing-status]");
   const save = page.getByRole("button", { name: "حفظ وإرسال الطلب", exact: true });
+  await page.locator("#lab-order-doctor").selectOption(String(doctorId));
+  expect(await page.locator("#lab-order-doctor").inputValue()).toBe(String(doctorId));
   await lab.selectOption("9100");
   return { context, page, lab, service, cost, teeth, currency, scope, equation, status, save, orders, pending,
     hold: () => { holdQuotes = true; },
@@ -142,6 +154,7 @@ describe("lab quote scope and financial provenance", () => {
       expect(await f.equation.count()).toBe(0);
       await f.save.click();
       await expect.poll(() => f.orders.length).toBe(1);
+      expect(f.orders[0].doctorId).toBe(doctorId);
       expect(f.orders[0]).not.toHaveProperty("cost");
       expect(f.orders[0]).not.toHaveProperty("costCurrency");
       expect(f.orders[0].labServiceId).toBe(Number(service));
@@ -175,12 +188,16 @@ describe("lab quote scope and financial provenance", () => {
       await f.release(0);
       await f.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       expect(await f.cost.inputValue()).toBe("25");
-      await f.teeth.fill("14,15,16");
+      // DNT_FULL controls clinical roles, while its deliberately single_tooth
+      // metadata still controls pricing: three denture units cost 3 × 25.
+      await f.teeth.fill("14(Denture Tooth),15(Denture Tooth),16(Denture Tooth)");
       await expect.poll(() => f.cost.inputValue()).toBe("75");
       expect(await f.equation.textContent()).toContain("25.00 × 3 = 75.00");
       await f.save.click();
       await expect.poll(() => f.orders.length).toBe(1);
-      expect(f.orders[0]).toMatchObject({ labServiceId: 9101, cost: "75", costCurrency: "USD" });
+      expect(f.orders[0].doctorId).toBe(doctorId);
+      expect(f.orders[0]).toMatchObject({ doctorId, labServiceId: 9101, cost: "75", costCurrency: "USD",
+        toothNumbers: "14(Denture Tooth),15(Denture Tooth),16(Denture Tooth)" });
     } finally { await f.context.close(); }
   });
 
@@ -252,12 +269,13 @@ describe("lab quote scope and financial provenance", () => {
       await expect.poll(() => f.cost.inputValue()).toBe("60");
       await f.currency.selectOption("SAR");
       expect(await f.cost.inputValue()).toBe("60");
-      await f.teeth.fill("14");
+      await f.teeth.fill("14(Denture Tooth)");
       expect(await f.cost.inputValue()).toBe("60");
       expect(await f.equation.textContent()).toContain("القيمة المعدّلة يدوياً");
       await f.save.click();
       await expect.poll(() => f.orders.length).toBe(1);
-      expect(f.orders[0]).toMatchObject({ cost: "60", costCurrency: "SAR" });
+      expect(f.orders[0].doctorId).toBe(doctorId);
+      expect(f.orders[0]).toMatchObject({ doctorId, cost: "60", costCurrency: "SAR", toothNumbers: "14(Denture Tooth)" });
     } finally { await f.context.close(); }
   });
 
@@ -272,6 +290,7 @@ describe("lab quote scope and financial provenance", () => {
       expect(await f.page.locator("[data-lab-manual-cost]").count()).toBe(0);
       await f.save.click();
       await expect.poll(() => f.orders.length).toBe(1);
+      expect(f.orders[0].doctorId).toBe(doctorId);
       expect(f.orders[0]).not.toHaveProperty("cost");
       expect(f.orders[0]).not.toHaveProperty("costCurrency");
     } finally { await f.context.close(); }
@@ -310,6 +329,7 @@ describe("lab quote scope and financial provenance", () => {
       await expect.poll(() => f.status.textContent()).toContain("لا توجد قاعدة");
       await f.save.click();
       await expect.poll(() => f.orders.length).toBe(1);
+      expect(f.orders[0].doctorId).toBe(doctorId);
       expect(f.orders[0]).toMatchObject({ partyId: 9100, sentDate, cost: "41", costCurrency: "USD" });
     } finally { await f.context.close(); }
   });

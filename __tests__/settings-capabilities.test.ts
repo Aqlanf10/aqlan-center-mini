@@ -22,7 +22,8 @@ describe("per-key settings write policy (M2, Dot 6480538845 item 1)", () => {
 
   it("known authority, integration and backup keys never fall to the operational class", () => {
     for (const key of ["workflow.doctor_financial_view", "finance.reception_adds_opening_balance"]) expect(SETTING_KEY_CLASSES[key].class).toBe("authority");
-    for (const key of ["messaging.consent_mode", "reminders.auto_enabled", "ai.clinical_external"]) expect(SETTING_KEY_CLASSES[key].class).toBe("integration");
+    for (const key of ["messaging.consent_mode", "reminders.auto_enabled", "ai.clinical_external",
+      "lab.patient_identity_mode", "clinic.login_photo_asset", "clinic.login_photo_visible"]) expect(SETTING_KEY_CLASSES[key].class).toBe("integration");
     for (const key of Object.keys(SETTING_KEY_CLASSES).filter(key => key.startsWith("backup."))) expect(SETTING_KEY_CLASSES[key].class).toBe("backup");
     for (const definition of SETTING_DEFINITIONS.filter(definition => definition.category === "backup" || definition.category === "messaging")) {
       expect(SETTING_KEY_CLASSES[definition.key].class).not.toBe("operational");

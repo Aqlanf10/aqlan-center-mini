@@ -13,6 +13,7 @@ import { useSession } from "./SessionProvider";
 import { OpeningCorrectionPreview } from "./OpeningCorrectionPreview";
 import { PatientStatementDialog } from "./PatientStatementDialog";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { ServiceSelect } from "./ServiceSelect";
@@ -119,6 +120,7 @@ interface PlanSummary {
   items: { count: number; doneCount: number; doneMinor: number; remainingMinor: number } | null;
 }
 interface Ledger {
+  clinicTimeZone?: string;
   invoices: Invoice[]; payments: Payment[]; opening: OpeningBalance | null;
   /** (P1-5ب) الأرصدة الافتتاحية بعملاتها. */
   openings?: OpeningBalance[];
@@ -228,6 +230,7 @@ function isLedgerRead(value: unknown): value is Ledger {
     || !Array.isArray(value.plans) || !value.plans.every(isPlanSummary)
     || (value.opening !== null && !isOpening(value.opening)) || !isBalance(value.balance)
     || !isCurrency(value.baseCurrency)) return false;
+  if (value.clinicTimeZone !== undefined && typeof value.clinicTimeZone !== "string") return false;
   if (value.openings !== undefined && (!Array.isArray(value.openings) || !value.openings.every(isOpening))) return false;
   const balances = value.balances;
   if (balances !== undefined && (!record(balances) || !CURRENCIES.every((currency) => isBalance(balances[currency])))) return false;
@@ -1000,7 +1003,7 @@ function PatientLedgerContent({ orthoRecovery, reconciliationRecovery, patientId
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm font-extrabold">{invoice.invoiceNumber}</span>
                   <span className="flex max-w-full flex-wrap items-start gap-x-1 text-[11px] leading-5 text-slate-500">
-                    <span>{friendlyDateLong(invoice.createdAt.slice(0, 10))} ·</span>
+                    <span>{formatClinicDate(invoice.createdAt, ledger.clinicTimeZone ?? CLINIC_ZONE_FALLBACK)} ·</span>
                     <span className="max-w-full">
                       <InvoiceSettlementStatus invoice={invoice}
                         patientId={patientId} evidence={ledger.installmentRecovery}
@@ -1093,7 +1096,7 @@ function PatientLedgerContent({ orthoRecovery, reconciliationRecovery, patientId
                     ) : null}
                   </p>
                   <p className="text-[11px] text-slate-500">
-                    {payment.receiptNumber} · {friendlyDateLong(payment.createdAt.slice(0, 10))}
+                    {payment.receiptNumber} · {formatClinicDate(payment.createdAt, ledger.clinicTimeZone ?? CLINIC_ZONE_FALLBACK)}
                   </p>
                 </div>
                 <span className="flex gap-2">

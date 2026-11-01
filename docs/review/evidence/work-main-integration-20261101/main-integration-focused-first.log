@@ -1,0 +1,390 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/lab-accounting-fx-snapshot.test.ts __tests__/lab-accounting-monetary-intent-route.test.ts __tests__/lab-accounting-safety.test.ts __tests__/periodontal-candidate-chain.test.ts __tests__/patient-appointment-history-schema.test.ts __tests__/schema-preflight-cli.test.ts __tests__/login-photo-backup.test.ts __tests__/login-photo-restore-staging.test.ts __tests__/login-photo-layout-freshness.test.tsx __tests__/lab-dispatch-print-privacy.test.tsx --exclude .next/**
+
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+stderr | __tests__/lab-dispatch-print-privacy.test.tsx > actual lab document render privacy > renders modal preview without private fields and offers only the dedicated print page
+Received `true` for a non-boolean attribute `jsx`.
+
+If you want to write it to the DOM, pass a string instead: jsx="true" or jsx={value.toString()}.
+Received `true` for a non-boolean attribute `global`.
+
+If you want to write it to the DOM, pass a string instead: global="true" or global={value.toString()}.
+
+ ❯ __tests__/lab-dispatch-print-privacy.test.tsx (16 tests | 8 failed) 87ms
+     × renders the actual authorized page and real QR encoder with only the order reference 33ms
+     × uses the stored name policy, keeps QR reference-only and prints structured zones 14ms
+     × draws selected primary teeth in both labeled arches: 51(Crown), 65(Pontic), 71(Abutment), 85(Crown) 6ms
+     × draws selected primary teeth in both labeled arches: 14(Abutment), 51(Crown), 75(Pontic) 3ms
+     × keeps the permanent-only diagram unchanged without extra primary rows 3ms
+     × renders modal preview without private fields and offers only the dedicated print page 13ms
+     × shows unknown clinical facts as unknown in both actual renderers 6ms
+     × retains the human-readable reference if local QR generation fails 1ms
+ ❯ __tests__/lab-accounting-fx-snapshot.test.ts (27 tests | 1 failed) 132ms
+     × blocks settled monetary changes but allows metadata-only snapshot preservation 43ms
+ ❯ __tests__/login-photo-backup.test.ts (15 tests | 6 failed) 60ms
+     × includes the hidden configured photo in the SQL snapshot and manifest (default=false) 9ms
+     × includes the hidden configured photo in the SQL snapshot and manifest (default=true) 4ms
+     × preserves old backups without configured photo (undefined) 15ms
+     × preserves old backups without configured photo () 1ms
+     × releases before streaming, cleans partial output on failure, and never emits its final manifest 9ms
+     × refuses a missing or corrupted configured asset instead of emitting a complete manifest 2ms
+ ❯ __tests__/lab-accounting-safety.test.ts (18 tests | 18 failed) 54ms
+     × blocks legacy batch history after reversal reset the paid marker 46ms
+     × writes detailed financial evidence only to protected audit, not clinical tracking 1ms
+     × blocks revaluation of a closed earlier linked patient invoice 0ms
+     × rejects clearing/invalid debt amount null rather than corrupting paired snapshots 0ms
+     × rejects clearing/invalid debt amount 0 rather than corrupting paired snapshots 0ms
+     × rejects clearing/invalid debt amount -1 rather than corrupting paired snapshots 0ms
+     × rejects every financially material change after settlement: {"costMinor":3000} 0ms
+     × rejects every financially material change after settlement: {"costCurrency":"SAR"} 0ms
+     × rejects every financially material change after settlement: {"exchangeRate":540} 1ms
+     × rejects every financially material change after settlement: {"isPosted":false} 0ms
+     × rejects every financially material change after settlement: {"expenseAccountCode":"5102"} 0ms
+     × rejects every financially material change after settlement: {"expenseCategoryId":5} 0ms
+     × rejects every financially material change after settlement: {"payableAccountCode":"2102"} 0ms
+     × blocks closed-period changes under a settings fence 0ms
+     × rejects a concurrent payment lock without waiting or writing 0ms
+     × reads settlement history in a fresh statement after the payable lock 0ms
+     × preserves an explicitly overridden saved account when category is omitted 0ms
+     × accepts an exact no-op for a paid closed-period order without changing state or audit 0ms
+ ❯ __tests__/login-photo-restore-staging.test.ts (2 tests | 2 failed) 6ms
+   × rejects restored photo metadata before commit or any staged filesystem writes 4ms
+   × keeps legacy backups with no photo setting compatible 1ms
+ ❯ __tests__/login-photo-layout-freshness.test.tsx (3 tests | 3 failed) 6ms
+   × reflects newly published photo on navigation despite a warm hidden settings cache 4ms
+   × reflects hiding despite a warm visible settings cache 1ms
+   × fails closed instead of serving a stale visible flag when the fresh read fails 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 38 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/lab-accounting-fx-snapshot.test.ts > actual lab accounting writer money snapshot bindings > blocks settled monetary changes but allows metadata-only snapshot preservation
+Error: lab_order_accounting_settled
+ ❯ Module.updateLabOrderAccounting lib/db.ts:7413:13
+    7411|     );
+    7412|     if (order.financial_status === "paid" || settlementRows[0]?.has_se…
+    7413|       throw new Error("lab_order_accounting_settled");
+       |             ^
+    7414|     }
+    7415|     const { rows: cutoffRows } = await client.query<{ value: string }>(
+ ❯ __tests__/lab-accounting-fx-snapshot.test.ts:145:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/38]⎯
+
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > blocks legacy batch history after reversal reset the paid marker
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > writes detailed financial evidence only to protected audit, not clinical tracking
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > blocks revaluation of a closed earlier linked patient invoice
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects clearing/invalid debt amount null rather than corrupting paired snapshots
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects clearing/invalid debt amount 0 rather than corrupting paired snapshots
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects clearing/invalid debt amount -1 rather than corrupting paired snapshots
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects every financially material change after settlement: {"costMinor":3000}
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects every financially material change after settlement: {"costCurrency":"SAR"}
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects every financially material change after settlement: {"exchangeRate":540}
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects every financially material change after settlement: {"isPosted":false}
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects every financially material change after settlement: {"expenseAccountCode":"5102"}
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects every financially material change after settlement: {"expenseCategoryId":5}
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects every financially material change after settlement: {"payableAccountCode":"2102"}
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > blocks closed-period changes under a settings fence
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > rejects a concurrent payment lock without waiting or writing
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > reads settlement history in a fresh statement after the payable lock
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > preserves an explicitly overridden saved account when category is omitted
+ FAIL  __tests__/lab-accounting-safety.test.ts > lab accounting financial safety > accepts an exact no-op for a paid closed-period order without changing state or audit
+Error: LEGACY_STAFF_AUTHORITY_SCHEMA_HELD
+ ❯ refuse lib/legacy-staff-schema.mjs:11:31
+
+ ❯ readFootprint lib/legacy-staff-schema.mjs:23:95
+ ❯ readStaffEntryMode lib/legacy-staff-schema.mjs:41:12
+ ❯ lib/db.ts:425:9
+ ❯ __tests__/lab-accounting-safety.test.ts:43:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/38]⎯
+
+ FAIL  __tests__/lab-dispatch-print-privacy.test.tsx > actual lab document render privacy > renders the actual authorized page and real QR encoder with only the order reference
+ReferenceError: selectedTeethCodes is not defined
+ ❯ Module.LabOrderPrintPage app/print/lab/[id]/page.tsx:183:20
+    181|                 </td>
+    182|                 <td colSpan={3} style={{ padding: "2.5mm 3mm", fontWei…
+    183|                   {selectedTeethCodes.length > 0 ? (
+       |                    ^
+    184|                     <div style={{ display: "flex", gap: "2mm", flexWra…
+    185|                       {selectedTeethCodes.map((code) => {
+ ❯ renderPage __tests__/lab-dispatch-print-privacy.test.tsx:19:63
+ ❯ __tests__/lab-dispatch-print-privacy.test.tsx:41:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/38]⎯
+
+ FAIL  __tests__/lab-dispatch-print-privacy.test.tsx > actual lab document render privacy > uses the stored name policy, keeps QR reference-only and prints structured zones
+ReferenceError: selectedTeethCodes is not defined
+ ❯ Module.LabOrderPrintPage app/print/lab/[id]/page.tsx:183:20
+    181|                 </td>
+    182|                 <td colSpan={3} style={{ padding: "2.5mm 3mm", fontWei…
+    183|                   {selectedTeethCodes.length > 0 ? (
+       |                    ^
+    184|                     <div style={{ display: "flex", gap: "2mm", flexWra…
+    185|                       {selectedTeethCodes.map((code) => {
+ ❯ renderPage __tests__/lab-dispatch-print-privacy.test.tsx:19:63
+ ❯ __tests__/lab-dispatch-print-privacy.test.tsx:67:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/38]⎯
+
+ FAIL  __tests__/lab-dispatch-print-privacy.test.tsx > actual lab document render privacy > draws selected primary teeth in both labeled arches: 51(Crown), 65(Pontic), 71(Abutment), 85(Crown)
+ FAIL  __tests__/lab-dispatch-print-privacy.test.tsx > actual lab document render privacy > draws selected primary teeth in both labeled arches: 14(Abutment), 51(Crown), 75(Pontic)
+ReferenceError: selectedTeethCodes is not defined
+ ❯ Module.LabOrderPrintPage app/print/lab/[id]/page.tsx:183:20
+    181|                 </td>
+    182|                 <td colSpan={3} style={{ padding: "2.5mm 3mm", fontWei…
+    183|                   {selectedTeethCodes.length > 0 ? (
+       |                    ^
+    184|                     <div style={{ display: "flex", gap: "2mm", flexWra…
+    185|                       {selectedTeethCodes.map((code) => {
+ ❯ renderPage __tests__/lab-dispatch-print-privacy.test.tsx:19:63
+ ❯ __tests__/lab-dispatch-print-privacy.test.tsx:83:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/38]⎯
+
+ FAIL  __tests__/lab-dispatch-print-privacy.test.tsx > actual lab document render privacy > keeps the permanent-only diagram unchanged without extra primary rows
+ReferenceError: selectedTeethCodes is not defined
+ ❯ Module.LabOrderPrintPage app/print/lab/[id]/page.tsx:183:20
+    181|                 </td>
+    182|                 <td colSpan={3} style={{ padding: "2.5mm 3mm", fontWei…
+    183|                   {selectedTeethCodes.length > 0 ? (
+       |                    ^
+    184|                     <div style={{ display: "flex", gap: "2mm", flexWra…
+    185|                       {selectedTeethCodes.map((code) => {
+ ❯ renderPage __tests__/lab-dispatch-print-privacy.test.tsx:19:63
+ ❯ __tests__/lab-dispatch-print-privacy.test.tsx:97:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/38]⎯
+
+ FAIL  __tests__/lab-dispatch-print-privacy.test.tsx > actual lab document render privacy > renders modal preview without private fields and offers only the dedicated print page
+ReferenceError: PRIMARY_FDI_TEETH is not defined
+ ❯ LabDispatchDentalChart components/LabDentalChart.tsx:792:58
+    790|     { label: "الأسنان الدائمة — الفك العلوي", codes: [...ADULT_FDI_TEE…
+    791|     { label: "الأسنان الدائمة — الفك السفلي", codes: [...ADULT_FDI_TEE…
+    792|     { label: "الأسنان اللبنية — الفك العلوي", codes: [...PRIMARY_FDI_T…
+       |                                                          ^
+    793|     { label: "الأسنان اللبنية — الفك السفلي", codes: [...PRIMARY_FDI_T…
+    794|   ];
+ ❯ Object.react_stack_bottom_frame node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:9808:18
+ ❯ renderWithHooks node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:5062:19
+ ❯ renderElement node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:5497:23
+ ❯ retryNode node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6428:21
+ ❯ renderNodeDestructive node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6367:11
+ ❯ renderNode node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6905:18
+ ❯ renderChildrenArray node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6674:11
+ ❯ retryNode node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6441:13
+ ❯ renderNodeDestructive node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6367:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/38]⎯
+
+ FAIL  __tests__/lab-dispatch-print-privacy.test.tsx > actual lab document render privacy > shows unknown clinical facts as unknown in both actual renderers
+ReferenceError: selectedTeethCodes is not defined
+ ❯ Module.LabOrderPrintPage app/print/lab/[id]/page.tsx:183:20
+    181|                 </td>
+    182|                 <td colSpan={3} style={{ padding: "2.5mm 3mm", fontWei…
+    183|                   {selectedTeethCodes.length > 0 ? (
+       |                    ^
+    184|                     <div style={{ display: "flex", gap: "2mm", flexWra…
+    185|                       {selectedTeethCodes.map((code) => {
+ ❯ renderPage __tests__/lab-dispatch-print-privacy.test.tsx:19:63
+ ❯ __tests__/lab-dispatch-print-privacy.test.tsx:118:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/38]⎯
+
+ FAIL  __tests__/lab-dispatch-print-privacy.test.tsx > actual lab document render privacy > retains the human-readable reference if local QR generation fails
+ReferenceError: selectedTeethCodes is not defined
+ ❯ Module.LabOrderPrintPage app/print/lab/[id]/page.tsx:183:20
+    181|                 </td>
+    182|                 <td colSpan={3} style={{ padding: "2.5mm 3mm", fontWei…
+    183|                   {selectedTeethCodes.length > 0 ? (
+       |                    ^
+    184|                     <div style={{ display: "flex", gap: "2mm", flexWra…
+    185|                       {selectedTeethCodes.map((code) => {
+ ❯ renderPage __tests__/lab-dispatch-print-privacy.test.tsx:19:63
+ ❯ __tests__/lab-dispatch-print-privacy.test.tsx:130:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/38]⎯
+
+ FAIL  __tests__/login-photo-backup.test.ts > configured login photo full backup preservation > includes the hidden configured photo in the SQL snapshot and manifest (default=false)
+Error: Unexpected query: SELECT c.relname::text AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY($1::text[]) ORDER BY c.relname
+ ❯ Object.query __tests__/login-photo-backup.test.ts:47:11
+     45|     }
+     46|     if (["BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", "COMMIT", …
+     47|     throw new Error(`Unexpected query: ${sql}`);
+       |           ^
+     48|   } };
+     49|   return { source, calls };
+ ❯ readIdentityProvenance lib/restore/identity-provenance.ts:22:42
+ ❯ captureSnapshotFromSource lib/fullBackup.ts:189:38
+ ❯ Module.fullBackupBlocks lib/fullBackup.ts:297:9
+ ❯ archive __tests__/login-photo-backup.test.ts:55:20
+ ❯ __tests__/login-photo-backup.test.ts:65:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/38]⎯
+
+ FAIL  __tests__/login-photo-backup.test.ts > configured login photo full backup preservation > includes the hidden configured photo in the SQL snapshot and manifest (default=true)
+Error: Unexpected query: SELECT c.relname::text AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY($1::text[]) ORDER BY c.relname
+ ❯ Object.query __tests__/login-photo-backup.test.ts:47:11
+     45|     }
+     46|     if (["BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", "COMMIT", …
+     47|     throw new Error(`Unexpected query: ${sql}`);
+       |           ^
+     48|   } };
+     49|   return { source, calls };
+ ❯ readIdentityProvenance lib/restore/identity-provenance.ts:22:42
+ ❯ captureSnapshotFromSource lib/fullBackup.ts:189:38
+ ❯ captureSnapshotDefault lib/fullBackup.ts:213:12
+ ❯ Module.fullBackupBlocks lib/fullBackup.ts:298:9
+ ❯ archive __tests__/login-photo-backup.test.ts:55:20
+ ❯ __tests__/login-photo-backup.test.ts:65:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/38]⎯
+
+ FAIL  __tests__/login-photo-backup.test.ts > configured login photo full backup preservation > preserves old backups without configured photo (undefined)
+ FAIL  __tests__/login-photo-backup.test.ts > configured login photo full backup preservation > preserves old backups without configured photo ()
+Error: Unexpected query: SELECT c.relname::text AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY($1::text[]) ORDER BY c.relname
+ ❯ Object.query __tests__/login-photo-backup.test.ts:47:11
+     45|     }
+     46|     if (["BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", "COMMIT", …
+     47|     throw new Error(`Unexpected query: ${sql}`);
+       |           ^
+     48|   } };
+     49|   return { source, calls };
+ ❯ readIdentityProvenance lib/restore/identity-provenance.ts:22:42
+ ❯ captureSnapshotFromSource lib/fullBackup.ts:189:38
+ ❯ Module.fullBackupBlocks lib/fullBackup.ts:297:9
+ ❯ archive __tests__/login-photo-backup.test.ts:55:20
+ ❯ __tests__/login-photo-backup.test.ts:78:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/38]⎯
+
+ FAIL  __tests__/login-photo-backup.test.ts > configured login photo full backup preservation > releases before streaming, cleans partial output on failure, and never emits its final manifest
+AssertionError: expected [Function] to throw error including 'synthetic disk failure' but got 'Unexpected query: SELECT c.relname::t…'
+
+- Expected
++ Received
+
+- synthetic disk failure
++ Unexpected query: SELECT c.relname::text AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
++       WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY($1::text[]) ORDER BY c.relname
+
+ ❯ __tests__/login-photo-backup.test.ts:107:10
+    105|         throw new Error("synthetic disk failure");
+    106|       } })) blocks.push(block);
+    107|     })()).rejects.toThrow("synthetic disk failure");
+       |          ^
+    108|     expect(Buffer.concat(blocks).includes(Buffer.from("manifest.json")…
+    109|     await expect(access(mocks.stages.at(-1)!)).rejects.toThrow();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/38]⎯
+
+ FAIL  __tests__/login-photo-backup.test.ts > configured login photo full backup preservation > refuses a missing or corrupted configured asset instead of emitting a complete manifest
+AssertionError: expected [Function] to throw error matching /missing or corrupt/ but got 'Unexpected query: SELECT c.relname::t…'
+
+- Expected:
+/missing or corrupt/
+
++ Received:
+"Unexpected query: SELECT c.relname::text AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY($1::text[]) ORDER BY c.relname"
+
+ ❯ __tests__/login-photo-backup.test.ts:112:44
+    110|   });
+    111|   it("refuses a missing or corrupted configured asset instead of emitt…
+    112|     await expect(archive(raw, false, null)).rejects.toThrow(/missing o…
+       |                                            ^
+    113|     await expect(archive(raw, false, Buffer.alloc(bytes.length))).reje…
+    114|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/38]⎯
+
+ FAIL  __tests__/login-photo-layout-freshness.test.tsx > reflects newly published photo on navigation despite a warm hidden settings cache
+Error: `headers` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+ ❯ throwForMissingRequestStore node_modules/next/src/server/app-render/work-unit-async-storage.external.ts:464:8
+ ❯ callingExpression node_modules/next/src/server/request/headers.ts:157:30
+ ❯ RootLayout app/layout.tsx:66:32
+     64|
+     65| export default async function RootLayout({ children }: { children: Rea…
+     66|   const publicDisplay = (await headers()).get("x-aqlan-public-display"…
+       |                                ^
+     67|   /* قاعدة اختيار واحدة: كوكي موحّدة تُقبل بإثبات القاعدة الحالي ولا ت…
+     68|      القديم؛ غيرها يبقى على requireSession كما كان. */
+ ❯ visibility __tests__/login-photo-layout-freshness.test.tsx:19:24
+ ❯ __tests__/login-photo-layout-freshness.test.tsx:32:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/38]⎯
+
+ FAIL  __tests__/login-photo-layout-freshness.test.tsx > reflects hiding despite a warm visible settings cache
+Error: `headers` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+ ❯ throwForMissingRequestStore node_modules/next/src/server/app-render/work-unit-async-storage.external.ts:464:8
+ ❯ callingExpression node_modules/next/src/server/request/headers.ts:157:30
+ ❯ RootLayout app/layout.tsx:66:32
+     64|
+     65| export default async function RootLayout({ children }: { children: Rea…
+     66|   const publicDisplay = (await headers()).get("x-aqlan-public-display"…
+       |                                ^
+     67|   /* قاعدة اختيار واحدة: كوكي موحّدة تُقبل بإثبات القاعدة الحالي ولا ت…
+     68|      القديم؛ غيرها يبقى على requireSession كما كان. */
+ ❯ visibility __tests__/login-photo-layout-freshness.test.tsx:19:24
+ ❯ __tests__/login-photo-layout-freshness.test.tsx:35:55
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/38]⎯
+
+ FAIL  __tests__/login-photo-layout-freshness.test.tsx > fails closed instead of serving a stale visible flag when the fresh read fails
+Error: `headers` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+ ❯ throwForMissingRequestStore node_modules/next/src/server/app-render/work-unit-async-storage.external.ts:464:8
+ ❯ callingExpression node_modules/next/src/server/request/headers.ts:157:30
+ ❯ RootLayout app/layout.tsx:66:32
+     64|
+     65| export default async function RootLayout({ children }: { children: Rea…
+     66|   const publicDisplay = (await headers()).get("x-aqlan-public-display"…
+       |                                ^
+     67|   /* قاعدة اختيار واحدة: كوكي موحّدة تُقبل بإثبات القاعدة الحالي ولا ت…
+     68|      القديم؛ غيرها يبقى على requireSession كما كان. */
+ ❯ visibility __tests__/login-photo-layout-freshness.test.tsx:19:24
+ ❯ __tests__/login-photo-layout-freshness.test.tsx:38:50
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/38]⎯
+
+ FAIL  __tests__/login-photo-restore-staging.test.ts > rejects restored photo metadata before commit or any staged filesystem writes
+TypeError: Cannot read properties of undefined (reading 'identityProvenance')
+ ❯ Module.stagedRestore lib/restore/staging.ts:178:56
+    176|     // ── الخطوة ٢أ: مصدرٌ موحّد الهوية (بروتوكول الاستعادة R1): الحجز…
+    177|     // الهدف يجب أن يكون فارغًا تمامًا وبلا أي أثر هوية، ولا خيار لتجا…
+    178|     const canonicalSource = Boolean(validated.manifest.identityProvena…
+       |                                                        ^
+    179|     if (canonicalSource) {
+    180|       const manifestBytes = archive.entries.get("manifest.json")!.data;
+ ❯ __tests__/login-photo-restore-staging.test.ts:30:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/38]⎯
+
+ FAIL  __tests__/login-photo-restore-staging.test.ts > keeps legacy backups with no photo setting compatible
+TypeError: Cannot read properties of undefined (reading 'identityProvenance')
+ ❯ Module.stagedRestore lib/restore/staging.ts:178:56
+    176|     // ── الخطوة ٢أ: مصدرٌ موحّد الهوية (بروتوكول الاستعادة R1): الحجز…
+    177|     // الهدف يجب أن يكون فارغًا تمامًا وبلا أي أثر هوية، ولا خيار لتجا…
+    178|     const canonicalSource = Boolean(validated.manifest.identityProvena…
+       |                                                        ^
+    179|     if (canonicalSource) {
+    180|       const manifestBytes = archive.entries.get("manifest.json")!.data;
+ ❯ __tests__/login-photo-restore-staging.test.ts:42:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/38]⎯
+
+
+ Test Files  6 failed | 4 passed (10)
+      Tests  38 failed | 107 passed (145)
+   Start at  04:10:00
+   Duration  5.97s (transform 2.68s, setup 0ms, import 3.76s, tests 520ms, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

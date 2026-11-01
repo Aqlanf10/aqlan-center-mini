@@ -1,6 +1,6 @@
 # WORK / main reconciliation intake — 2026-11-01
 
-This is read-only merge-tree evidence, not a merge. Current published WORK is `e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a`; fetched main is `6a6bdc0cc705874fd4ff6d0f0ddc3fdcd314e9e6`; their common ancestor is `82ff44f165a6f7a199c330ca0aee41bbb2110368`.
+This is the historical read-only intake, not acceptance of the later merge. At intake, published WORK was `e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a`; fetched main was `6a6bdc0cc705874fd4ff6d0f0ddc3fdcd314e9e6`; their common ancestor was `82ff44f165a6f7a199c330ca0aee41bbb2110368`. Current resolution and verification are tracked in the [integration report](work-main-integration-20261101.md).
 
 `git merge-tree --write-tree --name-only` reported **35 content-conflicting files**. It wrote only comparison objects, with no checkout, index, branch, commit, push or deployment change. The generated tree is `a8f223508ff2886cd85c5f3beb046693d6e2e464` and contains conflict markers; it is not executable acceptance evidence.
 
@@ -56,4 +56,4 @@ The critical conflicts are database helpers, audit, full backup/restore staging,
 4. Reconcile schema/backup ownership and fixture requirements using isolated PostgreSQL. Re-run source guards without lowering limits; source witnesses remain tied to their own revisions rather than silently rehashed.
 5. Run local focused regressions for every conflict group, full unit/type/lint/build/runtime/audit checks, PostgreSQL schema/restore/financial/canonical journeys and built browser workflows. Keep the final merged head reviewable, then normal-push only after fresh remote comparison and run full exact-head CI.
 
-This is a substantial integration batch, not a promise to resolve35 files by deleting markers. No source conflict has been resolved yet and no final integrated build exists.
+At this intake checkpoint no source conflict had been resolved and no integrated build existed. The subsequent integration report records the actual behavior resolutions and evidence; deletion of conflict markers alone is not acceptance.

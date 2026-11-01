@@ -117,20 +117,20 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
   <Style ss:ID="Default" ss:Name="Normal">
    <Alignment ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
    <Borders/>
-   <Font ss:FontName="Segoe UI" x:CharSet="178" ss:Size="10" ss:Color="#1E293B"/>
+   <Font ss:FontName="Segoe UI" x:CharSet="178" ss:Size="10" ss:Color="#0D2137"/>
    <Interior/>
    <NumberFormat/>
    <Protection/>
   </Style>
   <Style ss:ID="TitleClinic">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="16" ss:Bold="1" ss:Color="#0F172A"/>
-   <Interior ss:Color="#F1F5F9" ss:Pattern="Solid"/>
+   <Font ss:FontName="Segoe UI" ss:Size="16" ss:Bold="1" ss:Color="#0D2137"/>
+   <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
   </Style>
   <Style ss:ID="TitleReport">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="13" ss:Bold="1" ss:Color="#1E40AF"/>
-   <Interior ss:Color="#DBEAFE" ss:Pattern="Solid"/>
+   <Font ss:FontName="Segoe UI" ss:Size="13" ss:Bold="1" ss:Color="#1A3A5C"/>
+   <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
   </Style>
   <Style ss:ID="MetaLabel">
    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
@@ -142,7 +142,7 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
   </Style>
   <Style ss:ID="MetaVal">
    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#0F172A"/>
+   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#0D2137"/>
    <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
@@ -151,60 +151,60 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
   <Style ss:ID="KpiHeader">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
    <Font ss:FontName="Segoe UI" ss:Size="9" ss:Bold="1" ss:Color="#FFFFFF"/>
-   <Interior ss:Color="#1E293B" ss:Pattern="Solid"/>
+   <Interior ss:Color="#1A3A5C" ss:Pattern="Solid"/>
    <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#0F172A"/>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#0D2137"/>
    </Borders>
   </Style>
   <Style ss:ID="KpiVal">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="12" ss:Bold="1" ss:Color="#0F172A"/>
-   <Interior ss:Color="#F1F5F9" ss:Pattern="Solid"/>
+   <Font ss:FontName="Segoe UI" ss:Size="12" ss:Bold="1" ss:Color="#0D2137"/>
+   <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
    <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
    </Borders>
   </Style>
   <Style ss:ID="ColHeader">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
    <Font ss:FontName="Segoe UI" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/>
-   <Interior ss:Color="#0F766E" ss:Pattern="Solid"/>
+   <Interior ss:Color="#1A3A5C" ss:Pattern="Solid"/>
    <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#115E59"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#14B8A6"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#14B8A6"/>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#0D2137"/>
+    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
    </Borders>
   </Style>
   <Style ss:ID="CellRegular">
    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#1E293B"/>
+   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#0D2137"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
    </Borders>
   </Style>
   <Style ss:ID="CellBold">
    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="9.5" ss:Bold="1" ss:Color="#0F172A"/>
+   <Font ss:FontName="Segoe UI" ss:Size="9.5" ss:Bold="1" ss:Color="#0D2137"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
    </Borders>
   </Style>
   <Style ss:ID="CellCenter">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#1E293B"/>
+   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#0D2137"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
    </Borders>
   </Style>
   <Style ss:ID="CellCode">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Font ss:FontName="Consolas" ss:Size="9.5" ss:Bold="1" ss:Color="#097277"/>
+   <Font ss:FontName="Consolas" ss:Size="9.5" ss:Bold="1" ss:Color="#1A3A5C"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
    </Borders>
   </Style>
   <Style ss:ID="CellMoney">
    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#0F172A"/>
+   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#0D2137"/>
    <NumberFormat ss:Format="#,##0.00"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
@@ -229,7 +229,7 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
   </Style>
   <Style ss:ID="CellPercent">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#0F172A"/>
+   <Font ss:FontName="Segoe UI" ss:Size="9" ss:Color="#0D2137"/>
    <NumberFormat ss:Format="0.0%"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
@@ -278,21 +278,21 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
   </Style>
   <Style ss:ID="TotalHeader">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="11" ss:Bold="1" ss:Color="#0F172A"/>
-   <Interior ss:Color="#E2E8F0" ss:Pattern="Solid"/>
+   <Font ss:FontName="Segoe UI" ss:Size="11" ss:Bold="1" ss:Color="#0D2137"/>
+   <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
    <Borders>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#64748B"/>
-    <Border ss:Position="Bottom" ss:LineStyle="Double" ss:Weight="3" ss:Color="#0F172A"/>
+    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1A3A5C"/>
+    <Border ss:Position="Bottom" ss:LineStyle="Double" ss:Weight="3" ss:Color="#0D2137"/>
    </Borders>
   </Style>
   <Style ss:ID="TotalMoney">
    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
-   <Font ss:FontName="Segoe UI" ss:Size="11" ss:Bold="1" ss:Color="#0F172A"/>
-   <Interior ss:Color="#E2E8F0" ss:Pattern="Solid"/>
+   <Font ss:FontName="Segoe UI" ss:Size="11" ss:Bold="1" ss:Color="#0D2137"/>
+   <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
    <NumberFormat ss:Format="#,##0.00"/>
    <Borders>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#64748B"/>
-    <Border ss:Position="Bottom" ss:LineStyle="Double" ss:Weight="3" ss:Color="#0F172A"/>
+    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1A3A5C"/>
+    <Border ss:Position="Bottom" ss:LineStyle="Double" ss:Weight="3" ss:Color="#0D2137"/>
    </Borders>
   </Style>
  </Styles>

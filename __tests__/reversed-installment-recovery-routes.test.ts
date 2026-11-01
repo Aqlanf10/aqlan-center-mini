@@ -167,7 +167,7 @@ describe("ledger recovery projection boundary", () => {
   it("returns the dedicated reader projection without inferring from ledger rows", async () => {
     const response = await getLedger(new Request("https://synthetic.invalid/api/patients/7/ledger"), context);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ installmentRecovery: { recoveries: [], reviews: [{ invoiceId: 17, planId: 7, reason: "missing_creation_provenance" }] } });
+    expect(await response.json()).toMatchObject({ clinicTimeZone: "Asia/Aden", installmentRecovery: { recoveries: [], reviews: [{ invoiceId: 17, planId: 7, reason: "missing_creation_provenance" }] } });
     expect(mock.readRecovery).toHaveBeenCalledWith(7);
   });
 });

@@ -27,9 +27,4 @@
   .report [data-testid="report-occupancy-fill"] {
     background: #888 !important;
   }
-
-  .report [data-testid="report-paper-header"] img,
-  .report [data-testid="report-paper-header"] svg {
-    filter: grayscale(1);
-  }
 }

@@ -1,3 +1,4 @@
+import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { canManageStaff } from "@/lib/hr";
 import { requireSession } from "@/lib/session";
@@ -43,7 +44,7 @@ export default async function ContractPrintPage({
   const clauses = contract.termsPayload?.clauses?.join("\n") || contract.notes;
 
   return (
-    <div className="mx-auto max-w-4xl p-6 print:p-0">
+    <div className="sheet sheet-a4 print-document" dir="rtl">
       <div className="mb-4 flex justify-end print:hidden">
         <PrintButton />
       </div>
@@ -52,7 +53,7 @@ export default async function ContractPrintPage({
 
       <div className="my-6 space-y-6 text-sm leading-relaxed text-gray-900">
         {/* Header summary */}
-        <div className="flex items-center justify-between border-b pb-3">
+        <PrintMetadata>
           <div>
             <span className="font-semibold text-gray-600">رقم العقد: </span>
             <span className="font-mono font-bold">{contract.contractNumber}</span>
@@ -65,7 +66,7 @@ export default async function ContractPrintPage({
             <span className="font-semibold text-gray-600">الحالة: </span>
             <span className="font-bold">{HR_CONTRACT_STATUS_LABEL[contract.status] || contract.status}</span>
           </div>
-        </div>
+        </PrintMetadata>
 
         {/* Parties introduction */}
         <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
@@ -155,7 +156,7 @@ export default async function ContractPrintPage({
         </div>
 
         {/* Signatures */}
-        <div className="mt-12 pt-8 border-t grid grid-cols-2 text-center">
+        <div className="print-document-signatures mt-12 pt-8 border-t grid grid-cols-2 text-center">
           <div>
             <div className="font-bold mb-12">توقيع وختم الطرف الأول (المركز)</div>
             <div className="text-xs text-gray-500">............................................</div>

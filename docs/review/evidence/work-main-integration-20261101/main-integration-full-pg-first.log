@@ -1,0 +1,295 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts
+
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+(node:117748) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:118081) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:118196) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:118708) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/payment-acknowledgment-evidence.test.ts (44 tests | 44 skipped) 26ms
+(node:122733) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/expense-category-history-containment.test.ts (48 tests | 48 skipped) 25ms
+ ❯ __tests__/postgres/lab-work-restore-contract.test.ts (60 tests | 1 failed) 8085ms
+     × applies 0074 to an existing legacy lab database without backfill or money changes 584ms
+(node:124182) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:124359) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:126867) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:126903) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:126951) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:127045) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:127331) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:127553) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:127828) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:128010) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:128027) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:128134) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:128213) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/payment-shift-admission.test.ts (18 tests | 18 skipped) 32ms
+(node:128406) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:128544) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:128658) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:128854) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:128868) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:129089) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:130861) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:130903) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/manual-cash-containment.test.ts (20 tests | 20 skipped) 39ms
+(node:131307) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:131357) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/expense-void-close-race.test.ts (8 tests | 8 skipped) 23ms
+(node:131461) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:131625) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:131863) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/lab-accounting-fx-snapshot.test.ts (35 tests | 3 failed) 900ms
+     × preserves all rows after direct partial settlement 22ms
+     × preserves all rows after allocated partial settlement 15ms
+     × does not wait on a concurrent payment's payable lock 16ms
+(node:132225) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:135866) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:137954) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:138070) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:138183) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:138304) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:138760) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:139284) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:139966) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:140051) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:140713) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:145761) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:145947) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:147707) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:149289) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:149438) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:149562) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:149842) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:149970) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:150007) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:150210) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:150242) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:150476) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:150529) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:150750) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:150845) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:151042) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:151926) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:152010) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:152026) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:152807) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:152922) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:154735) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:154973) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:156871) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:157166) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:157586) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:158004) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/expense-category-history-containment.test.ts [ __tests__/postgres/expense-category-history-containment.test.ts ]
+Error: Focused containment proof requires a NEW empty synthetic database; do not erase a schema
+ ❯ Module.prepareExpenseCategoryHistoryFixture __tests__/postgres/_expense-category-fixture.ts:20:13
+     18|     );
+     19|     if (row.n !== 0) {
+     20|       throw new Error("Focused containment proof requires a NEW empty …
+       |             ^
+     21|     }
+     22|   } finally { await client.end(); }
+ ❯ __tests__/postgres/expense-category-history-containment.test.ts:29:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  __tests__/postgres/expense-void-close-race.test.ts [ __tests__/postgres/expense-void-close-race.test.ts ]
+Error: Manual cash proof requires a NEW empty synthetic database; do not erase a schema
+ ❯ prepareManualCashFixture __tests__/postgres/_manual-cash-fixture.ts:18:28
+     16|       "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname='publ…
+     17|     );
+     18|     if (row.n !== 0) throw new Error("Manual cash proof requires a NEW…
+       |                            ^
+     19|   } finally { await client.end(); }
+     20| }
+ ❯ __tests__/postgres/expense-void-close-race.test.ts:149:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  __tests__/postgres/manual-cash-containment.test.ts [ __tests__/postgres/manual-cash-containment.test.ts ]
+Error: Manual cash proof requires a NEW empty synthetic database; do not erase a schema
+ ❯ prepareManualCashFixture __tests__/postgres/_manual-cash-fixture.ts:18:28
+     16|       "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname='publ…
+     17|     );
+     18|     if (row.n !== 0) throw new Error("Manual cash proof requires a NEW…
+       |                            ^
+     19|   } finally { await client.end(); }
+     20| }
+ ❯ __tests__/postgres/manual-cash-containment.test.ts:123:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  __tests__/postgres/payment-acknowledgment-evidence.test.ts [ __tests__/postgres/payment-acknowledgment-evidence.test.ts ]
+Error: Manual cash proof requires a NEW empty synthetic database; do not erase a schema
+ ❯ Module.prepareManualCashFixture __tests__/postgres/_manual-cash-fixture.ts:18:28
+     16|       "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname='publ…
+     17|     );
+     18|     if (row.n !== 0) throw new Error("Manual cash proof requires a NEW…
+       |                            ^
+     19|   } finally { await client.end(); }
+     20| }
+ ❯ __tests__/postgres/payment-acknowledgment-evidence.test.ts:141:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  __tests__/postgres/payment-shift-admission.test.ts [ __tests__/postgres/payment-shift-admission.test.ts ]
+Error: Manual cash proof requires a NEW empty synthetic database; do not erase a schema
+ ❯ prepareManualCashFixture __tests__/postgres/_manual-cash-fixture.ts:18:28
+     16|       "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname='publ…
+     17|     );
+     18|     if (row.n !== 0) throw new Error("Manual cash proof requires a NEW…
+       |                            ^
+     19|   } finally { await client.end(); }
+     20| }
+ ❯ __tests__/postgres/payment-shift-admission.test.ts:239:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/lab-accounting-fx-snapshot.test.ts > lab accounting settlement and period fences > preserves all rows after direct partial settlement
+ FAIL  __tests__/postgres/lab-accounting-fx-snapshot.test.ts > lab accounting settlement and period fences > preserves all rows after allocated partial settlement
+AssertionError: expected [Function] to throw error including 'lab_order_accounting_settled' but got 'التزام المختبر له أدلة صرف؛ لا يمكن إ…'
+
+Expected: "lab_order_accounting_settled"
+Received: "التزام المختبر له أدلة صرف؛ لا يمكن إعادة تسعيره من محرر الربط. راجع التصحيح المالي دون تغيير السندات."
+
+ ❯ __tests__/postgres/lab-accounting-fx-snapshot.test.ts:204:65
+    202|     const before = await snapshot(order.id);
+    203|     for (const input of [{ costMinor: 3000 }, { costCurrency: "SAR" as…
+    204|       // WORK proves saved monetary lineage first; main additionally f…
+       |                                                                 ^
+    205|       // posting/account changes. Both refusal paths must preserve eve…
+    206|       if ("costMinor" in input || "costCurrency" in input) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  __tests__/postgres/lab-accounting-fx-snapshot.test.ts > lab accounting settlement and period fences > does not wait on a concurrent payment's payable lock
+AssertionError: expected [Function] to throw error including 'lab_order_accounting_busy' but got 'could not obtain lock on row in relat…'
+
+Expected: "lab_order_accounting_busy"
+Received: "could not obtain lock on row in relation "payables""
+
+ ❯ __tests__/postgres/lab-accounting-fx-snapshot.test.ts:214:79
+    214|     const holder = await db.getPool().connect();
+    215|     try {
+    216|       await holder.query("BEGIN");
+       |                    ^
+    217|       await holder.query("SELECT id FROM payables WHERE id=$1 FOR UPDA…
+    218|       // WORK's earlier linked-payable NOWAIT lock raises native conte…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  __tests__/postgres/lab-work-restore-contract.test.ts > lab historical graph restore contract > applies 0074 to an existing legacy lab database without backfill or money changes
+AssertionError: expected [ Array(1) ] to deeply equal [ Array(1) ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "row": "{\"id\": 1, \"note\": null, \"shade\": null, \"source\": \"manual\", \"status\": \"needed\", \"details\": null, \"due_date\": \"2026-11-01\", \"lab_name\": \"Synthetic legacy lab\", \"party_id\": null, \"priority\": \"normal\", \"visit_id\": null, \"doctor_id\": null, \"is_posted\": true, \"lab_phone\": null, \"posted_at\": null, \"sent_date\": \"2026-11-01\", \"work_type\": \"تاج\", \"cost_minor\": 1234, \"created_at\": \"2026-11-01T04:21:43.777117+00:00\", \"patient_id\": 1, \"payable_id\": null, \"tooth_code\": null, \"received_at\": null, \"stump_shade\": null, \"delivered_at\": null, \"cost_currency\": null, \"exchange_rate\": 1.000000, \"quality_check\": \"pending\", \"quality_notes\": null, \"remake_reason\": null, \"tooth_numbers\": null, \"lab_service_id\": null, \"impression_type\": \"physical\", \"technician_name\": null, \"financial_status\": \"pending_delivery\", \"base_amount_minor\": null, \"remake_original_id\": null, \"expense_category_id\": null, \"expense_account_code\": null, \"payable_account_code\": null}",
++     "row": "{\"id\": 1, \"note\": null, \"shade\": null, \"source\": \"manual\", \"status\": \"needed\", \"details\": null, \"due_date\": \"2026-11-01\", \"lab_name\": \"Synthetic legacy lab\", \"party_id\": null, \"priority\": \"normal\", \"visit_id\": null, \"doctor_id\": null, \"is_posted\": true, \"lab_phone\": null, \"posted_at\": null, \"sent_date\": \"2026-11-01\", \"work_type\": \"تاج\", \"cost_minor\": 1234, \"created_at\": \"2026-11-01T04:21:43.777117+00:00\", \"patient_id\": 1, \"payable_id\": null, \"tooth_code\": null, \"received_at\": null, \"stump_shade\": null, \"delivered_at\": null, \"cost_currency\": null, \"exchange_rate\": 1.000000, \"quality_check\": \"pending\", \"quality_notes\": null, \"remake_reason\": null, \"tooth_numbers\": null, \"lab_service_id\": null, \"impression_type\": \"physical\", \"technician_name\": null, \"financial_status\": \"pending_delivery\", \"base_amount_minor\": null, \"remake_original_id\": null, \"expense_category_id\": null, \"shade_specification\": null, \"expense_account_code\": null, \"payable_account_code\": null}",
+    },
+  ]
+
+ ❯ __tests__/postgres/lab-work-restore-contract.test.ts:71:113
+     69|   const before=(await target.query("SELECT to_jsonb(t)::text AS row FR…
+     70|   await migrate(target,{files,apply:true});
+     71|   expect((await target.query("SELECT (to_jsonb(t)-'lab_work_intent_id'…
+       |                                                                                                                 ^
+     72|   expect((await target.query("SELECT id FROM lab_work_intents")).rows)…
+     73|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+
+ Test Files  7 failed | 382 passed (389)
+      Tests  4 failed | 4819 passed | 138 skipped (4961)
+   Start at  04:15:05
+   Duration  1751.40s (transform 18.16s, setup 0ms, import 145.66s, tests 1555.47s, environment 36ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

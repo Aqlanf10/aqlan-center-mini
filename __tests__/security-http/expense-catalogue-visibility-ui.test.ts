@@ -50,6 +50,11 @@ async function fixture(path = "/finance/expense-categories", width = 1280) {
         case "/api/auth/me": await json(route, { username: "secadmin", role: "admin" }); return;
         case "/api/laboratories": await json(route, { laboratories: [] }); return;
         case "/api/lab/services": await json(route, { services: [] }); return;
+        case "/api/parties":
+          // The lab's explicit physician picker reads only the doctor catalogue.
+          // Keep other party scopes and all writes blocked by the fixture guard.
+          if (url.search === "?kind=doctor") { await json(route, []); return; }
+          break;
       }
     }
     unexpected.push(`${request.method()} ${url.pathname}`);

@@ -1,3 +1,4 @@
+import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getExpense, getSettingsSafe, printCount } from "@/lib/db";
 import { EXPENSE_CATEGORY_LABEL } from "@/lib/expenses";
@@ -38,7 +39,7 @@ export default async function VoucherPage({ params }: { params: Promise<{ id: st
       <div className="sheet sheet-a6">
         <PrintHeader settings={settings} title="سند صرف" compact />
 
-        <div className="line">
+        <PrintMetadata><div className="line">
           <span>رقم السند</span>
           <span className="num" dir="ltr">{expense.voucherNumber}</span>
         </div>
@@ -48,7 +49,7 @@ export default async function VoucherPage({ params }: { params: Promise<{ id: st
             {friendlyDateLong(dateText)} ·{" "}
             {friendlyTime(`${String(stamped.getHours()).padStart(2, "0")}:${String(stamped.getMinutes()).padStart(2, "0")}`)}
           </span>
-        </div>
+        </div></PrintMetadata>
         <div className="rule-light" />
 
         <div className="line">

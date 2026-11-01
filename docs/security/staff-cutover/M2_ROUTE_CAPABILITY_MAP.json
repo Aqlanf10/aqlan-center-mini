@@ -2258,6 +2258,18 @@
       "finance.payables.record"
      ],
      "note": ""
+    },
+    "update_clinical": {
+     "need": [
+      "clinical.visits.document"
+     ],
+     "note": "Main clinical correction branch, patient-scoped and still held. Preserve its CAS, saved financial links and atomic audit; this inventory entry does not admit canonical requests."
+    },
+    "update_shade": {
+     "need": [
+      "clinical.visits.document"
+     ],
+     "note": "Main clinical correction branch, patient-scoped and still held. Preserve its CAS, saved financial links and atomic audit; this inventory entry does not admit canonical requests."
     }
    },
    "fields": [
@@ -5597,6 +5609,48 @@
   "scope": null,
   "status": "existing",
   "note": ""
+ },
+ {
+  "route": "/api/settings/login-photo",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.integrations.change"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Imported main branding route remains held for canonical admission. Hidden-photo preview and publication use the existing owner-only external-identity boundary; generic settings.view or operational editing does not grant access. Dedicated snapshot/command contract and current session proof remain required before conversion."
+ },
+ {
+  "route": "/api/settings/login-photo",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.integrations.change"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Imported main branding route remains held for canonical admission. Hidden-photo preview and publication use the existing owner-only external-identity boundary; generic settings.view or operational editing does not grant access. Dedicated snapshot/command contract and current session proof remain required before conversion."
+ },
+ {
+  "route": "/api/settings/login-photo",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.integrations.change"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Imported main branding route remains held for canonical admission. Hidden-photo preview and publication use the existing owner-only external-identity boundary; generic settings.view or operational editing does not grant access. Dedicated snapshot/command contract and current session proof remain required before conversion."
  },
  {
   "route": "/api/settings/material-rates",

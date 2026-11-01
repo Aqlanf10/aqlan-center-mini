@@ -1,4 +1,6 @@
 import { LabDispatchDentalChart } from "@/components/LabDentalChart";
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
+import styles from "./lab-dispatch.module.css";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { getLabOrderById, getSettingsSafe } from "@/lib/db";
@@ -12,6 +14,7 @@ import {
   LAB_TOOTH_ROLE_META,
   toLabDispatchExternal,
   labDispatchQrPayload,
+  labDispatchShadeLines,
 } from "@/lib/lab";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +46,7 @@ export default async function LabOrderPrintPage({
 
 
   const settings = await getSettingsSafe();
-  const order = toLabDispatchExternal(internalOrder);
+  const order = toLabDispatchExternal(internalOrder, settings);
   const toothMap = Object.fromEntries(order.teeth.map(({ code, role }) => [code, role]));
   const selectedTeethCodes = order.teeth.map(({ code }) => code);
   const qrPayload = labDispatchQrPayload(order);
@@ -67,65 +70,34 @@ export default async function LabOrderPrintPage({
     <>
       <PrintButton />
       <div
-        className="sheet sheet-a4"
-        style={{ padding: "10mm 12mm", fontSize: "9.5pt", lineHeight: "1.4" }}
+        className={`sheet sheet-a4 ${styles.sheet}`} dir="rtl"
       >
         <PrintHeader
           settings={settings}
           title="تذكرة إرسالية معمل تركيبات وتعويضات الأسنان"
         />
-        <div style={{ textAlign: "center", marginTop: "-2mm", marginBottom: "2mm", fontSize: "8pt", color: "#64748b" }}>
+        <div style={{ textAlign: "center", marginTop: "1mm", marginBottom: "2mm", fontSize: "8pt", lineHeight: 1.5, color: "#64748b" }}>
           Dental Laboratory Dispatch · {order.reference}
         </div>
 
-        {/* شريط البيانات الأساسية */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 100px",
-            gap: "3mm",
-            backgroundColor: "#f8fafc",
-            border: "1.5px solid #cbd5e1",
-            borderRadius: "3mm",
-            padding: "3mm 4mm",
-            marginTop: "3mm",
-            fontSize: "9pt",
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5mm" }}>
-            <span style={{ color: "#64748b", fontWeight: "bold" }}>مرجع الطلب:</span>
-            <strong dir="ltr" style={{ fontSize: "14pt", color: "#0f172a" }}>{order.reference}</strong>
-            <span>تُطابق الإرسالية داخل العيادة بهذا المرجع.</span>
+        {/* Shared compact identity; the external DTO and reference-only QR stay unchanged. */}
+        <div className="print-lab-metadata">
+          <div>
+            <PrintMetadata>
+              <div className="line"><span>مرجع الطلب:</span><strong dir="ltr">{order.reference}</strong></div>
+              {order.patientName ? <div className="line"><span>اسم المريض: </span><strong>{order.patientName}</strong></div> : null}
+              <div className={styles.labIdentity}><span>المختبر: </span><strong>{order.labName}</strong>{order.labPhone ? <span dir="ltr" style={{ marginRight: "1mm", fontSize: "8pt" }}>({order.labPhone})</span> : null}</div>
+              <div className="line"><span>الطبيب المعالج: </span><strong>{order.doctorName || "غير محدد"}</strong></div>
+              <div className="line"><span>تاريخ الإرسال: </span><strong dir="ltr" className={styles.date}>{order.sentDate}</strong></div>
+              <div className="line"><span>التسليم المطلوب: </span><strong dir="ltr" className={styles.date} style={{ color: "#b91c1c" }}>{order.dueDate}</strong></div>
+            </PrintMetadata>
+            <p className="footer-note">تُطابق الإرسالية داخل العيادة بهذا المرجع.</p>
           </div>
-
-          {/* بيانات الطلب والمختبر */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5mm" }}>
-            <div>
-              <span style={{ color: "#64748b", fontWeight: "bold" }}>المختبر: </span>
-              <strong style={{ fontSize: "10.5pt", color: "#0f172a" }}>{order.labName}</strong>
-              {order.labPhone && <span dir="ltr" style={{ marginRight: "2mm", fontSize: "8pt", color: "#64748b" }}>({order.labPhone})</span>}
-            </div>
-            <div>
-              <span style={{ color: "#64748b" }}>الطبيب المعالج: </span>
-              <strong style={{ color: "#334155" }}>{order.doctorName || "غير محدد"}</strong>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "3mm", alignItems: "center" }}>
-              <div>
-                <span style={{ color: "#64748b" }}>تاريخ الإرسال: </span>
-                <strong dir="ltr" style={{ color: "#0f172a", display: "inline-block", whiteSpace: "nowrap" }}>{order.sentDate}</strong>
-              </div>
-              <div>
-                <span style={{ color: "#64748b" }}>التسليم المطلوب: </span>
-                <strong dir="ltr" style={{ color: "#b91c1c", display: "inline-block", whiteSpace: "nowrap" }}>{order.dueDate}</strong>
-              </div>
-            </div>
-          </div>
-
           {/* باركود QR ودرجة الأولوية */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
             {qrCodeDataUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={qrCodeDataUrl} alt={`مرجع الطلب ${order.reference}`} style={{ width: "65px", height: "65px", borderRadius: "4px" }} />
+              <img className="print-watermark-protected" src={qrCodeDataUrl} alt={`مرجع الطلب ${order.reference}`} style={{ width: "65px", height: "65px", borderRadius: "4px" }} />
             ) : null}
             <span
               style={{
@@ -156,7 +128,7 @@ export default async function LabOrderPrintPage({
           <h3 style={{ fontSize: "10pt", fontWeight: "900", color: "#0f172a", marginBottom: "1.5mm" }}>
             المواصفات الفنية للتعويضات السنية
           </h3>
-          <table
+          <PrintTableFrame><table
             style={{
               width: "100%",
               borderCollapse: "collapse",
@@ -181,7 +153,7 @@ export default async function LabOrderPrintPage({
               </tr>
               <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
                 <td style={{ padding: "2.5mm 3mm", fontWeight: "bold", color: "#475569" }}>
-                  لون الخزف (Body Shade):
+                  اللون العام (Shade):
                 </td>
                 <td style={{ padding: "2.5mm 3mm", fontWeight: "900", fontSize: "11pt", color: "#0f172a" }}>
                   {order.shade ? (
@@ -240,11 +212,17 @@ export default async function LabOrderPrintPage({
                 </td>
               </tr>
             </tbody>
-          </table>
+          </table></PrintTableFrame>
         </div>
 
-        <LabDispatchDentalChart teeth={order.teeth} />
+        {order.shadeSpecification?.teeth.length ? <section className={styles.shades} aria-label="ألوان مناطق الأسنان">
+          <h3>ألوان مناطق الأسنان — حسب الدليل الفعلي</h3>
+          {labDispatchShadeLines(order).map((line, index) => <p key={index}>{line}</p>)}
+        </section> : null}
 
+        <div className="print-watermark-protected"><LabDispatchDentalChart teeth={order.teeth} /></div>
+
+        <section className={styles.closing}>
         {/* توقيعات الطبيب ومندوب المعمل */}
         <div
           style={{
@@ -270,7 +248,7 @@ export default async function LabOrderPrintPage({
             </p>
             <div style={{ height: "14mm" }} />
             <div style={{ borderTop: "1px solid #cbd5e1", paddingTop: "1mm", fontSize: "8pt", color: "#64748b" }}>
-              {order.doctorName || "غير محدد"} · التاريخ: {order.sentDate}
+              {order.doctorName || "غير محدد"} · التاريخ: <span dir="ltr" className={styles.date}>{order.sentDate}</span>
             </div>
           </div>
 
@@ -298,6 +276,7 @@ export default async function LabOrderPrintPage({
         </div>
 
         <PrintFooter settings={settings} />
+        </section>
       </div>
     </>
   );

@@ -48,6 +48,7 @@ import {
  * 12.  ماسح قارئات الأجسام (ci:scan:body)                     — كما في CI
  * 13.  بناء الإنتاج (build)                                    — كما في CI
  * 14.  اختبارات الأمن على HTTP (test:security-http)            — كما في CI
+ *      ويليها فحص PDF عقد الأقساط الصناعي (Chromium + Poppler، مثل رحلة طباعة HTTP).
  *
  * ما يبقى CI-only هو رفعُ الآثار (artifacts) وتثبيت Chromium — خطوات منشأ
  * وإثبات مصدر لا بوابات فحص، موثَّقة في docs/ENVIRONMENT_CI_PARITY.md.
@@ -174,6 +175,7 @@ export const FULL_GATE_STEPS = [
   { name: "بناء الإنتاج", command: ["npm", "run", "build"] },
   { name: "بناء وفحص أداة المخطط للقراءة فقط", command: ["npm", "run", "build:preflight"] },
   { name: "اختبارات الأمن على HTTP", command: ["npm", "run", "test:security-http"] },
+  { name: "فحص طباعة عقد الأقساط الصناعي", command: ["npm", "run", "test:contract-print"] },
 ];
 
 /** متطلبات بيئة تُشرح قبل أن يصطدم بها الـsteps لاحقًا برسائلٍ أقل تحديدًا. */

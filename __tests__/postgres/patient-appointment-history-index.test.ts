@@ -97,7 +97,7 @@ it("serializes numbered/runtime racers and retries idempotently on a populated 0
   const competitor = new Pool({ connectionString: pool.options.connectionString!, ssl: false });
   try {
     const [runtime, numbered] = await Promise.all([applyRuntimeMigrationFiles(pool, [index]), migrate(competitor, { apply: true, files })]);
-    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082"]);
+    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089"]);
   } finally { await competitor.end(); }
   const oid = (await pool.query("SELECT 'appointments_patient_history_idx'::regclass::oid AS oid")).rows;
   expect(await applyRuntimeMigrationFiles(pool, [index])).toEqual([]);

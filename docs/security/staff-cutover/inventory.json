@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "8ce81c9103225acab9ddee827d7d215ae58c1eb01790624f8ef4a741f03bc437",
+  "sourceDigest": "a7b6085634d0554ee1e7e18b715260a6c2e1727e5ec5342a8b5b494342439281",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -47,10 +47,10 @@
     "clinical.plans.view"
   ],
   "summary": {
-    "routeMethods": 416,
+    "routeMethods": 420,
     "routeClassifications": {
-      "public-separate-portal": 24,
-      "staff-legacy-held": 383,
+      "public-separate-portal": 25,
+      "staff-legacy-held": 386,
       "canonical-ready": 0,
       "unknown": 9
     },
@@ -61,7 +61,7 @@
       "canonical-ready": 0,
       "unknown": 25
     },
-    "legacyReferenceFiles": 248,
+    "legacyReferenceFiles": 249,
     "canonicalDirectReferences": 0
   },
   "sourceEntries": [
@@ -85,6 +85,7 @@
     "app/api/book/route.ts",
     "app/api/booking-requests/[id]/route.ts",
     "app/api/booking-requests/route.ts",
+    "app/api/branding/login-photo/route.ts",
     "app/api/cases/[id]/route.ts",
     "app/api/ceph-reference-sets/route.ts",
     "app/api/ceph/[id]/ai-analyze/route.ts",
@@ -295,6 +296,7 @@
     "app/api/settings/display/announcements/reorder/route.ts",
     "app/api/settings/display/announcements/route.ts",
     "app/api/settings/history/route.ts",
+    "app/api/settings/login-photo/route.ts",
     "app/api/settings/material-rates/route.ts",
     "app/api/settings/messaging/route.ts",
     "app/api/settings/messaging/test/route.ts",
@@ -1302,15 +1304,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 22
         },
         {
           "symbol": "requireSession",
-          "line": 41
+          "line": 44
         }
       ]
     },
@@ -1742,15 +1744,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 20
         },
         {
           "symbol": "requireSession",
-          "line": 35
+          "line": 39
         },
         {
           "symbol": "requireSession",
-          "line": 233
+          "line": 276
         }
       ]
     },
@@ -1814,11 +1816,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 24
         },
         {
           "symbol": "requireSession",
-          "line": 65
+          "line": 67
         },
         {
           "symbol": "findUserByUsername",
@@ -1826,7 +1828,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 40
+          "line": 42
         }
       ]
     },
@@ -3619,6 +3621,19 @@
       ]
     },
     {
+      "file": "app/api/settings/login-photo/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 3
+        },
+        {
+          "symbol": "requireSession",
+          "line": 14
+        }
+      ]
+    },
+    {
       "file": "app/api/settings/material-rates/route.ts",
       "evidence": [
         {
@@ -4125,23 +4140,23 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 66
+          "line": 68
         },
         {
           "symbol": "requireSession",
-          "line": 72
+          "line": 74
         },
         {
           "symbol": "findUserByUsername",
-          "line": 5
+          "line": 6
         },
         {
           "symbol": "findUserByUsername",
-          "line": 78
+          "line": 92
         }
       ]
     },
@@ -4150,11 +4165,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 20
         }
       ]
     },
@@ -4163,11 +4178,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 34
+          "line": 35
         }
       ]
     },
@@ -4176,11 +4191,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 76
+          "line": 77
         }
       ]
     },
@@ -4189,11 +4204,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 13
         },
         {
           "symbol": "requireSession",
-          "line": 97
+          "line": 98
         }
       ]
     },
@@ -4202,15 +4217,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 50
+          "line": 51
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 197
         }
       ]
     },
@@ -4219,11 +4234,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 92
+          "line": 93
         }
       ]
     },
@@ -4232,11 +4247,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 27
+          "line": 28
         }
       ]
     },
@@ -4245,11 +4260,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 3
+          "line": 4
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 23
         }
       ]
     },
@@ -4258,11 +4273,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 3
+          "line": 4
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 22
         }
       ]
     },
@@ -4271,11 +4286,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 3
+          "line": 4
         },
         {
           "symbol": "requireSession",
-          "line": 27
+          "line": 28
         }
       ]
     },
@@ -4284,11 +4299,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 2
+          "line": 3
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 24
         }
       ]
     },
@@ -4297,11 +4312,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 18
         }
       ]
     },
@@ -4310,11 +4325,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 31
+          "line": 34
         }
       ]
     },
@@ -4323,11 +4338,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 24
         }
       ]
     },
@@ -4353,7 +4368,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 25
         }
       ]
     },
@@ -4362,11 +4377,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 36
+          "line": 37
         }
       ]
     },
@@ -4375,11 +4390,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 57
+          "line": 58
         }
       ]
     },
@@ -4401,11 +4416,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 24
         }
       ]
     },
@@ -4427,11 +4442,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 31
+          "line": 32
         }
       ]
     },
@@ -4440,11 +4455,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 21
         },
         {
           "symbol": "requireSession",
-          "line": 40
+          "line": 41
         }
       ]
     },
@@ -4453,11 +4468,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 18
+          "line": 19
         }
       ]
     },
@@ -4466,11 +4481,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 22
         }
       ]
     },
@@ -4510,23 +4525,23 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 66
+          "line": 68
         },
         {
           "symbol": "requireSession",
-          "line": 72
+          "line": 74
         },
         {
           "symbol": "findUserByUsername",
-          "line": 5
+          "line": 6
         },
         {
           "symbol": "findUserByUsername",
-          "line": 78
+          "line": 92
         }
       ]
     },
@@ -5131,6 +5146,17 @@
           "line": 70
         }
       ]
+    },
+    {
+      "route": "/api/branding/login-photo",
+      "method": "GET",
+      "file": "app/api/branding/login-photo/route.ts",
+      "httpAccess": "public",
+      "classification": "public-separate-portal",
+      "workflow": "other-review-required",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Non-staff transport class; this is not a claim of marker-bearing runtime acceptance",
+      "directHelperEvidence": []
     },
     {
       "route": "/api/cases/[id]",
@@ -6919,15 +6945,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 22
         },
         {
           "symbol": "requireSession",
-          "line": 41
+          "line": 44
         }
       ]
     },
@@ -6945,15 +6971,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 22
         },
         {
           "symbol": "requireSession",
-          "line": 41
+          "line": 44
         }
       ]
     },
@@ -8148,11 +8174,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 24
         },
         {
           "symbol": "requireSession",
-          "line": 65
+          "line": 67
         },
         {
           "symbol": "findUserByUsername",
@@ -8160,7 +8186,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 40
+          "line": 42
         }
       ]
     },
@@ -8184,11 +8210,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 24
         },
         {
           "symbol": "requireSession",
-          "line": 65
+          "line": 67
         },
         {
           "symbol": "findUserByUsername",
@@ -8196,7 +8222,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 40
+          "line": 42
         }
       ]
     },
@@ -8214,15 +8240,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 20
         },
         {
           "symbol": "requireSession",
-          "line": 35
+          "line": 39
         },
         {
           "symbol": "requireSession",
-          "line": 233
+          "line": 276
         }
       ]
     },
@@ -8242,15 +8268,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 20
         },
         {
           "symbol": "requireSession",
-          "line": 35
+          "line": 39
         },
         {
           "symbol": "requireSession",
-          "line": 233
+          "line": 276
         }
       ]
     },
@@ -13878,6 +13904,72 @@
       ]
     },
     {
+      "route": "/api/settings/login-photo",
+      "method": "GET",
+      "file": "app/api/settings/login-photo/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "other-review-required",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 3
+        },
+        {
+          "symbol": "requireSession",
+          "line": 14
+        }
+      ]
+    },
+    {
+      "route": "/api/settings/login-photo",
+      "method": "PATCH",
+      "file": "app/api/settings/login-photo/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "other-review-required",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 3
+        },
+        {
+          "symbol": "requireSession",
+          "line": 14
+        }
+      ]
+    },
+    {
+      "route": "/api/settings/login-photo",
+      "method": "POST",
+      "file": "app/api/settings/login-photo/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "other-review-required",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 3
+        },
+        {
+          "symbol": "requireSession",
+          "line": 14
+        }
+      ]
+    },
+    {
       "route": "/api/settings/material-rates",
       "method": "GET",
       "file": "app/api/settings/material-rates/route.ts",
@@ -15554,11 +15646,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 20
         }
       ]
     },
@@ -15571,11 +15663,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 34
+          "line": 35
         }
       ]
     },
@@ -15588,11 +15680,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 76
+          "line": 77
         }
       ]
     },
@@ -15605,11 +15697,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 13
         },
         {
           "symbol": "requireSession",
-          "line": 97
+          "line": 98
         }
       ]
     },
@@ -15622,15 +15714,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 50
+          "line": 51
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 197
         }
       ]
     },
@@ -15643,11 +15735,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 92
+          "line": 93
         }
       ]
     },
@@ -15660,11 +15752,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 27
+          "line": 28
         }
       ]
     },
@@ -15677,11 +15769,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 3
+          "line": 4
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 23
         }
       ]
     },
@@ -15694,11 +15786,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 3
+          "line": 4
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 22
         }
       ]
     },
@@ -15711,11 +15803,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 3
+          "line": 4
         },
         {
           "symbol": "requireSession",
-          "line": 27
+          "line": 28
         }
       ]
     },
@@ -15728,11 +15820,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 2
+          "line": 3
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 24
         }
       ]
     },
@@ -15745,11 +15837,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 18
         }
       ]
     },
@@ -15762,11 +15854,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 31
+          "line": 34
         }
       ]
     },
@@ -15779,11 +15871,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 24
         }
       ]
     },
@@ -15817,7 +15909,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 25
         }
       ]
     },
@@ -15830,11 +15922,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 7
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 36
+          "line": 37
         }
       ]
     },
@@ -15847,11 +15939,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 57
+          "line": 58
         }
       ]
     },
@@ -15881,11 +15973,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 24
         }
       ]
     },
@@ -15915,11 +16007,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 31
+          "line": 32
         }
       ]
     },
@@ -15932,11 +16024,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 21
         },
         {
           "symbol": "requireSession",
-          "line": 40
+          "line": 41
         }
       ]
     },
@@ -15949,11 +16041,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 18
+          "line": 19
         }
       ]
     },
@@ -15966,11 +16058,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 22
         }
       ]
     },

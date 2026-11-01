@@ -634,3 +634,34 @@ local activation does not authorize Production deployment.
 ## Local laboratory identity reservation (2026-10-26)
 
 `0074_lab_work_intents.sql` is locally registered in the isolated unified lab branch, with exact paired runtime SQL. It excludes deferred0073 clinical authorization and keeps0075 cross-domain corrections unregistered. It adds explicit work/member/source/command identity without legacy-source backfill, protects historical graphs and fresh-snapshot lab history, and uses READ COMMITTED UUID insertion fences compatible with0080. See [local scope, baseline adoption refusal and remaining gates](LAB_UNIFIED_LOCAL_ACCEPTANCE_20261026.md). This is not a live migration or deployment approval.
+### 0087_agreement_reminder_metadata.sql
+
+Additive replacement of the reconciliation terms guard permits only
+`plan_installments.last_reminder_at` to change on reconciled installments.
+Whole-row JSON equality excluding that field keeps all other current and future
+columns immutable; INSERT/DELETE and invoice-item guards remain unchanged.
+Published 0078 bytes and its registry checksum are preserved. Numbered and
+runtime 0087 SQL are identical and checksum checked. Reminder timestamps and
+mandatory audit rows commit together in one transaction, including bulk requests.
+
+An application rollback does not undo this migration: old 480 startup preserves
+the new guard, but its old preflight manifest reports 0087 as unknown. Do not
+delete registry history to hide that mismatch. Exact-head CI and Staging
+acceptance remain required before Production rollout.
+
+
+### 0089_lab_shade_specification.sql
+
+Adds nullable, versioned `lab_orders.shade_specification` JSONB for explicit
+per-tooth cervical, body and incisal/occlusal shade selections. The immutable
+validator and CHECK constraint accept only valid FDI identities and the reviewed
+VITA classical / 3D-MASTER guide-code pairs, reject duplicate teeth and unknown
+keys, and preserve SQL NULL for orders without structured shade instructions.
+
+Existing global shade strings and tooth roles are not rewritten, inferred or
+backfilled. Numbered and checksum-checked runtime SQL use identical bytes.
+Migration 0088 remains separately reserved; this change does not fill that gap.
+Application shade edits commit their audit record in the same transaction and
+use the previously observed specification to reject stale writes. Rollback of
+application code must not delete the new column or migration registry history.
+Exact-head CI and Staging verification remain required before Production rollout.

@@ -52,6 +52,8 @@ beforeEach(async () => {
     if (/FROM lab_orders WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: order ? [order] : [] };
     if (/SELECT id,lab_order_id,party_id FROM payables/.test(sql)) return { rows: payables };
     if (/EXISTS\(SELECT 1 FROM expenses WHERE payable_id/.test(sql)) return { rows: [{ exists: paid }] };
+    if (/FROM payables.*FOR UPDATE NOWAIT/s.test(sql)) return { rows: payables.map(row => ({ ...row, source_type: "operational", created_date: "2026-10-05" })) };
+    if (/AS has_settlement/.test(sql)) return { rows: [{ has_settlement: paid }] };
     if (/INSERT INTO payables/.test(sql)) return { rows: insertionConflict ? [] : [{ id: 29 }] };
     return { rows: [] };
   });
@@ -135,13 +137,15 @@ describe("actual lab accounting writer money snapshot bindings", () => {
     expect(boundary.query.mock.calls.at(-1)).toEqual(["ROLLBACK"]);
     expect(boundary.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
   });
-  it("blocks settled monetary changes but allows metadata-only snapshot preservation", async () => {
+  it("blocks settled monetary and posting changes without rewriting saved snapshots", async () => {
     paid = true;
     await expect(updateLabOrderAccounting(11, { costMinor: 3000, costCurrency: "USD", exchangeRate: 600 })).rejects.toMatchObject({ code: "lab_settled_money_review" });
     expect(boundary.query.mock.calls.some(([sql]) => /^(INSERT|UPDATE|DELETE) /.test(sql))).toBe(false);
     boundary.query.mockClear();
-    await updateLabOrderAccounting(11, { isPosted: false });
-    expect(statement(/UPDATE payables\s+SET expense_category_id/).values[8]).toBe(false);
+    // Main's accepted settlement guard treats posting/account edits as financial changes.
+    await expect(updateLabOrderAccounting(11, { isPosted: false })).rejects.toThrow("lab_order_accounting_settled");
+    expect(boundary.query.mock.calls.some(([sql]) => /^(INSERT|UPDATE|DELETE) /.test(sql))).toBe(false);
+    expect(boundary.query.mock.calls.at(-1)).toEqual(["ROLLBACK"]);
   });
   it.each([false, true])("refuses zero, clear and currency-only changes without partial snapshots, paid=%s", async settled => {
     paid = settled;
@@ -166,7 +170,7 @@ describe("actual lab accounting writer money snapshot bindings", () => {
     expect(queries.some(sql => /^(INSERT|UPDATE|DELETE) /.test(sql))).toBe(false);
     expect(boundary.release).toHaveBeenCalledTimes(1);
   });
-  it.each([/UPDATE payables\s+SET expense_category_id/, /INSERT INTO lab_order_tracking/])(
+  it.each([/UPDATE payables\s+SET expense_category_id/, /INSERT INTO lab_order_tracking/, /INSERT INTO audit_log/])(
     "rolls back and releases on a late failure at %s", async failAt => {
       failure = failAt;
       await expect(updateLabOrderAccounting(11, { costMinor: 7500, exchangeRate: 540 })).rejects.toBe(fault);

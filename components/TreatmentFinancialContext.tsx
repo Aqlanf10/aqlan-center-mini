@@ -16,7 +16,7 @@ const REASON: Record<FinancialReferenceReason, string> = {
   opening_reference_missing: "مرجع الرصيد الافتتاحي غير محلول",
   opening_allocation_unavailable: "تحصيل الرصيد السابق غير موزع على الاتفاقات",
   multiple_financial_sources: "توجد مراجع مالية متعددة تحتاج مراجعة",
-  package_coverage_unspecified: "المشمول والإضافي في باقة التقويم غير محددين بهذا المرجع",
+  package_coverage_unspecified: "هذا المرجع يوضح مصدر التمويل، ولا يحدد تغطية جميع إجراءات التقويم. راجع حالة التقويم لمعرفة شمول الشدّات، وتحقق من تغطية المثبتات والأعمال الإضافية بشكل مستقل.",
   item_settlement_allocation_unavailable: "السندات تخص المستند؛ لا يوجد توزيع مثبت على هذا البند",
   invoice_item_identity_conflict: "هوية بند الفاتورة تتعارض مع مرجع مصدره",
   installment_schedule_missing: "طريقة أقساط بلا جدول سداد أو مستندات أقساط مثبتة",

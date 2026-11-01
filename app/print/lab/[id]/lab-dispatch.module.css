@@ -1,0 +1,56 @@
+.sheet {
+  padding: 7mm 9mm;
+  font-size: 9pt;
+  line-height: 1.35;
+}
+.metadataDates {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1mm;
+}
+.date {
+  direction: ltr;
+  unicode-bidi: isolate;
+  white-space: nowrap;
+  display: inline-block;
+}
+.closing {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+@page lab-dispatch {
+  size: A4 portrait;
+  margin: 8mm;
+}
+@media print {
+  .sheet {
+    page: lab-dispatch;
+    padding: 0;
+    width: auto;
+    min-height: 0;
+    background: white;
+  }
+  .sheet header {
+    break-inside: avoid;
+  }
+  .sheet table tr {
+    break-inside: avoid;
+  }
+}
+
+.shades { margin-top: 3mm; font-size: 8pt; border: 1px solid #cbd5e1; padding: 2mm; }
+.shades h3 { margin: 0 0 1mm; break-after: avoid; }
+.shades p { margin: 1mm 0; break-inside: avoid; }
+
+/* Keep the laboratory label, identifier and phone in a single inline field.
+ * Flex label/value spreading fragments the native PDF reading order. */
+/* Preserve the original field typography as well as its inline grouping.
+ * Reducing its mixed Arabic/Latin label and identifier changes PDF word runs. */
+/* Mixed Arabic/Latin glyph boxes exceed 1.35 when a long identifier wraps.
+ * Keep the label and identifier size, but reserve space for the Arabic font. */
+.sheet .labIdentity { display: block; line-height: 1.8; }
+/* Long laboratory identities need a full metadata row, including their phone.
+ * Override the shared odd/even column placement without changing other fields. */
+.sheet .labIdentity:nth-child(n) { grid-column: 1 / -1; }
+.sheet .labIdentity > span:first-child { font-weight: bold; }
+.sheet .labIdentity > strong { font-size: 10.5pt; }

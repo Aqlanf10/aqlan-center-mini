@@ -68,7 +68,11 @@ describe("lab historical graph restore contract",()=>{
   await target.query("INSERT INTO lab_orders(patient_id,lab_name,work_type,sent_date,due_date,status,cost_minor) VALUES($1,'Synthetic legacy lab','تاج',CURRENT_DATE,CURRENT_DATE,'needed',1234)",[owner]);
   const before=(await target.query("SELECT to_jsonb(t)::text AS row FROM lab_orders t")).rows;
   await migrate(target,{files,apply:true});
-  expect((await target.query("SELECT (to_jsonb(t)-'lab_work_intent_id')::text AS row FROM lab_orders t")).rows).toEqual(before);
+  // Main's immutable 0089 adds a nullable clinical field alongside WORK's 0074.
+  // Neither may backfill or reinterpret the historical order or its money.
+  expect((await target.query("SELECT lab_work_intent_id,shade_specification FROM lab_orders")).rows)
+    .toEqual([{lab_work_intent_id:null,shade_specification:null}]);
+  expect((await target.query("SELECT (to_jsonb(t)-'lab_work_intent_id'-'shade_specification')::text AS row FROM lab_orders t")).rows).toEqual(before);
   expect((await target.query("SELECT id FROM lab_work_intents")).rows).toHaveLength(0);
  });
  it("emits a stable graph order and retains target marker ownership",()=>{expect(sql).toContain("BEGIN;");expect(sql).not.toMatch(/INSERT INTO lab_work_intent_schema/);expect(sql.indexOf("INSERT INTO lab_work_members")).toBeLessThan(sql.indexOf("INSERT INTO lab_work_intents"));expect(sql.indexOf("INSERT INTO lab_prescription_source_memberships")).toBeLessThan(sql.indexOf("INSERT INTO lab_work_intents"));expect(sql.indexOf("INSERT INTO lab_work_intents")).toBeLessThan(sql.indexOf("INSERT INTO lab_orders"));});

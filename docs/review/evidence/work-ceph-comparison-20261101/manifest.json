@@ -253,5 +253,6 @@
   "rawEvidenceSha256": {
     "slice39-build-first.log": "2621c01ec59d87c22087665e59a96a95572a0a32bff0fdb7c4bf54211e4b8329",
     "slice39-build-second.log": "f9b624d0613d3f3a9624f5522c7743fdc82c5a79d286453ce5a234c361327cdc"
-  }
+  },
+  "sourceRevision": "93b54b12069e927afa2e9969adc717b0d9c8ff00"
 }

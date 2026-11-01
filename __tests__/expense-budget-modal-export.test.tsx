@@ -13,8 +13,8 @@ vi.mock("react", async (original) => ({
   useMemo: (compute: () => unknown) => compute(), useRef: () => ({ current: null }), useEffect: () => {},
 }));
 vi.mock("../components/SettingsProvider", () => ({ useSetting: () => "Synthetic clinic" }));
-vi.mock("../components/Icon", () => ({ Icon: () => null }));
-vi.mock("../components/ReportPrintHeader", () => ({ ReportPrintIdentity: () => null }));
+vi.mock("../components/Icon", () => ({ Icon: () => null, Logo: () => null }));
+vi.mock("../components/ReportPrintHeader", () => ({ ReportPrintHeader: () => null, ReportPrintFooter: () => null }));
 vi.mock("../lib/expenseBudgetExport", () => ({ exportExpenseBudgetToExcel: vi.fn() }));
 import { ExpenseBudgetReportModal } from "../components/ExpenseBudgetReportModal";
 import { exportExpenseBudgetToExcel } from "../lib/expenseBudgetExport";

@@ -2,11 +2,11 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6",
+  "generatedOnServerVersion": "18.6 (Debian 18.6-1.pgdg13+2)",
   "counts": {
     "tables": 146,
-    "columns": 1819,
-    "constraints": 2204,
+    "columns": 1820,
+    "constraints": 2205,
     "indexes": 450,
     "triggers": 144
   },
@@ -9032,6 +9032,10 @@
           "type": "text",
           "nullable": true
         },
+        "shade_specification": {
+          "type": "jsonb",
+          "nullable": true
+        },
         "source": {
           "type": "text",
           "nullable": false
@@ -9073,7 +9077,9 @@
           "lab_work_intent_id"
         ]
       ],
-      "checks": [],
+      "checks": [
+        "lab_orders_shade_specification_valid"
+      ],
       "foreignKeys": [
         {
           "columns": [

@@ -1,5 +1,7 @@
 "use client";
 
+import { DentalArchRow } from "./dental/DentalArchRow";
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CONDITION_LABEL, PERMANENT_LOWER, PERMANENT_UPPER,
@@ -726,15 +728,11 @@ export function PerioChartView({
       {/* فكي الأسنان */}
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
         <div className="mb-2 text-center text-xs font-bold text-slate-500">الفك العلوي (Maxilla)</div>
-        <div className="grid grid-cols-8 md:grid-cols-16 gap-1.5 mx-auto w-fit" dir="ltr">
-          {teethUpper.map(renderToothCell)}
-        </div>
+        <DentalArchRow teeth={teethUpper} className="flex gap-1.5 mx-auto w-fit" renderTooth={renderToothCell} />
 
         <div className="my-3 border-t border-dashed border-slate-200" />
 
-        <div className="grid grid-cols-8 md:grid-cols-16 gap-1.5 mx-auto w-fit" dir="ltr">
-          {teethLower.map(renderToothCell)}
-        </div>
+        <DentalArchRow teeth={teethLower} className="flex gap-1.5 mx-auto w-fit" renderTooth={renderToothCell} />
         <div className="mt-2 text-center text-xs font-bold text-slate-500">الفك السفلي (Mandible)</div>
       </div>
 
