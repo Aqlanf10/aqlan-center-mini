@@ -1,0 +1,76 @@
+{
+  "format": "work-plan-proposals-v1",
+  "baseRevision": "f864e07c629c51ad411c50dc3f3554ec935f6878",
+  "sourceRevision": null,
+  "buildId": "MSkjME9Ko1cHDfKUdUoZX",
+  "acceptance": {
+    "focusedPostgres": {
+      "passed": 24,
+      "files": 3
+    },
+    "focusedHttpBrowser": {
+      "passed": 23,
+      "files": 4
+    },
+    "focusedUnitAndGuards": {
+      "passed": 29,
+      "files": 4
+    },
+    "sourcePreservation": 16,
+    "historicalSourceHashes": 611,
+    "typecheck": "passed after type-only non-null assertion on an already assigned synthetic gate callback",
+    "lint": "passed: 0 errors, 345 warnings",
+    "fullBatchGates": "pending",
+    "exactHeadCI": "not published",
+    "independentReview": "pending",
+    "actualDocker": "blocked by prior enforced Alpine destination refusal"
+  },
+  "sourceSha256": {
+    "__tests__/canonical-proposals-projection.test.ts": "3f3aa1c0613727735efe141a1bdddc5979c86b568704c64e81ef493f56fef8b6",
+    "__tests__/postgres/plans-canonical-proposals.test.ts": "e415a9df91a86e9ba74436c2b62e966c7f7b7f88ebd2f5e9fa28106c94578272",
+    "__tests__/security-http/canonical-proposals-journey.test.ts": "61fe70f6ec9dcaf69942a5fbf26fcf240e8ef5f81b244a24bdc25fb827b5bf8e",
+    "app/api/plans/proposals/route.ts": "1d2d2da75f619975e686a13e42da6ab98a196d2e6b39e7151f49a8501e8d975c",
+    "app/recall/page.tsx": "f7bf8a4166a78e2b67288a8e0a093ba710da6b5985b01251bbfb1355a897b038",
+    "components/CanonicalProposalFollowUp.tsx": "ce1b472e3d43b904d8e538b95c3815ba6fc3d442a9330bf19fee601bb9c4a61d",
+    "docs/review/work-plan-proposals-slice49-20261101.md": "048264aa3ac7bd6f8a3a1772781bf13676b312dbcc0eb46fb109b8a0a2b582c5",
+    "docs/review/work-remaining-plan-20261101.md": "af59b4faabe9527bb3b76146471700f4c1e10ffbb1b883fd7bde23837a6a6c67",
+    "docs/security/staff-cutover/HANDOFF.md": "2d106414f325570bcd032cad92093d5c809850d73761a16bfcc65e1dc912dfaf",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "da8f66c4f3734ecad8cfc555ec3c9089ea6bba314cf2fcf9d284b6611c2a094f",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "087ce6eccb803eaf139004df47aac7f6089964400036233e66a5c68a785c5849",
+    "docs/security/staff-cutover/inventory.json": "46d828374febeed4074c63ca6b13fc1beb3a19ba40e33003a439dde4871f6a17",
+    "lib/canonical-proposal-projection.ts": "185ba7d11caa6eb309378af71c6a3803b3214a7fab6fab96e9821ced369fa760",
+    "lib/canonical-proposal-version.ts": "9034bd71ce49aa67c0951ba98f63cb05c0a3b2aa3e7ed972dece20bcf4ad3c39",
+    "lib/canonical-proposals.ts": "6352f0815ad61230e2fc53f989dd39c8e37f02bb7cc6196833128d60bd640827",
+    "lib/canonical-record-reads.ts": "b127cd13db8e35a9be916ba1865a94ba6be8c1eb7d9ed752842524a4c41c9daa",
+    "lib/db.ts": "f48a78b25c253b79ba6e8beef6a1b20b285170d60b2390061e8d53aa23c61f22"
+  },
+  "artifacts": {
+    "proposals-390.png": "d111fc715c7c3d7af550ed0fc1fcee725c228f6e92ed46c9bb6688b362969cb9",
+    "slice49-body-final.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice49-build-first.log": "d94aeafb0da3131d757ccc119e6e75d22acfcf80d28849c3fc51766cca8512ee",
+    "slice49-build-first.log.gz": "fd7e0db40b2801ad74f6764d1e1ee09c237f1365fe38d3425c9c579a6f1108ee",
+    "slice49-http-before.log": "07db1c770209d20c0be810c624019cdf69c3fb5d2b0d5bef3e5126d43542b08b",
+    "slice49-http-final.log": "550b11c96b6cd007c2901e3dedc23c726e8135e1454559dd0f4978ca36d31881",
+    "slice49-http-first.log": "b64eb69713034453f9f2ad1906fff417644478348b7b249c949423f4904b1d0d",
+    "slice49-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice49-lint-final.log": "729e3f9e33e359db4ac63e6f4c01a123521f2f21dac277d1bb308dc8fb171dfb",
+    "slice49-pg-final.log": "4c94509f459b48278bbae7ac73a68496ad1ed7763e0fc40727338e335441db93",
+    "slice49-pg-first.log": "e85f5d60945a15ce3abf63cfd03f8eb9253e4cff573e63c38398e8851a18809d",
+    "slice49-pg-second.log": "35cea9020558c282be29f6424ba90911340083f76ecd010b1b56d5971670a149",
+    "slice49-source-proof.json": "e3edc8c03d2b232148eccb983a42d857081d85b696df7220ca00ae239c3e15aa",
+    "slice49-tsc-final.log": "e0fba4d8e4ba6b95ce9ff8d226eb79b8a052b4b94652087d98a8e501cc42102e",
+    "slice49-tsc-fixed.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice49-types-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice49-unit-first.log": "9c2240cfbb091f37ed22ae37182ee88e9cd993d68bba1bd292072c8567dd0a58",
+    "slice49-unit-guards-final.log": "f278eb86e3ebae990efc503df1e4a7e40952580db00679489e797dd9ce1ff4fb",
+    "slice49-unit-guards-fixed.log": "bf75473d4105601b117b32a3203b0714162fee84cbdfeda256a8b8ad92cf165c",
+    "verify-slice49.py": "b2e0121251468d6375f5f897affed6d2df724fe81c8eb1d0e5a2c484122304b3"
+  },
+  "normalization": {
+    "slice49-build-first.log": {
+      "rawSha256": "0cff959c5e4cc4fbb545634fcb3fd2e20824155ca1b510211f3a38125794feb0",
+      "rawGzip": "slice49-build-first.log.gz",
+      "displayLog": "trailing whitespace/newlines normalized only; byte-exact original compressed"
+    }
+  }
+}

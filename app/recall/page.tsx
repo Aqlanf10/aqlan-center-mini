@@ -15,6 +15,7 @@ import {
   type RecallRow,
 } from "@/lib/recall";
 import { PageHeader } from "@/components/PageHeader";
+import { CanonicalProposalFollowUp } from "@/components/CanonicalProposalFollowUp";
 import { ProposalFollowUp } from "@/components/ProposalFollowUp";
 import { useSession } from "@/components/SessionProvider";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
@@ -191,6 +192,8 @@ export default function RecallPage() {
 
       {/* (P1-E) عروض العلاج المعلّقة بعد الكشف — للإدارة والاستقبال. */}
       {canSeeProposals ? <ProposalFollowUp /> : null}
+      {canonical && (session?.isOwner === true || session?.capabilities?.includes("clinical.plans.edit") && ["own", "all"].includes(session.patientScope ?? "none"))
+        ? <CanonicalProposalFollowUp key={`${session?.username}:${session?.patientScope}:${session?.capabilities?.join(",")}`} /> : null}
 
       {/* بطاقات الإحصاءات السريعة */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">

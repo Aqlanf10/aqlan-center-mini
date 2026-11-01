@@ -1,7 +1,7 @@
 {
   "format": "work-coverage-lazy-import-fix-v1",
   "baseRevision": "b93bf77154d83cdfee8afb50e10e8bfa15008723",
-  "sourceRevision": null,
+  "sourceRevision": "f864e07c629c51ad411c50dc3f3554ec935f6878",
   "sourceSha256": {
     "lib/ortho-followup-coverage-db.ts": "1b0d419ed7c6d71d663576e484d19ead1ef081f49eee4bc0cb613b3dabf36239"
   },

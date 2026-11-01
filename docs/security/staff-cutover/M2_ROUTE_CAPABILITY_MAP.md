@@ -34,19 +34,19 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 275 |
+| existing | 274 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 69 |
+| canonical-done | 70 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 43–47 are published at `327b12fb` with completed local gates; exact-head CI and independent review are pending. Slice 48 is local and its full gates remain pending. Published map: 68 canonical-done / 276 existing; local map: 69 / 275. Neither state is whole-system acceptance.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 43–47 are published at `327b12fb` with completed local gates; exact-head CI and independent review are pending. Slices 48–49 are local and their full gates remain pending. Published map: 68 canonical-done / 276 existing; local map: 70 / 274. Neither state is whole-system acceptance.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -624,3 +624,7 @@ DELETE `/api/ceph/[id]` uses existing analysis authority and patient scope. The 
 ### Slice 48 — saved routine followup agreement coverage
 
 GET `/api/ortho/[id]/followup-coverage` requires independent `finance.agreements.manage` and patient scope. All authority, activation, saved decision and current commercial source checks use one owning RR read-only connection. Original source SQL, validity, site rules and fingerprints are shared unchanged with compatibility workflows. The full candidate context is bounded at 256 rows / 2 MiB; excess refuses without a partial applicability answer. Decision text and provenance are explicit fields; invoice names/references require independent `finance.invoices.view`. No commercial snapshot, totals, clinical detail, receipt or edit grant is projected. POST/PUT and signed proof are unchanged. On-demand read-only UI clears on refresh/hide/revocation and ignores closed-response completions; it is available in the clinical case only when both existing clinical visibility and the independent agreement grant permit it. This does not add a financial-only navigation screen or activate the writer.
+
+### Slice 49 — pending treatment proposal summaries
+
+GET `/api/plans/proposals` uses its mapped plan-edit authority and patient scope without legacy role fallback. Scope precedes the oldest 300-row limit; hasMore describes only the admitted scope. Current settings, proposal state, contact timing and authority use one RR snapshot. Money uses the existing independent patient-ledger projection. No care notes, item names, invoice details, dispatch choices or audit note text are returned. The canonical recall panel is read-only, clears stale data and retains the established RTL identity. No manual contact or outbound command is activated in this slice. [Acceptance and bounds](../../review/work-plan-proposals-slice49-20261101.md).

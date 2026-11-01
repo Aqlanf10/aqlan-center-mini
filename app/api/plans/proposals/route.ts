@@ -1,3 +1,6 @@
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { canonicalProposalQuery, readCanonicalProposals } from "@/lib/canonical-proposals";
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, getSettings, listPendingProposals, recordProposalContact } from "@/lib/db";
 import { followUpDaysFrom, proposalTiming, sortProposals } from "@/lib/consultation-followup";
@@ -13,7 +16,13 @@ const denied = () => NextResponse.json({ message: "انتهت الجلسة. سج
 const ALLOWED = new Set(["admin", "reception"]);
 
 /** (P1-E) عروض العلاج المعلّقة للمتابعة — للإدارة والاستقبال. */
-export async function GET() {
+export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { canonicalProposalQuery(new URL(request.url).searchParams); return NextResponse.json(await readCanonicalProposals(selected.handle), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر التحقق من عروض العلاج؛ لم تُعتبر القائمة فارغة."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!ALLOWED.has(session.role)) {

@@ -21125,6 +21125,34 @@ export interface PendingProposal {
  * (P1-E) عروض العلاج المعلّقة: خطط سارية بلا موافقة. قراءةٌ فقط، والأقدم أولًا؛
  * التصنيف (حان الاتصال/قديم/…) في consultation-followup.ts بمدّة الإعدادات.
  */
+/** Already admitted canonical summary reader. Scope is filtered before the bound;
+ * monetary keys are selected only under the caller's independently proved grant.
+ * Legacy proposal reader and contact writer below retain their exact behavior. */
+export async function listPendingProposalSummariesWith(q:Pick<DbClient,"query">,doctorPartyId:number|null,includeMoney:boolean){
+  type Row={planId:number;patientId:number;patientName:string;patientPhone:string|null;title:string;doctorName:string|null;
+    createdOn:string;lastContactOn:string|null;items:number;totalMinor:string|null;currency:string|null;
+    planXmin:string;planTid:string;contactCount:string;contactId:string|null;contactEpoch:string|null};
+  const {rows:[envelope]}=await q.query<{oversized:boolean;rows:Row[]|null}>(`WITH candidates AS MATERIALIZED (
+    SELECT t.id AS "planId",t.patient_id AS "patientId",patients.full_name AS "patientName",patients.phone AS "patientPhone",
+      t.title,t.created_at AS sort_at,d.name AS "doctorName",(t.created_at AT TIME ZONE $1)::date::text AS "createdOn",
+      contact.last_on AS "lastContactOn",contact.n AS "contactCount",contact.id AS "contactId",contact.epoch AS "contactEpoch",
+      (SELECT count(*) FROM plan_items i WHERE i.plan_id=t.id AND i.status<>'cancelled')::int AS items,
+      ${includeMoney?'t.total_minor::text':'NULL::text'} AS "totalMinor",${includeMoney?'t.base_currency':'NULL::text'} AS currency,
+      t.xmin::text AS "planXmin",t.ctid::text AS "planTid"
+    FROM treatment_plans t JOIN patients ON patients.id=t.patient_id LEFT JOIN parties d ON d.id=t.primary_doctor_id
+    CROSS JOIN LATERAL (SELECT (max(a.created_at) AT TIME ZONE $1)::date::text AS last_on,count(*)::text AS n,
+      max(a.id)::text AS id,extract(epoch from max(a.created_at))::text AS epoch FROM audit_log a
+      WHERE a.action='plan.proposal_contact' AND a.entity_id=t.id::text) contact
+    WHERE t.status='active' AND t.consent_at IS NULL ${doctorPartyId===null?'':`AND ${DOCTOR_PATIENT_CONDITION.replaceAll(':doc','$2')}`}
+    ORDER BY t.created_at,t.id LIMIT 301
+  ), sized AS (SELECT *,octet_length(to_jsonb(candidates)::text) bytes FROM candidates)
+  SELECT COALESCE(sum(bytes),0)>1048576 oversized,
+    CASE WHEN COALESCE(sum(bytes),0)<=1048576 THEN COALESCE(jsonb_agg(to_jsonb(sized)-'bytes'-'sort_at' ORDER BY sort_at,"planId"),'[]'::jsonb) ELSE NULL END rows FROM sized`,
+    doctorPartyId===null?[CLINIC_TIME_ZONE]:[CLINIC_TIME_ZONE,doctorPartyId]);
+  if(!envelope||envelope.oversized||!Array.isArray(envelope.rows))throw new Error("STAFF_READ_READ_FAILED");
+  return {rows:envelope.rows.slice(0,300),hasMore:envelope.rows.length>300};
+}
+
 export async function listPendingProposals(options: { includeMoney: boolean }): Promise<PendingProposal[]> {
   await ensureSchema();
   const { rows } = await getPool().query<{
