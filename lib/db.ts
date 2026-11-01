@@ -4045,6 +4045,7 @@ interface AppointmentRow {
   note: string | null;
   status: string;
   reminder_sent_at: Date | null;
+  patient_confirmed_at: Date | null;
   /** جهة الطبيب الموعود لديه (صلاحيات الوكيل المساعد) — null لغير المسند. */
   doctor_id?: number | null;
   doctor_name?: string | null;
@@ -4060,7 +4061,7 @@ interface AppointmentRow {
   is_new_patient?: boolean | null;
 }
 
-function toAppointment(row: AppointmentRow): Appointment {
+export function toAppointment(row: AppointmentRow): Appointment {
   const date = row.scheduled_date;
   return {
     id: row.id,
@@ -4076,6 +4077,7 @@ function toAppointment(row: AppointmentRow): Appointment {
     note: row.note,
     status: row.status as AppointmentStatus,
     reminderSentAt: row.reminder_sent_at ? row.reminder_sent_at.toISOString() : null,
+    patientConfirmedAt: row.patient_confirmed_at ? row.patient_confirmed_at.toISOString() : null,
     doctorId: row.doctor_id ?? null,
     doctorName: row.doctor_name ?? null,
     arrivedAt: row.arrived_at ? row.arrived_at.toISOString() : null,
@@ -4092,9 +4094,10 @@ function toAppointment(row: AppointmentRow): Appointment {
   };
 }
 
-const APPOINTMENT_SELECT = `
+export const APPOINTMENT_SELECT = `
   SELECT a.id, a.patient_id, p.full_name, p.phone, a.scheduled_date, a.scheduled_time,
          a.duration_minutes, a.appointment_type, a.note, a.status, a.reminder_sent_at,
+         a.patient_confirmed_at,
          a.doctor_id, doc.name AS doctor_name,
          a.arrived_at, a.started_at, a.ended_at, a.cancel_reason,
          a.service_id, a.buffer_before_minutes, a.buffer_after_minutes, a.chair_no,
