@@ -30,23 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 43 on WORK)
+### Counts (386 mapped route/method entries, after local slice 44 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 280 |
+| existing | 279 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 64 |
+| canonical-done | 65 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Local slices 40–43 have not yet passed published-head CI; the published base has 59 canonical-done / 285 existing ordinary entries.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Local slices 40–44 have not yet passed published-head CI; the published base has 59 canonical-done / 285 existing ordinary entries.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -604,3 +604,7 @@ Still open, not inferred: the owner decisions (four owner-only operations; empty
 ### Slice 43 — general clinical case status
 
 `PATCH /api/cases/[id]` uses current plan-edit/view authority and patient scope with a locked opaque version comparison, post-wait checks and atomic original transition/audit logic. Terminal cases cannot reopen; bridged orthodontic cases remain native-managed. No creation, assignment, money or permanent request receipt. See [the acceptance matrix](../../review/work-case-status-slice43-20261101.md). Local focused gates do not replace exact-head CI or independent review.
+
+### Slice 44 — clinical problem status
+
+`PATCH /api/problems/[id]` requires current `clinical.visits.document`, independently of plan edit. Original problem transitions, resolution provenance and atomic audit run on the admitted connection after patient and problem locks with a row-version comparison. It does not modify the case or financial state. The client requires explicit new intent after uncertainty. See [the acceptance matrix](../../review/work-problem-status-slice44-20261101.md); full new-head gates and review remain separate.

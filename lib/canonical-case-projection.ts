@@ -8,7 +8,7 @@ export interface CanonicalCaseRow {
 }
 export interface CanonicalProblemRow {
   id: number; label: string; site: string | null; specialty: string | null; status: ProblemStatus;
-  caseId: number | null; notedBy: string; notedAt: string; resolvedBy: string | null; resolvedAt: string | null;
+  caseId: number | null; version: string; notedBy: string; notedAt: string; resolvedBy: string | null; resolvedAt: string | null;
 }
 export interface CanonicalCaseItem {
   id: number; planId: number; planTitle: string; planStatus: string; serviceName: string; category: string | null;
@@ -50,8 +50,8 @@ export function isCanonicalPatientCases(value: unknown, patientId: number): valu
     if (!b.orthoVisible && c.specialty === "orthodontics") return false;
   }
   for (const p of b.problems) {
-    if (!keys(p, "id label site specialty status caseId notedBy notedAt resolvedBy resolvedAt") || !id(p.id) || problems.has(p.id)
-      || !text(p.label) || !nullableText(p.site) || !nullableText(p.specialty) || !PROBLEM_STATUSES.includes(p.status)
+    if (!keys(p, "id label site specialty status caseId notedBy notedAt resolvedBy resolvedAt version") || !id(p.id) || problems.has(p.id)
+      || typeof p.version !== "string" || !/^[a-f0-9]{64}$/.test(p.version) || !text(p.label) || !nullableText(p.site) || !nullableText(p.specialty) || !PROBLEM_STATUSES.includes(p.status)
       || p.caseId !== null && !cases.has(p.caseId) || !text(p.notedBy) || !time(p.notedAt) || !nullableText(p.resolvedBy)
       || p.resolvedAt !== null && !time(p.resolvedAt)) return false;
     problems.add(p.id);

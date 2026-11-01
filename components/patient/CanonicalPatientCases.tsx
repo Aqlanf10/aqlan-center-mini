@@ -6,12 +6,13 @@ import { CASE_STATUS_LABEL, DEPENDENCY_REQUIREMENT_LABEL, PROBLEM_STATUS_LABEL, 
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { CanonicalPlanCaseEditor } from "./CanonicalPlanCaseEditor";
 import { CanonicalPlanDependencyEditor } from "./CanonicalPlanDependencyEditor";
+import { CanonicalProblemStatusEditor } from "./CanonicalProblemStatusEditor";
 import { CanonicalCaseStatusEditor } from "./CanonicalCaseStatusEditor";
 
 const itemStatus: Record<string, string> = { planned: "مخطط", in_progress: "بدأ علاجه", done: "منفذ", cancelled: "ملغى" };
 const specialty = (key: string) => SPECIALTY_LABEL[key as keyof typeof SPECIALTY_LABEL] ?? key;
 
-export function CanonicalPatientCases({ patientId, canEdit, ownerKey }: { patientId: string; canEdit: boolean; ownerKey: string }) {
+export function CanonicalPatientCases({ patientId, canEdit, canDocument, ownerKey }: { patientId: string; canEdit: boolean; canDocument: boolean; ownerKey: string }) {
   const region = useId();
   const [open, setOpen] = useState(false), [refresh, setRefresh] = useState(0);
   const [feed, setFeed] = useState<CaseFeed | null>(null), [error, setError] = useState<string | null>(null);
@@ -54,6 +55,7 @@ export function CanonicalPatientCases({ patientId, canEdit, ownerKey }: { patien
         refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
       {canEdit ? <CanonicalPlanDependencyEditor key={`dependency:${ownerKey}:${patientId}`} patientId={patientId} ownerKey={ownerKey} feed={feed}
         refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
+      {canDocument ? <CanonicalProblemStatusEditor patientId={patientId} ownerKey={ownerKey} feed={feed} refresh={() => setRefresh(v => v + 1)} /> : null}
       {canEdit ? <CanonicalCaseStatusEditor key={`case-status:${ownerKey}:${patientId}`} patientId={patientId} ownerKey={ownerKey} feed={feed}
         refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
       {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : !feed ? <p role="status">جارٍ تحميل الحالات…</p> : <>

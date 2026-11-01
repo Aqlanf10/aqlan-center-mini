@@ -29122,31 +29122,39 @@ export async function getPatientProblemOwner(id: number): Promise<number | null>
   return rows[0]?.patient_id ?? null;
 }
 
-export async function changePatientProblemStatus(input: {
+export interface ChangePatientProblemStatusInput {
   id: number; status: ProblemStatus; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true; problem: PatientProblem } | { ok: false; reason: "not_found" | "unchanged" }> {
+}
+/** Original mutation/audit on the caller-owned transaction. */
+export async function changePatientProblemStatusInTransaction(client: DbClient, input: ChangePatientProblemStatusInput): Promise<{ ok: true } | { ok: false; reason: "not_found" | "unchanged" }> {
+  const { rows } = await client.query<{ patient_id: number; status: string; label: string }>(
+    `SELECT patient_id, status, label FROM patient_problems WHERE id = $1 FOR UPDATE`, [input.id]);
+  if (!rows[0]) { return { ok: false, reason: "not_found" }; }
+  if (rows[0].status === input.status) { return { ok: false, reason: "unchanged" }; }
+  const resolved = input.status === "resolved";
+  await client.query(
+    `UPDATE patient_problems
+        SET status = $2,
+            resolved_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+            resolved_by = CASE WHEN $3 THEN $4 ELSE NULL END
+      WHERE id = $1`,
+    [input.id, input.status, resolved, input.actor],
+  );
+  await insertAuditRow(client, {
+    action: "problem.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].label,
+    details: { المشكلة: input.id, من: rows[0].status, إلى: input.status },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+export async function changePatientProblemStatus(input: ChangePatientProblemStatusInput): Promise<{ ok: true; problem: PatientProblem } | { ok: false; reason: "not_found" | "unchanged" }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; status: string; label: string }>(
-      `SELECT patient_id, status, label FROM patient_problems WHERE id = $1 FOR UPDATE`, [input.id]);
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (rows[0].status === input.status) { await client.query("ROLLBACK"); return { ok: false, reason: "unchanged" }; }
-    const resolved = input.status === "resolved";
-    await client.query(
-      `UPDATE patient_problems
-          SET status = $2,
-              resolved_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
-              resolved_by = CASE WHEN $3 THEN $4 ELSE NULL END
-        WHERE id = $1`,
-      [input.id, input.status, resolved, input.actor],
-    );
-    await insertAuditRow(client, {
-      action: "problem.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].label,
-      details: { المشكلة: input.id, من: rows[0].status, إلى: input.status },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
+    const result = await changePatientProblemStatusInTransaction(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
     const { rows: fresh } = await getPool().query<ProblemRow>(`${PROBLEM_SELECT} WHERE p.id = $1`, [input.id]);
     return { ok: true, problem: toProblem(fresh[0]) };

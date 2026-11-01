@@ -5,6 +5,7 @@ import type { VerifiedDurableSession } from "./staff-durable-session";
 import { isDependencyMet } from "./cases";
 import { CASE_READ_LIMITS, isCanonicalPatientCases, type CanonicalPatientCases } from "./canonical-case-projection";
 import { planDependencyVersion } from "./canonical-plan-dependency-version";
+import { clinicalProblemStatusVersion } from "./canonical-problem-status-version";
 import { clinicalCaseStatusVersion } from "./canonical-case-status-version";
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -27,7 +28,7 @@ const CASES = `SELECT c.id,'specialty'::text kind,c.ortho_case_id AS "orthoCaseI
   LEFT JOIN parties d ON d.id=COALESCE(o.responsible_doctor_id,t.primary_doctor_id)
   WHERE o.patient_id=$1 AND $2::boolean AND NOT EXISTS(SELECT 1 FROM clinical_cases c WHERE c.ortho_case_id=o.id)`;
 const PROBLEMS = `SELECT p.id,p.label,p.site,p.specialty,p.status,CASE WHEN ${visibleCase} THEN p.case_id ELSE NULL END AS "caseId",
-  p.noted_by AS "notedBy",p.noted_at::text AS "notedAt",p.resolved_by AS "resolvedBy",p.resolved_at::text AS "resolvedAt"
+  p.noted_by AS "notedBy",p.noted_at::text AS "notedAt",p.resolved_by AS "resolvedBy",p.resolved_at::text AS "resolvedAt",p.xmin::text AS "versionXmin",p.ctid::text AS "versionTid"
   FROM patient_problems p LEFT JOIN clinical_cases c ON c.id=p.case_id AND c.patient_id=p.patient_id WHERE p.patient_id=$1`;
 // Include cancelled plans explicitly: a dependency may legitimately refer to one of
 // their items. Omitting that endpoint would misrepresent the saved graph.
@@ -74,7 +75,8 @@ export async function readPatientCasesWith(q: CanonicalSnapshotQuery, scope: Can
   const cases = (await boundedRows<Omit<CanonicalPatientCases["cases"][number], "version"> & { versionXmin: string; versionTid: string }>(q, CASES, args, CASE_READ_LIMITS.cases))
     .map(({ versionXmin, versionTid, ...row }) => ({ ...row, version: row.kind === "specialty" && row.id !== null && row.orthoCaseId === null
       ? clinicalCaseStatusVersion({ ...row, id: row.id, patientId, versionXmin, versionTid }) : null }));
-  const problems = await boundedRows<CanonicalPatientCases["problems"][number]>(q, PROBLEMS, args, CASE_READ_LIMITS.problems);
+  const problems = (await boundedRows<Omit<CanonicalPatientCases["problems"][number], "version"> & { versionXmin: string; versionTid: string }>(q, PROBLEMS, args, CASE_READ_LIMITS.problems))
+    .map(({versionXmin,versionTid,...row}) => ({...row,version:clinicalProblemStatusVersion({...row,patientId,versionXmin,versionTid})}));
   const items = planVisible ? await boundedRows<CanonicalPatientCases["items"][number]>(q, ITEMS, args, CASE_READ_LIMITS.items) : [];
   const dependencies = planVisible ? (await boundedRows<Omit<CanonicalPatientCases["dependencies"][number], "met" | "version"> & { requiredStatus: string; createdAt: string; rowXmin: string; rowTid: string }>(q, DEPS, [patientId], CASE_READ_LIMITS.dependencies))
     .map(({ requiredStatus, createdAt, rowXmin, rowTid, ...d }) => ({ ...d, version: planDependencyVersion({ ...d, createdAt, rowXmin, rowTid }), met: isDependencyMet(d.requirement, requiredStatus) })) : [];

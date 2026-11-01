@@ -4851,8 +4851,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "Slice 44: current clinical.visits.document and patient scope, independent of plan edit. Patient lock, fresh authority/locked responsibility, problem NOWAIT lock and opaque row-version comparison; original status/resolution provenance and atomic audit. All existing active/resolved/inactive transitions remain. No case/link/finance mutation, rich legacy replay or durable request receipt. UI refreshes uncertainty and requires explicit new intent."
  },
  {
   "route": "/api/provider-blocks",
