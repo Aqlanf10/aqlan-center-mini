@@ -28,7 +28,21 @@
     "fullBatchGates": "pending",
     "exactHeadCI": "not published",
     "independentReview": "pending",
-    "actualDocker": "blocked by prior enforced Alpine destination refusal"
+    "actualDocker": "blocked by prior enforced Alpine destination refusal",
+    "preNullableFixFullGates": {
+      "sourceRevision": "9503c9428b6e43a75640b1e01ba8b383caa20868",
+      "unit": {
+        "passed": 14504,
+        "files": 859
+      },
+      "postgres": {
+        "passed": 5239,
+        "files": 403,
+        "skipped": 0
+      },
+      "nullableVisitFixAcceptance": false,
+      "cancellation": "not performed: /proc/464867/cwd verification was permission-denied before any signal; original run subsequently finished normally"
+    }
   },
   "sourceSha256": {
     "__tests__/canonical-ortho-decisions-projection.test.ts": "943f4a10b8d01285ab717398841f02003f0e07d83141f09a2a13ae50677e9826",
@@ -53,9 +67,12 @@
     "lib/db.ts": "d886bdbd583f856a0d1decd1da1bc9ff436c480a4fdc921e1779713fa30492d8"
   },
   "artifacts": {
+    "lint-tooling-runtime-proof.json.gz": "4abd86a00c29caa76c8c4d1085a39b41fd45302ef4a37b5e9d7a69e49debbecc",
     "ortho-decisions-390.png": "eace3d2f4863eb26ed9b46850c08c3696467fe609d2ed2a87f8388a8c7387130",
+    "runtime-proof.json.gz": "324fcd9b8b3038f9b95b87e12df7152dd52fa2712e42a1128cfda1d1ae644307",
     "slice51-before-route-preserved.log": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
     "slice51-before-route-preserved.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "slice51-braces-runtime.log": "36d4c2ed3b6a8d03ad30ef4a33a13c46dcfdf10b02afebec7b14ccbcb45cf107",
     "slice51-build-first.log": "0b862dfcdde21b2ab8dca026efc70bc85ef60469d6a6b14e38a4c37c8aae6e77",
     "slice51-build-first.log.gz": "08e1a6fb4251c3d584366dea121cf88696074e02091f8e01e26a3a8f4c991b49",
     "slice51-guards.log": "b0d681455ea33159f80f6fc66ff5d6538a6cfb2b0f9bf0a4bbb470ba861c8ddd",
@@ -63,11 +80,14 @@
     "slice51-http-final.log": "3411e26045fb09c5bbca9b430cdd04798bdb27fb7c8fb6bc03a71c037146f5ae",
     "slice51-http-first.log": "cb150e9d90c0ac559742c799578bb76b9a6672c9b30d3f02ac409e8397136c82",
     "slice51-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice51-lint-runtime.log": "9ba1b447bbbf0d1ad6ed172a6b63184aaef2b272aef96ec2e2883ab66efba2f6",
     "slice51-pg-first.log": "4b10d1295623a29771200e528b6ed8140aeabdb5f5b52b787824b2080e38ddf7",
+    "slice51-pg-full.log": "fa254faeb45fac4683e3a585d9ee04c4af20a3ed3056207c0a6b3b678075be78",
     "slice51-pg-second.log": "ad52d39f80c4f68448dbedfaedd99980595e2df2565ef7a4cf3053d45614b3b1",
     "slice51-source-proof.json": "0f9e95f826e2ae8c282e495344873cec280c32eb1b448b0f44b634eb57501c74",
     "slice51-types-first.log": "404d0b2dd38b93c3bb262fc3eaffdf675ae5f520ac2707d0d3da506c1dc1e2fa",
     "slice51-unit-first.log": "70d62bfc42d93335354d850ee8c7ffd9b71727552b8a95f2230a34a12fe58456",
+    "slice51-unit-full.log": "2c8127d8c32d99370cfb850613d66bc91f5f0eac211c9b61888abf912430c785",
     "slice51-worktree.log": "b301092a956536491077844e18b1f71a289a2c6deceec3878991f6240c6745f2",
     "verify-slice51.py": "5556cfb360e1c6ca69c78664186322f1180725e9430650ba2570c0649f4c5441"
   },
@@ -81,6 +101,22 @@
       "rawSha256": "c21c2b5e74da7c8c225efd50cb75823a106241eea1199fa9cef950f3ed97927f",
       "rawGzip": "slice51-build-first.log.gz",
       "displayLog": "trailing whitespace/newlines normalized only; byte-exact original compressed"
+    }
+  },
+  "runtimeProofs": {
+    "runtime-proof.json": {
+      "compressed": "runtime-proof.json.gz",
+      "rawSha256": "21a07632e2d2acf1d33e9c846c112a515727c461abb2b53b08d40f4234559e8e",
+      "buildId": "4YY9u7JFxC_tH8NUCp8FX",
+      "traceCount": 372,
+      "manifestCount": null
+    },
+    "lint-tooling-runtime-proof.json": {
+      "compressed": "lint-tooling-runtime-proof.json.gz",
+      "rawSha256": "e8dd54859dbda544278bb79836862cddf9d37d129127b63d700f6b487984d058",
+      "buildId": "4YY9u7JFxC_tH8NUCp8FX",
+      "traceCount": 741,
+      "manifestCount": 86
     }
   }
 }

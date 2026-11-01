@@ -1,7 +1,7 @@
 {
   "format": "work-ortho-decision-command-v1",
   "baseRevision": "ddc6a2124eacfabcd9fecaee5f3945a72149cbea",
-  "sourceRevision": null,
+  "sourceRevision": "014c6ae0456794335b15c5a471ee049584ba7d97",
   "buildId": "WX0_Tl-PFBBeQ1-urhmI-",
   "acceptance": {
     "focusedPostgres": {
@@ -17,14 +17,53 @@
       "passed": 10,
       "files": 2
     },
-    "typecheck": "passed; final check will include late HTTP test additions",
+    "typecheck": "passed including final HTTP tests",
     "build": "passed",
     "sourcePreservationChecks": 4,
-    "HTTPBrowser": "pending",
-    "fullGates": "pending",
+    "HTTPBrowser": {
+      "passed": 46,
+      "files": 5,
+      "newCommandCases": 10,
+      "productRevision": "014c6ae0456794335b15c5a471ee049584ba7d97",
+      "testRevision": "a3812c1127e41ab60a57754c0e3912f8dbff9316",
+      "initialFailure": "45 pass, 1 obsolete held-POST assertion after canonical admission; replaced with a well-formed request from an actual read-only principal and exact403, not permission relaxation",
+      "screenshot": "synthetic 390px Chromium screenshot visually inspected"
+    },
+    "fullGates": "all required local unit/PostgreSQL/type/lint/build/body/environment/money/preflight/runtime gates passed; exact-head CI and independent review separate",
     "exactHeadCI": "not yet published",
     "independentReview": "pending",
-    "actualDocker": "blocked: previously enforced Alpine destination refusal, not retried"
+    "actualDocker": "blocked: previously enforced Alpine destination refusal, not retried",
+    "fullUnitFirstAttempt": {
+      "passed": 14527,
+      "failed": 1,
+      "files": 860,
+      "failure": "unchanged AST import guard exceeded5000ms at6509ms under simultaneous fullPG/runtime jobs",
+      "fullPassClaim": false,
+      "resolution": "unchanged complete final suite passed14528/860 after fullPG/runtime finished; original failed log retained"
+    },
+    "lint": "0 errors, 345 existing warnings",
+    "bodyEnvironmentMoneyPreflight": "passed",
+    "bracesRuntime": "passed; exact build WX0_Tl-PFBBeQ1-urhmI-",
+    "lintRuntime": {
+      "buildId": "WX0_Tl-PFBBeQ1-urhmI-",
+      "traces": 741,
+      "manifests": 86,
+      "status": "passed; available maps only, no opaque-code claim"
+    },
+    "fullPostgres": {
+      "passed": 5264,
+      "files": 405,
+      "skipped": 0,
+      "productRevision": "014c6ae0456794335b15c5a471ee049584ba7d97",
+      "durationSeconds": 2280.79
+    },
+    "fullUnit": {
+      "passed": 14528,
+      "files": 860,
+      "durationSeconds": 427.67,
+      "sourceRevision": "a3812c1127e41ab60a57754c0e3912f8dbff9316",
+      "guardsAndThresholds": "unchanged; started after full PG and runtime completed"
+    }
   },
   "sourceSha256": {
     "__tests__/canonical-ortho-decision-command.test.ts": "f333400bd85da17717b4f7727446617502b8725a2bf3512b006de8a71640f6d0",
@@ -63,6 +102,24 @@
     "slice52-source-freeze.json": "e6290b05321d92953e4eece62e4c763278b2d16280129275c82a53e28a44087b",
     "slice52-tsc-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
     "slice52-unit-first.log": "c32981cd15cb363f672f8f892e370e6e271a5f7ffa420ddc8f0af4a31edd5bd5",
-    "slice52-writer-source-proof.json": "944239e13fc738daaa0e1992eb1c23b697f4a370e1b1effcb5f984df901d315c"
+    "slice52-writer-source-proof.json": "944239e13fc738daaa0e1992eb1c23b697f4a370e1b1effcb5f984df901d315c",
+    "slice52-http-first.log": "94c2b08ef5d38304e135f8fc7c4b820388f03dbebe02501b077fa590ea3489b7",
+    "slice52-http-final.log": "f57938ce47945da8d3401891ca111664f986ae19c50f4f311b0231044344d5c4",
+    "slice52-unit-full.log": "dc32d604f0b27bdec3aadee46af3492e7cef540187feb850882585cdbb80e190",
+    "slice52-tsc-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice52-lint-final.log": "8bd651384fc723df281fbf754fb7380be8e9b06022251d123bce71ab2b362462",
+    "slice52-body-final.log": "388be5d350541a20fc819dfa3ea0e5ad3d85744008c0be0fb09aa5493a7c5163",
+    "slice52-environment-final.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice52-money-final.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice52-preflight-final.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "slice52-braces-runtime.log": "acb0c5b2d93b36f4fe6cf53b2296a1c41d259ecdf8b29fd57a0b7face5e28587",
+    "ortho-decision-write-390.png": "4e51821b79f894c736c192e2c0f5763df48e4e03e4fca8a54589f398788068d8",
+    "slice52-lint-runtime.log": "69b63ebad7134dbc90402304c0b2fa193381c81d89d7a6e15f7279db96424f1a",
+    "runtime-proof.json.gz": "60f587ba971691633d073fd434daf47009d5ff9c6f26c9865b95b708467db7fc",
+    "lint-tooling-runtime-proof.json.gz": "51b3dfa0a35bba016f4ff4b0f39893adb372e0f0c43d9fff058921e458cdf50b",
+    "slice52-pg-full.log": "d00ca5f5bc3978bebaa69e7eb4743e689c0d432192f144946929a260eef5febd",
+    "batch48-52-source-verification.json": "cd3c139000ddadd6af3084cbdb70b2f8506f11004a372714c3e4e5fe9233b4ba",
+    "verify-batch48-52.py": "7219817568d4a6a534ef2faf8da4067c0f04822c70b371a21b694eb15afdcce3",
+    "slice52-unit-final-uncontended.log": "15f99e7d286e44906051e0154b4a982648d917396e6825370d402410f89466de"
   }
 }

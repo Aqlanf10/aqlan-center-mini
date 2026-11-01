@@ -1,0 +1,40 @@
+
+ RUN  v4.1.12 /workspace/aqlan-null-visit-repro
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-decisions-journey.test.ts (9 tests | 1 failed) 30917ms
+   × HTTP/browser: a legacy visit without patient ownership fails closed and clears stale queue data 3696ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-decisions-journey.test.ts > HTTP/browser: a legacy visit without patient ownership fails closed and clears stale queue data
+AssertionError: expected 503 to be 500 // Object.is equality
+
+- Expected
++ Received
+
+- 500
++ 503
+
+ ❯ __tests__/security-http/canonical-ortho-decisions-journey.test.ts:50:29
+     48|     await journey.db.query("UPDATE ortho_adjustments SET visit_id=$1 W…
+     49|     const response = await journey.api("/api/ortho/billing-decisions",…
+     50|     expect(response.status).toBe(500); expect(response.headers.get("ca…
+       |                             ^
+     51|     expect(await response.json()).toEqual({ message: "تعذّر التحقق من …
+     52|     await panel.getByRole("button", { name: "تحديث قائمة المراجعة" }).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 35 passed (36)
+   Start at  10:58:11
+   Duration  148.89s (transform 5.43s, setup 0ms, import 7.30s, tests 131.74s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

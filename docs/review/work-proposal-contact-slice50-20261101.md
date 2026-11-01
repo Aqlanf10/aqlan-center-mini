@@ -16,4 +16,4 @@ Actual focused gates: **41/41 PostgreSQL in four files** (17 new command cases p
 
 [Manifest, logs, source proof and screenshot](evidence/work-proposal-contact-20261101/manifest.json). Full final unit/PostgreSQL/type/lint/provenance gates and exact-head CI remain pending here. No final acceptance or deployment is implied. Prior b93 PostgreSQL 5193/5193 and its runtime guards are separately archived; that older source does not substitute for this batch or erase its failed original full-unit invocation. Actual WORK Docker remains blocked by the reported enforced Alpine destination refusal.
 
-The frozen 985 full-unit suite subsequently passed **14487/14487 in 858 files**. Full PostgreSQL and final provenance remain separate running gates; the later queue slice has not inherited this acceptance.
+The frozen 985 full-unit suite subsequently passed **14487/14487 in 858 files**, full PostgreSQL **5225/5225 in 402 files**, and both runtime provenance guards, type/lint/body/environment/money/preflight passed. Those exact-source gates are archived in the manifest; later queue and decision changes have their own gates.

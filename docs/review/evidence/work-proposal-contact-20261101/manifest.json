@@ -25,7 +25,7 @@
     "sourcePreservation": 19,
     "historicalSourceHashes": 628,
     "build": "passed",
-    "fullBatchGates": "pending",
+    "fullBatchGates": "frozen985 local full gates passed; later combined52 gates and exact-head CI recorded separately",
     "exactHeadCI": "not published",
     "independentReview": "pending",
     "actualDocker": "blocked by prior enforced Alpine destination refusal",
@@ -33,6 +33,12 @@
       "passed": 14487,
       "files": 858,
       "sourceRevision": "985352177f0d3a552bd1c6df4ec478cd8ea5c015"
+    },
+    "fullPostgres": {
+      "passed": 5225,
+      "files": 402,
+      "sourceRevision": "985352177f0d3a552bd1c6df4ec478cd8ea5c015",
+      "skipped": 0
     }
   },
   "sourceSha256": {
@@ -55,26 +61,47 @@
     "lib/db.ts": "c847b3cbf4dde9af173d4167302005210f5586974e83ad7d4173390b590624c4"
   },
   "artifacts": {
+    "lint-tooling-runtime-proof.json.gz": "37c09315ffabeeeecdbb22178d48df1e8b260e2ceab1da930736a3dcd1273350",
     "proposal-contact-390.png": "b8f3eb3aae4fab8a643e54690a9fdda57944a338c62cd4fe10c28d84a255011b",
+    "runtime-proof.json.gz": "45feb0ef83d0f40b2b853eb1f92a4fbdbc0e4f705278644509d737e38327ebef",
+    "slice50-braces-runtime.log": "abf7cc3f208512c52b29ca4d4baa131f56f47428b49f975556c6138e85556831",
     "slice50-build-first.log": "9aa8df465bcc6c184b39087f9e4f1bce39082bb7f592b57b1800e47583b35a4e",
     "slice50-build-first.log.gz": "b95b9f1f5f2f60b3dbb246ee79550eb65a20888168e298fa08be6da8443be8c6",
     "slice50-guards.log": "7a020659e48e389b4d94a87ca911dac79095fc5dd3b307f0d34715e442faa849",
     "slice50-http-before.log": "fb541b5ae0a2d83789a572771ddf21c25ff6927c311cb85b2052fa43ffac8745",
     "slice50-http-first.log": "b1888275a8c5398132cc31eae038427ba8e471bded532a0a4fba3637e01c37ca",
     "slice50-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice50-lint-runtime.log": "f24a4a84ec064fa3f6b59d26110bdc6c17627a8398d6d65ef0e9db98d229fdcf",
     "slice50-pg-final.log": "f788b3359de956b685f3a8b8e75616e3027d7a5e2d53e1625b4e303744f28da5",
     "slice50-pg-first.log": "6f3dac5834fa727ea4bc142003e2fa1b20ad115e40876e03cdbdadce1009b613",
+    "slice50-pg-full.log": "056579aa709725732e98247fb6c256226532c0e7befac073a7d78fe3b293903d",
     "slice50-source-proof.json": "3d7ff4554b6f8a697b12ec33d273221587bfa3e578c1c4129c63a1f21265aba6",
     "slice50-types-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
     "slice50-unit-first.log": "9d90a77d876ec68ce8d2ed51dbf7dee4e662c436ec80869af9614c24f2bfd441",
-    "verify-slice50.py": "96f1ea9b474fd97c7daa513bf9cbd97d918fa5e3d65a5fa0b136fc932dcf3983",
-    "slice50-unit-full.log": "bd67828cde9b716c28e1e8b9c0b45eff7363223e5ab15d009e4aea76c1dfb271"
+    "slice50-unit-full.log": "bd67828cde9b716c28e1e8b9c0b45eff7363223e5ab15d009e4aea76c1dfb271",
+    "verify-slice50.py": "96f1ea9b474fd97c7daa513bf9cbd97d918fa5e3d65a5fa0b136fc932dcf3983"
   },
   "normalization": {
     "slice50-build-first.log": {
       "rawSha256": "ad38c2891c2e20a8aaab09ab28cb07417cb280ac0e03d43ce8add7dc141fa497",
       "rawGzip": "slice50-build-first.log.gz",
       "displayLog": "trailing whitespace/newlines normalized only; byte-exact original compressed"
+    }
+  },
+  "runtimeProofs": {
+    "runtime-proof.json": {
+      "compressed": "runtime-proof.json.gz",
+      "rawSha256": "fbe69908fe1105526d47837088379fe23b2544343d0b1a5bd9d780fcfe980b8d",
+      "buildId": "eYpsA9XH-V-fyyzHFLUBy",
+      "traceCount": 372,
+      "manifestCount": null
+    },
+    "lint-tooling-runtime-proof.json": {
+      "compressed": "lint-tooling-runtime-proof.json.gz",
+      "rawSha256": "04b2e0f7cc9bc2407dec7bdd7b782214a1ac3a18bf6fd249b5cd8d5b2636cc47",
+      "buildId": "eYpsA9XH-V-fyyzHFLUBy",
+      "traceCount": 741,
+      "manifestCount": 86
     }
   }
 }

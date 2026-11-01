@@ -1,7 +1,7 @@
 {
   "format": "work-ortho-null-visit-v1",
   "baseRevision": "86c0bf366b2108d1b5950529a657ab18f3b117e5",
-  "sourceRevision": null,
+  "sourceRevision": "fa84550af963610fc78a81d736bb453666c189e7",
   "before": {
     "initialSetup": "did not execute tests: isolated synthetic database did not exist; created it after confirming absence",
     "initializedWitness": {
@@ -27,31 +27,74 @@
       "initialInvocation": "wrong test paths collected zero tests; corrected paths used; initial failure retained"
     },
     "sourcePreservationChecks": 17,
-    "historicalSourceHashes": 665
+    "historicalSourceHashes": 665,
+    "HTTPBrowser": {
+      "passed": 36,
+      "files": 4,
+      "productBuildId": "xo4RXQE3SXMYBym5icO4W",
+      "testRevision": "ddc6a2124eacfabcd9fecaee5f3945a72149cbea",
+      "initialFailure": "one new HTTP assertion expected500 instead of the existing central503; corrected exact code/message assertion, product unchanged"
+    },
+    "fullUnitCorrectedProduct": {
+      "passed": 14503,
+      "failed": 1,
+      "files": 859,
+      "failure": "unchanged import guard exceeded5000ms; no forbidden import assertion",
+      "isolatedSameGuard": {
+        "passed": 5,
+        "files": 1,
+        "durationSeconds": 5.26
+      },
+      "fullPassClaim": false,
+      "nextGate": "combined52 unchanged full suite subsequently passed14528/860; exact-head CI pending"
+    },
+    "fullPostgresCorrectedProduct": {
+      "passed": 5241,
+      "files": 404,
+      "skipped": 0,
+      "revision": "ddc6a2124eacfabcd9fecaee5f3945a72149cbea",
+      "durationSeconds": 2435.22
+    },
+    "typeLintBodyEnvironmentMoneyPreflightRuntime": "passed at corrected product build xo4RXQE3SXMYBym5icO4W"
   },
   "pending": [
-    "build",
-    "HTTP/browser",
-    "final full unit",
-    "final full PostgreSQL",
-    "final exact-head CI"
+    "final exact-head CI",
+    "independent review"
   ],
   "artifacts": {
     "slice51-null-after.log": "2f14de834f92884707b88e71709af84762d60f9c8cd2013fa737a0b60d6eb5b9",
     "slice51-null-before-initialized.log": "58f92b4fbd26824e14598885aeaef95af7d03696d796561c6a40a5b00c020940",
     "slice51-null-before.log": "f07d5a580ef90859848d19f16a15a74ba22b14b4376bd5e06679dc044fc03c1f",
+    "slice51-null-build.log": "d462279d11200fc2ba06c2ac892e16b3a378b0c14f1b731177f3845fb930f0c8",
+    "slice51-null-build.log.gz": "73089c60f6a4391d7764503e448a8ad8c6a4e435e126b463247e674a190be6a4",
     "slice51-null-focused-pg.log": "d3cdb4dc6b8c660135a48b946fc2cdc89ee516c4e1c541d391ca6a239b2c1245",
     "slice51-null-guards-correct-path.log": "e5b4b10ad0ea88c2b0f48e42a046d1a70583c3af86be4a4a7bb04652d6885efa",
     "slice51-null-guards.log": "dc607e1952dded12d5cb75cdcbd545520f91c571e4251a3b628a4cbdcf776cba",
+    "slice51-null-http-corrected-contract.log": "4945b02341ec46f9acaa68d3cd63e44100f89e668fc4582498dff98bc034daad",
+    "slice51-null-http.log": "22980987c497d6678a306314c1e1f1c539bf1c50f4bfed5abc4a5c893dc5b981",
+    "slice51-null-import-guard-isolated.log": "86cd94f02a562269976b57a4276fd4b990828a1d34439286eb7651fd0370bbeb",
     "slice51-null-original-witness.ts.txt": "d7d04a510b71f154624e79eacb80bd6ff4b859de133290629b7a56cf873d5ae1",
     "slice51-null-source-proof.json": "f09fecfafa34b0996731a6f70a7b5e1a3029a80c0eab14c9205d6a8e7f0fd32d",
+    "slice51-null-unit-full.log": "94a1d190f8f9847b229d613b7da8f9780b7d93c9851a689f13c8ef291ab8d5d2",
     "slice51-ts-target-proof.json": "f3774003ba84a698d694d754afb8f966585bb829434c03d98fb08f00aec6937d",
-    "slice51-unit-full.log": "2c8127d8c32d99370cfb850613d66bc91f5f0eac211c9b61888abf912430c785"
+    "slice51-unit-full.log": "2c8127d8c32d99370cfb850613d66bc91f5f0eac211c9b61888abf912430c785",
+    "slice51-null-pg-full.log": "7c73e14a81a91a1f5d8fb94828c231f7afb1ee5f74d8b585ba849ec22c5eb0c0",
+    "slice51-null-braces-runtime.log": "668864ebb34efbefd7830f93d8e80615ecec0efc7577e83999566a88f078afe3",
+    "slice51-null-lint-runtime.log": "087dc2bf045b2e769e1a90380709c483ec5648f0fd83e3bd899373478009dd8e",
+    "runtime-proof.json.gz": "3bdd00a6258f07c49ecaef28ac7b90c14512bedfb833418ad8c681c15e498bd6",
+    "lint-tooling-runtime-proof.json.gz": "d0f425ccdea06127b34ddd88ef9e3eed9bed3b363690552ec22264be32c402c8"
   },
   "sourceSha256": {
     "lib/db.ts": "7d250b2b9797c5cc097c102cea1e6549a3fdd4f3daafb58e74d58c3cd9b9c7a9",
     "__tests__/postgres/ortho-null-visit-witness.test.ts": "6e3b333f350c7e4b5df5b2aa784a52268cd8f7b2ffd97683da39faef3c3ff0e8",
     "__tests__/security-http/canonical-ortho-decisions-journey.test.ts": "c94ac35d28acd67ea2169d39f19f38d48e9a603f720e34fbc3ef4cdbae1494d8",
     "docs/security/staff-cutover/inventory.json": "588c9eb1d3ea3b75941fa56500e76e405716a1923ee57a2ae1fb83e0339c6aa4"
+  },
+  "normalization": {
+    "slice51-null-build.log": {
+      "rawSha256": "62c2a484093369f5bff5a0abe7d268e7be72c6a2fc01cfaa82c909b5c37faf7a",
+      "rawGzip": "slice51-null-build.log.gz",
+      "displayLog": "trailing whitespace only"
+    }
   }
 }

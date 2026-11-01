@@ -1,0 +1,20 @@
+{
+  "publishedBase": "327b12fba84049e2b0f5e4e65fbd48445da42386",
+  "productSource": "014c6ae0456794335b15c5a471ee049584ba7d97",
+  "testOnlyRevision": "a3812c1127e41ab60a57754c0e3912f8dbff9316",
+  "historicalPinnedSourceHashes": 691,
+  "frozenFinalInputs": 15,
+  "onlyLaterNonDocumentationChange": "read-only principal exact403 HTTP assertion",
+  "protectedSourceUnchanged": [
+    "migrations",
+    "schema",
+    "Dockerfile",
+    ".github/workflows",
+    "package.json",
+    "package-lock.json",
+    "lib/ceph.ts",
+    "lib/commission.ts",
+    "lib/fullBackup.ts",
+    "lib/restore/staging.ts"
+  ]
+}
