@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { readFollowupCoverageSnapshotWith } from "../../lib/ortho-followup-coverage-db";
 let sequence = 0;
-export async function seedCanonicalCoverage(q: Pick<Pool, "query">, input: { patientId: number; actorId: number; doctorId: number; caseId?: number; save?: boolean }) {
+export async function seedCanonicalCoverage(q: Pick<Pool, "query">, input: { patientId: number; actorId: number; doctorId: number; caseId?: number; save?: boolean; createdAt?: string }) {
   const n = ++sequence, patient = input.patientId;
   const ortho = input.caseId ?? (await q.query("INSERT INTO ortho_cases(patient_id,created_by,status) VALUES($1,'SYN','completed') RETURNING id", [patient])).rows[0].id;
   const clinical = (await q.query("INSERT INTO clinical_cases(patient_id,specialty,title,site,ortho_case_id,created_by) VALUES($1,'orthodontics','SYN private clinical title','both',$2,'SYN') RETURNING id", [patient, ortho])).rows[0].id;
@@ -23,8 +23,8 @@ export async function seedCanonicalCoverage(q: Pick<Pool, "query">, input: { pat
   const source = (await readFollowupCoverageSnapshotWith(observed, patient, ortho)).sources[0];
   if (!source || !snapshot) throw new Error("Synthetic coverage lineage was not valid");
   let revision: string | null = null;
-  if (input.save !== false) revision = (await q.query(`INSERT INTO ortho_followup_coverage_revisions(patient_id,ortho_case_id,clinical_case_id,plan_id,plan_item_id,invoice_id,version,scope,decision,source_fingerprint,source_snapshot,reason,actor_user_id,created_by,command_id,request_fingerprint)
-    VALUES($1,$2,$3,$4,$5,$6,1,'routine_adjustments','included',$7,$10::jsonb,'SYN سبب الاتفاق المحفوظ',$8,'SYN actor',$9,repeat('a',64)) RETURNING id::text`,
-    [patient, ortho, clinical, plan, item, invoice, source.fingerprint, input.actorId, randomUUID(), JSON.stringify(snapshot)])).rows[0].id;
+  if (input.save !== false) revision = (await q.query(`INSERT INTO ortho_followup_coverage_revisions(patient_id,ortho_case_id,clinical_case_id,plan_id,plan_item_id,invoice_id,version,scope,decision,source_fingerprint,source_snapshot,reason,actor_user_id,created_by,command_id,request_fingerprint,created_at)
+    VALUES($1,$2,$3,$4,$5,$6,1,'routine_adjustments','included',$7,$10::jsonb,'SYN سبب الاتفاق المحفوظ',$8,'SYN actor',$9,repeat('a',64),COALESCE($11::timestamptz,NOW())) RETURNING id::text`,
+    [patient, ortho, clinical, plan, item, invoice, source.fingerprint, input.actorId, randomUUID(), JSON.stringify(snapshot), input.createdAt ?? null])).rows[0].id;
   return { patient, ortho, clinical, plan, service, invoice, item, revision, source };
 }

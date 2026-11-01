@@ -21,7 +21,7 @@ beforeAll(async () => {
     ids.patient = (await db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-COVJ-own','مريض تجريبي',$1) RETURNING id", [parties.own!])).rows[0].id;
     ids.outside = (await db.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-COVJ-outside','مريض خارج النطاق') RETURNING id")).rows[0].id;
     ids.ortho = (await db.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id", [ids.patient])).rows[0].id;
-    await seedCanonicalCoverage(db, { patientId: ids.patient, caseId: ids.ortho, actorId: _users.owner, doctorId: parties.own! });
+    await seedCanonicalCoverage(db, { patientId: ids.patient, caseId: ids.ortho, actorId: _users.owner, doctorId: parties.own!, createdAt: "2026-10-31T22:30:00.000Z" });
   } });
 }, 300_000);
 afterAll(async () => { await journey?.close(); }, 60_000);
@@ -29,7 +29,7 @@ it("HTTP: current agreement grant reads scoped coverage without a legacy session
   const session = await journey.login("own"); expect(session.status).toBe(200);
   const response = await journey.api(`/api/ortho/${ids.ortho}/followup-coverage?patientId=${ids.patient}`, session.cookie);
   expect(response.status).toBe(200);
-  expect(await response.json()).toMatchObject({ projection: "ortho-followup-coverage", patientId: ids.patient, orthoCaseId: ids.ortho });
+  expect(await response.json()).toMatchObject({ projection: "ortho-followup-coverage", patientId: ids.patient, orthoCaseId: ids.ortho, clinicTimeZone: "Asia/Aden", current: { createdAt: "2026-10-31T22:30:00.000Z" } });
 });
 const path = () => `/api/ortho/${ids.ortho}/followup-coverage?patientId=${ids.patient}`;
 it("HTTP: anonymous, none and adjacent roles cannot acquire agreement authority", async () => {
@@ -77,6 +77,19 @@ it("browser: 390px RTL read-only decision, no hidden invoice text, editors or so
     expect(calls.some(c => /\/api\/(invoices|plans|documents|ceph)|^(POST|PUT) .*followup-coverage/.test(c))).toBe(false);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     if (process.env.HR_EVIDENCE_DIR) { mkdirSync(process.env.HR_EVIDENCE_DIR, { recursive: true }); await page.screenshot({ path: join(process.env.HR_EVIDENCE_DIR, "ortho-coverage-390.png"), fullPage: true }); }
+  } finally { await context.close(); }
+});
+it("browser: a saved 01:30 Aden decision uses the clinic day even on an American device", async () => {
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar", timezoneId: "America/Los_Angeles" });
+  try {
+    const page = await context.newPage(), panel = await openCoverage(page);
+    const time = panel.getByTestId("ortho-coverage-saved").locator("time");
+    expect(await time.getAttribute("datetime")).toBe("2026-10-31T22:30:00.000Z");
+    expect(await time.textContent()).toBe("الأحد 01/11/2026");
+    await panel.getByRole("button", { name: "تحديث نطاق المتابعات" }).click();
+    await panel.getByTestId("ortho-coverage-saved").waitFor();
+    expect(await time.textContent()).toBe("الأحد 01/11/2026");
+    if (process.env.HR_EVIDENCE_DIR) { mkdirSync(process.env.HR_EVIDENCE_DIR, { recursive: true }); await page.screenshot({ path: join(process.env.HR_EVIDENCE_DIR, "ortho-coverage-clinic-midnight-390.png"), fullPage: true }); }
   } finally { await context.close(); }
 });
 it("browser: a clinical-only user gets no financial control and makes no coverage request", async () => {

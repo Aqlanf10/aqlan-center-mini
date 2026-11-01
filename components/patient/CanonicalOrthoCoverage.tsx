@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useState } from "react";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { isCanonicalOrthoCoverage, type CanonicalOrthoCoverage as Coverage } from "@/lib/canonical-ortho-coverage-projection";
 
 /** Independent agreement read; the clinical case never supplies this grant. */
@@ -44,7 +45,7 @@ export function CanonicalOrthoCoverage({ patientId, caseId }: { patientId: numbe
             <p className="font-bold">القرار المحفوظ: {feed.current.decision === "included" ? "المتابعات الروتينية مشمولة" : "المتابعات الروتينية خارج الاتفاق"}</p>
             {!feed.applicable ? <p role="status" className="text-amber-800">القرار المحفوظ لا يطابق مصدر الاتفاق الحالي. يلزم التحقق؛ لم يتغيّر القرار تلقائيًا.</p> : <p>القرار يطابق مصدر الاتفاق في هذه القراءة.</p>}
             <p className="whitespace-pre-wrap">سبب القرار: {feed.current.reason}</p>
-            <p>النسخة {feed.current.version} — سجّلها {feed.current.createdBy} — <time>{feed.current.createdAt.slice(0, 10)}</time></p>
+            <p>النسخة {feed.current.version} — سجّلها {feed.current.createdBy} — <time dateTime={feed.current.createdAt}>{formatClinicDate(feed.current.createdAt, feed.clinicTimeZone)}</time></p>
           </>}
         {feed.invoiceSources.state === "restricted" ? <p className="text-slate-600">تفاصيل مصدر الفاتورة تحتاج صلاحية عرض الفواتير.</p>
           : feed.invoiceSources.items.length ? <><h5 className="font-bold">مصادر الفواتير المطابقة المتاحة</h5><ul className="space-y-2">{feed.invoiceSources.items.map((item, index) => <li key={`${item.invoiceId}:${index}`}>{item.invoiceNumber} — {item.serviceName}</li>)}</ul></> : null}

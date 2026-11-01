@@ -1,4 +1,5 @@
 import "server-only";
+import { CLINIC_TIME_ZONE } from "./db";
 import { CanonicalPatientReadRefusal, readCanonicalPatientRecord } from "./canonical-patient-reads";
 import { canonicalOrthoCaseId } from "./canonical-ortho-reads";
 import { readFollowupCoverageSnapshotWith } from "./ortho-followup-coverage-db";
@@ -16,7 +17,7 @@ export function readCanonicalOrthoCoverage(session: VerifiedDurableSession, pati
     const found = (await q.query("SELECT id FROM ortho_cases WHERE id=$1 AND patient_id=$2", [caseId, patientId])).rows[0];
     if (!found) throw new CanonicalPatientReadRefusal("patient_not_found", "لا يوجد مريض بهذا الرقم ضمن مرضاك.");
     const saved = await readFollowupCoverageSnapshotWith(q, patientId, caseId), head = saved.current;
-    return { projection: "ortho-followup-coverage", patientId, orthoCaseId: caseId, enabled: saved.enabled, applicable: saved.applicable,
+    return { projection: "ortho-followup-coverage", clinicTimeZone: CLINIC_TIME_ZONE, patientId, orthoCaseId: caseId, enabled: saved.enabled, applicable: saved.applicable,
       current: head ? { id: head.id, version: head.version, decision: head.decision, reason: head.reason, createdAt: head.createdAt, createdBy: head.createdBy } : null,
       invoiceSources: scope.granted("finance.invoices.view")
         ? { state: "allowed", items: saved.sources.map(s => ({ invoiceId: s.invoiceId, invoiceNumber: s.invoiceNumber, serviceName: s.serviceName })) }
