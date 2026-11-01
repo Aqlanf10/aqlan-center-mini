@@ -5,9 +5,6 @@
 .radiology-repeat-identity h1 { font-size:10pt; font-weight:800; line-height:1.25; margin:0; }
 .radiology-document h2 { font-size:10pt; font-weight:700; border-top:1px solid #bbb; margin:2mm 0 1mm; }
 .radiology-brand { display:flex; flex-direction:column; align-items:center; text-align:center; overflow-wrap:anywhere; }
-.radiology-brand strong { font-size:12pt; }
-.radiology-brand span { font-size:8pt; }
-.radiology-logo { width:10mm; height:10mm; object-fit:contain; }
 .radiology-repeat-identity { font-size:8pt; line-height:1.25; border-bottom:1px solid #999; padding-bottom:1mm; }
 .radiology-repeat-identity p { margin:0; }
 .radiology-reference { font-size:7pt; text-align:center; }

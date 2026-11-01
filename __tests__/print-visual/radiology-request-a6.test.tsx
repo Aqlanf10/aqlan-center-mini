@@ -27,6 +27,7 @@ vi.mock("@/lib/radiology-request-service", () => ({ readRadiologyRequest: async 
     notes: fixture.long ? Array.from({ length: 24 }, (_, index) => `RADNOTE${String(index + 1).padStart(2, "0")} تعليمات اصطناعية واضحة لمركز الأشعة لاختبار امتداد النص كاملًا.`).join("\n") : "RADSHORT تعليمات اصطناعية قصيرة",
   },
 }) }));
+import { PrintDocumentWatermark } from "../../components/PrintDocument";
 import RadiologyPrint from "../../app/print/radiology-request/[key]/page";
 let css: string;
 beforeAll(async () => {
@@ -38,9 +39,10 @@ it.each([false, true])("prints actual A6 paper with intact text and repeated ide
   fixture.long = long;
   const node = await RadiologyPrint({ params: Promise.resolve({ key }), searchParams: Promise.resolve({ patientId: "7" }) });
   const body = renderToStaticMarkup(node);
+  const watermark=renderToStaticMarkup(<PrintDocumentWatermark/>);
   const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
   expect(body).toContain('src="/logo.png"');
-  const html = `<!doctype html><html lang="ar" dir="rtl"><style>${css}</style><body><div class="print-root">${body.replaceAll('src="/logo.png"', `src="${logo}"`)}</div></body></html>`;
+  const html = `<!doctype html><html lang="ar" dir="rtl"><style>${css}</style><body>${watermark.replaceAll('src="/logo.png"', `src="${logo}"`)}<div class="print-root">${body.replaceAll('src="/logo.png"', `src="${logo}"`)}</div></body></html>`;
   const output = resolve(".settings-ui-artifacts/radiology-a6"); mkdirSync(output, { recursive: true });
   const kind = long ? "overflow" : "short";
   const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
@@ -48,7 +50,7 @@ it.each([false, true])("prints actual A6 paper with intact text and repeated ide
     const page = await browser.newPage(); await page.route("**/*", route => route.abort()); await page.setContent(html);
     await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(image => image.decode())); });
     await page.emulateMedia({ media: "print" });
-    expect(await page.locator(".radiology-logo").evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    expect(await page.locator(".radiology-brand .print-logo").evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
     const pdf = await page.pdf({ path: resolve(output, `${kind}.pdf`), preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
     const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
     const pages = await page.evaluate(raw => {

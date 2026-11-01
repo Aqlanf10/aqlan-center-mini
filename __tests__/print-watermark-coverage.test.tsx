@@ -20,13 +20,13 @@ describe("one shared print-document watermark across all paper families", () => 
     expect(html).toContain('data-logo-state="unavailable"'); expect(html).not.toContain("<img");
     expect(source("components/PrintDocumentWatermark.tsx")).toContain("onError={() => setFailed(true)}");
   });
-  it("covers all 25 dedicated routes through their existing shared identity renderers", () => {
+  it("covers all 26 dedicated routes through their existing shared identity renderers", () => {
     const pages: string[] = [];
     function visit(path: string) { for (const entry of readdirSync(path, { withFileTypes: true })) {
       const full = join(path, entry.name); if (entry.isDirectory()) visit(full); else if (entry.name === "page.tsx") pages.push(full);
     } }
     visit(new URL("../app/print", import.meta.url).pathname);
-    expect(pages).toHaveLength(25);
+    expect(pages).toHaveLength(26);
     for (const page of pages) expect(readFileSync(page, "utf8")).toMatch(/PrintHeader|PrintableReportDocument/);
   });
   it("uses fixed-size agreement/page marks and retains compact paper choice", () => {
