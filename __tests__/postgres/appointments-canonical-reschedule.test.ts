@@ -41,7 +41,7 @@ const setting = (key: string, value: string) => fx.pool.query("INSERT INTO setti
 
 beforeAll(async () => {
   fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner");
-  for (let index = 1; index <= 8; index++) {
+  for (let index = 1; index <= 9; index++) {
     patients.push((await fx.pool.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone) VALUES($1,$2,$3) RETURNING id",
       [`SYN-RS-${index}`, `SYN Reschedule ${index}`, `05000001${index}0`])).rows[0].id);
   }
@@ -81,14 +81,49 @@ describe("rescheduling through the cross-day capacity engine", () => {
   });
   it("two concurrent reschedules of one appointment: one wins, the loser's stale read is refused, never overwritten", async () => {
     const id = await booked(patients[4], FROM, "14:00");
-    const results = await Promise.allSettled([
-      reschedule("desk", id, { date: TO, time: "15:00", reason: "Synthetic A" }),
-      reschedule("desk", id, { date: TO, time: "16:00", reason: "Synthetic B" }),
-    ]);
+    // Starting two promises does not prove that their initial reads overlap.
+    // Hold the actual first day fence until both engine transactions are waiting
+    // on it: both have then read the same original slot before either can write.
+    const gate = await db.getPool().connect();
+    let pending: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    let results: PromiseSettledResult<unknown>[];
+    let released = false;
+    try {
+      await gate.query("BEGIN");
+      const holder = (await gate.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      await gate.query("SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))", [FROM]);
+      const sessions = await Promise.all([fx.session("desk"), fx.session("desk")]);
+      pending = Promise.allSettled([
+        appointments.commandCanonicalReschedule(sessions[0], id, appointments.parseCanonicalReschedule({ date: TO, time: "15:00", reason: "Synthetic A" })),
+        appointments.commandCanonicalReschedule(sessions[1], id, appointments.parseCanonicalReschedule({ date: TO, time: "16:00", reason: "Synthetic B" })),
+      ]);
+      await vi.waitFor(async () => {
+        const blocked = await fx.pool.query<{ pid: number }>(
+          "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1::int=ANY(pg_blocking_pids(pid)) AND wait_event_type='Lock'", [holder]);
+        expect(blocked.rows).toHaveLength(2);
+      }, { timeout: 10_000, interval: 10 });
+      expect((await at(id)).slot).toBe(`${FROM} 14:00`);
+      expect(await audits("appointment.reschedule", id)).toHaveLength(0);
+      await gate.query("COMMIT");
+      released = true;
+      results = await pending;
+    } finally {
+      if (!released) await gate.query("ROLLBACK");
+      gate.release();
+      await pending;
+    }
     expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
     const rejected = results.find(result => result.status === "rejected") as PromiseRejectedResult;
     expect(rejected.reason).toMatchObject({ code: "appointment_move_conflict", status: 409 });
     expect(await audits("appointment.reschedule", id)).toHaveLength(1);
+  });
+  it("two fresh sequential reschedule intentions both succeed and retain two audit rows", async () => {
+    const id = await booked(patients[8], FROM, "15:30");
+    await reschedule("desk", id, { date: TO, time: "17:30", reason: "Synthetic first intention" });
+    expect((await at(id)).slot).toBe(`${TO} 17:30`);
+    await reschedule("desk", id, { date: TO, time: "18:30", reason: "Synthetic later intention" });
+    expect((await at(id)).slot).toBe(`${TO} 18:30`);
+    expect(await audits("appointment.reschedule", id)).toEqual(["SYN-RS-DESK", "SYN-RS-DESK"]);
   });
   it("only a booked appointment moves", async () => {
     const id = await booked(patients[5], FROM, "17:00");

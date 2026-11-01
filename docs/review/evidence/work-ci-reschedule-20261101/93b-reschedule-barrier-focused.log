@@ -1,0 +1,39 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/appointments-canonical-reschedule.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/appointments-canonical-reschedule.test.ts (9 tests | 1 failed) 12927ms
+     × two concurrent reschedules of one appointment: one wins, the loser's stale read is refused, never overwritten 10010ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/appointments-canonical-reschedule.test.ts > rescheduling through the cross-day capacity engine > two concurrent reschedules of one appointment: one wins, the loser's stale read is refused, never overwritten
+Error: timeout exceeded when trying to connect
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ syntheticClaims __tests__/postgres/_canonical-ready-fixture.ts:85:24
+     83| /** Current claims for an account, read directly for negative/positive…
+     84| export async function syntheticClaims(pool: Pool, schema: string, user…
+     85|  const { rows: [r] } = await pool.query(`SELECT u.id,u.username,u.pass…
+       |                        ^
+     86|   h.realm_id::text,h.generation_id::text,h.registry_revision::text,c.b…
+     87|   FROM ${schema}.users u CROSS JOIN ${schema}.staff_identity_state h C…
+ ❯ Object.session __tests__/postgres/_canonical-inventory-fixture.ts:103:63
+ ❯ __tests__/postgres/appointments-canonical-reschedule.test.ts:95:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed (9)
+   Start at  05:06:45
+   Duration  15.80s (transform 1.98s, setup 0ms, import 2.39s, tests 12.93s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
