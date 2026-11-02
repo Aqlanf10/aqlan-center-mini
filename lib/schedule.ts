@@ -69,6 +69,8 @@ export interface Appointment {
   note: string | null;
   status: AppointmentStatus;
   reminderSentAt?: string | null;
+  /** تأكيد المريض للموعد من البوابة؛ لا يغيّر حالة الوصول أو الإنجاز. */
+  patientConfirmedAt?: string | null;
   /** جهة «طبيب» الموعد (صلاحيات الوكيل المساعد) — null لغير المسند لطبيب. */
   doctorId?: number | null;
   /** اسم الطبيب المسند إليه الموعد للعرض السريع في الواجهة. */

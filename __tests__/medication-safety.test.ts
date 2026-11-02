@@ -13,7 +13,8 @@ describe("محرك الأمان والتعارضات الدوائية (Medicatio
     expect(alerts.length).toBe(1);
     expect(alerts[0].severity).toBe("critical");
     expect(alerts[0].title).toContain("Penicillin Allergy");
-    expect(alerts[0].suggestedAlternative).toContain("Clindamycin");
+    expect(alerts[0].suggestedAlternative).toContain("لا تختَر بديلًا تلقائيًا");
+    expect(alerts[0].suggestedAlternative).not.toMatch(/Clindamycin|Azithromycin|\d+mg/);
   });
 
   it("يحذر من مسكنات NSAIDs أثناء الحمل", () => {

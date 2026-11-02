@@ -9,7 +9,7 @@
  * للمحرّك. ولا يبني أيُّ مسارٍ حكمَه بنفسه.
  */
 import {
-  CLINIC_TIME_ZONE, getSettings, listAppointmentServices, listProviderBlocks,
+  CLINIC_TIME_ZONE, getSettings, getSettingsInTransaction, listAppointmentServices, listProviderBlocks,
   resolveServiceByLegacyType, type DbClient,
 } from "./db";
 import { clinicDayStart } from "./clinicZone";
@@ -27,8 +27,8 @@ export interface CapacityContext {
 }
 
 /** يقرأ سياسة السعة من الإعدادات — مصدرٌ واحد لساعات المركز وطاقته. */
-export async function loadCapacityContext(): Promise<CapacityContext> {
-  const settings = await getSettings();
+export async function loadCapacityContext(client?: DbClient): Promise<CapacityContext> {
+  const settings = client ? await getSettingsInTransaction(client) : await getSettings();
   const shifts: Shift[] = [
     { start: settings["clinic.day_start"], end: settings["clinic.day_end"] },
   ];
@@ -62,12 +62,12 @@ export async function loadCapacityContext(): Promise<CapacityContext> {
 export async function resolveService(input: {
   serviceId?: number | null;
   appointmentType?: string | null;
-}): Promise<AppointmentService | null> {
+}, client?: DbClient): Promise<AppointmentService | null> {
   if (input.serviceId) {
-    const all = await listAppointmentServices({ includeInactive: true });
+    const all = await listAppointmentServices({ includeInactive: true }, client);
     return all.find((service) => service.id === input.serviceId) ?? null;
   }
-  if (input.appointmentType) return await resolveServiceByLegacyType(input.appointmentType);
+  if (input.appointmentType) return await resolveServiceByLegacyType(input.appointmentType, client);
   return null;
 }
 

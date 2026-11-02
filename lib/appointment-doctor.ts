@@ -13,10 +13,11 @@ export const APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE = "الطبيب غير مت�
  */
 export async function lockBookableAppointmentDoctor(
   client: DbClient, doctorId: number | null,
+  nowait = false,
 ): Promise<boolean> {
   if (doctorId === null) return true;
   const { rows } = await client.query<{ id: number }>(
-    `SELECT id FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active FOR SHARE`,
+    `SELECT id FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active FOR SHARE${nowait ? ' NOWAIT' : ''}`,
     [doctorId],
   );
   return rows.length === 1;

@@ -148,7 +148,13 @@ export class ProtectedCollectionAttemptHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد إثبات إلغاء محاولات تحصيل؛ يجب الاحتفاظ بمفاتيحها حتى لا تُسجَّل محاولة متأخرة بعد إعادة الضبط. لم يُمسح شيء."); this.name = "ProtectedCollectionAttemptHistoryError"; }
 }
 
+/** 0095: an explicit appointment purpose is immutable clinical provenance. */
+export class ProtectedAppointmentPurposeHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد تصنيف موعد صراحةً؛ يجب الاحتفاظ بقصد الحجز ومصدر خطته التاريخي. لم يُمسح شيء."); this.name = "ProtectedAppointmentPurposeHistoryError"; }
+}
+
 export const RESET_KEEP_TABLES = [
+  "appointment_purpose_provenance",
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,

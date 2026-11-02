@@ -11,6 +11,9 @@
  * وقناة الطلب (`channel`) تُسجَّل للتدقيق فقط — لا تغيّر قاعدةً واحدة.
  */
 import { isAdmin } from "./roles";
+import type { SessionPayload } from "./auth";
+import { revalidateSessionInTransaction } from "./session";
+import { canAccessPatient } from "./patient-access";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./ortho-booking-intent";
 import { APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE, lockBookableAppointmentDoctor } from "./appointment-doctor";
 import type { Role } from "./roles";
@@ -40,6 +43,9 @@ export interface BookingActor {
   canOverrideCapacity?: boolean;
   /** كيف وصل الطلب — للتدقيق فقط. */
   channel: "ui" | "ai" | "portal" | "visit";
+  /** Signed request admission; required only when the new explicit clinical
+   * purpose is supplied. Existing legacy callers remain unchanged. */
+  session?: SessionPayload;
 }
 
 export interface BookAppointmentInput {
@@ -50,6 +56,8 @@ export interface BookAppointmentInput {
   durationMinutes?: number | null;
   serviceId?: number | null;
   appointmentType?: string | null;
+  /** Explicit purpose must use the durable direct/planned command, never this legacy writer. */
+  appointmentPurpose?: string;
   /** Restricts the untouched board proposal; never grants extra booking authority. */
   bookingIntent?: "ortho_follow_up" | null;
   note?: string | null;
@@ -94,7 +102,7 @@ export type BookingResult =
       /** تنبيهٌ لا خطأ — الحجز تمّ والمستخدم يُخبَر ليتأكّد قبل أن يَعِد المريض. */
       warning: string | null;
     }
-  | { ok: false; status: 400; message: string }
+  | { ok: false; status: 400 | 401 | 403; message: string }
   | { ok: false; status: 409; conflict: BookingConflict };
 
 /** صلاحية التجاوز تُشتقّ من المستخدم لا من القناة — والوكيل الذكي قناة. */
@@ -308,6 +316,8 @@ export async function judgeBookingInDay(input: {
 export async function bookAppointment(
   input: BookAppointmentInput, actor: BookingActor,
 ): Promise<BookingResult> {
+  if (input.appointmentPurpose !== undefined)
+    return { ok: false, status: 400, message: "الغرض الصريح يتطلب مسار الحجز المصنّف." };
   const patientId = Number(input.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return { ok: false, status: 400, message: "اختر المريض أولًا." };
@@ -357,13 +367,13 @@ export async function bookAppointment(
   }
 
   /* الطبيب يحجز لنفسه؛ وغيرُه يحدّد الطبيب صراحةً. */
-  const doctorId = actor.role === "doctor" && typeof actor.doctorPartyId === "number"
+  let doctorId = actor.role === "doctor" && typeof actor.doctorPartyId === "number"
     && actor.doctorPartyId > 0
     ? actor.doctorPartyId
     : (Number.isInteger(Number(input.doctorId)) && Number(input.doctorId) > 0
       ? Number(input.doctorId) : null);
 
-  const canOverride = actorCanOverride(actor);
+  let canOverride = actorCanOverride(actor);
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
   const state: {
     verdict: CapacityVerdict | null; overridden: boolean;
@@ -402,7 +412,8 @@ export async function bookAppointment(
       state.overridden = judged.overridden;
       return { ok: true as const };
     },
-    commit: (client) => insertAppointmentOnClient(client, {
+    commit: async (client) => {
+      const appointment = await insertAppointmentOnClient(client, {
       patientId,
       date: input.date,
       time: input.time,
@@ -420,7 +431,9 @@ export async function bookAppointment(
       occupiesChair: service ? service.requiresChair : true,
       isNewPatient: input.isNewPatient ?? false,
       waitingListId: input.waitingListId ?? null,
-    }),
+      });
+      return appointment;
+    },
   });
 
   if (!result.ok) {
