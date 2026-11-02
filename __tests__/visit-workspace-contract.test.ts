@@ -2,22 +2,20 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// Core authority remains pinned to 055c399a, except the reviewed presentation-only
-// sign delta in #380: clear invoiceReferenceState after an owner-bound successful
-// sign response, before the canonical reread. It must not carry old invoice
-// verification onto the response invoice ID. Request/guards/response validation,
-// unknown-outcome handling, callback and dependencies are unchanged. Navigation
-// is outside this slice. The extra equivalence assertion below pins that claim.
-// The original sign SHA is retained there; the full current slice stays pinned too.
-// The load boundary differs only by
-// removing the retired catalogue modal reset after the inline ServiceSelect switch.
-// CI1768 caught that obsolete setter; all owner/read/draft guards remain unchanged.
+// Full modern slices stay byte-pinned. Finite, count-checked literal reversals
+// below also recover the prior reviewed load/sign bytes: direct React state
+// mirrors and stable setter dependencies are the only newly approved deltas.
+// This is change-isolation provenance, not semantic equivalence by hashing;
+// clinical ownership, stale-read, signing and draft behavior have runtime tests.
+// The prior #380 invoiceReferenceState presentation change remains separately
+// isolated against the original 055c399a sign hash. The prior load baseline
+// already includes removal of the retired catalogue-modal reset (CI1768).
 const baseline = [
   {
     "label": "load",
     "start": "  const load = useCallback(",
     "end": "  useEffect(() => { void load(); }",
-    "sha": "4e6e0ebbf2630871c822df5a72ef321dde0ee540bdb55bff87098cddc96ff982"
+    "sha": "d585ede1681d8aac5b00a5d02038eade3bea35647eb99a30c1d687e4be24aad4"
   },
   {
     "label": "send",
@@ -29,7 +27,7 @@ const baseline = [
     "label": "sign",
     "start": "  const sign = useCallback(",
     "end": "  /** (VISIT-2) فتح ملف",
-    "sha": "4e1cd839b93397762e4e96d0fa92467a877c6ea3864637a1d2e93ae353ca89f6"
+    "sha": "ed66cf19fa7d3d24fb784ac4d181398e1c7b110c12f84be91323872b46dc4823"
   },
   {
     "label": "payload",
@@ -44,6 +42,29 @@ const baseline = [
     "sha": "28ab4c344ef3a0bdb893778e4b0fe50405235e514251c0e8440d014a19905156"
   }
 ];
+const historicalHashes = {
+  load: "4e6e0ebbf2630871c822df5a72ef321dde0ee540bdb55bff87098cddc96ff982",
+  sign: "4e1cd839b93397762e4e96d0fa92467a877c6ea3864637a1d2e93ae353ca89f6",
+};
+// Literal reviewed deltas only; do not generalize to whitespace, callback or
+// arbitrary setter removal. Every approved insertion must occur exactly once.
+const reviewedMirrorChanges = {
+  load: [
+    ['lastAutoTreatment.current = ""; setDisplayedAutoTreatment("");', 'lastAutoTreatment.current = "";'],
+    ["lastAppliedOwner.current = owner; setAppliedOwner(owner);", "lastAppliedOwner.current = owner;"],
+    ['if (loaded.status === "signed") { confirmedSignOwner.current = owner; setDisplayedSignOwner(owner); }', 'if (loaded.status === "signed") confirmedSignOwner.current = owner;'],
+    ["[visitId, expectedPatientId, currentOwner, owner, setRxOpen, setPostOpOpen]", "[visitId, expectedPatientId, currentOwner, owner]"],
+  ],
+  sign: [["confirmedSignOwner.current = owner; setDisplayedSignOwner(owner);", "confirmedSignOwner.current = owner;"]],
+} as const;
+function restoreReviewedHistoricalSlice(slice: string, boundary: keyof typeof reviewedMirrorChanges) {
+  for (const [current, previous] of reviewedMirrorChanges[boundary]) {
+    expect(slice.split(current)).toHaveLength(2);
+    slice = slice.replace(current, previous);
+  }
+  return slice;
+}
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const source = readFileSync("components/ClinicalVisit.tsx", "utf8");
 describe("actual visit workspace retains its authoritative contracts", () => {
   it.each(baseline)("keeps $label byte-identical to its reviewed authority boundary", ({ start, end, sha }) => {
@@ -51,10 +72,34 @@ describe("actual visit workspace retains its authoritative contracts", () => {
     const to = source.indexOf(end, from); expect(to).toBeGreaterThan(from);
     expect(createHash("sha256").update(source.slice(from, to)).digest("hex")).toBe(sha);
   });
+  it.each(["load", "sign"] as const)("recovers the historical %s authority bytes after only reviewed render-mirror changes", (label) => {
+    const boundary = baseline.find(item => item.label === label)!;
+    const from = source.indexOf(boundary.start), to = source.indexOf(boundary.end, from);
+    expect(sha256(restoreReviewedHistoricalSlice(source.slice(from, to), label))).toBe(historicalHashes[label]);
+  });
+  it("binds presentation mirrors and stable dependencies to direct React state setters", () => {
+    for (const declaration of [
+      "const [appliedOwner, setAppliedOwner] = useState<typeof owner | null>(null);",
+      "const [displayedSignOwner, setDisplayedSignOwner] = useState<typeof owner | null>(null);",
+      'const [displayedAutoTreatment, setDisplayedAutoTreatment] = useState("");',
+      "const [rxOpen, setRxOpen] = useState(false);",
+      "const [postOpOpen, setPostOpOpen] = useState(false);",
+    ]) expect(source.split(declaration)).toHaveLength(2);
+  });
+  it("does not hide missing, duplicate or unreviewed authority edits in the historical reconstruction", () => {
+    const boundary = baseline.find(item => item.label === "load")!;
+    const from = source.indexOf(boundary.start), to = source.indexOf(boundary.end, from);
+    const load = source.slice(from, to), insertion = reviewedMirrorChanges.load[0][0];
+    expect(() => restoreReviewedHistoricalSlice(load.replace(insertion, ""), "load")).toThrow();
+    expect(() => restoreReviewedHistoricalSlice(load + insertion, "load")).toThrow();
+    expect(load).toContain("currentOwner()");
+    const changedAuthority = load.replace("currentOwner()", "true");
+    expect(sha256(restoreReviewedHistoricalSlice(changedAuthority, "load"))).not.toBe(historicalHashes.load);
+  });
   it("changes only optimistic documentary verification within the original sign authority", () => {
     const from = source.indexOf("  const sign = useCallback(");
     const to = source.indexOf("  /** (VISIT-2) فتح ملف", from);
-    const sign = source.slice(from, to);
+    const sign = restoreReviewedHistoricalSlice(source.slice(from, to), "sign");
     const reviewedInsertion = ", invoiceReferenceState: undefined";
     expect(sign.split(reviewedInsertion)).toHaveLength(2);
     expect(createHash("sha256").update(sign.replace(reviewedInsertion, "")).digest("hex"))

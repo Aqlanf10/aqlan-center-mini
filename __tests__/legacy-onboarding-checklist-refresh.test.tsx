@@ -221,13 +221,14 @@ beforeEach(() => {
   classifierRead = async () => response(classification(caseRow.planId !== null, caseRow.id));
   casesRead = async (id) => response({ cases: [{ ...caseRow, patientId: id }] });
   plansRead = async (id) => response(plans(id));
-  patch = async ({ planId }) => { caseRow = { ...caseRow, planId }; return response({ ok: true }); };
+  patch = async ({ planId }) => { caseRow = { ...caseRow, planId }; return response({ ok: true, caseId: caseRow.id, planId, changed: true }); };
   fetchMock.mockImplementation(async (url, init) => {
     if (url === "/api/ortho/41" && init?.method === "PATCH") return patch(JSON.parse(String(init.body)));
     if (init?.method) throw new Error(`Unexpected synthetic mutation: ${url}`);
     const legacy = url.match(/^\/api\/patients\/(\d+)\/legacy-onboarding\?caseId=\d+$/);
     if (legacy) return classifierRead(Number(legacy[1]));
     if (url.startsWith("/api/ortho?patientId=")) return casesRead(Number(url.split("=")[1]));
+    if (url === `/api/ortho/${caseRow.id}/plan-link`) return response({caseId:caseRow.id,patientId,planId:caseRow.planId,status:caseRow.status,observedVersion:"a".repeat(64)});
     if (url.startsWith("/api/plans?patientId=")) return plansRead(Number(url.split("=")[1]));
     if (/^\/api\/patients\/\d+$/.test(url)) return response({ patient: { id: Number(url.split("/").at(-1)), fullName: "Synthetic patient", phone: null } });
     throw new Error(`Unexpected synthetic read: ${url}`);
@@ -248,7 +249,8 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     expect(text(checklist())).toContain("✓ مرجع مالي موثّق لهذه الحالة");
     expect(text(checklist())).toContain("فاتورة #81"); expect(text(checklist())).toContain(OUTSIDE);
     expect(text(render())).not.toContain("لا اتفاق مالي مربوط بالحالة");
-    expect(elements(section(PACKAGE_LABEL)).some(node => node.type === "select")).toBe(false);
+    // Explicit optional selection does not invalidate the independent invoice reference.
+    expect(elements(section(PACKAGE_LABEL)).some(node => node.type === "select")).toBe(true);
     const cards = elements(parentTree).filter(node => node.type === TreatmentFinancialContext);
     expect(cards).toHaveLength(1); expect(cards[0].props).toMatchObject({ patientId: 19, orthoCaseId: 41, canView: false });
     expect(writes()).toEqual([]);
@@ -292,11 +294,11 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     unknown(); expect(classifierCalls().length).toBeGreaterThan(1);
     expect(checklistProps()).toMatchObject({ patientId: 19, caseId: 41, planId: next });
     expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ planId: next }) }]]);
+      body: JSON.stringify({ planId: next, expectedVersion: "a".repeat(64) }) }]]);
     pending.resolve(response(classification(next !== null))); await flush();
     expect(text(checklist())).toContain(next === null ? OUTSIDE : INCLUDED);
     expect(text(checklist())).not.toContain(next === null ? INCLUDED : OUTSIDE);
-    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا يوجد رابط خطة أقساط قديم" : "✓ رابط اتفاق أقساط قديم");
+    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لم تُربط خطة علاج بهذه الحالة" : "✓ رابط اتفاق أقساط قديم");
   });
 
   it.each([51])("withdraws parent references after a confirmed plan transition while the case reload stalls/fails, then restores the canonical classifier (%s)", async (initialPlan) => {
@@ -320,9 +322,9 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     classifierPending.resolve(response(classification(next !== null))); await flush();
     expect(text(checklist())).toContain(next === null ? OUTSIDE : INCLUDED);
     expect(text(checklist())).not.toContain(next === null ? INCLUDED : OUTSIDE);
-    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا يوجد رابط خطة أقساط قديم" : "✓ رابط اتفاق أقساط قديم");
+    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لم تُربط خطة علاج بهذه الحالة" : "✓ رابط اتفاق أقساط قديم");
     expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ planId: next }) }]]);
+      body: JSON.stringify({ planId: next, expectedVersion: "a".repeat(64) }) }]]);
   });
 
   it("does not invalidate the classifier for an unsuccessful package mutation", async () => {

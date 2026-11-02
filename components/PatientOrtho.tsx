@@ -451,13 +451,15 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     setError("غير مصرّح لك بعرض كابينة التقويم لهذا المريض.");
   }, [owner]);
   useLayoutEffect(() => { owner.bindDenial(deny); }, [owner, deny]);
+  const readUsername = session?.username;
+  const readRole = session?.role;
   const load = useCallback(() => {
     if (!owner.active) return;
     const controller = new AbortController();
     const sequence = owner.beginRead(controller);
     const current = () => owner.active && owner.readSequence === sequence && !controller.signal.aborted;
     setReadState("loading"); setPatient(null); setError(null);
-    if (!session?.username?.trim() || !["admin", "doctor", "reception", "assistant"].includes(session.role)) {
+    if (!readUsername?.trim() || !["admin", "doctor", "reception", "assistant"].includes(readRole!)) {
       deny(); return;
     }
     let finished = 0;
@@ -501,7 +503,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     };
     // Independent continuations: no stalled peer or JSON body can postpone denial.
     void read("clinical"); void read("contact");
-  }, [owner, patientId, session?.username, session?.role, deny]);
+  }, [owner, patientId, readUsername, readRole, deny]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -753,9 +755,9 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </FinancialContextContainer>
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
-                      <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">رابط خطة أقساط قديم · للتوافق فقط</summary>
+                      <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">ربط خطة علاج أو اتفاق قائم</summary>
                         <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
-                          canLink={row.planId !== null && (session?.role === "admin" || session?.role === "reception"
+                          canLink={(session?.role === "admin" || session?.role === "reception"
                             || (session?.role === "doctor" && session.permissions?.canEditPlans !== false))}
                           onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
                       </details>

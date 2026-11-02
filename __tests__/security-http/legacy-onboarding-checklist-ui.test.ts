@@ -106,7 +106,9 @@ async function open(width: number, failPlans: boolean) {
     if (!["GET", "HEAD", "OPTIONS"].includes(req.method())) {
       const body: unknown = req.postDataJSON();
       if (!failPlans && req.method() === "PATCH" && url.pathname === `/api/ortho/${caseId}`
-        && body !== null && typeof body === "object" && Object.keys(body).join() === "planId"
+        && body !== null && typeof body === "object" && Object.keys(body).sort().join() === "expectedVersion,planId"
+        && typeof (body as {expectedVersion?:unknown}).expectedVersion === "string"
+        && /^[a-f0-9]{64}$/.test((body as {expectedVersion:string}).expectedVersion)
         && (body as { planId?: unknown }).planId === null) {
         writes.push(body as { planId: number | null }); await route.continue(); return;
       }
@@ -131,7 +133,7 @@ async function open(width: number, failPlans: boolean) {
     await page.goto(`${baseUrl}/patients/${patientId}?tab=ortho`, { waitUntil: "domcontentloaded" });
     const checklist = page.getByRole("region", { name: "تهيئة الحالة السابقة", exact: true });
     const agreement = page.getByRole("region", { name: "اتفاق التقويم", exact: true });
-    await page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact: true }).click();
+    await page.getByText("ربط خطة علاج أو اتفاق قائم", { exact: true }).click();
     await checklist.getByText(included, { exact: true }).waitFor();
     return { context, page, checklist, agreement, held, writes,
       setMode: (next: typeof mode) => { mode = next; },
@@ -162,18 +164,23 @@ describe("legacy checklist confirmed-context refresh in the real parent", () => 
       await capture(f.checklist, `.settings-ui-artifacts/legacy-checklist-unavailable-${width}.png`);
       // Confirmed unlink reloads the parent, remounting native details closed.
       // Reopen the compatibility reference before asserting its visible state.
-      const compatibility = f.page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact: true });
+      const compatibility = f.page.getByText("ربط خطة علاج أو اتفاق قائم", { exact: true });
       expect(await compatibility.locator("..").getAttribute("open")).toBeNull();
       expect((await db.query("SELECT plan_id FROM ortho_cases WHERE id = $1 AND patient_id = $2", [caseId, patientId])).rows).toEqual([{ plan_id: null }]);
       await compatibility.click();
-      await f.agreement.getByText("لا يوجد رابط خطة أقساط قديم", { exact: true }).waitFor();
-      expect(await f.agreement.getByRole("button", { name: "اربط", exact: true }).count()).toBe(0);
+      await f.agreement.getByText("لم تُربط خطة علاج بهذه الحالة", { exact: true }).waitFor();
+      // The explicit chooser is available, but no agreement is preselected and
+      // opening it must never relink the case automatically.
+      const linkButton = f.agreement.getByRole("button", { name: "اربط", exact: true });
+      expect(await linkButton.count()).toBe(1);
+      expect(await linkButton.isDisabled()).toBe(true);
+      expect(f.writes).toEqual([{ planId: null, expectedVersion: expect.stringMatching(/^[a-f0-9]{64}$/) }]);
       f.setMode("hold");
       await f.checklist.getByRole("button", { name: retry, exact: true }).click();
       await expect.poll(() => f.held.length).toBeGreaterThan(0);
       f.setMode("live");
       // Restore the pre-existing synthetic compatibility link, never create a
-      // financial source or use the removed UI action to manufacture a new link.
+      // financial source or submit a new explicit link while testing late reads.
       await db.query("UPDATE ortho_cases SET plan_id = $1 WHERE id = $2 AND patient_id = $3", [planId, caseId, patientId]);
       await f.page.getByRole("button", { name: "تحديث كابينة التقويم", exact: true }).click();
       await f.checklist.getByText(included, { exact: true }).waitFor();
@@ -181,7 +188,7 @@ describe("legacy checklist confirmed-context refresh in the real parent", () => 
       await f.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       expect(await f.checklist.innerText()).toContain(included);
       expect(await f.checklist.innerText()).not.toContain(outside);
-      expect(f.writes).toEqual([{ planId: null }]); f.isolated();
+      expect(f.writes).toEqual([{ planId: null, expectedVersion: expect.stringMatching(/^[a-f0-9]{64}$/) }]); f.isolated();
       expect((await db.query("SELECT plan_id FROM ortho_cases WHERE id = $1 AND patient_id = $2", [caseId, patientId])).rows).toEqual([{ plan_id: planId }]);
       expect(await moneySnapshot()).toEqual(before);
     } finally {

@@ -43,12 +43,15 @@ type Props = ComponentProps<typeof OrthoPackageLink>;
 type Element = ReactElement<Record<string, unknown>>;
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 const onChanged = vi.fn();
+const observationMock = vi.fn<() => Promise<Response>>();
 const defaults: Props = { patientId: 19, caseId: 41, planId: 51, canLink: true, onChanged };
 const fixture = (extra: Record<string, unknown> = {}) => ({
   id: 51, patientId: 19, title: "Synthetic existing agreement", status: "active", installments: [{ id: 61 }], ...extra,
 });
 const response = (plans: unknown = [fixture()], status = 200) => Response.json({ plans }, { status });
+let observedProps: Props;
 function render(overrides: Partial<Props> = {}) {
+  observedProps = { ...defaults, ...overrides };
   hooks.cursor = 0;
   const scope = OrthoPackageLink({ ...defaults, ...overrides });
   // The pre-fix component has no keyed child; this branch supports the
@@ -100,7 +103,13 @@ const writes = () => fetchMock.mock.calls.filter(([, init]) => init?.method);
 beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.effects.clear(); hooks.pending = []; hooks.key = null;
   authority.current = { username: "synthetic-doctor", role: "doctor", permissions: {} } as SessionInfo;
-  fetchMock.mockReset(); onChanged.mockReset(); vi.stubGlobal("fetch", fetchMock);
+  observationMock.mockReset();
+  observationMock.mockImplementation(() => Promise.resolve(Response.json({ caseId: observedProps.caseId, patientId: observedProps.patientId,
+    planId: observedProps.planId, status: "active", observedVersion: "a".repeat(64) })));
+  fetchMock.mockReset(); onChanged.mockReset(); vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+    if (url.endsWith("/plan-link")) return observationMock();
+    return fetchMock(url, init);
+  });
 });
 afterEach(() => {
   for (const entry of hooks.effects.values()) entry.cleanup?.();
@@ -146,7 +155,7 @@ describe("orthodontic agreement read states", () => {
   });
   it("reports only the missing legacy link, without an obsolete direct-plan creation link", async () => {
     fetchMock.mockResolvedValue(response([])); render({ planId: null }); await settle();
-    const tree = render({ planId: null }); expect(text(tree)).toContain("لا يوجد رابط خطة أقساط قديم");
+    const tree = render({ planId: null }); expect(text(tree)).toContain("لم تُربط خطة علاج بهذه الحالة");
     expect(text(tree)).not.toContain("لا اتفاق مالي مربوط بالحالة");
     const links = nodes(tree).filter((node) => node.type === "a"); expect(links).toHaveLength(0);
     expect(writes()).toEqual([]);
@@ -166,7 +175,7 @@ describe("orthodontic agreement read states", () => {
       fixture({ id: 52, title: "Synthetic proposal", installments: [], agreementApproved: false })]));
     render({ planId: null }); await settle();
     const options = nodes(render({ planId: null })).filter((node) => node.type === "option").map((node) => text(node));
-    expect(options).toEqual(["اختر اتفاق الأقساط…", "Synthetic existing agreement — اتفاق معتمد"]);
+    expect(options).toEqual(["اختر اتفاقًا قائمًا…", "Synthetic existing agreement — اتفاق معتمد"]);
   });
   it("FIN-INT-4: a cancelled approved plan neither funds nor is offered", async () => {
     fetchMock.mockResolvedValue(response([fixture({ status: "cancelled", installments: [], agreementApproved: true })])); render(); await settle();
@@ -236,21 +245,44 @@ describe("orthodontic agreement scope retirement", () => {
 });
 
 describe("existing explicit linking actions", () => {
-  it("keeps the canonical unlink PATCH exact and suppresses same-turn duplicate clicks", async () => {
-    const write = deferred(); fetchMock.mockResolvedValueOnce(response()).mockReturnValueOnce(write.promise);
-    render(); await settle(); const unlink = button(render(), "فكّ الربط"); click(unlink); click(unlink);
-    expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: null }) }]]);
-    write.resolve(Response.json({ ok: true })); await settle(); expect(onChanged).toHaveBeenCalledTimes(1);
-  });
-  it("links only the explicitly chosen existing funded plan", async () => {
-    fetchMock.mockResolvedValueOnce(response([fixture(), fixture({ id: 52, status: "cancelled" }), fixture({ id: 53, installments: [] })]))
-      .mockResolvedValueOnce(Response.json({ ok: true }));
+  it.each(["active", "completed"])("saves an explicitly selected %s approved agreement without installments", async (status) => {
+    fetchMock.mockResolvedValueOnce(response([fixture({ status, installments: [], agreementApproved: true })]))
+      .mockResolvedValueOnce(Response.json({ ok: true, caseId: 41, planId: 51, changed: true }));
     render({ planId: null }); await settle();
     const select = nodes(render({ planId: null })).find((node) => node.type === "select")!;
     expect(nodes(select).filter((node) => node.type === "option").map((node) => node.props.value)).toEqual(["", 51]);
     (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "51" } });
     click(button(render({ planId: null }), "اربط")); await settle();
-    expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: 51 }) }]]);
+    expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: 51, expectedVersion: "a".repeat(64) }) }]]);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    { status: "cancelled", installments: [], agreementApproved: true },
+    { status: "active", installments: [], agreementApproved: false },
+  ])("rejects a forced ineligible selection despite another eligible option: %j", async (ineligible) => {
+    fetchMock.mockResolvedValue(response([fixture(), fixture({ id: 52, ...ineligible })]));
+    render({ planId: null }); await settle();
+    const select = nodes(render({ planId: null })).find((node) => node.type === "select")!;
+    expect(nodes(select).filter((node) => node.type === "option").map((node) => node.props.value)).toEqual(["", 51]);
+    (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "52" } });
+    click(button(render({ planId: null }), "اربط")); await settle();
+    expect(writes()).toEqual([]); expect(onChanged).not.toHaveBeenCalled();
+  });
+  it("keeps the canonical unlink PATCH exact and suppresses same-turn duplicate clicks", async () => {
+    const write = deferred(); fetchMock.mockResolvedValueOnce(response()).mockReturnValueOnce(write.promise);
+    render(); await settle(); const unlink = button(render(), "فكّ الربط"); click(unlink); click(unlink);
+    expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: null, expectedVersion: "a".repeat(64) }) }]]);
+    write.resolve(Response.json({ ok: true, caseId: 41, planId: null, changed: true })); await settle(); expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+  it("links only the explicitly chosen existing funded plan", async () => {
+    fetchMock.mockResolvedValueOnce(response([fixture(), fixture({ id: 52, status: "cancelled" }), fixture({ id: 53, installments: [] })]))
+      .mockResolvedValueOnce(Response.json({ ok: true, caseId: 41, planId: 51, changed: true }));
+    render({ planId: null }); await settle();
+    const select = nodes(render({ planId: null })).find((node) => node.type === "select")!;
+    expect(nodes(select).filter((node) => node.type === "option").map((node) => node.props.value)).toEqual(["", 51]);
+    (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "51" } });
+    click(button(render({ planId: null }), "اربط")); await settle();
+    expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: 51, expectedVersion: "a".repeat(64) }) }]]);
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
   it("never acts on a synthetic selection not present in the confirmed agreements", async () => {
@@ -262,7 +294,7 @@ describe("existing explicit linking actions", () => {
   it("does not forward a retired write result to the new patient", async () => {
     const write = deferred(); fetchMock.mockResolvedValueOnce(response()).mockReturnValueOnce(write.promise).mockReturnValueOnce(deferred().promise);
     render(); await settle(); click(button(render(), "فكّ الربط"));
-    render({ patientId: 20 }); write.resolve(Response.json({ ok: true })); await settle();
+    render({ patientId: 20 }); write.resolve(Response.json({ ok: true, caseId: 41, planId: null, changed: true })); await settle();
     unknown(render({ patientId: 20 })); expect(onChanged).not.toHaveBeenCalled(); expect(writes()).toHaveLength(1);
   });
   it("preserves explicit write errors without fabricating a successful unlink", async () => {
@@ -275,5 +307,47 @@ describe("existing explicit linking actions", () => {
     fetchMock.mockResolvedValue(response()); render({ canLink: false }); await settle();
     expect(nodes(render({ canLink: false })).filter((node) => ["button", "select", "a"].includes(String(node.type)))).toEqual([]);
     expect(writes()).toEqual([]);
+  });
+});
+
+
+describe("versioned link reconciliation", () => {
+  it("blocks every stale write after a lost response until explicit fresh-read review", async () => {
+    fetchMock.mockResolvedValueOnce(response()).mockRejectedValueOnce(new Error("synthetic lost response")).mockResolvedValue(response());
+    render(); await settle(); const old = button(render(), "فكّ الربط"); click(old); await settle();
+    let tree = render();
+    expect(text(tree)).toContain("لن نعيد الإرسال تلقائيًا");
+    expect(text(tree)).not.toContain("راجعت النتيجة؛ ابدأ اختيارًا جديدًا");
+    click(old); await settle(); expect(writes()).toHaveLength(1);
+    observationMock.mockResolvedValueOnce(Response.json({ caseId: 41, patientId: 19, planId: null, status: "active", observedVersion: "b".repeat(64) }));
+    click(button(tree, "تحقق من الارتباط الحالي")); render(); await settle(); tree = render();
+    expect(text(tree)).toMatch(/القراءة الحالية:\s+بلا رابط/);
+    expect(writes()).toHaveLength(1); expect(onChanged).not.toHaveBeenCalled();
+    click(button(tree, "راجعت النتيجة؛ ابدأ اختيارًا جديدًا")); tree = render();
+    click(old); await settle(); expect(writes()).toHaveLength(1);
+    const select = nodes(tree).find(node => node.type === "select")!;
+    (select.props.onChange as (event: { target: { value: string } }) => void)({target:{value:"51"}});
+    fetchMock.mockResolvedValueOnce(Response.json({ok:true,caseId:41,planId:51,changed:true}));
+    click(button(render(), "اربط")); await settle();
+    expect(JSON.parse(writes()[1][1]!.body as string)).toEqual({planId:51,expectedVersion:"b".repeat(64)});
+  });
+  it("never uses a missing, mismatched or malformed observation as write authority", async () => {
+    fetchMock.mockResolvedValue(response());
+    observationMock.mockResolvedValue(Response.json({caseId:999,patientId:19,planId:51,observedVersion:"bad",status:"active"}));
+    render(); await settle(); const tree = render(); unknown(tree);
+    expect(text(tree)).toContain("تعذّر تحميل"); expect(writes()).toEqual([]);
+  });
+  it("a denied observation retires controls even if the plan list was readable", async () => {
+    fetchMock.mockResolvedValue(response()); observationMock.mockResolvedValue(Response.json({}, {status:403}));
+    render(); await settle(); unknown(render()); expect(text(render())).toContain("بصلاحية الجلسة الحالية"); expect(writes()).toEqual([]);
+  });
+});
+
+describe("write confirmation integrity", () => {
+  it.each([{}, {ok:true}, {ok:true,caseId:999,planId:null,changed:true}, {ok:true,caseId:41,planId:51,changed:true}])("reconciles malformed or mismatched 2xx %j", async payload => {
+    fetchMock.mockResolvedValueOnce(response()).mockResolvedValueOnce(Response.json(payload));
+    render(); await settle(); const stale = button(render(), "فكّ الربط"); click(stale); await settle();
+    expect(onChanged).not.toHaveBeenCalled(); expect(text(render())).toContain("تحقّق من الحالة");
+    click(stale); await settle(); expect(writes()).toHaveLength(1);
   });
 });

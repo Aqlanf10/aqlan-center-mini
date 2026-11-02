@@ -26,7 +26,7 @@ const DRAFT_BODY = {
   diagnosis: "خراج لبي",
   notes: "",
   instructionsLang: "both",
-  items: [{ name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" }],
+  items: [{ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" }],
 };
 
 function draftOf(body: Record<string, unknown> = DRAFT_BODY): PrescriptionDraft {
@@ -212,7 +212,7 @@ describe("ربط الإقرار بالوصفة نفسها وبالتحذيرات
       now: T0,
     });
     const added = draftOf();
-    added.items.push({ name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" });
+    added.items.push({ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" });
     expect(
       verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: added, warnings: METRO_IN_PREGNANCY, now: T0 + 60 * 1000 }),
     ).toEqual({ ok: false, failure: "bad_signature" });

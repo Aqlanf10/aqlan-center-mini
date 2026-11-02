@@ -66,8 +66,16 @@ describe("legacy compatibility link versus canonical financial source over HTTP"
 
   it("unlinking changes classification independently of the retained plan and creates no debt", async () => {
     const before = await state();
-    const response = await authedMutation(`/api/ortho/${caseId}`, h.sessions.admin, "PATCH", JSON.stringify({ planId: null }));
+    const observation = await authedGet(`/api/ortho/${caseId}/plan-link`, h.sessions.admin);
+    expect(observation.status).toBe(200);
+    const view = await observation.json();
+    expect(view).toMatchObject({ caseId, patientId, planId, observedVersion: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const response = await authedMutation(`/api/ortho/${caseId}`, h.sessions.admin, "PATCH", JSON.stringify({ planId: null, expectedVersion: view.observedVersion }));
     expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, caseId, planId: null, changed: true });
+    // Even a same-target repeat must not bypass stale-version admission.
+    const stale = await authedMutation(`/api/ortho/${caseId}`, h.sessions.admin, "PATCH", JSON.stringify({ planId: null, expectedVersion: view.observedVersion }));
+    expect(stale.status).toBe(409);
     const read = await authedGet(path(), h.sessions.admin);
     expect(read.status).toBe(200);
     expect(await read.json()).toMatchObject({ onboarding: {
