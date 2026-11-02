@@ -75,7 +75,7 @@ export function canonicalPrescriptionForAck(draft: PrescriptionDraft): string {
       item.instructionsEn,
       ...(item.selection ? [item.selection.id, item.selection.amount, item.selection.confirmed] : []),
       ...(item.selection?.catalog ? [item.selection.catalog.id, item.selection.catalog.revision] : []),
-      ...(item.selection?.doseReview ? ["dose-review-v1", canonicalMedicationDoseProvenance(item.selection.doseReview)] : []),
+      ...(item.selection?.doseReview ? [`dose-review-v${item.selection.doseReview.version}`, canonicalMedicationDoseProvenance(item.selection.doseReview)] : []),
     ]),
   });
 }

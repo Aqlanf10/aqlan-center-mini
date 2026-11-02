@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import { expect,it } from 'vitest';
 import { DOSE_REFERENCE_VERSION } from '../lib/medication-dose-profiles';
 import { parseDoseReviewInput,type DoseReviewInput } from '../lib/medication-dose-review';
@@ -20,3 +21,10 @@ it('saved snapshots remain readable without reauthorization against a new refere
 it('non-profile canonical command bytes remain exactly unchanged',()=>{const item=row();delete item.selection!.doseReview;const d=draft(item);const old=JSON.stringify({version:1,patientId:d.patientId,visitId:d.visitId,prescribingDoctorPartyId:d.prescribingDoctorPartyId,diagnosis:d.diagnosis,notes:d.notes,instructionsLang:d.instructionsLang,items:d.items.map(i=>[i.name,i.dose,i.form,i.frequency,i.duration,i.instructions,i.instructionsEn,i.selection?.id??null,i.selection?.amount??null,i.selection?.confirmed??null])});expect(canonicalPrescriptionCommand(d)).toBe(old);});
 
 it('does not serialize age, weight or product-label snapshot into draft print query items',()=>{const item=row(),printed=prescriptionDraftPrintItems([item]);expect(printed[0].selection).not.toHaveProperty('doseReview');const query=JSON.stringify(printed);expect(query).not.toContain('weightKg');expect(query).not.toContain('synthetic.invalid');expect(item.selection).toHaveProperty('doseReview');expect(printed[0].selection?.confirmed).toBe(true);});
+
+it('preserves published fab4 v1 snapshot, command and acknowledgement golden bytes',()=>{
+ const item=row(),d=draft(item),sha=(value:string)=>createHash('sha256').update(value).digest('hex');
+ expect(sha(canonicalMedicationDoseProvenance(item.selection!.doseReview!))).toBe('f425549035e9ebc2e6405aff9a0da6759fa5adab7353e54714d584497336f6c2');
+ expect(sha(canonicalPrescriptionCommand(d))).toBe('6ef7fba16f8a8ce79baf4b443a676e7cd9d6df93d61eead9e1a8743c0228a1bc');
+ expect(sha(canonicalPrescriptionForAck(d))).toBe('1054fb29ca9810503e08f979044798fe80f79c58f6ff3d111f56ed1a239d30c5');
+});

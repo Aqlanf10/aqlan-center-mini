@@ -190,7 +190,8 @@ it("actual PG catalogue detector keeps unrelated binding artifacts legacy and qu
   } finally { await db.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`); }
 });
 
-it('built dose-profile picker reviews inputs, issues one snapshot, recovers and keeps reception saved-print only after visit closure', async () => {
+it.each(['amoxicillin','ibuprofen'] as const)('built %s dose-profile picker issues one snapshot, recovers and preserves reception saved printing before and after closure', async ingredient => {
+  const ibu=ingredient==='ibuprofen',amount=ibu?'7.5 mL (150 mg)':'4 mL (200 mg)';
   const doctor=(await db.query("SELECT party_id FROM users WHERE username='secdoctora'")).rows[0];
   const reception=(await db.query("SELECT id,permissions FROM users WHERE username='secreception'")).rows[0];
   const patient=(await db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'مريض جرعة اصطناعي',$2) RETURNING id",[`DOSE-RX-${Date.now()}`,doctor.party_id])).rows[0];
@@ -204,18 +205,19 @@ it('built dose-profile picker reviews inputs, issues one snapshot, recovers and 
     const page=await context.newPage();await page.goto(`${baseUrl}/visits/${visit.id}`);
     await page.getByRole('button',{name:'💊 روشتة طبية (℞)',exact:true}).click();
     await page.locator('summary').filter({hasText:'الجرعات والتعليمات حسب الاستطباب والمرجع'}).click();
-    await page.getByLabel('الملف المرجعي للجرعة',{exact:true}).selectOption('amoxicillin-child-aapd-q8');
-    for(const [label,value] of Object.entries({'الاستطباب المراجع':'Synthetic clinician-reviewed indication','العمر بأشهر مكتملة من تاريخ الميلاد':'60','الوزن الحالي kg':'20','المقدار المختار mg/kg/day':'30','عدد الجرعات خلال24ساعة':'3','الفاصل الأدنى بالساعات':'8','المدة المختارة بالأيام':'5','خطة المراجعة والإيقاف':'Synthetic review and stop plan','اسم المستحضر الفعلي':'Synthetic suspension','قوة المنتج mg':'250','رابط نشرة المستحضر HTTPS':'https://synthetic.invalid/product-label','أدنى عمر للمنتج بالأشهر وفق النشرة':'4','المادة نفسها من جميع المصادر الأخرى mg/24h — اكتب0 بعد التحقق':'0'}))await page.getByLabel(label,{exact:true}).fill(value);
-    await page.getByLabel('مادة المنتج',{exact:true}).selectOption('amoxicillin');
+    await page.getByLabel('الملف المرجعي للجرعة',{exact:true}).selectOption(ibu?'ibuprofen-child-sdcep':'amoxicillin-child-aapd-q8');
+    for(const [label,value] of Object.entries({'الاستطباب المراجع':'Synthetic clinician-reviewed indication','العمر بأشهر مكتملة من تاريخ الميلاد':'60','الوزن الحالي kg':'20',[ibu?'المقدار المختار mg/dose':'المقدار المختار mg/kg/day']:ibu?'150':'30','عدد الجرعات خلال24ساعة':'3','الفاصل الأدنى بالساعات':'8','المدة المختارة بالأيام':'5','خطة المراجعة والإيقاف':'Synthetic review and stop plan','اسم المستحضر الفعلي':'Synthetic suspension','قوة المنتج mg':ibu?'100':'250','رابط نشرة المستحضر HTTPS':'https://synthetic.invalid/product-label','أدنى عمر للمنتج بالأشهر وفق النشرة':ibu?'6':'4','المادة نفسها من جميع المصادر الأخرى mg/24h — اكتب0 بعد التحقق':'0'}))await page.getByLabel(label,{exact:true}).fill(value);
+    await page.getByLabel('مادة المنتج',{exact:true}).selectOption(ingredient);
     await page.getByLabel('الشكل والطريق',{exact:true}).selectOption('oral-liquid');
     await page.getByLabel('حجم المقام mL بعد التحضير',{exact:true}).fill('5');await page.getByLabel('تدريج أداة القياس mL',{exact:true}).fill('0.1');
-    for(const label of ['تحققت من العمر الدقيق؛ لم أستنتجه من سنة الميلاد فقط','تحققت من الوزن الحالي لهذا المريض','راجعت المادة والشكل والقوة وعمر المنتج وأداة القياس من النشرة الفعلية','راجعت الحساسية والتداخلات والحالات الخاصة؛ لا تحتاج الحالة تعديلًا خارج هذا الملف','قررت استطباب المضاد ومعالجة السبب؛ لا مضاد تلقائي للألم أو الخلع'])await page.getByLabel(label,{exact:true}).check();
+    if(ibu){await page.getByLabel('أقل فاصل بالساعات من نشرة المنتج',{exact:true}).fill('6');await page.getByLabel('أقصى عدد جرعات خلال24ساعة من نشرة المنتج',{exact:true}).fill('3');}
+    for(const label of ['تحققت من العمر الدقيق؛ لم أستنتجه من سنة الميلاد فقط','تحققت من الوزن الحالي لهذا المريض','راجعت المادة والشكل والقوة وعمر المنتج وأداة القياس من النشرة الفعلية','راجعت الحساسية والتداخلات والحالات الخاصة؛ لا تحتاج الحالة تعديلًا خارج هذا الملف',...(ibu?[]:['قررت استطباب المضاد ومعالجة السبب؛ لا مضاد تلقائي للألم أو الخلع'])])await page.getByLabel(label,{exact:true}).check();
     const confirm=page.getByLabel('راجعت هذه المدخلات والنتيجة والتعليمات لهذا المريض',{exact:true});
     const add=page.getByRole('button',{name:'نقل الجرعة والتعليمات إلى مسودة غير مؤكدة',exact:true});
-    await expect.poll(()=>page.locator('[data-dose-form]').innerText()).toContain('4 mL (200 mg)');
+    await expect.poll(()=>page.locator('[data-dose-form]').innerText()).toContain(amount);
     await confirm.check();await page.getByLabel('الوزن الحالي kg',{exact:true}).fill('21');expect(await confirm.isChecked()).toBe(false);expect(await add.isDisabled()).toBe(true);
-    await page.getByLabel('الوزن الحالي kg',{exact:true}).fill('20');await confirm.check();await page.getByLabel('قوة المنتج mg',{exact:true}).fill('125');expect(await confirm.isChecked()).toBe(false);await expect.poll(()=>page.locator('[data-dose-form]').innerText()).toContain('8 mL (200 mg)');
-    await page.getByLabel('قوة المنتج mg',{exact:true}).fill('250');await confirm.check();await add.click();
+    await page.getByLabel('الوزن الحالي kg',{exact:true}).fill('20');await confirm.check();await page.getByLabel('قوة المنتج mg',{exact:true}).fill(ibu?'50':'125');expect(await confirm.isChecked()).toBe(false);await expect.poll(()=>page.locator('[data-dose-form]').innerText()).toContain(ibu?'15 mL (150 mg)':'8 mL (200 mg)');
+    await page.getByLabel('قوة المنتج mg',{exact:true}).fill(ibu?'100':'250');await confirm.check();await add.click();
     await page.getByLabel('راجعت الاستطباب والحساسية والشكل والتركيز والجرعة والتكرار والمدة لهذا السطر. هذا لا يلغي تنبيهات السلامة.',{exact:true}).check();
     const waitResponse=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/prescriptions'&&r.request().method()==='POST');
     let pending=waitResponse();await page.getByRole('button',{name:'طباعة الروشتة (A6)',exact:true}).click();let response=await pending;
@@ -223,7 +225,8 @@ it('built dose-profile picker reviews inputs, issues one snapshot, recovers and 
     expect(response.status(),await response.text()).toBe(201);const saved=await response.json();const command=response.request().postDataJSON();
     const before=(await db.query('SELECT * FROM prescriptions WHERE id=$1',[saved.id])).rows[0];
     const items=typeof before.items==='string'?JSON.parse(before.items):before.items;
-    expect(items[0]).toMatchObject({dose:'250 mg/5 mL',frequency:'Every 8 hours (3 doses/24h)',selection:{amount:'4 mL (200 mg)',doseReview:{mode:'calculated',input:{ageMonths:60,weightKg:20,product:{strengthMg:250,perMl:5}},result:{mgPerDose:200,mgPer24h:600,mlPerDose:4}}}});
+    expect(items[0]).toMatchObject({dose:ibu?'100 mg/5 mL':'250 mg/5 mL',frequency:ibu?'3 times daily; at least 8 hours apart':'Every 8 hours (3 doses/24h)',selection:{amount,doseReview:{version:ibu?2:1,mode:'calculated',input:{ageMonths:60,weightKg:20,product:{strengthMg:ibu?100:250,perMl:5,...(ibu?{minimumIntervalHours:6,maxAdministrationsPer24h:3}:{})}},result:{mgPerDose:ibu?150:200,mgPer24h:ibu?450:600,mlPerDose:ibu?7.5:4}}}});
+    if(ibu){expect(items[0].instructionsEn).toContain('Preferably after food.');expect(items[0].frequency).toContain('at least 8 hours apart');}
     expect(before.created_by).toBe('secdoctora');expect(before.prescribing_doctor_party_id).toBe(doctor.party_id);
     const replay=await post('/api/prescriptions',command);expect(replay.status).toBe(201);expect(await replay.json()).toMatchObject({id:saved.id,replayed:true});
     const recovered=await read(`/api/prescriptions/commands/${command.commandKey}?patientId=${patient.id}&visitId=${visit.id}&prescribingDoctorPartyId=${doctor.party_id}`,'doctorA');expect(recovered.status).toBe(200);expect(await recovered.json()).toMatchObject({id:saved.id,state:'completed'});
@@ -232,9 +235,9 @@ it('built dose-profile picker reviews inputs, issues one snapshot, recovers and 
     const printPath=`/print/prescription/${patient.id}?rx=${saved.id}`;
     expect((await read(printPath)).status).toBe(200);
     const sign=await post(`/api/visits/${visit.id}/clinical`,{action:'sign'});expect(sign.status,await sign.text()).toBe(200);
-    const received=await read(printPath);expect(received.status).toBe(200);const html=await received.text();expect(html).toContain('4 mL (200 mg)');for(const secret of ['weightKg','product-label','data-dose-form'])expect(html).not.toContain(secret);
+    const received=await read(printPath);expect(received.status).toBe(200);const html=await received.text();expect(html).toContain(amount);if(ibu){expect(html).toContain('Preferably after food.');expect(html).toContain('at least 8 hours apart');}for(const secret of ['weightKg','product-label','data-dose-form'])expect(html).not.toContain(secret);
     const receptionPage=await receiveContext.newPage();await receptionPage.goto(`${baseUrl}/patients/${patient.id}`);expect(await receptionPage.locator('[data-dose-profile-review]').count()).toBe(0);
-    await receptionPage.goto(`${baseUrl}${printPath}`);await mkdir('.settings-ui-artifacts/prescription-dose',{recursive:true});await receptionPage.screenshot({path:'.settings-ui-artifacts/prescription-dose/saved-calculated.png',fullPage:true});await receptionPage.pdf({path:'.settings-ui-artifacts/prescription-dose/saved-calculated.pdf',preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false});
+    await receptionPage.goto(`${baseUrl}${printPath}`);await mkdir('.settings-ui-artifacts/prescription-dose',{recursive:true});await receptionPage.screenshot({path:`.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.png`,fullPage:true});await receptionPage.pdf({path:`.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.pdf`,preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false});
     expect((await read(`/print/prescription/${patient.id}?draft=1&items=[]`)).status).toBe(404);
     expect((await db.query('SELECT * FROM prescriptions WHERE id=$1',[saved.id])).rows[0]).toEqual(before);
     expect(Number((await db.query('SELECT count(*) n FROM prescriptions WHERE patient_id=$1',[patient.id])).rows[0].n)).toBe(1);

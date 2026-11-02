@@ -22,3 +22,7 @@ describe('source-bound dose review without clinical activation',()=>{
 });
 
 it('rejects ingredient mismatch, compound formulation, missing label and schedule-kind confusion',()=>{for(const change of [{product:{...base().product,ingredientId:'paracetamol' as const}},{product:{...base().product,labelUrl:''}},{scheduleKind:'prn-max' as const},{ageVerified:false}])expect(reviewMedicationDose({...base(),...change})).toMatchObject({ok:false});});
+
+it.each([Number.MIN_VALUE,1e-16])('rejects nonrepresentable measurement tick counts %s',measurementIncrementMl=>{expect(reviewMedicationDose({...base(),product:{...base().product,measurementIncrementMl}})).toMatchObject({ok:false});});
+it('rejects positive volume rounding to zero measurement ticks',()=>{expect(reviewMedicationDose({...base(),weightKg:1e-10})).toMatchObject({ok:false});});
+it('rejects overflowing derived tablet count in supported APAP form',()=>{expect(reviewMedicationDose({...apap(),product:{...apap().product,kind:'tablet',strengthMg:Number.MIN_VALUE}})).toMatchObject({ok:false});});

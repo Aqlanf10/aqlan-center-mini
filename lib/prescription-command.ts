@@ -7,7 +7,7 @@ export function canonicalPrescriptionCommand(draft: PrescriptionDraft): string {
     prescribingDoctorPartyId: draft.prescribingDoctorPartyId ?? null,
     diagnosis: draft.diagnosis, notes: draft.notes, instructionsLang: draft.instructionsLang,
     items: draft.items.map(item => [item.name, item.dose, item.form, item.frequency, item.duration,
-      item.instructions, item.instructionsEn, item.selection?.id ?? null, item.selection?.amount ?? null, item.selection?.confirmed ?? null, ...(item.selection?.catalog ? [item.selection.catalog.id, item.selection.catalog.revision] : []), ...(item.selection?.doseReview ? ["dose-review-v1", canonicalMedicationDoseProvenance(item.selection.doseReview)] : [])]),
+      item.instructions, item.instructionsEn, item.selection?.id ?? null, item.selection?.amount ?? null, item.selection?.confirmed ?? null, ...(item.selection?.catalog ? [item.selection.catalog.id, item.selection.catalog.revision] : []), ...(item.selection?.doseReview ? [`dose-review-v${item.selection.doseReview.version}`, canonicalMedicationDoseProvenance(item.selection.doseReview)] : [])]),
   });
 }
 export function validPrescriptionCommandKey(value: unknown): value is string {

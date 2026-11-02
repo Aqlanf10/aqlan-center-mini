@@ -684,6 +684,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Explicit synthetic calculated saved-print evidence only. No traces,
+      # request payloads, browser state or broad artifact directory uploads.
+      - name: Upload calculated prescription saved print evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prescription-calculated-saved-print
+          path: |
+            .settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.png
+            .settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.pdf
+            .settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.png
+            .settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.pdf
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Exact synthetic current-statement browser/PDF evidence only.
       - name: Upload current patient statement print artifacts
         if: always()

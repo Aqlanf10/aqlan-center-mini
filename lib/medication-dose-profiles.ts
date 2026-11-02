@@ -11,7 +11,7 @@ export type DoseProfileId = string;
 export type DoseBasis = 'mg/dose' | 'mg/kg/dose' | 'mg/kg/day';
 export interface DoseCalculationRule {
   profileId: string;
-  medicationId: 'paracetamol' | 'amoxicillin';
+  medicationId: 'paracetamol' | 'amoxicillin' | 'ibuprofen';
   basis: DoseBasis;
   scheduleKind: 'times-per-day' | 'prn-max' | 'fixed-interval';
   range: readonly [number, number];
@@ -25,6 +25,9 @@ export interface DoseCalculationRule {
   dailyMaxMg?: number;
   dailyMaxMgPerKg?: number;
   requiresLabelSingleMax?: boolean;
+  requiresProductSchedule?: boolean;
+  instructionsAr?: string;
+  instructionsEn?: string;
   antibiotic: boolean;
   sourceDurationDays?: number;
   /** Conservative app scope, not a claim that the source forbids younger ages. */
@@ -47,10 +50,31 @@ const rules: readonly DoseCalculationRule[] = [
     ageMonths:{min:3,minExclusive:true,maxExclusive:216}, weightBelowKg:40, weightRequired:true,
     administrations:[2], minimumIntervalHours:12, singleMaxMg:875, antibiotic:true,
     scopeNote:'نظام مستقل كل12ساعة؛ لا يستبدل التكرار داخل نظام8ساعات. يلزم منتج ومدة واستطباب مراجعون؛ راجع قيود قوة875 عند القصور الكلوي.' },
+  // SDCEP odontogenic pain example, verified 2026-11-02. Product label supplies
+  // the minimum interval: the source page does not specify one.
+  { profileId:'ibuprofen-adult-sdcep',medicationId:'ibuprofen',basis:'mg/dose',scheduleKind:'times-per-day',range:[400,400],
+    ageMonths:{min:216},weightRequired:true,administrations:[4],minimumIntervalHours:0,dailyMaxMg:2400,antibiotic:false,sourceDurationDays:5,requiresProductSchedule:true,
+    instructionsAr:'يفضل تناوله بعد الطعام.',instructionsEn:'Preferably after food.',
+    scopeNote:'مثال بالغ400mg أربع مرات فقط؛ لا رفع تلقائي إلى2.4g. تحقّق من النشرة والحساسية والأسبرين والقرحة والكلى والحمل والتداخلات؛ الحالات الخاصة خارج المحول.' },
+  { profileId:'ibuprofen-child-sdcep',medicationId:'ibuprofen',basis:'mg/dose',scheduleKind:'times-per-day',range:[50,400],
+    ageMonths:{min:6,maxExclusive:216},weightRequired:true,administrations:[3,4],minimumIntervalHours:0,dailyMaxMgPerKg:30,antibiotic:false,sourceDurationDays:5,requiresProductSchedule:true,
+    instructionsAr:'يفضل تناوله بعد الطعام.',instructionsEn:'Preferably after food.',
+    scopeNote:'نظام SDCEP مستقل بحسب العمر مع سقف30mg/kg/day؛ لا40mg/kg من مرجع آخر. حد عدد الجرعات والفاصل من المنتج إلزاميان؛ تعارضهما يرفض الحساب. مراجعة NSAID ليست ضمان سلامة طبيًا.' },
 ];
 for (const rule of rules) { Object.freeze(rule.range); Object.freeze(rule.ageMonths); Object.freeze(rule.administrations); Object.freeze(rule); }
-export function doseCalculationRule(id: string): DoseCalculationRule | undefined {
-  return rules.find(rule=>rule.profileId===id);
+const ibuprofenBands: readonly (readonly [number,number,number,number,number])[] = [
+  [6,12,50,50,4],[12,48,100,100,3],[48,84,150,150,3],
+  [84,120,200,200,3],[120,144,300,300,3],[144,216,300,400,4],
+];
+export function doseCalculationRule(id: string,ageMonths?:number): DoseCalculationRule | undefined {
+  const rule=rules.find(rule=>rule.profileId===id);
+  if(!rule||id!=='ibuprofen-child-sdcep'||ageMonths===undefined)return rule;
+  if(!Number.isInteger(ageMonths))return undefined;
+  const band=ibuprofenBands.find(([min,max])=>ageMonths>=min&&ageMonths<max);
+  if(!band)return undefined;
+  return Object.freeze({...rule,range:Object.freeze([band[2],band[3]]) as readonly [number,number],
+    ageMonths:Object.freeze({min:band[0],maxExclusive:band[1]}),administrations:Object.freeze([band[4]]),
+    ...(ageMonths>=84?{dailyMaxMg:2400}:{})});
 }
 export function doseReference(id: string) { return DOSE_REFERENCES.find(profile=>profile.id===id); }
 export function doseProfileCalculationBlocker(id: string): string | null {

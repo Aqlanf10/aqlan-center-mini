@@ -1,6 +1,6 @@
 import { DOSE_REFERENCE_VERSION } from "../../lib/medication-dose-profiles";
 import { createCalculatedDoseProvenance, calculatedDoseFields } from "../../lib/medication-dose-provenance";
-const rxFixture = vi.hoisted(() => ({ long: false, longIdentity: false, calculated: false }));
+const rxFixture = vi.hoisted(() => ({ long: false, longIdentity: false, calculated: false, ibuprofen: false }));
 vi.mock("@/lib/prescription-prescriber", () => ({ prescriptionPrescriberOptions: async () => ({ issuerId: 5, canChooseAnyDoctor: false, doctors: [{ id: 5, name: "SYN-DRAFT-CLINICIAN" }] }) }));
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,9 +17,10 @@ import { dispatchOrder } from "../fixtures/lab-dispatch";
 import { assertLabDispatchPdfFields } from "../helpers/lab-dispatch-pdf-fields";
 
 function calculatedRxItem() {
- const input={profileId:'amoxicillin-child-aapd-q8',referenceVersion:DOSE_REFERENCE_VERSION,indication:'Synthetic reviewed indication',ageMonths:60,ageVerified:true,weightKg:20,currentWeightVerified:true,selectedDose:30,administrationsPer24h:3,scheduleKind:'fixed-interval' as const,intervalHours:8,durationDays:5,reviewPlan:'SYN-CALCULATED-PLAN '+('Review synthetic instructions and follow-up. '.repeat(7))+'SYN-CALCULATED-END',product:{name:'SYN-LONG-PRODUCT '+('synthetic '.repeat(12)),ingredientId:'amoxicillin' as const,formulation:'single-ingredient' as const,labelUrl:'https://synthetic.invalid/label',kind:'oral-liquid' as const,strengthMg:250,perMl:5,measurementIncrementMl:0.1,minimumAgeMonths:4,labelVerified:true},otherSameIngredientMg24h:0,specialPopulationOrInteraction:false,antibioticIndicationReviewed:true};
+ const baseInput={profileId:'amoxicillin-child-aapd-q8',referenceVersion:DOSE_REFERENCE_VERSION,indication:'Synthetic reviewed indication',ageMonths:60,ageVerified:true,weightKg:20,currentWeightVerified:true,selectedDose:30,administrationsPer24h:3,scheduleKind:'fixed-interval' as const,intervalHours:8,durationDays:5,reviewPlan:'SYN-CALCULATED-PLAN '+('Review synthetic instructions and follow-up. '.repeat(7))+'SYN-CALCULATED-END',product:{name:'SYN-LONG-PRODUCT '+('synthetic '.repeat(12)),ingredientId:'amoxicillin' as const,formulation:'single-ingredient' as const,labelUrl:'https://synthetic.invalid/label',kind:'oral-liquid' as const,strengthMg:250,perMl:5,measurementIncrementMl:0.1,minimumAgeMonths:4,labelVerified:true},otherSameIngredientMg24h:0,specialPopulationOrInteraction:false,antibioticIndicationReviewed:true};
+ const input=rxFixture.ibuprofen?{...baseInput,profileId:'ibuprofen-child-sdcep',selectedDose:150,scheduleKind:'times-per-day' as const,product:{...baseInput.product,ingredientId:'ibuprofen' as const,strengthMg:100,minimumAgeMonths:6,minimumIntervalHours:6,maxAdministrationsPer24h:3}}:baseInput;
  const doseReview=createCalculatedDoseProvenance(input);if(!doseReview)throw Error('Invalid calculated print fixture');
- const {amount,...fields}=calculatedDoseFields(doseReview)!;return {...fields,selection:{id:'amoxicillin',amount,confirmed:true,doseReview}};
+ const {amount,...fields}=calculatedDoseFields(doseReview)!;return {...fields,selection:{id:rxFixture.ibuprofen?'ibuprofen':'amoxicillin',amount,confirmed:true,doseReview}};
 }
 
 vi.mock("@/lib/session", () => ({ requireSession: async () => ({ role: "admin", username: "SYN-DRAFT-CLINICIAN" }) }));
@@ -61,11 +62,12 @@ function labCss() {
   return css.toString();
 }
 describe("native compact print regression witnesses", () => {
-  it.each(["receipt", "lab", "prescription-saved", "prescription-draft", "prescription-long", "prescription-long-identity", "prescription-calculated", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
+  it.each(["receipt", "lab", "prescription-saved", "prescription-draft", "prescription-long", "prescription-long-identity", "prescription-calculated", "prescription-ibuprofen-calculated", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
     const prescription = kind.startsWith("prescription-");
     rxFixture.long = kind.startsWith("prescription-long");
     rxFixture.longIdentity = kind === "prescription-long-identity";
-    rxFixture.calculated = kind === "prescription-calculated";
+    rxFixture.calculated = kind === "prescription-calculated" || kind === "prescription-ibuprofen-calculated";
+    rxFixture.ibuprofen = kind === "prescription-ibuprofen-calculated";
     const node = kind === "patient-card" ? await PatientCardPage({ params: Promise.resolve({ id: "2" }) }) : prescription
       ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(kind !== "prescription-draft"
         ? { rx: "11", diagnosis: "SYN-URL-TAMPER" }
@@ -123,7 +125,7 @@ describe("native compact print regression witnesses", () => {
         }
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
-        const references = rxFixture.calculated ? ["Amoxicillin", "250 mg/5 mL", "4 mL (200 mg)", "Every 8 hours", "5 days", "SYN-CALCULATED-PLAN", "SYN-CALCULATED-END", "SYN-SAVED-CLINICIAN"] : kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
+        const references = rxFixture.calculated ? [rxFixture.ibuprofen?"Ibuprofen":"Amoxicillin", rxFixture.ibuprofen?"100 mg/5 mL":"250 mg/5 mL", rxFixture.ibuprofen?"7.5 mL (150 mg)":"4 mL (200 mg)", rxFixture.ibuprofen?"3 times daily":"Every 8 hours", ...(rxFixture.ibuprofen?["at least 8 hours apart","Preferably after food."]:[]), "5 days", "SYN-CALCULATED-PLAN", "SYN-CALCULATED-END", "SYN-SAVED-CLINICIAN"] : kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
           ? ["SYN-RX-PATIENT", "SYN-RX-001", ...(rxFixture.long ? Array.from({ length: 20 }, (_, index) => `SYN-MED-${String(index + 1).padStart(2, "0")}`) : ["SYNTHETIC-RX-MEDICATION"]), "SYN-AMOUNT", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", kind !== "prescription-draft" ? "SYN-SAVED-CLINICIAN" : "SYN-DRAFT-CLINICIAN", kind !== "prescription-draft" ? "SYN-SAVED-DIAGNOSIS" : "SYN-DRAFT-DIAGNOSIS"]
           : ["SYN-PROV-ORIGINAL-BHGFBCDEFABCD", "SYN-REV-00002", "SYN-REP-00003"];
         for (const reference of references) expect(rxFixture.calculated ? text.replace(/\s+/g, " ") : text).toContain(reference);

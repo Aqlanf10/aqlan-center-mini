@@ -21,13 +21,21 @@ export interface DoseReviewInput {
   specialPopulationOrInteraction: boolean;
   antibioticIndicationReviewed: boolean;
 }
+export interface DoseReviewInputV2 extends Omit<DoseReviewInput,'product'> {
+ product: Omit<DoseReviewInput['product'],'ingredientId'> & {
+  ingredientId:'paracetamol'|'amoxicillin'|'ibuprofen';
+  minimumIntervalHours:number;
+  maxAdministrationsPer24h:number;
+ };
+}
+export type AnyDoseReviewInput=DoseReviewInput|DoseReviewInputV2;
 export type DoseReviewResult = { ok:false; problems:string[] } | { ok:true; mgPerDose:number; mgPer24h:number; mlPerDose:number|null; tabletsPerDose:number|null; formula:string; fingerprint:string; referenceId:string; referenceVersion:string };
 const positive = (value: number) => Number.isFinite(value) && value > 0;
 const boundedText = (value: unknown, max: number) => typeof value==='string' && !!value.trim() && value.length<=max;
 /** A mathematical preview inside one source regimen, NOT clinical approval.
  * No default values, silent capping/rounding, regimen mixing, or prescription side effects. */
-export function reviewMedicationDose(input: DoseReviewInput): DoseReviewResult {
-  const rule=doseCalculationRule(input.profileId), reference=doseReference(input.profileId);
+export function reviewMedicationDose(input: AnyDoseReviewInput): DoseReviewResult {
+  const rule=doseCalculationRule(input.profileId,input.ageMonths), reference=doseReference(input.profileId);
   const problems:string[]=[];
   if(!rule || !reference) return {ok:false,problems:['لا يوجد محول عددي مراجع لهذا الملف.']};
   if(input.referenceVersion!==DOSE_REFERENCE_VERSION) problems.push('تغير إصدار المرجع؛ أعد المراجعة.');
@@ -50,6 +58,12 @@ export function reviewMedicationDose(input: DoseReviewInput): DoseReviewResult {
   try { const url=new URL(p?.labelUrl??''); if(url.protocol!=='https:'||url.username||url.password) throw Error(); } catch { problems.push('يلزم مرجع نشرة المنتج الفعلي للتحقق من المادة والقوة.'); }
   if(rule.profileId==='paracetamol-adult-sdcep' && (p?.kind!=='tablet'||p.strengthMg!==500)) problems.push('هذا مثال أقراص500mg؛ لا استبدال الشكل أو التركيز داخل الملف.');
   if(rule.medicationId==='amoxicillin' && p?.kind!=='oral-liquid') problems.push('محول الأطفال الحالي للمعلق الفموي بتركيز متحقق فقط.');
+  if(rule.requiresProductSchedule || (p && 'minimumIntervalHours' in p)) {
+    if(!p||!('minimumIntervalHours' in p)||!positive(Number(p.minimumIntervalHours))||Number(p.minimumIntervalHours)>24||input.intervalHours<Number(p.minimumIntervalHours)) problems.push('الفاصل الأدنى الموثق من نشرة المنتج مفقود أو متجاوز.');
+    if(!p||!('maxAdministrationsPer24h' in p)||!Number.isInteger(p.maxAdministrationsPer24h)||Number(p.maxAdministrationsPer24h)<1||Number(p.maxAdministrationsPer24h)>24||input.administrationsPer24h>Number(p.maxAdministrationsPer24h)) problems.push('عدد الجرعات يتجاوز حد نشرة المنتج أو لم يوثق.');
+  }
+  if(rule.profileId==='ibuprofen-adult-sdcep'&&(p?.kind!=='tablet'||p.strengthMg!==400)) problems.push('مثال البالغ الحالي لأقراص400mg فقط.');
+  if(rule.medicationId==='ibuprofen'&&input.otherSameIngredientMg24h!==0) problems.push('مصدر إيبوبروفين آخر يتطلب مراجعة موحدة خارج هذا المثال.');
   if(rule.requiresLabelSingleMax && (!positive(p?.singleMaxMg ?? NaN))) problems.push('حد الجرعة المفردة من نشرة المنتج مفقود؛ لا يُستنتج.');
   if(!Number.isFinite(input.otherSameIngredientMg24h)||input.otherSameIngredientMg24h<0) problems.push('كمية المادة نفسها من مصادر أخرى مجهولة؛ لا تعاملها كصفر.');
   if(input.specialPopulationOrInteraction!==false) problems.push('حالة خاصة أو تداخل يحتاج مراجعة خارج هذا المحول؛ لا تعديل تلقائي.');
@@ -63,14 +77,15 @@ export function reviewMedicationDose(input: DoseReviewInput): DoseReviewResult {
   if(rule.dailyMaxMgPerKg!==undefined && mgPer24h>rule.dailyMaxMgPerKg*input.weightKg) problems.push('تجاوز الحد اليومي بحسب الوزن.');
   if(rule.antibiotic && input.otherSameIngredientMg24h!==0) problems.push('يوجد مصدر آخر للمادة؛ يلزم توحيد النظام يدويًا.');
   const mlPerDose=p.kind==='oral-liquid'?mgPerDose*p.perMl!/p.strengthMg:null;
-  if(mlPerDose!==null && Math.abs(mlPerDose/p.measurementIncrementMl!-Math.round(mlPerDose/p.measurementIncrementMl!))>1e-8) problems.push('الحجم لا يطابق تدريج أداة القياس؛ لا تقريب تلقائي للجرعة.');
+  const measurementTicks=mlPerDose===null?null:mlPerDose/p.measurementIncrementMl!;
+  if(measurementTicks!==null&&(!positive(measurementTicks)||!Number.isSafeInteger(Math.round(measurementTicks))||Math.round(measurementTicks)<1||Math.abs(measurementTicks-Math.round(measurementTicks))>1e-8)) problems.push('الحجم لا يطابق تدريج أداة القياس؛ لا تقريب تلقائي للجرعة.');
   const tabletsPerDose=p.kind==='tablet'?mgPerDose/p.strengthMg:null;
   if(tabletsPerDose!==null && !Number.isInteger(tabletsPerDose)) problems.push('تقسيم القرص غير مدعوم دون منتج وأداة موثقين؛ لا تقريب تلقائي.');
   if(!positive(mgPerDose)||!positive(mgPer24h)||(mlPerDose!==null&&!positive(mlPerDose))) problems.push('نتيجة غير صالحة.');
   if(problems.length) return {ok:false,problems};
   // Stable full input binding, not an authority token. Server-side issuer must still
   // enforce clinical confirmation and permissions. No rounded dose is returned.
-  const fingerprint=JSON.stringify([DOSE_REFERENCE_VERSION,input.profileId,input.indication,input.ageMonths,input.ageVerified,input.weightKg,input.currentWeightVerified,input.selectedDose,input.administrationsPer24h,input.scheduleKind,input.intervalHours,input.durationDays,input.reviewPlan,p.name,p.ingredientId,p.formulation,p.labelUrl,p.kind,p.strengthMg,p.perMl??null,p.measurementIncrementMl??null,p.minimumAgeMonths,p.labelVerified,p.singleMaxMg??null,input.otherSameIngredientMg24h,input.specialPopulationOrInteraction,input.antibioticIndicationReviewed]);
+  const fingerprint=JSON.stringify([DOSE_REFERENCE_VERSION,input.profileId,input.indication,input.ageMonths,input.ageVerified,input.weightKg,input.currentWeightVerified,input.selectedDose,input.administrationsPer24h,input.scheduleKind,input.intervalHours,input.durationDays,input.reviewPlan,p.name,p.ingredientId,p.formulation,p.labelUrl,p.kind,p.strengthMg,p.perMl??null,p.measurementIncrementMl??null,p.minimumAgeMonths,p.labelVerified,p.singleMaxMg??null,input.otherSameIngredientMg24h,input.specialPopulationOrInteraction,input.antibioticIndicationReviewed,...('minimumIntervalHours' in p?[p.minimumIntervalHours,p.maxAdministrationsPer24h]:[])]);
   return {ok:true,mgPerDose,mgPer24h,mlPerDose,tabletsPerDose,formula:rule.basis==='mg/kg/day'?`${input.selectedDose} mg/kg/day × ${input.weightKg} kg ÷ ${input.administrationsPer24h} = ${mgPerDose} mg/dose`:rule.basis==='mg/kg/dose'?`${input.selectedDose} mg/kg/dose × ${input.weightKg} kg = ${mgPerDose} mg/dose`:`${mgPerDose} mg/dose`,fingerprint,referenceId:input.profileId,referenceVersion:DOSE_REFERENCE_VERSION};
 }
 
@@ -92,6 +107,24 @@ export function parseDoseReviewInput(value:unknown):DoseReviewInput|null {
   if(!['times-per-day','prn-max','fixed-interval'].includes(String(value.scheduleKind))||!['paracetamol','amoxicillin'].includes(String(p.ingredientId))||p.formulation!=='single-ingredient'||!['oral-liquid','tablet'].includes(String(p.kind)))return null;
   // Fixed key order makes both command and acknowledgement stable across transport order.
   const result=Object.fromEntries(inputKeys.map(k=>[k,k==='product'?Object.fromEntries(productKeys.filter(key=>key in p).map(key=>[key,typeof p[key]==='string'?(p[key] as string).trim():p[key]])):typeof value[k]==='string'?(value[k] as string).trim():value[k]])) as unknown as DoseReviewInput;
+  if(new TextEncoder().encode(JSON.stringify(result)).length>6000)return null;
+  return result;
+}
+
+// Immutable v2 shape is separate: never widen or narrow saved v1 parsing.
+const productKeysV2=[...productKeys,'minimumIntervalHours','maxAdministrationsPer24h'];
+export function parseDoseReviewInputV2(value:unknown):DoseReviewInputV2|null {
+  if(!object(value)||Object.keys(value).some(k=>!inputKeys.includes(k))||inputKeys.some(k=>!(k in value))||!object(value.product))return null;
+  const p=value.product;
+  if(Object.keys(p).some(k=>!productKeysV2.includes(k))||['name','ingredientId','formulation','labelUrl','kind','strengthMg','minimumAgeMonths','labelVerified','minimumIntervalHours','maxAdministrationsPer24h'].some(k=>!(k in p)))return null;
+  if(['profileId','referenceVersion','indication','scheduleKind','reviewPlan'].some(k=>typeof value[k]!=='string'||String(value[k]).length>500))return null;
+  if(['ageMonths','weightKg','selectedDose','administrationsPer24h','intervalHours','durationDays','otherSameIngredientMg24h'].some(k=>typeof value[k]!=='number'||!Number.isFinite(value[k])))return null;
+  if(['ageVerified','currentWeightVerified','specialPopulationOrInteraction','antibioticIndicationReviewed'].some(k=>typeof value[k]!=='boolean')||typeof p.labelVerified!=='boolean')return null;
+  if(['name','ingredientId','formulation','labelUrl','kind'].some(k=>typeof p[k]!=='string'||String(p[k]).length>500))return null;
+  if(['strengthMg','minimumAgeMonths','minimumIntervalHours','maxAdministrationsPer24h'].some(k=>typeof p[k]!=='number'||!Number.isFinite(p[k]))||['perMl','measurementIncrementMl','singleMaxMg'].some(k=>k in p&&(typeof p[k]!=='number'||!Number.isFinite(p[k]))))return null;
+  if(!['times-per-day','prn-max','fixed-interval'].includes(String(value.scheduleKind))||!['paracetamol','amoxicillin','ibuprofen'].includes(String(p.ingredientId))||p.formulation!=='single-ingredient'||!['oral-liquid','tablet'].includes(String(p.kind)))return null;
+  // Fixed key order makes both command and acknowledgement stable across transport order.
+  const result=Object.fromEntries(inputKeys.map(k=>[k,k==='product'?Object.fromEntries(productKeysV2.filter(key=>key in p).map(key=>[key,typeof p[key]==='string'?(p[key] as string).trim():p[key]])):typeof value[k]==='string'?(value[k] as string).trim():value[k]])) as unknown as DoseReviewInputV2;
   if(new TextEncoder().encode(JSON.stringify(result)).length>6000)return null;
   return result;
 }

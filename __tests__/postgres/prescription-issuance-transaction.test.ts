@@ -173,13 +173,16 @@ it('catalogue disable blocks new issuance, not replay/recovery of immutable save
 });
 
 
-it('stores verified dose snapshot, rejects tampering atomically, and replays an authorized historical reference without new clinical validation', async () => {
+it.each(['amoxicillin','ibuprofen'] as const)('stores %s dose snapshot, rejects tampering atomically, and replays an authorized historical reference without new clinical validation', async ingredient => {
+ const ibu=ingredient==='ibuprofen';
  const {DOSE_REFERENCE_VERSION}=await import('../../lib/medication-dose-profiles');
  const {createCalculatedDoseProvenance,calculatedDoseFields}=await import('../../lib/medication-dose-provenance');
  const {checkPrescriptionDraft}=await import('../../lib/prescription');
- const input={profileId:'amoxicillin-child-aapd-q8',referenceVersion:DOSE_REFERENCE_VERSION,indication:'Synthetic reviewed indication',ageMonths:60,ageVerified:true,weightKg:20,currentWeightVerified:true,selectedDose:30,administrationsPer24h:3,scheduleKind:'fixed-interval' as const,intervalHours:8,durationDays:5,reviewPlan:'Review synthetic patient',product:{name:'Synthetic suspension',ingredientId:'amoxicillin' as const,formulation:'single-ingredient' as const,labelUrl:'https://synthetic.invalid/label',kind:'oral-liquid' as const,strengthMg:250,perMl:5,measurementIncrementMl:0.1,minimumAgeMonths:4,labelVerified:true},otherSameIngredientMg24h:0,specialPopulationOrInteraction:false,antibioticIndicationReviewed:true};
+ const baseInput={profileId:'amoxicillin-child-aapd-q8',referenceVersion:DOSE_REFERENCE_VERSION,indication:'Synthetic reviewed indication',ageMonths:60,ageVerified:true,weightKg:20,currentWeightVerified:true,selectedDose:30,administrationsPer24h:3,scheduleKind:'fixed-interval' as const,intervalHours:8,durationDays:5,reviewPlan:'Review synthetic patient',product:{name:'Synthetic suspension',ingredientId:'amoxicillin' as const,formulation:'single-ingredient' as const,labelUrl:'https://synthetic.invalid/label',kind:'oral-liquid' as const,strengthMg:250,perMl:5,measurementIncrementMl:0.1,minimumAgeMonths:4,labelVerified:true},otherSameIngredientMg24h:0,specialPopulationOrInteraction:false,antibioticIndicationReviewed:true};
+ const input=ibu?{...baseInput,profileId:'ibuprofen-child-sdcep',selectedDose:150,scheduleKind:'times-per-day' as const,product:{...baseInput.product,ingredientId:'ibuprofen' as const,strengthMg:100,minimumAgeMonths:6,minimumIntervalHours:6,maxAdministrationsPer24h:3}}:baseInput;
  const doseReview=createCalculatedDoseProvenance(input)!;const {amount,...fields}=calculatedDoseFields(doseReview)!;
- const selected={...draft,items:[{...fields,selection:{id:'amoxicillin' as const,amount,confirmed:true,doseReview}}]};
+ const selected={...draft,items:[{...fields,selection:{id:ingredient,amount,confirmed:true,doseReview}}]};
+ expect(doseReview.version).toBe(ibu?2:1);
  const tampered=structuredClone(selected);if(tampered.items[0].selection.doseReview.mode!=='calculated')throw Error();tampered.items[0].selection.doseReview.result.mgPerDose=999;
  const bad=await issuePrescriptionTransaction({session:session(),key:randomUUID(),draft:tampered},issue);expect(bad.status).toBe(409);expect(await counts()).toEqual({rx:0,commands:0,audits:0});
  const first=await issuePrescriptionTransaction({session:session(),key,draft:selected},issue);expect(first.status).toBe(201);const saved=await first.json();
