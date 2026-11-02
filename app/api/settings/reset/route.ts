@@ -3,7 +3,7 @@ import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { clinicResetPreview, findUserByUsername, resetClinicData } from "@/lib/db";
 import { verifyPassword } from "@/lib/auth";
-import { ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE, RESET_PREVIEW_GROUPS, isResetPhrase } from "@/lib/clinic-reset";
+import { ProtectedRadiologyHistoryError, ProtectedPrescriptionHistoryError, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE, RESET_PREVIEW_GROUPS, isResetPhrase } from "@/lib/clinic-reset";
 import { removeFileByKey } from "@/lib/files";
 import { runVerifiedManualBackup } from "@/lib/manual-backup";
 import { isAdmin } from "@/lib/roles";
@@ -77,6 +77,8 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
+    if (error instanceof ProtectedRadiologyHistoryError) return noStore({ message: error.message, code: "protected-radiology-history" }, 409);
+    if (error instanceof ProtectedPrescriptionHistoryError) return noStore({ message: error.message, code: "protected-prescription-history" }, 409);
     if (error instanceof ProtectedPurchaseHistoryError) return noStore({ message: error.message, code: "protected-purchase-history" }, 409);
     if (error instanceof ProtectedAgreementHistoryError) return noStore({ message: error.message, code: "protected-agreement-history" }, 409);
     if (error instanceof ProtectedCollectionAttemptHistoryError) return noStore({ message: error.message, code: "protected-collection-attempt-history" }, 409);

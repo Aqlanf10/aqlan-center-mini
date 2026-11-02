@@ -1,5 +1,6 @@
 "use client";
 
+import { useSession } from "@/components/SessionProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ROLES, ROLE_HINT, ROLE_LABEL, type Role } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
@@ -59,6 +60,7 @@ const EMPTY_SPECIAL_RATE = {
 };
 
 export default function UsersAndDoctorsPage() {
+  const session = useSession();
   const [users, setUsers] = useState<StaffAccount[]>([]);
   const [clinicServices, setClinicServices] = useState<ClinicServiceItem[]>([]);
   const [doctorParties, setDoctorParties] = useState<DoctorParty[]>([]);
@@ -153,7 +155,14 @@ export default function UsersAndDoctorsPage() {
     }
   }, []);
 
-  const handleAddSpecialRate = (override?: {
+  // Exact server-derived username identity: no normalization or delegation.
+  // The existing PATCH remains the authoritative permission check.
+  const isOwnAdminClinicalIdentity = editingUser?.role === "admin" &&
+    editForm.role === "admin" && session?.role === "admin" &&
+    typeof session.username === "string" && session.username.length > 0 &&
+    session.username === editingUser.username;
+
+  const handleAddSpecialRate = useCallback((override?: {
     name: string;
     percent: number;
     category?: string;
@@ -205,7 +214,7 @@ export default function UsersAndDoctorsPage() {
 
     // Reset input fields
     setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
-  };
+  }, [newSpecialRate, setEditForm, setNewSpecialRate]);
 
   const handleRemoveSpecialRate = (rateId: string, serviceName: string, serviceId?: number) => {
     setEditForm((c) => {
@@ -254,7 +263,7 @@ export default function UsersAndDoctorsPage() {
   }, [load]);
 
   const send = useCallback(
-    async (run: () => Promise<Response>) => {
+    async (run: () => Promise<Response>, onSuccess?: (payload: unknown) => void) => {
       if (busy) return false;
       setBusy(true);
       setError(null);
@@ -267,6 +276,7 @@ export default function UsersAndDoctorsPage() {
           return false;
         }
         await load();
+        onSuccess?.(payload);
         return true;
       } catch {
         setError("تعذّر الاتصال بالخادم.");
@@ -1019,30 +1029,40 @@ export default function UsersAndDoctorsPage() {
                     {/* ربط حساب الطبيب بجهته (V2 §٣٥/٣٧/٣٩) — أساس عزل الخادم.
                         من دون ربطٍ يرى الطبيب كل المرضى (السلوك القديم) حتى يربطه
                         المدير؛ وربطه يخصّص رؤيته لمرضاه في كل استعلام. */}
-                    {editForm.role === "doctor" && (
+                    {(editForm.role === "doctor" || isOwnAdminClinicalIdentity) && (
                       <div className="sm:col-span-2">
                         <label className="mb-1 block font-bold text-slate-700">
-                          جهة «طبيب» المرتبطة — أساس عزل مرضى الحساب في الخادم
+                          {isOwnAdminClinicalIdentity
+                            ? "هويتي الطبية — ربط حسابي بجهة الطبيب الخاصة بي"
+                            : "جهة «طبيب» المرتبطة — أساس عزل مرضى الحساب في الخادم"}
                         </label>
                         <select
                           value={editingUser.partyId ?? ""}
-                          onChange={(e) =>
-                            send(() =>
+                          onChange={async (e) => {
+                            const owner = editorOwner.current;
+                            const refreshOwnIdentity = isOwnAdminClinicalIdentity;
+                            const partyId = e.target.value ? Number(e.target.value) : null;
+                            await send(() =>
                               fetch(`/api/users/${editingUser.id}`, {
                                 method: "PATCH",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  action: "link_doctor",
-                                  partyId: e.target.value ? Number(e.target.value) : null,
-                                }),
+                                body: JSON.stringify({ action: "link_doctor", partyId }),
                               }),
-                            )
-                          }
+                              (payload) => {
+                                if (!refreshOwnIdentity || !owner || editorOwner.current !== owner || !payload || typeof payload !== "object") return;
+                                const updated = payload as Record<string, unknown>;
+                                if (updated.id !== editingUser.id || updated.username !== editingUser.username || updated.role !== "admin" || updated.partyId !== partyId || (updated.partyName !== null && typeof updated.partyName !== "string")) return;
+                                setEditingUser((current) => current && current.id === updated.id
+                                  ? { ...current, partyId, partyName: updated.partyName as string | null }
+                                  : current);
+                              },
+                            );
+                          }}
                           disabled={busy}
                           aria-label="ربط الطبيب"
                           className="w-full rounded-xl border border-sky-200 bg-sky-50/60 px-3 py-2 text-xs font-bold text-sky-900"
                         >
-                          <option value="">— بلا ربط (يرى كل المرضى) —</option>
+                          <option value="">{isOwnAdminClinicalIdentity ? "— لا توجد هوية طبية مرتبطة —" : "— بلا ربط (يرى كل المرضى) —"}</option>
                           {doctorParties.map((doctor) => (
                             <option key={doctor.id} value={doctor.id}>
                               {doctor.name}
@@ -1050,7 +1070,9 @@ export default function UsersAndDoctorsPage() {
                           ))}
                         </select>
                         <p className="mt-1 text-[11px] text-slate-500">
-                          {editingUser.partyName
+                          {isOwnAdminClinicalIdentity
+                            ? "اختر جهة الطبيب الخاصة بك فقط. هذا الربط لا يمنح صلاحية إصدار وصفة باسم طبيب آخر أو التفويض عنه."
+                            : editingUser.partyName
                             ? `مربوط حاليًا بـ${editingUser.partyName} — يرى مرضاه وحالاته فقط`
                             : "غير مربوط — يرى كل المرضى حتى يُربط"}
                         </p>
@@ -2322,6 +2344,16 @@ export default function UsersAndDoctorsPage() {
                       </div>
                     </div>
 
+                    {editForm.role === "reception" && <label className="flex gap-3 rounded-xl border p-4">
+                      <input type="checkbox" checked={editForm.permissions.canPrintSavedPrescriptions === true}
+                        onChange={event => setEditForm(current => ({ ...current, permissions: { ...current.permissions, canPrintSavedPrescriptions: event.target.checked } }))} />
+                      <span>إعادة طباعة الوصفات المحفوظة الفاعلة فقط — دون إنشاء أو تعديل أو إبطال</span>
+                    </label>}
+                    {editForm.role === "reception" && <label className="flex gap-3 rounded-xl border p-4">
+                      <input type="checkbox" checked={editForm.permissions.canPrintRadiologyRequests === true}
+                        onChange={event => setEditForm(current => ({ ...current, permissions: { ...current.permissions, canPrintRadiologyRequests: event.target.checked } }))} />
+                      <span>طباعة طلبات الأشعة المحفوظة فقط — دون إصدار أو تعديل طبي</span>
+                    </label>}
                     {/* Section: AI Chatbot Permissions */}
                     <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 shadow-xs">
                       <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-indigo-950">

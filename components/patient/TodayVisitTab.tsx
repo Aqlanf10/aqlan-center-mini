@@ -286,11 +286,13 @@ function OwnedTodayVisitTab({
       && source.invoiceId === checkout?.invoiceId && source.currency === invoiceCurrency && source.remainingMinor === checkout?.remainingMinor) : null;
   // Never give a scheduled/aggregate recommendation to the old invoice or
   // untargeted modal. Only the exact ordinary visit invoice remains inline.
+  const checkoutInvoiceId = checkout?.invoiceId;
+  const checkoutRemainingMinor = checkout?.remainingMinor;
   const presetInvoice = useMemo(
-    () => inlineSource && checkout?.invoiceId && checkout.remainingMinor > 0
-      ? { id: checkout.invoiceId, baseCurrency: invoiceCurrency }
+    () => inlineSource && checkoutInvoiceId && checkoutRemainingMinor !== undefined && checkoutRemainingMinor > 0
+      ? { id: checkoutInvoiceId, baseCurrency: invoiceCurrency }
       : null,
-    [checkout?.invoiceId, checkout?.remainingMinor, invoiceCurrency, inlineSource],
+    [checkoutInvoiceId, checkoutRemainingMinor, invoiceCurrency, inlineSource],
   );
   const todayInvoice = presetInvoice && checkout ? [{
     id: checkout.invoiceId as number,

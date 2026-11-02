@@ -12,6 +12,7 @@ import { validateSetting as validateLegacy } from "./settings";
 import { isKnownZone } from "./clinicZone";
 import { DOCUMENT_PREFIX_SETTING } from "./document-numbers";
 import { parseSpecialtyTemplates } from "./specialty-templates";
+import { RADIOLOGY_CENTERS_KEY, parseRadiologyCenters } from "./radiology-centers";
 import { parseBalanceWarning } from "./chair-readiness";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -42,6 +43,11 @@ export function validateTypedSetting(key: string, raw: string): string | null {
   const definition = settingDefinition(key);
   if (!definition) return "مفتاح إعداد غير معروف.";
   if (definition.systemLocked) return `${definition.label}: ثابتُ نظامٍ لا يُغيَّر من الإعدادات.`;
+
+  if (key === RADIOLOGY_CENTERS_KEY) {
+    const parsed = parseRadiologyCenters(raw);
+    return parsed.ok ? null : `${definition.label}: ${parsed.message}`;
+  }
 
   const value = raw.trim();
 
