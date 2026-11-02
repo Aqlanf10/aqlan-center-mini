@@ -169,13 +169,18 @@ describe("legacy checklist confirmed-context refresh in the real parent", () => 
       expect((await db.query("SELECT plan_id FROM ortho_cases WHERE id = $1 AND patient_id = $2", [caseId, patientId])).rows).toEqual([{ plan_id: null }]);
       await compatibility.click();
       await f.agreement.getByText("لم تُربط خطة علاج بهذه الحالة", { exact: true }).waitFor();
-      expect(await f.agreement.getByRole("button", { name: "اربط", exact: true }).count()).toBe(0);
+      // The explicit chooser is available, but no agreement is preselected and
+      // opening it must never relink the case automatically.
+      const linkButton = f.agreement.getByRole("button", { name: "اربط", exact: true });
+      expect(await linkButton.count()).toBe(1);
+      expect(await linkButton.isDisabled()).toBe(true);
+      expect(f.writes).toEqual([{ planId: null, expectedVersion: expect.stringMatching(/^[a-f0-9]{64}$/) }]);
       f.setMode("hold");
       await f.checklist.getByRole("button", { name: retry, exact: true }).click();
       await expect.poll(() => f.held.length).toBeGreaterThan(0);
       f.setMode("live");
       // Restore the pre-existing synthetic compatibility link, never create a
-      // financial source or use the removed UI action to manufacture a new link.
+      // financial source or submit a new explicit link while testing late reads.
       await db.query("UPDATE ortho_cases SET plan_id = $1 WHERE id = $2 AND patient_id = $3", [planId, caseId, patientId]);
       await f.page.getByRole("button", { name: "تحديث كابينة التقويم", exact: true }).click();
       await f.checklist.getByText(included, { exact: true }).waitFor();
