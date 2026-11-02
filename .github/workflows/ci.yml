@@ -353,12 +353,42 @@ jobs:
       - name: HTTP security integration tests
         env:
           HR_EVIDENCE_DIR: /tmp/hr-evidence
-        run: npm run test:security-http
+        run: npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-main-raw.json"
+
+      - name: Collect sanitized main HTTP failure index
+        id: http_main_index
+        if: always()
+        run: node scripts/dependency-security/http-failure-index.mjs main
+
+      - name: Upload sanitized main HTTP failure index
+        if: always() && steps.http_main_index.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-main-failure-index
+          path: .http-failure-index/main.json
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
 
       - name: Isolated inventory proposal HTTP tests (explicit opt-in)
         env:
           INVENTORY_SCHEMA_TEST: "1"
-        run: npm run test:security-http
+        run: npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-inventory-raw.json"
+
+      - name: Collect sanitized inventory HTTP failure index
+        id: http_inventory_index
+        if: always()
+        run: node scripts/dependency-security/http-failure-index.mjs inventory
+
+      - name: Upload sanitized inventory HTTP failure index
+        if: always() && steps.http_inventory_index.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-inventory-failure-index
+          path: .http-failure-index/inventory.json
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
 
       # Four pristine unauthenticated login views only, before any credentials.
       # Never upload cookies, browser storage, traces, videos, or broad directories.
