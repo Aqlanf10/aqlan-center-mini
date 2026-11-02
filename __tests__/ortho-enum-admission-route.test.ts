@@ -1,3 +1,4 @@
+vi.mock("server-only", () => ({}));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OrthoCase } from "@/lib/db";
 import { PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
@@ -8,14 +9,14 @@ vi.mock("@/lib/patient-access", () => ({ canAccessPatient: vi.fn() }));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden", getOrthoCase: vi.fn(), findUserByUsername: vi.fn(),
   setOrthoPhase: vi.fn(), setRetainer: vi.fn(), recordAdjustment: vi.fn(),
-  closeOrthoCase: vi.fn(), linkOrthoCasePlan: vi.fn(),
+  closeOrthoCase: vi.fn(), linkOrthoCasePlan: vi.fn(), getPool: vi.fn(), linkOrthoCasePlanWith: vi.fn(),
 }));
 
 import { PATCH, POST } from "@/app/api/ortho/[id]/route";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import {
-  getOrthoCase, setOrthoPhase, setRetainer, recordAdjustment, closeOrthoCase, linkOrthoCasePlan,
+  getOrthoCase, setOrthoPhase, setRetainer, recordAdjustment, closeOrthoCase, linkOrthoCasePlan, getPool, linkOrthoCasePlanWith,
 } from "@/lib/db";
 
 const handlers = { PATCH, POST };
@@ -154,13 +155,12 @@ describe("actual POST phase own-key normalization", () => {
   });
 });
 
-describe("PATCH action precedence stays unchanged", () => {
-  it("planId still wins over inherited phase and retainer strings", async () => {
-    expect((await call("PATCH", { planId: null, phase: "constructor", retainer: "__proto__", status: "completed" })).status).toBe(200);
-    expect(linkOrthoCasePlan).toHaveBeenCalledWith({
-      caseId: 41, planId: null, actor: "synthetic-admin", actorRole: "admin",
-    });
-    onlyWriter(linkOrthoCasePlan);
+describe("PATCH exact plan-link intent and remaining action precedence", () => {
+  it("rejects mixed plan-link intent before storage admission or any writer", async () => {
+    expect((await call("PATCH", { planId: null, expectedVersion: "a".repeat(64), phase: "constructor", retainer: "__proto__", status: "completed" })).status).toBe(400);
+    noWriters();
+    expect(getPool).not.toHaveBeenCalled();
+    expect(linkOrthoCasePlanWith).not.toHaveBeenCalled();
   });
   it("valid phase still wins over inherited retainer and completion", async () => {
     expect((await call("PATCH", { phase: "working", retainer: "constructor", status: "completed" })).status).toBe(200);

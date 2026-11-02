@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, harness } from "./_server";
 
 /**
  * (P1-B) ربط حالة التقويم باتفاقها على التطبيق المبني: للإدارة والطبيب والاستقبال فقط،
@@ -14,8 +14,11 @@ let planId = 0;
 let foreignPlan = 0;
 const stamp = Date.now();
 
-const patch = (session: { cookie: string }, body: unknown) =>
-  authedMutation(`/api/ortho/${caseId}`, session, "PATCH", JSON.stringify(body));
+const patch = async (session: { cookie: string }, body: unknown) => {
+  const read = await authedGet(`/api/ortho/${caseId}/plan-link`, session);
+  const observation = await read.json();
+  return authedMutation(`/api/ortho/${caseId}`, session, "PATCH", JSON.stringify({...body as object,expectedVersion:observation.observedVersion}));
+};
 
 async function arabic(response: Response) {
   const body = await response.json().catch(() => ({})) as { message?: string };
@@ -38,8 +41,10 @@ beforeAll(async () => {
   const mine = await patient("M");
   planId = await plan(mine);
   foreignPlan = await plan(await patient("F"));
-  caseId = (await db.query<{ id: number }>(
-    `INSERT INTO ortho_cases (patient_id, created_by) VALUES ($1, 'doctor') RETURNING id`, [mine])).rows[0].id;
+  const created = await authedMutation("/api/ortho", h.sessions.admin, "POST", JSON.stringify({patientId:mine,appliance:"fixed_metal",arches:"both",slot:"022",plannedMonths:18}));
+  expect(created.status).toBe(201);
+  caseId = (await created.json()).id;
+  expect(caseId).toBeGreaterThan(0);
 }, 120_000);
 
 afterAll(async () => { await db?.end(); });
@@ -67,7 +72,7 @@ describe("(P1-B) linking an orthodontic case to its agreement over HTTP", () => 
   it("reception links the patient's own agreement — funded, audited", async () => {
     const response = await patch(h.sessions.reception, { planId });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, changed: true, funded: true });
+    expect(await response.json()).toEqual({ ok: true, caseId, planId, changed: true });
     expect((await db.query(`SELECT plan_id FROM ortho_cases WHERE id = $1`, [caseId])).rows[0].plan_id).toBe(planId);
     expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'ortho.plan_link' AND entity_id = $1`,
       [String(caseId)])).rows[0].n).toBe(1);

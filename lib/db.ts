@@ -23049,7 +23049,13 @@ export async function linkOrthoCasePlan(input: {
   caseId: number; planId: number | null; actor: string; actorRole: string | null;
 }): Promise<OrthoPlanLinkResult> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client): Promise<OrthoPlanLinkResult> => {
+  return withTransaction(getPool(), client => linkOrthoCasePlanWith(client, input));
+}
+
+/** Existing writer under an already authorized caller transaction. No schema initializer. */
+export async function linkOrthoCasePlanWith(client: DbClient, input: {
+  caseId: number; planId: number | null; actor: string; actorRole: string | null;
+}): Promise<OrthoPlanLinkResult> {
     const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.caseId]);
     if (!owner) return { ok: false, status: 404, message: "الحالة غير موجودة." };
     await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
@@ -23075,7 +23081,6 @@ export async function linkOrthoCasePlan(input: {
     const { rows: [funded] } = await client.query<{ funded: boolean }>(
       `SELECT ${ORTHO_CASE_FUNDED_SQL} AS funded FROM ortho_cases c WHERE c.id = $1`, [input.caseId]);
     return { ok: true, changed, funded: funded?.funded === true };
-  });
 }
 
 /**
