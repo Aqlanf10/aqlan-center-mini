@@ -68,3 +68,18 @@ describe('actual catalogue component lifetime handlers (synthetic scheduling, no
  it('ignores a late old GET after principal switch',async()=>{let done!:(v:ReturnType<typeof response>)=>void;reads=()=>new Promise(resolve=>{done=resolve;});render();await settle();identity.session={username:'another-admin',role:'admin'};reads=null;await ready();done(response(payload));await settle();expect(retired.every(h=>h.lateUpdates===0)).toBe(true);});
  it('retired catalogue selection callback cannot append to a new principal draft',async()=>{const select=vi.fn();page=()=>PrescriptionClinicCatalog({onSelect:select});await ready();const old=button('إضافة للمسودة للمراجعة');identity.session={username:'another-admin',role:'admin'};await ready();click(old);expect(select).not.toHaveBeenCalled();});
 });
+
+it('denied catalogue read exposes no entries and cannot select',async()=>{
+ const select=vi.fn();page=()=>PrescriptionClinicCatalog({onSelect:select});
+ reads=async()=>({ok:false,status:403,json:async()=>payload});await ready();
+ expect(text(render())).toContain('تعذر تحميل إضافات المركز');
+ expect(nodes(render()).some(n=>n.type==='button'&&text(n)==='إضافة للمسودة للمراجعة')).toBe(false);
+ expect(select).not.toHaveBeenCalled();
+});
+it('late catalogue GET after principal retirement cannot expose old entries or append',async()=>{
+ const select=vi.fn();page=()=>PrescriptionClinicCatalog({onSelect:select});
+ let done!:(v:ReturnType<typeof response>)=>void;reads=()=>new Promise(resolve=>{done=resolve;});render();await settle();
+ identity.session={username:'another-doctor',role:'doctor'};reads=async()=>response({'clinical.medication_catalog':JSON.stringify({schemaVersion:1,entries:[]})});await ready();
+ done(response(payload));await settle();
+ expect(text(render())).not.toContain(entry.name);expect(retired.every(h=>h.lateUpdates===0)).toBe(true);expect(select).not.toHaveBeenCalled();
+});
