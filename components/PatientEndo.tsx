@@ -347,7 +347,7 @@ function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, c
     if (context?.orthoCaseId !== undefined || context?.planId !== undefined || context?.planItemId !== undefined || context?.visitId !== undefined) return null;
     if (selectedId !== null) return treatments.find((one) => one.id === selectedId) ?? null;
     return treatments.find((one) => one.status === "in_progress") ?? treatments[0];
-  }, [treatments, selectedId, context?.clinicalCaseId, context?.endoTreatmentId, context?.orthoCaseId, context?.planId, context?.planItemId, context?.visitId]);
+  }, [treatments, selectedId, context]);
   const episodeContext = (treatment: EndoTreatmentView): ClinicalNavigationContext => ({
     ...(context?.clinicalCaseId === treatment.caseId ? context : {}), patientId, clinicalCaseId: treatment.caseId, endoTreatmentId: treatment.id,
   });

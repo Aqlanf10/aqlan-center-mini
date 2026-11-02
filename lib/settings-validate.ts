@@ -1,3 +1,4 @@
+import { parseMedicationCatalog, MEDICATION_CATALOG_KEY } from "./medication-catalog";
 /**
  * التحقّق الخادميّ من قيم الإعدادات — الفرض هنا لا في الشاشة.
  *
@@ -39,6 +40,7 @@ function integerProblem(definition: SettingDefinition, raw: string): string | nu
  * «نموذج أنظف» يفتح ما كان مغلقًا.
  */
 export function validateTypedSetting(key: string, raw: string): string | null {
+  if (key === MEDICATION_CATALOG_KEY) { const parsed = parseMedicationCatalog(raw); return parsed.ok ? null : parsed.message; }
   const definition = settingDefinition(key);
   if (!definition) return "مفتاح إعداد غير معروف.";
   if (definition.systemLocked) return `${definition.label}: ثابتُ نظامٍ لا يُغيَّر من الإعدادات.`;
