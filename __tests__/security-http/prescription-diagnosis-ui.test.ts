@@ -109,6 +109,11 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
       if (failPrescriber) await json(route, { message: "Synthetic identity outage" }, 503);
       else await json(route, { prescriptions: [], suggestions: [], prescriberOptions: { issuerId: 98104, canChooseAnyDoctor: false, doctors: [{ id: 98104, name: "طبيب تجريبي" }] } });
     }
+    // Exact safe catalogue read introduced by the real picker. Other settings
+    // methods/query variants remain unexpected and no real settings read escapes.
+    else if (method === "GET" && path === "/api/settings" && url.search === "") {
+      await json(route, { "clinical.medication_catalog": JSON.stringify({ schemaVersion: 1, entries: [] }) });
+    }
     else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties") await json(route, [{ id: 98104, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);

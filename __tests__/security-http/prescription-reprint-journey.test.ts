@@ -202,7 +202,7 @@ it('built dose-profile picker reviews inputs, issues one snapshot, recovers and 
     await addSession(context,'doctorA');await addSession(receiveContext,'reception');
     await context.addInitScript(()=>{window.print=()=>{};});
     const page=await context.newPage();await page.goto(`${baseUrl}/visits/${visit.id}`);
-    await page.getByRole('button',{name:'روشتة طبية (℞)',exact:true}).click();
+    await page.getByRole('button',{name:'💊 روشتة طبية (℞)',exact:true}).click();
     await page.locator('summary').filter({hasText:'الجرعات والتعليمات حسب الاستطباب والمرجع'}).click();
     await page.getByLabel('الملف المرجعي للجرعة',{exact:true}).selectOption('amoxicillin-child-aapd-q8');
     for(const [label,value] of Object.entries({'الاستطباب المراجع':'Synthetic clinician-reviewed indication','العمر بأشهر مكتملة من تاريخ الميلاد':'60','الوزن الحالي kg':'20','المقدار المختار mg/kg/day':'30','عدد الجرعات خلال24ساعة':'3','الفاصل الأدنى بالساعات':'8','المدة المختارة بالأيام':'5','خطة المراجعة والإيقاف':'Synthetic review and stop plan','اسم المستحضر الفعلي':'Synthetic suspension','قوة المنتج mg':'250','رابط نشرة المستحضر HTTPS':'https://synthetic.invalid/product-label','أدنى عمر للمنتج بالأشهر وفق النشرة':'4','المادة نفسها من جميع المصادر الأخرى mg/24h — اكتب0 بعد التحقق':'0'}))await page.getByLabel(label,{exact:true}).fill(value);
