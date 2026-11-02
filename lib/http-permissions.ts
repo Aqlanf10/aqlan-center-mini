@@ -78,6 +78,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ai/chat": { POST: CLINIC },
   "/api/ai/confirmation": { POST: CLINIC },
   "/api/appointments": { GET: CLINIC, POST: CLINIC },
+  "/api/appointments/commands/[id]": { GET: CLINIC },
   "/api/appointments/[id]": { PATCH: CLINIC, DELETE: ADMIN },
   "/api/appointments/mine": { GET: CLINICAL },
   "/api/appointments/availability": { GET: CLINIC },

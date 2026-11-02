@@ -11,6 +11,7 @@ import { lockBookableAppointmentDoctor } from "./appointment-doctor";
 import { loadCapacityContext } from "./capacity-context";
 import { judgeBookingInDay } from "./book-appointment";
 import { PURCHASE_RESET_FENCE } from "./clinic-reset";
+import { insertAppointmentPurposeProvenance, type AppointmentPurpose } from "./appointment-purpose";
 import type { BookingConflict } from "./book-appointment";
 import {
   parsePlannedRebookIntent, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, PLANNED_REBOOK_GENERATION_SQL,
@@ -29,7 +30,7 @@ function reject(status: 400 | 401 | 403 | 404 | 409, message: string): never {
   throw new RebookRejected({ ok: false, status, message });
 }
 interface LockedPlan {
-  id: number; patient_id: number; appointment_id: number | null; title: string;
+  id: number; patient_id: number; plan_id:number|null; appointment_id: number | null; title: string;
   duration_minutes: number; doctor_id: number | null;
 }
 interface LockedAppointment {
@@ -65,6 +66,7 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
   let replay: Success | null = null;
   let plan: LockedPlan | undefined;
   let old: LockedAppointment | undefined;
+  let origin: {patient_id:number;purpose:AppointmentPurpose;source_plan_id:number;source_planned_visit_id:number}|undefined;
   let session: SessionPayload | null = null;
   let appointmentLocks: number[] = [];
   let service: Awaited<ReturnType<typeof lockAppointmentServiceForBooking>> = null;
@@ -91,13 +93,23 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
            ORDER BY a.id FOR UPDATE`, [input.plannedVisitId, input.expectedAppointmentId, previewReferralId]);
         appointmentLocks = locked.map(row => row.id);
         const { rows: plans } = await client.query<LockedPlan>(
-          `SELECT id, patient_id, appointment_id, title, duration_minutes, doctor_id
+          `SELECT id, patient_id, plan_id, appointment_id, title, duration_minutes, doctor_id
            FROM planned_visits WHERE id = $1 FOR UPDATE`, [input.plannedVisitId]);
         plan = plans[0];
         if (!plan) reject(404, "الزيارة المخطَّطة غير موجودة.");
         session = await revalidateSessionInTransaction(admitted, client);
         if (!session) reject(401, "انتهت الجلسة أو تغيّرت صلاحيات الحساب. سجّل الدخول من جديد.");
         if (!await canAccessPatient(session, plan.patient_id, undefined, client, "nowait")) reject(403, "غير مصرّح لك بملف هذا المريض.");
+        const {rows:[historical]}=await client.query<{patient_id:number;purpose:AppointmentPurpose;source_plan_id:number;source_planned_visit_id:number}>(
+          `SELECT patient_id,purpose,source_plan_id,source_planned_visit_id
+             FROM appointment_purpose_provenance WHERE appointment_id=$1`, [input.expectedAppointmentId]);
+        origin=historical;
+        if (origin) {
+          if (origin.patient_id!==plan.patient_id || origin.source_plan_id!==plan.plan_id ||
+              origin.source_planned_visit_id!==plan.id) reject(409,"مصدر الموعد المصنّف لا يطابق الجلسة؛ راجع الملف.");
+          if (!await canAccessPatient(session,plan.patient_id,"canViewPlans",client,"nowait"))
+            reject(403,"غير مصرّح لك بخطة الموعد المصنّف.");
+        }
         // Reset keeps users/audit but reuses clinical IDs. The held planned and
         // appointment table locks conflict with its EXCLUSIVE/TRUNCATE locks.
         // Check the generation here, not in the unlocked preview, and reject old
@@ -202,6 +214,15 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
         await client.query("UPDATE appointments SET planned_visit_id = NULL WHERE id = $1 AND planned_visit_id = $2", [old.id, plan.id]);
         await client.query("UPDATE appointments SET planned_visit_id = $2 WHERE id = $1", [created.id, plan.id]);
         await client.query("UPDATE planned_visits SET appointment_id = $2, status = 'scheduled' WHERE id = $1", [plan.id, created.id]);
+        if (origin) {
+          await insertAppointmentPurposeProvenance(client,{appointmentId:created.id,purpose:origin.purpose,
+            sourcePlanId:origin.source_plan_id,sourcePlannedVisitId:origin.source_planned_visit_id,
+            recordedBy:session.username});
+          await insertAuditRow(client,{action:"appointment.purpose_recorded",entity:"appointment",entityId:created.id,
+            actor:session.username,actorRole:session.role,details:{purpose:origin.purpose,patientId:origin.patient_id,
+              sourcePlanId:origin.source_plan_id,sourcePlannedVisitId:origin.source_planned_visit_id,
+              copiedFromAppointmentId:old.id}});
+        }
         const { rows: [replacement] } = await client.query<{ snapshot: Record<string, unknown> }>("SELECT to_jsonb(a) AS snapshot FROM appointments a WHERE id = $1", [created.id]);
         const response = { appointmentId: created.id, title: plan.title };
         await insertAuditRow(client, {

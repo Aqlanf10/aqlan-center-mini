@@ -31,6 +31,9 @@ import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { HR_STAFF_SQL } from "./hr-schema";
 import HR_TEMPORAL_RUNTIME_MIGRATIONS from './hr-temporal-schema.generated.json';
 import { applyRuntimeMigrationFiles } from './migrations';
+import { APPOINTMENT_PURPOSE_MIGRATION } from './appointment-purpose-migration-guard';
+import { insertAppointmentPurposeProvenance, isAppointmentPurpose, planRequiredForPurpose, type AppointmentPurpose } from './appointment-purpose';
+import type { SessionPayload } from './auth';
 import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
@@ -111,7 +114,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedAppointmentPurposeHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -2111,6 +2114,9 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_LINEAGE_MIGRATIONS);
+    // Registered 0095 file, never an inline ensureSchema extension. The shared
+    // migration lock validates checksum, registry and catalog before DDL.
+    await applyRuntimeMigrationFiles(getPool(), [APPOINTMENT_PURPOSE_MIGRATION]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -4166,6 +4172,15 @@ export async function getAppointment(id: number): Promise<Appointment | null> {
   return rows[0] ? toAppointment(rows[0]) : null;
 }
 
+/** Read the current state of a committed command on its existing recovery
+ * transaction. SHARE waits for a concurrent cancellation/move; no second pool
+ * connection or schema initializer may cross the UUID fence. */
+export async function getAppointmentOnClient(client: DbClient, id: number, nowait = false): Promise<Appointment | null> {
+  const { rows } = await client.query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.id=$1 FOR SHARE OF a${nowait ? ' NOWAIT' : ''}`, [id]);
+  return rows[0] ? toAppointment(rows[0]) : null;
+}
+
 export async function createAppointment(input: {
   patientId: number;
   date: string;
@@ -4241,7 +4256,7 @@ export async function insertAppointmentOnClient(
 export async function deleteAppointment(
   id: number,
   context: { actor: string; actorRole?: string | null; reason?: string | null },
-): Promise<{ ok: boolean; reason?: "not_found" | "arrived" }> {
+): Promise<{ ok: boolean; reason?: "not_found" | "arrived" | "classified_history" }> {
   await ensureSchema();
   const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
@@ -4264,6 +4279,14 @@ export async function deleteAppointment(
     if (current.arrived_at) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "arrived" };
+    }
+    // 0095 is historical intent, not a mutable appointment label. Cancellation
+    // preserves it; physical deletion must not erase its appointment FK.
+    const { rows: [classified] } = await client.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM appointment_purpose_provenance WHERE appointment_id = $1) AS exists", [id]);
+    if (classified.exists) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "classified_history" };
     }
     /* (REF-2) حذف موعد إحالةٍ محجوزة يعيدها لانتظار الحجز (كالإلغاء). */
     await referralOnAppointmentReleased(client, {
@@ -4310,17 +4333,32 @@ export async function deleteAppointment(
  */
 export async function writeAppointmentInDay<T>(input: {
   date: string;
+  /** A command-specific prelude before the day lock. Its explicit tagged result
+   * permits a committed receipt replay without re-running mutable capacity or
+   * the INSERT. Legacy callers omit it and retain their exact lock order. */
+  prelude?: (client: DbClient) => Promise<
+    { kind: "continue" } | { kind: "replayed"; value: T } | { kind: "rejected"; conflict: unknown }
+  >;
   /** Optional composed-writer fence, before day or table locks. */
   beforeLocks?: (client: DbClient) => Promise<void>;
   judge: (day: Appointment[], client: DbClient) =>
     | ({ ok: true } | { ok: false; conflict: unknown })
     | Promise<{ ok: true } | { ok: false; conflict: unknown }>;
   commit: (client: DbClient) => Promise<T>;
-}): Promise<{ ok: true; value: T } | { ok: false; conflict: unknown }> {
+}): Promise<{ ok: true; value: T; replayed?: boolean } | { ok: false; conflict: unknown }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const prelude = await input.prelude?.(client);
+    if (prelude?.kind === "replayed") {
+      await client.query("COMMIT");
+      return { ok: true, value: prelude.value, replayed: true };
+    }
+    if (prelude?.kind === "rejected") {
+      await client.query("ROLLBACK");
+      return { ok: false, conflict: prelude.conflict };
+    }
     await input.beforeLocks?.(client);
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`,
@@ -5252,7 +5290,7 @@ export async function findPatientIdByNumber(patientNumber: string): Promise<numb
 
 export type PatientMergeResult =
   | { ok: true; moved: Record<string, number>; target: Patient }
-  | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "conflict"; counts?: Record<string, number> };
+  | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "source_has_classified_history" | "conflict"; counts?: Record<string, number> };
 
 /**
  * (P2-7) دمج ملفٍّ مكرَّر (المصدر) في الملف الأصلي (الهدف) — معاملةٌ واحدة.
@@ -5285,6 +5323,15 @@ export async function mergeDuplicatePatient(
     if (!source || !target) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "not_found" };
+    }
+
+    // Only the disappearing source is blocked. Classified history on the
+    // surviving target is unchanged and must not prohibit a safe merge.
+    const { rows: [sourceHistory] } = await client.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM appointment_purpose_provenance WHERE patient_id = $1) AS exists", [sourceId]);
+    if (sourceHistory.exists) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "source_has_classified_history" };
     }
 
     const { rows: [footprint] } = await client.query<{
@@ -5611,6 +5658,13 @@ export async function deletePatientCascade(
       return { ok: false, reason: "not_found" };
     }
     const patient = toPatient(patientRows[0]);
+
+    const { rows: [classifiedHistory] } = await client.query<{ count: number }>(
+      "SELECT COUNT(*)::int AS count FROM appointment_purpose_provenance WHERE patient_id = $1", [id]);
+    if (classifiedHistory.count > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "has_clinical_history", counts: { classifiedAppointments: classifiedHistory.count } };
+    }
 
     // عُدّ ما سيُمحى — صورة الحذف في سجل التدقيق وإحصاءاته في رسالة التأكيد.
     const countOf = async (table: string, where: string, args: unknown[]): Promise<number> => {
@@ -21578,6 +21632,9 @@ export async function todayPlannedVisits(date: string, doctorPartyId?: number | 
  */
 export async function schedulePlannedVisit(input: {
   plannedVisitId: number;
+  /** Optional new explicit path; omission preserves all legacy scheduling. */
+  appointmentPurpose?: AppointmentPurpose;
+  session?: SessionPayload;
   date: string;
   time: string;
   chairs: number;
@@ -21594,10 +21651,18 @@ export async function schedulePlannedVisit(input: {
     Promise<{ ok: true } | { ok: false; conflict: unknown }>;
 }): Promise<
   | { ok: true; appointmentId: number; title: string }
-  | { ok: false; reason: "not_found" | "not_schedulable" | "already_scheduled" }
+  | { ok: false; reason: "not_found" | "not_schedulable" | "already_scheduled" | "invalid_purpose" | "session_expired" | "denied" | "source_mismatch" }
   | { ok: false; reason: "conflict"; conflict: { message: string; suggestion?: string; suggestionMessage?: string } }
 > {
+  const purpose = input.appointmentPurpose;
+  if (purpose !== undefined && (!isAppointmentPurpose(purpose) || !planRequiredForPurpose(purpose)))
+    return {ok:false,reason:"invalid_purpose"};
+  if (purpose && !input.session) return {ok:false,reason:"session_expired"};
   await ensureSchema();
+  // Keep db.ts free of static session/patient-access imports: both depend on
+  // this database module. Only the new explicit path needs these authorities.
+  const revalidatePurposeSession = purpose ? (await import('./session')).revalidateSessionInTransaction : null;
+  const canAccessPurposePatient = purpose ? (await import('./patient-access')).canAccessPatient : null;
 
   // قراءة أولية: المدة والحالة والمريض — ليعرف الحكم مدةً صحيحة.
   const { rows: previewRows } = await getPool().query<PlannedVisitRow>(
@@ -21616,6 +21681,10 @@ export async function schedulePlannedVisit(input: {
   try {
     const result = await writeAppointmentInDay({
       date: input.date,
+      beforeLocks: purpose ? async client => {
+        await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))", [PURCHASE_RESET_FENCE]);
+        if (!await revalidatePurposeSession!(input.session!, client)) throw new PlannedVisitRejected("session_expired");
+      } : undefined,
       judge: async (day, client) => {
         if (input.judge) return await input.judge(day, client, preview.duration_minutes);
         const verdict = checkSlot(day, input.date, input.time, preview.duration_minutes, input.chairs);
@@ -21634,8 +21703,8 @@ export async function schedulePlannedVisit(input: {
       },
       commit: async (client) => {
         // إعادة التحقق تحت القفل: لا تحويل مرتين مهما تزامنت الطلبات.
-        const { rows: locked } = await client.query<{ id: number; status: string; appointment_id: number | null }>(
-          `SELECT id, status, appointment_id FROM planned_visits WHERE id = $1 FOR UPDATE`,
+        const { rows: locked } = await client.query<{ id: number; status: string; appointment_id: number | null; patient_id:number;plan_id:number|null;title:string;duration_minutes:number }>(
+          `SELECT id, status, appointment_id,patient_id,plan_id,title,duration_minutes FROM planned_visits WHERE id = $1 ${purpose ? "FOR UPDATE NOWAIT" : "FOR UPDATE"}`,
           [input.plannedVisitId],
         );
         const current = locked[0];
@@ -21645,19 +21714,42 @@ export async function schedulePlannedVisit(input: {
         if (current.appointment_id) {
           throw new PlannedVisitRejected("already_scheduled");
         }
+        if (purpose) {
+          const session = await revalidatePurposeSession!(input.session!, client);
+          if (!session) throw new PlannedVisitRejected("session_expired");
+          if (current.patient_id!==preview.patient_id || current.plan_id!==preview.plan_id ||
+              current.duration_minutes!==preview.duration_minutes || current.title!==preview.title || !current.plan_id)
+            throw new PlannedVisitRejected("source_mismatch");
+          if (!await canAccessPurposePatient!(session,current.patient_id,"canViewPlans",client,"nowait"))
+            throw new PlannedVisitRejected("denied");
+          const {rows:parents}=await client.query<{id:number}>(
+            `SELECT p.id FROM treatment_plans p JOIN patients patient ON patient.id=p.patient_id
+              WHERE p.id=$1 AND p.patient_id=$2 AND p.status='active' FOR SHARE OF p,patient NOWAIT`,
+            [current.plan_id,current.patient_id]);
+          if (parents.length!==1) throw new PlannedVisitRejected("source_mismatch");
+        }
 
         const { rows: created } = await client.query<{ id: number }>(
           `INSERT INTO appointments
              (patient_id, scheduled_date, scheduled_time, duration_minutes, note, planned_visit_id)
            VALUES ($1, $2::date, $3::time, $4, $5::text, $6::int)
            RETURNING id`,
-          [preview.patient_id, input.date, input.time, preview.duration_minutes,
+          [purpose ? current.patient_id : preview.patient_id, input.date, input.time,
+           purpose ? current.duration_minutes : preview.duration_minutes,
            `من خطة العلاج: ${preview.title}`, input.plannedVisitId],
         );
         await client.query(
           `UPDATE planned_visits SET status = 'scheduled', appointment_id = $2 WHERE id = $1`,
           [input.plannedVisitId, created[0].id],
         );
+        if (purpose) {
+          await insertAppointmentPurposeProvenance(client,{appointmentId:created[0].id,purpose,
+            sourcePlanId:current.plan_id,sourcePlannedVisitId:current.id,recordedBy:input.session!.username});
+          await insertAuditRow(client,{action:"appointment.purpose_recorded",entity:"appointment",entityId:created[0].id,
+            actor:input.session!.username,actorRole:input.session!.role,
+            details:{purpose,patientId:current.patient_id,sourcePlanId:current.plan_id,sourcePlannedVisitId:current.id}});
+          if (!await revalidatePurposeSession!(input.session!,client)) throw new PlannedVisitRejected("session_expired");
+        }
         return { appointmentId: created[0].id, title: preview.title };
       },
     });
@@ -21670,13 +21762,14 @@ export async function schedulePlannedVisit(input: {
     if (error instanceof PlannedVisitRejected) {
       return { ok: false, reason: error.reason };
     }
+    if (purpose && (error as {code?:string}).code==="55P03") return {ok:false,reason:"source_mismatch"};
     throw error;
   }
 }
 
 /** رفضٌ داخلي يعبر المعاملة إلى الاستجابة — لا يُفشل السجل كله. */
 class PlannedVisitRejected extends Error {
-  constructor(readonly reason: "not_schedulable" | "already_scheduled") {
+  constructor(readonly reason: "not_schedulable" | "already_scheduled" | "session_expired" | "denied" | "source_mismatch") {
     super(reason);
   }
 }
@@ -26456,9 +26549,10 @@ async function seedAppointmentServicesOnPool(): Promise<number> {
 
 export async function listAppointmentServices(
   options: { includeInactive?: boolean } = {},
+  client?: DbClient,
 ): Promise<AppointmentService[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<AppointmentServiceRow>(
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<AppointmentServiceRow>(
     `${SERVICE_SELECT}
       ${options.includeInactive ? "" : "WHERE is_active = TRUE"}
       ORDER BY sort_order, id`,
@@ -26490,9 +26584,9 @@ export async function lockAppointmentServiceForBooking(client: DbClient, id: num
  * تبقى كما هي — لا تُعاد كتابتها. والجسر `legacy_type` يجعلها تُقرأ باسمها الصحيح
  * وتُحسب بمدّتها الصحيحة.
  */
-export async function resolveServiceByLegacyType(type: string): Promise<AppointmentService | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<AppointmentServiceRow>(
+export async function resolveServiceByLegacyType(type: string, client?: DbClient): Promise<AppointmentService | null> {
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<AppointmentServiceRow>(
     `${SERVICE_SELECT} WHERE legacy_type = $1 OR code = $1 ORDER BY is_active DESC, id LIMIT 1`,
     [type],
   );
@@ -27438,6 +27532,12 @@ export async function resetClinicData<F>(
       const { rows: [attemptHistory] } = await client.query<{ exists: boolean }>(
         `SELECT ${COLLECTION_ATTEMPT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (attemptHistory.exists) throw new ProtectedCollectionAttemptHistoryError();
+      // 0095 is kept history. Freeze issuers before backup or any mutation;
+      // never let a reset erase even one classified appointment or its source.
+      await client.query("LOCK TABLE appointment_purpose_provenance IN EXCLUSIVE MODE");
+      const { rows: [purposeHistory] } = await client.query<{ exists: boolean }>(
+        "SELECT EXISTS (SELECT 1 FROM appointment_purpose_provenance) AS exists");
+      if (purposeHistory.exists) throw new ProtectedAppointmentPurposeHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
@@ -27455,7 +27555,7 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, appointment_purpose_provenance, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }

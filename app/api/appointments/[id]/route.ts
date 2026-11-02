@@ -209,6 +209,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
           { status: 409 },
         );
       }
+      if (result.reason === "classified_history") {
+        return NextResponse.json(
+          { message: "هذا الموعد يحمل قصد حجز مصنّفًا وسجل مصدر تاريخي؛ ألغِ الموعد بدل حذفه." },
+          { status: 409 },
+        );
+      }
       return NextResponse.json({ message: "الموعد غير موجود." }, { status: 404 });
     }
     return NextResponse.json({ message: "حُذف الموعد وسُجِّل في التدقيق." });
