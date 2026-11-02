@@ -451,13 +451,15 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     setError("غير مصرّح لك بعرض كابينة التقويم لهذا المريض.");
   }, [owner]);
   useLayoutEffect(() => { owner.bindDenial(deny); }, [owner, deny]);
+  const readUsername = session?.username;
+  const readRole = session?.role;
   const load = useCallback(() => {
     if (!owner.active) return;
     const controller = new AbortController();
     const sequence = owner.beginRead(controller);
     const current = () => owner.active && owner.readSequence === sequence && !controller.signal.aborted;
     setReadState("loading"); setPatient(null); setError(null);
-    if (!session?.username?.trim() || !["admin", "doctor", "reception", "assistant"].includes(session.role)) {
+    if (!readUsername?.trim() || !["admin", "doctor", "reception", "assistant"].includes(readRole!)) {
       deny(); return;
     }
     let finished = 0;
@@ -501,7 +503,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     };
     // Independent continuations: no stalled peer or JSON body can postpone denial.
     void read("clinical"); void read("contact");
-  }, [owner, patientId, session?.username, session?.role, deny]);
+  }, [owner, patientId, readUsername, readRole, deny]);
 
   useEffect(() => { load(); }, [load]);
 

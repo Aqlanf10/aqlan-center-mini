@@ -1,3 +1,4 @@
+import { canonicalMedicationDoseProvenance } from "./medication-dose-provenance";
 /**
  * ربط إقرار قراءة تحذيرات السلامة الدوائية بالوصفة **وبالتحذيرات نفسها**
  * (Safety Acknowledgement Binding) — مراجعة P0 المستقلة، الجولة الثالثة،
@@ -56,6 +57,9 @@ const ACK_TOKEN_VERSION = 2;
  * جرعة أو تعليمة يغيّر التمثيل ويُبطل الرمز. */
 export function canonicalPrescriptionForAck(draft: PrescriptionDraft): string {
   return JSON.stringify({
+    ownerAuthority: draft.ownerAuthority ?? null,
+    prescribingDoctorName: draft.prescribingDoctorName ?? "",
+    prescribingDoctorPartyId: draft.prescribingDoctorPartyId ?? null,
     patientId: draft.patientId,
     visitId: draft.visitId,
     diagnosis: draft.diagnosis,
@@ -69,6 +73,9 @@ export function canonicalPrescriptionForAck(draft: PrescriptionDraft): string {
       item.duration,
       item.instructions,
       item.instructionsEn,
+      ...(item.selection ? [item.selection.id, item.selection.amount, item.selection.confirmed] : []),
+      ...(item.selection?.catalog ? [item.selection.catalog.id, item.selection.catalog.revision] : []),
+      ...(item.selection?.doseReview ? [`dose-review-v${item.selection.doseReview.version}`, canonicalMedicationDoseProvenance(item.selection.doseReview)] : []),
     ]),
   });
 }

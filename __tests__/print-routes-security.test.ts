@@ -25,6 +25,7 @@ vi.mock("@/lib/db", async (importOriginal) => {
     ...actual,
     getPatient: mocks.getPatient,
     getSettingsSafe: mocks.getSettingsSafe,
+    getPrescriptionPrintSettings: mocks.getSettingsSafe,
     getAppointment: mocks.getAppointment,
     getLabOrderById: mocks.getLabOrderById,
     patientAppointmentsFrom: mocks.patientAppointmentsFrom,
