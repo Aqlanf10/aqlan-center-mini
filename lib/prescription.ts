@@ -1,4 +1,4 @@
-import { parseMedicationDoseProvenance } from "./medication-dose-provenance";
+import { parseMedicationDoseProvenance } from "./patient-dose-provenance";
 import { manualMedicationSelectionError, type ManualMedicationSelection } from "./prescription-medication-selection";
 /**
  * الوصفة الطبية — الروشتة التي يخرج بها المريض إلى الصيدلية.

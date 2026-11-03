@@ -3,6 +3,7 @@ import { Client } from "pg";
 import { chromium, type Browser } from "playwright";
 import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { authedMutation, baseUrl, harness } from "./_server";
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser;
 beforeAll(async () => {
@@ -245,7 +246,8 @@ it.each(['amoxicillin','ibuprofen'] as const)('built %s dose-profile picker issu
     expect(response.status(),await response.text()).toBe(201);const saved=await response.json();const command=response.request().postDataJSON();
     const before=(await db.query('SELECT * FROM prescriptions WHERE id=$1',[saved.id])).rows[0];
     const items=typeof before.items==='string'?JSON.parse(before.items):before.items;
-    expect(items[0]).toMatchObject({dose:ibu?'100 mg/5 mL':'250 mg/5 mL',frequency:ibu?'3 times daily; at least 8 hours apart':'Every 8 hours (3 doses/24h)',selection:{amount,doseReview:{version:ibu?2:1,mode:'calculated',input:{ageMonths:60,weightKg:20,product:{strengthMg:ibu?100:250,perMl:5,...(ibu?{minimumIntervalHours:6,maxAdministrationsPer24h:3}:{})}},result:{mgPerDose:ibu?150:200,mgPer24h:ibu?450:600,mlPerDose:ibu?7.5:4}}}});
+    expect(items[0]).toMatchObject({dose:ibu?'100 mg/5 mL':'250 mg/5 mL',frequency:ibu?'3 times daily; at least 8 hours apart':'Every 8 hours (3 doses/24h)',selection:{amount,doseReview:{version:3,inputVersion:ibu?2:1,mode:'calculated',input:{ageMonths:60,weightKg:20,product:{strengthMg:ibu?100:250,perMl:5,...(ibu?{minimumIntervalHours:6,maxAdministrationsPer24h:3}:{})}},result:{mgPerDose:ibu?150:200,mgPer24h:ibu?450:600,mlPerDose:ibu?7.5:4}}}});
+    expect(items[0].instructions).toMatch(/^خطة المراجعة:/);
     if(ibu){expect(items[0].instructionsEn).toContain('Preferably after food.');expect(items[0].frequency).toContain('at least 8 hours apart');}
     expect(before.created_by).toBe('secdoctora');expect(before.prescribing_doctor_party_id).toBe(doctor.party_id);
     const replay=await post('/api/prescriptions',command);expect(replay.status).toBe(201);expect(await replay.json()).toMatchObject({id:saved.id,replayed:true});
@@ -258,9 +260,32 @@ it.each(['amoxicillin','ibuprofen'] as const)('built %s dose-profile picker issu
     const received=await read(printPath);expect(received.status).toBe(200);const html=await received.text();expect(html).toContain(amount);if(ibu){expect(html).toContain('Preferably after food.');expect(html).toContain('at least 8 hours apart');}for(const secret of ['weightKg','product-label','data-dose-form'])expect(html).not.toContain(secret);
     const receptionPage=await receiveContext.newPage();await receptionPage.goto(`${baseUrl}/patients/${patient.id}`);expect(await receptionPage.locator('[data-dose-profile-review]').count()).toBe(0);
     await receptionPage.goto(`${baseUrl}${printPath}`);await mkdir('.settings-ui-artifacts/prescription-dose',{recursive:true});await receptionPage.screenshot({path:`.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.png`,fullPage:true});await receptionPage.pdf({path:`.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.pdf`,preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false});
+    // Regression: the bounded one-item saved Rx must not orphan its signature
+    // on a second A6 sheet. Inspect the actual hosted PDF, not the screen PNG.
+    const pdfPath = `.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.pdf`;
+    const info = execFileSync('pdfinfo', [pdfPath], { encoding: 'utf8' });
+    expect(Number(info.match(/^Pages:\s+(\d+)/m)?.[1])).toBe(1);
+    const paper = info.match(/^Page size:\s+([\d.]+) x ([\d.]+) pts/m);
+    expect(paper).not.toBeNull();
+    expect(Number(paper![1])).toBeGreaterThan(295); expect(Number(paper![1])).toBeLessThan(301);
+    expect(Number(paper![2])).toBeGreaterThan(417); expect(Number(paper![2])).toBeLessThan(423);
+    const normalize = (value: string) => value.normalize('NFKC').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim();
+    const pdfText = normalize(execFileSync('pdftotext', ['-raw', pdfPath, '-'], { encoding: 'utf8' }));
+    for (const value of [items[0].name, items[0].dose, ...(ibu ? ['7.5 mL', '150 mg'] : ['4 mL', '200 mg']), items[0].frequency, items[0].duration, items[0].instructionsEn, 'Physician', 'Signature & Stamp', `Rx #${saved.id}`, '04-253028']) {
+      expect(pdfText).toContain(normalize(value));
+    }
+    // Arabic PDF text extraction reorders bidi words; preserve its complete
+    // saved source in the rendered page, and require Arabic glyphs in the PDF.
+    const renderedText = normalize(await receptionPage.locator('body').innerText());
+    // Parenthesis order in PDF extraction is bidi-dependent; DOM retains exact amount.
+    expect(renderedText).toContain(normalize(amount));
+    expect(renderedText).toContain(normalize(items[0].instructions));
+    expect(renderedText).toContain(normalize(before.prescribing_doctor_name));
+    expect(pdfText).toMatch(/[\u0600-\u06ff]/);
     expect((await read(`/print/prescription/${patient.id}?draft=1&items=[]`)).status).toBe(404);
     expect((await db.query('SELECT * FROM prescriptions WHERE id=$1',[saved.id])).rows[0]).toEqual(before);
     expect(Number((await db.query('SELECT count(*) n FROM prescriptions WHERE patient_id=$1',[patient.id])).rows[0].n)).toBe(1);
   } finally {await context.close();await receiveContext.close();await db.query('UPDATE users SET permissions=$1 WHERE id=$2',[reception.permissions,reception.id]);}
 },180_000);
+
 

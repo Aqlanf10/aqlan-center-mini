@@ -165,7 +165,7 @@ export default async function PrescriptionPrintPage({
               <tr key={idx} className="prescription-medication"><td>
               <div style={{
                   borderBottom: "1px dashed #cbd5e1",
-                  paddingBottom: "2.5mm",
+                  paddingBottom: "1.5mm",
                   fontSize: "9pt",
                 }}
               >
@@ -227,7 +227,7 @@ export default async function PrescriptionPrintPage({
           </div>
         )}
 
-        <div className="sign-row" dir="ltr" style={{ textAlign: "left", marginTop: "4mm", alignItems: "flex-end" }}>
+        <div className="sign-row" dir="ltr" style={{ textAlign: "left", marginTop: "2mm", alignItems: "flex-end" }}>
           <div>
             <div style={{ fontSize: "8pt", color: "#64748b" }}><span dir="ltr">Physician</span> · <span dir="rtl">الطبيب المعالج</span></div>
             <div style={{ fontWeight: 800, fontSize: "9pt", marginTop: "1mm" }}>
@@ -237,7 +237,7 @@ export default async function PrescriptionPrintPage({
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: "8pt", color: "#64748b" }}>التوقيع والختم · <span dir="ltr">Signature &amp; Stamp</span></div>
-            <div style={{ height: "10mm", width: "30mm", borderBottom: "1px dotted #94a3b8", margin: "2mm auto 0" }} />
+            <div style={{ height: "8mm", width: "30mm", borderBottom: "1px dotted #94a3b8", margin: "1mm auto 0" }} />
           </div>
         </div>
 
