@@ -51,6 +51,17 @@ export class CanonicalLabOrderRefusal extends Error {
 }
 
 const STATUSES: readonly LabOrderStatus[] = ["needed", "sent", "in_progress", "received", "delivered", "remake", "cancelled"];
+
+/**
+ * Post-dispatch moves (from any status past `needed`) that need `clinical.lab.cancel` in
+ * addition to `clinical.lab.order`. PENDING OWNER DECISION — see
+ * docs/review/lab-post-dispatch-policy-20261103.md. The map's field text reads "any
+ * change after dispatch"; the legacy rule it describes ("Today admin-only") guards the
+ * CANCEL alone (receipt, fitting, remake and return stay with every lab role). This list
+ * keeps the legacy behaviour until the owner decides; the literal reading would list
+ * every target status here.
+ */
+export const LAB_POST_DISPATCH_CANCEL_GUARDED: readonly LabOrderStatus[] = Object.freeze(["cancelled"] as const);
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const invalid = (message: string) => new CanonicalLabOrderRefusal("invalid_lab_order", 400, message);
 const notFound = () => new CanonicalLabOrderRefusal("lab_order_not_found", 404, "أمر المختبر غير موجود.");
@@ -118,6 +129,11 @@ export async function commandCanonicalLabStatus(session: VerifiedDurableSession,
     }
     const identity = await staffOperationIdentity(client, handle, "clinical.lab.order");
     const cancel = (await staffOperationCapabilities(client, handle, "clinical.lab.order", ["clinical.lab.cancel"] as const)).has("clinical.lab.cancel");
+    // The guarded post-dispatch moves, checked explicitly under the lock (the writer's own
+    // cancel check below stays as a second line).
+    if (row.status !== "needed" && LAB_POST_DISPATCH_CANCEL_GUARDED.includes(status) && !cancel) {
+      throw new Error("STAFF_OPERATION_CAPABILITY_DENIED");
+    }
     const authority: LabStatusAuthority = {
       actor: { username: identity.username, role: identity.role },
       canAccessPatient: patientId => inScope(client, scope, patientId),

@@ -2181,7 +2181,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 66: record read read:lab.orders in one owning snapshot; the patient scope is applied in SQL before the list limit (own = the central DOCTOR_PATIENT_CONDITION; another patient answers like one without orders); summary=1 counts follow the scope; the clinical fields are an allowlist and the money group (cost, base amount, rate, payable, accounts, posting) is added only with finance.cost-prices.view. The shared list helper's daily window is now a WHERE condition (it was appended after the last LEFT JOIN and filtered nothing) and keeps remake orders — legacy and canonical alike.",
+  "note": "M2 slice 66: record read read:lab.orders in one owning snapshot; the patient scope is applied in SQL before the list limit (own = the central DOCTOR_PATIENT_CONDITION; another patient answers like one without orders); summary=1 counts follow the scope; the clinical fields are an allowlist and the money group (cost, base amount, rate, payable, accounts, posting) is added only with finance.cost-prices.view. The shared list helper's daily window is now a WHERE condition (it was appended after the last LEFT JOIN and filtered nothing) and keeps remake orders — legacy and canonical alike. M2 slice 68: for actors holding clinical.lab.order the read also returns the creation form's directory (active lab parties and active doctors: id and name, lab phone; never money).",
   "projection": {"legacy": "every admitted role read every clinic order; doctors without the cost permission lost only cost/currency (base amount and rate stayed visible).", "groups": {"clinical": "patient identity, work, teeth, shades, lab, doctor, dates, status, quality, remake, notes", "money": "cost, currency, base amount, rate, financial status, payable, expense/payable accounts, posting — only with finance.cost-prices.view"}, "rows": "patient scope all: every order in the daily window; own: the clinician's patients; none: refused"}
  },
  {
@@ -2197,8 +2197,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 68: one admitted clinical.lab.order transaction (createLabOrderOn). The patient must be inside the patient scope (outside or missing = 404; the legacy route checked no patient access). Duplicate prevention without schema change: a required requestKey, a transaction advisory lock on (actor, key), and the receipt = the same-transaction lab_order.create audit row carrying the key and a fingerprint of the normalised request (1-day window): same key + same request replays the existing order (200, replayed), same key + another request is refused (409 lab_request_key_reused), a key whose order was deleted is refused (409 lab_request_key_used). The visit/tooth unique index still refuses a second order for the same tooth (409 lab_order_exists). Explicit money and posting fields (cost, costCurrency, expenseCategoryId, expenseAccountCode, payableAccountCode, isPosted) are refused (409 lab_money_not_canonical); the only money effect is the legacy automatic price from the lab's pricing rules with the legacy default accounts. The lab must be an active lab party (no party created from free text). A clinician-linked actor orders in its own name; a visit must belong to the patient. The audit row commits with the order (the legacy route wrote it after the commit). Response: the clinical projection unless finance.cost-prices.view."
  },
  {
   "route": "/api/lab/[id]",
@@ -2281,7 +2281,7 @@
      "need": [
       "clinical.lab.cancel"
      ],
-     "note": "Today admin-only. M2 slice 67 reads this as the legacy rule it describes: CANCELLING work past needed needs clinical.lab.cancel in addition to clinical.lab.order (the legacy admin-only check is on cancel alone; ordinary moves such as receipt stay under clinical.lab.order)."
+     "note": "Today admin-only. PENDING OWNER DECISION (docs/review/lab-post-dispatch-policy-20261103.md). The canonical branch keeps the legacy rule this note describes: CANCELLING work past needed needs clinical.lab.cancel in addition to clinical.lab.order (the legacy admin-only check is on cancel alone; receipt, fitting, remake and return stay under clinical.lab.order). One constant (LAB_POST_DISPATCH_CANCEL_GUARDED) holds the rule; a matrix test pins it."
     }
    ]
   }

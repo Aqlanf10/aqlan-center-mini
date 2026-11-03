@@ -562,6 +562,39 @@ The read-only patient panel clears stale or failed responses and has no action o
   - a move waits on the row lock, then reads the moved status.
   All lab PG suites 373/373 in 21 files. Built journey `canonical-lab-orders-journey` (3, portOffset 108).
 
+### Slice 68 — lab-order creation with a request key (`POST /api/lab`)
+- **Admission and scope:** one admitted `clinical.lab.order` transaction (`createLabOrderOn`, the legacy writer's own body). The patient must be inside the patient scope: outside or missing answers 404, and `none` is refused. The legacy route checked no patient access.
+- **Duplicate prevention, without schema change:**
+  - A `requestKey` is required, one per form submission.
+  - Under a transaction advisory lock on (actor, key), the receipt is looked up first. The receipt is the same-transaction `lab_order.create` audit row, carrying the key and a fingerprint of the normalised request (stable JSON, nested fields included; 1-day window).
+  - Same key + same request → the existing order is returned (200, `replayed`).
+  - Same key + another request → 409 `lab_request_key_reused`.
+  - Key whose order was deleted → 409 `lab_request_key_used`.
+  - A failed attempt commits nothing, so its retry creates once. Keys are per actor.
+  - The visit/tooth unique index still refuses a second order for the same tooth (409 `lab_order_exists`).
+- **Money and posting:**
+  - Explicit `cost`, `costCurrency`, `expenseCategoryId`, `expenseAccountCode`, `payableAccountCode` and `isPosted` are refused (409 `lab_money_not_canonical`, naming the field).
+  - The only money effect is the legacy automatic price from the lab's pricing rules in force, with the legacy default accounts and posting.
+  - The response is the clinical projection unless `finance.cost-prices.view`.
+- **Directory:**
+  - The lab must be an active lab party. The legacy route created a party from free text, a directory write that belongs to `clinical.laboratories.manage`.
+  - A clinician-linked actor orders in its own name (the legacy doctor binding); others name an active doctor.
+  - A visit must belong to the patient.
+  - `GET /api/lab` returns the creation directory (active labs and doctors, names only) to `clinical.lab.order` holders.
+- **Audit:** the `lab_order.create` audit row commits with the order; the legacy route wrote it after the commit.
+- **Screen:** `CanonicalLabCreateForm` on the board.
+  - Patient search goes through the canonical directory.
+  - One key per opened form, kept across retries; a lost response is retried safely.
+  - The form keeps its directory across the 30-second refresh, so it is never unmounted while being filled in.
+- **Post-dispatch policy (pending the owner):**
+  - [`lab-post-dispatch-policy-20261103.md`](../../review/lab-post-dispatch-policy-20261103.md) documents the map's text, the legacy behaviour, the two readings and the proposed decision.
+  - The rule is one constant, `LAB_POST_DISPATCH_CANCEL_GUARDED = ["cancelled"]` (legacy-equivalent), checked under the lock.
+  - PG `lab-canonical-dispatch-policy` (6) pins 12 moves × 4 grant sets.
+- **Tests:**
+  - PG `lab-canonical-create` (10): double press, 5 concurrent submissions with one key, reused key, distinct keys, per-actor keys, failed-attempt retry, deleted-order key, visit/tooth guard, money refusals, directory, scope and doctor binding, automatic price.
+  - Unit `canonical-lab-create-fingerprint` (4).
+  - Built journey `canonical-lab-create-journey` (2, portOffset 110), including a lost-response retry in the browser.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

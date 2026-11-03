@@ -6916,7 +6916,7 @@ export async function addLabOrderTracking(
  * التكلفة والالتزام معًا أو لا شيء: أمرٌ سُجّل وتكلفته ضاعت يعني عملًا يُنتظر بلا
  * أثر مالي، ثم يأتي المختبر بحسابه آخر الشهر فلا يُقابَل بشيء يُراجَع.
  */
-export async function createLabOrder(input: {
+export type LabOrderCreateInput = {
   patientId: number;
   labName: string;
   labPhone: string | null;
@@ -6953,13 +6953,35 @@ export async function createLabOrder(input: {
   expenseAccountCode?: string | null;
   payableAccountCode?: string | null;
   isPosted?: boolean;
-}): Promise<LabOrder | null> {
-  const parsedShade = parseLabShadeSpecification(input.shadeSpecification ?? null, Object.keys(parseLabTeeth(input.toothNumbers)).map(Number));
-  if (!parsedShade.ok) throw new Error(parsedShade.error);
+};
+
+export async function createLabOrder(input: LabOrderCreateInput): Promise<LabOrder | null> {
   await ensureSchema();
   const client = await getPool().connect();
+  let orderId: number | null;
   try {
     await client.query("BEGIN");
+    orderId = await createLabOrderOn(client, input);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  return orderId === null ? null : getLabOrderWith(getPool(), orderId);
+}
+
+/**
+ * The order creation inside the CALLER's transaction (M2 slice 68): the lab party
+ * resolved, the automatic price from the pricing rules in force, the order row (the
+ * visit/tooth unique index answers a second order for the same tooth with `null`),
+ * its first tracking row and its payable. Throws on an invalid shade specification.
+ */
+export async function createLabOrderOn(client: DbClient, input: LabOrderCreateInput): Promise<number | null> {
+  const parsedShade = parseLabShadeSpecification(input.shadeSpecification ?? null, Object.keys(parseLabTeeth(input.toothNumbers)).map(Number));
+  if (!parsedShade.ok) throw new Error(parsedShade.error);
+  {
 
     // الربط المالي: المختبر جهةٌ محاسبية — إن أُرسل الطلب باسم مختبرٍ بلا جهة،
     // نبحث عنها، فإن لم توجد وُلدت جهة جديدة بلا مخاطبة ولا حسابات مخصصة.
@@ -7082,7 +7104,6 @@ export async function createLabOrder(input: {
       ],
     );
     if (!rows[0]) {
-      await client.query("COMMIT");
       return null;
     }
     const orderId = rows[0].id;
@@ -7133,14 +7154,7 @@ export async function createLabOrder(input: {
       }
     }
 
-    await client.query("COMMIT");
-    const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
-    return full[0] ? toLabOrder(full[0]) : null;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+    return orderId;
   }
 }
 

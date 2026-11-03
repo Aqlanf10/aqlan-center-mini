@@ -11,6 +11,7 @@ import {
   type LabFilter, type LabOrder, type LabOrderClinicalDTO,
 } from "@/lib/lab";
 import { CanonicalLabOrderActions } from "./CanonicalLabOrderActions";
+import { CanonicalLabCreateForm } from "./CanonicalLabCreateForm";
 import { LAB_BACKLOG_FILTER_LABEL, LAB_BACKLOG_FILTERS, labBacklogPatientHref, type LabBacklogFilter, type LabBacklogSnapshot } from "@/lib/lab-backlog";
 
 /**
@@ -20,10 +21,14 @@ import { LAB_BACKLOG_FILTER_LABEL, LAB_BACKLOG_FILTERS, labBacklogPatientHref, t
  * finance.cost-prices.view. قائمة المتابعة الشاملة (GET /api/lab/backlog) لمن نطاقه «كل
  * المرضى»، والمهام المرتبطة لمن يملك tasks.use. لا يُركَّب هنا المسار القديم ولا طلباته.
  * نقل الحالة وتغيير الموعد والإلغاء وسجل الحركة (clinical.lab.order وclinical.lab.cancel)
- * في CanonicalLabOrderActions؛ إنشاء الطلبات في شريحة لاحقة.
+ * في CanonicalLabOrderActions؛ وإنشاء الطلبات بمفتاح طلب يمنع التكرار في CanonicalLabCreateForm.
  */
 type Order = LabOrderClinicalDTO & Partial<Pick<LabOrder, "costMinor" | "costCurrency">>;
-interface Feed { orders: Order[]; labs: { labName: string }[]; projection: { costs: boolean } }
+interface Feed {
+  orders: Order[]; labs: { labName: string }[]; projection: { costs: boolean };
+  /** The creation form's directory (slice 68), sent only to those who may create orders. */
+  labParties?: { id: number; name: string }[]; doctors?: { id: number; name: string }[];
+}
 const FILTERS: LabFilter[] = ["late", "outstanding", "pending", "received", "remake", "delivered", "all"];
 
 export function CanonicalLabBoard() {
@@ -38,6 +43,9 @@ export function CanonicalLabBoard() {
   const [backlogFilter, setBacklogFilter] = useState<LabBacklogFilter>("overdue");
   const [backlogError, setBacklogError] = useState<string | null>(null);
   const sequence = useRef(0);
+  // The creation form keeps the last directory: a refresh (every 30 s) must never unmount
+  // a form being filled in.
+  const [directory, setDirectory] = useState<Pick<Feed, "labParties" | "doctors">>({});
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   const load = useCallback(async () => {
@@ -50,6 +58,7 @@ export function CanonicalLabBoard() {
       if (current !== sequence.current) return;
       if (!response.ok || !payload || !Array.isArray(payload.orders)) { setError(payload?.message ?? "تعذّر تحميل أعمال المختبر."); return; }
       setFeed(payload as Feed);
+      if (Array.isArray(payload.labParties)) setDirectory({ labParties: payload.labParties, doctors: payload.doctors });
     } catch { if (current === sequence.current) setError("تعذّر الاتصال بالخادم."); }
     if (!whole) return;
     setBacklog(null); setBacklogError(null);
@@ -82,6 +91,8 @@ export function CanonicalLabBoard() {
         </div>
         <button type="button" onClick={() => void load()} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">تحديث</button>
       </header>
+
+      {canOrder ? <CanonicalLabCreateForm directory={directory} onCreated={() => void load()} /> : null}
 
       {whole ? (
         <section aria-label="قائمة المتابعة الشاملة" className="rounded-2xl border border-slate-200 bg-white p-3" data-testid="lab-backlog">

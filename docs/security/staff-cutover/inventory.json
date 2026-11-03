@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "9a705f04d30910d58cce6f278a29b3c043f5c081f996fa7165b921dd0a9485a8",
+  "sourceDigest": "cb421cc86d2d1ac961ffcda7f51f701ff1234bafd9240aa8399a6ad65d8401e0",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -1826,11 +1826,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 39
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 82
+          "line": 103
         },
         {
           "symbol": "findUserByUsername",
@@ -1838,7 +1838,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 57
+          "line": 58
         }
       ]
     },
@@ -8188,11 +8188,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 39
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 82
+          "line": 103
         },
         {
           "symbol": "findUserByUsername",
@@ -8200,7 +8200,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 57
+          "line": 58
         }
       ]
     },
@@ -8224,11 +8224,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 39
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 82
+          "line": 103
         },
         {
           "symbol": "findUserByUsername",
@@ -8236,7 +8236,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 57
+          "line": 58
         }
       ]
     },

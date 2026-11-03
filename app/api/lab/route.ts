@@ -16,6 +16,7 @@ import { parseLabShadeSpecification } from "@/lib/lab-shades";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { CanonicalLabReadRefusal, readCanonicalLabOrders } from "@/lib/canonical-lab-reads";
+import { CanonicalLabCreateRefusal, commandCanonicalLabCreate } from "@/lib/canonical-lab-create";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +80,26 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  /* M2 slice 68: clinical.lab.order inside the patient scope, with a request key that
+     prevents duplicates; money and posting fields refused; never the legacy session. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    const source = (body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+    try {
+      const result = await commandCanonicalLabCreate(selected.handle, source);
+      return NextResponse.json(result, { status: result.replayed ? 200 : 201, headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalLabCreateRefusal) {
+        return NextResponse.json({ code: error.code, message: error.message, ...(error.field ? { field: error.field } : {}) }, { status: error.status, headers: NO_STORE });
+      }
+      return canonicalPatientReadFailure(error, "تعذّر حفظ العمل. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   let body: unknown;

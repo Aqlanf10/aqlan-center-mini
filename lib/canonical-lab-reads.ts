@@ -60,10 +60,19 @@ export async function readCanonicalLabOrders(session: VerifiedDurableSession, pa
     const orders = await listLabOrdersWith(query, patientId !== null ? { patientId } : undefined, clinician);
     const labs = await listLabNamesWith(query);
     const labServices = withServices ? await listLabServicesWith(query) : null;
+    // The creation form's directory (M2 slice 68): active labs and doctors, names only —
+    // never money — and only for those who may create orders.
+    const directory = scope.granted("clinical.lab.order") ? {
+      labParties: (await query.query<{ id: number; name: string; phone: string | null }>(
+        "SELECT id, name, phone FROM parties WHERE kind = 'lab' AND is_active ORDER BY name, id LIMIT 200")).rows,
+      doctors: (await query.query<{ id: number; name: string }>(
+        "SELECT id, name FROM parties WHERE kind = 'doctor' AND is_active ORDER BY name, id LIMIT 200")).rows,
+    } : {};
     return {
       orders: costs ? orders : orders.map(clinicalLabOrder),
       labs,
       ...(labServices ? { labServices } : {}),
+      ...directory,
       projection: { costs },
     };
   }, { errorPrefix: "STAFF_READ", maxBytes: 4 * 1024 * 1024 });
