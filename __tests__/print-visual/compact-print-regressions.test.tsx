@@ -104,9 +104,25 @@ describe("native compact print regression witnesses", () => {
       await page.route("**/*", route => route.abort());
       await page.setContent(html);
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(image => image.decode().catch(() => undefined))); });
+      if (prescription) {
+        expect(body).toContain('sheet sheet-a5 prescription-approved-a5');
+        expect(body).toContain('℞');
+        const screenWidth = await page.locator('.prescription-approved-a5').evaluate(node => node.getBoundingClientRect().width);
+        expect(Math.abs(screenWidth - 148 * 96 / 25.4)).toBeLessThan(2);
+        await page.screenshot({ path: resolve(output, `${kind}-approved-screen.png`), fullPage: true });
+      }
       await page.emulateMedia({ media: "print" });
       await page.screenshot({ path: resolve(output, `${kind}-compact.png`), fullPage: true });
-      const pdf = await page.pdf({ path: resolve(output, `${kind}-compact.pdf`), format: ["receipt", "patient-card"].includes(kind) ? "A6" : "A4", preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+      const pdf = await page.pdf({ path: resolve(output, `${kind}-compact.pdf`), format: prescription ? "A5" : ["receipt", "patient-card"].includes(kind) ? "A6" : "A4", preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+      if (prescription && !rxFixture.long && !rxFixture.calculated && !rxFixture.historicalIbuprofen) {
+        // Production respects the operator's paper choice rather than forcing A6/A5.
+        const a4 = await page.pdf({ path: resolve(output, `${kind}-operator-a4.pdf`), format: "A4", preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+        const paperInfo = execFileSync("pdfinfo", ["-"], { input: a4, encoding: "utf8" });
+        const size = paperInfo.match(/^Page size:\s+([\d.]+) x ([\d.]+) pts/m);
+        expect(size).not.toBeNull();
+        expect(Math.abs(Number(size![1]) - 210 * 72 / 25.4)).toBeLessThan(1);
+        expect(Math.abs(Number(size![2]) - 297 * 72 / 25.4)).toBeLessThan(1);
+      }
       const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
       const pages = await page.evaluate(raw => {
         const doc = new DOMParser().parseFromString(raw, "application/xml");
@@ -129,8 +145,8 @@ describe("native compact print regression witnesses", () => {
         else if (rxFixture.calculated) expect(pages.length).toBeGreaterThan(0);
         else expect(pages).toHaveLength(1);
         for (const paper of pages) {
-        expect(Math.abs(paper.width - 105 * 72 / 25.4)).toBeLessThan(1);
-        expect(Math.abs(paper.height - 148 * 72 / 25.4)).toBeLessThan(1);
+        expect(Math.abs(paper.width - (prescription ? 148 : 105) * 72 / 25.4)).toBeLessThan(1);
+        expect(Math.abs(paper.height - (prescription ? 210 : 148) * 72 / 25.4)).toBeLessThan(1);
         for (const word of paper.words) {
           expect([word.xMin, word.xMax, word.yMin, word.yMax].every(Number.isFinite)).toBe(true);
           expect(word.xMin).toBeGreaterThanOrEqual(0); expect(word.yMin).toBeGreaterThanOrEqual(0);
@@ -153,7 +169,7 @@ describe("native compact print regression witnesses", () => {
           expect(body).toContain(historicalIbuprofenItem.instructions);
           expect(body).toContain(historicalIbuprofenItem.instructionsEn);
           expect(body).toContain("طبيب الأمن أ");
-          // Every rendered word remains within the single A6 sheet (checked above).
+          // Every rendered word remains within the single operator-selected A5 sheet (checked above).
           expect(pages).toHaveLength(1);
         }
         if (rxFixture.long) {

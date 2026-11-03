@@ -95,16 +95,16 @@ describe("actual non-table print routes retain source semantics (synthetic SSR)"
     expect(html).not.toContain("UNTRUSTED-DOCTOR"); expect(html).not.toContain(friendlyDateLong("1900-01-01"));
     expect(html).toContain(friendlyDateLong(source.createdAt.slice(0, 10))); expect(html).toContain("Signature &amp; Stamp");
     if (status === "void") expect(html).toContain("VOIDED"); else expect(html).not.toContain("مسودة للمراجعة");
-    expect(html).toContain("sheet sheet-a6 prescription-a6-sheet");
+    expect(html).toContain("sheet sheet-a5 prescription-approved-a5");
     expect(html).toContain("prescription-page-identity");
-    expect(source).toEqual(before); artifact(`prescription-${status}`, html, "A6");
+    expect(source).toEqual(before); artifact(`prescription-${status}`, html, "A5");
   });
   it("long saved prescription retains all 20 instructions across natural page breaks", async () => {
     const source = { ...prescription, items: Array.from({ length: 20 }, (_, index) => ({ ...prescription.items[0], name: `SYNTHETIC-DRUG-${String(index + 1).padStart(2, "0")} (NOT FOR USE)`, instructions: `تعليمات عربية صناعية طويلة لفحص التفاف النص وترقيم الصفحات فقط، لا تستخدم للعلاج — بند ${index + 1}` })) };
     readers.prescription.mockResolvedValue(source); const before = structuredClone(source);
     const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002" }) }));
     for (const item of source.items) { expect(html).toContain(item.name); expect(html).toContain(item.instructions); }
-    expect(source).toEqual(before); artifact("prescription-long-20", html, "A6");
+    expect(source).toEqual(before); artifact("prescription-long-20", html, "A5");
   });
   it("rejects retired draft printing before patient or prescription lookup", async () => {
     await expect(PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", items: JSON.stringify(reviewedDraftItems), diagnosis: "تشخيص مسودة صناعي", date: "2031-01-04", lang: "en" }) })).rejects.toThrow("synthetic-not-found");

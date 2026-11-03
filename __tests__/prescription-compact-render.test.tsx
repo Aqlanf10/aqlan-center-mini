@@ -8,7 +8,7 @@ it('renders a blank writable medicine and closed optional resources without hidi
  expect(html).toContain('اسم الدواء للسطر 1');
  expect(html).toContain('القوة / التركيز والوحدة');
  expect(html).toContain('مقدار الجرعة للسطر 1');
- expect(html).toContain('حفظ وطباعة الوصفة (A6)');
+ expect(html).toContain('حفظ وطباعة الوصفة');
  expect(html.indexOf('اسم الدواء للسطر 1')).toBeLessThan(html.indexOf('data-prescription-optional="references"'));
  for(const tag of html.match(/<details[^>]*>/g)??[])expect(tag).not.toMatch(/\sopen(?:=|\s|>)/);
  expect(html).not.toMatch(/<input[^>]*type="checkbox"[^>]*checked/);

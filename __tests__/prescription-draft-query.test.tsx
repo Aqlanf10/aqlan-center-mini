@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 const state = vi.hoisted(() => ({ role: "doctor", allowed: true, patientAccess: true, recordPatient: 123, status: "active", exists: true }));
 vi.mock("@/lib/prescription-print-access", () => ({ canPrintSavedPrescription: async () => state.allowed }));
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden",
   getPatient: vi.fn(async () => ({ fullName: "Synthetic Patient", patientNumber: "TEST", birthYear: 2000, gender: "male" })),
   getPrescription: vi.fn(async () => state.exists ? ({
     id: 42, patientId: state.recordPatient, status: state.status, voidReason: "synthetic reason",
