@@ -72,6 +72,12 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   /** GET /api/provider-blocks: one doctor's active blocks on one clinic day, inside the
    * appointment scope (`own` = the actor's own clinician party only) (M2 slice 25). */
   "read:provider-blocks": Object.freeze({ record: "appointment", need: Object.freeze([]), anyOf: Object.freeze([]) }),
+  /** GET /api/lab: lab orders (and their badge counts) inside the patient scope, the
+   * money group only with finance.cost-prices.view (M2 slice 66). */
+  "read:lab.orders": Object.freeze({ record: "patient", need: Object.freeze(["clinical.lab.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/lab/backlog: the whole clinic's open lab work; the reader requires the
+   * WHOLE patient scope (`all`) (M2 slice 66). */
+  "read:lab.backlog": Object.freeze({ record: "patient", need: Object.freeze(["clinical.lab.view"] as const), anyOf: Object.freeze([]) }),
 } as const satisfies Readonly<Record<`read:${string}`, CanonicalRecordReadRule>>);
 
 export type CanonicalRecordRead = keyof typeof CANONICAL_RECORD_READS;

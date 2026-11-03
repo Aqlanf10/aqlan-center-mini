@@ -6360,6 +6360,19 @@ export async function listLabOrders(filters?: {
   limit?: number;
 }): Promise<LabOrder[]> {
   await ensureSchema();
+  return listLabOrdersWith(getPool(), filters, null);
+}
+
+/** The same list on the caller's runner. `scopeDoctorPartyId` keeps only the patients
+ * of that clinician (the central DOCTOR_PATIENT_CONDITION, applied in SQL before the
+ * limit); null is the whole clinic. */
+export async function listLabOrdersWith(q: Pick<DbClient, "query">, filters: {
+  status?: string;
+  patientId?: number;
+  doctorId?: number;
+  partyId?: number;
+  limit?: number;
+} | undefined, scopeDoctorPartyId: number | null): Promise<LabOrder[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
   let idx = 1;
@@ -6384,17 +6397,24 @@ export async function listLabOrders(filters?: {
   }
 
   const hasFilters = conditions.length > 0;
-  const whereClause = hasFilters ? `WHERE ${conditions.join(" AND ")}` : "";
+  if (scopeDoctorPartyId !== null) {
+    conditions.push(`EXISTS (SELECT 1 FROM patients WHERE patients.id = l.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${idx++}`)})`);
+    params.push(scopeDoctorPartyId);
+  }
   // النافذة اليومية (بلا فلاتر): المفتوح + ما رُكّب خلال شهر — أداة عمل لا أرشيف.
-  const openWindow = !hasFilters
-    ? `AND (l.status IN ('needed', 'sent', 'in_progress', 'received')
-            OR l.delivered_at > NOW() - INTERVAL '30 days')`
-    : "";
+  // (M2 slice 66) شرطٌ في WHERE: كان يُلحق بـ«AND» بلا WHERE فيلتصق بـON آخر LEFT JOIN
+  // ولا يرشّح شيئًا — فتظهر أقدم 300 أمر (ومنها ما رُكّب منذ سنوات) ويختفي المفتوح بعدها.
+  // وإعادة التصنيع (remake) عملٌ مفتوح يبقى في النافذة.
+  if (!hasFilters) {
+    conditions.push(`(l.status IN ('needed', 'sent', 'in_progress', 'received', 'remake')
+            OR l.delivered_at > NOW() - INTERVAL '30 days')`);
+  }
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limitClause = `LIMIT ${filters?.limit ? Math.min(filters.limit, 500) : 300}`;
 
-  const { rows } = await getPool().query<LabOrderRow>(
+  const { rows } = await q.query<LabOrderRow>(
     `${LAB_SELECT}
-      ${whereClause} ${openWindow}
+      ${whereClause}
       ORDER BY l.due_date ASC, l.id DESC
       ${limitClause}`,
     params,
@@ -6438,7 +6458,10 @@ export async function labOrderEvents(id: number): Promise<LabOrderTrackingEvent[
  * الدليل الذي يعرف أعماله يمنع تعطيل خدمةٍ تنبض تحتها طلبات. */
 export async function listLabServices(includeInactive = false): Promise<LabService[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return listLabServicesWith(getPool(), includeInactive);
+}
+export async function listLabServicesWith(q: Pick<DbClient, "query">, includeInactive = false): Promise<LabService[]> {
+  const { rows } = await q.query<{
     id: number; name: string; code: string | null; category: string;
     tooth_scope: string; requires_shade: boolean;
     default_days: number; description: string | null; is_active: boolean;
@@ -7995,11 +8018,17 @@ export async function labCounts(options?: { mode: "workflow"; today: string }): 
   outstanding: number; late: number; dueToday: number; waitingFitting: number;
 }> {
   await ensureSchema();
+  return labCountsWith(getPool(), options, null);
+}
+/** The badge counts on the caller's runner, optionally inside one clinician's patients. */
+export async function labCountsWith(q: Pick<DbClient, "query">, options: { mode: "workflow"; today: string } | undefined, scopeDoctorPartyId: number | null): Promise<{
+  outstanding: number; late: number; dueToday: number; waitingFitting: number;
+}> {
   // Reports use the full workflow and one captured clinic day; badges keep their sent-only SQL clock.
   const workflow = options?.mode === "workflow";
   const outstanding = workflow ? "status IN ('sent', 'in_progress', 'remake')" : "status = 'sent'";
   const today = workflow ? "$1::date" : "(NOW() AT TIME ZONE $1)::date";
-  const { rows } = await getPool().query<{
+  const { rows } = await q.query<{
     outstanding: string; late: string; due_today: string; waiting_fitting: string;
   }>(
     `SELECT
@@ -8007,8 +8036,8 @@ export async function labCounts(options?: { mode: "workflow"; today: string }): 
        count(*) FILTER (WHERE ${outstanding} AND due_date < ${today})::int AS late,
        count(*) FILTER (WHERE ${outstanding} AND due_date = ${today})::int AS due_today,
        count(*) FILTER (WHERE status = 'received')::int AS waiting_fitting
-     FROM lab_orders`,
-    [workflow ? options.today : CLINIC_TIME_ZONE],
+     FROM lab_orders${scopeDoctorPartyId === null ? "" : ` WHERE EXISTS (SELECT 1 FROM patients WHERE patients.id = lab_orders.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")})`}`,
+    [workflow ? options!.today : CLINIC_TIME_ZONE, ...(scopeDoctorPartyId === null ? [] : [scopeDoctorPartyId])],
   );
   return {
     outstanding: Number(rows[0].outstanding),
@@ -8021,7 +8050,10 @@ export async function labCounts(options?: { mode: "workflow"; today: string }): 
 /** أسماء المختبرات المستخدمة سابقًا — تُختصر الكتابة وتمنع «النور» و«مختبر النور». */
 export async function listLabNames(): Promise<{ labName: string; labPhone: string | null }[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ lab_name: string; lab_phone: string | null }>(
+  return listLabNamesWith(getPool());
+}
+export async function listLabNamesWith(q: Pick<DbClient, "query">): Promise<{ labName: string; labPhone: string | null }[]> {
+  const { rows } = await q.query<{ lab_name: string; lab_phone: string | null }>(
     `SELECT lab_name, MAX(lab_phone) AS lab_phone FROM lab_orders
       GROUP BY lab_name ORDER BY MAX(created_at) DESC LIMIT 10`,
   );

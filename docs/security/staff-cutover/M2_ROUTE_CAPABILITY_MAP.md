@@ -529,6 +529,21 @@ The read-only patient panel clears stale or failed responses and has no action o
 - Current-reference panel inside the canonical ceph section, explicitly distinguished from the reference used for a historical study. Read only, eight-second timeout, hide/refresh/revocation clearing and delayed-response retirement. Min/max age labels are separate to avoid RTL interval reversal.
 - PostgreSQL and HTTP/browser proof covers independent permission, none/own/all, real fence waiting and revocation, concurrent revisions, failed leases, exact JSON keys and unchanged legacy behavior. Source conversion is not independent acceptance, activation or completion of comparison/tracing workflows.
 
+### Slice 66 — lab reads and the canonical lab board (`GET /api/lab`, `GET /api/lab/backlog`, `/lab`)
+- **Orders:** record read `read:lab.orders` (`clinical.lab.view`) in one owning snapshot.
+  - The patient scope is applied in SQL before the list limit: `own` uses the central `DOCTOR_PATIENT_CONDITION`, and `none` is refused.
+  - Another patient answers like a patient without orders.
+  - `summary=1` counts follow the scope.
+  - Digits-only patient id (`1e9` is refused).
+- **Money:** the clinical fields are an allowlist (`clinicalLabOrder`). Cost, currency, base amount, rate, financial status, payable, accounts and posting are added only with `finance.cost-prices.view`. The legacy route hid only cost/currency from doctors.
+- **Backlog:** record read `read:lab.backlog`, the whole clinic's open work.
+  - It needs the whole patient scope (`all`).
+  - Linked tasks are shown only with `tasks.use`; others' private tasks never.
+  - Same SQL as the legacy admin snapshot (`readLabBacklogWith`).
+- **Shared fix (legacy too):** `listLabOrdersWith` makes the daily window a `WHERE` condition. It was appended after the last `LEFT JOIN` and filtered nothing, so the oldest 300 orders were listed and open work fell off. The window keeps `remake` orders.
+- **Screen:** `app/lab/layout.tsx` mounts `CanonicalLabBoard`, a read-only board for this slice: filters, days late, due today, the backlog for the whole scope, and costs only when sent. `/lab` is registered with `clinical.lab.view` and a patient scope.
+- **Tests:** PG `lab-canonical-reads` (6); existing lab PG suites 353/19; built journey `canonical-lab-board-journey` (3, portOffset 106). `canonical-entry-journey`'s not-yet-canonical examples are now `/api/laboratories` and `/reports`.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

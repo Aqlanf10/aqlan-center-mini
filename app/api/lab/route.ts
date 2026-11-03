@@ -13,6 +13,9 @@ import { requireSession } from "@/lib/session";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 import { parseLabShadeSpecification } from "@/lib/lab-shades";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalLabReadRefusal, readCanonicalLabOrders } from "@/lib/canonical-lab-reads";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +24,18 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  /* M2 slice 66: clinical.lab.view inside the patient scope, the money group only with
+     finance.cost-prices.view, in one owning snapshot; never the legacy session. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalLabOrders(selected.handle, new URL(request.url).searchParams), { headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalLabReadRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تحميل أعمال المختبر.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const url = new URL(request.url);
