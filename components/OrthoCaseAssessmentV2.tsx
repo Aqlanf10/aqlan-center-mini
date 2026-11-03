@@ -10,6 +10,8 @@ import type { AssessmentAppendResponse, AssessmentReadResponseV2, AssessmentSave
 import { plain } from "@/lib/ortho-assessment-model";
 import { OrthoAssessmentProgressV2 } from "./OrthoAssessmentProgressV2";
 import { editMeasurementPayloadV2 } from "@/lib/ortho-assessment-measurement-editor-v2";
+import { decodeOrthoRecordDocuments, type OrthoRecordDocument } from "@/lib/ortho-records";
+import { OrthoPanoramicReview } from "./OrthoPanoramicReview";
 export interface AssessmentLifetimeV2 {
   identity: object; active(): boolean; editable(): boolean; denied(): void;
   busy: boolean; uncertain: boolean; dirty: boolean; readVersion: number;
@@ -20,7 +22,7 @@ export interface AssessmentLifetimeV2 {
 }
 export interface OrthoCaseAssessmentV2Props {
   patientId: number; orthoCaseId: number; clinicalCaseId?: number; lifetime?: AssessmentLifetimeV2;
-  sectionView?: "interview" | "extraoral" | "intraoral" | "measurements";
+  sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" | "radiographs";
   onContinue?: () => void;
 }
 const control = "min-h-11 min-w-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-40";
@@ -61,7 +63,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     && latest.current?.identity === lifetime?.identity && (!lifetime || lifetime.active());
   // Same-generation callbacks must also own the exact draft bytes they rendered.
   const currentDraft = () => currentView() && latest.current?.values.document === lifetime?.values.document;
-  const [read, setRead] = useState<{ generation: object; data: AssessmentReadResponseV2 | null; error: string | null } | null>(null);
+  const [read, setRead] = useState<{ generation: object; data: AssessmentReadResponseV2 | null; error: string | null; panoramic?: OrthoRecordDocument[]; panoramicError?: string } | null>(null);
   const data = read?.generation === generation ? read.data : null;
   const error = read?.generation === generation ? read.error : null;
   const draft = readAssessmentEditorV2(lifetime?.values.document ?? "");
@@ -85,12 +87,24 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
         const accepted = await readAssessmentResponseV2(raw, { patientId, orthoCaseId, clinicalCaseId, revisionId: selected });
         if (!current()) return;
         if (!accepted) throw Error("تعذّر التحقق من هوية السجل أو بصمة نتائجه.");
-        setRead({ generation, data: accepted, error: null });
+        let panoramic: OrthoRecordDocument[] = [], panoramicError: string | undefined;
+        if (sectionView === "radiographs" && accepted.state === "ready" && accepted.sources.imaging === "allowed") {
+          try {
+            const documents = await fetch(`/api/patients/${patientId}/documents`, { cache: "no-store", signal: controller.signal });
+            if (!current()) return;
+            if ([401, 403].includes(documents.status)) { life?.denied(); throw Error("مراجع الصور محجوبة بالصلاحية الحالية."); }
+            if (!documents.ok || documents.redirected) throw Error("تعذر تحميل أصل البانوراما؛ لم يُعتبر السجل فارغاً.");
+            const payload: unknown = await documents.json(); if (!current()) return;
+            panoramic = decodeOrthoRecordDocuments(payload, patientId).filter(d => d.orthoCaseId === orthoCaseId && d.photoView === "panoramic");
+          } catch (error) { if (!current()) return; panoramicError = error instanceof Error ? error.message : "تعذر تحميل الصورة."; }
+        }
+        if (!current()) return;
+        setRead({ generation, data: accepted, error: null, panoramic, panoramicError });
       } catch (caught) { if (current()) setRead({ generation, data: null, error: caught instanceof Error ? caught.message : "تعذرت القراءة." }); }
       finally { clearTimeout(timer); }
     })();
     return () => { live = false; controller.abort(); clearTimeout(timer); };
-  }, [generation, owner, patientId, orthoCaseId, clinicalCaseId, selected]);
+  }, [generation, owner, patientId, orthoCaseId, clinicalCaseId, selected, sectionView]);
   const change = (next: AssessmentEditorV2) => { if (currentDraft() && editable && lifetime?.active() && latest.current?.editable()) lifetime.change("document", JSON.stringify(next)); };
   function begin() {
     if (!currentDraft() || !writable || !data || !lifetime || draft || malformed || data.revision?.id !== data.history[0]?.id) return;
@@ -155,6 +169,8 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     {data?.state === "bridge_missing" && <p role="status">الرابط السريري غير موجود. يلزم الربط الصريح؛ لا تُستنتج حالة جديدة من غياب الزيارات.</p>}
     {data?.state === "ready" && <>
       {!draft && savedSummary && <OrthoAssessmentProgressV2 draft={savedSummary} savedVersion={data.revision!.version} />}
+      {sectionView === "radiographs" && read?.generation === generation && read.panoramicError && <p role="alert">{read.panoramicError}</p>}
+      {sectionView === "radiographs" && !draft && savedSummary && <OrthoPanoramicReview draft={savedSummary} documents={read?.generation === generation ? read.panoramic ?? [] : []} sources={data.sources.items} onChange={() => {}} />}
       <p className="text-xs">المريض #{patientId} · التقويم #{orthoCaseId} · الحالة السريرية #{data.clinicalCaseId}</p>
       {data.recordingContext === "retrospective" && <p>توثيق لاحق لحالة سابقة؛ لا يعيد فتح العلاج.</p>}
       {!!data.history.length && <label className="block">نسخة التقييم<select className={`${control} w-full`} value={selected ?? data.history[0].id}
@@ -176,7 +192,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
       <OrthoAssessmentProgressV2 draft={draft.measurements} />
       <p className="text-xs">يمكن حفظ ما اكتمل وترك الباقي غير مسجل. زر الحفظ أدناه يسجل مراجعة واحدة لكل مسودة التقييم، بما فيها تعديلات الأقسام الأخرى. التنقل وحده لا يحفظها.</p>
       {stale && <p role="alert">تغير رأس السجل. بقيت المسودة مرتبطة بسابقتها؛ لم تُنقل إلى نسخة جديدة تلقائيًا.</p>}
-      <div hidden={sectionView === "measurements"}>
+      <div hidden={sectionView === "measurements" || sectionView === "radiographs"}>
       <OrthoAssessmentFindingsV2 draft={draft.measurements} sources={data?.sources.items ?? []}
         focusGroup={sectionView === "interview" ? "history" : sectionView === "extraoral" ? "facial" : sectionView === "intraoral" ? "intraoral" : undefined}
         owner={{ renderEditable: editable, active: currentDraft, editable: () => currentDraft() && editable && !!latest.current?.editable() }}
@@ -186,6 +202,9 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
         owner={{ renderEditable: editable, active: currentDraft, editable: () => currentDraft() && editable && !!latest.current?.editable() }}
         onChange={measurements => change({ ...draft, measurements })} />
       </div>
+      {sectionView === "radiographs" && <OrthoPanoramicReview draft={draft.measurements} documents={read?.generation === generation ? read.panoramic ?? [] : []} sources={data?.sources.items ?? []}
+        owner={{ renderEditable: editable, active: currentDraft, editable: () => currentDraft() && editable && !!latest.current?.editable() }}
+        onChange={measurements => change({ ...draft, measurements })} />}
       <label className="block">سبب إنشاء هذه المراجعة<input className={`${control} w-full`} maxLength={500} disabled={!editable} value={draft.reason}
         onChange={event => change({ ...draft, reason: event.target.value })} /></label>
       <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={!editable} onClick={() => void save()}>حفظ مراجعة تقييم جديدة</button>

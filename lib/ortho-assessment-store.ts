@@ -7,6 +7,7 @@ import { positiveId } from "./ortho-assessment-model";
 import { ASSESSMENT_COLUMNS,collectAssessmentSourceClosure,decodeAssessmentStoredRow,listAssessmentSourceChoices,resolveAssessmentSourceGraph,validateAssessmentCopies,type AssessmentStoredRow } from "./ortho-assessment-versioned-sources";
 import type { AssessmentReadResponseV2,AssessmentHistoryEntryV2,AssessmentScope } from "./ortho-assessment-response-v2";
 import { ASSESSMENT_HISTORY_MAX_BYTES,ASSESSMENT_HISTORY_MAX_REVISIONS,assessmentStoredByteCount } from "./ortho-assessment-limits";
+import { validatePanoramicFindingSources } from "./ortho-panoramic-source-validation";
 export interface AssessmentFailure {ok:false;status:number;code:string;message:string}
 interface OwnerSnapshot {clinicalCaseId:number|null;recordingContext:"current"|"retrospective"}
 async function ownerSnapshot(client:DbClient,input:AssessmentOwnerInput,lock:boolean,write:boolean):Promise<OwnerSnapshot>{
@@ -102,6 +103,7 @@ export async function appendOrthoAssessment(input:AssessmentOwnerInput&{command:
     if(graph.states.some(s=>s.state!=="available"))assessmentFail(409,"source_unavailable","مرجع مفقود أو تغير إصداره؛ لم يُحفظ بديل مفترض.");
     for(const r of graph.revisions.values())if(r.version>(fresh.revisions[0]?.version??0))assessmentFail(409,"future_assessment_source","المرجع لا يسبق المراجعة الجديدة.");
     validateAssessmentCopies(command.content,graph);
+    await validatePanoramicFindingSources(client,scope,command.content);
     const content=createPersistedAssessmentV2(command.content);if(!content.ok)assessmentFail(400,content.code,"تعذّر التحقق من القياسات والنتائج.");
     const contentHash=assessmentJsonHash(content.value);
     const row=(await client.query<AssessmentStoredRow>(`INSERT INTO ortho_assessment_revisions(patient_id,recorded_patient_id,ortho_case_id,clinical_case_id,schema_version,version,supersedes_revision_id,actor_user_id,created_by,reason,recording_context,command_id,request_fingerprint,content_sha256,content)

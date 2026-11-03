@@ -1209,8 +1209,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                         </div>
                       </div>}
                       {currentSection === "extraoral" && <a className="inline-flex min-h-11 items-center rounded-lg border border-navy-300 bg-white px-3 py-2 text-sm font-bold text-navy-900" href={`/ortho/${row.id}/facial?patientId=${patientId}`}>قياس أثلاث وأخماس الوجه على الصورة</a>}
-                      <div hidden={!(["interview", "extraoral", "intraoral", "measurements"] as readonly string[]).includes(currentSection)}><OrthoAssessmentPanelV2 patientId={patientId} caseRow={row}
-                          sectionView={currentSection === "extraoral" ? "extraoral" : currentSection === "intraoral" ? "intraoral" : currentSection === "measurements" ? "measurements" : "interview"}
+                      <div hidden={!(["interview", "extraoral", "intraoral", "measurements", "records"] as readonly string[]).includes(currentSection)}><OrthoAssessmentPanelV2 patientId={patientId} caseRow={row}
+                          sectionView={currentSection === "records" ? "radiographs" : currentSection === "extraoral" ? "extraoral" : currentSection === "intraoral" ? "intraoral" : currentSection === "measurements" ? "measurements" : "interview"}
                           onContinue={() => { if (workup && typeof workupStep === "number") { navigateWorkup(workupStep + 1); return; } const next = assessmentNeighbour(currentSection, 1); if (next) navigateAssessment(next); }} /></div>
                       {/* معرض سجلات الحالة والأشعة المعياري الـ 12 كمنصة WebCeph */}
                       <section hidden={currentSection !== "records"}>
@@ -2363,13 +2363,13 @@ function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow
 
 /** Dedicated assessment lifetime survives parent reads and pillar remounts.
  * It never uses the strategy document or acknowledges a write from GET. */
-function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView, onContinue }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements"; onContinue?: () => void }) {
+function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView, onContinue }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" | "radiographs"; onContinue?: () => void }) {
   const session = useSession();
   const canWrite = session?.role === "admin" || session?.role === "doctor";
   if (!canWrite) return <OrthoCaseAssessmentV2 patientId={patientId} orthoCaseId={caseRow.id} sectionView={sectionView} />;
   return <OwnedAssessmentV2 patientId={patientId} caseRow={caseRow} sectionView={sectionView} onContinue={onContinue} />;
 }
-function OwnedAssessmentV2({ patientId, caseRow, sectionView, onContinue }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements"; onContinue?: () => void }) {
+function OwnedAssessmentV2({ patientId, caseRow, sectionView, onContinue }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" | "radiographs"; onContinue?: () => void }) {
   const parent = useContext(OrthoOwnerContext)!;
   const [owner] = useState(() => parent.assessments.get(caseRow.id) ?? makeAssessmentOwnerV2({
     patientId, orthoCaseId: caseRow.id,
@@ -2476,7 +2476,16 @@ function OwnedRecordsGrid({ patientId, caseRow }: { patientId: number; caseRow: 
   useLayoutEffect(() => {
     if (!upload) return;
     parent.uploads.set(caseRow.id, upload); upload.activate();
-    return upload.subscribe(() => redraw(value => value + 1));
+    let observedDocumentId = upload.lastDocumentId;
+    return upload.subscribe(() => {
+      if (upload.lastDocumentId !== observedDocumentId) {
+        observedDocumentId = upload.lastDocumentId;
+        // A matching upload receipt admits a new source choice. Refresh only
+        // the read witness; the assessment draft and any command remain owned.
+        if (observedDocumentId !== null && upload.active()) parent.assessments.get(caseRow.id)?.refresh();
+      }
+      redraw(value => value + 1);
+    });
   }, [parent, upload, caseRow.id]);
   return <WebCephRecordsGrid patientId={patientId} orthoCaseId={caseRow.id} currentPhase={caseRow.phase} uploadOwner={upload ?? undefined} />;
 }
