@@ -1,6 +1,6 @@
 import { DOSE_REFERENCE_VERSION } from "../../lib/medication-dose-profiles";
 import { createCalculatedDoseProvenance, calculatedDoseFields } from "../../lib/medication-dose-provenance";
-const rxFixture = vi.hoisted(() => ({ long: false, longIdentity: false, calculated: false, ibuprofen: false }));
+const rxFixture = vi.hoisted(() => ({ long: false, longIdentity: false, calculated: false, ibuprofen: false, historicalIbuprofen: false }));
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -22,14 +22,24 @@ function calculatedRxItem() {
  const {amount,...fields}=calculatedDoseFields(doseReview)!;return {...fields,selection:{id:rxFixture.ibuprofen?'ibuprofen':'amoxicillin',amount,confirmed:true,doseReview}};
 }
 
+// Frozen saved v2-era text from the exact 1414 hosted two-page regression.
+// Never regenerate this snapshot using the newer patient-facing projection.
+const historicalIbuprofenItem = {
+  name: "Ibuprofen", dose: "100 mg/5 mL", form: "Oral suspension", duration: "5 days",
+  frequency: "3 times daily; at least 8 hours apart",
+  instructions: "لا تستبدل سقف30 بسقف40 من مرجع آخر. إذا تجاوزت جرعة الفئة سقف الوزن تُحال للمراجعة ولا تخفض صامتًا. خطة المراجعة: Synthetic review and stop plan يفضل تناوله بعد الطعام.",
+  instructionsEn: "Review plan: Synthetic review and stop plan Preferably after food.",
+  selection: { id: "ibuprofen", amount: "7.5 mL (150 mg)", confirmed: true },
+};
+
 vi.mock("@/lib/session", () => ({ requireSession: async () => ({ role: "admin", username: "SYN-DRAFT-CLINICIAN" }) }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: async () => true }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null, ReprintMark: () => null }));
 vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", printCount: async () => 0,
   getSettingsSafe: async () => SETTING_DEFAULTS, getPrescriptionPrintSettings: async () => SETTING_DEFAULTS,
   patientAppointmentsFrom: async () => [{ id: 1, patientId: 2, scheduledDate: "2031-01-04", scheduledTime: "09:30", status: "booked" }],
-  getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: rxFixture.longIdentity ? "SYN-RX-PATIENT SYNTHETIC EXTENDED PATIENT IDENTITY FOR WRAPPING SYN-PATIENT-LAST" : "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
-  getPrescription: async () => ({ id: 11, patientId: 1, prescribingDoctorName: rxFixture.longIdentity ? "SYN-SAVED-CLINICIAN SYNTHETIC EXTENDED DOCTOR IDENTITY FOR WRAPPING SYN-DOCTOR-LAST" : "SYN-SAVED-CLINICIAN", createdBy: "SYN-ACTOR", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: rxFixture.calculated ? [calculatedRxItem()] : Array.from({ length: rxFixture.long ? 20 : 1 }, (_, index) => ({ selection: { id: "manual", amount: rxFixture.long ? `SYN-AMOUNT-${String(index + 1).padStart(2, "0")}` : "SYN-AMOUNT", confirmed: true }, name: rxFixture.long ? `SYN-MED-${String(index + 1).padStart(2, "0")}` : "SYNTHETIC-RX-MEDICATION", dose: rxFixture.long ? `SYN-DOSE-${String(index + 1).padStart(2, "0")}` : "SYN-DOSE", form: "Tablets", frequency: rxFixture.long ? `SYN-FREQUENCY-${String(index + 1).padStart(2, "0")}` : "SYN-FREQUENCY", duration: rxFixture.long ? `SYN-DURATION-${String(index + 1).padStart(2, "0")}` : "SYN-DURATION", instructions: `تعليمات اصطناعية للاختبار ${index + 1}`, instructionsEn: rxFixture.long ? `SYN-INSTRUCTIONS-${String(index + 1).padStart(2, "0")}` : "SYN-INSTRUCTIONS" })) }),
+  getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: rxFixture.historicalIbuprofen ? "مريض جرعة اصطناعي" : rxFixture.longIdentity ? "SYN-RX-PATIENT SYNTHETIC EXTENDED PATIENT IDENTITY FOR WRAPPING SYN-PATIENT-LAST" : "SYN-RX-PATIENT", patientNumber: rxFixture.historicalIbuprofen ? "DOSE-RX-1793731221737" : "SYN-RX-001", birthYear: rxFixture.historicalIbuprofen ? null : 1990, gender: rxFixture.historicalIbuprofen ? null : "male", medicalAlert: null }),
+  getPrescription: async () => ({ id: 11, patientId: 1, prescribingDoctorName: rxFixture.historicalIbuprofen ? "طبيب الأمن أ" : rxFixture.longIdentity ? "SYN-SAVED-CLINICIAN SYNTHETIC EXTENDED DOCTOR IDENTITY FOR WRAPPING SYN-DOCTOR-LAST" : "SYN-SAVED-CLINICIAN", createdBy: "SYN-ACTOR", createdAt: rxFixture.historicalIbuprofen ? "2026-11-03T18:40:21.737Z" : "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: rxFixture.historicalIbuprofen ? "Synthetic dose review" : "SYN-SAVED-DIAGNOSIS", notes: "", items: rxFixture.historicalIbuprofen ? [structuredClone(historicalIbuprofenItem)] : rxFixture.calculated ? [calculatedRxItem()] : Array.from({ length: rxFixture.long ? 20 : 1 }, (_, index) => ({ selection: { id: "manual", amount: rxFixture.long ? `SYN-AMOUNT-${String(index + 1).padStart(2, "0")}` : "SYN-AMOUNT", confirmed: true }, name: rxFixture.long ? `SYN-MED-${String(index + 1).padStart(2, "0")}` : "SYNTHETIC-RX-MEDICATION", dose: rxFixture.long ? `SYN-DOSE-${String(index + 1).padStart(2, "0")}` : "SYN-DOSE", form: "Tablets", frequency: rxFixture.long ? `SYN-FREQUENCY-${String(index + 1).padStart(2, "0")}` : "SYN-FREQUENCY", duration: rxFixture.long ? `SYN-DURATION-${String(index + 1).padStart(2, "0")}` : "SYN-DURATION", instructions: `تعليمات اصطناعية للاختبار ${index + 1}`, instructionsEn: rxFixture.long ? `SYN-INSTRUCTIONS-${String(index + 1).padStart(2, "0")}` : "SYN-INSTRUCTIONS" })) }),
   getLabOrderById: async () => dispatchOrder({ labName: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456", serviceName: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", workType: "SYNTHETIC-DISPATCH-SERVICE-1234567890123" }),
   getPayment: async () => ({ id: 1, receiptNumber: "SYN-PROV-ORIGINAL-BHGFBCDEFABCD", patientName: "SYNTHETIC-RECEIPT-PROVENANCE", invoiceId: 1, kind: "payment", amountMinor: 50000, currency: "YER", method: "cash", createdBy: "SYNTHETIC-SIGNER", createdAt: "2000-03-02T22:00:00.000Z" }),
 }));
@@ -70,12 +80,13 @@ describe("native compact print regression witnesses", () => {
     await expect(PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(query) }))
       .rejects.toMatchObject({ digest: "NEXT_HTTP_ERROR_FALLBACK;404" });
   });
-  it.each(["receipt", "lab", "prescription-saved", "prescription-long", "prescription-long-identity", "prescription-calculated", "prescription-ibuprofen-calculated", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
+  it.each(["receipt", "lab", "prescription-saved", "prescription-long", "prescription-long-identity", "prescription-calculated", "prescription-ibuprofen-calculated", "prescription-historical-ibuprofen-short", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
     const prescription = kind.startsWith("prescription-");
     rxFixture.long = kind.startsWith("prescription-long");
     rxFixture.longIdentity = kind === "prescription-long-identity";
     rxFixture.calculated = kind === "prescription-calculated" || kind === "prescription-ibuprofen-calculated";
     rxFixture.ibuprofen = kind === "prescription-ibuprofen-calculated";
+    rxFixture.historicalIbuprofen = kind === "prescription-historical-ibuprofen-short";
     const node = kind === "patient-card" ? await PatientCardPage({ params: Promise.resolve({ id: "2" }) }) : prescription
       ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve({ rx: "11" }) })
       : await (kind === "receipt" ? ReceiptPage : LabPage)({ params: Promise.resolve({ id: "1" }) });
@@ -131,10 +142,22 @@ describe("native compact print regression witnesses", () => {
         }
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
-        const references = rxFixture.calculated ? [rxFixture.ibuprofen?"Ibuprofen":"Amoxicillin", rxFixture.ibuprofen?"100 mg/5 mL":"250 mg/5 mL", rxFixture.ibuprofen?"7.5 mL (150 mg)":"4 mL (200 mg)", rxFixture.ibuprofen?"3 times daily":"Every 8 hours", ...(rxFixture.ibuprofen?["at least 8 hours apart","Preferably after food."]:[]), "5 days", "SYN-CALCULATED-PLAN", "SYN-CALCULATED-END", "SYN-SAVED-CLINICIAN"] : kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
+        const references = rxFixture.historicalIbuprofen ? ["Ibuprofen", "100 mg/5 mL", "7.5 mL (150 mg)", "3 times daily; at least 8 hours apart", "5 days", historicalIbuprofenItem.instructionsEn, "Signature & Stamp", "Physician", SETTING_DEFAULTS["clinic.phone"]] : rxFixture.calculated ? [rxFixture.ibuprofen?"Ibuprofen":"Amoxicillin", rxFixture.ibuprofen?"100 mg/5 mL":"250 mg/5 mL", rxFixture.ibuprofen?"7.5 mL (150 mg)":"4 mL (200 mg)", rxFixture.ibuprofen?"3 times daily":"Every 8 hours", ...(rxFixture.ibuprofen?["at least 8 hours apart","Preferably after food."]:[]), "5 days", "SYN-CALCULATED-PLAN", "SYN-CALCULATED-END", "SYN-SAVED-CLINICIAN"] : kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
           ? ["SYN-RX-PATIENT", "SYN-RX-001", ...(rxFixture.long ? Array.from({ length: 20 }, (_, index) => `SYN-MED-${String(index + 1).padStart(2, "0")}`) : ["SYNTHETIC-RX-MEDICATION"]), "SYN-AMOUNT", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", "SYN-SAVED-CLINICIAN", "SYN-SAVED-DIAGNOSIS"]
           : ["SYN-PROV-ORIGINAL-BHGFBCDEFABCD", "SYN-REV-00002", "SYN-REP-00003"];
-        for (const reference of references) expect(rxFixture.calculated ? text.replace(/\s+/g, " ") : text).toContain(reference);
+        for (const reference of references) expect(rxFixture.calculated || rxFixture.historicalIbuprofen ? text.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").replace(/\s+/g, " ") : text).toContain(reference);
+        if (rxFixture.historicalIbuprofen) {
+          expect(body).toContain(historicalIbuprofenItem.instructions);
+          expect(body).toContain(historicalIbuprofenItem.instructionsEn);
+          expect(body).toContain("طبيب الأمن أ");
+          // Every rendered word remains within the single A6 sheet (checked above).
+          expect(pages).toHaveLength(1);
+        }
+        if (rxFixture.long) {
+          const finalPage = pages.at(-1)!.words.map(word => word.text).join(" ");
+          expect(finalPage).toContain("SYN-MED-20");
+          expect(finalPage).toContain("Signature"); expect(finalPage).toContain("Stamp");
+        }
         if (rxFixture.long) for (let index = 1; index <= 20; index++) {
           for (const field of ["AMOUNT", "DOSE", "FREQUENCY", "DURATION", "INSTRUCTIONS"]) expect(text).toContain(`SYN-${field}-${String(index).padStart(2, "0")}`);
         }
@@ -151,4 +174,5 @@ describe("native compact print regression witnesses", () => {
     } finally { await browser.close(); }
   });
 });
+
 

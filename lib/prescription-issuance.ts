@@ -1,4 +1,4 @@
-import { medicationDoseProvenanceProblem } from "./medication-dose-provenance";
+import { medicationDoseProvenanceProblem } from "./patient-dose-provenance";
 import { MEDICATION_CATALOG_KEY, EMPTY_MEDICATION_CATALOG, parseMedicationCatalog, catalogSelectionProblem } from "./medication-catalog";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";

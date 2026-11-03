@@ -30,3 +30,18 @@ it('rejects a changed legacy reference before save and does not bypass ordinary 
 it('ordinary legacy manual reference-only issuance does not acquire calculated provenance',async()=>{const d=draft(),old=d.items[0].selection!.doseReview!;d.items[0].selection!.doseReview={version:old.version,mode:'reference-only',profileId:old.profileId,referenceVersion:old.referenceVersion};d.items[0].instructions='Clinician-authored manual instructions';expect((await run(d)).status).toBe(201);expect(state.saves[0].items[0]).toEqual(d.items[0]);expect(state.saves[0].items[0].selection.doseReview).not.toHaveProperty('input');});
 it('compatibility cannot bypass expired authority or a different prescribing doctor',async()=>{const expired={...session(),expiresAt:Date.now()-1};const response=await issuePrescriptionTransaction({session:expired,key:'11111111-1111-4111-8111-111111111111',draft:draft()},async({persist})=>NextResponse.json(await persist(),{status:201}));expect(response.status).toBe(403);expect(state.saves).toHaveLength(0);state.receipt=null;const d=draft();d.prescribingDoctorPartyId=4;expect((await run(d)).status).toBe(403);expect(state.saves).toHaveLength(0);});
 it('existing receipt cannot replay under a different actor even when dose compatibility holds',async()=>{expect((await run()).status).toBe(201);const response=await issuePrescriptionTransaction({session:{...session(),userId:10,username:'another-doctor'},key:'11111111-1111-4111-8111-111111111111',draft:draft()},async({persist})=>NextResponse.json(await persist(),{status:201}));expect(response.status).toBe(409);expect(state.saves).toHaveLength(1);});
+
+it('v3 actual issuer retains canonical bytes, fresh authority and receipt-first replay',async()=>{
+ const patient=await import('../lib/patient-dose-provenance');
+ const {DOSE_REFERENCE_VERSION}=await import('../lib/medication-dose-profiles');
+ const d=draft(),old=d.items[0].selection!.doseReview!;if(old.mode!=='calculated')throw Error();
+ const p=patient.createCalculatedDoseProvenance({...old.input,referenceVersion:DOSE_REFERENCE_VERSION})!;
+ const {amount,...fields}=patient.calculatedDoseFields(p)!;
+ d.items[0]={...fields,selection:{...d.items[0].selection!,amount,doseReview:p}};
+ const before=JSON.stringify(d);
+ expect((await run(d)).status).toBe(201);expect(state.saves[0].items).toEqual(d.items);expect(JSON.stringify(d)).toBe(before);
+ const spy=vi.spyOn(patient,'medicationDoseProvenanceProblem').mockReturnValue('future policy changed');
+ expect((await (await run(d)).json()).replayed).toBe(true);expect(spy).not.toHaveBeenCalled();expect(state.saves).toHaveLength(1);
+ state.denySession=true;expect((await run(d)).status).toBe(403);state.denySession=false;
+ const changed=structuredClone(d);changed.items[0].instructions+=' changed';expect((await run(changed)).status).toBe(409);
+});

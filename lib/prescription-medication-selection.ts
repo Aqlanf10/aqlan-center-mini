@@ -1,4 +1,4 @@
-import { asManualDoseReference, parseMedicationDoseProvenance, type MedicationDoseProvenance } from "./medication-dose-provenance";
+import { asManualDoseReference, parseMedicationDoseProvenance, type MedicationDoseProvenance } from "./patient-dose-provenance";
 import { validCatalogId } from "./medication-catalog";
 import type { RxItem } from "./prescription";
 

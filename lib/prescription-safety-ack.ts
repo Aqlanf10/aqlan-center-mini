@@ -1,4 +1,4 @@
-import { canonicalMedicationDoseProvenance } from "./medication-dose-provenance";
+import { canonicalMedicationDoseProvenance } from "./patient-dose-provenance";
 /**
  * ربط إقرار قراءة تحذيرات السلامة الدوائية بالوصفة **وبالتحذيرات نفسها**
  * (Safety Acknowledgement Binding) — مراجعة P0 المستقلة، الجولة الثالثة،

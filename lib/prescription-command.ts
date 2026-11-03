@@ -1,4 +1,4 @@
-import { canonicalMedicationDoseProvenance } from "./medication-dose-provenance";
+import { canonicalMedicationDoseProvenance } from "./patient-dose-provenance";
 import type { PrescriptionDraft } from "./prescription";
 /** Versioned clinical semantics; ephemeral safety tokens and mutable registry
  * labels are deliberately excluded. Actor binding is added on the server. */

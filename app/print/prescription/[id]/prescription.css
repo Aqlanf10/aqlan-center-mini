@@ -18,3 +18,15 @@
   .prescription-a6-sheet .prescription-pages > tbody > tr { break-inside: avoid; page-break-inside: avoid; }
   .prescription-a6-sheet .sign-row { break-inside: avoid; }
 }
+
+/* Compact closing whitespace only: preserve all clinical text and natural
+   continuation pages rather than clipping, scaling, or hiding long content. */
+.prescription-a6-sheet .prescription-ending .print-footer-rule { margin: 1mm 0; }
+@media print {
+  /* Prefer the final medicine and signature together when they fit. This is a
+     pagination preference, not a fixed-height block: long text may continue. */
+  .prescription-a6-sheet .prescription-medication:has(+ .prescription-ending) {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}
