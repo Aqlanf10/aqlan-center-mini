@@ -25,6 +25,13 @@ import { isLabAccountingRate } from "@/lib/lab-accounting-edit";
 
 import { completeLabPrescription, LabPrescriptionError } from "@/lib/lab-prescription-write";
 import { validateLabPrescription } from "@/lib/lab-prescription-input";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import {
+  CanonicalLabOrderRefusal, canonicalLabActionNotMigrated, commandCanonicalLabDelete, commandCanonicalLabDueDate,
+  commandCanonicalLabStatus, readCanonicalLabEvents,
+} from "@/lib/canonical-lab-orders";
+import type { VerifiedDurableSession } from "@/lib/staff-durable-session";
 
 export const dynamic = "force-dynamic";
 
@@ -34,8 +41,40 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const STATUSES: LabOrderStatus[] = [
   "needed", "sent", "in_progress", "received", "delivered", "remake", "cancelled",
 ];
+const SESSION_ENDED = "انتهت الجلسة. سجّل الدخول من جديد.";
+
+/** One HTTP mapping for the canonical lab-order branch (M2 slice 67): bounded codes,
+ * Arabic messages, no driver text, never cached. */
+function canonicalLabFailure(error: unknown, fallback: string): NextResponse {
+  if (error instanceof CanonicalLabOrderRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  if (error instanceof LabFinancialBoundaryError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  if ((error as { code?: string } | null)?.code === "55P03") return NextResponse.json({ code: "lab_status_busy", message: "يوجد تحديث جارٍ؛ حدّث الإرسالية وأعد المحاولة." }, { status: 409, headers: NO_STORE });
+  return canonicalPatientReadFailure(error, fallback);
+}
+
+/** M2 slice 67: status, due date and events on the canonical runtime; every other
+ * action (prescription, clinical/shade corrections, accounting and posting) is refused
+ * explicitly until its own slice, never the legacy session. */
+async function canonicalPatch(request: Request, handle: VerifiedDurableSession, rawId: string): Promise<NextResponse> {
+  let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+  }
+  const source = (body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+  try {
+    if (source.action === "events") return NextResponse.json(await readCanonicalLabEvents(handle, rawId), { headers: NO_STORE });
+    if (source.action !== undefined) canonicalLabActionNotMigrated();
+    if (source.dueDate !== undefined) return NextResponse.json(await commandCanonicalLabDueDate(handle, rawId, source), { headers: NO_STORE });
+    return NextResponse.json(await commandCanonicalLabStatus(handle, rawId, source), { headers: NO_STORE });
+  } catch (error) {
+    return canonicalLabFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+  }
+}
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: SESSION_ENDED }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return canonicalPatch(request, selected.handle, (await context.params).id);
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -273,6 +312,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 /* حذف أمر مختبر نهائيًا — المدير وحده، والالتزام المسدَّد يمنعه (يُلغى سريريًا
  * بدله). الإلغاء للموقف الطبيعي، والحذف للسجل الخاطئ الذي لا مكان له أصلًا. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 67: clinical.lab.cancel inside the patient scope; the audit row commits
+     with the delete. Never the legacy session. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: SESSION_ENDED }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let reason: unknown = null;
+    try {
+      const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      reason = (body as Record<string, unknown> | null)?.reason ?? null;
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; }
+    try {
+      await commandCanonicalLabDelete(selected.handle, (await context.params).id, reason);
+      return NextResponse.json({ message: "حُذف أمر المختبر وسُجِّل في التدقيق." }, { headers: NO_STORE });
+    } catch (error) {
+      return canonicalLabFailure(error, "تعذّر حذف أمر المختبر. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

@@ -544,6 +544,24 @@ The read-only patient panel clears stale or failed responses and has no action o
 - **Screen:** `app/lab/layout.tsx` mounts `CanonicalLabBoard`, a read-only board for this slice: filters, days late, due today, the backlog for the whole scope, and costs only when sent. `/lab` is registered with `clinical.lab.view` and a patient scope.
 - **Tests:** PG `lab-canonical-reads` (6); existing lab PG suites 353/19; built journey `canonical-lab-board-journey` (3, portOffset 106). `canonical-entry-journey`'s not-yet-canonical examples are now `/api/laboratories` and `/reports`.
 
+### Slice 67 — lab-order commands (`PATCH /api/lab/[id]` status, due date, events; `DELETE /api/lab/[id]`)
+- **Status:** one admitted `clinical.lab.order` transaction through the legacy writer's own body (`setLabOrderStatusOn`, an injectable `LabStatusAuthority`; the legacy wrapper keeps its session revalidation and builds the same authority).
+  - The order row is locked first. An order outside the patient scope answers like a missing one (404): `own` uses `DOCTOR_PATIENT_CONDITION`; `none` is refused.
+  - An optional `expectedStatus` (what the screen showed) is compared under the lock: a stale screen gets 409 `lab_status_changed` and writes nothing.
+  - Unchanged: the transition map, the prescription gate (`needed` → `sent` only through prescription completion), the tracking row, and the money effects (an unpaid payable is removed on cancel and the order becomes exempt; a paid one is kept; receipt/fitting recognises the payable once, `ON CONFLICT (lab_order_id)`).
+  - The response is the clinical projection unless `finance.cost-prices.view`.
+- **Cancel after dispatch** (status past `needed`) also needs `clinical.lab.cancel` (the map's field rule; the legacy route checked the admin role label). The `lab_order.cancel` audit row commits with the cancel; the legacy route wrote it after the commit.
+- **Due date:** `setLabOrderDueDateOn` under the row lock and scope, for open work only (`needed`, `sent`, `in_progress`, `remake`), with a real calendar date. The tracking row carries the admitted actor and commits with the date. Shared fix (legacy too): the legacy list stopped at `needed`/`sent`, although its own refusal reads "work that arrived or was cancelled"; the legacy writer is now one transaction instead of two statements.
+- **Events:** record read `read:lab.events` (`clinical.lab.view`) inside the patient scope.
+- **Delete:** one admitted `clinical.lab.cancel` transaction (`deleteLabOrderOn`). The legacy rules are unchanged (source-linked or settled refused, reason of 3+ characters, unpaid payable removed). The `lab_order.delete` audit row commits with the delete.
+- **Held:** `complete_prescription`, `update_clinical`, `update_shade`, `update_accounting`, `post` and `unpost` are refused explicitly in the canonical branch (409 `lab_action_not_canonical`). Money and posting stay behind their legacy guards and are unreachable from canonical sessions until their own reviewed slice.
+- **Screen:** `CanonicalLabOrderActions` on each board card offers the next moves, an explicit two-press cancel (only with `clinical.lab.cancel` after dispatch), the promised date, and the tracking events. Each move sends `expectedStatus`; a 409 reloads the board.
+- **Tests:** PG `lab-canonical-orders` (14), including:
+  - two concurrent receipts: one wins, one payable, one tracking row;
+  - cancel racing receipt: exactly one applies and the money stays consistent;
+  - a move waits on the row lock, then reads the moved status.
+  All lab PG suites 373/373 in 21 files. Built journey `canonical-lab-orders-journey` (3, portOffset 108).
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

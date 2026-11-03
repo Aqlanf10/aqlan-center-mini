@@ -10,15 +10,17 @@ import {
   LAB_FILTER_LABEL, LAB_PRIORITY_LABEL, LAB_STATUS_LABEL, daysLate, filterOrders, isDueToday,
   type LabFilter, type LabOrder, type LabOrderClinicalDTO,
 } from "@/lib/lab";
+import { CanonicalLabOrderActions } from "./CanonicalLabOrderActions";
 import { LAB_BACKLOG_FILTER_LABEL, LAB_BACKLOG_FILTERS, labBacklogPatientHref, type LabBacklogFilter, type LabBacklogSnapshot } from "@/lib/lab-backlog";
 
 /**
- * لوحة المختبر للجلسة الموحّدة (M2 slice 66) — قراءة فقط في هذه الشريحة.
+ * لوحة المختبر للجلسة الموحّدة (M2 slices 66–67).
  *
  * GET /api/lab يعيد أوامر نطاق مرضاك (`own`: مرضاك وحدهم)، والتكاليف لا تصل إلا لمن يملك
  * finance.cost-prices.view. قائمة المتابعة الشاملة (GET /api/lab/backlog) لمن نطاقه «كل
- * المرضى»، والمهام المرتبطة لمن يملك tasks.use. لا يُركَّب هنا المسار القديم ولا طلباته؛
- * تحديث الحالة وإنشاء الطلبات والإلغاء تأتي في شرائح لاحقة.
+ * المرضى»، والمهام المرتبطة لمن يملك tasks.use. لا يُركَّب هنا المسار القديم ولا طلباته.
+ * نقل الحالة وتغيير الموعد والإلغاء وسجل الحركة (clinical.lab.order وclinical.lab.cancel)
+ * في CanonicalLabOrderActions؛ إنشاء الطلبات في شريحة لاحقة.
  */
 type Order = LabOrderClinicalDTO & Partial<Pick<LabOrder, "costMinor" | "costCurrency">>;
 interface Feed { orders: Order[]; labs: { labName: string }[]; projection: { costs: boolean } }
@@ -27,6 +29,8 @@ const FILTERS: LabFilter[] = ["late", "outstanding", "pending", "received", "rem
 export function CanonicalLabBoard() {
   const session = useSession();
   const whole = session?.isOwner === true || session?.patientScope === "all";
+  const holds = (capability: string) => session?.isOwner === true || (session?.capabilities ?? []).includes(capability);
+  const canOrder = holds("clinical.lab.order"), canCancel = holds("clinical.lab.cancel");
   const [feed, setFeed] = useState<Feed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<LabFilter>("late");
@@ -74,7 +78,7 @@ export function CanonicalLabBoard() {
       <header className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 id="lab-board-title" className="text-lg font-black text-navy-900">أعمال المختبر</h1>
-          <p className="text-xs text-slate-600">{whole ? "كل أعمال المركز المفتوحة" : "أعمال مرضاك"} — للعرض في هذه المرحلة.</p>
+          <p className="text-xs text-slate-600">{whole ? "كل أعمال المركز المفتوحة" : "أعمال مرضاك"}{canOrder ? "" : " — للعرض فقط"}.</p>
         </div>
         <button type="button" onClick={() => void load()} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">تحديث</button>
       </header>
@@ -138,6 +142,7 @@ export function CanonicalLabBoard() {
                   </p>
                   {feed.projection.costs && order.costMinor != null && order.costCurrency && isCurrency(order.costCurrency)
                     ? <p className="mt-1 text-xs text-slate-700">التكلفة: {formatMoney(order.costMinor, order.costCurrency)}</p> : null}
+                  <CanonicalLabOrderActions key={`${order.id}:${order.status}:${order.dueDate}`} order={order} canOrder={canOrder} canCancel={canCancel} onChanged={() => void load()} />
                 </li>
               );
             })}

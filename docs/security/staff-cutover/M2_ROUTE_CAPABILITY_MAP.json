@@ -2211,8 +2211,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 67: one admitted clinical.lab.cancel transaction (deleteLabOrderOn): the row locked, an order outside the patient scope answers like a missing one, the legacy rules unchanged (source-linked or settled refused, reason of 3+ characters required, the unpaid payable removed with the order); the lab_order.delete audit row commits with the delete (the legacy route wrote it after the commit)."
  },
  {
   "route": "/api/lab/[id]",
@@ -2227,8 +2227,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "",
+  "status": "canonical-done",
+  "note": "M2 slice 67: status and due date in one admitted clinical.lab.order transaction (setLabOrderStatusOn / setLabOrderDueDateOn): the order row locked first, an order outside the patient scope answers like a missing one (own = DOCTOR_PATIENT_CONDITION, none refused), an optional expectedStatus compared under the lock (409 lab_status_changed), the legacy transition map, prescription gate, tracking row and money effects unchanged (an unpaid payable removed on cancel, a paid one kept; receipt/fitting recognises the payable once). The lab_order.cancel audit row commits with the cancel. The response carries the clinical projection unless finance.cost-prices.view. Due date: open work only (needed, sent, in_progress, remake); a real calendar date. Every other action (complete_prescription, update_clinical, update_shade, update_accounting, post, unpost) is refused explicitly in the canonical branch (409 lab_action_not_canonical) until its own slice.",
   "branches": {
    "discriminator": "action",
    "values": {
@@ -2239,8 +2239,10 @@
      "note": "Clinical prescription content."
     },
     "events": {
-     "need": [],
-     "note": "Order tracking events."
+     "need": [
+      "clinical.lab.view"
+     ],
+     "note": "Order tracking events. M2 slice 67: record read read:lab.events inside the patient scope."
     },
     "post": {
      "need": [
@@ -2279,7 +2281,7 @@
      "need": [
       "clinical.lab.cancel"
      ],
-     "note": "Today admin-only."
+     "note": "Today admin-only. M2 slice 67 reads this as the legacy rule it describes: CANCELLING work past needed needs clinical.lab.cancel in addition to clinical.lab.order (the legacy admin-only check is on cancel alone; ordinary moves such as receipt stay under clinical.lab.order)."
     }
    ]
   }

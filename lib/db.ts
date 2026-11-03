@@ -6425,14 +6425,21 @@ export async function listLabOrdersWith(q: Pick<DbClient, "query">, filters: {
 /** أمر مختبر واحد بالمعرف — لشاشة التتبع وتاريخ الأحداث (المختبرات V2). */
 export async function getLabOrderById(id: number): Promise<LabOrder | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
+  return getLabOrderWith(getPool(), id);
+}
+/** The same inside a caller-owned transaction or snapshot (M2 slice 67). */
+export async function getLabOrderWith(q: Pick<DbClient, "query">, id: number): Promise<LabOrder | null> {
+  const { rows } = await q.query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
   return rows[0] ? toLabOrder(rows[0]) : null;
 }
 
 /** سجل أحداث أمر المختبر (المختبرات V2) — من حرّك الحالة ومتى وبأي ملاحظة. */
 export async function labOrderEvents(id: number): Promise<LabOrderTrackingEvent[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return labOrderEventsWith(getPool(), id);
+}
+export async function labOrderEventsWith(q: Pick<DbClient, "query">, id: number): Promise<LabOrderTrackingEvent[]> {
+  const { rows } = await q.query<{
     id: number; lab_order_id: number; action: string; from_status: string | null;
     to_status: string | null; notes: string | null; actor: string; actor_role: string | null;
     created_at: Date;
@@ -7594,6 +7601,62 @@ export async function setLabOrderStatus(
     if (context?.session && (!activeSession || !["admin", "doctor", "reception", "assistant"].includes(activeSession.role))) {
       throw new LabFinancialBoundaryError("lab_status_forbidden", "انتهت الجلسة أو لا تملك صلاحية متابعة هذا العمل.");
     }
+    const authority: LabStatusAuthority = {
+      actor: { username: activeSession?.username ?? context?.actor ?? "system", role: activeSession?.role ?? context?.actorRole ?? null },
+      canAccessPatient: async patientId => !activeSession
+        || await (await import("./patient-access")).canAccessPatient(activeSession, patientId, undefined, client, "nowait"),
+      mayCancelSent: !activeSession || activeSession.role === "admin",
+    };
+    const applied = await setLabOrderStatusOn(client, id, status, authority, context);
+    if (!applied) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    if (activeSession && activeSession.expiresAt < Date.now()) {
+      throw new LabFinancialBoundaryError("lab_status_forbidden", "انتهت الجلسة أثناء الانتظار؛ لم تُحفظ العملية.");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
+  return full[0] ? toLabOrder(full[0]) : null;
+}
+
+
+/** Who moves a lab order and what they may do: the legacy session wrapper or the
+ * canonical admitted operation (M2 slice 67). */
+export interface LabStatusAuthority {
+  readonly actor: { readonly username: string; readonly role: string | null };
+  /** Whether the actor may follow this patient's lab work (checked after the row lock). */
+  readonly canAccessPatient: (patientId: number) => Promise<boolean>;
+  /** Cancelling work that already left the clinic (status past `needed`). */
+  readonly mayCancelSent: boolean;
+}
+
+/**
+ * The status transition inside the CALLER's transaction: the order row locked first,
+ * the transition map, the patient and cancel authority after the lock, the tracking
+ * row, and the money effects unchanged (an unpaid payable removed on cancel; the
+ * payable recognised on receipt/fitting from the saved cost snapshot). `false`: the
+ * order is missing or the transition is not allowed from its current status — the
+ * caller rolls back. Boundary refusals throw LabFinancialBoundaryError.
+ */
+export async function setLabOrderStatusOn(
+  client: DbClient,
+  id: number,
+  status: LabOrderStatus,
+  authority: LabStatusAuthority,
+  context?: {
+    notes?: string | null;
+    qualityCheck?: "passed" | "rejected" | "pending";
+    qualityNotes?: string | null;
+    technicianName?: string | null;
+  },
+): Promise<boolean> {
     // خريطة "إلى أين يحقّ الانتقال" — مصدرها الحالات نفسها:
     // - `sent` يُحقّ من `needed` (أُرسل فعلًا) ومن `received` (عاد للمعمل للتعديل).
     // - `needed` لا يُصار إليه يدويًا: يولّده توقيع الزيارة فقط.
@@ -7622,18 +7685,17 @@ export async function setLabOrderStatus(
       [id],
     );
     if (!currentRows[0] || !allowedFrom[status].includes(currentRows[0].status)) {
-      await client.query("ROLLBACK");
-      return null;
+      return false;
     }
     const current = currentRows[0];
     const prevStatus = current.status;
-    if (activeSession && !await (await import("./patient-access")).canAccessPatient(activeSession, current.patient_id, undefined, client, "nowait")) {
+    if (!await authority.canAccessPatient(current.patient_id)) {
       throw new LabFinancialBoundaryError("lab_patient_forbidden", "لا تملك صلاحية متابعة ملف هذا المريض.");
     }
     if (status === "sent" && current.status === "needed") {
       throw new LabFinancialBoundaryError("lab_prescription_required", "استكمل مواصفات الإرسالية وراجعها قبل تسجيل الإرسال.");
     }
-    if (status === "cancelled" && activeSession && current.status !== "needed" && activeSession.role !== "admin") {
+    if (status === "cancelled" && current.status !== "needed" && !authority.mayCancelSent) {
       throw new LabFinancialBoundaryError("lab_cancel_forbidden", "إلغاء إرسالية أُرسلت للمختبر للمدير وحده.");
     }
     if (status === "cancelled" && current.lab_work_intent_id && current.payable_id) {
@@ -7665,15 +7727,14 @@ export async function setLabOrderStatus(
       ],
     );
     if (!rows[0]) {
-      await client.query("ROLLBACK");
-      return null;
+      return false;
     }
     // سجل التتبع: كل انتقال يترك أثرًا بفاعله وتاريخه وملاحظته (المختبرات V2).
     await client.query(
       `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role)
        VALUES ($1, 'status_change', $2, $3, $4, $5, $6)`,
       [id, prevStatus, status, context?.notes ?? null,
-       activeSession?.username ?? context?.actor ?? "system", activeSession?.role ?? context?.actorRole ?? null],
+       authority.actor.username, authority.actor.role],
     );
 
     /* الإلغاء يعيد الاعتراف المالي: إرساليةٌ أُلغيت قبل سدادها لا تبقى دَينًا على
@@ -7721,7 +7782,7 @@ export async function setLabOrderStatus(
           `${current.work_type}${current.details ? ` — ${current.details}` : ""}`,
           costMinor, costCurrency, baseAmount,
           id, dateText(current.due_date),
-          activeSession?.username ?? context?.actor ?? "system", exchangeRate,
+          authority.actor.username, exchangeRate,
         ],
       );
       if (!payRows[0]) {
@@ -7734,18 +7795,7 @@ export async function setLabOrderStatus(
         );
       }
     }
-    if (activeSession && activeSession.expiresAt < Date.now()) {
-      throw new LabFinancialBoundaryError("lab_status_forbidden", "انتهت الجلسة أثناء الانتظار؛ لم تُحفظ العملية.");
-    }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
-  const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
-  return full[0] ? toLabOrder(full[0]) : null;
+    return true;
 }
 
 /** تسجيل نتيجة فحص الجودة والمطابقة السريرية عند استلام العمل (المختبرات V2). */
@@ -7891,6 +7941,12 @@ export async function createLabOrderRemake(
   }
 }
 
+/** Statuses whose promised date can still move: the work has not arrived (not yet sent,
+ * at the lab, in manufacture, or back for a remake). The legacy list stopped at
+ * needed/sent although its own refusal reads "work that arrived or was cancelled"
+ * (M2 slice 67: in_progress and remake added). */
+export const LAB_DUE_DATE_STATUSES = Object.freeze(["needed", "sent", "in_progress", "remake"] as const);
+
 /** يؤجّل موعد التسليم حين يعد المختبر بموعد جديد — بلا هذا يبقى «متأخرًا» بلا معنى. */
 export async function setLabOrderDueDate(
   id: number,
@@ -7898,18 +7954,40 @@ export async function setLabOrderDueDate(
   actor = "system",
 ): Promise<LabOrder | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const applied = await setLabOrderDueDateOn(client, id, dueDate, { username: actor, role: null });
+    await client.query(applied ? "COMMIT" : "ROLLBACK");
+    if (!applied) return null;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  return getLabOrderWith(getPool(), id);
+}
+
+/** The due-date move inside the caller's transaction: the date and its tracking row
+ * commit together. `false`: missing, or the work already arrived or was cancelled. */
+export async function setLabOrderDueDateOn(
+  client: DbClient,
+  id: number,
+  dueDate: string,
+  actor: { readonly username: string; readonly role: string | null },
+): Promise<boolean> {
+  const { rows } = await client.query<{ id: number }>(
     `UPDATE lab_orders SET due_date = $2::date
-      WHERE id = $1 AND status IN ('sent', 'needed') RETURNING id`,
-    [id, dueDate],
+      WHERE id = $1 AND status = ANY($3::text[]) RETURNING id`,
+    [id, dueDate, [...LAB_DUE_DATE_STATUSES]],
   );
-  if (!rows[0]) return null;
+  if (!rows[0]) return false;
   await addLabOrderTracking(
     id, "due_date_change", null, null,
-    `تأجيل موعد التسليم إلى ${dueDate}`, actor, null,
+    `تأجيل موعد التسليم إلى ${dueDate}`, actor.username, actor.role, client,
   );
-  const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
-  return full[0] ? toLabOrder(full[0]) : null;
+  return true;
 }
 
 /**
@@ -7929,65 +8007,12 @@ export async function deleteLabOrder(
   let snapshot: Record<string, unknown> | null = null;
   try {
     await client.query("BEGIN");
-    const { rows: currentRows } = await client.query<{
-      id: number; patient_id: number; lab_name: string; work_type: string;
-      status: string; cost_minor: string | null; cost_currency: string | null;
-      lab_work_intent_id: string | null; payable_id: number | null; tooth_numbers: string | null; sent_date: Date;
-    }>(
-      `SELECT id, patient_id, lab_name, work_type, status, cost_minor, cost_currency,
-              payable_id, tooth_numbers, sent_date, lab_work_intent_id
-         FROM lab_orders WHERE id = $1 FOR UPDATE`,
-      [id],
-    );
-    if (!currentRows[0]) {
+    const result = await deleteLabOrderOn(client, id, context.reason ?? null);
+    if (!result.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
+      return { ok: false, reason: result.reason };
     }
-    const current = currentRows[0];
-    if (current.lab_work_intent_id) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "source_linked" };
-    }
-    snapshot = {
-      patientId: current.patient_id,
-      labName: current.lab_name,
-      workType: current.work_type,
-      status: current.status,
-      toothNumbers: current.tooth_numbers,
-      sentDate: current.sent_date,
-      costMinor: current.cost_minor != null ? Number(current.cost_minor) : null,
-      costCurrency: current.cost_currency,
-      reason: context.reason ?? null,
-    };
-
-    if (current.payable_id) {
-      const { rows: paidRows } = await client.query<{ count: string }>(
-        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
-               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
-        [current.payable_id],
-      );
-      if (Number(paidRows[0]?.count ?? 0) > 0) {
-        await client.query("ROLLBACK");
-        return { ok: false, reason: "settled" };
-      }
-    }
-    /* (FIA-3) الحذف النهائي يمحو أمرًا وأثره المالي غير المسدَّد — سببه إلزاميٌّ في الخادم نفسه لا
-       في الشاشة وحدها (الإلغاء الطبيعي ليس حذفًا وله مساره). بعد فحص الوجود والتسوية: رسالتهما أدق. */
-    if ((context.reason?.trim().length ?? 0) < 3) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "reason_required" };
-    }
-    if (current.payable_id) {
-      /* سندات الصرف تشير إلى الالتزام بلا مفتاح أجنبي (تاريخٌ يُقرأ لا يُدار) —
-         نُفرغ الإشارة أولًا ثم يُحذف الالتزام نفسه. */
-      await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = $1`, [
-        current.payable_id,
-      ]);
-      await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
-    }
-    // أحداث التتبع والطلب نفسه (التتالي يشيل الأول لكن الصريح أوضح للقارئ).
-    await client.query(`DELETE FROM lab_order_tracking WHERE lab_order_id = $1`, [id]);
-    await client.query(`DELETE FROM lab_orders WHERE id = $1`, [id]);
+    snapshot = result.snapshot;
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -8005,6 +8030,82 @@ export async function deleteLabOrder(
     actorRole: context.actorRole ?? null,
   });
   return { ok: true };
+}
+
+export type LabOrderDeleteOutcome =
+  | { ok: true; patientId: number; snapshot: Record<string, unknown> }
+  | { ok: false; reason: "not_found" | "settled" | "reason_required" | "source_linked" };
+
+/**
+ * The permanent delete inside the CALLER's transaction (M2 slice 67): the row locked,
+ * a source-linked order refused, a settled payable refused, the reason required (after
+ * the existence and settlement checks: their messages are more precise), then the
+ * unpaid payable, the tracking rows and the order removed. On a refusal nothing was
+ * written; the caller rolls back. `authorize` runs after the row lock (patient scope).
+ */
+export async function deleteLabOrderOn(
+  client: DbClient,
+  id: number,
+  reason: string | null,
+  authorize?: (patientId: number) => Promise<boolean>,
+): Promise<LabOrderDeleteOutcome> {
+    const { rows: currentRows } = await client.query<{
+      id: number; patient_id: number; lab_name: string; work_type: string;
+      status: string; cost_minor: string | null; cost_currency: string | null;
+      lab_work_intent_id: string | null; payable_id: number | null; tooth_numbers: string | null; sent_date: Date;
+    }>(
+      `SELECT id, patient_id, lab_name, work_type, status, cost_minor, cost_currency,
+              payable_id, tooth_numbers, sent_date, lab_work_intent_id
+         FROM lab_orders WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const current = currentRows[0];
+    // An order outside the actor's patient scope answers like a missing one.
+    if (!current || (authorize && !await authorize(current.patient_id))) {
+      return { ok: false, reason: "not_found" };
+    }
+    if (current.lab_work_intent_id) {
+      return { ok: false, reason: "source_linked" };
+    }
+    const snapshot = {
+      patientId: current.patient_id,
+      labName: current.lab_name,
+      workType: current.work_type,
+      status: current.status,
+      toothNumbers: current.tooth_numbers,
+      sentDate: current.sent_date,
+      costMinor: current.cost_minor != null ? Number(current.cost_minor) : null,
+      costCurrency: current.cost_currency,
+      reason: reason ?? null,
+    };
+
+    if (current.payable_id) {
+      const { rows: paidRows } = await client.query<{ count: string }>(
+        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
+               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
+        [current.payable_id],
+      );
+      if (Number(paidRows[0]?.count ?? 0) > 0) {
+        return { ok: false, reason: "settled" };
+      }
+    }
+    /* (FIA-3) الحذف النهائي يمحو أمرًا وأثره المالي غير المسدَّد — سببه إلزاميٌّ في الخادم نفسه لا
+       في الشاشة وحدها (الإلغاء الطبيعي ليس حذفًا وله مساره). بعد فحص الوجود والتسوية: رسالتهما أدق. */
+    if ((reason?.trim().length ?? 0) < 3) {
+      return { ok: false, reason: "reason_required" };
+    }
+    if (current.payable_id) {
+      /* سندات الصرف تشير إلى الالتزام بلا مفتاح أجنبي (تاريخٌ يُقرأ لا يُدار) —
+         نُفرغ الإشارة أولًا ثم يُحذف الالتزام نفسه. */
+      await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = $1`, [
+        current.payable_id,
+      ]);
+      await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
+    }
+    // أحداث التتبع والطلب نفسه (التتالي يشيل الأول لكن الصريح أوضح للقارئ).
+    await client.query(`DELETE FROM lab_order_tracking WHERE lab_order_id = $1`, [id]);
+    await client.query(`DELETE FROM lab_orders WHERE id = $1`, [id]);
+    return { ok: true, patientId: current.patient_id, snapshot };
 }
 
 /**
