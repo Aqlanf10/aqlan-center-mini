@@ -58,7 +58,7 @@ const SAFETY_RULES: SafetyRule[] = [
     severity: "critical",
     title: "خطر تحسسي حرج (Penicillin Allergy)",
     message: "المريض يعاني من حساسية بنسلين مؤكدة! صرف مشتقات البنسلين قد يسبب صدمة حساسية مهددة للحياة (Anaphylaxis).",
-    suggestedAlternative: "البديل الآمن المعتمد: Clindamycin 300mg أو Azithromycin 500mg.",
+    suggestedAlternative: "توجد حساسية دوائية مسجلة؛ لا تختَر بديلًا تلقائيًا. راجع نوع التفاعل والتداخلات والإرشاد العلاجي وحدّد البديل والجرعة بنفسك.",
   },
 
   // 2. الحمل ومضادات الالتهاب غير الستيرويدية (NSAIDs)

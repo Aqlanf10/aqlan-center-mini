@@ -120,10 +120,12 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
   const [consentFor, setConsentFor] = useState<number | null>(null);
 
   const readRef = useRef({ active: false, generation: 0, controller: null as AbortController | null });
+  const [completionReadGeneration, setCompletionReadGeneration] = useState(0);
   const load = useCallback(async () => {
     const lifetime = readRef.current;
     if (!lifetime.active) return;
     const generation = ++lifetime.generation;
+    setCompletionReadGeneration(generation);
     lifetime.controller?.abort();
     const controller = new AbortController();
     lifetime.controller = controller;
@@ -195,10 +197,13 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
   }, [busy, money.attempt, consentFor, payFor]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   const completionAllowed = useRef<(id: number) => boolean>(() => false);
-  const completionReadGeneration = readRef.current.generation;
-  completionAllowed.current = (id) => readRef.current.active && readRef.current.generation === completionReadGeneration
-    && !loading && !readUnavailable && !readDenied && canSeeFinancial && canHandleMoney(session?.role)
-    && money.ready && !busy && money.attempt === null && plans.some(plan => plan.id === id && plan.status === "active") && canLeave();
+  useLayoutEffect(() => {
+    const allowed = (id: number) => readRef.current.active && readRef.current.generation === completionReadGeneration
+      && !loading && !readUnavailable && !readDenied && canSeeFinancial && canHandleMoney(session?.role)
+      && money.ready && !busy && money.attempt === null && plans.some(plan => plan.id === id && plan.status === "active") && canLeave();
+    completionAllowed.current = allowed;
+    return () => { if (completionAllowed.current === allowed) completionAllowed.current = () => false; };
+  }, [completionReadGeneration, loading, readUnavailable, readDenied, canSeeFinancial, session?.role, money.ready, busy, money.attempt, plans, canLeave]);
 
   const visiblePlans = plans.filter((plan) => (context?.planId === undefined || plan.id === context.planId)
     && (context?.planItemId === undefined || plan.items.some((item) => item.id === context.planItemId))

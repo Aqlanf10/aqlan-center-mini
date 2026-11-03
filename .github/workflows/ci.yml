@@ -43,7 +43,7 @@ jobs:
       # vulnerability at all. npm v11 uses the replacement bulk advisory
       # endpoint, so the audit keeps guarding dependencies as before.
       - name: Upgrade npm to bulk advisory endpoint
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.1
 
       - name: Install locked dependencies
         run: npm ci
@@ -121,11 +121,16 @@ jobs:
       - name: Verify braces absence in actual runtime artifacts
         run: node scripts/verify-braces-runtime.mjs
 
+      - name: Verify lint tooling absence in actual runtime artifacts
+        run: node scripts/dependency-security/verify-lint-tooling-runtime.mjs
+
       - name: Upload exact runtime dependency proof
         uses: actions/upload-artifact@v4
         with:
           name: braces-runtime-absence
-          path: .dependency-audit/runtime-proof.json
+          path: |
+            .dependency-audit/runtime-proof.json
+            .dependency-audit/lint-tooling-runtime-proof.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -174,7 +179,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Upgrade npm to bulk advisory endpoint
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.1
       - name: Install locked dependencies
         run: npm ci
       - name: Verify environment contract
@@ -233,6 +238,7 @@ jobs:
           git checkout -- schema/current-schema-contract.pg18.json
 
       - name: Upload PostgreSQL 18 schema contract
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: current-schema-contract-pg18
@@ -322,13 +328,19 @@ jobs:
           node-version: 22
           cache: npm
       - name: Upgrade npm to bulk advisory endpoint
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.1
       - name: Install locked dependencies
         run: npm ci
       - name: Verify environment contract
         run: npm run verify:environment
       - name: Production build for built-app HTTP tests
         run: npm run build
+      - name: Build read-only preflight artifact for HTTP runtime verification
+        run: npm run build:preflight
+      - name: Verify built-app runtime dependency boundaries
+        run: |
+          node scripts/verify-braces-runtime.mjs
+          node scripts/dependency-security/verify-lint-tooling-runtime.mjs
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
       # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
@@ -342,12 +354,42 @@ jobs:
       - name: HTTP security integration tests
         env:
           HR_EVIDENCE_DIR: /tmp/hr-evidence
-        run: npm run test:security-http
+        run: npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-main-raw.json"
+
+      - name: Collect sanitized main HTTP failure index
+        id: http_main_index
+        if: always()
+        run: node scripts/dependency-security/http-failure-index.mjs main
+
+      - name: Upload sanitized main HTTP failure index
+        if: always() && steps.http_main_index.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-main-failure-index
+          path: .http-failure-index/main.json
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
 
       - name: Isolated inventory proposal HTTP tests (explicit opt-in)
         env:
           INVENTORY_SCHEMA_TEST: "1"
-        run: npm run test:security-http
+        run: npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-inventory-raw.json"
+
+      - name: Collect sanitized inventory HTTP failure index
+        id: http_inventory_index
+        if: always()
+        run: node scripts/dependency-security/http-failure-index.mjs inventory
+
+      - name: Upload sanitized inventory HTTP failure index
+        if: always() && steps.http_inventory_index.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-inventory-failure-index
+          path: .http-failure-index/inventory.json
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
 
       # Four pristine unauthenticated login views only, before any credentials.
       # Never upload cookies, browser storage, traces, videos, or broad directories.
@@ -638,6 +680,22 @@ jobs:
             .settings-ui-artifacts/patient-dossier-endo-mobile-390.png
             .settings-ui-artifacts/patient-dossier-endo-print.png
             .settings-ui-artifacts/patient-dossier-endo-a4.pdf
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Explicit synthetic calculated saved-print evidence only. No traces,
+      # request payloads, browser state or broad artifact directory uploads.
+      - name: Upload calculated prescription saved print evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prescription-calculated-saved-print
+          path: |
+            .settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.png
+            .settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.pdf
+            .settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.png
+            .settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.pdf
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

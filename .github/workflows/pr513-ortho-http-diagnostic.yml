@@ -1,0 +1,68 @@
+name: PR513 focused orthodontic HTTP diagnostic
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: pr513-ortho-http-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  prove:
+    if: >-
+      github.repository == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.number == 513 &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.head.ref == 'fix/ortho-plan-link-integrity-20261101'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11.21.1
+      - run: npm ci
+      - name: Verify exact diagnostic head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Verify environment contract
+        run: npm run verify:environment
+      - name: Build exact production application
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Install PDF text inspection tool
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
+      # Diagnostic only: full CI remains independently required and unchanged.
+      # Synthetic disposable database only. No artifacts or deployed credentials.
+      - name: Reproduce exactly two identified orthodontic HTTP files
+        run: >-
+          npm run test:security-http --
+          __tests__/security-http/legacy-onboarding-checklist-ui.test.ts
+          __tests__/security-http/ortho-compatibility-reference-http.test.ts

@@ -1,3 +1,4 @@
+vi.mock("server-only", () => ({}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OrthoCase } from "@/lib/db";
 import { RETAINER_LABEL } from "@/lib/ortho";

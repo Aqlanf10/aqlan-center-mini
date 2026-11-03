@@ -7,7 +7,10 @@ import type { CaseStatus, RetainerType } from "../../lib/ortho";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { assertPostgresMajorOrThrow, postgresMajorFromVersionNum } from "../../lib/env-contract";
 
-// Only authentication/access are mocked. PATCH, getOrthoCase, setRetainer,
+// Framework-only marker: preserve the production server boundary, skip it in Vitest.
+vi.mock("server-only", () => ({}));
+
+// Only authentication/access are behavior-mocked. PATCH, getOrthoCase, setRetainer,
 // closeOrthoCase and all their SQL execute against a fresh owned PostgreSQL DB.
 vi.mock("../../lib/session", () => ({ requireSession: vi.fn() }));
 vi.mock("../../lib/patient-access", () => ({ canAccessPatient: vi.fn() }));

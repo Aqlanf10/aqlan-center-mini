@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "./SessionProvider";
 import { DiagnosisChoiceField } from "./DiagnosisChoiceField";
@@ -39,8 +39,9 @@ function decodeVersions(payload: unknown, caseId: number): DiagnosisVersionView[
   return payload.diagnoses as DiagnosisVersionView[];
 }
 
-type Owner = { scope: readonly unknown[]; active: boolean; ready: boolean; readSequence: number; controller: AbortController | null; saving: boolean; timer: ReturnType<typeof setTimeout> | null };
-type Writer = { owner: Owner; active: boolean };
+type Owner = { scope: readonly unknown[] };
+type OwnerRuntime = { owner: Owner; active: boolean; ready: boolean; readSequence: number; controller: AbortController | null; saving: boolean; timer: ReturnType<typeof setTimeout> | null };
+type Writer = { owner: Owner };
 type Snapshot = { owner: Owner; status: "loading" | "ready" | "error"; versions: DiagnosisVersionView[] };
 
 type DiagnosisProps = { patientId: number; orthoCaseId: number } & (
@@ -53,48 +54,55 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
   const canRead = !!session?.username?.trim() && ["admin", "doctor", "reception", "assistant"].includes(session.role);
   const canWrite = !readOnly && canRead && (session?.role === "doctor" || session?.role === "admin");
   const permissionScope = JSON.stringify(session?.permissions ?? null);
-  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId],
-    active: false, ready: false, readSequence: 0, controller: null, saving: false, timer: null }),
+  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId] }),
     [patientId, orthoCaseId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId]);
+  // Render snapshots keep immutable identity; effect-owned refs retire async work
+  // without mutating values already handed to React.
+  const runtimeRef = useRef<OwnerRuntime | null>(null);
+  const writerRef = useRef<Writer | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [writer, setWriter] = useState<Writer | null>(null);
   const [savingOwner, setSavingOwner] = useState<Owner | null>(null);
   useLayoutEffect(() => {
-    owner.active = true;
+    const runtime: OwnerRuntime = { owner, active: true, ready: false, readSequence: 0, controller: null, saving: false, timer: null };
+    runtimeRef.current = runtime;
     return () => {
-      owner.active = false; owner.ready = false; owner.controller?.abort();
-      if (owner.timer !== null) clearTimeout(owner.timer);
+      runtime.active = false; runtime.ready = false; runtime.controller?.abort();
+      if (runtime.timer !== null) clearTimeout(runtime.timer);
+      if (runtimeRef.current === runtime) runtimeRef.current = null;
+      if (writerRef.current?.owner === owner) writerRef.current = null;
     };
   }, [owner]);
 
   const load = useCallback(async () => {
-    if (!owner.active) return;
-    owner.ready = false;
-    owner.controller?.abort();
-    if (owner.timer !== null) clearTimeout(owner.timer);
+    const runtime = runtimeRef.current;
+    if (!runtime || runtime.owner !== owner || !runtime.active) return;
+    runtime.ready = false;
+    runtime.controller?.abort();
+    if (runtime.timer !== null) clearTimeout(runtime.timer);
     const controller = new AbortController();
-    owner.controller = controller;
-    const sequence = ++owner.readSequence;
-    const current = () => owner.active && !controller.signal.aborted && owner.readSequence === sequence;
+    runtime.controller = controller;
+    const sequence = ++runtime.readSequence;
+    const current = () => runtime.active && !controller.signal.aborted && runtime.readSequence === sequence;
     setSnapshot({ owner, status: "loading", versions: [] });
     const timeout = setTimeout(() => {
       if (!current()) return;
       controller.abort();
       setSnapshot({ owner, status: "error", versions: [] });
     }, READ_TIMEOUT_MS);
-    owner.timer = timeout;
+    runtime.timer = timeout;
     try {
       if (!canRead || !positiveId(patientId) || !positiveId(orthoCaseId)) throw new Error(readFailure);
       const response = await fetch(`/api/patients/${patientId}/diagnoses?orthoCaseId=${orthoCaseId}`,
         { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(readFailure);
       const versions = decodeVersions(await response.json(), orthoCaseId);
-      if (current()) { owner.ready = true; setSnapshot({ owner, status: "ready", versions }); }
+      if (current()) { runtime.ready = true; setSnapshot({ owner, status: "ready", versions }); }
     } catch {
       if (current()) setSnapshot({ owner, status: "error", versions: [] });
     } finally {
       clearTimeout(timeout);
-      if (owner.timer === timeout) owner.timer = null;
+      if (runtime.timer === timeout) runtime.timer = null;
     }
   }, [owner, patientId, orthoCaseId, canRead]);
   useEffect(() => { void load(); }, [load]);
@@ -103,12 +111,14 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
   const failed = snapshot?.owner === owner && snapshot.status === "error";
   const versions = ready ? snapshot.versions : [];
   const current = versions[0];
-  const writing = writer?.owner === owner && writer.active;
+  const writing = writer?.owner === owner;
   const saving = savingOwner === owner;
 
   const save = async (content: Record<string, string>, label: string) => {
-    if (!owner.active || !canWrite || !owner.ready || !writer?.active || writer.owner !== owner || owner.saving) return;
-    owner.saving = true;
+    const runtime = runtimeRef.current;
+    if (!runtime || runtime.owner !== owner || !runtime.active || !canWrite || !runtime.ready
+      || !writer || writerRef.current !== writer || writer.owner !== owner || runtime.saving) return;
+    runtime.saving = true;
     setSavingOwner(owner);
     onError?.(null);
     try {
@@ -117,18 +127,19 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
         body: JSON.stringify({ content, label, orthoCaseId }),
       });
       const payload = await response.json().catch(() => null);
-      if (!owner.active) return;
+      if (!runtime.active) return;
       if (!response.ok) { onError?.(payload?.message ?? "تعذّر الحفظ."); return; }
-      writer.active = false;
+      if (writerRef.current !== writer) return;
+      writerRef.current = null;
       setWriter(null);
       // The POST has settled. A bounded refresh must not keep the write latch
       // held if an old transport ignores abort after its read deadline.
       void load();
     } catch {
-      if (owner.active) onError?.("تعذّر الاتصال بالخادم.");
+      if (runtime.active) onError?.("تعذّر الاتصال بالخادم.");
     } finally {
-      owner.saving = false;
-      if (owner.active) setSavingOwner(null);
+      runtime.saving = false;
+      if (runtime.active) setSavingOwner(null);
     }
   };
 
@@ -171,7 +182,7 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
         {failed ? (
           <div role="alert" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
             <p>{readFailure}</p>
-            <button type="button" onClick={() => { if (owner.active) void load(); }}
+            <button type="button" onClick={() => { if (runtimeRef.current?.owner === owner && runtimeRef.current.active) void load(); }}
               className="mt-2 min-h-11 rounded-lg px-2 font-bold underline">إعادة تحميل التشخيص</button>
           </div>
         ) : !ready ? (
@@ -192,13 +203,23 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
           </>
         ) : versions.map(entry)}
         {canWrite && ready && (!writing ? (
-          <button type="button" onClick={() => { if (owner.active && owner.ready && !owner.saving) setWriter({ owner, active: true }); }}
+          <button type="button" onClick={() => {
+            const runtime = runtimeRef.current;
+            if (runtime?.owner === owner && runtime.active && runtime.ready && !runtime.saving) {
+              const next = { owner }; writerRef.current = next; setWriter(next);
+            }
+          }}
             className="w-full rounded-xl border border-navy-800 bg-white py-2 text-xs font-bold text-navy-800 hover:bg-navy-50 transition-colors">
             {current ? "+ تحديث التشخيص (نسخة جديدة — لا يمسح القديم)" : "+ سجّل تشخيص هذه الحالة"}
           </button>
         ) : (
           <DiagnosisForm key={`${patientId}:${orthoCaseId}:${session?.username}:${session?.role}`} saving={saving}
-            onCancel={() => { if (owner.active && writer && !owner.saving) { writer.active = false; setWriter(null); } }} onSave={save} />
+            onCancel={() => {
+              const runtime = runtimeRef.current;
+              if (runtime?.owner === owner && runtime.active && writer && writerRef.current === writer && !runtime.saving) {
+                writerRef.current = null; setWriter(null);
+              }
+            }} onSave={save} />
         ))}
       </div>
     </div>

@@ -1,3 +1,4 @@
+vi.mock("server-only", () => ({}));
 import { createHmac } from "node:crypto";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
