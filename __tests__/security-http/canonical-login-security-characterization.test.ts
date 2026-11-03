@@ -29,19 +29,18 @@ async function attempt(username: string, password: string) {
   return { status: response.status, body: await response.text(), cookie: response.headers.get("set-cookie") };
 }
 
-it("S1 (gap): a copy of the logged-out cookie is still admitted after logout", async () => {
+it("S1 (remediated): a copy of the logged-out cookie is refused after logout", async () => {
   const { cookie } = await journey.login("staff");
   const copy = cookie;
   const logout = await journey.api("/api/auth/logout", cookie, { method: "POST" });
   expect(logout.status).toBe(200);
   expect(logout.headers.get("set-cookie") ?? "").toMatch(/Max-Age=0/i);
   const me = await journey.api("/api/auth/me", copy);
-  expect(me.status).toBe(200);
-  expect(await me.json()).toMatchObject({ username: ACCOUNTS.staff.username });
+  expect(me.status).toBe(401);
 });
 
-it("S2/S3 (gap): failed logins and logouts leave no audit row; a successful login writes exactly one", async () => {
-  const before = await allAudits(), logins = await auditCount("auth.canonical_login");
+it("S2/S3: failed logins leave no audit row; successful login and canonical logout each write an atomic audit row", async () => {
+  const before = await allAudits(), logins = await auditCount("auth.canonical_login"), logouts = await auditCount("auth.canonical_logout");
   expect((await attempt(ACCOUNTS.staff.username, "wrong-password-1")).status).toBe(401);
   expect((await attempt("canon-l-nobody", "wrong-password-1")).status).toBe(401);
   expect(await allAudits()).toBe(before);
@@ -49,7 +48,8 @@ it("S2/S3 (gap): failed logins and logouts leave no audit row; a successful logi
   expect(await auditCount("auth.canonical_login")).toBe(logins + 1);
   const afterLogin = await allAudits();
   await journey.api("/api/auth/logout", cookie, { method: "POST" });
-  expect(await allAudits()).toBe(afterLogin);
+  expect(await auditCount("auth.canonical_logout")).toBe(logouts + 1);
+  expect(await allAudits()).toBe(afterLogin + 1);
 });
 
 it("S5 (kept): unknown user and wrong password answer identically and set no cookie", async () => {

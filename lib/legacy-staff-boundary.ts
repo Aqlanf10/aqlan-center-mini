@@ -1,5 +1,6 @@
 import type { DbClient } from "./db";
-import { revalidateLegacySessionEvidence, sessionCredentialVersion, sessionPermissionVersion, type VerifiedLegacySession } from "./auth";
+import { legacySessionTokenHash, revalidateLegacySessionEvidence, sessionCredentialVersion, sessionPermissionVersion, type VerifiedLegacySession } from "./auth";
+import { isLegacyTokenHashRevokedIn } from "./legacy-session-token-revocation";
 import { classifyStaffPermissionEnvelope } from "./staff-permission-envelope";
 import { parseDoctorPermissions } from "./doctor-permissions";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
@@ -34,6 +35,8 @@ export async function assertLegacyStaffWrite(source:Query,authorization:LegacySt
  if(!actor || !actor.is_active || actor.username!==signed.username || actor.role!==signed.role || sessionCredentialVersion(actor.password_hash,Number(actor.session_version??0))!==signed.credentialVersion)refuse("ACTOR_REVOKED");
  for(const row of rows)assertLegacyPermissionEnvelope(row.permissions);
  if((actor.role==="cashier" || actor.role==="accountant") && signed.permissionVersion!==sessionPermissionVersion(actor.role,parseDoctorPermissions(actor.permissions,actor.role)?.financeAccess))refuse("ACTOR_REVOKED");
+ const tokenHash=legacySessionTokenHash(signed);
+ if(tokenHash && await isLegacyTokenHashRevokedIn(source,actor.id,tokenHash,s))refuse("ACTOR_REVOKED");
  if(authorization.selfPassword){if(action!=="update" || targetId!==actor.id)refuse("SELF_PASSWORD_SCOPE");}
  else if(actor.role!=="admin")refuse("ADMIN_REQUIRED");
  if(!revalidateLegacySessionEvidence(authorization.evidence))refuse("SESSION_EXPIRED");

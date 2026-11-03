@@ -982,6 +982,46 @@ describe("Finding 4 / independent 6 (legacy mode) — revokeLegacySessionIfCurre
         [u.id],
       );
       expect(afterReplay.session_version).toBe(1);
+
+      // Signed-token current-session semantics: logging out tokenA revokes ONLY tokenA (not sibling tokenB or Bearer)
+      const sessionMod = await import("../../lib/session");
+      const tokenA = authMod.createSessionToken({
+        userId: u.id,
+        username: "SYN-LEGACY-USER",
+        role: "reception",
+        expiresAt: Date.now() + 60_000,
+        credentialVersion: authMod.sessionCredentialVersion(pwHash, 1),
+        sessionNonce: "nonce-device-a",
+      });
+      const tokenB = authMod.createSessionToken({
+        userId: u.id,
+        username: "SYN-LEGACY-USER",
+        role: "reception",
+        expiresAt: Date.now() + 60_000,
+        credentialVersion: authMod.sessionCredentialVersion(pwHash, 1),
+        sessionNonce: "nonce-device-b",
+      });
+      const parsedA = authMod.readSessionToken(tokenA)!;
+      const parsedB = authMod.readSessionToken(tokenB)!;
+
+      expect(await db.revokeLegacySessionIfCurrent(parsedA)).toBe(true);
+      expect(await db.revokeLegacySessionIfCurrent(parsedA)).toBe(false);
+
+      const { rows: [afterPerToken] } = await legacyOwned.source.query<{ session_version: number }>(
+        "SELECT session_version FROM users WHERE id = $1",
+        [u.id],
+      );
+      expect(afterPerToken.session_version).toBe(1);
+
+      const c = await db.getPool().connect();
+      try {
+        await c.query("BEGIN");
+        expect(await sessionMod.revalidateSessionInTransaction(parsedA, c)).toBeNull();
+        expect(await sessionMod.revalidateSessionInTransaction(parsedB, c)).toMatchObject({ userId: u.id, role: "reception" });
+        await c.query("COMMIT");
+      } finally {
+        c.release();
+      }
     } finally {
       vi.stubEnv("DATABASE_URL", prevUrl);
       await db.resetPoolForTesting();

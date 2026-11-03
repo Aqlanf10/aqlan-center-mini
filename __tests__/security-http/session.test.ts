@@ -85,9 +85,11 @@ describe("(P2-FIX-1) الاستعادة بعد التحديث — من الخا�
 
 describe("(P2-FIX-1) طلبات المتصفح العادية — كوكي بلا أي Authorization", () => {
   it("mutation بكوكي + Origin نفسه + بلا Authorization تعبر الحارس (المسار المتصفحي)", async () => {
-    // الخروج على المسار نفسه بطلب كوكي صافٍ: 200 من المسار لا 403 من الحارس
-    const response = await authedMutation("/api/auth/logout", h.sessions.doctorA, "POST");
+    // الخروج على المسار نفسه بطلب كوكي صافٍ: 200 من المسار لا 403 من الحارس، ويُبطل تلك الجلسة وحدها على الخادم
+    const disposable = await loginStaff(TEST_USERS.doctorA.username, TEST_USERS.doctorA.password);
+    const response = await authedMutation("/api/auth/logout", disposable, "POST");
     expect([200, 204]).toContain(response.status);
+    expect((await authedGet("/api/auth/me", disposable)).status).toBe(401);
   });
 
   it("GET بيانات بكوكي صافٍ بلا Authorization يعمل (لا حاجة لأي توكن في المتصفح)", async () => {
@@ -111,13 +113,15 @@ describe("(P2-FIX-1) طلبات المتصفح العادية — كوكي بل�
 
 describe("(P2-FIX-1) الخروج يمحو الكوكي", () => {
   it("logout: Set-Cookie بمDescriptor مطابق وMax-Age=0 (حذف فوري)", async () => {
-    const response = await authedMutation("/api/auth/logout", h.sessions.doctorB, "POST");
+    const disposable = await loginStaff(TEST_USERS.doctorB.username, TEST_USERS.doctorB.password);
+    const response = await authedMutation("/api/auth/logout", disposable, "POST");
     expect([200, 204]).toContain(response.status);
     const setCookies = response.headers.getSetCookie?.() ?? [];
     const cleared = setCookies.find((c) => c.startsWith("aqlan_flow_session="));
     expect(cleared).toBeTruthy();
     expect(cleared).toMatch(/max-age=0/i);
     expect(cleared).toMatch(/httponly/i);
+    expect((await authedGet("/api/auth/me", disposable)).status).toBe(401);
   });
 
   it("بعد الخروج: المتصفح بلا كوكي ⇒ 401 — الجلسة انتهت في الواجهة", async () => {

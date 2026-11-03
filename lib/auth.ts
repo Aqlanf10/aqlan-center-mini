@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { financeAccessFor, type FinanceAccess } from "./finance-permissions";
 
@@ -61,6 +61,7 @@ export interface SessionPayload {
   credentialVersion?: string;
   financeAccess?: FinanceAccess;
   permissionVersion?: string;
+  sessionNonce?: string;
 }
 
 function secret(): string {
@@ -155,6 +156,12 @@ export function carryLegacySessionEvidence(source: SessionPayload, derived: Sess
   const token=legacyPayloadSources.get(source);
   if(token)legacyPayloadSources.set(derived,token);
   return derived;
+}
+/** SHA-256 digest of the original signed legacy session token, for per-session logout revocation. */
+export function legacySessionTokenHash(payload: SessionPayload): string | null {
+  const token = legacyPayloadSources.get(payload);
+  if (!token) return null;
+  return createHash("sha256").update(token).digest("hex");
 }
 
 export function readSessionToken(token: string | undefined): SessionPayload | null {

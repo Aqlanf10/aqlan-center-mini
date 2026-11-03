@@ -3,7 +3,8 @@ import { getPool } from "./db";
 import { isAdmin } from "./roles";
 import { withDefaults, type SettingsMap } from "./settings";
 import { readSessionPayload } from "./session";
-import { sessionCredentialVersion } from "./auth";
+import { legacySessionTokenHash, sessionCredentialVersion } from "./auth";
+import { isLegacyTokenHashRevokedIn } from "./legacy-session-token-revocation";
 
 /**
  * الطبقة القرائية الحصرية لنظام النسخ الاحتياطي — هنا سبب أن «لا كتابة في
@@ -95,6 +96,7 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
     party_id: number | null;
     permissions: unknown;
   } | null = null;
+  let tokenRevoked = false;
   let client: Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>> | null = null;
   let discard=false;
   try {
@@ -120,6 +122,10 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
     );
     userRow = rows[0] ?? null;
     if(userRow)assertLegacyPermissionEnvelope(userRow.permissions);
+    const tokenHash = legacySessionTokenHash(payload);
+    if (userRow && tokenHash) {
+      tokenRevoked = await isLegacyTokenHashRevokedIn(client, userRow.id, tokenHash);
+    }
     await client.query("COMMIT");
   } catch {
     if(client)await client.query("ROLLBACK").catch(()=>{discard=true;});
@@ -130,7 +136,7 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
   if(payload.expiresAt<=Date.now())return {ok:false,reason:"no-session"};
   if (!userRow.is_active) return { ok: false, reason: "inactive" };
   if (userRow.id !== payload.userId || userRow.username !== payload.username || userRow.role !== payload.role) return { ok: false, reason: "user-gone" };
-  if (payload.credentialVersion !== sessionCredentialVersion(userRow.password_hash, Number(userRow.session_version ?? 0))) {
+  if (tokenRevoked || payload.credentialVersion !== sessionCredentialVersion(userRow.password_hash, Number(userRow.session_version ?? 0))) {
     return { ok: false, reason: "credential-changed" };
   }
 

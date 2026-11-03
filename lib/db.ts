@@ -167,7 +167,8 @@ import {
 import { costNow, issuedCostMinor, movementCostsAtIndexes, type CostedMovement } from "./inventoryCost";
 import { assertBaseUnitEdit, quantityAtoms, QUANTITY_SCALE } from "./inventory-domain/quantities";
 import { proportionalCostMinor } from "./inventory-domain/treatment-cost";
-import { hashPassword, sessionCredentialVersion, sessionPermissionVersion, type SessionPayload } from "./auth";
+import { hashPassword, legacySessionTokenHash, sessionCredentialVersion, sessionPermissionVersion, type SessionPayload } from "./auth";
+import { REVOKED_LEGACY_SESSION_SCOPE, revokedLegacySessionActor } from "./legacy-session-token-revocation";
 import { seedDefaultServices } from "./services-seed";
 import { seedDefaultLabServices } from "./lab-services-seed";
 import {
@@ -3368,6 +3369,27 @@ export async function revokeLegacySessionIfCurrent(payload: SessionPayload | nul
       payload.permissionVersion !== sessionPermissionVersion(user.role, user.permissions?.financeAccess)
     ) {
       return false;
+    }
+    const tokenHash = legacySessionTokenHash(payload);
+    if (tokenHash) {
+      const actorKey = revokedLegacySessionActor(user.id);
+      await client.query(
+        `DELETE FROM http_idempotency_keys
+          WHERE scope = $1
+            AND actor = $2
+            AND (response_body->>'expiresAt')::bigint <= $3`,
+        [REVOKED_LEGACY_SESSION_SCOPE, actorKey, Date.now()],
+      );
+      const { rows: inserted } = await client.query<{ id: string }>(
+        `INSERT INTO http_idempotency_keys (
+           scope, actor, idempotency_key, request_hash, state, status_code, response_body, completed_at
+         )
+         VALUES ($1, $2, $3, $3, 'completed', 200, $4::jsonb, NOW())
+         ON CONFLICT (scope, actor, idempotency_key) DO NOTHING
+         RETURNING id::text AS id`,
+        [REVOKED_LEGACY_SESSION_SCOPE, actorKey, tokenHash, JSON.stringify({ expiresAt: payload.expiresAt })],
+      );
+      return inserted.length === 1;
     }
     await client.query(
       "UPDATE users SET session_version = COALESCE(session_version, 0) + 1 WHERE id = $1",

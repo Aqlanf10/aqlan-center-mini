@@ -3,11 +3,15 @@ import { SESSION_COOKIE, readSessionToken, sessionCredentialVersion, carryLegacy
 import { sessionPermissionVersion } from "./auth";
 import { financeAccessFor } from "./finance-permissions";
 import { findUserByUsername, findLegacyUserByUsernameReadOnlySnapshot, type StaffUser, type DbClient } from "./db";
+import { isLegacyPayloadRevoked } from "./legacy-session-token-revocation";
 
 async function currentSession(payload: SessionPayload | null, client?: DbClient): Promise<SessionPayload | null> {
   if (!payload?.credentialVersion) return null;
   const user = client ? await findUserByUsername(payload.username, client) : await findUserByUsername(payload.username);
-  return currentSessionForUser(payload, user);
+  const resolved = currentSessionForUser(payload, user);
+  if (!resolved || !user) return null;
+  if (await isLegacyPayloadRevoked(payload, user.id, client)) return null;
+  return resolved;
 }
 
 function currentSessionForUser(payload: SessionPayload, user: StaffUser | null): SessionPayload | null {
@@ -103,5 +107,9 @@ export async function revalidateSessionInTransaction(
  * snapshot. Never use this read projection as permission to mutate. */
 export async function revalidateLegacySessionReadOnlySnapshot(payload: SessionPayload, client: DbClient): Promise<SessionPayload | null> {
   if (!payload?.credentialVersion) return null;
-  return currentSessionForUser(payload, await findLegacyUserByUsernameReadOnlySnapshot(payload.username, client));
+  const user = await findLegacyUserByUsernameReadOnlySnapshot(payload.username, client);
+  const resolved = currentSessionForUser(payload, user);
+  if (!resolved || !user) return null;
+  if (await isLegacyPayloadRevoked(payload, user.id, client)) return null;
+  return resolved;
 }

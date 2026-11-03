@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { clearAccountLoginAttempts, consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
 import { accountLimitKey, consumeLoginAttemptFor, legacyStaffAccountKey } from "@/lib/loginLimit";
@@ -203,6 +204,7 @@ export async function POST(request: Request) {
       // جهة الطبيب المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب فيحجب ما ليس لهم.
       partyId: user.partyId,
       credentialVersion: sessionCredentialVersion(user.passwordHash, user.sessionVersion),
+      sessionNonce: randomBytes(16).toString("base64url"),
       ...(user.role === "cashier" || user.role === "accountant" ? {
         financeAccess: user.permissions?.financeAccess,
         permissionVersion: sessionPermissionVersion(user.role, user.permissions?.financeAccess),
