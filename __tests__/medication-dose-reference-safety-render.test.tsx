@@ -3,15 +3,25 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DoseProfileForm, PrescriptionDoseProfiles } from '../components/PrescriptionDoseProfiles';
 
-const state = vi.hoisted(() => ({ selected: '' }));
+const state = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0 }));
 vi.mock('../components/SessionProvider', () => ({
   useSessionActions: () => ({ ready: true, session: { username: 'synthetic-reviewer', role: 'doctor', permissions: [] } }),
 }));
 vi.mock('react', async original => ({
   ...await original<typeof import('react')>(),
-  // The actual select handler changes this one chooser state. This is a
-  // component/server-render test, not a DOM, browser or React lifecycle test.
-  useState: () => [state.selected, (value: string) => { state.selected = value; }],
+  // Keep a separate stable slot for each chooser hook. This exercises the
+  // actual select handler, but is not a browser or React lifecycle test.
+  useRef: (initial: unknown) => {
+    const slot = state.cursor++;
+    if (!(slot in state.values)) state.values[slot] = { current: initial };
+    return state.values[slot];
+  },
+  useLayoutEffect: (effect: () => void | (() => void)) => { state.cursor++; effect(); },
+  useState: (initial: unknown) => {
+    const slot = state.cursor++;
+    if (!(slot in state.values)) state.values[slot] = initial;
+    return [state.values[slot], (value: unknown) => { state.values[slot] = typeof value === 'function' ? value(state.values[slot]) : value; }];
+  },
 }));
 type Element = ReactElement<Record<string, unknown>>;
 type OnSelect = ComponentProps<typeof PrescriptionDoseProfiles>['onSelect'];
@@ -22,9 +32,10 @@ function nodes(node: ReactNode): Element[] {
 }
 function chooser(onSelect: OnSelect): Element {
   const outer = PrescriptionDoseProfiles({ onSelect });
+  state.cursor = 0;
   return (outer.type as (props: unknown) => Element)(outer.props);
 }
-beforeEach(() => { state.selected = ''; });
+beforeEach(() => { state.values = []; state.cursor = 0; });
 
 describe('actual reference chooser selection and server-rendered safety text', () => {
   it.each([
@@ -36,7 +47,7 @@ describe('actual reference chooser selection and server-rendered safety text', (
     expect(select).toBeDefined();
     (select!.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: profileId } });
     const tree = chooser(onSelect);
-    expect(state.selected).toBe(profileId);
+    expect(nodes(tree).find(node => node.props['aria-label'] === 'الملف المرجعي للجرعة')?.props.value).toBe(profileId);
     expect(nodes(tree).some(node => node.type === DoseProfileForm)).toBe(false);
     const markup = renderToStaticMarkup(tree);
     expect(markup).toContain(expectedText);
@@ -50,3 +61,4 @@ describe('actual reference chooser selection and server-rendered safety text', (
     }
   });
 });
+

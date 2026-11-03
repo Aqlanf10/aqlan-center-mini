@@ -1,6 +1,6 @@
 {
-  "version": "2026-11-01.expansion.1",
-  "checked_on": "2026-11-01",
+  "version": "2026-11-03.topical-manual.1",
+  "checked_on": "2026-11-03",
   "sources": [
     {
       "id": "AAPD25",
@@ -224,6 +224,54 @@
       "url": "https://www.medicines.org.uk/emc/product/2272/smpc",
       "version": "21 May2026",
       "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_ABX_REVIEW",
+      "title": "SDCEP bacterial infections review tool",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/supporting-tools/bacterial-infections-review-tool/",
+      "version": "live page; reviewed 2026-11-03",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "SD_ABX_FIRST",
+      "title": "SDCEP first-line antibiotics and patient advice",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/bacterial-infections/dental-abscess/first-line-antibiotics/",
+      "version": "live page; reviewed 2026-11-03",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "METRO_400_LABEL",
+      "title": "UK Metronidazole 400 mg tablets SmPC: alcohol precautions",
+      "url": "https://www.medicines.org.uk/emc/product/12817/smpc",
+      "version": "updated 2025-04-30; UK example, not proof of selected local product",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "FLUORIDE_5000_LABEL",
+      "title": "UK Fluoride 5000 ppm toothpaste SmPC",
+      "url": "https://www.medicines.org.uk/emc/product/9575/smpc",
+      "version": "updated2020-10-26; UK example, not selected local product verification",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "FLUORIDE_5000_PIL",
+      "title": "UK Fluoride5000ppm patient leaflet: safe storage and accidental ingestion",
+      "url": "https://www.medicines.org.uk/emc/files/pil.9575.pdf",
+      "version": "revised2020-10; UK example, not selected local product",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "NHS_POISON_FIRST_AID",
+      "title": "NHS poisoning first aid: avoid inducing vomiting",
+      "url": "https://www.nhs.uk/conditions/poisoning/",
+      "version": "reviewed2025-06-12; checked2026-11-03",
+      "checked_on": "2026-11-03",
       "primary_source": true
     }
   ],
@@ -552,7 +600,7 @@
           5
         ],
         "review_day": 3,
-        "stop": "SDCEP: إيقاف بعد زوال العلامات الجهازية وفق المراجعة؛ لا إطالة تلقائية"
+        "stop": "قرار الطبيب في المراجعة: لا علامات عدوى مستمرة، ألم آخذ بالتحسن، أكل وشرب طبيعيان، ولا علامات خطر؛ عند استمرار العدوى يُقرر إكمال الكورس وإعادة التقييم، وعند علامات الخطر إحالة طارئة. لا إيقاف ذاتي لمجرد غياب الأعراض الجهازية."
       },
       "form_strength_reference": [
         "125mg/5mL",
@@ -562,7 +610,9 @@
       "source_ids": [
         "SD_AMOX",
         "SD_ABSCESS",
-        "SD_ABX_CAUTION"
+        "SD_ABX_CAUTION",
+        "SD_ABX_REVIEW",
+        "SD_ABX_FIRST"
       ],
       "warning_ids": [
         "penicillin",
@@ -603,7 +653,7 @@
           5
         ],
         "review_day": 3,
-        "stop": "SDCEP: إيقاف بعد زوال العلامات الجهازية وفق المراجعة؛ لا إطالة تلقائية"
+        "stop": "قرار الطبيب في المراجعة: لا علامات عدوى مستمرة، ألم آخذ بالتحسن، أكل وشرب طبيعيان، ولا علامات خطر؛ عند استمرار العدوى يُقرر إكمال الكورس وإعادة التقييم، وعند علامات الخطر إحالة طارئة. لا إيقاف ذاتي لمجرد غياب الأعراض الجهازية."
       },
       "form_strength_reference": [
         "tablet250mg",
@@ -613,7 +663,9 @@
       "source_ids": [
         "SD_PENV",
         "SD_ABX_CAUTION",
-        "SD_ABSCESS"
+        "SD_ABSCESS",
+        "SD_ABX_REVIEW",
+        "SD_ABX_FIRST"
       ],
       "warning_ids": [
         "penicillin",
@@ -659,7 +711,7 @@
           5
         ],
         "review_day": 3,
-        "stop": "SDCEP: إيقاف بعد زوال العلامات الجهازية وفق المراجعة؛ لا إطالة تلقائية"
+        "stop": "قرار الطبيب في المراجعة: لا علامات عدوى مستمرة، ألم آخذ بالتحسن، أكل وشرب طبيعيان، ولا علامات خطر؛ عند استمرار العدوى يُقرر إكمال الكورس وإعادة التقييم، وعند علامات الخطر إحالة طارئة. لا إيقاف ذاتي لمجرد غياب الأعراض الجهازية."
       },
       "form_strength_reference": [
         "tablet200/400mg",
@@ -667,7 +719,10 @@
       ],
       "source_ids": [
         "SD_METRO",
-        "SD_ABX_CAUTION"
+        "SD_ABX_CAUTION",
+        "SD_ABX_REVIEW",
+        "SD_ABX_FIRST",
+        "METRO_400_LABEL"
       ],
       "warning_ids": [
         "metronidazole",
@@ -1090,12 +1145,15 @@
         "1.1% sodium fluoride; 5000ppm fluoride"
       ],
       "source_ids": [
-        "SD_F5000"
+        "SD_F5000",
+        "FLUORIDE_5000_LABEL",
+        "FLUORIDE_5000_PIL",
+        "NHS_POISON_FIRST_AID"
       ],
       "warning_ids": [
         "fluoride"
       ],
-      "notes": "ليس معجون أطفال عامًا؛ المدة والمراجعة حسبالخطر."
+      "notes": "ليس معجون أطفال عامًا؛ المدة والمراجعة حسبالخطر. يلزم تقييم مجمل مصادر الفلوريد والمنتجات المتزامنة والسواغات والحمل/الرضاعة ونشرة المنتج الفعلي؛ لا تحويل طول الشريط إلىmg."
     },
     {
       "id": "fluoride-rinse005",

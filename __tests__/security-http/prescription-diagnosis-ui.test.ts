@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Locator, type Page, type Route } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
-import { toWhatsAppNumber } from "../../lib/reminders";
 import { PROCEDURE_TEMPLATES } from "../../lib/prescription-procedure-templates";
 import { baseUrl, harness } from "./_server";
 
@@ -179,11 +178,13 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
 }
 
 async function fillMedicine(page: Page) {
-  await page.getByRole("button", { name: "إضافة دواء جديد", exact: true }).click();
+  // The compact composer already owns one pristine manual row.
+  expect(await page.getByLabel("اسم الدواء للسطر 1", { exact: true }).inputValue()).toBe("");
+  expect(await page.getByPlaceholder("Drug name", { exact: true }).count()).toBe(1);
   for (const [placeholder, value] of [
-    ["Drug name (e.g. Augmentin / Brufen)", medicine.name],
-    ["Dose (1g / 500mg)", medicine.dose],
-    ["Form (Tablets / Syrup)", medicine.form],
+    ["Drug name", medicine.name],
+    ["Strength / concentration + unit", medicine.dose],
+    ["Form / route (tablet, oral rinse…)", medicine.form],
     ["Frequency (every 8 hours)", medicine.frequency],
     ["Duration (5 days)", medicine.duration],
     ["التعليمات بالعربية (بعد الأكل…)", medicine.instructions],
@@ -194,9 +195,9 @@ async function fillMedicine(page: Page) {
 }
 
 async function assertMedicine(page: Page) {
-  expect(await page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).count()).toBe(1);
-  expect(await page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).inputValue()).toBe(medicine.name);
-  expect(await page.getByPlaceholder("Dose (1g / 500mg)", { exact: true }).inputValue()).toBe(medicine.dose);
+  expect(await page.getByPlaceholder("Drug name", { exact: true }).count()).toBe(1);
+  expect(await page.getByPlaceholder("Drug name", { exact: true }).inputValue()).toBe(medicine.name);
+  expect(await page.getByPlaceholder("Strength / concentration + unit", { exact: true }).inputValue()).toBe(medicine.dose);
   expect(await page.getByPlaceholder("Frequency (every 8 hours)", { exact: true }).inputValue()).toBe(medicine.frequency);
   expect(await page.getByPlaceholder("Duration (5 days)", { exact: true }).inputValue()).toBe(medicine.duration);
 }
@@ -206,8 +207,8 @@ async function prints(page: Page) {
 }
 
 describe("prescription diagnosis draft in the built visit page", () => {
-  it("inherits late visit edits before first open and on reopening, then submits the current diagnosis only printing after acknowledgement", async () => {
-    const f = await fixture();
+  it.each([1280, 390])("inherits late visit edits and retains visible saved-print recovery after acknowledgement at %ipx", async (width) => {
+    const f = await fixture("", {}, width);
     try {
       // The modal is already mounted (but hidden) after the visit loads. This
       // edit must be inherited even though it comes after useState's mount.
@@ -232,7 +233,7 @@ describe("prescription diagnosis draft in the built visit page", () => {
         instructionsLang: "en", items: [medicine],
       };
       f.holdPrescriptionPreview();
-      await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).click();
+      await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).click();
       await expect.poll(() => f.requests.length).toBe(1);
       expect(f.requests[0].commandKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
       expected.commandKey = f.requests[0].commandKey as string;
@@ -246,7 +247,7 @@ describe("prescription diagnosis draft in the built visit page", () => {
       expect(await f.diagnosis.inputValue()).toBe(expected.diagnosis);
       expect(await f.notes.inputValue()).toBe(draftNotes);
       await assertMedicine(f.page);
-      const printButton = f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true });
+      const printButton = f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true });
       await expect.poll(() => printButton.isEnabled()).toBe(true);
       expect(f.requests).toEqual([expected]);
       expect(await prints(f.page)).toEqual([]);
@@ -273,9 +274,29 @@ describe("prescription diagnosis draft in the built visit page", () => {
       await acknowledge.waitFor();
       await f.diagnosis.scrollIntoViewIfNeeded();
       await mkdir(".settings-ui-artifacts", { recursive: true });
-      await f.page.screenshot({ path: ".settings-ui-artifacts/prescription-diagnosis-pinned.png" });
+      if (width === 1280) await f.page.screenshot({ path: ".settings-ui-artifacts/prescription-diagnosis-pinned.png" });
       await acknowledge.click();
       await expect.poll(() => prints(f.page)).toEqual([`/print/prescription/${patientId}?rx=${prescriptionId}`]);
+      // A blocked popup must retain the saved result, not resubmit issuance.
+      await f.page.getByText("الوصفة محفوظة ولم تُفتح نافذة الطباعة", { exact: false }).first().waitFor();
+      // Scroll the body to its bottom; the recovery action must stay in the footer.
+      await f.notes.scrollIntoViewIfNeeded();
+      const savedLink = f.page.getByRole("link", { name: `فتح الوصفة المحفوظة للطباعة #${prescriptionId}`, exact: true });
+      expect(await savedLink.isVisible()).toBe(true);
+      expect(await savedLink.getAttribute("href")).toBe(`/print/prescription/${patientId}?rx=${prescriptionId}`);
+      const recoveryBounds = await savedLink.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+          viewportWidth: innerWidth, viewportHeight: innerHeight,
+          hittable: hit !== null && (hit === element || element.contains(hit)) };
+      });
+      expect(recoveryBounds.viewportWidth).toBe(width);
+      expect(recoveryBounds.left).toBeGreaterThanOrEqual(0);
+      expect(recoveryBounds.right).toBeLessThanOrEqual(width);
+      expect(recoveryBounds.top).toBeGreaterThanOrEqual(0);
+      expect(recoveryBounds.bottom).toBeLessThanOrEqual(recoveryBounds.viewportHeight);
+      expect(recoveryBounds.hittable).toBe(true);
       expect(f.requests).toEqual([expected, expected, { ...expected, acknowledgedSafetyToken: acknowledgementToken }]);
       // Pinning a submitted draft must not disable a deliberate later edit.
       await f.diagnosis.fill("Deliberately revised prescription diagnosis");
@@ -298,6 +319,7 @@ describe("prescription diagnosis draft in the built visit page", () => {
         let expectedNotes = draftNotes;
         if (kind === "template") {
           const template = PROCEDURE_TEMPLATES[0];
+          await f.page.locator('details[data-prescription-optional="procedures"] > summary').click();
           await f.page.getByRole("button", { name: template.title, exact: true }).click();
           expectedDiagnosis = template.diagnosis;
           expectedNotes = template.notes;
@@ -345,8 +367,8 @@ async function capturePatientContext(page: Page, width: number, contextState: "w
   const targets: Array<{ label: string; locator: Locator }> = [
     { label: `${contextState} patient-context notice`, locator: warning },
     { label: "cancel", locator: panel.getByRole("button", { name: "إلغاء", exact: true }) },
-    { label: "print", locator: panel.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }) },
-    ...(contextState === "warning" ? [{ label: "synthetic phone action", locator: panel.getByRole("button", { name: /إرسال واتساب/ }) }] : []),
+    { label: "print", locator: panel.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }) },
+    ...(contextState === "warning" ? [{ label: "synthetic phone action", locator: panel.getByRole("button", { name: /واتساب غير متاح حاليًا/ }) }] : []),
   ];
   const bounds = [];
   for (const { label, locator } of targets) {
@@ -396,29 +418,30 @@ describe("patient-file context in the built prescription consumer", () => {
     try {
       await f.open();
       await f.page.getByText("Penicillin allergy", { exact: true }).waitFor();
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).waitFor();
+      await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).waitFor();
       await f.diagnosis.fill("Independent Rx draft");
       await f.notes.fill(draftNotes);
       await fillMedicine(f.page);
-      const drugName = f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true });
+      const drugName = f.page.getByPlaceholder("Drug name", { exact: true });
       await drugName.fill("Amoxicillin");
       await f.page.getByText("خطر تحسسي حرج (Penicillin Allergy)", { exact: true }).waitFor();
       // A manual edit clears the same review contract as a library-origin edit.
       const manualReview = f.page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ });
       expect(await manualReview.isChecked()).toBe(false);
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).isDisabled()).toBe(true);
       expect(await prints(f.page)).toEqual([]);
       await manualReview.check();
       await capturePatientContext(f.page, width, "warning");
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
-      expect(await prints(f.page)).toEqual([expect.stringContaining("https://wa.me/967777100099?")]);
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).isDisabled()).toBe(true);
+      expect(await prints(f.page)).toEqual([]);
+      expect(f.requests).toEqual([]);
       await f.close();
       await f.visitDiagnosis.fill("Unsubmitted visit draft");
       f.holdPatientRead(); await f.open();
       await expect.poll(f.pendingPatientReads).toBe(1);
       await f.page.getByText(/جارٍ تحميل التنبيهات الطبية وبيانات التواصل/).waitFor();
       expect(await f.page.getByText("Penicillin allergy", { exact: true }).count()).toBe(0);
-      expect(await f.page.getByRole("button", { name: /إرسال واتساب/ }).count()).toBe(0);
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).count()).toBe(0);
       expect(await f.diagnosis.inputValue()).toBe("Independent Rx draft");
       expect(await f.notes.inputValue()).toBe(draftNotes);
       expect(await drugName.inputValue()).toBe("Amoxicillin");
@@ -451,13 +474,13 @@ describe("patient-file context in the built prescription consumer", () => {
     const f = await fixture("Synthetic real-GET contract", { id, real: true });
     try {
       await f.open();
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).waitFor();
+      await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).waitFor();
       expect(await f.page.getByText(/تعذّر التحقق من التنبيهات الطبية/).count()).toBe(0);
       if (payload.patient.medicalAlert) await f.page.getByText(payload.patient.medicalAlert, { exact: true }).waitFor();
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).isDisabled()).toBe(true);
       const opened = await prints(f.page);
-      expect(opened).toHaveLength(1);
-      expect(opened[0]).toContain(`https://wa.me/${toWhatsAppNumber(payload.patient.phone!)}?`);
+      expect(opened).toEqual([]);
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).getAttribute("title")).toContain("المشاركة متوقفة");
       expect(f.requests).toEqual([]); expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
     } finally { await f.context.close(); }
   });
@@ -470,10 +493,10 @@ it("blocks issuance on prescriber lookup failure and permits explicit safe retry
     f.failPrescriberRead(true); await f.open(); await fillMedicine(f.page);
     await f.page.getByText("تعذر التحقق من هوية الطبيب الواصف. الإصدار والمعاينة متوقفان حتى ينجح التحقق.", { exact: true }).waitFor();
     expect(await f.page.getByLabel("الطبيب الواصف", { exact: true }).inputValue()).toBe("");
-    expect(await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).isDisabled()).toBe(true);
+    expect(await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).isDisabled()).toBe(true);
     expect(f.requests).toEqual([]); expect(await prints(f.page)).toEqual([]);
     f.failPrescriberRead(false); await f.page.getByRole("button", { name: "إعادة التحقق من الطبيب", exact: true }).click();
-    await expect.poll(() => f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).isEnabled()).toBe(true);
+    await expect.poll(() => f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).isEnabled()).toBe(true);
     expect(await f.page.getByLabel("الطبيب الواصف", { exact: true }).inputValue()).toBe("طبيب تجريبي");
     expect(f.requests).toEqual([]); expect(await prints(f.page)).toEqual([]);
     expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
@@ -484,32 +507,75 @@ it("explicit generic choice fills only a name, never saves or prints, and requir
   const f = await fixture("Synthetic diagnosis never selects an antibiotic");
   try {
     await f.open();
-    expect(await f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).count()).toBe(0);
+    expect(await f.page.getByPlaceholder("Drug name", { exact: true }).count()).toBe(1);
+    expect(await f.page.getByLabel("اسم الدواء للسطر 1", { exact: true }).inputValue()).toBe("");
+    await f.page.locator('details[data-prescription-optional="references"] > summary').click();
     await f.page.locator("summary").filter({ hasText: "مكتبة أدوية إرشادية" }).click();
     const choose = f.page.getByRole("button", { name: "اختيار اسم أموكسيسيلين فقط — أكمل التفاصيل يدويًا", exact: true });
     await expect.poll(() => choose.isEnabled()).toBe(true);
     await choose.click();
-    expect(await f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).inputValue()).toBe("Amoxicillin");
-    for (const placeholder of ["Strength / concentration", "Form (Tablets / Syrup)", "Frequency (every 8 hours)", "Duration (5 days)"]) expect(await f.page.getByPlaceholder(placeholder, { exact: true }).inputValue()).toBe("");
+    expect(await f.page.getByPlaceholder("Drug name", { exact: true }).inputValue()).toBe("Amoxicillin");
+    for (const placeholder of ["Strength / concentration + unit", "Form / route (tablet, oral rinse…)", "Frequency (every 8 hours)", "Duration (5 days)"]) expect(await f.page.getByPlaceholder(placeholder, { exact: true }).inputValue()).toBe("");
     expect(await f.page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).inputValue()).toBe("");
     expect(f.requests).toHaveLength(0); expect(await prints(f.page)).toEqual([]);
-    await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).click();
+    await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).click();
     expect(f.requests).toHaveLength(0); expect(await prints(f.page)).toEqual([]);
-    await f.page.getByPlaceholder("Strength / concentration", { exact: true }).fill("synthetic strength");
-    await f.page.getByPlaceholder("Form (Tablets / Syrup)", { exact: true }).fill("synthetic form");
+    await f.page.getByPlaceholder("Strength / concentration + unit", { exact: true }).fill("synthetic strength");
+    await f.page.getByPlaceholder("Form / route (tablet, oral rinse…)", { exact: true }).fill("synthetic form");
     await f.page.getByPlaceholder("Frequency (every 8 hours)", { exact: true }).fill("synthetic frequency");
     await f.page.getByPlaceholder("Duration (5 days)", { exact: true }).fill("synthetic duration");
     await f.page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).fill("synthetic amount");
-    await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).click(); expect(f.requests).toHaveLength(0);
+    await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).click(); expect(f.requests).toHaveLength(0);
     const review = f.page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ });
     await review.check();
     await f.page.getByPlaceholder("Duration (5 days)", { exact: true }).fill("changed synthetic duration");
     expect(await review.isChecked()).toBe(false);
     await review.check();
-    await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).click();
+    await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).click();
     await expect.poll(() => f.requests.length).toBe(1);
     expect(f.requests[0].items).toEqual([expect.objectContaining({ name: "Amoxicillin", dose: "synthetic strength", duration: "changed synthetic duration", selection: { id: "amoxicillin", amount: "synthetic amount", confirmed: true } })]);
     expect(await prints(f.page)).toEqual([]); // Existing server warning still requires its own acknowledgement.
     expect(f.unexpected).toEqual([]);
   } finally { await f.context.close(); }
 }, 120_000);
+
+
+it.each([1280, 390])("compact prescription starts writable with visible actions and preserves draft through optional panels at %ipx", async (width) => {
+  const f = await fixture("Synthetic compact workflow", {}, width);
+  try {
+    await f.open();
+    const name = f.page.getByLabel("اسم الدواء للسطر 1", { exact: true });
+    const save = f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true });
+    await expect.poll(() => save.isEnabled()).toBe(true);
+    expect(await name.inputValue()).toBe("");
+    expect(await f.page.getByPlaceholder("Drug name", { exact: true }).count()).toBe(1);
+    expect(await f.page.locator("details[data-prescription-optional][open]").count()).toBe(0);
+    for (const target of [name, save]) {
+      const box = await target.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(1000);
+      expect(await target.evaluate(element => {
+        const r = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return hit !== null && (hit === element || element.contains(hit));
+      })).toBe(true);
+    }
+    expect(await save.evaluate(element => {
+      const style = getComputedStyle(element);
+      return style.backgroundColor !== "rgba(0, 0, 0, 0)" && style.backgroundColor !== style.color;
+    })).toBe(true);
+    await fillMedicine(f.page);
+    for (const section of ["references", "procedures"]) {
+      const summary = f.page.locator(`details[data-prescription-optional="${section}"] > summary`);
+      await summary.click(); await summary.click();
+      await assertMedicine(f.page);
+      expect(await f.page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ }).isChecked()).toBe(true);
+    }
+    expect(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    expect(f.requests).toEqual([]); expect(await prints(f.page)).toEqual([]);
+    expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+  } finally { await f.context.close(); }
+});
+

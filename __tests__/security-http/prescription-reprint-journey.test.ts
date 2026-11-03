@@ -11,7 +11,7 @@ beforeAll(async () => {
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
 const post = (path: string, body: object, role: "doctorA" | "doctorB" | "reception" | "admin" = "doctorA") => authedMutation(path, h.sessions[role], "POST", JSON.stringify(body));
-const read = (path: string, role: "doctorA" | "doctorB" | "reception" = "reception") => fetch(`${baseUrl}${path}`, { headers: { Cookie: h.sessions[role].cookie }, redirect: "manual" });
+const read = (path: string, role: "doctorA" | "doctorB" | "reception" | "admin" = "reception") => fetch(`${baseUrl}${path}`, { headers: { Cookie: h.sessions[role].cookie }, redirect: "manual" });
 it("doctor saves and closes visit; explicitly authorized reception reprints immutable Rx without issuing or changing it", async () => {
   const { rows: [doctor] } = await db.query("SELECT party_id FROM users WHERE username='secdoctora'");
   const { rows: [reception] } = await db.query("SELECT id, permissions FROM users WHERE username='secreception'");
@@ -74,6 +74,20 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
     const printPath = `/print/prescription/${patient.id}?rx=${id}`;
     const html = await (await read(printPath)).text(); expect(html).toContain("SyntheticRxOnly"); expect(html).toContain("Synthetic amount only"); expect(html).toContain(before.prescribing_doctor_name);
     for (const path of [`/print/prescription/${patient.id}?draft=1&items=[]`, `/print/prescription/${patient.id}`, `/print/prescription/${h.seeded.patientBId}?rx=${id}`, `/print/prescription/${patient.id}?rx=99999999`]) expect((await read(path)).status).toBe(404);
+    // A saved ID cannot legitimize draft payloads in URLs, even for clinicians/admins.
+    // These requests use only this job's disposable synthetic patient and record.
+    for (const role of ["doctorA", "admin"] as const) {
+      for (const query of [
+        { draft: "1", items: "[]" },
+        { rx: String(id), draft: "1" }, { rx: String(id), items: "[]" },
+        { rx: String(id), diagnosis: "Synthetic URL override" }, { rx: String(id), notes: "" },
+      ] as Array<Record<string, string>>) {
+        const response = await read(`/print/prescription/${patient.id}?${new URLSearchParams(query)}`, role);
+        expect(response.status).toBe(404);
+      }
+      expect((await db.query("SELECT * FROM prescriptions WHERE id=$1", [id])).rows[0]).toEqual(before);
+      expect(Number((await db.query("SELECT COUNT(*) AS n FROM prescriptions WHERE patient_id=$1", [patient.id])).rows[0].n)).toBe(1);
+    }
     for (const method of ["POST", "PATCH"] as const) expect((await authedMutation("/api/prescriptions", h.sessions.reception, method, JSON.stringify({ ...body, prescribingDoctorPartyId: 999 }))).status).toBeGreaterThanOrEqual(400);
     expect((await post(`/api/prescriptions/${id}/void`, { reason: "forbidden" }, "reception")).status).toBe(403);
     expect((await post("/api/print-log", { docType: "prescription", docId: id, patientId: h.seeded.patientBId }, "reception")).status).toBe(404);
@@ -204,6 +218,9 @@ it.each(['amoxicillin','ibuprofen'] as const)('built %s dose-profile picker issu
     await context.addInitScript(()=>{window.print=()=>{};});
     const page=await context.newPage();await page.goto(`${baseUrl}/visits/${visit.id}`);
     await page.getByRole('button',{name:'💊 روشتة طبية (℞)',exact:true}).click();
+    expect(await page.getByLabel('اسم الدواء للسطر 1',{exact:true}).inputValue()).toBe('');
+    expect(await page.getByPlaceholder('Drug name',{exact:true}).count()).toBe(1);
+    await page.locator('details[data-prescription-optional="references"] > summary').click();
     await page.locator('summary').filter({hasText:'الجرعات والتعليمات حسب الاستطباب والمرجع'}).click();
     await page.getByLabel('الملف المرجعي للجرعة',{exact:true}).selectOption(ibu?'ibuprofen-child-sdcep':'amoxicillin-child-aapd-q8');
     for(const [label,value] of Object.entries({'الاستطباب المراجع':'Synthetic clinician-reviewed indication','العمر بأشهر مكتملة من تاريخ الميلاد':'60','الوزن الحالي kg':'20',[ibu?'المقدار المختار mg/dose':'المقدار المختار mg/kg/day']:ibu?'150':'30','عدد الجرعات خلال24ساعة':'3','الفاصل الأدنى بالساعات':'8','المدة المختارة بالأيام':'5','خطة المراجعة والإيقاف':'Synthetic review and stop plan','اسم المستحضر الفعلي':'Synthetic suspension','قوة المنتج mg':ibu?'100':'250','رابط نشرة المستحضر HTTPS':'https://synthetic.invalid/product-label','أدنى عمر للمنتج بالأشهر وفق النشرة':ibu?'6':'4','المادة نفسها من جميع المصادر الأخرى mg/24h — اكتب0 بعد التحقق':'0'}))await page.getByLabel(label,{exact:true}).fill(value);
@@ -218,9 +235,12 @@ it.each(['amoxicillin','ibuprofen'] as const)('built %s dose-profile picker issu
     await confirm.check();await page.getByLabel('الوزن الحالي kg',{exact:true}).fill('21');expect(await confirm.isChecked()).toBe(false);expect(await add.isDisabled()).toBe(true);
     await page.getByLabel('الوزن الحالي kg',{exact:true}).fill('20');await confirm.check();await page.getByLabel('قوة المنتج mg',{exact:true}).fill(ibu?'50':'125');expect(await confirm.isChecked()).toBe(false);await expect.poll(()=>page.locator('[data-dose-form]').innerText()).toContain(ibu?'15 mL (150 mg)':'8 mL (200 mg)');
     await page.getByLabel('قوة المنتج mg',{exact:true}).fill(ibu?'100':'250');await confirm.check();await add.click();
+    // The calculated selection replaces the pristine blank row, not a second row.
+    expect(await page.getByPlaceholder('Drug name',{exact:true}).count()).toBe(1);
+    expect(await page.getByLabel('مقدار الجرعة للسطر 1',{exact:true}).inputValue()).toBe(amount);
     await page.getByLabel('راجعت الاستطباب والحساسية والشكل والتركيز والجرعة والتكرار والمدة لهذا السطر. هذا لا يلغي تنبيهات السلامة.',{exact:true}).check();
     const waitResponse=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/prescriptions'&&r.request().method()==='POST');
-    let pending=waitResponse();await page.getByRole('button',{name:'طباعة الروشتة (A6)',exact:true}).click();let response=await pending;
+    let pending=waitResponse();await page.getByRole('button',{name:'حفظ وطباعة الوصفة (A6)',exact:true}).click();let response=await pending;
     if(response.status()===200){const preview=await response.json();expect(preview.requiresAcknowledgement).toBe(true);pending=waitResponse();await page.getByRole('button',{name:'أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا',exact:true}).click();response=await pending;}
     expect(response.status(),await response.text()).toBe(201);const saved=await response.json();const command=response.request().postDataJSON();
     const before=(await db.query('SELECT * FROM prescriptions WHERE id=$1',[saved.id])).rows[0];
@@ -243,3 +263,4 @@ it.each(['amoxicillin','ibuprofen'] as const)('built %s dose-profile picker issu
     expect(Number((await db.query('SELECT count(*) n FROM prescriptions WHERE patient_id=$1',[patient.id])).rows[0].n)).toBe(1);
   } finally {await context.close();await receiveContext.close();await db.query('UPDATE users SET permissions=$1 WHERE id=$2',[reception.permissions,reception.id]);}
 },180_000);
+

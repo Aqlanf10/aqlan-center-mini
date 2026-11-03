@@ -170,13 +170,19 @@ describe("prescription patient context contract", () => {
     expect(state.getPatientFile).toHaveBeenCalledWith(patientId);
     expect(modalProps()).toMatchObject({ patientContextStatus: "ready", medicalAlert: "Penicillin allergy", patientPhone: "777100099" });
     expect(text(renderModal())).toContain("Penicillin allergy");
-    click(button(renderModal(), "إضافة دواء جديد"));
-    change(find(renderModal(), (node) => node.props.placeholder === "Drug name (e.g. Augmentin / Brufen)"), "Amoxicillin");
+    expect(elements(renderModal()).filter(node => node.props["aria-label"] === "اسم الدواء للسطر 1")).toHaveLength(1);
+    change(find(renderModal(), (node) => node.props.placeholder === "Drug name"), "Amoxicillin");
     expect(text(renderModal())).toContain("خطر تحسسي حرج (Penicillin Allergy)");
-    click(button(renderModal(), "💬إرسال واتساب"));
-    // Incomplete new medication cannot escape issuance review through sharing.
+    const share = button(renderModal(), "💬واتساب غير متاح حاليًا");
+    expect(share.props.disabled).toBe(true);
+    expect(share.props.title).toContain("المشاركة متوقفة");
+    const callsBefore = fetchMock.mock.calls.length;
+    // Even direct callback invocation cannot bypass the disabled UI boundary.
+    click(share);
+    expect(fetchMock.mock.calls).toHaveLength(callsBefore);
     expect(openMock).not.toHaveBeenCalled();
-    expect(text(renderModal())).toContain("أكمل اسم الدواء");
+    expect(text(renderModal())).toContain("مشاركة واتساب غير متاحة حاليًا");
+    expect(text(renderModal())).toContain("لم تُفتح خدمة خارجية");
     expect(readCalls()[0][1]).toMatchObject({ cache: "no-store", signal: expect.any(AbortSignal) });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   });
@@ -187,7 +193,7 @@ describe("prescription patient context contract", () => {
     expect(modalProps()).toMatchObject({ patientContextStatus: "ready", medicalAlert: empty, patientPhone: empty });
     expect(text(renderModal())).not.toContain("تعذّر التحقق");
     expect(text(renderModal())).not.toContain("جارٍ تحميل التنبيهات");
-    expect(text(renderModal())).not.toContain("إرسال واتساب");
+    expect(text(renderModal())).not.toContain("واتساب غير متاح حاليًا");
   });
 
   it.each([
@@ -201,7 +207,7 @@ describe("prescription patient context contract", () => {
     readPatient = async () => response(200, payload); await mount(); await open();
     expect(modalProps()).toMatchObject({ patientContextStatus: "unavailable", medicalAlert: null, patientPhone: null });
     expect(text(renderModal())).toContain("حالة الحساسية والمخاطر غير معروفة هنا");
-    expect(text(renderModal())).not.toContain("إرسال واتساب");
+    expect(text(renderModal())).not.toContain("واتساب غير متاح حاليًا");
   });
 
   it.each([401, 403, 404, 503])("does not turn HTTP %i into a clear/empty safety context", async (status) => {
@@ -339,14 +345,14 @@ describe("prescription context request lifetimes", () => {
     change(find(renderVisit(), (node) => node.props["aria-label"] === "السلك العلوي لهذه الشدّة"), "Custom wire draft");
     await open();
     change(find(renderModal(), (node) => node.props.placeholder === "مثال: Acute Pulpitis / Post-Extraction"), "Explicit Rx diagnosis");
-    click(button(renderModal(), "إضافة دواء جديد"));
-    change(find(renderModal(), (node) => node.props.placeholder === "Drug name (e.g. Augmentin / Brufen)"), "SyntheticRx");
+    expect(elements(renderModal()).filter(node => node.props["aria-label"] === "اسم الدواء للسطر 1")).toHaveLength(1);
+    change(find(renderModal(), (node) => node.props.placeholder === "Drug name"), "SyntheticRx");
     const clinicalReads = fetchMock.mock.calls.filter(([url]) => url.endsWith("/clinical")).length;
     close(); readPatient = async () => response(200, patientFile(patientId, "Updated alert", "777100088")); await open();
     expect(modalProps()).toMatchObject({ medicalAlert: "Updated alert", patientPhone: "777100088", defaultDiagnosis: "Unsaved visit diagnosis" });
     expect(find(renderVisit(), (node) => node.props["aria-label"] === "السلك العلوي لهذه الشدّة").props.value).toBe("Custom wire draft");
     expect(find(renderModal(), (node) => node.props.placeholder === "مثال: Acute Pulpitis / Post-Extraction").props.value).toBe("Explicit Rx diagnosis");
-    expect(find(renderModal(), (node) => node.props.placeholder === "Drug name (e.g. Augmentin / Brufen)").props.value).toBe("SyntheticRx");
+    expect(find(renderModal(), (node) => node.props.placeholder === "Drug name").props.value).toBe("SyntheticRx");
     expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("/clinical"))).toHaveLength(clinicalReads);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   });
@@ -356,7 +362,8 @@ describe("optional PrescriptionModal context status", () => {
   it("preserves existing caller behavior when status is not provided", () => {
     const props = { isOpen: true, onClose: vi.fn(), patientId, patientName: "Synthetic patient", medicalAlert: "Known alert", patientPhone: "777100099" };
     const display = text(renderModal(props));
-    expect(display).toContain("Known alert"); expect(display).toContain("إرسال واتساب");
+    expect(display).toContain("Known alert"); expect(display).toContain("واتساب غير متاح حاليًا");
+    expect(button(renderModal(props), "💬واتساب غير متاح حاليًا").props.disabled).toBe(true);
     expect(display).not.toContain("تعذّر التحقق"); expect(display).not.toContain("جارٍ تحميل التنبيهات");
   });
   it.each(["loading", "unavailable"] as const)("renders the explicit %s warning with no fabricated alert", (patientContextStatus) => {
@@ -374,8 +381,8 @@ describe('durable issuance async owner fencing', () => {
     storageData.clear(); digestMock.mockReset().mockResolvedValue(new Uint8Array(32).buffer);
     Object.assign(window, { sessionStorage: { getItem: (key: string) => storageData.get(key) ?? null, setItem: (key: string, value: string) => storageData.set(key, value), removeItem: (key: string) => storageData.delete(key) }, crypto: { subtle: { digest: digestMock }, randomUUID: () => '11111111-1111-4111-8111-111111111111' } });
     await mount(); await open(); renderModal(); await tick(); renderModal();
-    click(button(renderModal(), 'إضافة دواء جديد'));
-    for (const [placeholder, value] of [['Drug name (e.g. Augmentin / Brufen)', 'SyntheticRx'], ['Dose (1g / 500mg)', '500mg'], ['Form (Tablets / Syrup)', 'tablet'], ['Frequency (every 8 hours)', 'fixture frequency'], ['Duration (5 days)', 'fixture duration'], ['Clinician-entered amount per dose', '1 tablet']])
+    expect(elements(renderModal()).filter(node => node.props["aria-label"] === "اسم الدواء للسطر 1")).toHaveLength(1);
+    for (const [placeholder, value] of [['Drug name', 'SyntheticRx'], ['Strength / concentration + unit', '500mg'], ['Form / route (tablet, oral rinse…)', 'tablet'], ['Frequency (every 8 hours)', 'fixture frequency'], ['Duration (5 days)', 'fixture duration'], ['Clinician-entered amount per dose', '1 tablet']])
       change(find(renderModal(), node => node.props.placeholder === placeholder), value);
     (find(renderModal(), node => node.type === 'input' && node.props.type === 'checkbox').props.onChange as (event: { target: { checked: boolean } }) => void)({ target: { checked: true } });
     renderModal();
@@ -383,14 +390,14 @@ describe('durable issuance async owner fencing', () => {
   const posts = () => fetchMock.mock.calls.filter(([url]) => url === '/api/prescriptions');
   it('retires a deferred digest on close without sending and reopens without a stuck busy state', async () => {
     await prepare(); const digest = deferred<ArrayBuffer>(); digestMock.mockReturnValueOnce(digest.promise);
-    click(button(renderModal(), 'طباعة الروشتة (A6)')); close(); digest.resolve(new Uint8Array(32).buffer); await tick();
+    click(button(renderModal(), 'حفظ وطباعة الوصفة (A6)')); close(); digest.resolve(new Uint8Array(32).buffer); await tick();
     expect(posts()).toHaveLength(0); expect(openMock).not.toHaveBeenCalled();
-    await open(); renderModal(); await tick(); expect(button(renderModal(), 'طباعة الروشتة (A6)').props.disabled).toBe(false);
+    await open(); renderModal(); await tick(); expect(button(renderModal(), 'حفظ وطباعة الوصفة (A6)').props.disabled).toBe(false);
   });
   it.each(['patient', 'principal', 'close'])('does not publish or print a delayed POST after %s owner changes', async kind => {
     await prepare(); const saved = deferred<ReadResponse>(); const normal = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/prescriptions' ? saved.promise : normal(url, init));
-    click(button(renderModal(), 'طباعة الروشتة (A6)')); await tick(); expect(posts()).toHaveLength(1);
+    click(button(renderModal(), 'حفظ وطباعة الوصفة (A6)')); await tick(); expect(posts()).toHaveLength(1);
     const props = { ...modalProps(), patientId: kind === 'patient' ? patientId + 1 : patientId };
     if (kind === 'principal') state.username = 'different-synthetic-clinician';
     if (kind === 'close') close(); else renderModal(props);
@@ -400,7 +407,7 @@ describe('durable issuance async owner fencing', () => {
   it('uses one request for rapid double click, blocks discard in flight, and reconciles replay without automatic print', async () => {
     await prepare(); const saved = deferred<ReadResponse>(); const normal = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/prescriptions' ? saved.promise : normal(url, init));
-    const print = button(renderModal(), 'طباعة الروشتة (A6)'); click(print); click(print); await tick();
+    const print = button(renderModal(), 'حفظ وطباعة الوصفة (A6)'); click(print); click(print); await tick();
     expect(digestMock).toHaveBeenCalledTimes(1); expect(posts()).toHaveLength(1);
     click(button(renderModal(), 'بدء إصدار جديد بعد مراجعة السجل')); expect(window.confirm).not.toHaveBeenCalled(); expect(storageData.size).toBe(1);
     saved.resolve(response(201, { id: 1234, status: 'active', replayed: true })); await tick();
@@ -409,10 +416,12 @@ describe('durable issuance async owner fencing', () => {
   it('hides recovered document link when the same username permissions change until fresh recovery', async () => {
     await prepare(); const normal = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/prescriptions' ? Promise.resolve(response(201, { id: 1234, status: 'active', replayed: true })) : normal(url, init));
-    click(button(renderModal(), 'طباعة الروشتة (A6)')); await tick(); expect(text(renderModal())).toContain('فتح النسخة المحفوظة #1234');
+    click(button(renderModal(), 'حفظ وطباعة الوصفة (A6)')); await tick(); expect(text(renderModal())).toContain('فتح النسخة المحفوظة #1234');
     const props = modalProps();
     state.permissions = { canViewAllPatients: false } as import('../lib/doctor-permissions').DoctorPermissions;
     expect(text(renderModal(props))).not.toContain('فتح النسخة المحفوظة #1234'); await tick(); expect(text(renderModal(props))).not.toContain('فتح النسخة المحفوظة #1234'); expect(openMock).not.toHaveBeenCalled();
   });
 
 });
+
+

@@ -47,6 +47,19 @@ describe("saved prescription reprint access", () => {
     m.rx.mockResolvedValue(record); expect((await log()).status).toBe(404); await expect(page()).rejects.toThrow("NOT_FOUND"); expect(m.print).not.toHaveBeenCalled();
   });
   it.each([{ draft: "1", items: "[]" }, {}, { rx: "81", draft: "1" }])("reception never receives a draft or query-only print", async query => { await expect(page(query)).rejects.toThrow("NOT_FOUND"); });
+  it.each(["doctor", "admin", "reception"])("rejects legacy and mixed clinical query data for %s before any patient or Rx lookup", async role => {
+    const actor = { ...session, role };
+    m.session.mockResolvedValue(actor);
+    m.user.mockResolvedValue({ ...actor, id: 3, isActive: true, permissions: { canPrintSavedPrescriptions: true } });
+    const before = structuredClone(rx);
+    for (const query of [
+      { draft: "1", items: "[]" },
+      { rx: "81", draft: "" }, { rx: "81", items: "[]" },
+      { rx: "81", diagnosis: "Synthetic query override" }, { rx: "81", notes: "" },
+    ]) await expect(page(query)).rejects.toThrow("NOT_FOUND");
+    expect(m.patient).not.toHaveBeenCalled(); expect(m.rx).not.toHaveBeenCalled();
+    expect(m.print).not.toHaveBeenCalled(); expect(rx).toEqual(before);
+  });
   it("records the printing actor without recreating or changing the prescribing snapshot", async () => {
     m.print.mockResolvedValue(1); expect((await log()).status).toBe(200);
     expect(m.print).toHaveBeenCalledWith({ docType: "prescription", docId: "81", printedBy: session.username });
@@ -55,3 +68,4 @@ describe("saved prescription reprint access", () => {
   });
   it("reports logging failure without successful-print response", async () => { m.print.mockRejectedValue(new Error("offline")); expect((await log()).status).toBe(500); });
 });
+
