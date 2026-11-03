@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { OrthoPendingDecisions } from "@/components/OrthoPendingDecisions";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { clinicalContextHref } from "@/lib/patient-navigation";
 
 /**
  * مركز متابعة التقويم — قائمة يومية للاستقبال.
@@ -247,7 +248,7 @@ export default function OrthoFollowupPage() {
                       {appointment ? "واتساب تذكير" : "واتساب لترتيب متابعة"}
                     </a>
                   ) : null}
-                  <a href={`/patients/${row.patientId}?tab=treatment`}
+                  <a href={clinicalContextHref(row.patientId, { orthoCaseId: row.caseId, pillar: "diagnostics" }, "ortho")}
                     className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600">
                     ملف التقويم
                   </a>

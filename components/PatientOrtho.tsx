@@ -572,6 +572,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
 
   // تبويب الركن النشط لكل حالة (افتراضيًا: الأسلاك والشدّات)
   const [activePillars, setActivePillars] = useState<Record<number, OrthoPillar>>({});
+  const [diagnosticSections, setDiagnosticSections] = useState<Record<number, DiagnosticSection>>({});
 
   const renderRead = owner.readSequence;
   const currentView = () => owner.active && !owner.denied && owner.clinical && owner.readSequence === renderRead;
@@ -832,7 +833,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
             const wires = wiresFor(row.slot);
             const currentPillar: OrthoPillar = activePillars[row.id] ?? (context?.orthoCaseId === row.id ? context.pillar : undefined) ?? "wires";
 
-            const FinancialContextContainer = currentPillar === "prescription" ? "details" : "div";
+            const compactFinancialContext = currentPillar === "prescription" || currentPillar === "diagnostics";
+            const FinancialContextContainer = compactFinancialContext ? "details" : "div";
 
             return (
               <li
@@ -880,9 +882,9 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </div>
 
                   {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
-                  <FinancialContextContainer data-testid="ortho-financial-context" className={currentPillar === "prescription" ? "mt-2" : undefined}>
-                    {currentPillar === "prescription" ? <summary className="min-h-11 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs font-bold text-slate-700">
-                      مرجع الحالة المالي وشمول الشدّة
+                  <FinancialContextContainer data-testid="ortho-financial-context" className={compactFinancialContext ? "mt-2" : undefined}>
+                    {compactFinancialContext ? <summary className="min-h-11 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs font-bold text-slate-700">
+                      {currentPillar === "diagnostics" ? "خطة الحالة والاتفاق والحساب" : "مرجع الحالة المالي وشمول الشدّة"}
                     </summary> : null}
                     <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
                       planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={row.id}
@@ -1140,9 +1142,21 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
 
                   {/* ────────────────── الركن الثاني: السجلات والتشخيص السيفالومتري ────────────────── */}
                   {currentPillar === "diagnostics" && (
-                    <div className="space-y-4">
+                    <div className="space-y-4" data-testid="ortho-diagnostic-workspace">
+                      <div className="rounded-xl border border-navy-100 bg-slate-50 p-3">
+                        <h3 className="font-bold text-navy-900">ملف التشخيص والفحص</h3>
+                        <p className="mt-1 text-sm text-slate-600">انتقل بين أقسام الحالة نفسها. يمكن توثيق ما توفر وحفظ مراجعة جزئية؛ غير المسجل يبقى ظاهراً ولا يُعد نتيجة طبيعية.</p>
+                        <nav aria-label="أقسام تشخيص الحالة" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {DIAGNOSTIC_SECTIONS.map(([key, label]) => <button type="button" key={key}
+                            aria-pressed={(diagnosticSections[row.id] ?? "interview") === key}
+                            className={`min-h-11 rounded-lg border px-2 py-2 text-sm ${(diagnosticSections[row.id] ?? "interview") === key ? "border-navy-800 bg-navy-800 font-bold text-white" : "border-slate-200 bg-white text-slate-700"}`}
+                            onClick={() => { if (currentCase(row.id)) setDiagnosticSections(previous => ({ ...previous, [row.id]: key })); }}>{label}</button>)}
+                        </nav>
+                      </div>
+                      <div hidden={!(["interview", "extraoral", "intraoral", "measurements"] as readonly string[]).includes(diagnosticSections[row.id] ?? "interview")}><OrthoAssessmentPanelV2 patientId={patientId} caseRow={row}
+                          sectionView={diagnosticSections[row.id] === "extraoral" ? "extraoral" : diagnosticSections[row.id] === "intraoral" ? "intraoral" : diagnosticSections[row.id] === "measurements" ? "measurements" : "interview"} /></div>
                       {/* معرض سجلات الحالة والأشعة المعياري الـ 12 كمنصة WebCeph */}
-                      <section>
+                      <section hidden={diagnosticSections[row.id] !== "records"}>
                         <WebCephRecordsGrid
                           patientId={patientId}
                           orthoCaseId={row.id}
@@ -1152,7 +1166,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       </section>
 
                       {/* السيفالومتري ومخطط ويب سيف (WebCeph Station) */}
-                      <section className="rounded-2xl border border-navy-100 bg-slate-50/50 p-3.5">
+                      <section hidden={diagnosticSections[row.id] !== "ceph"} className="rounded-2xl border border-navy-100 bg-slate-50/50 p-3.5">
                         <PatientCeph
                           patientId={patientId}
                           orthoCaseId={row.id}
@@ -1162,14 +1176,15 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       </section>
 
                       {/* التوثيق الفوتوغرافي ومقارنة المراحل (Before / Progress / After) */}
-                      <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
+                      <section hidden={diagnosticSections[row.id] !== "comparison"} className="rounded-2xl border border-slate-200 bg-white p-3.5">
                         <OrthoComparison patientId={patientId} orthoCaseId={row.id} photosVisible={row.photosVisible} />
                       </section>
 
                       {/* التحليل السريري للفكين وتصنيف الحالة (Malocclusion Diagnosis) */}
-                      <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
+                      <section hidden={diagnosticSections[row.id] !== "diagnosis"} className="rounded-2xl border border-slate-200 bg-white p-3.5">
                         <PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={safeError} />
-                        <OrthoAssessmentPanelV2 patientId={patientId} caseRow={row} />
+                        <button type="button" className="mt-3 min-h-11 rounded-lg border px-3 py-2 text-sm"
+                          onClick={() => { if (currentCase(row.id)) setPillarForCase(row.id, "prescription"); }}>الانتقال إلى أهداف وخطة الحالة</button>
                       </section>
                     </div>
                   )}
@@ -2300,13 +2315,16 @@ function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow
 
 /** Dedicated assessment lifetime survives parent reads and pillar remounts.
  * It never uses the strategy document or acknowledges a write from GET. */
+const DIAGNOSTIC_SECTIONS = [
+  ["interview", "المقابلة والتاريخ"], ["extraoral", "فحص الوجه والابتسامة"],
+  ["intraoral", "فحص الفم والإطباق"], ["records", "الصور والأشعة"],
+  ["ceph", "تحليل السيفالو"], ["measurements", "الموديلات والقياسات"],
+  ["diagnosis", "التشخيص وقائمة المشاكل"], ["comparison", "مقارنة مراحل العلاج"],
+] as const;
+type DiagnosticSection = typeof DIAGNOSTIC_SECTIONS[number][0];
 function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" }) {
-  const parent = useContext(OrthoOwnerContext)!;
   const session = useSession();
   const canWrite = session?.role === "admin" || session?.role === "doctor";
-  const [opened, setOpened] = useState(() => parent.assessments.has(caseRow.id));
-  if (!opened) return <button type="button" className="mb-4 min-h-11 rounded-lg border px-3 py-2 text-sm"
-    onClick={() => { if (parent.active && !parent.denied && parent.clinical) setOpened(true); }}>فتح التقييم السريري والقياسات</button>;
   if (!canWrite) return <OrthoCaseAssessmentV2 patientId={patientId} orthoCaseId={caseRow.id} sectionView={sectionView} />;
   return <OwnedAssessmentV2 patientId={patientId} caseRow={caseRow} sectionView={sectionView} />;
 }

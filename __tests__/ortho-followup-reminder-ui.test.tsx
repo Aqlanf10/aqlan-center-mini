@@ -297,8 +297,13 @@ describe("orthodontic board follow-up message", () => {
       expect(text(visible)).toContain(service);
       expect(text(visible)).not.toContain(otherService);
       const hrefs = elements(visible).map((node) => node.props.href).filter(Boolean);
-      expect(hrefs).toContain(`/patients/${row.patientId}?tab=treatment`);
-      expect(hrefs).not.toContain(`/patients/${otherRow.patientId}?tab=treatment`);
+      const caseLink = elements(visible).find(node => node.type === "a" && text(node) === "ملف التقويم");
+      const destination = new URL(caseLink!.props.href as string, "https://synthetic.invalid");
+      expect(destination.pathname).toBe(`/patients/${row.patientId}`);
+      expect(Object.fromEntries(destination.searchParams)).toEqual({
+        tab: "treatment", sub: "ortho", patientId: String(row.patientId), orthoCaseId: String(row.caseId), pillar: "diagnostics",
+      });
+      expect(hrefs.some(href => typeof href === "string" && href.startsWith(`/patients/${otherRow.patientId}?`))).toBe(false);
       expect(hrefs).toContain(`/appointments?date=${date}`);
       expect(hrefs).not.toContain(`/appointments?date=${otherDate}`);
       const whatsapp = links(visible); expect(whatsapp).toHaveLength(1);

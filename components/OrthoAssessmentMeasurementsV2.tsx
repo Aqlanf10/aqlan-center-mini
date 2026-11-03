@@ -1,4 +1,5 @@
 "use client";
+import { observationInputHintV2 } from "@/lib/ortho-assessment-input-hints-v2";
 import { useState } from "react";
 import { UPPER_MEASUREMENT_TEETH, LOWER_MEASUREMENT_TEETH, measurementReadinessV2, toggleMeasurementAnalysisV2,
   changeMeasurementDecimalV2, applyMeasurementSessionV2, addMeasurementSetV2, linkMeasurementInputV2, matchesMeasurementInputV2,
@@ -124,7 +125,7 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
     </section>}
     <fieldset><legend className="font-bold">التحليلات من القياسات نفسها</legend>{selections.map(({ title, selection }) => <label key={selection.id} className="flex min-h-11 items-center gap-2">
       <input type="checkbox" disabled={!editable} checked={draft.payload.analyses.some(a => a.id === selection.id)} onChange={() => publish(toggleMeasurementAnalysisV2(draft, selection))} />{title}</label>)}</fieldset>
-    {!!readiness.errors.length && <ul role="status" className="text-xs text-amber-900">{readiness.errors.map((e, index) => <li key={index}>{rows.find(o => o.id === e.observationId)?.label ?? "بنية المجموعة"}: مدخل أو مصدر غير مكتمل ({e.code})</li>)}</ul>}
+    {!!readiness.errors.length && <ul role="status" className="text-xs text-amber-900">{readiness.errors.map((e, index) => <li key={index}>{rows.find(o => o.id === e.observationId)?.label ?? "بنية المجموعة"}: {observationInputHintV2(e.code)}</li>)}</ul>}
     {readiness.analyses.map(({ selection, readiness: checked }) => <div key={selection.id} data-testid={`analysis-${selection.id}`} className="space-y-1 rounded-lg border p-3">
       <p className="font-bold">{selection.method}{selection.method === "arch_space" ? ` · ${selection.arch}` : ""}</p>
       {!checked.ok ? <p role="alert">تعذّر التحقق من مراجع التحليل: {checked.code}</p> : checked.value.state === "incomplete" ? <ul>{checked.value.missing.map((m, i) => <li key={i}>

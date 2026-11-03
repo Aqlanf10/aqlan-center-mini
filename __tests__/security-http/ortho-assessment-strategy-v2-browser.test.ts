@@ -34,7 +34,7 @@ const records = async (ortho: number) => (await db.query("SELECT id,version,comm
 async function openAssessment(page: Page, patient: number) {
   await page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=ortho`);
   await page.getByRole("button", { name: /السجلات والسيفالومتري/ }).click();
-  await page.getByRole("button", { name: "فتح التقييم السريري والقياسات", exact: true }).click();
+  await page.getByRole("button", { name: "الموديلات والقياسات", exact: true }).click();
   await page.getByTestId("assessment-v2-saved").waitFor();
 }
 
@@ -98,7 +98,7 @@ describe("existing linked episodes: real built assessment/strategy editors", () 
       expect(await records(scope.ortho)).toEqual(committed);
       await page.reload();
       await page.getByRole("button", { name: /السجلات والسيفالومتري/ }).click();
-      await page.getByRole("button", { name: "فتح التقييم السريري والقياسات", exact: true }).click();
+      await page.getByRole("button", { name: "الموديلات والقياسات", exact: true }).click();
       await expect.poll(async () => page.getByTestId("assessment-v2-saved").innerText()).toContain("نسخة 2");
       await page.getByRole("button", { name: /خطة العلاج والميكانيكا/ }).click();
       const strategy = page.getByTestId("ortho-strategy-editor");

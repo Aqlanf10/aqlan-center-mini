@@ -33,7 +33,7 @@ export function OrthoAssessmentFindingsV2({ draft, owner, sources, onChange, foc
           return <p key={field} role="alert">هوية حقل {title} تحتاج مراجعة؛ لم يُستبدل الحقل المحفوظ.</p>;
         const states = ["not_recorded", numeric ? "measured" : "recorded", "unknown", "not_measured", "unavailable", "not_applicable"] as MeasurementValueDraftV2["state"][];
         return <fieldset key={field} className="min-w-0 space-y-2 rounded-lg border p-2"><legend className="text-sm font-bold">{title}{numeric ? " (mm)" : ""}</legend>
-          <label className="block text-xs">حالة {title}<select className={control} disabled={!editable} value={value.state}
+          <label className="block text-xs">حالة {title}<select aria-label={`حالة ${title}`} className={control} disabled={!editable} value={value.state}
             onChange={event => patch(id, { state: event.target.value as MeasurementValueDraftV2["state"] })}>
             {states.map(state => <option key={state} value={state}>{labels[state]}</option>)}</select></label>
           {value.state === "recorded" && !numeric && <><label className="block text-xs">{title} — اختيار قابل للبحث أو نص حر
@@ -53,19 +53,19 @@ export function OrthoAssessmentFindingsV2({ draft, owner, sources, onChange, foc
           </>}
           {metadataId === id && <div className="space-y-2 rounded-lg bg-slate-50 p-2" aria-label={`مصدر ${title}`}>
             <p className="text-xs">المنفذ الموثق مستقل عن مسجّل المراجعة. لا يُفترض تاريخ اليوم أو اسم الطبيب.</p>
-            <label className="block text-xs">حالة تاريخ {title}<select className={control} value={value.dateState} disabled={!editable}
+            <label className="block text-xs">حالة تاريخ {title}<select aria-label={`حالة تاريخ ${title}`} className={control} value={value.dateState} disabled={!editable}
               onChange={event => patch(id, { dateState: event.target.value as MeasurementValueDraftV2["dateState"] })}>
               <option value="">اختر حالة التاريخ…</option><option value="known">معلوم</option><option value="unknown">غير معلوم</option></select></label>
             {value.dateState === "known" ? <label className="block text-xs">تاريخ {title}<input className={control} type="date" value={value.date} disabled={!editable}
               onChange={event => patch(id, { date: event.target.value })} /></label> : value.dateState === "unknown" ? <label className="block text-xs">سبب غياب تاريخ {title}
               <input className={control} value={value.dateReason} disabled={!editable} onChange={event => patch(id, { dateReason: event.target.value })} /></label> : null}
-            <label className="block text-xs">طريقة توثيق {title}<select className={control} value={value.method} disabled={!editable}
+            <label className="block text-xs">طريقة توثيق {title}<select aria-label={`طريقة توثيق ${title}`} className={control} value={value.method} disabled={!editable}
               onChange={event => patch(id, { method: event.target.value as MeasurementValueDraftV2["method"] })}>
               <option value="">اختر الطريقة…</option><option value="direct_examination">مقابلة / فحص مباشر</option><option value="manual_record_measurement">قياس سجل</option>
               <option value="external_report">تقرير خارجي</option>{value.copiedFrom && <option value="legacy_revision">نسخة تاريخية</option>}</select></label>
             <label className="block text-xs">وصف طريقة توثيق {title}<input className={control} value={value.methodDescription} disabled={!editable}
               onChange={event => patch(id, { methodDescription: event.target.value })} /></label>
-            <label className="block text-xs">من أجرى فحص {title}<select className={control} value={value.performer} disabled={!editable}
+            <label className="block text-xs">من أجرى فحص {title}<select aria-label={`من أجرى فحص ${title}`} className={control} value={value.performer} disabled={!editable}
               onChange={event => patch(id, { performer: event.target.value as MeasurementValueDraftV2["performer"] })}>
               <option value="unknown">غير معلوم</option><option value="documented">إسناد موثق</option></select></label>
             {value.performer === "documented" && <label className="block text-xs">إسناد منفذ {title}<input className={control} value={value.performerAttribution} disabled={!editable}

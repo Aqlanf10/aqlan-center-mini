@@ -8,6 +8,8 @@ import { newAssessmentEditorV2, readAssessmentEditorV2, assessmentEditorCommandV
 import type { AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import type { AssessmentReadResponseV2, AssessmentSaveExpectationV2 } from "@/lib/ortho-assessment-response-v2";
 import { plain } from "@/lib/ortho-assessment-model";
+import { OrthoAssessmentProgressV2 } from "./OrthoAssessmentProgressV2";
+import { editMeasurementPayloadV2 } from "@/lib/ortho-assessment-measurement-editor-v2";
 export interface AssessmentLifetimeV2 {
   identity: object; active(): boolean; editable(): boolean; denied(): void;
   busy: boolean; uncertain: boolean; dirty: boolean; readVersion: number;
@@ -61,6 +63,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
   const data = read?.generation === generation ? read.data : null;
   const error = read?.generation === generation ? read.error : null;
   const draft = readAssessmentEditorV2(lifetime?.values.document ?? "");
+  const savedSummary = data?.revision?.schemaVersion === 2 ? editMeasurementPayloadV2(data.revision.content.draft) : null;
   const malformed = !!lifetime?.values.document && !draft;
   const stale = !!draft && !!data && draft.expectedRevisionId !== (data.history[0]?.id ?? null);
   const writable = !!lifetime && lifetime.active() && lifetime.editable() && data?.state === "ready" && data.clinicalWritable;
@@ -135,6 +138,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     {malformed && <p role="alert">المسودة غير قابلة للقراءة؛ لم تُستبدل بنموذج فارغ.</p>}
     {data?.state === "bridge_missing" && <p role="status">الرابط السريري غير موجود. يلزم الربط الصريح؛ لا تُستنتج حالة جديدة من غياب الزيارات.</p>}
     {data?.state === "ready" && <>
+      {!draft && savedSummary && <OrthoAssessmentProgressV2 draft={savedSummary} savedVersion={data.revision!.version} />}
       <p className="text-xs">المريض #{patientId} · التقويم #{orthoCaseId} · الحالة السريرية #{data.clinicalCaseId}</p>
       {data.recordingContext === "retrospective" && <p>توثيق لاحق لحالة سابقة؛ لا يعيد فتح العلاج.</p>}
       {!!data.history.length && <label className="block">نسخة التقييم<select className={`${control} w-full`} value={selected ?? data.history[0].id}
@@ -153,6 +157,8 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
         {data.revision ? "فتح مراجعة تصحيحية من النسخة الحالية" : "بدء تقييم غير معبأ"}</button>}
     </>}
     {draft && <div data-testid="assessment-v2-draft" className="space-y-3">
+      <OrthoAssessmentProgressV2 draft={draft.measurements} />
+      <p className="text-xs">يمكن حفظ ما اكتمل وترك الباقي غير مسجل. زر الحفظ أدناه يسجل مراجعة واحدة لكل مسودة التقييم، بما فيها تعديلات الأقسام الأخرى. التنقل وحده لا يحفظها.</p>
       {stale && <p role="alert">تغير رأس السجل. بقيت المسودة مرتبطة بسابقتها؛ لم تُنقل إلى نسخة جديدة تلقائيًا.</p>}
       <div hidden={sectionView === "measurements"}>
       <OrthoAssessmentFindingsV2 draft={draft.measurements} sources={data?.sources.items ?? []}
