@@ -53,21 +53,34 @@ export function verifyProductionToolingGraph(graph) {
   return { packageOccurrences: packages, graphSha256: sha256(JSON.stringify(graph)) };
 }
 
-async function inspectAncestorManifests(file, root) {
+// Cache only physical ancestor manifests, never input paths or realpath results.
+// This map belongs to one verification. Every entry (including absence) is
+// reread before success, so sharing a checked chain cannot hide a lasting edit.
+async function traceManifestBytes(manifest) {
+  let stat;
+  try { stat = await lstat(manifest); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  if (!stat) return null;
+  assert(stat.isFile() && !stat.isSymbolicLink(), "non-file trace package manifest");
+  return readFile(manifest);
+}
+async function inspectAncestorManifests(file, root, checked) {
+  const pending = [];
   let directory = path.dirname(file);
   while (directory !== root) {
     assert(directory.startsWith(`${root}${path.sep}`), "trace source escapes project");
     const manifest = path.join(directory, "package.json");
-    let stat;
-    try { stat = await lstat(manifest); } catch (error) { if (error.code !== "ENOENT") throw error; }
-    if (stat) {
-      assert(stat.isFile() && !stat.isSymbolicLink(), "non-file trace package manifest");
-      const pkg = JSON.parse(await readFile(manifest, "utf8"));
+    // An earlier successful walk checked this directory and every ancestor.
+    if (checked.has(manifest)) break;
+    const bytes = await traceManifestBytes(manifest);
+    if (bytes !== null) {
+      const pkg = JSON.parse(bytes.toString("utf8"));
       assert(record(pkg) && (pkg.name === undefined || typeof pkg.name === "string"), "malformed trace package manifest");
       assert(!denied(pkg.name), `renamed tooling trace package: ${pkg.name}`);
     }
+    pending.push([manifest, bytes]);
     directory = path.dirname(directory);
   }
+  for (const [manifest, bytes] of pending) checked.set(manifest, bytes);
 }
 function inspectMap(map) {
   // The unchanged braces verifier has already validated shape, indexed maps,
@@ -85,6 +98,7 @@ export async function verifyLintToolingRuntime(projectRoot) {
   // allowance or weaker traversal replaces the reviewed braces guard.
   const provenance = await verifyRuntimeArtifacts(root);
   assert(Object.keys(provenance.files).length > 0 && provenance.traceCount > 1, "empty artifact provenance");
+  const checkedTraceManifests = new Map();
   let manifests = 0, maps = 0, traces = 0;
   for (const [relative, digest] of Object.entries(provenance.files)) {
     assert(!toolingSourcePath(relative), `tooling artifact path: ${relative}`);
@@ -106,10 +120,15 @@ export async function verifyLintToolingRuntime(projectRoot) {
         assert(!toolingSourcePath(input), `tooling NFT input: ${input}`);
         const physical = await realpath(path.resolve(path.dirname(file), input));
         assert(!toolingSourcePath(physical), `tooling physical NFT input: ${input}`);
-        await inspectAncestorManifests(physical, root);
+        await inspectAncestorManifests(physical, root, checkedTraceManifests);
       }
       traces++;
     }
+  }
+  for (const [manifest, previous] of checkedTraceManifests) {
+    const current = await traceManifestBytes(manifest);
+    assert(previous === null ? current === null : current !== null && previous.equals(current),
+      `trace package manifest changed during verification: ${path.relative(root, manifest)}`);
   }
   assert(manifests > 0 && traces >= provenance.traceCount, "missing manifest or NFT inspection");
   for (const pkg of provenance.preflightBundledPackages) assert(!denied(pkg.name), `tooling preflight input: ${pkg.name}`);
