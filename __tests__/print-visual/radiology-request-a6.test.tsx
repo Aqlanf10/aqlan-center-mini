@@ -71,9 +71,26 @@ it.each([false, true])("prints actual A6 paper with intact text and repeated ide
         expect([word.xMin, word.xMax, word.yMin, word.yMax].every(Number.isFinite)).toBe(true);
         expect(word.xMin).toBeGreaterThanOrEqual(0); expect(word.yMin).toBeGreaterThanOrEqual(0);
         expect(word.xMax).toBeLessThanOrEqual(p.width); expect(word.yMax).toBeLessThanOrEqual(p.height);
+        // Physical paper bounds alone miss glyphs clipped at the printable
+        // edge. Repeated Arabic header ink used to leak below the preceding
+        // page's 7mm margin. Allow only 1pt for PDF coordinate quantization.
+        const printableMargin = 7 * 72 / 25.4;
+        expect(word.xMin).toBeGreaterThanOrEqual(printableMargin - 1);
+        expect(word.yMin).toBeGreaterThanOrEqual(printableMargin - 1);
+        expect(word.xMax).toBeLessThanOrEqual(p.width - printableMargin + 1);
+        expect(word.yMax).toBeLessThanOrEqual(p.height - printableMargin + 1);
       }
     }
     for (const marker of ["RADCENTER", "RADADDRESS", "RADEXAM", "RADREGION", ...(long ? ["ADDRESSEND", ...markers] : ["RADSHORT"])]) expect(text).toContain(marker);
     if (long) for (const marker of markers) expect(text.split(marker)).toHaveLength(2);
+    // Check the Arabic body as well as the Latin markers: every synthetic
+    // instruction and all five address repetitions must survive pagination.
+    const plainText = text.normalize("NFKC").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").replace(/\s+/g, " ");
+    if (long) {
+      expect(plainText.match(/واضحة/g)).toHaveLength(24);
+      // Poppler returns the lam-alef glyph sequence in this extraction order.
+      expect(plainText.match(/امتداد النص كاماًل/g)).toHaveLength(24);
+      expect(plainText.match(/الحي النموذجي/g)).toHaveLength(5);
+    }
   } finally { await browser.close(); }
 });
