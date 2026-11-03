@@ -1,0 +1,314 @@
+{
+  "scope": "تحديث جزئي مستقل فوق المصفوفة التاريخية، لا يعيد تصنيف البنود الـ349 أو قبول السيناريوهات الـ52",
+  "source": {
+    "library_file_id": "libfile_3264db5ea3248191b1703154440d7912",
+    "sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+    "bytes": 126204,
+    "lines": 624,
+    "hash_verified": true
+  },
+  "base_main": "6a6bdc0cc705874fd4ff6d0f0ddc3fdcd314e9e6",
+  "branch": "feat/ortho-assessment-intake-20261103",
+  "application_commit": "a63a67a2c962e37b41939df5fae5586b07bf827d",
+  "build_id": "ZcqpqtLZW40EDgrKTk_FZ",
+  "date": "2026-11-03",
+  "full_plan_accepted": false,
+  "requirements": [
+    {
+      "id": "V2R086",
+      "source_line": 86,
+      "requirement": "| 1 | الوصول وبيانات التعريف | استدعاء المريض والحالة والموعد والطبيب والفرع دون تسجيل المريض مرة ثانية؛ تحديد حالة جديدة/قديمة/محولة |",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "المدخل من الوحدة أو ملف مريض مسجل يصل لحالة تقييم واحدة وجسر سريري واحد؛ لم يكتمل ربط الوصول والموعد والطبيب والفرع ولا اختيار جديد/قديم/محول.",
+      "evidence": [
+        "components/OrthoAssessmentEntry.tsx",
+        "lib/ortho-assessment-intake-store.ts",
+        "__tests__/security-http/ortho-assessment-intake-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R087",
+      "source_line": 87,
+      "requirement": "| 2 | المقابلة والشكوى | الشكوى الرئيسية بكلام المريض، التوقعات، التاريخ الطبي والسني والعائلي والتقويمي والعادات؛ اقتراح حقول منظمة دون اختراع إجابات |",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "حفظ شكوى بمصدر وتاريخ غير معلوم ثم استعادتها وإضافة فحص دون إعادة الشكوى متحقق بالمتصفح؛ جميع تفاصيل التاريخ والتوقعات غير مقبولة كحزمة مكتملة.",
+      "evidence": [
+        "components/OrthoCaseAssessmentV2.tsx",
+        "__tests__/security-http/ortho-assessment-intake-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R088",
+      "source_line": 88,
+      "requirement": "| 3 | الفحص خارج الفم | الصور والفحص الأمامي والجانبي والابتسامة والتناسق والنسب والأنسجة الرخوة والوظائف، مع حقول القياس والملاحظات |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "فحص الوجه وقياس الأثلاث والأخماس مرتبطان بالحالة والصورة ومراجعات مستقلة. قياسات الصورة اختبرت على الرأس الحالي؛ لا اكتمال للجانب والوظائف وكل النسب.",
+      "evidence": [
+        "components/OrthoFacialAnalysis.tsx",
+        "__tests__/security-http/ortho-facial-analysis-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R089",
+      "source_line": 89,
+      "requirement": "| 4 | الفحص داخل الفم | الأسنان والعلاقات الإطباقية لكل جانب، overjet/overbite، الخطوط الوسطية، التزاحم/التباعد، curve of Spee، والصور والنتائج الأخرى |",
+      "priority": "P1",
+      "status": "غير متحقق",
+      "assessment": "قسم وحقول داخل الفم موجودة في التقييم المنظم؛ لم ينفذ قبول تفصيلي لكل العلاقات والجهات والصور على هذه المرحلة.",
+      "evidence": [
+        "components/OrthoCaseAssessmentV2.tsx"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R090",
+      "source_line": 90,
+      "requirement": "| 5 | القياسات وتحليل الموديلات | إدخال أحجام الأسنان وقياسات القوس مرة واحدة على نموذج واضح للفكين؛ اختيار تحليل أو عدة تحليلات وتشغيلها تلقائيًا من هذه البيانات |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "المحرك والمدخلات المنظمة سابقان لهذه المرحلة. اختبار المتصفح الحالي أثبت استخدام قيمة سن واحدة في ثلاث نتائج مع إبقاء النسخة السابقة؛ جميع التحليلات المطلوبة غير مقبولة كاملة.",
+      "evidence": [
+        "__tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R091",
+      "source_line": 91,
+      "requirement": "| 6 | البانوراما | ربط الصورة الأصلية وتاريخها، وفحص الطبيب ونتائجه وتعليقاته المرتبطة بالأسنان؛ لا تُستنتج نتيجة شعاعية من اسم الملف |",
+      "priority": "P1",
+      "status": "غير متحقق",
+      "assessment": "مكونات الصور موجودة؛ لم يثبت مسار بانوراما شامل مع تاريخ وفحص وتعليقات سنية على الرأس الحالي.",
+      "evidence": [
+        "components/WebCephRecordsGrid.tsx"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R092",
+      "source_line": 92,
+      "requirement": "| 7 | السيفالو | الصورة والتاريخ والمرحلة والمعايرة والمعالم ثم الحساب والتفسير والمراجعة والاعتماد، في سياق الحالة نفسها |",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "التصحيح والإصدارات والمعايرة ومحرك السيفالو موجودة؛ رحلة verify:ceph نجحت محلياً. لم تنفذ رحلة UI كاملة T1–T4 ولا يعتمد مرجع معياري غير متحقق.",
+      "evidence": [
+        "scripts/verify-ceph.mjs",
+        "docs/ortho/2026-11-03-integration-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R093",
+      "source_line": 93,
+      "requirement": "| 8 | خلاصة التشخيص وقائمة المشكلات | تجميع الملاحظات والقياسات والتحليلات والصور مع مصادرها، ثم مراجعة الطبيب وصياغة التشخيص واعتماده |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "التشخيص والمشكلات موجودان؛ الارتباط المنضبط الكامل بكل المصادر واعتماد الخلاصة غير مقبول بعد.",
+      "evidence": [
+        "components/WebCephRecordsGrid.tsx",
+        "docs/ortho/2026-11-03-integration-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R094",
+      "source_line": 94,
+      "requirement": "| 9 | الأهداف وخطة العلاج والميكانيكا | أهداف وبدائل وإجراءات واستراتيجيات وإرساء وخطة مسافات وموافقات مرتبطة بالمشكلات |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "محرر الاستراتيجية القائم واختبار التعارض والمصدر يعملان، لكن تجميع كل أهداف وبدائل وإجراءات وموافقات الخطة لم يكتمل.",
+      "evidence": [
+        "__tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R095",
+      "source_line": 95,
+      "requirement": "| 10 | الاتفاق المالي والموافقة | تحديد نطاق الاتفاق والمبلغ والعملة والخصم والدفعة والأقساط وربط الفاتورة؛ توثيق ما سُدد سابقًا للحالة القديمة وإصدار نسخة الاتفاق |",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "ربط خطة/اتفاق قائم أثناء التقييم عبر المالك المالي القائم مع فحص الإصدار ورفض خطة مريض آخر. لم تتغير الخطة أو القسط ولم تنشأ فاتورة/دفعة. ليس هذا قبول كامل الاتفاق القديم/الخصم/الصرف.",
+      "evidence": [
+        "lib/ortho-plan-link-command.ts",
+        "__tests__/postgres/ortho-assessment-intake.test.ts",
+        "__tests__/security-http/ortho-assessment-intake-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R096",
+      "source_line": 96,
+      "requirement": "| 11 | التركيب والزيارات والتحصيل | تسجيل ما نُفذ وصوره ومتابعته، وربط كل عمل بتغطية الاتفاق أو قرار مالي مستقل؛ تحصيل المستحق عبر الحساب القائم دون إعادة المقابلة كل مرة |",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "بدء العلاج الصريح على نفس حالة التقييم متحقق؛ الشدات والزيارات القائمة اختبرت PostgreSQL. لم ينفذ مرور شامل جديد من موعد الوصول إلى إجراء وزيارة وتحصيل.",
+      "evidence": [
+        "lib/ortho-assessment-intake-store.ts",
+        "__tests__/postgres/ortho-baseline.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R097",
+      "source_line": 97,
+      "requirement": "| 12 | النتيجة والإنهاء والتثبيت | تقييم الأهداف، فك الجهاز والمثبتات لكل فك والتعليمات وزيارات الاستبقاء؛ عرض الوضع المالي النهائي مستقلًا عن القرار السريري |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "قرار التثبيت الصريح وأحداث الأجهزة موجودة من المرحلة السابقة واختبرت على البناء الحالي. قبول النتيجة النهائية وربط المختبر/الانتكاس/إعادة العلاج بالكامل باق.",
+      "evidence": [
+        "__tests__/security-http/ortho-retention-transition-browser.test.ts",
+        "docs/ortho/2026-11-03-retention-transition-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R098",
+      "source_line": 98,
+      "requirement": "| 13 | دراسة الحالة الموثقة داخل البرنامج | عرض متكامل باسم المركز والمريض يُحفظ ويُراجع داخل الحالة، مع تعبئة محتواه من السجل؛ تصدير PPTX أو PDF اختياري عند الطلب |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "حفظ الدراسة وإصدارات المصادر وتصدير نصي موجود من المرحلة الأولى. التصدير المصور ومطابقة تخطيطات العرض الفعلية غير مكتملين؛ لم يعد اختبار التصدير في هذه المرحلة.",
+      "evidence": [
+        "docs/ortho/2026-11-03-integration-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R102",
+      "source_line": 102,
+      "requirement": "- أزرار «السابق» و«حفظ والمتابعة» ومؤشر خطوات واضح؛ يمكن الرجوع لأي جزء وتسجيل مسودة أو تخطي جزء غير متاح مع إظهار النقص. لا تحبس الطبيب في معالج خطي يمنع تقديم الرعاية.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "تنقل حر بثمانية أقسام وحفظ تقييم جزئي على نفس المالك؛ أزرار السابق وحفظ والمتابعة وتسلسل الخطوات الثلاث عشرة لم تنفذ.",
+      "evidence": [
+        "components/WebCephRecordsGrid.tsx",
+        "components/OrthoCaseAssessmentV2.tsx"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R104",
+      "source_line": 104,
+      "requirement": "- الحالة الجديدة تبدأ بالمقابلة، والحالة القديمة تبدأ بتحديد الوضع الحالي وما توفر من الأرشيف، والزيارة الدورية تفتح نموذج الزيارة المختصر. لا يُجبر العائد على إعادة إعداد الحالة.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الجديد يبدأ بالتشخيص والمقابلة مع حقائق علاج NULL. العودة لا تعيد فتح الحالة أو الشكوى؛ وضع الاستكمال القديم/المحول يحتاج توحيداً إضافياً.",
+      "evidence": [
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-assessment-intake-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R105",
+      "source_line": 105,
+      "requirement": "- أظهر حالة كل خطوة: لم تبدأ / مسودة / مكتملة المدخلات / تحتاج مراجعة / معتمدة حيث ينطبق الاعتماد. اكتمال الحقول ليس اعتمادًا سريريًا.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "ملخص التقييم يفصل المدون وغير المسجل والحالات الأخرى ويظهر النسخة. لا مؤشر حالة موحد لكل مراحل الملف ولا يعتبر عد الحقول اعتماداً.",
+      "evidence": [
+        "components/OrthoCaseAssessmentV2.tsx"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R127",
+      "source_line": 127,
+      "requirement": "- حفظ المسودة وإظهار «محفوظ/جارٍ الحفظ/تعارض/تعذر تأكيد الحفظ» بوضوح. لا يظهر نجاح قبل تأكيد الخادم؛ انقطاع الرد لا يبرر إعادة إنشاء الزيارة.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "نتيجة إنشاء الحالة/بدء العلاج لا تعتمد إلا برد مطابق للطلب والهوية والبصمة؛ ضياع الرد يعيد الطلب ذاته. المحفوظ يستعاد؛ المسودات غير المحفوظة لا تستعاد بعد إغلاق المتصفح.",
+      "evidence": [
+        "lib/ortho-assessment-intake.ts",
+        "__tests__/security-http/ortho-assessment-intake-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R128",
+      "source_line": 128,
+      "requirement": "- تغيير المريض أو الحالة أو الصلاحية أثناء طلب جارٍ لا يُظهر الرد في سياق آخر. لا تُحفظ بيانات صحية في localStorage غير منضبط لإبقاء المسودات.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "أعيد استخدام مالك المسودة وإبطال الصلاحية/السياق. اختبارات القراءة والتبويب القديم وسحب الصلاحية ناجحة؛ لم ينفذ كل تبديل محتمل أثناء كل مسار جديد.",
+      "evidence": [
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R160",
+      "source_line": 160,
+      "requirement": "- قواعد التزامن في الخادم والمعاملة وقاعدة البيانات: مفاتيح تكرار للإنشاء، فحص الإصدار عند التعديل، وتعارض واضح عند تعديل طبيبين السجل نفسه. لا يكفي تعطيل الزر في المتصفح.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "فتح متزامن ينتج حالة واحدة، بدءان متزامنان يقبل واحداً، وإعادة الأمر المثبت تعيد إيصالاً دون أثر جديد؛ التعديل المالي بإصدار والربط والتدقيق ذريان. القبول الشامل لكل أوامر الوحدة باق.",
+      "evidence": [
+        "__tests__/postgres/ortho-assessment-intake.test.ts",
+        "migrations/0103_ortho_assessment_intake.sql"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R225",
+      "source_line": 225,
+      "requirement": "8. بعد تعديل قيمة، أعد حساب مسودات التحليلات المعتمدة عليها فقط وأظهر أنها تغيرت. التحليل المعتمد سابقًا يبقى ثابتًا؛ أنشئ مسودة إصدار جديد مع مقارنة الأثر بدل تغيير الماضي أو العرض المؤرشف.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "اختبار قديم أعيد على البناء الحالي: قيمة سن واحدة تعيد نتائجها التابعة فقط والتصحيح نسخة جديدة. لا قبول شامل لكل تحاليل المواصفة.",
+      "evidence": [
+        "__tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R400",
+      "source_line": 400,
+      "requirement": "- تُحفظ المقابلة والفحوص والقياسات والتحليلات والأشعة والتشخيص والخطة والموافقات والاتفاق والزيارات والنتائج في مصادرها المنظمة، وتُعرض مترابطة داخل ملف الحالة. لا تجعل ملف PowerPoint هو المستودع الوحيد للمعلومات.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "المقابلة والفحص والقياس وخطة الحساب مرتبطة بحالة محفوظة؛ ليست ملفات التصدير مخزنها الوحيد. الترتيب الشامل لكل مراحل الدراسة غير مكتمل.",
+      "evidence": [
+        "lib/ortho-assessment-intake-store.ts",
+        "docs/ortho/2026-11-03-integration-review.md"
+      ],
+      "full_requirement_accepted": false
+    }
+  ],
+  "verified_behaviors": [
+    "حالة تقييم قبل العلاج دون حقائق علاج افتراضية",
+    "استعادة الشكوى المحفوظة مع إضافة مراجعة مستقلة وعدم تعديل السابقة",
+    "مدخلان لنفس المريض والحالة والجسر دون تكرار",
+    "ربط الاتفاق القائم أثناء التقييم دون إنشاء أثر مالي",
+    "بدء علاج صريح على نفس الحالة مع حفظ الفحص والاتفاق",
+    "تفرد وقفل ومعاملة وتدقيق ومفتاح إعادة طلب تحت PostgreSQL الحقيقي"
+  ],
+  "acceptance": [
+    {
+      "id": "O01",
+      "status": "غير متحقق",
+      "full_scenario_executed": false,
+      "partial_evidence": "المدخل والتقييم والربط وبدء العلاج اختبرت؛ الصور والخطة والزيارة والتحصيل في مسار واحد جديد لم تنفذ."
+    },
+    {
+      "id": "O38",
+      "status": "غير متحقق",
+      "full_scenario_executed": false,
+      "partial_evidence": "الهوية والحفظ والاستعادة والإدخال الجزئي اختبرت؛ الوصول وكل الخطوات الثلاث عشرة واستعادة مسودة متصفح مغلق لم تكتمل."
+    }
+  ],
+  "restrictions": [
+    "لا نشر أو دمج",
+    "لا بيانات مرضى حقيقية",
+    "لا نسخ من المستودع المرجعي بلا ترخيص",
+    "AI/Dot المستقبلية خارج النطاق"
+  ]
+}

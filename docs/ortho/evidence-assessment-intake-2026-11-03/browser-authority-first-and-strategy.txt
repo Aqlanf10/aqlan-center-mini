@@ -1,0 +1,34 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-assessment-intake-browser.test.ts __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-intake-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-assessment-intake-browser.test.ts (3 tests | 1 failed) 24095ms
+     × enforces current route admission and patient ownership without financial writes 133ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-assessment-intake-browser.test.ts > first diagnostic case from module through saved assessment to explicit treatment > enforces current route admission and patient ownership without financial writes
+AssertionError: expected 400 to be 404 // Object.is equality
+
+- Expected
++ Received
+
+- 404
++ 400
+
+ ❯ __tests__/security-http/ortho-assessment-intake-browser.test.ts:31:144
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 4 passed (5)
+   Start at  19:14:34
+   Duration  131.27s (transform 136ms, setup 0ms, import 598ms, tests 124.54s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

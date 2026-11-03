@@ -1,0 +1,28 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho __tests__/postgres/migrations __tests__/postgres/schema-ownership.test.ts __tests__/postgres/hr-composed-backup.test.ts __tests__/postgres/hr-runtime-registration.test.ts __tests__/postgres/legacy-doctor-fk-compatibility.test.ts __tests__/postgres/patient-appointment-history-index.test.ts __tests__/postgres/debt-installments-storage.test.ts __tests__/postgres/periodontal-restore.test.ts __tests__/postgres/prescription-lineage-restore.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-intake-flow
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/periodontal-restore.test.ts (7 tests | 7 skipped) 38ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/periodontal-restore.test.ts [ __tests__/postgres/periodontal-restore.test.ts ]
+AssertionError: expected '9000' to be '0104' // Object.is equality
+
+Expected: "0104"
+Received: "9000"
+
+ ❯ __tests__/postgres/periodontal-restore.test.ts:137:28
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 25 passed (26)
+      Tests  213 passed | 7 skipped (220)
+   Start at  18:57:14
+   Duration  234.57s (transform 5.26s, setup 0ms, import 14.31s, tests 214.35s, environment 3ms)

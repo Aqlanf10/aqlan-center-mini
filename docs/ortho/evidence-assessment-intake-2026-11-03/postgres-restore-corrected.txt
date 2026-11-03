@@ -1,0 +1,13 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/periodontal-restore.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-intake-flow
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  19:01:52
+   Duration  9.22s (transform 2.76s, setup 0ms, import 3.25s, tests 5.27s, environment 0ms)
