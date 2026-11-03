@@ -595,6 +595,29 @@ The read-only patient panel clears stale or failed responses and has no action o
   - Unit `canonical-lab-create-fingerprint` (4).
   - Built journey `canonical-lab-create-journey` (2, portOffset 110), including a lost-response retry in the browser.
 
+### Slice 69 — lab-order corrections (`PATCH /api/lab/[id]`: `complete_prescription`, `update_clinical`, `update_shade`)
+- **Admission:** one admitted `clinical.visits.document` transaction each (the map's branch requirement). The legacy route allowed admin/doctor for the prescription and admin/doctor/reception for the corrections.
+- **Writers:** the legacy bodies run unchanged through an injectable authority: `completeLabPrescriptionOn` (`LabPrescriptionAuthority`), `updateLabOrderClinicalOn` and `updateLabOrderShadesOn` (`LabClinicalAuthority`). The legacy wrappers build the same authority from their revalidated session. A doctor session without a linked party still may not change the doctor at all.
+- **Locking:** the order row is locked and the patient scope checked first; outside the scope reads like a missing order (404). The prescription keeps the legacy lock order: the `lab_orders` table lock with `NOWAIT` before any row lock.
+- **Guards, unchanged:**
+  - the prescription's observed version and needed-only rule;
+  - the source scope;
+  - the lab change refused when a cost or payable is attached;
+  - the clinical snapshot CAS, with doctor and lab changes refused when money or an invoice is attached;
+  - the shade specification CAS;
+  - a clinician may reassign the treating doctor only to itself.
+- **Audit:** every audit row commits with its write.
+- **Held:** accounting and posting stay refused (409 `lab_action_not_canonical`).
+- **Screen:** `CanonicalLabCorrections` on the board, for `clinical.visits.document` holders.
+  - Prescription completion with draft or dispatch, sending the observed version.
+  - Clinical correction (work, teeth, doctor, lab), sending the observed snapshot.
+  - Per-tooth body shade, sending the observed specification.
+  - The read's directory now also reaches `clinical.visits.document` holders.
+- **Tests:**
+  - PG `lab-canonical-corrections` (7), including two concurrent shade edits from one observed state, of which exactly one applies.
+  - Legacy suites `lab-prescription-completion`, `lab-shade-persistence`, `auto-lab-doctor-attribution`, `lab-work-intent-lifecycle` (PG 60) and the five route/write unit files (72): unchanged and passing.
+  - Built journey `canonical-lab-corrections-journey` (2, portOffset 112).
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

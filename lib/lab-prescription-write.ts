@@ -1,11 +1,18 @@
-import { ensureSchema, getPool, insertAuditRow } from "./db";
+import { ensureSchema, getPool, insertAuditRow, type DbClient } from "./db";
 import { canAccessPatient } from "./patient-access";
 import type { SessionPayload } from "./auth";
-import { labPrescriptionVersion, validateLabPrescription, assertAutoLabSource, assertExplicitLabSource } from "./lab-prescription-input";
+import { labPrescriptionVersion, validateLabPrescription, assertAutoLabSource, assertExplicitLabSource, type LabPrescriptionInput } from "./lab-prescription-input";
 import { revalidateSessionInTransaction } from "./session";
 import { PENDING_LAB_NAME } from "./lab";
 export class LabPrescriptionError extends Error {
  constructor(message:string, readonly status:number){super(message);}
+}
+/** Who completes a prescription: the legacy session wrapper or the canonical admitted
+ * operation (M2 slice 69). */
+export interface LabPrescriptionAuthority {
+ readonly actor: { readonly username: string; readonly role: string | null };
+ /** Checked after the order row lock. */
+ readonly canAccessPatient: (patientId: number) => Promise<boolean>;
 }
 /** Clinical metadata only. Never creates/orders, guesses prices, posts money or sends messages. */
 export async function completeLabPrescription(id:number, raw:unknown, expected:string, dispatch:boolean, session:SessionPayload) {
@@ -20,11 +27,24 @@ export async function completeLabPrescription(id:number, raw:unknown, expected:s
   await client.query("LOCK TABLE lab_orders IN ROW EXCLUSIVE MODE NOWAIT");
   const active=await revalidateSessionInTransaction(session,client);
   if(!active || !["admin","doctor"].includes(active.role)) throw new LabPrescriptionError("انتهت صلاحية الجلسة أو تغيرت صلاحيات المستخدم.",403);
+  const result=await completeLabPrescriptionOn(client,id,input,expected,dispatch,{
+   actor:{username:active.username,role:active.role},
+   canAccessPatient:patientId=>canAccessPatient(active,patientId,undefined,client,"nowait"),
+  });
+  await client.query("COMMIT");
+  return result;
+ }catch(error){await client.query("ROLLBACK").catch(()=>{});if((error as {code?:string}).code==="55P03")throw new LabPrescriptionError("يوجد تحديث سريري جارٍ؛ أعد المحاولة بعد تحديث البيانات.",409);throw error;}finally{client.release();}
+}
+/** The prescription completion inside the CALLER's transaction: the order row locked,
+ * patient authority after the lock, the version compared, the source scope and saved
+ * financial link guarded, the order updated (dispatch optional), tracking and audit
+ * rows written. Throws LabPrescriptionError on every refusal. */
+export async function completeLabPrescriptionOn(client:DbClient,id:number,input:LabPrescriptionInput,expected:string,dispatch:boolean,authority:LabPrescriptionAuthority):Promise<{id:number;status:"sent"|"needed"}> {
   const {rows}=await client.query(`SELECT patient_id, status, party_id, shade, stump_shade, tooth_numbers, due_date::text,
    impression_type, priority, payable_id, cost_minor, source, tooth_code, work_type, visit_id FROM lab_orders WHERE id=$1 FOR UPDATE`,[id]);
   const row=rows[0];
   if(!row) throw new LabPrescriptionError("الطلب غير موجود.",404);
-  if(!await canAccessPatient(active,row.patient_id,undefined,client,"nowait")) throw new LabPrescriptionError("لا تملك صلاحية تعديل هذا الملف.",403);
+  if(!await authority.canAccessPatient(row.patient_id)) throw new LabPrescriptionError("لا تملك صلاحية تعديل هذا الملف.",403);
   if(row.status!=="needed") throw new LabPrescriptionError("تغيّرت حالة الطلب؛ حدّث القائمة. تعديل الإرسالية متاح قبل الإرسال فقط.",409);
   const version=labPrescriptionVersion({status:row.status,partyId:row.party_id,shade:row.shade,stumpShade:row.stump_shade,toothNumbers:row.tooth_numbers,dueDate:row.due_date,impressionType:row.impression_type??"physical",priority:row.priority??"normal",workType:row.work_type,source:row.source,toothCode:row.tooth_code,visitId:row.visit_id});
   if(expected!==version) throw new LabPrescriptionError("تغيّرت بيانات الطلب؛ أغلق النموذج وحدّث القائمة قبل المحاولة.",409);
@@ -50,11 +70,9 @@ export async function completeLabPrescription(id:number, raw:unknown, expected:s
    sent_date=CASE WHEN $11 THEN CURRENT_DATE ELSE sent_date END WHERE id=$1`,
    [id,input.partyId,labs[0].name,labs[0].phone,input.shade||null,input.stumpShade||null,storedToothNumbers||null,input.dueDate,input.impressionType,input.priority,dispatch]);
   await client.query(`INSERT INTO lab_order_tracking (lab_order_id,action,from_status,to_status,notes,actor,actor_role)
-   VALUES ($1,$6,'needed',$2,$3,$4,$5)`,[id,dispatch?"sent":"needed",dispatch?"استُكملت المواصفات وسُجّل الإرسال — لا إرسال آلي":"حُفظت مسوّدة المواصفات قبل الإرسال",active.username,active.role,dispatch?"prescription_completed":"prescription_draft_saved"]);
+   VALUES ($1,$6,'needed',$2,$3,$4,$5)`,[id,dispatch?"sent":"needed",dispatch?"استُكملت المواصفات وسُجّل الإرسال — لا إرسال آلي":"حُفظت مسوّدة المواصفات قبل الإرسال",authority.actor.username,authority.actor.role,dispatch?"prescription_completed":"prescription_draft_saved"]);
   await insertAuditRow(client,{action:"lab_order.prescription_updated",entity:"lab_order",entityId:id,
    details:{before:JSON.parse(version),after:{...input,toothNumbers:storedToothNumbers},sourceTooth:row.tooth_code,sourceWorkType:row.work_type,dispatch},
-   actor:active.username,actorRole:active.role});
-  await client.query("COMMIT");
+   actor:authority.actor.username,actorRole:authority.actor.role});
   return {id,status:dispatch?"sent":"needed"};
- }catch(error){await client.query("ROLLBACK").catch(()=>{});if((error as {code?:string}).code==="55P03")throw new LabPrescriptionError("يوجد تحديث سريري جارٍ؛ أعد المحاولة بعد تحديث البيانات.",409);throw error;}finally{client.release();}
 }

@@ -2228,7 +2228,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 67: status and due date in one admitted clinical.lab.order transaction (setLabOrderStatusOn / setLabOrderDueDateOn): the order row locked first, an order outside the patient scope answers like a missing one (own = DOCTOR_PATIENT_CONDITION, none refused), an optional expectedStatus compared under the lock (409 lab_status_changed), the legacy transition map, prescription gate, tracking row and money effects unchanged (an unpaid payable removed on cancel, a paid one kept; receipt/fitting recognises the payable once). The lab_order.cancel audit row commits with the cancel. The response carries the clinical projection unless finance.cost-prices.view. Due date: open work only (needed, sent, in_progress, remake); a real calendar date. Every other action (complete_prescription, update_clinical, update_shade, update_accounting, post, unpost) is refused explicitly in the canonical branch (409 lab_action_not_canonical) until its own slice.",
+  "note": "M2 slice 67: status and due date in one admitted clinical.lab.order transaction (setLabOrderStatusOn / setLabOrderDueDateOn): the order row locked first, an order outside the patient scope answers like a missing one (own = DOCTOR_PATIENT_CONDITION, none refused), an optional expectedStatus compared under the lock (409 lab_status_changed), the legacy transition map, prescription gate, tracking row and money effects unchanged (an unpaid payable removed on cancel, a paid one kept; receipt/fitting recognises the payable once). The lab_order.cancel audit row commits with the cancel. The response carries the clinical projection unless finance.cost-prices.view. Due date: open work only (needed, sent, in_progress, remake); a real calendar date. Slice 69 adds complete_prescription, update_clinical and update_shade (see branches). Accounting and posting (update_accounting, post, unpost) are refused explicitly in the canonical branch (409 lab_action_not_canonical) until their own reviewed slice.",
   "branches": {
    "discriminator": "action",
    "values": {
@@ -2236,7 +2236,7 @@
      "need": [
       "clinical.visits.document"
      ],
-     "note": "Clinical prescription content."
+     "note": "Clinical prescription content. M2 slice 69: canonical — one admitted clinical.visits.document transaction (completeLabPrescriptionOn) keeping the legacy lock order (lab_orders table lock NOWAIT first): patient scope (outside = 404), the observed version and needed-only rule, the source scope, the lab change refused when a cost or payable is attached; tracking and audit with the write."
     },
     "events": {
      "need": [
@@ -2266,13 +2266,13 @@
      "need": [
       "clinical.visits.document"
      ],
-     "note": "Main clinical correction branch, patient-scoped and still held. Preserve its CAS, saved financial links and atomic audit; this inventory entry does not admit canonical requests."
+     "note": "M2 slice 69: canonical — one admitted clinical.visits.document transaction (updateLabOrderClinicalOn): row lock and patient scope first (outside = 404), the observed snapshot compared (409 lab_clinical_conflict), doctor/lab changes refused when money or an invoice is attached (financial_doctor_locked / financial_lab_locked), a clinician reassigns the doctor only to itself, audit lab_order.clinical with the write."
     },
     "update_shade": {
      "need": [
       "clinical.visits.document"
      ],
-     "note": "Main clinical correction branch, patient-scoped and still held. Preserve its CAS, saved financial links and atomic audit; this inventory entry does not admit canonical requests."
+     "note": "M2 slice 69: canonical — one admitted clinical.visits.document transaction (updateLabOrderShadesOn): row lock and patient scope first, the observed specification compared (409 lab_shade_conflict), audit lab_order.shade with the write."
     }
    },
    "fields": [

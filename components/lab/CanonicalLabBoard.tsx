@@ -12,6 +12,8 @@ import {
 } from "@/lib/lab";
 import { CanonicalLabOrderActions } from "./CanonicalLabOrderActions";
 import { CanonicalLabCreateForm } from "./CanonicalLabCreateForm";
+import { CanonicalLabCorrections } from "./CanonicalLabCorrections";
+import { labPrescriptionVersion } from "@/lib/lab-prescription-input";
 import { LAB_BACKLOG_FILTER_LABEL, LAB_BACKLOG_FILTERS, labBacklogPatientHref, type LabBacklogFilter, type LabBacklogSnapshot } from "@/lib/lab-backlog";
 
 /**
@@ -35,7 +37,7 @@ export function CanonicalLabBoard() {
   const session = useSession();
   const whole = session?.isOwner === true || session?.patientScope === "all";
   const holds = (capability: string) => session?.isOwner === true || (session?.capabilities ?? []).includes(capability);
-  const canOrder = holds("clinical.lab.order"), canCancel = holds("clinical.lab.cancel");
+  const canOrder = holds("clinical.lab.order"), canCancel = holds("clinical.lab.cancel"), canDocument = holds("clinical.visits.document");
   const [feed, setFeed] = useState<Feed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<LabFilter>("late");
@@ -154,6 +156,7 @@ export function CanonicalLabBoard() {
                   {feed.projection.costs && order.costMinor != null && order.costCurrency && isCurrency(order.costCurrency)
                     ? <p className="mt-1 text-xs text-slate-700">التكلفة: {formatMoney(order.costMinor, order.costCurrency)}</p> : null}
                   <CanonicalLabOrderActions key={`${order.id}:${order.status}:${order.dueDate}`} order={order} canOrder={canOrder} canCancel={canCancel} onChanged={() => void load()} />
+                  {canDocument ? <CanonicalLabCorrections key={`fix:${order.id}:${order.status}:${labPrescriptionVersion(order)}:${JSON.stringify(order.shadeSpecification ?? null)}:${order.doctorId}`} order={order} directory={directory} onChanged={() => void load()} /> : null}
                 </li>
               );
             })}

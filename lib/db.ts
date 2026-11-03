@@ -7174,12 +7174,35 @@ export async function updateLabOrderShades(id: number, input: {
 }): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid"> {
   if (!["admin", "doctor", "reception"].includes(input.session.role)) return "forbidden";
   await ensureSchema();
-  return withTransaction(getPool(), async client => {
+  const session = input.session;
+  return withTransaction(getPool(), client => updateLabOrderShadesOn(client, id, input, {
+    actor: { username: session.username, role: session.role },
+    canAccessPatient: async patientId => (await import("./patient-access")).canAccessPatient(session, patientId, undefined, client, "nowait"),
+    restrictDoctorTo: "unrestricted",
+  }));
+}
+
+/** Who corrects a lab order's clinical data (M2 slice 69): the legacy session wrapper or
+ * the canonical admitted operation. `restrictDoctorTo`: a clinician may only reassign the
+ * treating doctor to itself (the legacy doctor-role binding). */
+export interface LabClinicalAuthority {
+  readonly actor: { readonly username: string; readonly role: string | null };
+  /** Checked after the order row lock. */
+  readonly canAccessPatient: (patientId: number) => Promise<boolean>;
+  readonly restrictDoctorTo: number | null | "unrestricted";
+}
+
+/** The shade edit inside the CALLER's transaction: row lock, patient authority, the
+ * observed specification compared, the audit row with the write. */
+export async function updateLabOrderShadesOn(client: DbClient, id: number, input: {
+  shadeSpecification: LabShadeSpecification | null;
+  expectedShadeSpecification: LabShadeSpecification | null;
+}, authority: LabClinicalAuthority): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid"> {
+  {
     const { rows } = await client.query<{ patient_id: number; tooth_numbers: string | null; tooth_code: number | null }>(
       "SELECT patient_id,tooth_numbers,tooth_code FROM lab_orders WHERE id=$1 FOR UPDATE", [id]);
     if (!rows[0]) return "not_found";
-    const allowed = await (await import("./patient-access")).canAccessPatient(input.session, rows[0].patient_id, undefined, client, "nowait");
-    if (!allowed) return "forbidden";
+    if (!await authority.canAccessPatient(rows[0].patient_id)) return "forbidden";
     const selected = Object.keys(parseLabTeeth(rows[0].tooth_numbers)).map(Number);
     if (!selected.length && rows[0].tooth_code) selected.push(rows[0].tooth_code);
     const parsed = parseLabShadeSpecification(input.shadeSpecification, selected);
@@ -7190,9 +7213,9 @@ export async function updateLabOrderShades(id: number, input: {
       [id, expected.value === null ? null : JSON.stringify(expected.value), parsed.value === null ? null : JSON.stringify(parsed.value)]);
     if (!rowCount) return "conflict";
     await insertAuditRow(client, { action: "lab_order.shade", entity: "lab_orders", entityId: id,
-      details: { previous: expected.value, current: parsed.value }, actor: input.session.username, actorRole: input.session.role });
+      details: { previous: expected.value, current: parsed.value }, actor: authority.actor.username, actorRole: authority.actor.role });
     return "updated";
-  });
+  }
 }
 
 /** Explicit correction only; never recomputes or relinks a historical payable. */
@@ -7202,7 +7225,23 @@ export async function updateLabOrderClinical(id: number, input: {
 }): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid" | "financial_lab_locked" | "financial_doctor_locked"> {
   if (!["admin", "doctor", "reception"].includes(input.session.role)) return "forbidden";
   await ensureSchema();
-  return withTransaction(getPool(), async client => {
+  const session = input.session;
+  return withTransaction(getPool(), client => updateLabOrderClinicalOn(client, id, input, {
+    actor: { username: session.username, role: session.role },
+    canAccessPatient: async patientId => (await import("./patient-access")).canAccessPatient(session, patientId, undefined, client, "nowait"),
+    // A doctor session without a linked party may not change the doctor at all, as before
+    // (NaN matches no doctor id and not null).
+    restrictDoctorTo: session.role === "doctor" ? (session.partyId ?? Number.NaN) : "unrestricted",
+  }));
+}
+
+/** The clinical correction inside the CALLER's transaction: row lock, patient authority,
+ * the observed snapshot compared, the doctor binding, the saved financial links guarded
+ * (doctor/lab changes refused when money or an invoice is attached), audit with the write. */
+export async function updateLabOrderClinicalOn(client: DbClient, id: number, input: {
+  clinical: LabClinicalSnapshot; expectedClinical: LabClinicalSnapshot;
+}, authority: LabClinicalAuthority): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid" | "financial_lab_locked" | "financial_doctor_locked"> {
+  {
     const { rows } = await client.query<{
       patient_id: number; doctor_id: number | null; work_type: string; tooth_numbers: string | null;
       shade: string | null; shade_specification: unknown; party_id: number | null; lab_name: string;
@@ -7210,8 +7249,7 @@ export async function updateLabOrderClinical(id: number, input: {
     }>("SELECT patient_id,doctor_id,work_type,tooth_numbers,shade,shade_specification,party_id,lab_name,lab_phone,cost_minor,payable_id FROM lab_orders WHERE id=$1 FOR UPDATE", [id]);
     const row = rows[0];
     if (!row) return "not_found";
-    const allowed = await (await import("./patient-access")).canAccessPatient(input.session, row.patient_id, undefined, client, "nowait");
-    if (!allowed) return "forbidden";
+    if (!await authority.canAccessPatient(row.patient_id)) return "forbidden";
     const storedShades = parseLabShadeSpecification(row.shade_specification);
     if (!storedShades.ok) return "invalid";
     const previous: LabClinicalSnapshot = { doctorId: row.doctor_id, workType: row.work_type,
@@ -7220,7 +7258,7 @@ export async function updateLabOrderClinical(id: number, input: {
     if (!sameLabClinicalSnapshot(previous, input.expectedClinical)) return "conflict";
     const next = input.clinical;
     if (labClinicalEditProblem(next, previous)) return "invalid";
-    if (input.session.role === "doctor" && next.doctorId !== previous.doctorId && next.doctorId !== input.session.partyId) return "forbidden";
+    if (authority.restrictDoctorTo !== "unrestricted" && next.doctorId !== previous.doctorId && next.doctorId !== authority.restrictDoctorTo) return "forbidden";
     if (next.doctorId !== null && next.doctorId !== previous.doctorId) {
       const doctor = await client.query("SELECT id FROM parties WHERE id=$1 AND kind='doctor' AND is_active=TRUE FOR SHARE", [next.doctorId]);
       if (!doctor.rowCount) return "invalid";
@@ -7244,9 +7282,9 @@ export async function updateLabOrderClinical(id: number, input: {
       [id,next.doctorId,next.workType,next.toothNumbers,next.shade,
         next.shadeSpecification === null ? null : JSON.stringify(next.shadeSpecification),next.partyId,next.labName,next.labPhone]);
     await insertAuditRow(client, { action: "lab_order.clinical", entity: "lab_orders", entityId: id,
-      details: { previous, current: next, financialSnapshotUnchanged: true }, actor: input.session.username, actorRole: input.session.role });
+      details: { previous, current: next, financialSnapshotUnchanged: true }, actor: authority.actor.username, actorRole: authority.actor.role });
     return "updated";
-  });
+  }
 }
 
 export async function updateLabOrderAccounting(

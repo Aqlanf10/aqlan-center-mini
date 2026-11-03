@@ -66,7 +66,8 @@ it("HTTP: status with the expected status, scope, cancel authority, explicit ref
   const cancel = await journey.api(`/api/lab/${ids.api}`, coordinator.cookie, json({ status: "cancelled" }));
   expect(cancel.status).toBe(403);
   expect((await cancel.json()).message).toMatch(ARABIC);
-  for (const action of ["update_accounting", "post", "unpost", "complete_prescription", "update_clinical", "update_shade"]) {
+  // Slice 69 moved the clinical corrections; accounting and posting stay refused.
+  for (const action of ["update_accounting", "post", "unpost"]) {
     const refused = await journey.api(`/api/lab/${ids.api}`, coordinator.cookie, json({ action, isPosted: true, cost: "1" }));
     expect([action, refused.status, (await refused.json()).code]).toEqual([action, 409, "lab_action_not_canonical"]);
   }
