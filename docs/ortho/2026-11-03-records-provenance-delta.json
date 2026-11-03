@@ -1,0 +1,99 @@
+{
+  "scope": "تحديث جزئي لربط صور الحالة؛ لا إعادة تصنيف للمصفوفة التاريخية أو قبول السيناريوهات الـ52",
+  "source": {
+    "library_file_id": "libfile_3264db5ea3248191b1703154440d7912",
+    "sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+    "hash_verified": true
+  },
+  "parent_commit": "edb974a68900f914e7ae3ac246fbb9e96b66b63f",
+  "branch": "feat/ortho-records-provenance-20261103",
+  "full_plan_accepted": false,
+  "requirements": [
+    {
+      "id": "V2R091",
+      "source_line": 91,
+      "requirement": "| 6 | البانوراما | ربط الصورة الأصلية وتاريخها، وفحص الطبيب ونتائجه وتعليقاته المرتبطة بالأسنان؛ لا تُستنتج نتيجة شعاعية من اسم الملف |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "رفع البانوراما من نفس واجهة السجلات مع تاريخ صريح أو غير معلوم؛ لم يكتمل فحص الطبيب والتعليق بحسب السن.",
+      "evidence": [
+        "__tests__/postgres/ortho-record-uploads.test.ts",
+        "__tests__/security-http/ortho-record-upload-browser.test.ts",
+        "__tests__/ortho-record-upload.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R092",
+      "source_line": 92,
+      "requirement": "| 7 | السيفالو | الصورة والتاريخ والمرحلة والمعايرة والمعالم ثم الحساب والتفسير والمراجعة والاعتماد، في سياق الحالة نفسها |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الصورة مرتبطة بالحالة والمرحلة والمصدر؛ لم تُقبل هنا رحلة السيفالو كاملة أو جميع دراسات T1–T4.",
+      "evidence": [
+        "__tests__/postgres/ortho-record-uploads.test.ts",
+        "__tests__/security-http/ortho-record-upload-browser.test.ts",
+        "__tests__/ortho-record-upload.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R103",
+      "source_line": 103,
+      "requirement": "- المرحلة التالية تستفيد من بيانات السابقة تلقائيًا. لكل قيمة وصورة ونتيجة مالك واحد، ويُفتح مصدرها للتعديل من الملخص أو العرض.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الأصل في patient_documents وسجل الأمر يشير إليه؛ اختيار نسخة دراسة الحالة والتعديل المصحح للمصدر ما زالا مطلوبين.",
+      "evidence": [
+        "__tests__/postgres/ortho-record-uploads.test.ts",
+        "__tests__/security-http/ortho-record-upload-browser.test.ts",
+        "__tests__/ortho-record-upload.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R127",
+      "source_line": 127,
+      "requirement": "- حفظ المسودة وإظهار «محفوظ/جارٍ الحفظ/تعارض/تعذر تأكيد الحفظ» بوضوح. لا يظهر نجاح قبل تأكيد الخادم؛ انقطاع الرد لا يبرر إعادة إنشاء الزيارة.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "نجح فقد رد الرفع وإعادة الأمر نفسه؛ مسودة الملف مؤقتة في الذاكرة، ولا تستعاد بعد إغلاق المتصفح.",
+      "evidence": [
+        "__tests__/postgres/ortho-record-uploads.test.ts",
+        "__tests__/security-http/ortho-record-upload-browser.test.ts",
+        "__tests__/ortho-record-upload.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R145",
+      "source_line": 145,
+      "requirement": "| مجموعة السجلات | مجموعة زمنية تشير إلى المستندات الحالية | نوع المنظر والمرحلة وتاريخ الالتقاط ومصدره؛ لا نسخ ثنائية متكررة للصور |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "المنظر والمرحلة والتاريخ ومصدرهما مرتبطون بالصورة الأصلية؛ مجموعات السجلات الزمنية والاختيار للعرض لم تكتمل.",
+      "evidence": [
+        "__tests__/postgres/ortho-record-uploads.test.ts",
+        "__tests__/security-http/ortho-record-upload-browser.test.ts",
+        "__tests__/ortho-record-upload.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R073",
+      "source_line": 73,
+      "requirement": "5. حافظ على ربط خط الأساس القديم، حماية المسودات، منع تكرار الشدّة، عزل حالة المريض، حماية الصور، مسار اعتماد السيفالو، وإصلاحات التنقل الحالية. أضف اختبارات انحدار لهذه الحدود قبل إعادة تفكيك المكونات.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "حماية نطاق الحالة والصلاحيات وإعادة الطلب متحققة للرفع الجديد؛ لا قبول لكل حدود انحدار الخطة.",
+      "evidence": [
+        "__tests__/postgres/ortho-record-uploads.test.ts",
+        "__tests__/security-http/ortho-record-upload-browser.test.ts",
+        "__tests__/ortho-record-upload.test.ts"
+      ],
+      "full_requirement_accepted": false
+    }
+  ],
+  "application_commit": "95c33e2424ea118c128f071802b1bbb5fd657cc1",
+  "build_id": "fPidGLuCOYf-D82BP4gwC"
+}

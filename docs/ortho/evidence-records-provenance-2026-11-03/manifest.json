@@ -1,0 +1,268 @@
+{
+  "scope": "Synthetic local evidence; explicit case photo provenance only; no staging or production acceptance",
+  "generated_at_utc": "2026-11-03T20:23:01.087317+00:00",
+  "codeCommit": "95c33e2424ea118c128f071802b1bbb5fd657cc1",
+  "parentCommit": "edb974a68900f914e7ae3ac246fbb9e96b66b63f",
+  "buildId": "fPidGLuCOYf-D82BP4gwC",
+  "node": "22.23.3",
+  "npm": "11.21.1",
+  "postgres": "18.6",
+  "branch": "feat/ortho-records-provenance-20261103",
+  "files": [
+    {
+      "path": "build.txt",
+      "sha256": "44c5ad0bbe66b5fa92cb88bf41c066417f8d3848a2dc1c8d65fe0c25c6b51b30",
+      "bytes": 13491,
+      "raw_sha256": "895837233f020e0d2240a5d340958de0453ea4cbc023794c3929adbb5498d0a7"
+    },
+    {
+      "path": "browser.txt",
+      "sha256": "85fe49b2c24bc07e555aaf067247e1b2d136b685354a440de8788b62079b82ec",
+      "bytes": 751,
+      "raw_sha256": "85fe49b2c24bc07e555aaf067247e1b2d136b685354a440de8788b62079b82ec"
+    },
+    {
+      "path": "browser-first.txt",
+      "sha256": "10890f22dc8126671fca1c9c156ceea7dcd8cd3bdfea8990013005af5a774774",
+      "bytes": 2026,
+      "raw_sha256": "10890f22dc8126671fca1c9c156ceea7dcd8cd3bdfea8990013005af5a774774"
+    },
+    {
+      "path": "unit-all.txt",
+      "sha256": "8a088649170127c245e3e1ba4b6aa5a0da938fab6f3bc606b4124bc6df28acbf",
+      "bytes": 437,
+      "raw_sha256": "b707307b8a6b3d409c6ff9e6d2ffdf4a0e9e5d082ce46dd2f3ce2a1c9ad6987b"
+    },
+    {
+      "path": "unit-all-first.txt",
+      "sha256": "0cc5d403eb777866c51d48b731ad4aa708d751f5422381ae579068d43d0b65e0",
+      "bytes": 1515,
+      "raw_sha256": "820624a9ea312fd7147f4b20474989293267e39f26825af1e20e23f4484d1074"
+    },
+    {
+      "path": "unit-focused.txt",
+      "sha256": "0ff2b5b963dda9cf4bcce9ea703f68fce67da08628960ba44380d2384d3dc8ed",
+      "bytes": 215,
+      "raw_sha256": "69ae7d11261551273f17d75ee7c4b88258be09ee33347cd275a808679ac95f7e"
+    },
+    {
+      "path": "parent-regression.txt",
+      "sha256": "52615e3fd447d7361d730cc1020c6f4c42c407b430f1407a48a941f0cb2c2ea3",
+      "bytes": 217,
+      "raw_sha256": "e1b22b29533416ba1cb083c6dcae0730ff758751e3e37a87389c7094fccdc1b8"
+    },
+    {
+      "path": "postgres-regression.txt",
+      "sha256": "a7078e5d89fcb71b3068d562617b203e8cc072b3b7ece8c83e7b7b369932c7b8",
+      "bytes": 1098,
+      "raw_sha256": "ad64c2985349514a3e84fa78786b440a17e008824183414af75f1eaf4867e054"
+    },
+    {
+      "path": "postgres-upgrade.txt",
+      "sha256": "13959bcb27bc6b485151e5da8ac1c99941ca23a4a246ce5c9cc9248f10e3dba4",
+      "bytes": 680,
+      "raw_sha256": "2bde754e18c1fa6669e500c1a515f82201ab9f197b78c0df2b1c20e2eae4429a"
+    },
+    {
+      "path": "schema-contract.txt",
+      "sha256": "68c375604b59fde984bee02d6fd884e8762a645213d2db19d98deaec145ae097",
+      "bytes": 248,
+      "raw_sha256": "68c375604b59fde984bee02d6fd884e8762a645213d2db19d98deaec145ae097"
+    },
+    {
+      "path": "lint.txt",
+      "sha256": "e780d26759fa7d4bbc7970177c7b4ec2fb73e4b92a221c0bea43e1750426b30f",
+      "bytes": 12605,
+      "raw_sha256": "fadbabe3e1b9dc94bc2826e04596d30eb7ab24648bb3ab458811b578bfde3e71"
+    },
+    {
+      "path": "preflight.txt",
+      "sha256": "ce1e46cdfacfcbb217e240a858285810f878aaabcf55b5645723b8d1827645a6",
+      "bytes": 789,
+      "raw_sha256": "ce1e46cdfacfcbb217e240a858285810f878aaabcf55b5645723b8d1827645a6"
+    },
+    {
+      "path": "runtime-braces.txt",
+      "sha256": "e3737c16745ce99bd2f25c85458f89251cf466f78d961820773b7d4d37eb3b2d",
+      "bytes": 108,
+      "raw_sha256": "e3737c16745ce99bd2f25c85458f89251cf466f78d961820773b7d4d37eb3b2d"
+    },
+    {
+      "path": "runtime-tooling.txt",
+      "sha256": "f3f54b5da4fac1e260f8d7a5a2e9499d27f588af79d73b5956e800a8db6da10b",
+      "bytes": 137,
+      "raw_sha256": "f3f54b5da4fac1e260f8d7a5a2e9499d27f588af79d73b5956e800a8db6da10b"
+    },
+    {
+      "path": "audit.json",
+      "sha256": "2466951d1236d5092510d6d330f3908a2b687eb177f0820e34a3e6b8bb0dcbfb",
+      "bytes": 364
+    },
+    {
+      "path": "migration-collision-scan.json",
+      "sha256": "37b66e95b99b4712fa5bd1b8cde9950cc3ee5abfdfa43341d6240e58861343ca",
+      "bytes": 56
+    },
+    {
+      "path": "records-390.png",
+      "sha256": "d55a3e90640c37ab65a564bc46161aa02692cb827517a57849bbb5224c0e23cf",
+      "bytes": 26861
+    },
+    {
+      "path": "records-1280.png",
+      "sha256": "6bbc856ded683c8f7db8ee90db674602824a62354fb2b56dee257647f1078d1e",
+      "bytes": 30494
+    },
+    {
+      "path": "parent-ci-snapshot.json",
+      "sha256": "1d9601920bf803955139d8f9ccc7544a89a3426200c7bde8321ba1657f0f9725",
+      "bytes": 1699
+    }
+  ],
+  "sources": [
+    {
+      "path": "__tests__/migrations.test.ts",
+      "sha256": "ef6178853097bd66545e43464809181371a640da25f06c1a1b2c65f26c7d890c"
+    },
+    {
+      "path": "__tests__/ortho-record-upload.test.ts",
+      "sha256": "8b9629c0c119b0bea9cb07e20c50da8e3ca994d20c408b7abc8b2aec0c483630"
+    },
+    {
+      "path": "__tests__/patient-appointment-history-schema.test.ts",
+      "sha256": "f27f02e6970126967a0487c5fae70a9089f15f28cdd60d7a133b717fbb8c5a41"
+    },
+    {
+      "path": "__tests__/periodontal-candidate-chain.test.ts",
+      "sha256": "fd3da2abed89b1fcea33ae9425b898ef0ba85618f50a443110b9832e8eb8df07"
+    },
+    {
+      "path": "__tests__/periodontal-schema.test.ts",
+      "sha256": "47a653218f2c00675143210d87f94b8e5d713c18661b47c9916de7f634335dc4"
+    },
+    {
+      "path": "__tests__/postgres/_periodontal-fixture.ts",
+      "sha256": "45940e0dc963092663bcc7164241d7297250aa9787c3a26dd17bd4b29a46c76d"
+    },
+    {
+      "path": "__tests__/postgres/debt-installments-storage.test.ts",
+      "sha256": "d772a0181ff95fa23a411430cacc3c597ef0cd6992dd06c7fcc3a4a50a48deed"
+    },
+    {
+      "path": "__tests__/postgres/hr-composed-backup.test.ts",
+      "sha256": "666777c02a267dd0f994e903bb7e9e2d48e26077cb505cc3c91c5c8e08a3da42"
+    },
+    {
+      "path": "__tests__/postgres/hr-runtime-registration.test.ts",
+      "sha256": "6aa88d1b20b1c9ff0afcf0c908f967d63bf3132c105b03b99068dcdc1add5786"
+    },
+    {
+      "path": "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts",
+      "sha256": "d12ac626f4a5538ee54dde6b2608f585e774498b9ecd652392fdd27e5c4726d4"
+    },
+    {
+      "path": "__tests__/postgres/ortho-record-uploads-migration.test.ts",
+      "sha256": "9312f94782649888904127eeea993cf153e089ff22097b59dc6f9ee6449b60f9"
+    },
+    {
+      "path": "__tests__/postgres/ortho-record-uploads.test.ts",
+      "sha256": "40fe0dd4067f7b17b9244246e89ca63f2f99fb9c819c70818d69c5ed5a4ae2e1"
+    },
+    {
+      "path": "__tests__/postgres/patient-appointment-history-index.test.ts",
+      "sha256": "8d30c9223c339f989bcbf0a6d994ff5a54a5d2d4aaa0133aee1aa4ab12e137e7"
+    },
+    {
+      "path": "__tests__/postgres/periodontal-restore.test.ts",
+      "sha256": "121ce21f1022eeccbbe183ff4b5d092ac478d78b38f1a19783d474f425bc48e5"
+    },
+    {
+      "path": "__tests__/postgres/prescription-lineage-restore.test.ts",
+      "sha256": "bfcf2b013ac9dfd8974d841eec3b92cd3f7e18da3959c0b0ae1ee4061880f1ef"
+    },
+    {
+      "path": "__tests__/postgres/schema-ownership.test.ts",
+      "sha256": "8ec7fd06048475f8d98e381a7d612bac40d77f7020dd2a066463342803a8cddb"
+    },
+    {
+      "path": "__tests__/schema-preflight-cli.test.ts",
+      "sha256": "046bc85488696315c95d619dba71a8e9092c8fa704ffbb7e306bbed5bae25699"
+    },
+    {
+      "path": "__tests__/security-http/ortho-record-upload-browser.test.ts",
+      "sha256": "db590b0bfdd35899337654ba2929f962f825f5344b3339621658d20aed2ebcd9"
+    },
+    {
+      "path": "__tests__/webceph-records-grid.test.tsx",
+      "sha256": "9e7033a888919e12b70e8c2b82daa59aa1eebcb2cadb530988105c6e323a1bb1"
+    },
+    {
+      "path": "app/api/ortho/[id]/record-uploads/route.ts",
+      "sha256": "11a13467faa9384ae255f6037ff5aee02f7d9a6c9029a482d989801a179bfba2"
+    },
+    {
+      "path": "components/OrthoRecordUpload.tsx",
+      "sha256": "845ad969b2195fd104d89110ac09cd69f0a95315d34baabbdb8b1347e44b498b"
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "sha256": "e2ca8d8b35d33ff355eb3a5cd02ad582efe2dda5b89801b0c121ceef3eec8050"
+    },
+    {
+      "path": "components/WebCephRecordsGrid.tsx",
+      "sha256": "52989dc44dd8d75ddcd78384f3df1b90b70d86caabb833be16a09a78aaa74c04"
+    },
+    {
+      "path": "docs/DATABASE_MIGRATIONS.md",
+      "sha256": "a3ec5969e7cd82f98a2d0f4f272f7b95b331606e269d053fec506a2721e9ca80"
+    },
+    {
+      "path": "lib/audit.ts",
+      "sha256": "ef042825ae3c4de6ee1aad5ed912e6b932953a97aef1875729f3acbfe6420f0e"
+    },
+    {
+      "path": "lib/clinic-reset.ts",
+      "sha256": "b2d0003ea46a9fee6a0cc1f826e9bd4c84a955e2b16d8dc7df56457e7d500ba4"
+    },
+    {
+      "path": "lib/db.ts",
+      "sha256": "779599f61cb609ad3bfd04a373568355669ad9e863d8b4bc5fc7b22233221dfa"
+    },
+    {
+      "path": "lib/http-permissions.ts",
+      "sha256": "eaba46db5ee6c36d6ba477155189908ce3294b47bf87694b3762878daac6f2d1"
+    },
+    {
+      "path": "lib/ortho-record-upload-owner.ts",
+      "sha256": "7897acbca84f74ec214e9381df1d9e63d08eb5ba087afe035aa099dedbe5773f"
+    },
+    {
+      "path": "lib/ortho-record-upload-store.ts",
+      "sha256": "53f3fee0f721075a127fc9d3777c1e04276a22dd05b77f643d545c886c69904d"
+    },
+    {
+      "path": "lib/ortho-record-upload.ts",
+      "sha256": "24a788131b2e1848f52d532c5c9925938ba9b0e102d4742af0d001fed1fd6b1f"
+    },
+    {
+      "path": "lib/ortho-record-uploads-schema.ts",
+      "sha256": "647403b7a244051b0de8e5b10afc82132a94a5719e7e16d65df84460901ac607"
+    },
+    {
+      "path": "lib/ortho-records.ts",
+      "sha256": "c7c35e2d15d18b0fadfb3179e542726470fa813bd584fff853642b84edc134f7"
+    },
+    {
+      "path": "migrations/0104_ortho_record_uploads.sql",
+      "sha256": "42dff12b781c7af27445f71a3bb91b4380a0c76186b8267e5dbbf713ce517b73"
+    },
+    {
+      "path": "schema/current-schema-contract.pg18.json",
+      "sha256": "bcba50807247e87323bf2a8a7b39ae96bf30e5342f4b9c675525d51a1883d807"
+    },
+    {
+      "path": "scripts/verify-schema-ownership.ts",
+      "sha256": "c95eb828dc82c4ca640810f58595062378157650ab53b19a626afddb7dd4f162"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-records-flow
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+
+ Test Files  816 passed (816)
+      Tests  13984 passed (13984)
+   Start at  20:07:30
+   Duration  598.52s (transform 24.61s, setup 0ms, import 111.40s, tests 346.90s, environment 126ms)

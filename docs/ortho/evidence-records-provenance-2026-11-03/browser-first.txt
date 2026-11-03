@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-record-upload-browser.test.ts __tests__/security-http/document-associations-http.test.ts __tests__/security-http/ortho-guided-assessment-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-records-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-record-upload-browser.test.ts (3 tests | 1 failed) 10212ms
+     × refuses unreadable, foreign and mismatched source uploads over authenticated multipart HTTP 118ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-record-upload-browser.test.ts > explicit source image capture and same-command recovery > refuses unreadable, foreign and mismatched source uploads over authenticated multipart HTTP
+AssertionError: expected { ok: false, …(2) } to match object { code: 'unreadable_record_image' }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "code": "unreadable_record_image",
++   "code": "record_source_mismatch",
+  }
+
+ ❯ __tests__/security-http/ortho-record-upload-browser.test.ts:81:74
+     79|     expect((await upload(one.patientId, bytes, { ...command(bytes), fi…
+     80|     const invalid = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);…
+     81|     expect(unreadable.status).toBe(400); expect(await unreadable.json(…
+       |                                                                          ^
+     82|     expect((await db.query("SELECT count(*)::int n FROM patient_docume…
+     83|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 8 passed (9)
+   Start at  20:03:06
+   Duration  26.10s (transform 91ms, setup 0ms, import 601ms, tests 20.68s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

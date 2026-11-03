@@ -1,0 +1,8 @@
+
+ RUN  v4.1.12 /workspace/ortho-records-flow
+
+
+ Test Files  6 passed (6)
+      Tests  80 passed (80)
+   Start at  20:02:10
+   Duration  2.56s (transform 515ms, setup 0ms, import 784ms, tests 519ms, environment 1ms)

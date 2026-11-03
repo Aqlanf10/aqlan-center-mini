@@ -1,0 +1,39 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-records-flow
+
+ ❯ __tests__/periodontal-schema.test.ts (7 tests | 1 failed) 19ms
+     × does not register schema, a numbered migration, a route or an editor 13ms
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/periodontal-schema.test.ts > unregistered periodontal SQL source contract (SQL never executed) > does not register schema, a numbered migration, a route or an editor
+AssertionError: expected [ '0001_baseline_schema.sql', …(74) ] to have a length of 74 but got 75
+
+- Expected
++ Received
+
+- 74
++ 75
+
+ ❯ __tests__/periodontal-schema.test.ts:15:19
+     13|     expect(readFileSync("lib/db.ts", "utf8")).not.toContain("PERIODONT…
+     14|     const files = readdirSync("migrations").filter((name) => /^\d{4}_.…
+     15|     expect(files).toHaveLength(75);
+       |                   ^
+     16|     expect(files).toContain("0093_prescription_issuance_commands.sql");
+     17|     expect(files).toContain("0066_agreement_delta_amendments.sql");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 815 passed (816)
+      Tests  1 failed | 13983 passed (13984)
+   Start at  19:57:24
+   Duration  555.74s (transform 22.70s, setup 0ms, import 99.54s, tests 338.57s, environment 104ms)
