@@ -241,7 +241,7 @@ it.each(['amoxicillin','ibuprofen'] as const)('built %s dose-profile picker issu
     expect(await page.getByLabel('مقدار الجرعة للسطر 1',{exact:true}).inputValue()).toBe(amount);
     await page.getByLabel('راجعت الاستطباب والحساسية والشكل والتركيز والجرعة والتكرار والمدة لهذا السطر. هذا لا يلغي تنبيهات السلامة.',{exact:true}).check();
     const waitResponse=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/prescriptions'&&r.request().method()==='POST');
-    let pending=waitResponse();await page.getByRole('button',{name:'حفظ وطباعة الوصفة (A6)',exact:true}).click();let response=await pending;
+    let pending=waitResponse();await page.getByRole('button',{name:'حفظ وطباعة الوصفة',exact:true}).click();let response=await pending;
     if(response.status()===200){const preview=await response.json();expect(preview.requiresAcknowledgement).toBe(true);pending=waitResponse();await page.getByRole('button',{name:'أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا',exact:true}).click();response=await pending;}
     expect(response.status(),await response.text()).toBe(201);const saved=await response.json();const command=response.request().postDataJSON();
     const before=(await db.query('SELECT * FROM prescriptions WHERE id=$1',[saved.id])).rows[0];
@@ -259,16 +259,16 @@ it.each(['amoxicillin','ibuprofen'] as const)('built %s dose-profile picker issu
     const sign=await post(`/api/visits/${visit.id}/clinical`,{action:'sign'});expect(sign.status,await sign.text()).toBe(200);
     const received=await read(printPath);expect(received.status).toBe(200);const html=await received.text();expect(html).toContain(amount);if(ibu){expect(html).toContain('Preferably after food.');expect(html).toContain('at least 8 hours apart');}for(const secret of ['weightKg','product-label','data-dose-form'])expect(html).not.toContain(secret);
     const receptionPage=await receiveContext.newPage();await receptionPage.goto(`${baseUrl}/patients/${patient.id}`);expect(await receptionPage.locator('[data-dose-profile-review]').count()).toBe(0);
-    await receptionPage.goto(`${baseUrl}${printPath}`);await mkdir('.settings-ui-artifacts/prescription-dose',{recursive:true});await receptionPage.screenshot({path:`.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.png`,fullPage:true});await receptionPage.pdf({path:`.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.pdf`,preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false});
+    await receptionPage.goto(`${baseUrl}${printPath}`);await mkdir('.settings-ui-artifacts/prescription-dose',{recursive:true});await receptionPage.screenshot({path:`.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.png`,fullPage:true});await receptionPage.pdf({path:`.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.pdf`,format:"A5",preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false});
     // Regression: the bounded one-item saved Rx must not orphan its signature
-    // on a second A6 sheet. Inspect the actual hosted PDF, not the screen PNG.
+    // on a second operator-selected A5 sheet. Inspect the actual hosted PDF, not the screen PNG.
     const pdfPath = `.settings-ui-artifacts/prescription-dose/saved-${ingredient}-calculated.pdf`;
     const info = execFileSync('pdfinfo', [pdfPath], { encoding: 'utf8' });
     expect(Number(info.match(/^Pages:\s+(\d+)/m)?.[1])).toBe(1);
     const paper = info.match(/^Page size:\s+([\d.]+) x ([\d.]+) pts/m);
     expect(paper).not.toBeNull();
-    expect(Number(paper![1])).toBeGreaterThan(295); expect(Number(paper![1])).toBeLessThan(301);
-    expect(Number(paper![2])).toBeGreaterThan(417); expect(Number(paper![2])).toBeLessThan(423);
+    expect(Number(paper![1])).toBeGreaterThan(417); expect(Number(paper![1])).toBeLessThan(423);
+    expect(Number(paper![2])).toBeGreaterThan(592); expect(Number(paper![2])).toBeLessThan(598);
     const normalize = (value: string) => value.normalize('NFKC').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim();
     const pdfText = normalize(execFileSync('pdftotext', ['-raw', pdfPath, '-'], { encoding: 'utf8' }));
     for (const value of [items[0].name, items[0].dose, ...(ibu ? ['7.5 mL', '150 mg'] : ['4 mL', '200 mg']), items[0].frequency, items[0].duration, items[0].instructionsEn, 'Physician', 'Signature & Stamp', `Rx #${saved.id}`, '04-253028']) {

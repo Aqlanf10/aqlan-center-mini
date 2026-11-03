@@ -1,32 +1,19 @@
-/* Rx-only named paper: never changes invoices, statements or other routes. */
-@page prescription-a6 { size: 105mm 148mm; margin: 6mm; }
-.prescription-a6-sheet { page: prescription-a6; overflow-wrap: anywhere; }
-/* Keep the same branding and font sizes, but place the logo alongside text
-   instead of spending a separate vertical band on compact A6 paper. */
-.prescription-a6-sheet .print-brand-identity { display: grid; grid-template-columns: 12mm minmax(0, 1fr); column-gap: 2mm; align-items: center; }
-.prescription-a6-sheet .print-brand-identity > .print-logo { grid-column: 1; grid-row: 1 / span 4; }
-.prescription-a6-sheet .print-brand-identity > p { grid-column: 2; }
-.prescription-a6-sheet .prescription-pages { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.prescription-a6-sheet .prescription-pages > :is(thead, tbody) > tr > td { padding: 0; vertical-align: top; }
-.prescription-a6-sheet .prescription-context { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1mm 3mm; font-size: 9pt; margin: 1mm 0; }
-.prescription-a6-sheet .prescription-page-identity { direction: rtl; font-size: 9pt; line-height: 1.3; border-bottom: 1px solid #94a3b8; padding: 1mm 0; margin-bottom: 2mm; }
-.prescription-a6-sheet .rule, .prescription-a6-sheet .rule-light { margin: 1.5mm 0; }
-.prescription-a6-sheet .prescription-medication, .prescription-a6-sheet .prescription-ending { break-inside: avoid; page-break-inside: avoid; }
+/* Restore the approved Production A5 prescription, scoped to this route only. */
+.prescription-approved-a5 { overflow-wrap: anywhere; }
+.prescription-approved-a5 .prescription-pages { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.prescription-approved-a5 .prescription-pages > :is(thead, tbody) > tr > td { padding: 0; vertical-align: top; }
+.prescription-approved-a5 .prescription-medication > td { padding-bottom: 3mm; }
 @media print {
-  .prescription-a6-sheet { width: auto; min-height: 0; padding: 0; }
-  .prescription-a6-sheet .prescription-pages > thead { display: table-header-group; break-inside: avoid; }
-  .prescription-a6-sheet .prescription-pages > tbody > tr { break-inside: avoid; page-break-inside: avoid; }
-  .prescription-a6-sheet .sign-row { break-inside: avoid; }
+ .prescription-approved-a5 { width: auto; min-height: 0; padding: 0; }
+ .prescription-approved-a5 .prescription-pages > thead { display: table-header-group; }
+ .prescription-approved-a5 .prescription-medication, .prescription-approved-a5 .prescription-ending { break-inside: avoid; page-break-inside: avoid; }
+ .prescription-approved-a5 .prescription-single-medication { break-inside: auto; page-break-inside: auto; orphans: 3; widows: 3; }
+ /* A sole long medication must start on page one, rather than being moved
+    wholesale with the signature. Any ending continuation keeps the repeated
+    patient, saved clinician and Rx identity above the unchanged signature. */
+ .prescription-approved-a5 .prescription-medication:not(.prescription-single-medication):has(+ .prescription-ending) { break-after: avoid; page-break-after: avoid; }
 }
 
-/* Compact closing whitespace only: preserve all clinical text and natural
-   continuation pages rather than clipping, scaling, or hiding long content. */
-.prescription-a6-sheet .prescription-ending .print-footer-rule { margin: 1mm 0; }
-@media print {
-  /* Prefer the final medicine and signature together when they fit. This is a
-     pagination preference, not a fixed-height block: long text may continue. */
-  .prescription-a6-sheet .prescription-medication:has(+ .prescription-ending) {
-    break-after: avoid;
-    page-break-after: avoid;
-  }
-}
+.prescription-approved-a5 .prescription-record-identity { font-size: 8pt; color: #475569; margin-top: 1mm; }
+
+.prescription-approved-a5 .prescription-void-identity { color: #991b1b; }

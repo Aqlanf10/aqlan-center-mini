@@ -390,14 +390,14 @@ describe('durable issuance async owner fencing', () => {
   const posts = () => fetchMock.mock.calls.filter(([url]) => url === '/api/prescriptions');
   it('retires a deferred digest on close without sending and reopens without a stuck busy state', async () => {
     await prepare(); const digest = deferred<ArrayBuffer>(); digestMock.mockReturnValueOnce(digest.promise);
-    click(button(renderModal(), 'حفظ وطباعة الوصفة (A6)')); close(); digest.resolve(new Uint8Array(32).buffer); await tick();
+    click(button(renderModal(), 'حفظ وطباعة الوصفة')); close(); digest.resolve(new Uint8Array(32).buffer); await tick();
     expect(posts()).toHaveLength(0); expect(openMock).not.toHaveBeenCalled();
-    await open(); renderModal(); await tick(); expect(button(renderModal(), 'حفظ وطباعة الوصفة (A6)').props.disabled).toBe(false);
+    await open(); renderModal(); await tick(); expect(button(renderModal(), 'حفظ وطباعة الوصفة').props.disabled).toBe(false);
   });
   it.each(['patient', 'principal', 'close'])('does not publish or print a delayed POST after %s owner changes', async kind => {
     await prepare(); const saved = deferred<ReadResponse>(); const normal = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/prescriptions' ? saved.promise : normal(url, init));
-    click(button(renderModal(), 'حفظ وطباعة الوصفة (A6)')); await tick(); expect(posts()).toHaveLength(1);
+    click(button(renderModal(), 'حفظ وطباعة الوصفة')); await tick(); expect(posts()).toHaveLength(1);
     const props = { ...modalProps(), patientId: kind === 'patient' ? patientId + 1 : patientId };
     if (kind === 'principal') state.username = 'different-synthetic-clinician';
     if (kind === 'close') close(); else renderModal(props);
@@ -407,7 +407,7 @@ describe('durable issuance async owner fencing', () => {
   it('uses one request for rapid double click, blocks discard in flight, and reconciles replay without automatic print', async () => {
     await prepare(); const saved = deferred<ReadResponse>(); const normal = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/prescriptions' ? saved.promise : normal(url, init));
-    const print = button(renderModal(), 'حفظ وطباعة الوصفة (A6)'); click(print); click(print); await tick();
+    const print = button(renderModal(), 'حفظ وطباعة الوصفة'); click(print); click(print); await tick();
     expect(digestMock).toHaveBeenCalledTimes(1); expect(posts()).toHaveLength(1);
     click(button(renderModal(), 'بدء إصدار جديد بعد مراجعة السجل')); expect(window.confirm).not.toHaveBeenCalled(); expect(storageData.size).toBe(1);
     saved.resolve(response(201, { id: 1234, status: 'active', replayed: true })); await tick();
@@ -416,7 +416,7 @@ describe('durable issuance async owner fencing', () => {
   it('hides recovered document link when the same username permissions change until fresh recovery', async () => {
     await prepare(); const normal = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/prescriptions' ? Promise.resolve(response(201, { id: 1234, status: 'active', replayed: true })) : normal(url, init));
-    click(button(renderModal(), 'حفظ وطباعة الوصفة (A6)')); await tick(); expect(text(renderModal())).toContain('فتح النسخة المحفوظة #1234');
+    click(button(renderModal(), 'حفظ وطباعة الوصفة')); await tick(); expect(text(renderModal())).toContain('فتح النسخة المحفوظة #1234');
     const props = modalProps();
     state.permissions = { canViewAllPatients: false } as import('../lib/doctor-permissions').DoctorPermissions;
     expect(text(renderModal(props))).not.toContain('فتح النسخة المحفوظة #1234'); await tick(); expect(text(renderModal(props))).not.toContain('فتح النسخة المحفوظة #1234'); expect(openMock).not.toHaveBeenCalled();

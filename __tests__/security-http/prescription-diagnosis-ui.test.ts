@@ -233,7 +233,7 @@ describe("prescription diagnosis draft in the built visit page", () => {
         instructionsLang: "en", items: [medicine],
       };
       f.holdPrescriptionPreview();
-      await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).click();
+      await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }).click();
       await expect.poll(() => f.requests.length).toBe(1);
       expect(f.requests[0].commandKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
       expected.commandKey = f.requests[0].commandKey as string;
@@ -247,7 +247,7 @@ describe("prescription diagnosis draft in the built visit page", () => {
       expect(await f.diagnosis.inputValue()).toBe(expected.diagnosis);
       expect(await f.notes.inputValue()).toBe(draftNotes);
       await assertMedicine(f.page);
-      const printButton = f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true });
+      const printButton = f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true });
       await expect.poll(() => printButton.isEnabled()).toBe(true);
       expect(f.requests).toEqual([expected]);
       expect(await prints(f.page)).toEqual([]);
@@ -367,7 +367,7 @@ async function capturePatientContext(page: Page, width: number, contextState: "w
   const targets: Array<{ label: string; locator: Locator }> = [
     { label: `${contextState} patient-context notice`, locator: warning },
     { label: "cancel", locator: panel.getByRole("button", { name: "إلغاء", exact: true }) },
-    { label: "print", locator: panel.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }) },
+    { label: "print", locator: panel.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }) },
     ...(contextState === "warning" ? [{ label: "synthetic phone action", locator: panel.getByRole("button", { name: /واتساب غير متاح حاليًا/ }) }] : []),
   ];
   const bounds = [];
@@ -493,10 +493,10 @@ it("blocks issuance on prescriber lookup failure and permits explicit safe retry
     f.failPrescriberRead(true); await f.open(); await fillMedicine(f.page);
     await f.page.getByText("تعذر التحقق من هوية الطبيب الواصف. الإصدار والمعاينة متوقفان حتى ينجح التحقق.", { exact: true }).waitFor();
     expect(await f.page.getByLabel("الطبيب الواصف", { exact: true }).inputValue()).toBe("");
-    expect(await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).isDisabled()).toBe(true);
+    expect(await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }).isDisabled()).toBe(true);
     expect(f.requests).toEqual([]); expect(await prints(f.page)).toEqual([]);
     f.failPrescriberRead(false); await f.page.getByRole("button", { name: "إعادة التحقق من الطبيب", exact: true }).click();
-    await expect.poll(() => f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).isEnabled()).toBe(true);
+    await expect.poll(() => f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }).isEnabled()).toBe(true);
     expect(await f.page.getByLabel("الطبيب الواصف", { exact: true }).inputValue()).toBe("طبيب تجريبي");
     expect(f.requests).toEqual([]); expect(await prints(f.page)).toEqual([]);
     expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
@@ -518,20 +518,20 @@ it("explicit generic choice fills only a name, never saves or prints, and requir
     for (const placeholder of ["Strength / concentration + unit", "Form / route (tablet, oral rinse…)", "Frequency (every 8 hours)", "Duration (5 days)"]) expect(await f.page.getByPlaceholder(placeholder, { exact: true }).inputValue()).toBe("");
     expect(await f.page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).inputValue()).toBe("");
     expect(f.requests).toHaveLength(0); expect(await prints(f.page)).toEqual([]);
-    await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).click();
+    await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }).click();
     expect(f.requests).toHaveLength(0); expect(await prints(f.page)).toEqual([]);
     await f.page.getByPlaceholder("Strength / concentration + unit", { exact: true }).fill("synthetic strength");
     await f.page.getByPlaceholder("Form / route (tablet, oral rinse…)", { exact: true }).fill("synthetic form");
     await f.page.getByPlaceholder("Frequency (every 8 hours)", { exact: true }).fill("synthetic frequency");
     await f.page.getByPlaceholder("Duration (5 days)", { exact: true }).fill("synthetic duration");
     await f.page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).fill("synthetic amount");
-    await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).click(); expect(f.requests).toHaveLength(0);
+    await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }).click(); expect(f.requests).toHaveLength(0);
     const review = f.page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ });
     await review.check();
     await f.page.getByPlaceholder("Duration (5 days)", { exact: true }).fill("changed synthetic duration");
     expect(await review.isChecked()).toBe(false);
     await review.check();
-    await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }).click();
+    await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }).click();
     await expect.poll(() => f.requests.length).toBe(1);
     expect(f.requests[0].items).toEqual([expect.objectContaining({ name: "Amoxicillin", dose: "synthetic strength", duration: "changed synthetic duration", selection: { id: "amoxicillin", amount: "synthetic amount", confirmed: true } })]);
     expect(await prints(f.page)).toEqual([]); // Existing server warning still requires its own acknowledgement.
@@ -545,7 +545,7 @@ it.each([1280, 390])("compact prescription starts writable with visible actions 
   try {
     await f.open();
     const name = f.page.getByLabel("اسم الدواء للسطر 1", { exact: true });
-    const save = f.page.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true });
+    const save = f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true });
     await expect.poll(() => save.isEnabled()).toBe(true);
     expect(await name.inputValue()).toBe("");
     expect(await f.page.getByPlaceholder("Drug name", { exact: true }).count()).toBe(1);

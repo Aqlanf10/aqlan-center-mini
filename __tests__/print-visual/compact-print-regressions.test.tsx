@@ -104,9 +104,25 @@ describe("native compact print regression witnesses", () => {
       await page.route("**/*", route => route.abort());
       await page.setContent(html);
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(image => image.decode().catch(() => undefined))); });
+      if (prescription) {
+        expect(body).toContain('sheet sheet-a5 prescription-approved-a5');
+        expect(body).toContain('℞');
+        const screenWidth = await page.locator('.prescription-approved-a5').evaluate(node => node.getBoundingClientRect().width);
+        expect(Math.abs(screenWidth - 148 * 96 / 25.4)).toBeLessThan(2);
+        await page.screenshot({ path: resolve(output, `${kind}-approved-screen.png`), fullPage: true });
+      }
       await page.emulateMedia({ media: "print" });
       await page.screenshot({ path: resolve(output, `${kind}-compact.png`), fullPage: true });
-      const pdf = await page.pdf({ path: resolve(output, `${kind}-compact.pdf`), format: ["receipt", "patient-card"].includes(kind) ? "A6" : "A4", preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+      const pdf = await page.pdf({ path: resolve(output, `${kind}-compact.pdf`), format: prescription ? "A5" : ["receipt", "patient-card"].includes(kind) ? "A6" : "A4", preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+      if (prescription && !rxFixture.long && !rxFixture.calculated && !rxFixture.historicalIbuprofen) {
+        // Production respects the operator's paper choice rather than forcing A6/A5.
+        const a4 = await page.pdf({ path: resolve(output, `${kind}-operator-a4.pdf`), format: "A4", preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+        const paperInfo = execFileSync("pdfinfo", ["-"], { input: a4, encoding: "utf8" });
+        const size = paperInfo.match(/^Page size:\s+([\d.]+) x ([\d.]+) pts/m);
+        expect(size).not.toBeNull();
+        expect(Math.abs(Number(size![1]) - 210 * 72 / 25.4)).toBeLessThan(1);
+        expect(Math.abs(Number(size![2]) - 297 * 72 / 25.4)).toBeLessThan(1);
+      }
       const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
       const pages = await page.evaluate(raw => {
         const doc = new DOMParser().parseFromString(raw, "application/xml");
@@ -118,6 +134,17 @@ describe("native compact print regression witnesses", () => {
         }));
       }, xml);
       writeFileSync(resolve(output, `${kind}-compact-geometry.json`), JSON.stringify({ syntheticOnly: true, pages }, null, 2));
+      if (prescription) {
+        // Whole-document text and page-bound checks miss a heading-only first page.
+        const firstPageText = pages[0]?.words.map(word => word.text).join(" ") ?? "";
+        expect(firstPageText).toContain(rxFixture.historicalIbuprofen || rxFixture.ibuprofen ? "Ibuprofen" : rxFixture.calculated ? "Amoxicillin" : rxFixture.long ? "SYN-MED-01" : "SYNTHETIC-RX-MEDICATION");
+        const firstMedicationFields = rxFixture.historicalIbuprofen || rxFixture.ibuprofen
+          ? ["100 mg/5 mL", "7.5 mL", "150 mg", "3 times daily"]
+          : rxFixture.calculated ? ["250 mg/5 mL", "4 mL", "200 mg", "Every 8 hours"]
+          : rxFixture.long ? ["SYN-DOSE-01", "SYN-AMOUNT-01", "SYN-FREQUENCY-01"]
+          : ["SYN-DOSE", "SYN-AMOUNT", "SYN-FREQUENCY"];
+        for (const field of firstMedicationFields) expect(firstPageText).toContain(field);
+      }
       if (kind === "lab") {
         const layout = await page.locator(`.${labStyles.labIdentity}`).evaluate(node => ({ display: getComputedStyle(node).display, parentDisplay: getComputedStyle(node.parentElement!).display, labelWeight: getComputedStyle(node.querySelector("span")!).fontWeight, identifierSize: getComputedStyle(node.querySelector("strong")!).fontSize }));
         writeFileSync(resolve(output, "lab-compact-layout.json"), JSON.stringify({ syntheticOnly: true, layout }, null, 2));
@@ -129,16 +156,32 @@ describe("native compact print regression witnesses", () => {
         else if (rxFixture.calculated) expect(pages.length).toBeGreaterThan(0);
         else expect(pages).toHaveLength(1);
         for (const paper of pages) {
-        expect(Math.abs(paper.width - 105 * 72 / 25.4)).toBeLessThan(1);
-        expect(Math.abs(paper.height - 148 * 72 / 25.4)).toBeLessThan(1);
+        expect(Math.abs(paper.width - (prescription ? 148 : 105) * 72 / 25.4)).toBeLessThan(1);
+        expect(Math.abs(paper.height - (prescription ? 210 : 148) * 72 / 25.4)).toBeLessThan(1);
         for (const word of paper.words) {
           expect([word.xMin, word.xMax, word.yMin, word.yMax].every(Number.isFinite)).toBe(true);
           expect(word.xMin).toBeGreaterThanOrEqual(0); expect(word.yMin).toBeGreaterThanOrEqual(0);
           expect(word.xMax).toBeLessThanOrEqual(paper.width); expect(word.yMax).toBeLessThanOrEqual(paper.height);
         }
-        if (rxFixture.long) {
+        if (prescription && !rxFixture.historicalIbuprofen) {
           const pageText = paper.words.map(word => word.text).join(" ");
-          for (const identity of ["SYN-RX-PATIENT", "SYN-RX-001", "SYN-SAVED-CLINICIAN", "Rx", "#11", ...(rxFixture.longIdentity ? ["SYN-PATIENT-LAST", "SYN-DOCTOR-LAST"] : [])]) expect(pageText).toContain(identity);
+          for (const identity of ["SYN-RX-PATIENT", "SYN-RX-001", "SYN-SAVED-CLINICIAN", "Rx", "#11"]) expect(pageText).toContain(identity);
+          if (rxFixture.longIdentity) {
+            const identities = [
+              "SYN-RX-PATIENT SYNTHETIC EXTENDED PATIENT IDENTITY FOR WRAPPING SYN-PATIENT-LAST",
+              "SYN-SAVED-CLINICIAN SYNTHETIC EXTENDED DOCTOR IDENTITY FOR WRAPPING SYN-DOCTOR-LAST",
+            ];
+            const identityHeader = await page.locator('.prescription-pages > thead').innerText();
+            // These synthetic identities are ASCII. Poppler may split hyphens,
+            // interleave the Arabic field label, or insert Rx #11 before the
+            // clinician's wrapped suffix. Remove those layout separators;
+            // every identity character must still occur in order on every page.
+            const extractedIdentity = pageText.replace(/Rx\s*#11/g, "").replace(/[^\x21-\x7e]|:/g, "");
+            for (const identity of identities) {
+              expect(identityHeader).toContain(identity);
+              expect(extractedIdentity).toContain(identity.replace(/\s/g, ""));
+            }
+          }
         }
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
@@ -153,12 +196,12 @@ describe("native compact print regression witnesses", () => {
           expect(body).toContain(historicalIbuprofenItem.instructions);
           expect(body).toContain(historicalIbuprofenItem.instructionsEn);
           expect(body).toContain("طبيب الأمن أ");
-          // Every rendered word remains within the single A6 sheet (checked above).
+          // Every rendered word remains within the single operator-selected A5 sheet (checked above).
           expect(pages).toHaveLength(1);
         }
-        if (rxFixture.long) {
+        if (prescription) {
           const finalPage = pages.at(-1)!.words.map(word => word.text).join(" ");
-          expect(finalPage).toContain("SYN-MED-20");
+          if (rxFixture.long) expect(finalPage).toContain("SYN-MED-20");
           expect(finalPage).toContain("Signature"); expect(finalPage).toContain("Stamp");
         }
         if (rxFixture.long) for (let index = 1; index <= 20; index++) {
