@@ -107,7 +107,7 @@ export default function OrthoFollowupPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-5xl [&_a]:scroll-my-24 [&_button]:scroll-my-24 [&_input]:scroll-my-24">
       <PageHeader
         title="وحدة التقويم"
         subtitle="تقييم الحالات ومتابعة العلاج والمواعيد"

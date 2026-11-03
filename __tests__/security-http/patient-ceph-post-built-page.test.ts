@@ -119,6 +119,7 @@ async function fixture(width: number) {
     expect(response?.status()).toBe(200);
     const card = caseCard(page); await card.waitFor();
     await card.getByRole("button", { name: /السجلات/ }).click();
+    await card.getByRole("navigation", { name: "أقسام تشخيص الحالة" }).getByRole("button", { name: "تحليل السيفالو", exact: true }).click();
     await card.getByRole("button", { name: NEW, exact: true }).click();
     await expect.poll(() => card.getByRole("button", { name: OPEN, exact: true }).isDisabled()).toBe(false);
     return { page, context, card, posts, navigationAttempts,

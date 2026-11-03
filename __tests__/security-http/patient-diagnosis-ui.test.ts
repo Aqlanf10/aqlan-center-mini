@@ -74,6 +74,7 @@ async function fixture(width: number, session: Pick<Session, "cookie"> = h.sessi
       await expect.poll(() => page.getByTestId("patient-treatment-section").inputValue()).toBe("ortho");
     } else await page.getByTestId("patient-subtab-ortho").waitFor();
     const card = caseCard(page, "A"); await card.getByRole("button", { name: /السجلات/ }).click();
+    await card.getByRole("navigation", { name: "أقسام تشخيص الحالة" }).getByRole("button", { name: "التشخيص وقائمة المشاكل", exact: true }).click();
     const panel = diagnosisPanel(card, page); await panel.getByRole("heading", { name: /التشخيص السريري لهذه الحالة/ }).waitFor();
     return panel;
   };

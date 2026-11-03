@@ -159,6 +159,7 @@ async function fixture(width: number) {
   const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
   const openCase = async (key: "A" | "B") => {
     const card = caseCard(page, key); await card.getByRole("button", { name: /السجلات/ }).click();
+    await card.getByRole("navigation", { name: "أقسام تشخيص الحالة" }).getByRole("button", { name: "الصور والأشعة", exact: true }).click();
     const panel = card.getByTestId("ortho-records-grid"); await panel.waitFor(); return panel;
   };
   const open = async () => {
@@ -198,6 +199,7 @@ describe("exact-case orthodontic record slots on the built RTL patient page", ()
       // The signed unlinked T1 is a patient-wide reference, never the current
       // case's summary. Exercise PatientCeph's real toggle and DOM at both widths.
       const card = caseCard(f.page, "A");
+      await card.getByRole("navigation", { name: "أقسام تشخيص الحالة" }).getByRole("button", { name: "تحليل السيفالو", exact: true }).click();
       await card.getByText("لا توجد دراسات سيفالومترية مسجلة بعد", { exact: true }).waitFor();
       expect(await card.getByTestId("patient-ceph-summary").count()).toBe(0);
       await card.getByRole("button", { name: `دراسات الحالة #${caseA}`, exact: true }).click();
