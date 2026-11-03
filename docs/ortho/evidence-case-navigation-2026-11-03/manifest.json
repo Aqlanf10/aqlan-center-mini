@@ -1,0 +1,27 @@
+{
+  "scope": "Synthetic local evidence; no staging or production acceptance",
+  "codeCommit": "261ec5e6f55ae0e3ab93a59c94baced9a2fbdeb6",
+  "buildId": "OGsqRYobz-bZxV27xsBpC",
+  "files": [
+    {
+      "path": "browser.txt",
+      "sha256": "d79a2d85e8ba30beca21cc76edf7a07a41404e93f2b7760941dfc0eab511ba6e",
+      "bytes": 169
+    },
+    {
+      "path": "case-navigation-1280.png",
+      "sha256": "bdf5774b4561a1116f1f175b9c2153457dd76b2c955a7db0e09ad1c04bf7d723",
+      "bytes": 215109
+    },
+    {
+      "path": "case-navigation-390.png",
+      "sha256": "e67d233a1f0b0f7a5e8d961c505fa89afe03ef7c3167249a69e5dcc30ba0ea2a",
+      "bytes": 161311
+    },
+    {
+      "path": "unit.txt",
+      "sha256": "ee80604e35368bd96a81a5d1e6ef554d6f91ff77da70b16bbba0582088f9aee9",
+      "bytes": 175
+    }
+  ]
+}
