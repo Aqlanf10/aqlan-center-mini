@@ -48,7 +48,9 @@ describe("case-oriented diagnostic sections and incremental saved evidence", () 
       await page.getByLabel("حالة تناظر الوجه", { exact: true }).waitFor();
       expect(await chief.isVisible()).toBe(false);
       await page.getByRole("button", { name: "الصور والأشعة", exact: true }).click();
-      expect(await page.getByTestId("ortho-case-assessment-v2").isVisible()).toBe(false);
+      expect(await page.getByTestId("ortho-case-assessment-v2").isVisible()).toBe(true);
+      expect(await page.getByRole("region", { name: "قراءة البانوراما وربطها بالأسنان", exact: true }).isVisible()).toBe(true);
+      expect(await chief.isVisible()).toBe(false);
       await page.getByRole("button", { name: "المقابلة والتاريخ", exact: true }).click();
       expect(await chief.inputValue()).toBe("شكوى اصطناعية محفوظة على مراحل");
       await page.getByRole("button", { name: "حفظ مراجعة تقييم جديدة", exact: true }).click();

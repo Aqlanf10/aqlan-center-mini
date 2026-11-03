@@ -38,6 +38,7 @@ import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
 import { ORTHO_CASE_JOURNEY_SQL } from './ortho-case-journey-schema';
 import { ORTHO_RETENTION_TRANSITION_SQL } from './ortho-retention-transition-schema';
 import { ORTHO_ASSESSMENT_INTAKE_SQL } from "./ortho-assessment-intake-schema";
+import { ORTHO_PROBLEM_SOURCES_SQL } from "./ortho-problem-sources-schema";
 import { ORTHO_RECORD_UPLOADS_SQL } from "./ortho-record-uploads-schema";
 import { ORTHO_FACIAL_ANALYSIS_SQL } from './ortho-facial-analysis-schema';
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
@@ -2132,6 +2133,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0102", name: "ortho_facial_analysis", filename: "0102_ortho_facial_analysis.sql", sql: ORTHO_FACIAL_ANALYSIS_SQL, checksum: checksumOf(ORTHO_FACIAL_ANALYSIS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0103", name: "ortho_assessment_intake", filename: "0103_ortho_assessment_intake.sql", sql: ORTHO_ASSESSMENT_INTAKE_SQL, checksum: checksumOf(ORTHO_ASSESSMENT_INTAKE_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0104", name: "ortho_record_uploads", filename: "0104_ortho_record_uploads.sql", sql: ORTHO_RECORD_UPLOADS_SQL, checksum: checksumOf(ORTHO_RECORD_UPLOADS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0105", name: "ortho_problem_sources", filename: "0105_ortho_problem_sources.sql", sql: ORTHO_PROBLEM_SOURCES_SQL, checksum: checksumOf(ORTHO_PROBLEM_SOURCES_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 

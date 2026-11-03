@@ -29,6 +29,7 @@ describe("patient appointment history index provenance", () => {
       "0102_ortho_facial_analysis.sql",
       "0103_ortho_assessment_intake.sql",
       "0104_ortho_record_uploads.sql",
+      "0105_ortho_problem_sources.sql",
     ]);
   });
 

@@ -779,3 +779,19 @@ blob; this migration neither deletes those blobs nor changes backup retention.
 This remains an unmerged candidate. The inherited 0103 compatibility requirement
 for assessment/NULL-aware readers still applies; no production migration or
 rollback is authorized by this document.
+
+## 0105_ortho_problem_sources.sql — reviewed sources for the shared problem list
+
+Adds immutable `ortho_problem_source_reviews` linking a saved source snapshot to
+the canonical `patient_problems` row and its patient/orthodontic/clinical case.
+Each review retains source identity, version, available author and site facts,
+current reviewer identity, reason, predecessor and actor-scoped command receipt.
+Source changes require explicit review; they never rewrite the problem label.
+
+The runtime and numbered SQL are byte-identical. Existing problems and source
+records are unchanged, with no retrospective provenance inferred. Unregistered
+table collisions fail without adoption. Scope constraints reject cross-patient
+or cross-case reassignment, and review history cannot be updated or deleted.
+New reviews, optional problem creation and audit commit atomically. Retrying the
+same command returns its original result. This migration creates no visit,
+invoice or payment. This is an unmerged candidate, not a production rollout.

@@ -7,6 +7,10 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.at(-1)?.version === "0105" && files.at(-1)?.filename === "0105_ortho_problem_sources.sql") {
+    if (files.at(-2)?.version !== "0104" || files.at(-2)?.filename !== "0104_ortho_record_uploads.sql") throw new Error("Unreviewed baseline for problem sources.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   if (files.at(-1)?.version === "0104" && files.at(-1)?.filename === "0104_ortho_record_uploads.sql") {
     if (files.at(-2)?.version !== "0103" || files.at(-2)?.filename !== "0103_ortho_assessment_intake.sql") throw new Error("Unreviewed baseline for record uploads.");
     return periodontalCandidateMigrationVersion(files.slice(0, -1));

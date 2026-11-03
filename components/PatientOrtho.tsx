@@ -34,6 +34,9 @@ import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentS
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import { readRetentionTransitionCommand, readRetentionTransitionRead, type RetentionTransitionCommand, type RetentionTransitionRead } from "@/lib/ortho-retention-transition";
 import { verifyRetentionTransitionSaved } from "@/lib/ortho-retention-transition-client";
+import { readProblemSourceRead, verifyProblemSourceReceipt } from "@/lib/ortho-problem-source-client";
+import { readProblemSourceCommand, type ProblemSourceCandidate, type ProblemSourceCommand, type ProblemSourceRead } from "@/lib/ortho-problem-sources";
+import { canonicalJourneyJSON } from "@/lib/ortho-case-journey-json";
 import { OrthoRetentionEvents } from "./OrthoRetentionEvents";
 import { OrthoCaseStudyMount } from "./OrthoCaseStudyMount";
 import { makeRetentionMountOwner, type RetentionMountOwner } from "@/lib/ortho-retention-mount-owner";
@@ -393,6 +396,106 @@ function UncertainWrite({ draft }: { draft: Draft }) {
   return draft.uncertain ? <p role="alert" data-testid="ortho-write-uncertain" className="mt-2 text-xs font-bold text-amber-900">
     تعذّر تأكيد نتيجة الطلب السابق. قد يكون نُفّذ؛ راجع السجل بعد إعادة التحميل قبل فتح نموذج جديد. إعادة التحميل لا تعيد إرسال الطلب.
   </p> : null;
+}
+
+function OrthoProblemSourcesPanel({ patientId, row, visible }: { patientId: number; row: OrthoCase; visible: boolean }) {
+  const form = useOrthoDraft(`problem-sources:${row.id}`, patientId, row.id), { owner, draft } = form;
+  const [selected, setSelected] = form.field<ProblemSourceCandidate | null>("selected", null);
+  const [expectedReviewId, setExpectedReview] = form.field<number | null>("expectedReviewId", null);
+  const [action, setAction] = form.field<"create" | "link">("action", "create"), [label, setLabel] = form.field("label", "");
+  const [problemId, setProblemId] = form.field("problemId", ""), [reason, setReason] = form.field("reason", "");
+  const [confirmed, setConfirmed] = form.field("confirmed", false), [pending] = form.field<ProblemSourceCommand | null>("pending", null);
+  const [read, setRead] = useState<ProblemSourceRead | null>(null), [error, setError] = useState(""), [readVersion, reload] = useState(0);
+  const url = `/api/ortho/${row.id}/problem-sources`;
+  useEffect(() => {
+    if (!visible) return;
+    let active = true; const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), ORTHO_PARENT_READ_TIMEOUT_MS);
+    const current = () => active && owner.active && !owner.denied && draft.active;
+    void (async () => { try {
+      const response = await fetch(`${url}?patientId=${patientId}`, { cache: "no-store", signal: controller.signal });
+      if (!current()) return;
+      if (response.status === 401 || response.status === 403) { owner.deny(); return; }
+      if (!response.ok) throw Error("read_failed");
+      const value = readProblemSourceRead(await response.json(), { patientId, orthoCaseId: row.id });
+      if (current()) { setRead(value); setError(""); }
+    } catch { if (current()) { setRead(null); setError("تعذّرت قراءة مصادر قائمة المشاكل؛ لم يُعتبر السجل فارغاً. أعد القراءة."); } }
+    finally { clearTimeout(timeout); } })();
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+  }, [owner, draft, patientId, row.id, url, readVersion, visible]);
+  const choose = (identity: string) => {
+    const candidate = read?.candidates.find(c => c.identity === identity); if (!candidate || !form.editable()) return;
+    const previous = read?.reviews.find(r => r.sourceIdentity === identity);
+    setSelected(candidate); setExpectedReview(previous?.id ?? null); setLabel(candidate.proposedLabel ?? "");
+    setAction(previous ? "link" : "create"); setProblemId(previous ? String(previous.problemId) : ""); setConfirmed(false);
+  };
+  const save = async (retry: boolean) => {
+    const command = retry && pending ? pending : readProblemSourceCommand({ schemaVersion: 1, commandId: crypto.randomUUID(), source: selected?.ref,
+      expectedReviewId, action, problemId: action === "link" ? Number(problemId) : null, label: action === "create" ? label : null, reason, clinicianReviewed: confirmed });
+    if (!command || !read || !form.session?.id) { setError("اختر المصدر، وحدد المشكلة وسبب الربط، ثم أكد مراجعتك السريرية."); return; }
+    const operation = retry ? form.beginRetry(!!pending) : form.begin(read.writable); if (!operation) return;
+    const scope = { patientId, orthoCaseId: row.id, clinicalCaseId: read.clinicalCaseId, actorId: form.session.id };
+    form.commit("pending", command); setError(""); const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId, command }), signal: controller.signal });
+      if (!form.checkHeaders(response, operation)) return;
+      const payload = await response.json(); if (!form.current(operation)) return;
+      if (!response.ok) {
+        if (!retry && [400, 409].includes(response.status) && payload?.ok === false && typeof payload.code === "string") {
+          form.commit("pending", null); setError(typeof payload.message === "string" ? payload.message : "لم يُحفظ الربط؛ راجع المصدر الحالي."); setRead(null); return;
+        }
+        throw Error("unconfirmed_problem_review");
+      }
+      await verifyProblemSourceReceipt(payload, scope, command, response.status); if (!form.current(operation)) return;
+      form.acknowledge(operation, { selected: null, expectedReviewId: null, pending: null, label: "", problemId: "", reason: "", action: "create", confirmed: false });
+      owner.drafts.get(`strategy:${row.id}`)?.strategyView.notify(true);
+      setRead(null); reload(v => v + 1);
+    } catch { if (form.current(operation)) { form.uncertain(); setError("لم تتأكد نتيجة الحفظ؛ أعد نفس الطلب المحفوظ حتى لا تتكرر المشكلة."); } }
+    finally { clearTimeout(timeout); form.finish(operation); }
+  };
+  const control = "min-h-11 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-60";
+  const current = read?.candidates.find(c => c.identity === selected?.identity);
+  const stale = !!selected && !!read && (!current || canonicalJourneyJSON(current.ref) !== canonicalJourneyJSON(selected.ref));
+  const writable = form.editable() && !!read?.writable;
+  const latest = read?.reviews.filter((r, i, all) => all.findIndex(x => x.sourceIdentity === r.sourceIdentity) === i) ?? [];
+  const linkedProblems = [...new Set(latest.map(r => r.problemId))];
+  return <section aria-label="مصادر قائمة المشاكل الموحدة" className="my-4 space-y-3 rounded-xl border border-navy-200 bg-slate-50 p-3">
+    <h4 className="font-bold">من الفحص والتحاليل إلى قائمة المشاكل</h4>
+    <p className="text-sm">احفظ الفحص أو القراءة أولاً، ثم راجع المصدر هنا واربطه بمشكلة موجودة أو دوّن المشكلة مرة واحدة. القياس أو نتيجة الحساب لا يصبح تشخيصاً نهائياً تلقائياً.</p>
+    {error && <p role="alert">{error}</p>}
+    <button type="button" className={control} disabled={draft.busy || !form.caseGranted()} onClick={() => { setRead(null); reload(v => v + 1); }}>تحديث مصادر المشاكل</button>
+    {read && <p className="text-xs">{read.problems.length} مشكلة في الحالة · {read.candidates.filter(c => c.available).length} مصدر محفوظ متاح للمراجعة. غياب المصدر لا يعني نتيجة طبيعية.</p>}
+    <fieldset disabled={!writable} className="space-y-3">
+      <label className="block">مصدر المشكلة<select aria-label="مصدر المشكلة" className={control} value={selected?.identity ?? ""} onChange={e => choose(e.target.value)}>
+        <option value="">اختر مصدراً محفوظاً…</option>{[...new Set(read?.candidates.map(c => c.category) ?? [])].map(category => <optgroup key={category} label={category}>{read?.candidates.filter(c => c.category === category).map(c => <option key={c.identity} value={c.identity} disabled={!c.available}>{c.title}{c.site ? ` · ${c.site}` : ""}</option>)}</optgroup>)}
+      </select></label>
+      {selected && <>
+        <div className="space-y-1 rounded-lg border bg-white p-3"><p className="font-bold">{selected.title}</p><p className="whitespace-pre-wrap break-words">{selected.summary}</p>
+          <p className="text-xs">موضع المصدر: {selected.site ?? "الحالة؛ لم يحدد سن أو جانب"} · مسجل المصدر: {selected.sourceActor}</p><p className="text-xs">تسجيل المصدر: {selected.sourceDate} · مرجع #{selected.ref.id}</p></div>
+        {stale && <p role="alert">للمصدر نسخة أحدث أو لم يعد متاحاً؛ مسودتك باقية على نسختها السابقة. اختر النسخة الحالية صراحة بعد مراجعتها.</p>}
+        {stale && current?.available && <button type="button" className={control} onClick={() => choose(current.identity)}>اختيار النسخة الحالية للمراجعة</button>}
+        <label className="block">طريقة ربط المشكلة<select aria-label="طريقة ربط المشكلة" className={control} value={action} onChange={e => { setAction(e.target.value as "create" | "link"); setConfirmed(false); }}>
+          <option value="create" disabled={expectedReviewId !== null}>تسجيل مشكلة جديدة بعد المراجعة</option><option value="link">ربط بمشكلة موجودة دون إعادة كتابتها</option></select></label>
+        {action === "create" ? <label className="block">المشكلة بعد مراجعة الطبيب<textarea className={control} rows={3} maxLength={2000} value={label} onChange={e => { setLabel(e.target.value); setConfirmed(false); }} /></label>
+          : <label className="block">المشكلة الموجودة<select aria-label="المشكلة الموجودة" className={control} value={problemId} onChange={e => { setProblemId(e.target.value); setConfirmed(false); }}><option value="">اختر المشكلة…</option>{read?.problems.filter(p => p.status === "active").map(p => <option key={p.id} value={p.id}>{p.label}{p.site ? ` · ${p.site}` : ""}</option>)}</select></label>}
+        <label className="block">سبب مراجعة وربط المصدر<textarea className={control} rows={2} maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} /></label>
+        <label className="flex min-h-11 items-center gap-2"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />راجعت المصدر وأقرّ ارتباطه بهذه المشكلة</label>
+        <button type="button" className={control} disabled={stale || !confirmed || !selected.available} onClick={() => void save(false)}>حفظ المشكلة ومراجعة مصدرها</button>
+      </>}
+    </fieldset>
+    {draft.uncertain && <button type="button" className={control} disabled={draft.busy || !pending || !read} onClick={() => void save(true)}>التحقق بإعادة نفس طلب المشكلة</button>}
+    {!!linkedProblems.length && <div aria-label="المشاكل المرتبطة ومراجعة مصادرها" className="space-y-2">{linkedProblems.map(id => {
+      const related = latest.filter(r => r.problemId === id), currentLabel = read?.problems.find(p => p.id === id)?.label ?? related[0].problemLabel;
+      return <article key={id} aria-label={`المشكلة المرتبطة ${id}`} className="rounded-lg border bg-white p-3">
+        <h5 className="font-bold">{currentLabel}</h5><p className="text-xs">المشكلة #{id} · {related.length} مصادر مرتبطة</p>
+        {related.map(r => <div key={r.id} className="mt-3 border-t pt-3">
+          <p className="text-sm font-bold">{r.source.category} · {r.source.title}</p><p className="text-xs">راجعها {r.createdBy}{r.source.site ? ` · ${r.source.site}` : ""}</p>
+          {r.problemLabel !== currentLabel && <p className="text-xs">نص المشكلة وقت مراجعة المصدر: {r.problemLabel}</p>}
+          <p>{r.currentSourceState === "current" ? "المصدر يطابق النسخة المراجعة" : r.currentSourceState === "newer_version" ? "للمصدر نسخة أحدث تحتاج مراجعتك؛ لم تتغير المشكلة المحفوظة" : "المصدر غير متاح حالياً؛ بقيت المشكلة ومراجعتها محفوظتين"}</p>
+          <details><summary className="min-h-11 cursor-pointer py-2">تاريخ مراجعات المصدر</summary>{read?.reviews.filter(x => x.sourceIdentity === r.sourceIdentity).map(x => <p key={x.id} className="whitespace-pre-wrap break-words text-xs">#{x.id} · {x.createdAt} · {x.createdBy} · {x.reason} · {x.source.summary}</p>)}</details>
+        </div>)}
+      </article>;
+    })}</div>}
+  </section>;
 }
 
 /** Explicit clinician decision; the owner retains the exact command across pillar changes. */
@@ -1235,6 +1338,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       {/* التحليل السريري للفكين وتصنيف الحالة (Malocclusion Diagnosis) */}
                       <section hidden={currentSection !== "diagnosis"} className="rounded-2xl border border-slate-200 bg-white p-3.5">
                         <PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={safeError} />
+                        {owner.clinical && <OrthoProblemSourcesPanel patientId={patientId} row={row} visible={currentSection === "diagnosis"} />}
                         <button type="button" className="mt-3 min-h-11 rounded-lg border px-3 py-2 text-sm"
                           onClick={() => { if (currentCase(row.id)) setPillarForCase(row.id, "prescription"); }}>الانتقال إلى أهداف وخطة الحالة</button>
                       </section>
