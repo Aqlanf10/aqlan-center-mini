@@ -67,6 +67,8 @@ vi.mock("react", async (original) => {
       const owner = scope(); const index = owner.cursor++;
       if (!(index in owner.values)) owner.values[index] = { current: initial }; return owner.values[index];
     },
+    // URL bookmark semantics are exercised in a real browser; this owner simulator uses the SSR snapshot.
+    useSyncExternalStore: (_subscribe: unknown, _snapshot: unknown, serverSnapshot: () => string) => { scope().cursor++; return serverSnapshot(); },
     useMemo: memo, useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
     useEffect: (callback: () => void | (() => void), deps?: readonly unknown[]) => effect(callback, deps, false),
     useLayoutEffect: (callback: () => void | (() => void), deps?: readonly unknown[]) => effect(callback, deps, true),

@@ -36,6 +36,8 @@ vi.mock("react", async (original) => {
       if (!(index in hooks.values)) hooks.values[index] = { current: initial };
       return hooks.values[index];
     },
+    // Browser bookmark behavior is covered separately; preserve this simulator hook slot.
+    useSyncExternalStore: (_subscribe: unknown, _snapshot: unknown, serverSnapshot: () => string) => { hooks.cursor++; return serverSnapshot(); },
     useMemo: memo,
     useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
     useLayoutEffect: (effect: () => void, deps?: readonly unknown[]) => {

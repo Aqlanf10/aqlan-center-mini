@@ -6,7 +6,7 @@ import { OrthoAssessmentMeasurementsV2 } from "./OrthoAssessmentMeasurementsV2";
 import { readAssessmentResponseV2 } from "@/lib/ortho-assessment-client-v2";
 import { newAssessmentEditorV2, readAssessmentEditorV2, assessmentEditorCommandV2, type AssessmentEditorV2 } from "@/lib/ortho-assessment-editor-v2";
 import type { AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
-import type { AssessmentReadResponseV2, AssessmentSaveExpectationV2 } from "@/lib/ortho-assessment-response-v2";
+import type { AssessmentAppendResponse, AssessmentReadResponseV2, AssessmentSaveExpectationV2 } from "@/lib/ortho-assessment-response-v2";
 import { plain } from "@/lib/ortho-assessment-model";
 import { OrthoAssessmentProgressV2 } from "./OrthoAssessmentProgressV2";
 import { editMeasurementPayloadV2 } from "@/lib/ortho-assessment-measurement-editor-v2";
@@ -21,6 +21,7 @@ export interface AssessmentLifetimeV2 {
 export interface OrthoCaseAssessmentV2Props {
   patientId: number; orthoCaseId: number; clinicalCaseId?: number; lifetime?: AssessmentLifetimeV2;
   sectionView?: "interview" | "extraoral" | "intraoral" | "measurements";
+  onContinue?: () => void;
 }
 const control = "min-h-11 min-w-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-40";
 /** Read every preserved scalar, including legacy fields unsupported by this editor.
@@ -34,7 +35,7 @@ export function OrthoCaseAssessmentV2(props: OrthoCaseAssessmentV2Props) {
   const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
   return <Workspace key={`${props.patientId}:${props.orthoCaseId}:${props.clinicalCaseId ?? "unresolved"}:${authority}`} {...props} />;
 }
-function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionView }: OrthoCaseAssessmentV2Props) {
+function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionView, onContinue }: OrthoCaseAssessmentV2Props) {
   const owner = useMemo(() => ({ identity: lifetime?.identity }), [lifetime?.identity]);
   const activeOwner = useRef<typeof owner | null>(null);
   useLayoutEffect(() => {
@@ -46,6 +47,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
   const [selected, setSelected] = useState<number>();
   const [reload, setReload] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
+  const continuation = useRef<{ commandId: string; section: typeof sectionView } | null>(null);
   const readVersion = lifetime?.readVersion ?? 0;
   const generation = useMemo(() => ({ owner, selected, reload, readVersion, sectionView }), [owner, selected, reload, readVersion, sectionView]);
   // Only the committed view may act. A persistent parent owner can outlive this
@@ -96,15 +98,18 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     if (!next) { setMessage("هذه نسخة تاريخية بالإصدار الأول. يلزم إجراء ترقية صريح يحافظ على القيم ومصادرها؛ لم تُحوّل إلى نموذج فارغ."); return; }
     lifetime.settle("document", JSON.stringify(next)); setMessage(null);
   }
-  async function save(retry = false) {
+  async function save(retry = false, advance = false) {
     if (!currentDraft() || !lifetime || !draft || data?.state !== "ready" || !data.clinicalWritable || !(activeOwner.current === owner) || !lifetime.active()
       || lifetime.busy || (!retry && !editable) || retry && !lifetime.uncertain) return;
     const command = assessmentEditorCommandV2(draft);
     if (!command) { setMessage("أكمل السبب والقياسات ومصدر وتاريخ كل قيمة قبل الحفظ؛ الفراغ ليس صفرًا."); return; }
     const expected = { scope: { patientId, orthoCaseId, clinicalCaseId: data.clinicalCaseId }, command, previousVersion: draft.previousVersion };
     const lease = retry ? lifetime.beginRetry(expected) : lifetime.begin(expected); if (!lease) return;
+    if (!retry) continuation.current = advance ? { commandId: command.commandId, section: sectionView } : null;
+    const advanceAfterConfirmation = !!onContinue && continuation.current?.commandId === command.commandId && continuation.current.section === sectionView;
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
     let confirmed = false;
+    let followingDraft: AssessmentEditorV2 | null = null;
     const say = (text: string) => { if (currentView()) setMessage(text); };
     try {
       const response = await fetch(`/api/ortho/${orthoCaseId}/assessment`, { method: "POST", headers: { "Content-Type": "application/json" }, body: lease.body, signal: controller.signal });
@@ -120,11 +125,22 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
         return;
       }
       confirmed = await lease.confirmResponse(raw, response.status);
+      // The lease has checked the identity, exact command, predecessor, content
+      // hash and HTTP replay status. Only this verified revision may seed the
+      // next section; a coincidental later GET is never an acknowledgment.
+      if (confirmed && advanceAfterConfirmation) followingDraft = newAssessmentEditorV2(crypto.randomUUID(), (raw as AssessmentAppendResponse).revision);
       if (!confirmed) { lease.markUncertain(); say("رد الحفظ لا يثبت النسخة المطلوبة؛ بقيت المسودة والطلب دون تغيير."); }
     } catch { if (lease.current()) { lease.markUncertain(); say("قد يكون الحفظ تم رغم فقد الرد. أعد التحقق بنفس الطلب فقط."); } }
     finally {
       clearTimeout(timer); const current = lease.current(); lease.finish();
-      if (current && confirmed && currentView()) { setSelected(undefined); setReload(value => value + 1); setMessage("حُفظت مراجعة موثقة للقيم والنتائج."); }
+      if (current && confirmed && currentView()) {
+        continuation.current = null;
+        setSelected(undefined); setReload(value => value + 1); setMessage("حُفظت مراجعة موثقة للقيم والنتائج.");
+        if (followingDraft && advanceAfterConfirmation && latest.current?.active()) {
+          lifetime.settle("document", JSON.stringify(followingDraft));
+          onContinue?.();
+        }
+      }
     }
   }
   if (lifetime && !lifetime.active()) return <p role="status">السياق أو الصلاحية غير صالحين؛ التقييم محجوب حتى إعادة التحقق.</p>;
@@ -173,6 +189,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
       <label className="block">سبب إنشاء هذه المراجعة<input className={`${control} w-full`} maxLength={500} disabled={!editable} value={draft.reason}
         onChange={event => change({ ...draft, reason: event.target.value })} /></label>
       <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={!editable} onClick={() => void save()}>حفظ مراجعة تقييم جديدة</button>
+        {onContinue && <button type="button" className={`${control} font-bold text-navy-900`} disabled={!editable} onClick={() => void save(false, true)}>حفظ والمتابعة</button>}
         <button type="button" className={control} disabled={!lifetime?.active() || lifetime.busy || lifetime.uncertain} onClick={() => {
           if (!currentDraft() || !lifetime?.active() || latest.current?.busy || latest.current?.uncertain) return;
           if (lifetime.dirty && !window.confirm("تجاهل المسودة غير المحفوظة؟")) return;
