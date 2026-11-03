@@ -7,6 +7,12 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.at(-1)?.version === "0100" && files.at(-1)?.filename === "0100_ortho_case_journey.sql") {
+    if (files.at(-2)?.version !== "0093" || files.at(-2)?.filename !== "0093_prescription_issuance_commands.sql") {
+      throw new Error("Unreviewed baseline for orthodontic journey extension.");
+    }
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   const reviewedAdditions: Record<string, string> = {
     "0066": "0066_agreement_delta_amendments.sql",
     "0067": "0067_patient_appointment_history_index.sql",

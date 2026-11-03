@@ -96,6 +96,8 @@ export interface FollowupCase {
   /** تاريخ آخر شدّة — وقد لا توجد شدّة بعد لحالةٍ فُتحت حديثًا. */
   lastAdjustmentDate: string | null;
   nextWeeks: number;
+  /** Explicit documentary recall, independent of active-treatment adjustments. */
+  retentionRecall?: { state: "recorded" | "not_recorded" | "invalid"; dueDate: string | null };
   upperWire: string | null;
   lowerWire: string | null;
   /** الموعد القادم المحدد لمتابعة دورية؛ لا يُستنتج من أي موعد آخر للمريض. */
@@ -109,7 +111,7 @@ export interface FollowupCase {
 export interface FollowupRow extends FollowupCase {
   buckets: FollowupBucket[];
   /** التاريخ المستحق للشدّة القادمة بحساب nextWeeks — للعرض في القائمة. */
-  dueDate: string;
+  dueDate: string | null;
   daysSinceLast: number | null;
 }
 
@@ -128,7 +130,7 @@ export function classifyFollowups(input: {
     const buckets: FollowupBucket[] = [];
     const since = row.lastAdjustmentDate ?? row.startDate;
     const daysSinceLast = daysBetween(since, input.today);
-    const dueDate = nextAdjustmentDate(since, row.nextWeeks);
+    const dueDate = row.status === "retention" ? row.retentionRecall?.dueDate ?? null : nextAdjustmentDate(since, row.nextWeeks);
 
     const appointment = row.nextAppointment ?? row.bookingContext?.pastUnresolvedAppointment ?? null;
     if (appointment) {
@@ -145,9 +147,9 @@ export function classifyFollowups(input: {
 
     if (row.lastWasNoShow) buckets.push("no_show");
 
-    if (daysSinceLast >= 56) buckets.push("lapsed_8");
-    else if (daysSinceLast >= 42) buckets.push("lapsed_6");
-    else if (daysSinceLast >= 28) buckets.push("lapsed_4");
+    if (row.status === "active" && daysSinceLast >= 56) buckets.push("lapsed_8");
+    else if (row.status === "active" && daysSinceLast >= 42) buckets.push("lapsed_6");
+    else if (row.status === "active" && daysSinceLast >= 28) buckets.push("lapsed_4");
 
     if (row.status === "retention") buckets.push("retention");
 

@@ -1,0 +1,70 @@
+import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { Client } from "pg";
+import { chromium, type Browser } from "playwright";
+import JSZip from "jszip";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { baseUrl, harness } from "./_server";
+let browser: Browser, db: Client, h: Awaited<ReturnType<typeof harness>>;
+beforeAll(async () => {
+  h = await harness(); expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http");
+  db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect();
+  browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
+  await mkdir(".settings-ui-artifacts", { recursive: true });
+});
+afterAll(async () => { await browser?.close(); await db?.end(); });
+describe("retention and saved presentation through the actual patient workspace", () => {
+  it.each([390, 1280])("saves, reopens and exports synthetic records at %ipx", async width => {
+    const patientId = (await db.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'حالة تقويم اصطناعية') RETURNING id", [`SYN-JOURNEY-${randomUUID()}`])).rows[0].id;
+    const caseId = (await db.query("INSERT INTO ortho_cases(patient_id,created_by,status) VALUES($1,'synthetic','retention') RETURNING id", [patientId])).rows[0].id;
+    await db.query("INSERT INTO clinical_cases(patient_id,specialty,title,ortho_case_id,created_by) VALUES($1,'orthodontics','Synthetic bridge',$2,'synthetic')", [patientId, caseId]);
+    const money = async () => (await db.query("SELECT (SELECT count(*)::int FROM invoices WHERE patient_id=$1) invoices,(SELECT count(*)::int FROM payments WHERE patient_id=$1) payments", [patientId])).rows;
+    const before = await money();
+    const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE" });
+    const [name, ...value] = h.sessions.admin.cookie.split("="); await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+    const page = await context.newPage(), errors: string[] = []; page.on("pageerror", error => errors.push(error.message)); page.setDefaultTimeout(20_000);
+    try {
+      await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=ortho&orthoCaseId=${caseId}&pillar=retention`);
+      await page.getByLabel("نوع تدوين التثبيت", { exact: true }).selectOption("device_delivery");
+      await page.getByLabel("فك تدوين التثبيت", { exact: true }).selectOption("upper");
+      await page.getByLabel("نوع جهاز التثبيت", { exact: true }).selectOption("fixed");
+      await page.getByLabel("وصف جهاز التثبيت", { exact: true }).fill("جهاز اصطناعي علوي");
+      await page.getByLabel("امتداد حدث التثبيت", { exact: true }).fill("13–23");
+      await page.getByLabel("سبب حفظ سجل التثبيت", { exact: true }).fill("اختبار تسليم اصطناعي دون افتراض تاريخ");
+      const saved = page.waitForResponse(r => r.url().includes(`/ortho/${caseId}/retention-events`) && r.request().method() === "POST");
+      await page.getByRole("button", { name: "حفظ تدوين التثبيت", exact: true }).click();
+      expect((await saved).status()).toBe(201);
+      await page.getByText("جهاز اصطناعي علوي", { exact: false }).first().waitFor();
+      await page.screenshot({ path: `.settings-ui-artifacts/ortho-retention-${width}.png`, fullPage: true });
+      await page.getByRole("button", { name: /عرض الحالة/ }).click();
+      await page.getByLabel("إضافة المرجع إلى القسم", { exact: true }).selectOption("section_11");
+      await page.getByLabel("نوع مصدر الدراسة", { exact: true }).selectOption("retention_event");
+      await page.getByRole("group", { name: "اختيار مصدر حقيقي", exact: true }).getByRole("button", { name: "اختيار", exact: true }).click();
+      await page.getByLabel("سبب حفظ النسخة", { exact: true }).fill("دراسة اصطناعية للمراجعة");
+      await page.getByLabel("تعليق الدراسة", { exact: true }).fill("تعليق اصطناعي محفوظ على النسخة");
+      const studySaved = page.waitForResponse(r => r.url().includes(`/ortho/${caseId}/case-study/editor`) && r.request().method() === "POST");
+      await page.getByRole("button", { name: "حفظ مسودة الدراسة", exact: true }).click();
+      expect((await studySaved).status()).toBe(201);
+      const pptxLink = page.getByRole("link", { name: "PowerPoint نصي قابل للتحرير", exact: true }); await pptxLink.waitFor();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+      await page.screenshot({ path: `.settings-ui-artifacts/ortho-study-${width}.png`, fullPage: true });
+      const pptx = await context.request.get(new URL((await pptxLink.getAttribute("href"))!, baseUrl).href);
+      expect(pptx.status()).toBe(200); expect(pptx.headers()["cache-control"]).toContain("no-store");
+      const zip = await JSZip.loadAsync(await pptx.body());
+      const slides = Object.keys(zip.files).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name)); expect(slides.length).toBeGreaterThan(0);
+      const xml = await zip.file(slides[0])!.async("text"); expect(xml).toContain("تعليق اصطناعي محفوظ على النسخة"); expect(xml).toContain("<a:t>");
+      const allSlideText = (await Promise.all(slides.map(name => zip.file(name)!.async("text")))).join("\n");
+      expect(allSlideText).toContain("جهاز اصطناعي علوي");
+      const printHref = await page.getByRole("link", { name: "طباعة النسخة المحفوظة / PDF نصي", exact: true }).getAttribute("href");
+      const printed = await page.goto(`${baseUrl}${printHref}`); expect(printed?.status()).toBe(200);
+      expect(await page.locator("main").innerText()).toContain("تعليق اصطناعي محفوظ على النسخة");
+      expect(await page.locator("main").innerText()).toContain("جهاز اصطناعي علوي");
+      await page.pdf({ path: `.settings-ui-artifacts/ortho-study-${width}.pdf`, format: "A4", printBackground: true });
+      const denied = await fetch(`${baseUrl}/api/ortho/${caseId}/retention-events?patientId=${patientId}`, { headers: { Cookie: h.sessions.accountant.cookie } }); expect(denied.status).toBe(403);
+      const revision = (await db.query("SELECT id FROM ortho_case_study_revisions WHERE ortho_case_id=$1", [caseId])).rows[0];
+      expect((await fetch(`${baseUrl}/api/ortho/${caseId}/case-study/text-pptx?patientId=${patientId}&revisionId=${revision.id}`, { headers: { Cookie: h.sessions.accountant.cookie } })).status).toBe(403);
+      expect(await money()).toEqual(before); expect(errors).toEqual([]);
+    } catch (error) { await page.screenshot({ path: `.settings-ui-artifacts/ortho-journey-failure-${width}.png`, fullPage: true }); throw error; }
+    finally { await context.close(); }
+  });
+});

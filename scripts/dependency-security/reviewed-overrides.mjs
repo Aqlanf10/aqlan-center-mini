@@ -1,10 +1,12 @@
 import { equal, invariant } from "../../lib/scoped-braces-exception.mjs";
 
 // Dependency resolution only, never an advisory disposition. Exact development
-// consumers use official parser/minimatch fixes; all audit checks remain active.
+// consumers use official parser/minimatch fixes. PptxGenJS uses the official
+// image-size fix (see docs/ortho/2026-11-03-dependency-review.md). All audit checks remain active.
 // No braces override, version range, additional consumer or arbitrary override
 // is admitted. Changing this object requires independent security review.
 export const REVIEWED_OVERRIDES = Object.freeze({
+  "pptxgenjs@4.0.1": Object.freeze({ "image-size": "2.0.4" }),
   "tailwindcss@3.4.19": Object.freeze({ "postcss-selector-parser": "7.1.6" }),
   "postcss-nested@6.2.0": Object.freeze({ "postcss-selector-parser": "7.1.6" }),
   "eslint@10.14.0": Object.freeze({ minimatch: "11.0.3" }),

@@ -238,7 +238,7 @@ beforeEach(() => {
   patientId = 19; hooks.session = principalA(); hooks.existingRefresh = null; requests = []; unexpected = []; fetchMock.mockReset(); createURL.mockReset(); revokeURL.mockReset();
   navigationRegistration = null; navigationRegistrations = []; delayNavigationCleanup = false; delayedNavigationCleanup = [];
   confirmLeave.mockReset(); confirmLeave.mockReturnValue(false);
-  vi.stubGlobal("window", { confirm: confirmLeave, prompt: vi.fn() });
+  vi.stubGlobal("window", Object.assign(new EventTarget(), { confirm: confirmLeave, prompt: vi.fn() }));
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-04T06:00:00Z"));
   createURL.mockImplementation(() => `blob:synthetic-ortho-${createURL.mock.calls.length}`);
   vi.spyOn(URL, "createObjectURL").mockImplementation(createURL);

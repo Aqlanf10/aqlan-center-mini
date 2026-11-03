@@ -18,6 +18,8 @@ import type { DoctorPermissions } from "@/lib/doctor-permissions";
  *    منفصل غير المتصفح — لا يُصدر من دخول المتصفح ولا يُخزَّن في الصفحة.
  */
 export interface SessionInfo {
+  /** Display identity for command recovery only; all authority is rechecked by the server. */
+  id?: number;
   username: string;
   role: Role | string;
   displayName?: string;
@@ -119,6 +121,7 @@ export function SessionProvider({ value, children }: {
         if (cancelled) return;
         if (response.ok) {
           const me = (await response.json()) as {
+            id?: number;
             username?: string;
             displayName?: string;
             role?: string;
@@ -126,6 +129,7 @@ export function SessionProvider({ value, children }: {
           };
           if (me?.username && me?.role) {
             setSessionState({
+              id: me.id,
               username: me.username,
               displayName: me.displayName,
               role: me.role,

@@ -215,6 +215,7 @@ const classifierCalls = () => fetchMock.mock.calls.filter(([url]) => url.include
 const writes = () => fetchMock.mock.calls.filter(([, init]) => !!init?.method);
 
 beforeEach(() => {
+  vi.stubGlobal("window", new EventTarget());
   unmount(); componentIds = new Map(); hooks.changed = false; hooks.retiredWrites = 0;
   hooks.session = { username: "synthetic-a", role: "doctor", permissions: { ...DEFAULT_DOCTOR_PERMISSIONS } };
   patientId = 19; caseRow = fixture(); fetchMock.mockReset();

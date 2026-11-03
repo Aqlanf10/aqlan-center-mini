@@ -3,7 +3,7 @@ import { SPECIALTIES, type ServiceSpecialty } from "./appointment-services";
 /** Views over the existing patient record. These destinations never create clinical work. */
 export type PatientTab = "summary" | "treatment" | "today" | "account" | "files";
 export type TreatmentSubTab = "chart" | "plans" | "cases" | "endo" | "ortho" | "lab" | "referrals" | "materials";
-export type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention";
+export type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention" | "presentation";
 /** Navigation references only; none of these values authorize or create clinical work. */
 export interface ClinicalNavigationContext {
   patientId?: number;
@@ -27,7 +27,7 @@ export function parseClinicalId(raw: string): number | null {
   return /^[1-9]\d*$/.test(raw) && isClinicalId(Number(raw)) ? Number(raw) : null;
 }
 export const CLINICAL_CONTEXT_IDS = ["patientId", "planId", "planItemId", "clinicalCaseId", "orthoCaseId", "endoTreatmentId", "visitId"] as const;
-export const ORTHO_PILLARS: readonly OrthoPillar[] = ["wires", "diagnostics", "prescription", "retention"];
+export const ORTHO_PILLARS: readonly OrthoPillar[] = ["wires", "diagnostics", "prescription", "retention", "presentation"];
 export function readClinicalContext(params: URLSearchParams): Pick<PatientLocation, "context" | "contextError"> {
   const context: ClinicalNavigationContext = {};
   for (const key of CLINICAL_CONTEXT_IDS) {

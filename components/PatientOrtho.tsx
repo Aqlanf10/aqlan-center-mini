@@ -28,6 +28,12 @@ import { PatientDiagnosis } from "./PatientDiagnosis";
 import { OrthoCaseAssessmentV2, type AssessmentLifetimeV2 } from "./OrthoCaseAssessmentV2";
 import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
+import { OrthoRetentionEvents } from "./OrthoRetentionEvents";
+import { OrthoCaseStudyMount } from "./OrthoCaseStudyMount";
+import { makeRetentionMountOwner, type RetentionMountOwner } from "@/lib/ortho-retention-mount-owner";
+import { makeStudyMountOwner, type StudyMountOwner } from "@/lib/ortho-case-study-mount-owner";
+import { makeRetentionRecoveryLedger } from "@/lib/ortho-retention-recovery";
+import { makeStudyRecoveryLedger } from "@/lib/ortho-case-study-recovery";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
@@ -99,13 +105,14 @@ interface OrthoCase {
   };
 }
 
-type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention";
+type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention" | "presentation";
 
 const PILLAR_TABS: { key: OrthoPillar; label: string; icon: string }[] = [
   { key: "wires", label: "مسار الأسلاك والشدّات", icon: "⚡" },
   { key: "diagnostics", label: "السجلات والسيفالومتري (WebCeph)", icon: "📐" },
   { key: "prescription", label: "خطة العلاج والميكانيكا", icon: "⚙️" },
   { key: "retention", label: "التثبيت والاستبقاء", icon: "🛡️" },
+  { key: "presentation", label: "عرض الحالة", icon: "📋" },
 ];
 
 function monthsText(months: number): string {
@@ -154,6 +161,8 @@ type OrthoOwner = {
   controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null;
   cases: OrthoCase[]; drafts: Map<string, Draft>; mutations: Set<Mutation>;
   assessments: Map<number, AssessmentOwnerV2>;
+  studies: Map<number, StudyMountOwner>; retentions: Map<number, RetentionMountOwner>;
+  studyRecovery: ReturnType<typeof makeStudyRecoveryLedger>; retentionRecovery: ReturnType<typeof makeRetentionRecoveryLedger>;
   deny: () => void;
   activate: () => void; activateStandaloneDraft: (key: string, draft: Draft) => void; retire: () => void;
   bindDenial: (deny: () => void) => void; denyRead: () => void;
@@ -167,7 +176,8 @@ const OrthoOwnerContext = createContext<OrthoOwner | null>(null);
 function makeOwner(standalone = false): OrthoOwner {
   const owner: OrthoOwner = { active: false, denied: false, clinical: standalone, contact: standalone, standalone,
     readSequence: 0, mutationSequence: 0, denialSequence: 0, controller: null, timer: null,
-    cases: [], drafts: new Map(), assessments: new Map(), mutations: new Set(), deny: () => {},
+    cases: [], drafts: new Map(), assessments: new Map(), studies: new Map(), retentions: new Map(),
+    studyRecovery: makeStudyRecoveryLedger(), retentionRecovery: makeRetentionRecoveryLedger(), mutations: new Set(), deny: () => {},
     activate: () => { owner.active = true; },
     activateStandaloneDraft: (key, draft) => {
       owner.active = true; owner.clinical = true; owner.contact = true;
@@ -179,6 +189,8 @@ function makeOwner(standalone = false): OrthoOwner {
       owner.denied = true; owner.clinical = false; owner.contact = false;
       owner.denialSequence++; owner.controller?.abort(); owner.cases = [];
       for (const assessment of owner.assessments.values()) assessment.invalidateRead();
+      for (const study of owner.studies.values()) study.invalidateRead();
+      for (const retention of owner.retentions.values()) retention.invalidateRead();
       owner.clearTimer();
       for (const operation of owner.mutations) {
         operation.active = false; operation.draft.markUncertain();
@@ -186,6 +198,8 @@ function makeOwner(standalone = false): OrthoOwner {
     },
     beginRead: (controller) => {
       for (const assessment of owner.assessments.values()) assessment.invalidateRead();
+      for (const study of owner.studies.values()) study.invalidateRead();
+      for (const retention of owner.retentions.values()) retention.invalidateRead();
       owner.controller?.abort();
       if (owner.timer !== null) clearTimeout(owner.timer);
       owner.controller = controller;
@@ -195,6 +209,8 @@ function makeOwner(standalone = false): OrthoOwner {
     },
     retireRead: () => {
       for (const assessment of owner.assessments.values()) assessment.invalidateRead();
+      for (const study of owner.studies.values()) study.invalidateRead();
+      for (const retention of owner.retentions.values()) retention.invalidateRead();
       owner.controller?.abort(); owner.readSequence++; owner.clearTimer();
       owner.clinical = false; owner.contact = false; owner.cases = [];
     },
@@ -264,9 +280,12 @@ function retireOwner(owner: OrthoOwner) {
   for (const key of owner.drafts.keys()) disposeDraft(owner, key);
   for (const assessment of owner.assessments.values()) assessment.retire();
   owner.assessments.clear();
+  for (const study of owner.studies.values()) study.retire();
+  for (const retention of owner.retentions.values()) retention.retire();
+  owner.studies.clear(); owner.retentions.clear();
 }
 function sessionScope(session: SessionInfo | null) {
-  return JSON.stringify(session ? [session.username, session.role, session.permissions ?? null] : null);
+  return JSON.stringify(session ? [session.id ?? null, session.username, session.role, session.permissions ?? null] : null);
 }
 function currentMutation(owner: OrthoOwner, operation: Mutation | null): operation is Mutation {
   return !!operation && owner.active && !owner.denied && operation.active && operation.draft.active
@@ -397,6 +416,8 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
     if (!owner.active) return false;
     const drafts = [...owner.drafts.values()].filter((draft) => draft.active);
     const assessments = [...owner.assessments.values()];
+    const records = [...owner.studies.values(), ...owner.retentions.values()];
+    if (records.some(record => record.busy || record.uncertain)) return false;
     if (assessments.some(assessment => !assessment.canLeave(() => true))) return false;
     if (owner.mutations.size > 0 || drafts.some((draft) => draft.busy)) return false;
     if (drafts.some((draft) => draft.uncertain)) {
@@ -405,11 +426,21 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
     // A confirmed booking is retained for its receipt, not an unsaved form.
     // Initial field defaults never mark a draft dirty. Confirming departure
     // only permits navigation; the existing owner cleanup disposes the draft.
-    return !assessments.some(assessment => assessment.needsUnloadWarning())
+    return !records.some(record => record.needsUnloadWarning())
+      && !assessments.some(assessment => assessment.needsUnloadWarning())
       && !drafts.some((draft) => draft.dirty && !draft.values.get("booked") && draft.values.get("signed") !== true)
       || window.confirm("هناك عمل غير محفوظ في التقويم. هل تريد تجاهله ومغادرة القسم؟");
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if ([...owner.studies.values(), ...owner.retentions.values()].some(record => record.needsUnloadWarning())) {
+        event.preventDefault(); event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [owner]);
   return <OrthoOwnerContext.Provider value={owner}>
     <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onOpenAccount={onOpenAccount} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
@@ -1083,13 +1114,15 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     </div>
                   )}
 
+                  {currentPillar === "presentation" && <OrthoJourneyPanel kind="study" patientId={patientId} caseId={row.id} patientName={patient?.name ?? ""} />}
                   {/* ────────────────── الركن الرابع: التثبيت والاستبقاء ────────────────── */}
                   {currentPillar === "retention" && (
                     <div className="space-y-4">
+                      <OrthoJourneyPanel kind="retention" patientId={patientId} caseId={row.id} patientName={patient?.name ?? ""} />
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="mb-3 flex items-center justify-between">
                           <h4 className="text-xs font-black text-navy-900">
-                            المثبّتات والاستقرار ومنع الارتداد (Relapse Prevention)
+                            ملخص التثبيت السابق وإغلاق الحالة
                           </h4>
                           <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-black ${
                             row.retainer && row.retainer !== "none"
@@ -1103,7 +1136,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                         {live && (
                           <div className="rounded-xl bg-slate-50 p-3 border border-slate-200">
                             <p className="mb-2 text-xs font-bold text-slate-700">
-                              اختر نوع المثبّت المسلّم للمريض:
+                              الملخص القديم لا يحدد الفك أو عدد الأجهزة. وثّق الأجهزة ومراجعاتها في السجل التفصيلي أعلاه:
                             </p>
                             <div className="flex flex-wrap gap-2 mb-3">
                               {(Object.keys(RETAINER_LABEL) as RetainerType[]).map((type) => (
@@ -1131,7 +1164,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                                 }}
                                 className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-black text-white hover:bg-emerald-700 shadow-xs transition-colors"
                               >
-                                ✓ أُكملت الحالة بنجاح وسُلّم المثبت
+                                إغلاق ملف الحالة بالكامل
                               </button>
                               <button
                                 onClick={async () => {
@@ -2190,4 +2223,31 @@ function OwnedAssessmentV2({ patientId, caseRow, sectionView }: { patientId: num
     begin: owner.begin, beginRetry: owner.beginRetry,
   };
   return <OrthoCaseAssessmentV2 patientId={patientId} orthoCaseId={caseRow.id} lifetime={lifetime} sectionView={sectionView} />;
+}
+
+/** Parent ownership survives pillar changes; patient/account changes retire it.
+ * Server identity is required for binding retries, never inferred from a name. */
+function OrthoJourneyPanel({ kind, patientId, caseId, patientName }: { kind: "study" | "retention"; patientId: number; caseId: number; patientName: string }) {
+  const parent = useContext(OrthoOwnerContext)!;
+  const session = useSession();
+  const [binding, setBinding] = useState<StudyMountOwner | RetentionMountOwner | null>(null);
+  useLayoutEffect(() => {
+    const actorId = session?.id;
+    if (!actorId || !Number.isSafeInteger(actorId)) return;
+    const authorized = () => parent.active && !parent.denied && parent.clinical && parent.cases.some(row => row.id === caseId);
+    const writable = () => authorized() && (session.role === "admin" || session.role === "doctor");
+    const shared = { patientId, orthoCaseId: caseId, actorId, ownerKey: `${actorId}:${patientId}:${caseId}:${kind}`, authorized, writable, deny: () => parent.deny() };
+    if (kind === "study") {
+      const owner = parent.studies.get(caseId) ?? makeStudyMountOwner({ ...shared, recovery: parent.studyRecovery });
+      parent.studies.set(caseId, owner); owner.activate(); setBinding(owner);
+    } else {
+      const owner = parent.retentions.get(caseId) ?? makeRetentionMountOwner({ ...shared, recovery: parent.retentionRecovery });
+      parent.retentions.set(caseId, owner); owner.activate(); setBinding(owner);
+    }
+    // Parent owns retirement and in-memory drafts across temporary tab changes.
+  }, [parent, patientId, caseId, kind, session?.id, session?.role]);
+  if (!binding) return <p role="status">جارٍ التحقق من هوية الحساب لفتح سجل الحالة. إذا استمرت الرسالة أعد تحميل الصفحة.</p>;
+  const confirmDiscard = () => window.confirm("هل تريد تجاهل التعديلات غير المحفوظة؟");
+  return kind === "study" ? <OrthoCaseStudyMount owner={binding as StudyMountOwner} patientName={patientName} confirmDiscard={confirmDiscard} />
+    : <OrthoRetentionEvents owner={binding as RetentionMountOwner} confirmDiscard={confirmDiscard} />;
 }

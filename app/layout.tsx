@@ -93,6 +93,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             value={
               session
                 ? {
+                    id: user?.id,
                     username: session.username,
                     role: session.role,
                     displayName: user?.displayName || session.username,

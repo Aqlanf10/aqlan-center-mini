@@ -135,13 +135,14 @@ describe("تصنيف قوائم المتابعة", () => {
     expect(find(4).buckets).not.toContain("lapsed_4");
   });
 
-  it("حالة التثبيت تظهر في قائمتها — والأشهر الفائتة تُحسب من البداية إن لم توجد شدّة", () => {
+  it("حالة التثبيت لا تُصنف انقطاعاً عن الشدّ بسبب تاريخ العلاج القديم", () => {
     const rows = classifyFollowups({
       today: TODAY,
       cases: [row({ status: "retention", lastAdjustmentDate: null, startDate: "2026-04-01" })],
     });
     expect(rows[0].buckets).toContain("retention");
-    expect(rows[0].buckets).toContain("lapsed_8");
+    expect(rows[0].buckets).not.toContain("lapsed_8");
+    expect(rows[0].dueDate).toBeNull();
   });
 
   it("داخل القائمة الأقدم انقطاعًا أولًا", () => {

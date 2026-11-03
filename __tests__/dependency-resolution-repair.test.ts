@@ -17,6 +17,7 @@ const historicalParserOverrides = {
 // root has the separately reviewed modern lint-tooling dependency repair.
 const modernRootOverrides = {
   ...historicalParserOverrides,
+  "pptxgenjs@4.0.1": { "image-size": "2.0.4" },
   "eslint@10.14.0": { minimatch: "11.0.3" },
   "@eslint/config-array@0.23.5": { minimatch: "11.0.3" },
   "@typescript-eslint/typescript-estree@8.70.0": { minimatch: "11.0.3" },

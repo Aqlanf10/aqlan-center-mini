@@ -18,6 +18,9 @@ describe("reviewed official development dependency resolution", () => {
     expect(() => validateReviewedOverrides(root)).not.toThrow();
   });
   it.each([
+    ["global image-size override", (root) => { root.overrides["image-size"] = "2.0.4"; }],
+    ["image-size version range", (root) => { root.overrides["pptxgenjs@4.0.1"]["image-size"] = "^2.0.4"; }],
+    ["vulnerable image-size", (root) => { root.overrides["pptxgenjs@4.0.1"]["image-size"] = "1.2.1"; }],
     ["missing overrides", (root) => { delete root.overrides; }],
     ["null overrides", (root) => { root.overrides = null; }],
     ["empty overrides", (root) => { root.overrides = {}; }],

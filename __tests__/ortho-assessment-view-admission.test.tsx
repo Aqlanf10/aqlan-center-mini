@@ -122,7 +122,7 @@ beforeEach(() => {
   ready = { state: "ready", patientId: 1, orthoCaseId: 2, clinicalCaseId: 3, clinicalWritable: true, recordingContext: "current",
     history: [], revision: null, sourceStates: [], sources: { imaging: "available", truncated: false, items: [] } };
   fetchMock.mockReset(); fetchMock.mockImplementation(async () => ({ ok: true, status: 200, redirected: false, json: async () => ready }));
-  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { confirm: vi.fn(() => true) });
+  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", Object.assign(new EventTarget(), { confirm: vi.fn(() => true) }));
 });
 afterEach(() => { retireView(); vi.unstubAllGlobals(); });
 describe("actual assessment view handler admission", () => {

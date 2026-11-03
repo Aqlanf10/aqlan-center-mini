@@ -63,7 +63,7 @@ type Case = ComponentProps<typeof AdjustmentForm>["caseRow"];
 type Element = ReactElement<Record<string, unknown>>;
 const PATIENT_ID = 19;
 const CASE_ID = 41;
-const COMPLETE_LABEL = "أُكملت الحالة بنجاح وسُلّم المثبت";
+const COMPLETE_LABEL = "إغلاق ملف الحالة بالكامل";
 const DISCONTINUE_LABEL = "توقّفت الحالة";
 const COMPLETE_PROMPT = "ملاحظة على إكمال الحالة (اختياري)";
 const DISCONTINUE_PROMPT = "سبب التوقّف أو الإلغاء؟";
@@ -151,7 +151,7 @@ beforeEach(() => {
     if (url === `/api/patients/${PATIENT_ID}`) return Response.json({ patient: { id: PATIENT_ID, fullName: "Synthetic patient", phone: null } });
     throw new Error(`Unexpected synthetic read: ${url}`);
   });
-  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { prompt });
+  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", Object.assign(new EventTarget(), { prompt }));
 });
 afterEach(async () => { await settle(); vi.unstubAllGlobals(); });
 

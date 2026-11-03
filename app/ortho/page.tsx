@@ -167,7 +167,7 @@ export default function OrthoFollowupPage() {
                   </a>
                   <p className="mt-0.5 text-[11px] text-slate-500">
                     آخر شدّ: {row.lastAdjustmentDate ? friendlyDateLong(row.lastAdjustmentDate) : "بلا شدّات"} ({sinceAdjustmentText(row.daysSinceLast)})
-                    {" · الاستحقاق: "}{friendlyDateLong(row.dueDate)}
+                    {row.status === "retention" ? " · مراجعة التثبيت المسجلة: " : " · الاستحقاق: "}{row.dueDate ? friendlyDateLong(row.dueDate) : row.retentionRecall?.state === "invalid" ? "تحتاج مراجعة السجل" : "غير محددة"}
                   </p>
                   {!contextKnown ? (
                     <p role="status" className="mt-0.5 text-[11px] font-bold text-amber-700">

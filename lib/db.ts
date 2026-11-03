@@ -35,6 +35,7 @@ import { HR_STAFF_SQL } from "./hr-schema";
 import HR_TEMPORAL_RUNTIME_MIGRATIONS from './hr-temporal-schema.generated.json';
 import { applyRuntimeMigrationFiles } from './migrations';
 import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
+import { ORTHO_CASE_JOURNEY_SQL } from './ortho-case-journey-schema';
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
 import { HR_PAYROLL_SQL } from "./hr-payroll-schema";
@@ -2122,6 +2123,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(HR_PAYROLL_INTEGRITY_SQL);
     await applyRuntimeMigrationFiles(getPool(), HR_TEMPORAL_RUNTIME_MIGRATIONS);
     await applyOrthoAssessmentRuntime(getPool());
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0100", name: "ortho_case_journey", filename: "0100_ortho_case_journey.sql", sql: ORTHO_CASE_JOURNEY_SQL, checksum: checksumOf(ORTHO_CASE_JOURNEY_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -23375,6 +23377,7 @@ export async function closeOrthoCase(input: {
  * يبقى تاريخًا يُقرأ، والخطّ الزمني يعرض القصة كلّها في صفحةٍ واحدة.
  */
 
+import { projectRetentionRecall } from "./ortho-retention-recall";
 import { projectFollowupBookings, type ProjectedFollowupBooking } from "./ortho-followup-board";
 import type { FollowupCase, FollowupBookingContext } from "./ortho-followup";
 
@@ -23393,7 +23396,7 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
     case_id: number; patient_id: number; full_name: string; phone: string | null;
     status: string; phase: string; start_date: Date; last_adjustment_date: string | null;
     next_weeks: number | null; upper_wire: string | null; lower_wire: string | null;
-    clinical_case_id: number | null; bookings: ProjectedFollowupBooking[]; last_no_show: boolean;
+    clinical_case_id: number | null; bookings: ProjectedFollowupBooking[]; last_no_show: boolean; retention_events: unknown;
   }>(
     `WITH noshow AS (
        SELECT patient_id, TRUE AS was
@@ -23460,7 +23463,12 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
             c.start_date, a.last_adjustment_date, a.next_weeks,
             a.upper_wire, a.lower_wire, bridge.id AS clinical_case_id,
             COALESCE(bookings.items, '[]'::jsonb) AS bookings,
-            COALESCE(ns.was, FALSE) AS last_no_show
+            COALESCE(ns.was, FALSE) AS last_no_show,
+            COALESCE((SELECT jsonb_agg(jsonb_build_object('id', e.id, 'version', e.version,
+              'arch', e.arch, 'supersedesEntryId', e.supersedes_entry_id,
+              'archCorrectionReason', e.content->'archCorrectionReason', 'content', e.content->'payload') ORDER BY e.version)
+              FROM ortho_retention_entries e WHERE e.ortho_case_id=c.id AND e.patient_id=c.patient_id
+                AND e.clinical_case_id=bridge.id), '[]'::jsonb) AS retention_events
        FROM ortho_cases c
        JOIN patients p ON p.id = c.patient_id
        LEFT JOIN clinical_cases bridge ON bridge.ortho_case_id = c.id AND bridge.patient_id = c.patient_id
@@ -23496,6 +23504,7 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
       lowerWire: row.lower_wire,
       ...bookingProjection,
       lastWasNoShow: row.last_no_show,
+      retentionRecall: projectRetentionRecall(row.retention_events),
     };
   });
 }
