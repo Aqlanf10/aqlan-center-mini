@@ -693,3 +693,10 @@ Rollback to an old binary must keep issuance disabled. Do not remove the receipt
 table or rewrite history. Native PostgreSQL 18 concurrency, both official restore
 paths, exact generated schema contract and full CI remain release gates. See
 `docs/review/rx-history-integrity-20261101/PROTOCOL.md` for the complete protocol.
+
+
+## 0100 — سجل التثبيت وعرض الحالة التقويمية
+
+`0100_ortho_case_journey.sql` يضيف `ortho_decision_revisions` و`ortho_retention_entries` و`ortho_case_study_revisions` وعقود `ortho_case_study_export_manifests` و`ortho_case_study_artifact_events`. سجلات append-only بصلة صريحة للمريض وحالة التقويم والجسر السريري، مع مراجعات سابقة ومعرف طلب وبصمة وتدقيق. جدولَا أدلة التصدير محجوزان لعقد التصدير المصور؛ التصدير النصي الحالي لا يدّعي إنتاج أثر مخزن فيهما.
+
+البايتات مطابقة لمصدر `ORTHO_CASE_JOURNEY_SQL` في التشغيل؛ التسجيل تحت قفل الترحيلات نفسه. لا تعديل لـ0051/0052 أو إعادة استعمال 0053/0054 القديمة، ولا backfill لأي حقائق سريرية أو مالية. CREATE بدون IF NOT EXISTS يرفض وجود كائنات غير مسجلة، ولا يستبدل الإجراءات القديمة. يفحص الاستيجنج الأصل والبصمات قبل النشر.

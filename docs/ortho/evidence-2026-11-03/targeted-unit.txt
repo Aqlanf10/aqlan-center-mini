@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-study-text-export.test.ts __tests__/reviewed-dependency-overrides.test.mjs __tests__/dependency-resolution-repair.test.ts __tests__/http-permissions.test.ts __tests__/periodontal-candidate-chain.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-integration
+
+
+ Test Files  5 passed (5)
+      Tests  64 passed (64)
+   Start at  16:46:18
+   Duration  4.27s (transform 2.40s, setup 0ms, import 3.16s, tests 338ms, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
