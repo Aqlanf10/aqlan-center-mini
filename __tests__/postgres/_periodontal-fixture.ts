@@ -7,6 +7,11 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.at(-1)?.version === "0103" && files.at(-1)?.filename === "0103_ortho_assessment_intake.sql") {
+    if (files.at(-2)?.version !== "0102" || files.at(-2)?.filename !== "0102_ortho_facial_analysis.sql") throw new Error("Unreviewed baseline for assessment intake.");
+    if (periodontalCandidateMigrationVersion(files.slice(0,-1)) !== "9000") throw new Error("Unreviewed baseline for assessment intake.");
+    return "9000";
+  }
   if (files.at(-1)?.version === "0102" && files.at(-1)?.filename === "0102_ortho_facial_analysis.sql") {
     if (files.at(-2)?.version !== "0101" || files.at(-2)?.filename !== "0101_ortho_retention_transition.sql") {
       throw new Error("Unreviewed baseline for facial analysis extension.");

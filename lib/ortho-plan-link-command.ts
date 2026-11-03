@@ -84,7 +84,7 @@ export async function commandOrthoPlanLink(admitted: SessionPayload, id: number,
     if (!initial) throw new OrthoPlanLinkRefusal(404, "case_missing", "الحالة غير متاحة.");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE NOWAIT", [initial.patient_id]);
     const row = (await client.query<Observation>(`SELECT ${COLUMNS} FROM ortho_cases WHERE id=$1 FOR UPDATE NOWAIT`, [id])).rows[0];
-    if (!row || row.patient_id !== initial.patient_id || !["active", "retention"].includes(row.status) || version(row) !== input.expectedVersion) throw conflict();
+    if (!row || row.patient_id !== initial.patient_id || !["assessment", "active", "retention"].includes(row.status) || version(row) !== input.expectedVersion) throw conflict();
     await authority(client, admitted, row.patient_id, true);
     const plans = [...new Set([row.plan_id, input.planId].filter((v): v is number => v !== null))].sort((a, b) => a - b);
     if (plans.length) {

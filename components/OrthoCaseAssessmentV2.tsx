@@ -124,7 +124,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     } catch { if (lease.current()) { lease.markUncertain(); say("قد يكون الحفظ تم رغم فقد الرد. أعد التحقق بنفس الطلب فقط."); } }
     finally {
       clearTimeout(timer); const current = lease.current(); lease.finish();
-      if (current && confirmed && currentView()) { setSelected(undefined); setReload(value => value + 1); setMessage("حُفظت مراجعة موثقة؛ جارٍ إعادة قراءة القيم والنتائج المحفوظة."); }
+      if (current && confirmed && currentView()) { setSelected(undefined); setReload(value => value + 1); setMessage("حُفظت مراجعة موثقة للقيم والنتائج."); }
     }
   }
   if (lifetime && !lifetime.active()) return <p role="status">السياق أو الصلاحية غير صالحين؛ التقييم محجوب حتى إعادة التحقق.</p>;

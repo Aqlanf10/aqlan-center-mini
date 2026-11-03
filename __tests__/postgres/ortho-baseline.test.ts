@@ -87,7 +87,7 @@ describe("(CASE-1) legacy orthodontic baseline", () => {
       legacyFinancialMode: "installments", remainingObjectives: "إغلاق فراغ القلع العلوي",
     });
     expect(found?.baselineRecordedAt).not.toBeNull();
-    expect(found?.progress.monthsElapsed).toBeGreaterThanOrEqual(10);
+    expect(found?.progress?.monthsElapsed).toBeGreaterThanOrEqual(10);
 
     const audit = await q<{ action: string; actor: string; actor_role: string; entity_id: string }>(
       `SELECT action, actor, actor_role, entity_id FROM audit_log WHERE action = 'ortho.baseline'`);

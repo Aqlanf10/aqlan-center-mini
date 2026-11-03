@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DbPool } from "./db";
+import { ORTHO_ASSESSMENT_INTAKE_SQL } from "./ortho-assessment-intake-schema";
 
 /**
  * مجسّ توافق خط الأساس (P1-FIX-1) — إثبات أن قاعدة قائمة «تطابق» DDL خط
@@ -254,6 +255,27 @@ export async function runBaselineSchemaProbe(
       await client.query(`SET LOCAL search_path TO ${probeSchema}`);
       // DDL خط الأساس في المخطط المؤقت — نصًّا كما هو، بلا معاملات (simple query).
       await client.query(baselineSql);
+      // 0103 replaces five unconditional NOT NULL constraints with an exact
+      // lifecycle CHECK: an assessment has no invented treatment facts, while
+      // an active treatment still requires them. Only an authentic registered
+      // migration permits this evolution. Replay its baseline-only prefix in
+      // the disposable schema so PostgreSQL compares the complete replacement
+      // CHECK and unique index, not a hand-written list of ignored differences.
+      const registry = await client.query<{ exists: boolean }>(
+        "SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists",
+      );
+      if (registry.rows[0]?.exists) {
+        const registration = await client.query<{ name: string; checksum: string; adopted: boolean }>(
+          "SELECT name, checksum, adopted FROM public.schema_migrations WHERE version='0103'",
+        );
+        const row = registration.rows[0];
+        if (row?.name === "ortho_assessment_intake" && row.adopted === false
+          && row.checksum === createHash("sha256").update(ORTHO_ASSESSMENT_INTAKE_SQL).digest("hex")) {
+          const boundary = ORTHO_ASSESSMENT_INTAKE_SQL.indexOf("CREATE TABLE ortho_case_intake_events (");
+          if (boundary <= 0) throw new Error("Missing reviewed 0103 baseline evolution boundary.");
+          await client.query(ORTHO_ASSESSMENT_INTAKE_SQL.slice(0, boundary));
+        }
+      }
       // إعادة search_path إلى public ليكون عرض regclass متسقًا للجانبين.
       await client.query(`SET LOCAL search_path TO public`);
       const expected = await projectSchema(client, probeSchema, [probeSchema]);

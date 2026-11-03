@@ -127,5 +127,5 @@ async function readContext(db: DbClient, patientId: number, requested: ClinicalN
   }
   if (context.pillar !== undefined && specialty !== null && specialty !== "orthodontics") return mismatch;
   return { ok: true, context, specialty,
-    sub: context.orthoCaseId !== undefined ? "ortho" : specialty === "endodontics" ? "endo" : "cases" };
+    sub: context.orthoCaseId !== undefined || context.pillar !== undefined ? "ortho" : specialty === "endodontics" ? "endo" : "cases" };
 }

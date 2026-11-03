@@ -81,6 +81,7 @@ export function WebCephRecordsGrid({
 
   // المرحلة الزمنية المحددة للفلترة (افتراضياً: المقترحة تلقائياً أو "all")
   const defaultStage = useMemo<PhotoStage>(() => {
+    if (currentPhase === "assessment") return "initial";
     return suggestPhotoStage({
       date: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
       startDate: startDate || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),

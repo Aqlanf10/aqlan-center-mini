@@ -86,7 +86,7 @@ function Workspace({patientId,orthoCaseId}:{patientId:number;orthoCaseId:number}
       if(response.redirected||!response.ok)throw Error("uncertain");
       await verifyFacialSaved(raw,{patientId,orthoCaseId,clinicalCaseId:data.clinicalCaseId,actorId:data.actorId,command},response.status);
       if(!current())return;
-      setDraft(null);setPending(null);setHistoryId(null);setMessage("حُفظت مراجعة الصورة ومعالمها ونتائجها؛ جارٍ قراءة النسخة المحفوظة.");setRefresh(v=>v+1);
+      setDraft(null);setPending(null);setHistoryId(null);setMessage("حُفظت مراجعة الصورة ومعالمها ونتائجها.");setRefresh(v=>v+1);
     }catch{if(current()){setUncertain(true);setMessage("نتيجة الحفظ غير مؤكدة. احتُفظ بالطلب نفسه؛ لا تبدّل الصورة ولا تنشئ طلباً بديلاً.");}}
     finally{clearTimeout(timer);busyRef.current=false;if(current())setBusy(false);}
   }

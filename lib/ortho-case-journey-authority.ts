@@ -26,7 +26,11 @@ export function assertJourneyCurrent(authority: JourneyAuthority) {
 /** Patient -> current users/session -> access witnesses -> selected sources -> case.
  * Route admission outside this transaction does not replace current authority. */
 export async function authorizeJourney(client: DbClient, input: JourneyOwnerInput, write: boolean): Promise<JourneyAuthority> {
-  if (!journeyId(input.patientId) || !journeyId(input.orthoCaseId)) journeyFail(400, "invalid_scope");
+  if (!journeyId(input.orthoCaseId)) journeyFail(400, "invalid_scope");
+  return authorizeJourneyPatient(client,input,write);
+}
+export async function authorizeJourneyPatient(client:DbClient,input:Pick<JourneyOwnerInput,"session"|"patientId">,write:boolean):Promise<JourneyAuthority>{
+  if (!journeyId(input.patientId)) journeyFail(400, "invalid_scope");
   const { rows } = await client.query<{ id: number }>(`SELECT id FROM patients WHERE id=$1 ${write ? "FOR NO KEY UPDATE" : "FOR SHARE"}`, [input.patientId]);
   const session = await requireSession(client);
   if (!session || !journeyId(session.userId) || session.expiresAt < Date.now()

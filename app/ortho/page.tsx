@@ -10,6 +10,7 @@ import {
   BUCKET_LABEL, BUCKET_ORDER, BUCKET_TONE,
   type FollowupBucket, type FollowupRow,
 } from "@/lib/ortho-followup";
+import { OrthoAssessmentEntry } from "@/components/OrthoAssessmentEntry";
 import { PageHeader } from "@/components/PageHeader";
 import { OrthoPendingDecisions } from "@/components/OrthoPendingDecisions";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
@@ -108,10 +109,11 @@ export default function OrthoFollowupPage() {
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
-        title="مركز متابعة التقويم"
-        subtitle="قائمة اليوم: من يحتاج شدّة، ومن بلا موعد قادم، ومن تجاوز أو غاب — قبل أن يذوب."
+        title="وحدة التقويم"
+        subtitle="تقييم الحالات ومتابعة العلاج والمواعيد"
       />
 
+      <OrthoAssessmentEntry />
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}

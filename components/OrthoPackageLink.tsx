@@ -122,9 +122,9 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
         if (observation?.caseId !== caseId || observation.patientId !== patientId
           || typeof observation.observedVersion !== "string" || !/^[a-f0-9]{64}$/.test(observation.observedVersion)
           || observation.planId !== null && (!Number.isSafeInteger(observation.planId) || observation.planId <= 0)
-          || !["active", "retention", "completed", "discontinued"].includes(observation.status)) throw new Error("Invalid link observation");
+          || !["assessment", "active", "retention", "completed", "discontinued"].includes(observation.status)) throw new Error("Invalid link observation");
         publish({ phase: "ready", plans, observedVersion: observation.observedVersion,
-          currentPlanId: observation.planId, editable: ["active", "retention"].includes(observation.status) });
+          currentPlanId: observation.planId, editable: ["assessment", "active", "retention"].includes(observation.status) });
         if (verificationRequested.current) { reconciledVersion.current = observation.observedVersion; setReconciled(true); }
       } catch {
         if (!expired) publish({ phase: "error" });

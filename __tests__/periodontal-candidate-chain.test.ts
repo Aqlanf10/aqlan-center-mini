@@ -13,7 +13,7 @@ const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sq
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
   it("accepts the exact composed 0066–0069 chain and reviewed branch variants, retaining sentinel 9000", async () => {
     const files = await loadMigrationFiles();
-    expect(files).toHaveLength(73);
+    expect(files).toHaveLength(74);
     expect(files[67]).toMatchObject({ version: "0091", filename: "0091_prescribing_doctor_identity.sql" });
     expect(files[66]).toMatchObject({ version: "0090", filename: "0090_booking_request_preferences.sql" });
     expect(files[69]).toMatchObject({ version: "0093", filename: "0093_prescription_issuance_commands.sql" });
@@ -32,7 +32,7 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(periodontalCandidateMigrationVersion(files.slice(0,61))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,60))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0067"))).toBe("9000");
-    expect(periodontalCandidateMigrationVersion(files.filter(file => !["0066", "0068", "0069", "0078", "0087", "0089", "0090", "0091", "0092", "0093", "0100", "0101", "0102"].includes(file.version)))).toBe("9000");
+    expect(periodontalCandidateMigrationVersion(files.filter(file => !["0066", "0068", "0069", "0078", "0087", "0089", "0090", "0091", "0092", "0093", "0100", "0101", "0102", "0103"].includes(file.version)))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,59))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,58))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,57))).toBe("9000");

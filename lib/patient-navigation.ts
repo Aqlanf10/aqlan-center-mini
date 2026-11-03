@@ -170,7 +170,7 @@ export function decodeClinicalContext(value: unknown, patientId: number, request
   if (context.endoTreatmentId !== undefined && (dto.specialty !== "endodontics" || context.clinicalCaseId === undefined)) return null;
   if (dto.specialty !== null && context.clinicalCaseId === undefined && context.orthoCaseId === undefined) return null;
   if (context.pillar !== undefined && dto.specialty !== null && dto.specialty !== "orthodontics") return null;
-  const sub = context.orthoCaseId !== undefined ? "ortho" : dto.specialty === "endodontics" ? "endo" : "cases";
+  const sub = context.orthoCaseId !== undefined || context.pillar !== undefined ? "ortho" : dto.specialty === "endodontics" ? "endo" : "cases";
   if (dto.sub !== sub) return null;
   return { context, specialty: dto.specialty as ServiceSpecialty | null, sub };
 }

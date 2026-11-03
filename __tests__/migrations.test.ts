@@ -188,8 +188,24 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
     // No baseline adoption on drift. Only the pre-existing runtime extensions remain.
     const { rows } = await pool.query<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version');
-    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091', '0092', '0093', '0100', '0101', '0102']);
+    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091', '0092', '0093', '0100', '0101', '0102', '0103']);
     expect(rows.some(row => row.version === BASELINE_VERSION)).toBe(false);
+  });
+
+  it.each([
+    ["missing registration", "DELETE FROM schema_migrations WHERE version='0103'"],
+    ["wrong checksum", "UPDATE schema_migrations SET checksum=repeat('a',64) WHERE version='0103'"],
+    ["wrong migration name", "UPDATE schema_migrations SET name='unreviewed' WHERE version='0103'"],
+    ["missing lifecycle constraint", "ALTER TABLE ortho_cases DROP CONSTRAINT ortho_assessment_state_check"],
+    ["weakened lifecycle constraint", "ALTER TABLE ortho_cases DROP CONSTRAINT ortho_assessment_state_check; ALTER TABLE ortho_cases ADD CONSTRAINT ortho_assessment_state_check CHECK(status IS NOT NULL)"],
+    ["missing open-case uniqueness", "DROP INDEX ortho_cases_one_open_assessment_idx"],
+    ["unrelated nullable column", "ALTER TABLE payments ALTER COLUMN amount_minor DROP NOT NULL"],
+  ])("refuses assessment baseline evolution with %s", async (_label, mutation) => {
+    await ensureSchema();
+    const pool = getPool();
+    for (const statement of mutation.split("; ")) await pool.query(statement);
+    await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
+    expect((await pool.query("SELECT version FROM schema_migrations WHERE version='0001'")).rows).toHaveLength(0);
   });
 
   it("انحراف دقيق (نوع عمود مالي مختلف) → BASELINE_SCHEMA_MISMATCH", async () => {

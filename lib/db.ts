@@ -37,6 +37,7 @@ import { applyRuntimeMigrationFiles } from './migrations';
 import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
 import { ORTHO_CASE_JOURNEY_SQL } from './ortho-case-journey-schema';
 import { ORTHO_RETENTION_TRANSITION_SQL } from './ortho-retention-transition-schema';
+import { ORTHO_ASSESSMENT_INTAKE_SQL } from "./ortho-assessment-intake-schema";
 import { ORTHO_FACIAL_ANALYSIS_SQL } from './ortho-facial-analysis-schema';
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
@@ -2128,6 +2129,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0100", name: "ortho_case_journey", filename: "0100_ortho_case_journey.sql", sql: ORTHO_CASE_JOURNEY_SQL, checksum: checksumOf(ORTHO_CASE_JOURNEY_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0101", name: "ortho_retention_transition", filename: "0101_ortho_retention_transition.sql", sql: ORTHO_RETENTION_TRANSITION_SQL, checksum: checksumOf(ORTHO_RETENTION_TRANSITION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0102", name: "ortho_facial_analysis", filename: "0102_ortho_facial_analysis.sql", sql: ORTHO_FACIAL_ANALYSIS_SQL, checksum: checksumOf(ORTHO_FACIAL_ANALYSIS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0103", name: "ortho_assessment_intake", filename: "0103_ortho_assessment_intake.sql", sql: ORTHO_ASSESSMENT_INTAKE_SQL, checksum: checksumOf(ORTHO_ASSESSMENT_INTAKE_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -17110,9 +17112,9 @@ export interface VisitReferral {
 
 export interface VisitOrtho {
   caseId: number;
-  appliance: string;
+  appliance: string | null;
   phase: string;
-  slot: string;
+  slot: string | null;
   upperWire: string | null;
   lowerWire: string | null;
   lastAdjustment: string | null;
@@ -17388,7 +17390,7 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
     upperWire: open.upperWire,
     lowerWire: open.lowerWire,
     lastAdjustment: last?.doneOn ?? null,
-    daysSinceLast: open.progress.daysSinceLast,
+    daysSinceLast: open.progress?.daysSinceLast ?? null,
     lastDone: last?.done ?? null,
     elastics: last?.elastics ?? null,
     // حالةٌ سابقة بلا شدّة بعد: مطاطاتها من اللقطة.
@@ -21980,7 +21982,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
              (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL)::text AS visits,
              (SELECT COUNT(*) FROM lab_orders WHERE patient_id = $1 AND status IN ('needed', 'sent', 'in_progress', 'remake', 'received'))::text AS open_lab,
              (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1 AND removed_at IS NULL)::text AS documents,
-             (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1 AND status IN ('active', 'retention'))::text AS ortho`,
+             (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1 AND status IN ('assessment', 'active', 'retention'))::text AS ortho`,
           [patientId],
         );
         return {
@@ -22726,14 +22728,14 @@ export interface OrthoCase {
   id: number;
   patientId: number;
   patientName: string;
-  appliance: Appliance;
-  arches: Arches;
-  slot: SlotSize;
+  appliance: Appliance | null;
+  arches: Arches | null;
+  slot: SlotSize | null;
   bracketSystem: string | null;
   status: CaseStatus;
   phase: OrthoPhase;
-  startDate: string;
-  plannedMonths: number;
+  startDate: string | null;
+  plannedMonths: number | null;
   upperWire: string | null;
   lowerWire: string | null;
   planId: number | null;
@@ -22753,7 +22755,7 @@ export interface OrthoCase {
   legacyFinancialMode: LegacyFinancialMode | null;
   remainingObjectives: string | null;
   adjustments: OrthoAdjustment[];
-  progress: CaseProgress;
+  progress: CaseProgress | null;
 }
 
 export interface OrthoAdjustment {
@@ -22775,9 +22777,9 @@ export interface OrthoAdjustment {
 }
 
 interface CaseRow {
-  id: number; patient_id: number; full_name: string; appliance: string; arches: string;
-  slot: string; bracket_system: string | null; status: string; phase: string;
-  start_date: Date; planned_months: number; upper_wire: string | null;
+  id: number; patient_id: number; full_name: string; appliance: string | null; arches: string | null;
+  slot: string | null; bracket_system: string | null; status: string; phase: string;
+  start_date: Date | null; planned_months: number | null; upper_wire: string | null;
   lower_wire: string | null; plan_id: number | null; retainer: string | null;
   retainer_on: Date | null; note: string | null; closed_at: Date | null;
   closed_by: string | null; closed_note: string | null;
@@ -22844,13 +22846,13 @@ async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]
       id: row.id,
       patientId: row.patient_id,
       patientName: row.full_name,
-      appliance: row.appliance as Appliance,
-      arches: row.arches as Arches,
-      slot: row.slot as SlotSize,
+      appliance: row.appliance as Appliance | null,
+      arches: row.arches as Arches | null,
+      slot: row.slot as SlotSize | null,
       bracketSystem: row.bracket_system,
       status: row.status as CaseStatus,
       phase: row.phase as OrthoPhase,
-      startDate: dateText(row.start_date),
+      startDate: row.start_date ? dateText(row.start_date) : null,
       plannedMonths: row.planned_months,
       upperWire: row.upper_wire,
       lowerWire: row.lower_wire,
@@ -22869,7 +22871,7 @@ async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]
       legacyFinancialMode: isLegacyFinancialMode(row.legacy_financial_mode) ? row.legacy_financial_mode : null,
       remainingObjectives: row.remaining_objectives,
       adjustments,
-      progress: caseProgress({
+      progress: row.start_date === null || row.planned_months === null ? null : caseProgress({
         startDate: dateText(row.start_date),
         plannedMonths: row.planned_months,
         adjustments: adjustments.length,
@@ -22910,7 +22912,7 @@ export async function listOrthoCases(today: string, status?: CaseStatus): Promis
   const { rows } = await getPool().query<CaseRow>(
     status
       ? `${CASE_SELECT} WHERE c.status = $1 ORDER BY c.start_date DESC LIMIT 300`
-      : `${CASE_SELECT} WHERE c.status IN ('active','retention') ORDER BY c.start_date DESC LIMIT 300`,
+      : `${CASE_SELECT} WHERE c.status IN ('assessment','active','retention') ORDER BY c.created_at DESC LIMIT 300`,
     status ? [status] : [],
   );
   return hydrateCases(rows, today);
@@ -23070,7 +23072,7 @@ export async function linkOrthoCasePlanWith(client: DbClient, input: {
     const { rows: [found] } = await client.query<{ patient_id: number; status: string; plan_id: number | null }>(
       `SELECT patient_id, status, plan_id FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.caseId]);
     if (!found) return { ok: false, status: 404, message: "الحالة غير موجودة." };
-    if (found.status !== "active" && found.status !== "retention") {
+    if (found.status !== "assessment" && found.status !== "active" && found.status !== "retention") {
       return { ok: false, status: 409, message: "الحالة مغلقة — لا يُغيَّر اتفاقها." };
     }
     if (input.planId !== null) {
@@ -27792,7 +27794,7 @@ const SPECIALTY_CASE_SELECT = `
          d.name AS responsible_name,
          -- حالة التقويم المجسورة مصدرها وحدة التقويم وحدها: لا تنفصل الشاشتان أبدًا.
          CASE WHEN o.id IS NULL THEN c.status
-              WHEN o.status IN ('active', 'retention') THEN 'active'
+              WHEN o.status IN ('assessment', 'active', 'retention') THEN 'active'
               WHEN o.status = 'completed' THEN 'completed' ELSE 'closed' END AS status,
          c.started_on::text AS started_on,
          CASE WHEN o.id IS NULL THEN c.completed_at ELSE o.closed_at END AS completed_at,
@@ -27819,7 +27821,7 @@ const SPECIALTY_CASE_SELECT = `
   UNION ALL
   SELECT NULL, 'ortho', o.id, o.patient_id, 'orthodontics', 'تقويم الأسنان', NULL, NULL,
          COALESCE(o.responsible_doctor_id, t.primary_doctor_id), d.name,
-         CASE WHEN o.status IN ('active', 'retention') THEN 'active'
+         CASE WHEN o.status IN ('assessment', 'active', 'retention') THEN 'active'
               WHEN o.status = 'completed' THEN 'completed' ELSE 'closed' END,
          o.start_date::text, o.closed_at, o.closed_note, o.created_by, o.created_at,
          (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status <> 'cancelled')::int,
@@ -27888,7 +27890,7 @@ export async function createClinicalCase(input: CaseDraft & {
       if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_ortho" }; }
       /* (ORTHO-ID) موضع الجسر نطاق فك حالة التقويم نفسها لا نصٌّ حرٌّ يكتبه المنشئ — فتتطابق القراءتان. */
       bridgeSite = orthoArchesSiteText(rows[0].arches) ?? bridgeSite;
-      bridgeStatus = rows[0].status === "active" || rows[0].status === "retention" ? "active"
+      bridgeStatus = rows[0].status === "assessment" || rows[0].status === "active" || rows[0].status === "retention" ? "active"
         : rows[0].status === "completed" ? "completed" : "closed";
       if (bridgeStatus !== "active") bridgeClosedAt = rows[0].closed_at ?? new Date();
       const { rows: bridged } = await client.query(`SELECT 1 FROM clinical_cases WHERE ortho_case_id = $1`, [input.orthoCaseId]);

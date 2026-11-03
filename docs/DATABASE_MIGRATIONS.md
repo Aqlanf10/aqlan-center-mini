@@ -715,3 +715,39 @@ correction/re-treatment workflow; they cannot be overwritten or deleted.
 ## 0102_ortho_facial_analysis.sql — source-bound manual facial measurements
 
 Adds immutable, versioned `ortho_facial_revisions` bound to the same patient, orthodontic case, clinical bridge and source document. Each revision preserves original image SHA-256, EXIF orientation basis, manual landmarks, projection protocol, image-date provenance, physician review, computed results and request fingerprint. Deferred scope triggers cover all parents; runtime and CLI use identical SQL. No backfill, clinical state transition, visit, invoice or payment is created.
+
+## 0103_ortho_assessment_intake.sql — diagnostic identity before treatment
+
+Adds an explicit `assessment` lifecycle to the existing orthodontic case and an
+immutable `ortho_case_intake_events` record of opening and explicit treatment
+start. One open case per patient now includes assessment, active treatment and
+retention. Opening creates exactly one clinical bridge. It does not create a
+visit, appointment, agreement, invoice, payment or opening balance. Existing
+unlinked orthodontic shells require an explicit scope decision; this command
+refuses them without creating another context. No existing cases are backfilled
+or reclassified. Existing plans may be linked using the authorized, versioned
+financial command while the case is under assessment; no amount changes.
+
+The five treatment columns `appliance`, `arches`, `slot`, `start_date`, and
+`planned_months` become nullable. The replacement lifecycle CHECK permits an
+assessment only with all treatment facts absent and continues to require them
+after treatment starts (a non-wire appliance does not require a slot). A
+discontinued assessment retains its unknown treatment facts. The clinical
+bridge's `started_on` is the file-opening date; it is not the orthodontic
+treatment-start date. Diagnosis decision snapshots accept the assessment state.
+
+Runtime and numbered SQL are byte-identical and registered under the migration
+lock. Baseline 0001 remains immutable. Adoption recognizes the replacement only
+when 0103's exact name, checksum and non-adopted registration match this source;
+it replays the baseline-only alteration prefix in a disposable, always-rolled-back
+schema and compares the complete resulting CHECK and unique index. Missing or
+weakened replacements, invalid registration and unrelated schema drift still
+deny adoption. The generated current contract and disclosure policy were
+regenerated from fresh source-only PostgreSQL 18.6 databases, not a live target.
+
+Deployment is not part of this change. Before rollout, verify compatibility on
+staging and replace all readers that assume non-null treatment facts before
+enabling assessment creation. An old binary cannot safely read the new state;
+rolling back code must not remove assessment records or restore NOT NULL over
+unknown facts. Restore rehearsals retain the exact migration registration and
+immutable event data. Review live schema drift before any migration execution.
