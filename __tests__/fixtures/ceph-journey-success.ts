@@ -41,7 +41,11 @@ export function successfulCephJourney(onPoolEnd: () => Promise<void>) {
   };
   return {
     ceph: {
-      MEASUREMENTS: computed,
+      MEASUREMENTS: [
+        ...computed.map(row => ({ ...row, mean: 10, tol: 2 })),
+        { code: "SYNTHETIC_UNREFERENCED", mean: null, tol: null, referencePending: true },
+        { code: "SYNTHETIC_RETIRED", mean: 11, tol: 2, retired: true },
+      ],
       computeMmPerPixel: () => 1,
       computeAll: () => computed,
       missingFor: (code: string) => pending[code] ?? [],
@@ -57,7 +61,7 @@ export function successfulCephJourney(onPoolEnd: () => Promise<void>) {
         diagnosis: { finalDx: "علاقة هيكلية صنف أول", createdBy: "د. عقلان" },
       }),
       listCephReferenceSets: async () => [{
-        key: "builtin_default", values: Object.fromEntries(computed.map((row) => [row.code, row.value])),
+        key: "builtin_default", values: Object.fromEntries(computed.map((row) => [row.code, { mean: 10, sd: 2 }])),
       }],
       completeCephAnalysis: async () => ({
         ok: ++completeCount === 3, message: "معالم ناقصة", measurements: stamped,

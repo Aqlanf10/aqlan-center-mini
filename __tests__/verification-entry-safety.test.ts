@@ -475,6 +475,17 @@ describe("ceph owns only successfully created temporary databases", () => {
     expect(events).toEqual(["create", "runtime-end", "drop", "admin-end"]);
   });
 
+  it.each(["extra unverified reference", "changed reference value"])("rejects %s in the clinical reference check", async kind => {
+    successfulRuntime();
+    const original = runtimeFixture!.db.listCephReferenceSets;
+    runtimeFixture!.db.listCephReferenceSets = async () => {
+      const sets = await original();
+      sets[0].values[kind === "extra unverified reference" ? "SYNTHETIC_UNREFERENCED" : "SNA"] = { mean: 99, sd: 2 };
+      return sets;
+    };
+    expectFailedRun(await invokeDirect("verify-ceph.mjs"));
+  });
+
   it("cannot report success after DROP fails and still ends admin", async () => {
     successfulRuntime();
     boundary.query.mockImplementation(async (sql) => {
