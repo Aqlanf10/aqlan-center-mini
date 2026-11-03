@@ -6555,7 +6555,20 @@ export async function createLabService(input: {
   isActive?: boolean;
 }): Promise<LabService> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return createLabServiceWith(getPool(), input);
+}
+export async function createLabServiceWith(q: Pick<DbClient, "query">, input: {
+  name: string;
+  code?: string | null;
+  category?: LabService["category"];
+  toothScope?: LabService["toothScope"];
+  requiresShade?: boolean;
+  defaultDays?: number;
+  description?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
+}): Promise<LabService> {
+  const { rows } = await q.query<{
     id: number; name: string; code: string | null; category: string;
     tooth_scope: string; requires_shade: boolean;
     default_days: number; description: string | null; is_active: boolean;
@@ -6609,7 +6622,21 @@ export async function updateLabService(
   }>,
 ): Promise<LabService | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  return updateLabServiceWith(getPool(), id, input);
+}
+export async function updateLabServiceWith(q: Pick<DbClient, "query">, id: number,
+  input: Partial<{
+    name: string;
+    code: string | null;
+    category: LabService["category"];
+    toothScope: LabService["toothScope"];
+    requiresShade: boolean;
+    defaultDays: number;
+    description: string | null;
+    isActive: boolean;
+    sortOrder: number;
+  }>): Promise<LabService | null> {
+  const { rows } = await q.query<{ id: number }>(
     `UPDATE lab_services
         SET name           = COALESCE($2, name),
             code           = CASE WHEN $3::boolean THEN $4::text ELSE code END,
@@ -6638,18 +6665,21 @@ export async function updateLabService(
     ],
   );
   if (!rows[0]) return null;
-  return getLabService(id);
+  return getLabServiceWith(q, id);
 }
 
 /** حذف الخدمة: مرتبطة بطلبات أو قواعد تسعير؟ تُعطّل ولا تُمحى —
  * التكامل المالي يبدأ من بقاء أثر الخدمة في سجلات الالتزامات. */
 export async function deleteLabService(id: number): Promise<{ deleted: boolean; deactivated: boolean; message: string }> {
   await ensureSchema();
-  const { rows: orderCheck } = await getPool().query<{ count: string }>(
+  return deleteLabServiceWith(getPool(), id);
+}
+export async function deleteLabServiceWith(q: Pick<DbClient, "query">, id: number): Promise<{ deleted: boolean; deactivated: boolean; message: string }> {
+  const { rows: orderCheck } = await q.query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM lab_orders WHERE lab_service_id = $1`,
     [id],
   );
-  const { rows: ruleCheck } = await getPool().query<{ count: string }>(
+  const { rows: ruleCheck } = await q.query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM lab_pricing_rules WHERE lab_service_id = $1`,
     [id],
   );
@@ -6657,7 +6687,7 @@ export async function deleteLabService(id: number): Promise<{ deleted: boolean; 
   const ruleCount = Number(ruleCheck[0]?.count ?? 0);
 
   if (orderCount > 0 || ruleCount > 0) {
-    await getPool().query(`UPDATE lab_services SET is_active = FALSE WHERE id = $1`, [id]);
+    await q.query(`UPDATE lab_services SET is_active = FALSE WHERE id = $1`, [id]);
     return {
       deleted: false,
       deactivated: true,
@@ -6665,7 +6695,7 @@ export async function deleteLabService(id: number): Promise<{ deleted: boolean; 
     };
   }
 
-  const { rowCount } = await getPool().query(`DELETE FROM lab_services WHERE id = $1`, [id]);
+  const { rowCount } = await q.query(`DELETE FROM lab_services WHERE id = $1`, [id]);
   return {
     deleted: (rowCount ?? 0) > 0,
     deactivated: false,
@@ -6676,9 +6706,12 @@ export async function deleteLabService(id: number): Promise<{ deleted: boolean; 
 /** يزرع دليل الخدمات الافتراضي — تحديثٌ لا ازدواج: ON CONFLICT (code). */
 export async function seedLabServicesCatalog(): Promise<{ count: number }> {
   await ensureSchema();
+  return seedLabServicesCatalogWith(getPool());
+}
+export async function seedLabServicesCatalogWith(q: Pick<DbClient, "query">): Promise<{ count: number }> {
   let count = 0;
   for (const item of DEFAULT_LAB_SERVICES) {
-    const res = await getPool().query(
+    const res = await q.query(
       `INSERT INTO lab_services (name, code, category, tooth_scope, requires_shade, default_days, description, sort_order, is_active)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
        ON CONFLICT (code) DO UPDATE
@@ -6743,6 +6776,10 @@ export async function listLabPricingRules(
   labServiceId?: number,
 ): Promise<LabPricingRule[]> {
   await ensureSchema();
+  return listLabPricingRulesWith(getPool(), partyId, labServiceId);
+}
+export async function listLabPricingRulesWith(q: Pick<DbClient, "query">, partyId?: number,
+  labServiceId?: number): Promise<LabPricingRule[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
   let idx = 1;
@@ -6757,7 +6794,7 @@ export async function listLabPricingRules(
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const { rows } = await getPool().query<LabPricingRuleRow>(
+  const { rows } = await q.query<LabPricingRuleRow>(
     `SELECT r.id, r.party_id, p.name AS party_name, r.lab_service_id, ls.name AS service_name,
             r.cost_minor, r.cost_currency, r.effective_from, r.effective_to, r.note,
             r.created_by, r.created_at
@@ -6782,7 +6819,19 @@ export async function createLabPricingRule(input: {
   createdBy: string;
 }): Promise<LabPricingRule> {
   await ensureSchema();
-  const { rows } = await getPool().query<LabPricingRuleRow>(
+  return createLabPricingRuleWith(getPool(), input);
+}
+export async function createLabPricingRuleWith(q: Pick<DbClient, "query">, input: {
+  partyId: number;
+  labServiceId: number;
+  costMinor: number;
+  costCurrency: LabPricingRule["costCurrency"];
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  note?: string | null;
+  createdBy: string;
+}): Promise<LabPricingRule> {
+  const { rows } = await q.query<LabPricingRuleRow>(
     `INSERT INTO lab_pricing_rules
        (party_id, lab_service_id, cost_minor, cost_currency, effective_from, effective_to, note, created_by)
      VALUES ($1, $2, $3, $4, $5::date, $6::date, $7, $8)
@@ -6799,8 +6848,10 @@ export async function createLabPricingRule(input: {
       input.createdBy,
     ],
   );
-  const full = await listLabPricingRules(input.partyId, input.labServiceId);
-  return full[0] ?? toLabPricingRuleShallow(rows[0], input);
+  const full = await listLabPricingRulesWith(q, input.partyId, input.labServiceId);
+  // The created rule itself (M2 slice 70b): the newest rule of the pair is not
+  // necessarily the one just inserted (an older rule may start later).
+  return full.find(rule => rule.id === rows[0].id) ?? toLabPricingRuleShallow(rows[0], input);
 }
 
 /** نسخة مبسطة حين يخلو الجدول من القاعدة الجديدة بعد الإدراج (لا يحدث عمليًا). */
@@ -6833,7 +6884,17 @@ export async function updateLabPricingRule(
   }>,
 ): Promise<LabPricingRule | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ party_id: number; lab_service_id: number }>(
+  return updateLabPricingRuleWith(getPool(), id, input);
+}
+export async function updateLabPricingRuleWith(q: Pick<DbClient, "query">, id: number,
+  input: Partial<{
+    costMinor: number;
+    costCurrency: LabPricingRule["costCurrency"];
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    note: string | null;
+  }>): Promise<LabPricingRule | null> {
+  const { rows } = await q.query<{ party_id: number; lab_service_id: number }>(
     `UPDATE lab_pricing_rules
         SET cost_minor     = COALESCE($2, cost_minor),
             cost_currency  = COALESCE($3, cost_currency),
@@ -6854,13 +6915,16 @@ export async function updateLabPricingRule(
     ],
   );
   if (!rows[0]) return null;
-  const full = await listLabPricingRules(rows[0].party_id, rows[0].lab_service_id);
+  const full = await listLabPricingRulesWith(q, rows[0].party_id, rows[0].lab_service_id);
   return full.find((rule) => rule.id === id) ?? null;
 }
 
 export async function deleteLabPricingRule(id: number): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(`DELETE FROM lab_pricing_rules WHERE id = $1`, [id]);
+  return deleteLabPricingRuleWith(getPool(), id);
+}
+export async function deleteLabPricingRuleWith(q: Pick<DbClient, "query">, id: number): Promise<boolean> {
+  const { rowCount } = await q.query(`DELETE FROM lab_pricing_rules WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
 }
 
@@ -6871,7 +6935,12 @@ export async function resolveLabOrderPrice(
   dateStr: string,
 ): Promise<{ costMinor: number; costCurrency: LabPricingRule["costCurrency"]; ruleId: number } | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return resolveLabOrderPriceWith(getPool(), partyId, labServiceId, dateStr);
+}
+export async function resolveLabOrderPriceWith(q: Pick<DbClient, "query">, partyId: number,
+  labServiceId: number,
+  dateStr: string): Promise<{ costMinor: number; costCurrency: LabPricingRule["costCurrency"]; ruleId: number } | null> {
+  const { rows } = await q.query<{
     id: number;
     cost_minor: string | number;
     cost_currency: string;

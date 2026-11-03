@@ -51,7 +51,7 @@ describe("capability presentation", () => {
  it("navigation is a projection of current grants over accepted canonical pages only", () => {
   expect(canonicalPagesFor([], false)).toEqual([]);
   expect(canonicalPagesFor(["staff.view"], false).map(p => p.href)).toEqual(["/staff-access"]);
-  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/visits", "/appointments", "/requests", "/waiting-list", "/recall", "/patients", "/ortho", "/lab", "/finance", "/staff-access", "/settings/laboratories", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
+  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/visits", "/appointments", "/requests", "/waiting-list", "/recall", "/patients", "/ortho", "/lab", "/finance", "/staff-access", "/settings/laboratories", "/settings/lab-pricing", "/settings/lab-services", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
   expect(canonicalPagesFor(["finance.shifts.view"], false, { patientScope: "none" }).map(p => p.href)).toEqual(["/finance"]);
   expect(isCanonicalPage("/finance/reports")).toBe(false);
   expect(canonicalPagesFor(["inventory.custody.view"], false).map(p => p.href)).toEqual(["/inventory/custody"]);

@@ -41,6 +41,8 @@ export const CANONICAL_PAGES: readonly CanonicalPage[] = Object.freeze([
  { href: "/patients/[id]", label: "ملف المريض", anyOf: [], record: "patient", pattern: /^\/patients\/[1-9][0-9]{0,9}$/, description: "ملف مريضٍ ضمن نطاق مرضاك." },
  { href: "/staff-access", label: "صلاحيات الطاقم", anyOf: ["staff.view"], description: "دليل الطاقم وتعديل صلاحيات كل موظف بمراجعة وتدقيق." },
  { href: "/settings/laboratories", label: "دليل المختبرات", anyOf: ["clinical.laboratories.manage"], exact: true, description: "المختبرات وبيانات التواصل ومدة التسليم؛ الحسابات والعملة من شاشة الحسابات." },
+ { href: "/settings/lab-pricing", label: "أسعار المختبرات", anyOf: ["finance.cost-prices.view", "finance.lab-prices.edit"], exact: true, description: "أسعار خدمات كل مختبر وتواريخ سريانها؛ الأسعار لمن يملك رؤية التكلفة فقط، والتعديل لمن يملك تعديل الأسعار." },
+ { href: "/settings/lab-services", label: "خدمات المختبر", anyOf: ["clinical.lab.view"], exact: true, description: "دليل خدمات المختبر ومددها؛ الإضافة والتعديل لمن يملك تعديل أسعار المختبر. لا أسعار هنا." },
  { href: "/settings", label: "الإعدادات", anyOf: ["settings.view"], exact: true, description: "إعدادات العيادة والتشغيل والمالية؛ تعدّل ما تسمح به صلاحيتك فقط، وما للمالك يبقى للمالك." },
  { href: "/inventory/procurement", label: "طلبات الشراء", anyOf: ["inventory.requests.view"], description: "طلب مواد جديدة ومتابعة طلباتك أو طلبات المركز بحسب صلاحيتك." },
  { href: "/inventory/procurement/review", label: "اعتماد طلبات الشراء", anyOf: ["inventory.requests.approve"], description: "مراجعة قيم الطلبات واعتمادها أو رفضها باعتماد مستقل." },

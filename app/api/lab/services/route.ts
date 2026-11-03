@@ -14,6 +14,8 @@ import type { LabServiceCategory, LabToothScope } from "@/lib/lab";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { CanonicalLabDirectoryRefusal, readCanonicalLabServices } from "@/lib/canonical-lab-directory";
+import { canonicalLabRoute } from "@/lib/canonical-lab-http";
+import { commandCanonicalLabServiceCreate } from "@/lib/canonical-lab-pricing";
 export const dynamic = "force-dynamic";
 
 const SESSION_ENDED = "انتهت الجلسة. سجّل الدخول من جديد.";
@@ -56,6 +58,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  {
+    const canonical = await canonicalLabRoute(request, async (handle, body) => commandCanonicalLabServiceCreate(handle, body), "تعذّر حفظ خدمة المختبر.");
+    if (canonical) return canonical;
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

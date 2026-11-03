@@ -2310,12 +2310,14 @@
    "doctor"
   ],
   "need": [
-   "clinical.lab.view"
+   "clinical.lab.view",
+   "finance.cost-prices.view"
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70b. OWNER DECISION 2026-11-03 (#483 comment 6615071565): lab cost prices only with finance.cost-prices.view. One owning snapshot under clinical.lab.view; the list and resolve answers are refused (403) without finance.cost-prices.view — never a list with blanked prices; revocation refuses an earlier session.",
+  "projection": {"legacy": "every admitted role (doctor included) read every lab cost price.", "groups": {"prices": "rules with amounts and currency, resolved price — only with finance.cost-prices.view"}, "rows": "pricing rules (directory, not patient records)"}
  },
  {
   "route": "/api/lab/pricing",
@@ -2328,8 +2330,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70b. OWNER DECISION 2026-11-03 (#483 comment 6615071565): lab cost prices only with finance.cost-prices.view. One admitted finance.lab-prices.edit transaction (independent grant unchanged) under an advisory lock on (lab, service): closing the previous rule and creating the new one commit together (legacy: separate statements); whole minor units; dates validated; audit with amounts commits with the write; the response carries amounts only with finance.cost-prices.view."
  },
  {
   "route": "/api/lab/pricing/[id]",
@@ -2342,8 +2344,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70b: one admitted finance.lab-prices.edit transaction under the (lab, service) lock; audit with the write."
  },
  {
   "route": "/api/lab/pricing/[id]",
@@ -2356,8 +2358,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70b. OWNER DECISION 2026-11-03 (#483 comment 6615071565): lab cost prices only with finance.cost-prices.view. One admitted finance.lab-prices.edit transaction under the (lab, service) lock; a currency change must restate the amount (legacy reinterpreted it); dates validated against the stored rule; audit (before/changes) with the write; amounts in the response only with finance.cost-prices.view."
  },
  {
   "route": "/api/lab/services",
@@ -2387,8 +2389,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": "",
+  "status": "canonical-done",
+  "note": "M2 slice 70b: one admitted finance.lab-prices.edit transaction (the map); seed_defaults under its own advisory lock; a taken code is 409 lab_service_code_taken; audit with the write. The catalogue carries no prices.",
   "branches": {
    "discriminator": "action",
    "values": {
@@ -2410,8 +2412,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70b: one admitted finance.lab-prices.edit transaction; the legacy rule kept (a service with orders or pricing rules is deactivated, audited as lab_service.deactivate)."
  },
  {
   "route": "/api/lab/services/[id]",
@@ -2441,8 +2443,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70b: one admitted finance.lab-prices.edit transaction; the service row locked; audit (changes) with the write."
  },
  {
   "route": "/api/lab/work-intents/capability",

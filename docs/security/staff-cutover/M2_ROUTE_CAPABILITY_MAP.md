@@ -632,6 +632,27 @@ The read-only patient panel clears stale or failed responses and has no action o
 - **Not in 70a:** services writes and pricing (`finance.lab-prices.edit`, seven methods). They are slice 70b; the legacy pricing read shows cost prices to every role, which is an owner decision point.
 - **Tests:** PG `lab-canonical-directory` (5), including concurrent changes that both land and are both audited; built journey `canonical-lab-directory-journey` (2, portOffset 114).
 
+### Slice 70b — lab pricing and services-catalogue writes (owner decision on cost prices)
+- **Owner decision, 2026-11-03 (#483 comment 6615071565):** lab cost prices are seen only with `finance.cost-prices.view`. Entering the lab module or holding `clinical.lab.view` is not enough. It is enforced in the server for every response that carries a price.
+  - `GET /api/lab/pricing` (the list and `resolve`): `need` becomes `clinical.lab.view` + `finance.cost-prices.view`, and the answer is refused (403) without it — never a list with blanked prices.
+  - Revoking the capability refuses a session issued earlier: the permission revision invalidates it.
+- **Pricing writes:** `POST /api/lab/pricing` and `PUT/DELETE /api/lab/pricing/[id]` run under the independent `finance.lab-prices.edit` (unchanged; no new grant).
+  - The response carries amounts only with `finance.cost-prices.view`, so an editor without it never reads a stored price back.
+  - One transaction under an advisory lock on (lab, service). Closing the previous rule and creating the new one commit together; the legacy route ran them as separate statements.
+  - Amounts are whole minor units. A currency change must restate the amount (the legacy route reinterpreted it). Dates are validated against the stored rule.
+  - The audit row (with amounts, for financial accountability) commits with the write.
+- **Services catalogue writes:** `POST /api/lab/services` (including `seed_defaults` under its own lock) and `PATCH/DELETE /api/lab/services/[id]` under `finance.lab-prices.edit` (the map).
+  - A taken code is 409.
+  - Delete keeps the legacy rule (deactivate when used), audited as `lab_service.deactivate`.
+- **Shared fix:** the legacy `createLabPricingRule` returned the newest rule of the pair, not necessarily the one it created. It now returns the created rule.
+- **Screens:** `/settings/lab-pricing` (anyOf cost view or price edit) and `/settings/lab-services` (`clinical.lab.view`), each mounted on the exact path.
+  - The pricing page never requests prices without the cost capability.
+  - The entry journey's not-yet-canonical example is now `/api/families`.
+- **Note:** the audit reader (`/api/audit`) is still legacy (owner/admin). Its canonical slice must apply the same price projection to `lab_pricing.*` and `lab_order.create` details.
+- **Tests:**
+  - PG `lab-canonical-pricing` (7): refusal for list/resolve, revocation, editor without amounts, atomic close-previous, validation, pair lock wait, services writes, legacy create fix.
+  - Built journey `canonical-lab-pricing-journey` (2, portOffset 116).
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 
