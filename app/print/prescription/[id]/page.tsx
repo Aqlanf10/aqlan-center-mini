@@ -103,7 +103,9 @@ export default async function PrescriptionPrintPage({
     rxItems = stored.items;
   } else if (isDraftMode) {
     try {
-      const rawItems = JSON.parse(decodeURIComponent(sParams.items!));
+      // Next.js has already decoded the query parameter. A second decode would
+      // reject literal percent signs and silently change percent-encoded text.
+      const rawItems = JSON.parse(sParams.items!);
       rxItems = manualMedicationSelectionError(rawItems) ? [] : sanitizeRxItems(rawItems);
     } catch {
       rxItems = [];
@@ -305,3 +307,4 @@ export default async function PrescriptionPrintPage({
     </>
   );
 }
+

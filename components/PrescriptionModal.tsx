@@ -1,5 +1,6 @@
 "use client";
 import { blankPrescriptionRow, appendPrescriptionSelection, canAcceptPrescriptionSelection, retireDraftDoseReferenceAt } from "@/lib/prescription-draft-rows";
+import {openSavedPrescriptionPrint} from "@/lib/prescription-print-opening";
 import { prescriptionDraftPrintItems } from "@/lib/prescription";
 import { PrescriptionStaleReferenceNotice } from "./PrescriptionStaleReferenceNotice";
 import { PrescriptionDoseProfiles } from "./PrescriptionDoseProfiles";
@@ -115,6 +116,7 @@ export function PrescriptionModal({
   const commandScope = session?.username && patientId ? prescriptionCommandStorageKey(session.username, patientId, visitId ?? null) : null;
   const operationScope = isOpen ? JSON.stringify([commandScope, prescriberKey, selectedDoctorId]) : null;
   const operationFence = useRef(createPrescriptionOperationFence());
+  const [blockedSavedPrintId, setBlockedSavedPrintId] = useState<number | null>(null);
   const [preservingScope, setPreservingScope] = useState<string | null>(null);
   const preserving = operationScope !== null && preservingScope === operationScope;
   const setPreserving = (value: boolean) => setPreservingScope(value ? operationScope : null);
@@ -123,6 +125,7 @@ export function PrescriptionModal({
     const fence = operationFence.current;
     fence.setScope(operationScope);
     setPreservingScope(null);
+    setBlockedSavedPrintId(null);
     return () => { fence.retire(); setCommandRead(null); };
   }, [operationScope]);
 
@@ -330,9 +333,11 @@ export function PrescriptionModal({
   const openOfficialPrint = (prescriptionId: number) => {
     /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من snapshot السجل
      * لا من الرابط — فلا وثيقة رسمية تحمل اسمًا مزوّرًا (P0.9). */
-    const params = new URLSearchParams();
-    params.set("rx", String(prescriptionId));
-    window.open(`/print/prescription/${patientId}?${params.toString()}`, "_blank");
+    if (!patientId) return;
+    const opening = openSavedPrescriptionPrint(patientId, prescriptionId, (url, target) => window.open(url, target));
+    if (opening && !opening.opened) {
+      setBlockedSavedPrintId(prescriptionId);
+    }
   };
 
   const handlePrint = async () => {
@@ -608,7 +613,7 @@ export function PrescriptionModal({
             <p>{commandState.message}</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {commandState.entry && <button type="button" disabled={preserving} onClick={() => void recoverIssuance()} className="rounded border bg-white px-3 py-2">التحقق من نتيجة الإصدار السابق</button>}
-              {commandState.recoveredId && commandState.status === "active" && <a href={`/print/prescription/${patientId}?rx=${commandState.recoveredId}`} target="_blank" rel="noopener noreferrer" className="rounded border bg-white px-3 py-2">فتح النسخة المحفوظة #{commandState.recoveredId}</a>}
+              {commandState.recoveredId && commandState.status === "active" && <a href={`/print/prescription/${patientId}?rx=${commandState.recoveredId}`} target="_blank" rel="noopener noreferrer" className="rounded border border-slate-900 bg-slate-900 px-3 py-2 font-bold text-white">فتح النسخة المحفوظة #{commandState.recoveredId}</a>}
               <button type="button" disabled={preserving} onClick={startNewIssuance} className="rounded border bg-white px-3 py-2">بدء إصدار جديد بعد مراجعة السجل</button>
             </div>
           </div>}
@@ -1017,6 +1022,10 @@ export function PrescriptionModal({
 
         {/* تذييل النافذة والإجراءات */}
         <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3">
+          {blockedSavedPrintId && commandState?.recoveredId === blockedSavedPrintId && commandState.status === "active" && <div role="status" className="flex w-full flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs">
+            <span>الوصفة محفوظة ولم تُفتح نافذة الطباعة. افتح النسخة المحفوظة مباشرة؛ لا تبدأ إصدارًا جديدًا.</span>
+            <a href={`/print/prescription/${patientId}?rx=${blockedSavedPrintId}`} target="_blank" rel="noopener noreferrer" className="rounded bg-slate-900 px-3 py-2 font-bold text-white">فتح الوصفة المحفوظة للطباعة #{blockedSavedPrintId}</a>
+          </div>}
           <div className="flex items-center gap-2">
             <button
               type="button"
