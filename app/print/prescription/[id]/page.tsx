@@ -32,7 +32,17 @@ export default async function PrescriptionPrintPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<{
+    rx?: string | string[];
+    draft?: string | string[];
+    items?: string | string[];
+    diagnosis?: string | string[];
+    notes?: string | string[];
+    doctorName?: string; // Historical metadata is ignored; saved snapshot wins.
+    doctorPartyId?: string;
+    date?: string;
+    lang?: string;
+  }>;
 }) {
   const session = await requireSession();
   if (!session) notFound();

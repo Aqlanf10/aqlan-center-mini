@@ -1,7 +1,6 @@
 import { DOSE_REFERENCE_VERSION } from "../../lib/medication-dose-profiles";
 import { createCalculatedDoseProvenance, calculatedDoseFields } from "../../lib/medication-dose-provenance";
 const rxFixture = vi.hoisted(() => ({ long: false, longIdentity: false, calculated: false, ibuprofen: false }));
-vi.mock("@/lib/prescription-prescriber", () => ({ prescriptionPrescriberOptions: async () => ({ issuerId: 5, canChooseAnyDoctor: false, doctors: [{ id: 5, name: "SYN-DRAFT-CLINICIAN" }] }) }));
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -62,16 +61,23 @@ function labCss() {
   return css.toString();
 }
 describe("native compact print regression witnesses", () => {
-  it.each(["receipt", "lab", "prescription-saved", "prescription-draft", "prescription-long", "prescription-long-identity", "prescription-calculated", "prescription-ibuprofen-calculated", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
+  it.each([
+    { draft: "1", items: "SYN-PRIVATE-DRAFT" },
+    { rx: "11", draft: "1", items: "SYN-PRIVATE-DRAFT" },
+    { rx: "11", diagnosis: "SYN-PRIVATE-DIAGNOSIS" },
+    { rx: "11", notes: "SYN-PRIVATE-NOTES" },
+  ])("rejects retired draft or mixed clinical query as 404", async query => {
+    await expect(PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(query) }))
+      .rejects.toMatchObject({ digest: "NEXT_HTTP_ERROR_FALLBACK;404" });
+  });
+  it.each(["receipt", "lab", "prescription-saved", "prescription-long", "prescription-long-identity", "prescription-calculated", "prescription-ibuprofen-calculated", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
     const prescription = kind.startsWith("prescription-");
     rxFixture.long = kind.startsWith("prescription-long");
     rxFixture.longIdentity = kind === "prescription-long-identity";
     rxFixture.calculated = kind === "prescription-calculated" || kind === "prescription-ibuprofen-calculated";
     rxFixture.ibuprofen = kind === "prescription-ibuprofen-calculated";
     const node = kind === "patient-card" ? await PatientCardPage({ params: Promise.resolve({ id: "2" }) }) : prescription
-      ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(kind !== "prescription-draft"
-        ? { rx: "11", diagnosis: "SYN-URL-TAMPER" }
-        : { draft: "1", doctorPartyId: "5", lang: "both", diagnosis: "SYN-DRAFT-DIAGNOSIS", items: JSON.stringify([{ selection: { id: "manual", amount: "SYN-AMOUNT", confirmed: true }, name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }]) }) })
+      ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve({ rx: "11" }) })
       : await (kind === "receipt" ? ReceiptPage : LabPage)({ params: Promise.resolve({ id: "1" }) });
     const body = renderToStaticMarkup(<><PrintDocumentWatermark /><div className="print-root">{node}</div></>);
     const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
@@ -126,7 +132,7 @@ describe("native compact print regression witnesses", () => {
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
         const references = rxFixture.calculated ? [rxFixture.ibuprofen?"Ibuprofen":"Amoxicillin", rxFixture.ibuprofen?"100 mg/5 mL":"250 mg/5 mL", rxFixture.ibuprofen?"7.5 mL (150 mg)":"4 mL (200 mg)", rxFixture.ibuprofen?"3 times daily":"Every 8 hours", ...(rxFixture.ibuprofen?["at least 8 hours apart","Preferably after food."]:[]), "5 days", "SYN-CALCULATED-PLAN", "SYN-CALCULATED-END", "SYN-SAVED-CLINICIAN"] : kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
-          ? ["SYN-RX-PATIENT", "SYN-RX-001", ...(rxFixture.long ? Array.from({ length: 20 }, (_, index) => `SYN-MED-${String(index + 1).padStart(2, "0")}`) : ["SYNTHETIC-RX-MEDICATION"]), "SYN-AMOUNT", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", kind !== "prescription-draft" ? "SYN-SAVED-CLINICIAN" : "SYN-DRAFT-CLINICIAN", kind !== "prescription-draft" ? "SYN-SAVED-DIAGNOSIS" : "SYN-DRAFT-DIAGNOSIS"]
+          ? ["SYN-RX-PATIENT", "SYN-RX-001", ...(rxFixture.long ? Array.from({ length: 20 }, (_, index) => `SYN-MED-${String(index + 1).padStart(2, "0")}`) : ["SYNTHETIC-RX-MEDICATION"]), "SYN-AMOUNT", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", "SYN-SAVED-CLINICIAN", "SYN-SAVED-DIAGNOSIS"]
           : ["SYN-PROV-ORIGINAL-BHGFBCDEFABCD", "SYN-REV-00002", "SYN-REP-00003"];
         for (const reference of references) expect(rxFixture.calculated ? text.replace(/\s+/g, " ") : text).toContain(reference);
         if (rxFixture.long) for (let index = 1; index <= 20; index++) {
@@ -138,10 +144,11 @@ describe("native compact print regression witnesses", () => {
         }
         if (rxFixture.calculated) { expect(body).not.toContain("synthetic.invalid"); expect(body).not.toContain("weightKg"); expect(body).not.toContain("SYN-LONG-PRODUCT"); }
         if (prescription) {
-          expect(text).not.toContain("SYN-URL-TAMPER");
+          // Query overrides are rejected by the explicit 404 cases above.
           expect(text.includes("UNAPPROVED DRAFT")).toBe(false);
         }
       }
     } finally { await browser.close(); }
   });
 });
+
