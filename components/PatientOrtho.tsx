@@ -1153,6 +1153,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                             onClick={() => { if (currentCase(row.id)) setDiagnosticSections(previous => ({ ...previous, [row.id]: key })); }}>{label}</button>)}
                         </nav>
                       </div>
+                      {diagnosticSections[row.id] === "extraoral" && <a className="inline-flex min-h-11 items-center rounded-lg border border-navy-300 bg-white px-3 py-2 text-sm font-bold text-navy-900" href={`/ortho/${row.id}/facial?patientId=${patientId}`}>قياس أثلاث وأخماس الوجه على الصورة</a>}
                       <div hidden={!(["interview", "extraoral", "intraoral", "measurements"] as readonly string[]).includes(diagnosticSections[row.id] ?? "interview")}><OrthoAssessmentPanelV2 patientId={patientId} caseRow={row}
                           sectionView={diagnosticSections[row.id] === "extraoral" ? "extraoral" : diagnosticSections[row.id] === "intraoral" ? "intraoral" : diagnosticSections[row.id] === "measurements" ? "measurements" : "interview"} /></div>
                       {/* معرض سجلات الحالة والأشعة المعياري الـ 12 كمنصة WebCeph */}

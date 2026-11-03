@@ -162,6 +162,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ortho/[id]/strategy": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/assessment": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/retention-transition": { GET: CLINIC, POST: CLINICAL },
+  "/api/ortho/[id]/facial-analysis": { GET: CLINIC, POST: CLINICAL },
+  "/api/ortho/[id]/facial-image": { GET: CLINIC },
   "/api/ortho/[id]/retention-events": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/case-study": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/case-study/editor": { GET: CLINIC, POST: CLINICAL },

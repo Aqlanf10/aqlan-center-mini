@@ -711,3 +711,7 @@ objects fail closed. No backfill, inferred delivery, visit, closing timestamp or
 financial entry. Patient ownership is checked at deferred commit, including parent
 changes. Clinical case remains open. Existing decisions require a future explicit
 correction/re-treatment workflow; they cannot be overwritten or deleted.
+
+## 0102_ortho_facial_analysis.sql — source-bound manual facial measurements
+
+Adds immutable, versioned `ortho_facial_revisions` bound to the same patient, orthodontic case, clinical bridge and source document. Each revision preserves original image SHA-256, EXIF orientation basis, manual landmarks, projection protocol, image-date provenance, physician review, computed results and request fingerprint. Deferred scope triggers cover all parents; runtime and CLI use identical SQL. No backfill, clinical state transition, visit, invoice or payment is created.

@@ -94,7 +94,7 @@ export type AuditAction =
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
   | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "visit.create"
-  | "ortho.strategy_revision" | "ortho.assessment.append" | "ortho.journey_record" | "ortho.study_text_export" | "ortho.retention_transition"
+  | "ortho.strategy_revision" | "ortho.assessment.append" | "ortho.journey_record" | "ortho.study_text_export" | "ortho.retention_transition" | "ortho.facial_revision"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
@@ -367,6 +367,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.case_create": "فتح حالة تقويم",
   "ortho.strategy_revision": "توثيق مراجعة خطة الحالة التقويمية",
   "ortho.study_text_export": "تصدير نسخة نصية من عرض الحالة",
+  "ortho.facial_revision": "حفظ مراجعة قياسات صورة الوجه",
   "ortho.retention_transition": "إنهاء العلاج النشط وبدء متابعة التثبيت",
   "ortho.journey_record": "توثيق سجل التثبيت أو عرض الحالة التقويمية",
   "ortho.assessment.append": "حفظ مراجعة تقييم وقياسات الحالة التقويمية",

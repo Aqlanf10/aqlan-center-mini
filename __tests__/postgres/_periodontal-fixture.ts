@@ -7,6 +7,12 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.at(-1)?.version === "0102" && files.at(-1)?.filename === "0102_ortho_facial_analysis.sql") {
+    if (files.at(-2)?.version !== "0101" || files.at(-2)?.filename !== "0101_ortho_retention_transition.sql") {
+      throw new Error("Unreviewed baseline for facial analysis extension.");
+    }
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   if (files.at(-1)?.version === "0101" && files.at(-1)?.filename === "0101_ortho_retention_transition.sql") {
     if (files.at(-2)?.version !== "0100" || files.at(-2)?.filename !== "0100_ortho_case_journey.sql") {
       throw new Error("Unreviewed baseline for retention transition extension.");

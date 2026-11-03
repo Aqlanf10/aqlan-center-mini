@@ -7,7 +7,7 @@ describe("0101 upgrade from the populated 0100 candidate", () => {
     const f = await openPeriodontalFixture(process.env, { pristine: true });
     try {
       const files = await loadMigrationFiles();
-      await migrate(f.pool, { apply: true, files: files.filter(file => file.version !== "0101") });
+      await migrate(f.pool, { apply: true, files: files.filter(file => file.version < "0101") });
       for (const [n, status] of ["active", "retention", "completed"].entries()) {
         const patient = (await f.pool.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic historic patient') RETURNING id", [`SYN-UPGRADE-${n}`])).rows[0];
         const ortho = (await f.pool.query("INSERT INTO ortho_cases(patient_id,created_by,status,phase,retainer,retainer_on,start_date) VALUES($1,'synthetic',$2,'finishing','essix',NULL,'2022-01-01') RETURNING id", [patient.id, status])).rows[0];
@@ -28,7 +28,7 @@ describe("0101 upgrade from the populated 0100 candidate", () => {
     const f = await openPeriodontalFixture(process.env, { pristine: true });
     try {
       const files = await loadMigrationFiles();
-      await migrate(f.pool, { apply: true, files: files.filter(file => file.version !== "0101") });
+      await migrate(f.pool, { apply: true, files: files.filter(file => file.version < "0101") });
       await f.pool.query("CREATE TABLE ortho_retention_transitions(id INTEGER PRIMARY KEY,marker TEXT); INSERT INTO ortho_retention_transitions VALUES(1,'synthetic-unregistered-canary')");
       await expect(migrate(f.pool, { apply: true, files })).rejects.toThrow();
       expect((await f.pool.query("SELECT * FROM ortho_retention_transitions")).rows).toEqual([{ id: 1, marker: "synthetic-unregistered-canary" }]);
