@@ -6,7 +6,7 @@ import { vi } from "vitest";
 import { judgeFullCapacity } from "@/lib/capacity";
 import { judgeBookingInDay } from "@/lib/book-appointment";
 import type { CapacityContext } from "@/lib/capacity-context";
-import type { DbClient } from "@/lib/db";
+import { capacitySettingsClient } from "./helpers/capacity-settings-client";
 import type { Appointment } from "@/lib/schedule";
 
 /**
@@ -25,10 +25,6 @@ vi.stubEnv("RAILWAY_PROJECT_ID", "");
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const DATE = "2026-11-08";
-
-const noClient = {
-  query: () => { throw new Error("لا يُنتظر استعلامٌ في هذا المسار."); },
-} as unknown as DbClient;
 
 const context: CapacityContext = {
   shifts: [{ start: "09:00", end: "13:00" }],
@@ -106,7 +102,7 @@ describe("حدّ المرضى الجدد يمنع فعلًا", () => {
         appt({ id: 1, isNewPatient: true, scheduledTime: "09:00", durationMinutes: 15 }),
         appt({ id: 2, isNewPatient: true, scheduledTime: "09:30", durationMinutes: 15 }),
       ],
-      client: noClient, date: DATE, time: "11:00", durationMinutes: 15,
+      client: capacitySettingsClient(withLimit), date: DATE, time: "11:00", durationMinutes: 15,
       service: null, context: withLimit, isNewPatient: true,
       canOverride: false, overrideReason: "",
     });
@@ -121,7 +117,7 @@ describe("حدّ المرضى الجدد يمنع فعلًا", () => {
         appt({ id: 1, isNewPatient: true, scheduledTime: "09:00", durationMinutes: 15 }),
         appt({ id: 2, isNewPatient: true, scheduledTime: "09:30", durationMinutes: 15 }),
       ],
-      client: noClient, date: DATE, time: "11:00", durationMinutes: 15,
+      client: capacitySettingsClient(withLimit), date: DATE, time: "11:00", durationMinutes: 15,
       service: null, context: withLimit, isNewPatient: false,
       canOverride: false, overrideReason: "",
     });
@@ -135,7 +131,7 @@ describe("حدّ المرضى الجدد يمنع فعلًا", () => {
         appt({ id: 2, isNewPatient: true, scheduledTime: "09:30", durationMinutes: 15 }),
         appt({ id: 3, isNewPatient: true, scheduledTime: "10:30", durationMinutes: 15 }),
       ],
-      client: noClient, date: DATE, time: "11:00", durationMinutes: 15,
+      client: capacitySettingsClient({ ...context, chairs: 10 }), date: DATE, time: "11:00", durationMinutes: 15,
       service: null, context: { ...context, chairs: 10 }, isNewPatient: true,
       canOverride: false, overrideReason: "",
     });
@@ -148,7 +144,7 @@ describe("حدّ المرضى الجدد يمنع فعلًا", () => {
         appt({ id: 1, isNewPatient: true, scheduledTime: "09:00", durationMinutes: 15 }),
         appt({ id: 2, isNewPatient: true, scheduledTime: "09:30", durationMinutes: 15 }),
       ],
-      client: noClient, date: DATE, time: "11:00", durationMinutes: 15,
+      client: capacitySettingsClient(withLimit), date: DATE, time: "11:00", durationMinutes: 15,
       service: null, context: withLimit, isNewPatient: true, excludeId: 2,
       canOverride: false, overrideReason: "",
     });

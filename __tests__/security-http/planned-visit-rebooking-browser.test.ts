@@ -4,6 +4,7 @@ import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, clinicDateString } from "../../lib/schedule";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
+import { seedAdvisoryDuty } from "../helpers/advisory-duty-fixture";
 import { authedGet, baseUrl, harness, type Session } from "./_server";
 
 // Hosted acceptance in the existing built-app/proxy harness. Every patient and
@@ -14,6 +15,7 @@ let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let browser: Browser;
 let doctorId: number;
+let duty: Awaited<ReturnType<typeof seedAdvisoryDuty>> | undefined;
 let timeZone: string;
 let sequence = 0;
 const prefix = `SYN-REBOOK-BROWSER-${randomUUID()}`;
@@ -37,6 +39,7 @@ beforeAll(async () => {
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
   doctorId = (await db.query<{ party_id: number }>("SELECT party_id FROM users WHERE username = 'secdoctora'")).rows[0].party_id;
+  duty = await seedAdvisoryDuty(db, doctorId, "2000-01-01", "2099-12-31");
   const response = await authedGet(`/api/patients/${h.seeded.patientAId}/workflow`, h.sessions.admin);
   expect(response.status).toBe(200);
   timeZone = (await response.json() as { timeZone: string }).timeZone;
@@ -46,7 +49,7 @@ beforeAll(async () => {
   expect(clinicDateString(new Date(), timeZone)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
-afterAll(async () => { try { await browser?.close(); } finally { await db?.end(); } });
+afterAll(async () => { try { await browser?.close(); } finally { try { await duty?.cleanup(); } finally { await db?.end(); } } });
 
 async function fixture(status: "no_show" | "cancelled") {
   const serial = ++sequence;
@@ -186,7 +189,7 @@ async function connected(f: Fixture, session: Session, width: number) {
       const response = await route.fetch({ maxRetries: 0, maxRedirects: 0 });
       write.result = await response.json() as Result;
       write.status = response.status();
-      expect(write.status).toBe(writes.length === 1 ? 201 : 200);
+      expect(write.status, JSON.stringify(write.result)).toBe(writes.length === 1 ? 201 : 200);
       expect(write.result).toMatchObject({ title: f.title, replayed: writes.length > 1 });
       if (writes.length > 1) expect(write.result.appointmentId).toBe(writes[0].result!.appointmentId);
       await admission.gate.promise;

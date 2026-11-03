@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { actorCanOverride, judgeBookingInDay, type BookingActor } from "@/lib/book-appointment";
 import type { CapacityContext } from "@/lib/capacity-context";
-import type { DbClient } from "@/lib/db";
+import { capacitySettingsClient } from "./helpers/capacity-settings-client";
 import type { Appointment } from "@/lib/schedule";
 
 /**
@@ -22,11 +22,6 @@ import type { Appointment } from "@/lib/schedule";
 
 const ARABIC = /[؀-ۿ]/;
 const root = fileURLToPath(new URL("..", import.meta.url));
-
-/** اتصالٌ لا يُستعمل: الحكم في هذه الحالات لا يلمس القاعدة أصلًا. */
-const noClient = {
-  query: () => { throw new Error("لا يُنتظر استعلامٌ في هذا المسار."); },
-} as unknown as DbClient;
 
 const context: CapacityContext = {
   shifts: [{ start: "09:00", end: "13:00" }],
@@ -137,7 +132,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
 
   it("بلا صلاحية: رفضٌ برسالةٍ عربية وبديلٍ محدَّد", async () => {
     const judged = await judgeBookingInDay({ patientId: null,
-      sameDay: full, client: noClient, date: DATE, time: "10:00",
+      sameDay: full, client: capacitySettingsClient(context), date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: false, overrideReason: "",
     });
@@ -153,7 +148,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
 
   it("وبصلاحيةٍ بلا سبب: رفضٌ أيضًا — التجاوز موثَّق أو لا يكون", async () => {
     const judged = await judgeBookingInDay({ patientId: null,
-      sameDay: full, client: noClient, date: DATE, time: "10:00",
+      sameDay: full, client: capacitySettingsClient(context), date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: true, overrideReason: "   ",
     });
@@ -166,7 +161,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
 
   it("وبصلاحيةٍ وسبب: يمرّ، ويُعلَّم أنه تجاوز", async () => {
     const judged = await judgeBookingInDay({ patientId: null,
-      sameDay: full, client: noClient, date: DATE, time: "10:00",
+      sameDay: full, client: capacitySettingsClient(context), date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: true, overrideReason: "ألم حادّ لا يحتمل التأجيل",
     });
@@ -178,7 +173,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
 
   it("وسببٌ من حرفين لا يكفي — لا يُكتفى بضغطةٍ على المفتاح", async () => {
     const judged = await judgeBookingInDay({ patientId: null,
-      sameDay: full, client: noClient, date: DATE, time: "10:00",
+      sameDay: full, client: capacitySettingsClient(context), date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: true, overrideReason: "أ",
     });
@@ -187,7 +182,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
 
   it("والوقت المتاح يمرّ بلا تجاوزٍ ولا علامة", async () => {
     const judged = await judgeBookingInDay({ patientId: null,
-      sameDay: [], client: noClient, date: DATE, time: "10:00",
+      sameDay: [], client: capacitySettingsClient(context), date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: false, overrideReason: "",
     });
