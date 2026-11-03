@@ -61,6 +61,7 @@ async function fixture(width = 1280, existing = false, catalog = false, suggest 
   const open = () => page.getByRole("button", { name: /حجز موعد جديد/ }).click();
   await open();
   const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("التصنيف السريري للموعد",{exact:true}).selectOption("other");
   await dialog.getByLabel("المريض", { exact: true }).fill(patientName);
   if (existing) await dialog.getByRole("button", { name: new RegExp(patientName) }).click();
   const submit = dialog.locator('button[type="submit"]');
@@ -105,7 +106,7 @@ describe("quick booking repeated and interrupted flows", () => {
       await expect.poll(() => availableSlot.count()).toBe(1);
       expect(await availableSlot.isEnabled()).toBe(true);
       expect(await f.page.locator("html").getAttribute("dir")).toBe("rtl");
-      expect(await f.dialog.locator("fieldset").evaluate((panel) => {
+      expect(await f.dialog.locator("fieldset").first().evaluate((panel) => {
         const bounds = panel.getBoundingClientRect();
         return panel.scrollWidth <= panel.clientWidth && bounds.left >= 0 && bounds.right <= window.innerWidth;
       })).toBe(true);
@@ -154,7 +155,7 @@ describe("quick booking repeated and interrupted flows", () => {
       }
       if (catalog) {
         await mkdir(".settings-ui-artifacts", { recursive: true });
-        const panel = f.dialog.locator("fieldset");
+        const panel = f.dialog.locator("fieldset").first();
         await panel.evaluate((element) => { element.scrollTop = 0; });
         await panel.screenshot({ path: `.settings-ui-artifacts/quick-booking-frozen-${width === 390 ? "mobile" : "desktop"}.png` });
       }
@@ -165,7 +166,7 @@ describe("quick booking repeated and interrupted flows", () => {
         durationMinutes: 45, doctorId: 91002, chairNo: 2, appointmentType: "consultation",
         ...(catalog ? { serviceId: 93001 } : {}),
       });
-      await json(f.appointmentRequests[0], { id: 92001 }, 201);
+      await json(f.appointmentRequests[0], { id: 92001, status:"booked" }, 201);
       await expect.poll(() => f.dialog.count()).toBe(0);
       expect(f.patientRequests).toHaveLength(1);
       expect(f.appointmentRequests).toHaveLength(1);
@@ -176,7 +177,7 @@ describe("quick booking repeated and interrupted flows", () => {
       expect(await f.dialog.locator('[id$="-doctor"]').inputValue()).toBe("");
       expect(await f.submit.isEnabled()).toBe(true);
       await f.dialog.getByLabel("المريض", { exact: true }).fill("مريض جديد بعد النجاح");
-      await f.dialog.getByRole("button", { name: "إلغاء", exact: true }).click();
+      await f.dialog.getByRole("button", { name: "إغلاق", exact: true }).click();
       await expect.poll(() => f.dialog.count()).toBe(0);
     } finally { await f.context.close(); }
   });
@@ -204,7 +205,7 @@ describe("quick booking repeated and interrupted flows", () => {
       expect(f.appointmentRequests[0].request().postDataJSON()).toMatchObject({
         date: "2030-01-16", time: "17:00", doctorId: 91003, note: "ملاحظة مصححة",
       });
-      await json(f.appointmentRequests[0], { id: 92001 }, 201);
+      await json(f.appointmentRequests[0], { id: 92001, status:"booked" }, 201);
       await expect.poll(() => f.dialog.count()).toBe(0);
       expect(f.appointmentRequests).toHaveLength(1);
     } finally { await f.context.close(); }
@@ -228,7 +229,7 @@ describe("quick booking repeated and interrupted flows", () => {
       expect(f.patientRequests).toHaveLength(1);
       expect(f.appointmentRequests[1].request().postDataJSON()).toMatchObject({ patientId, isNewPatient: true, time: "17:00", note: "إعادة محاولة بعد التعارض" });
       await expectFrozen(f.dialog);
-      await json(f.appointmentRequests[1], { id: 92001 }, 201);
+      await json(f.appointmentRequests[1], { id: 92001, status:"booked" }, 201);
       await expect.poll(() => f.dialog.count()).toBe(0);
     } finally { await f.context.close(); }
   });
@@ -262,14 +263,10 @@ describe("quick booking repeated and interrupted flows", () => {
       expect(f.waitingRequests).toHaveLength(0);
       expect(f.appointmentRequests[1].request().postDataJSON().overrideReason).toBe("حالة ألم حاد");
       await json(f.appointmentRequests[1], { message: "تعذّر الحجز" }, 500);
-      await expect.poll(() => f.submit.isEnabled()).toBe(true);
-      await override.fill("سبب مصحح");
-      await f.dialog.locator('[data-waiting-sameday="no"]').click();
-      expect(await f.dialog.locator('[data-waiting-sameday="no"]').getAttribute("aria-pressed")).toBe("true");
-      expect(await f.dialog.locator('[data-action="save-to-waiting-list"]').isEnabled()).toBe(true);
-      await f.dialog.getByRole("button", { name: "تراجع", exact: true }).click();
-      expect(await f.dialog.locator('[data-action="add-to-waiting-list"]').isEnabled()).toBe(true);
-      await f.dialog.getByRole("button", { name: "إلغاء", exact: true }).click();
+      await expect.poll(() => f.dialog.getByRole("button",{name:"تحقّق من نتيجة الحجز",exact:true}).isEnabled()).toBe(true);
+      expect(await f.submit.isDisabled()).toBe(true);
+      expect(await f.dialog.locator('[id$="-time"]').isDisabled()).toBe(true);
+      await f.dialog.getByRole("button", { name: "إغلاق", exact: true }).click();
       await expect.poll(() => f.dialog.count()).toBe(0);
       expect(f.patientRequests).toHaveLength(0);
       expect(f.waitingRequests).toHaveLength(0);
@@ -283,7 +280,7 @@ describe("quick booking repeated and interrupted flows", () => {
       await expect.poll(() => f.appointmentRequests.length).toBe(1);
       expect(f.patientRequests).toHaveLength(0);
       expect(f.appointmentRequests[0].request().postDataJSON()).toMatchObject({ patientId, isNewPatient: false });
-      await json(f.appointmentRequests[0], { id: 92001 }, 201);
+      await json(f.appointmentRequests[0], { id: 92001, status:"booked" }, 201);
       await expect.poll(() => f.dialog.count()).toBe(0);
       expect(f.appointmentRequests).toHaveLength(1);
     } finally { await f.context.close(); }

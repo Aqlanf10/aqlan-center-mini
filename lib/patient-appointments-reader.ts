@@ -28,7 +28,7 @@ export async function readPatientAppointments(patientId: number, query: PatientA
       to_char(a.scheduled_date, 'YYYY-MM-DD') AS "scheduledDate",
       to_char(a.scheduled_time, 'HH24:MI') AS "scheduledTime",
       to_char(a.scheduled_time, 'HH24:MI:SS.US') AS "cursorTime",
-      a.duration_minutes AS "durationMinutes", a.status, a.doctor_id AS "doctorId", d.name AS "doctorName",
+      a.duration_minutes AS "durationMinutes", a.clinical_category AS "clinicalCategory", a.status, a.doctor_id AS "doctorId", d.name AS "doctorName",
       a.cancel_reason AS "cancelReason", a.reminder_sent_at AS "reminderSentAt", NULL AS note
     FROM appointments a JOIN patients p ON p.id = a.patient_id LEFT JOIN parties d ON d.id = a.doctor_id
     WHERE a.patient_id = $1 AND ${upcoming

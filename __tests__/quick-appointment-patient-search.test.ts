@@ -89,8 +89,17 @@ function render() {
     },
     results: () => all.filter((element) => element.type === "li")
       .map((li) => elements(li).find((element) => element.type === "button")!),
-    submit: () => (all.find((element) => element.type === "form")!.props.onSubmit as
-      (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: vi.fn() }),
+    submit: (): Promise<void> => {
+      // This suite audits catalogue/search ownership; explicitly satisfy the
+      // independent new classification requirement through its rendered control.
+      const category = all.find(element => element.props["aria-label"] === "التصنيف السريري للموعد");
+      if (category && !category.props.value) {
+        (category.props.onChange as (event:{target:{value:string}})=>void)({target:{value:"orthodontics"}});
+        return render().submit();
+      }
+      return (all.find((element) => element.type === "form")!.props.onSubmit as
+        (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: vi.fn() });
+    },
   };
 }
 function changeQuery(value: string) {
@@ -126,6 +135,8 @@ beforeEach(() => {
   hooks.effects = []; hooks.pending = []; hooks.dirty = false;
   open = true; searches.clear(); vi.clearAllMocks(); vi.useFakeTimers();
   vi.stubGlobal("fetch", fetchMock);
+  const storage = new Map<string,string>();
+  vi.stubGlobal("sessionStorage", { getItem: (key:string) => storage.get(key) ?? null, setItem: (key:string,value:string) => storage.set(key,value), removeItem: (key:string) => storage.delete(key) });
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     if (url.startsWith("/api/patients?q=")) {
       const query = decodeURIComponent(url.split("?q=")[1]);
@@ -133,10 +144,11 @@ beforeEach(() => {
       searches.set(query, request);
       return request.promise;
     }
+    if (url === "/api/auth/me") return Promise.resolve(response(200, { id: 70001, username: "synthetic-booking-reception" }));
     if (url === "/api/parties?kind=doctor") return Promise.resolve(response(200, []));
     if (url === "/api/settings/appointment-services") return Promise.resolve(response(200, { services: [], chairs: 0 }));
     if (url === "/api/patients" && init?.method === "POST") return Promise.resolve(response(201, { id: 91999 }));
-    if (url === "/api/appointments" && init?.method === "POST") return Promise.resolve(response(201, { id: 92999 }));
+    if (url === "/api/appointments" && init?.method === "POST") return Promise.resolve(response(201, { id: 92999, status: "booked" }));
     throw new Error(`Unexpected mocked fetch: ${url}`);
   });
   render();

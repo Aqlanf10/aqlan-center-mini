@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
+import { isAppointmentCategory, type AppointmentCategory } from './appointment-category';
 
 /** Values explicitly requested by the user, never mutable catalogue/default
  * values. The receipt owner is compared separately, not hidden in this hash. */
 export interface DirectAppointmentIntent {
+  expectedActor?: {userId:number;username:string} | null;
   patientId: number;
   date: string;
   time: string;
@@ -14,7 +16,8 @@ export interface DirectAppointmentIntent {
   chairNo?: number | null;
   overrideReason?: string | null;
   isNewPatient?: boolean;
-  appointmentPurpose: 'consultation' | 'start_treatment';
+  appointmentPurpose?: 'consultation' | 'start_treatment' | null;
+  clinicalCategory?: AppointmentCategory | null;
   bookingIntent?: 'ortho_follow_up' | null;
   /** Waiting-list conversion has its own recovery identity; never hide it in
    * a direct-purpose command that does not bind that row. */
@@ -44,8 +47,13 @@ const optionalText = (value: unknown, length: number): string | null => {
  * optional fields, and display-only whitespace cannot change replay identity.
  * A new interpretation requires a new version, never an unreviewed rehash. */
 export function normalizeDirectAppointmentIntent(input: DirectAppointmentIntent): NormalizedDirectAppointmentIntent {
-  if (input.appointmentPurpose !== 'consultation' && input.appointmentPurpose !== 'start_treatment')
+  if (input.appointmentPurpose != null && input.appointmentPurpose !== 'consultation' && input.appointmentPurpose !== 'start_treatment')
     throw new Error('APPOINTMENT_COMMAND_INVALID_PURPOSE');
+  if (input.appointmentPurpose == null && (!input.expectedActor || !Number.isSafeInteger(input.expectedActor.userId)
+    || input.expectedActor.userId <= 0 || typeof input.expectedActor.username !== 'string' || !input.expectedActor.username))
+    throw new Error('APPOINTMENT_COMMAND_INVALID_ACTOR');
+  if (input.clinicalCategory != null && !isAppointmentCategory(input.clinicalCategory))
+    throw new Error('APPOINTMENT_COMMAND_INVALID_CATEGORY');
   if (input.waitingListId !== null && input.waitingListId !== undefined)
     throw new Error('APPOINTMENT_COMMAND_WAITING_LIST_UNSUPPORTED');
   if (input.isNewPatient !== undefined && typeof input.isNewPatient !== 'boolean')
@@ -65,16 +73,18 @@ export function normalizeDirectAppointmentIntent(input: DirectAppointmentIntent)
     throw new Error('APPOINTMENT_COMMAND_INVALID_DURATION');
   // The ortho follow-up shortcut has its own service/plan validation. It is
   // not a direct consultation/start command and cannot bypass that boundary.
-  if (input.bookingIntent !== null && input.bookingIntent !== undefined)
+  if (input.bookingIntent != null && (input.bookingIntent !== 'ortho_follow_up' || input.appointmentPurpose != null))
     throw new Error('APPOINTMENT_COMMAND_INVALID_INTENT');
   return {
+    expectedActor:input.expectedActor ?? null,
     patientId: requiredId(input.patientId), date: input.date,
     time: `${time[1].padStart(2, '0')}:${time[2]}`,
     durationMinutes: duration, serviceId: optionalId(input.serviceId),
     appointmentType: optionalText(input.appointmentType, 60),
     note: optionalText(input.note, 300), doctorId: optionalId(input.doctorId),
     chairNo: optionalId(input.chairNo), overrideReason: optionalText(input.overrideReason, 300),
-    isNewPatient: input.isNewPatient === true, appointmentPurpose: input.appointmentPurpose,
+    isNewPatient: input.isNewPatient === true, appointmentPurpose: input.appointmentPurpose ?? null,
+    clinicalCategory: input.clinicalCategory ?? null,
     bookingIntent: input.bookingIntent ?? null,
   };
 }
@@ -86,6 +96,11 @@ export function fingerprintDirectAppointmentIntent(input: DirectAppointmentInten
     intent.serviceId, intent.appointmentType, intent.note, intent.doctorId, intent.chairNo,
     intent.overrideReason, intent.isNewPatient, intent.appointmentPurpose, intent.bookingIntent,
   ];
+  // Preserve every issued 0095 fingerprint; version 2 binds new explicit metadata.
+  if (intent.clinicalCategory !== null || intent.appointmentPurpose === null || intent.bookingIntent !== null) {
+    canonical[0] = 2;
+    canonical.push(intent.clinicalCategory, intent.expectedActor ? JSON.stringify([intent.expectedActor.userId,intent.expectedActor.username]) : null);
+  }
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 

@@ -1,0 +1,36 @@
+# Appointment completion review — 2026-11-03
+
+This is a stacked, undeployed continuation of PR515 (`b785d75f320a8c8e948f244cccd05998b611a350`). The review base is `feat/appointment-purpose-provenance-0095-20261101`, not the current live Staging source. See [inventory](inventory.md) for exact ancestry and parallel-work boundaries. No merge, deployment, real patient access, Staging mutation, or message sending occurred.
+
+## Resulting behavior
+
+- Seven explicit clinical booking categories: orthodontics, new orthodontic patient, endodontics, filling, prosthetics, awaiting prosthetics, other. These are separate from treatment-purpose provenance, attendance status and treatment state. Existing rows remain unclassified until staff choose a category. Patient lists filter on recorded appointment history before pagination, combine with text search and existing doctor scope, and disclose the historical meaning. The patient-file appointment panel shows the same category.
+- Quick booking writes a durable UUID command with the actual account ID and username before transmission. Unknown outcomes freeze the original draft. Reload recovery checks the receipt first; only a missing result enables replay of the exact body and key. Replays return the existing appointment. Corrupt/unreadable storage and account switches fail closed. An uncertain inline patient-creation response blocks another patient creation and directs staff to search the existing record; this older endpoint does not have a durable patient-creation receipt.
+- Existing booking paths share the same center-hours, duration/buffer, doctor-duty, approved-leave and provider-block admission. A selected doctor needs an unambiguous active HR mapping and effective schedule. Neither an administrator nor a capacity override can bypass unavailable hours. Suggested alternatives use the same frozen roster. Planned/next-session appointments preserve the source doctor under the transaction.
+- Center defaults are 09:00–13:00 and 15:00–19:00. Saved center hours, including explicitly continuous hours without an evening shift, remain authoritative. HR presets initialize from current center settings when opened and retain editable per-day schedules.
+- The daily board adds category, staff-confirmation and lateness filters/badges. Staff confirmation records the reporting employee and time without marking arrival or claiming delivery. Moving an appointment clears confirmation. Category editing compares the old value and displayed appointment snapshot; replacing a planned appointment preserves category. Existing no-show/arrival and follow-up workflows remain separate.
+- Appointment links expose only stored same-patient reciprocal visit/plan/case relationships after transactional authority checks. No latest-record guessing is used; assistant/finance roles do not receive these clinical links.
+- Reminder text continues to format the stored civil appointment time. No one-hour reminder error was reproduced. The quick-booking default date now uses clinic time, including clinic midnight when the browser timezone differs.
+
+## Transaction and storage notes
+
+Migration0095 remains byte-for-byte unchanged. New0096 adds explicit category/staff-confirmation columns and immutable generic booking command receipts; runtime migration bytes/checksum match the file. Both purpose and generic durable receipt histories prevent unsafe hard deletion, merge or reset. PostgreSQL18 schema artifacts were regenerated from the native synthetic database; existing ownership exceptions were not broadened.
+
+Settings and doctor roster/leave/block sources take short transaction-scoped SHARE NOWAIT locks to prevent phantom inserts or a configuration change after admission. A concurrent writer can produce a retry conflict. This deliberately favors consistency and can increase transient contention during HR/settings edits. Day locks, patient overlap, resource capacity, service requirements and protected orthodontic follow-up validation continue through the existing booking mechanisms.
+
+## Validation
+
+All data is synthetic and databases are disposable local PostgreSQL18.6. Node22.23.3 and the exact package lock are used. Final result details are recorded below after the last checks; interim changing-source runs are not represented as exact-head CI.
+
+- Native completion: 12 tests passed, including concurrent same-key replay, actor switch, missing/ambiguous availability rejection, observed HR phantom-write blocking, staff-confirmation stale snapshot, clinical-link privacy, planned/next-session doctor preservation, observed center-settings contention/stale preflight rejection, and refusal to suggest a time after doctor duty ends.
+- Patient-category routes: 81 tests passed, including 8 new validation/access/scope cases. Native category list: 2 tests passed with 32 patients, duplicate historical appointments, pagination and doctor/text scope.
+- Broad unit run: 754 files / 13,231 tests passed before the final center-lock/callback changes; final CI supersedes this.
+- Full lint: 0 errors (329 warnings); final focused source lint also passed. Typecheck passed. Focused completion/recovery/follow-up/search/capacity/intent unit suites: 96 passed, plus a subsequent unreadable-storage regression run: 12 passed.
+- Production build passed. Browser suite: 5 files / 22 tests passed before the final raw-reference removal and stricter settled-search assertion. A final rebuilt browser rerun and hosted exact-head CI are pending; results will be appended separately.
+- Native policy/artifact follow-up: schema-fingerprint 10 passed; doctor-bookability 24 passed with explicit synthetic rosters and hard outside-hours expectations. Independent native completion rerun: 12 passed.
+
+Browser evidence in [evidence](evidence/) uses synthetic patient names and IDs. It covers committed-response loss, reload recovery, exact-key replay, RTL desktop/mobile rendering, stored reminder time across browser timezones, staff confirmation, explicit category editing, patient list filters and clinic midnight. WhatsApp URLs are inspected; no messages are sent.
+
+## Remaining integration boundary
+
+Keep this PR draft until exact-head CI and review are complete. Staging acceptance and composition with current Staging/parallel PRs are separate, explicitly unperformed work. Before activating the stricter gate, verify authorized doctor HR mappings and effective schedules in that target environment; absent or ambiguous records now intentionally refuse booking. The unavailable Library v2 ZIP and any unverified Gemini patch were not incorporated. See [independent review](independent-review.md).

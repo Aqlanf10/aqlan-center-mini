@@ -668,3 +668,25 @@ Deploy remains gated on the actual target's full registry checksums/catalog and
 confirmation that the superseded Rx0090 was never applied there.
 Application rollback must preserve the columns and migration history. Exact-head
 PostgreSQL/schema/restore gates and review are required before any rollout.
+
+### 0095_appointment_purpose_provenance.sql
+
+Immutable explicit treatment-intent provenance and direct-command receipts.
+Composite ownership foreign keys preserve the recorded patient/plan/planned-visit
+relationship. Historical appointments are not classified or backfilled.
+The registered SQL and its runtime twin are checksum-checked; this completion
+branch preserves the original 0095 bytes.
+
+### 0096_appointment_booking_commands.sql
+
+Adds nullable explicit clinical booking category and staff confirmation metadata,
+separate from treatment intent, portal confirmation, reminders and attendance.
+Adds immutable generic quick-booking receipts, using the existing UUID/reset
+fences and actor-scoped recovery endpoint. Generic receipts do not invent a
+clinical treatment intent or plan association. Nonempty receipt history blocks
+physical appointment/patient deletion, patient merges and clinic reset; ordinary
+cancellation and rescheduling preserve the receipt. Moving the time clears staff
+confirmation, while preserving the category. Legacy rows retain NULL metadata.
+Runtime and numbered migration paths register identical SQL/checksum. Review
+0094 radiology and other parallel migrations separately; they are not part of
+this stack. No deployment or database upgrade has been performed by this change.

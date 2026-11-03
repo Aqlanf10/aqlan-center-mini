@@ -1,11 +1,11 @@
-import type { ReactElement, ReactNode } from "react";
+import type { EffectCallback, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickAppointmentModal } from "../components/QuickAppointmentModal";
 
 // Exercise the real component's rendered handlers and state across renders.
 // This repository has no DOM unit-test dependency. Effects are intentionally
 // excluded here; the built-app browser journey covers actual clicks and dialogs.
-const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0 }));
+const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, effectCursor:0, recoveryEffect:null as EffectCallback|null }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   function slot(initial: unknown) {
@@ -16,7 +16,7 @@ vi.mock("react", async (original) => {
   return {
     ...react,
     useId: () => "quick-appointment",
-    useEffect: () => {},
+    useEffect: (run:EffectCallback) => { if(hooks.effectCursor++ === 0 && !hooks.recoveryEffect) hooks.recoveryEffect=run; },
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? initial() : initial);
       return [hooks.values[index], (value: unknown) => {
@@ -47,8 +47,15 @@ const onSuccess = vi.fn();
 const fetchMock = vi.fn();
 function render(patientId?: number) {
   hooks.cursor = 0;
-  const tree = QuickAppointmentModal({ patientId, isOpen: true, onClose, onSuccess });
-  const all = elements(tree);
+  hooks.effectCursor=0;
+  let tree = QuickAppointmentModal({ patientId, isOpen: true, onClose, onSuccess });
+  if(hooks.recoveryEffect){const run=hooks.recoveryEffect;hooks.recoveryEffect=null;run();hooks.cursor=0;hooks.effectCursor=0;
+    tree=QuickAppointmentModal({patientId,isOpen:true,onClose,onSuccess});hooks.recoveryEffect=null;}
+  let all = elements(tree);
+  const category=all.find(node=>node.props["aria-label"] === "التصنيف السريري للموعد");
+  if(category?.props.value === "") {(category.props.onChange as (e:unknown)=>void)({target:{value:"other"}});
+    hooks.cursor=0;hooks.effectCursor=0;tree=QuickAppointmentModal({patientId,isOpen:true,onClose,onSuccess});hooks.recoveryEffect=null;all=elements(tree);}
+
   return {
     tree,
     all,
@@ -91,11 +98,25 @@ beforeEach(() => {
   hooks.values = [];
   hooks.cursor = 0;
   vi.clearAllMocks();
-  vi.stubGlobal("fetch", fetchMock);
+  fetchMock.mockReset();
+  const storage=new Map<string,string>();
+  vi.stubGlobal("sessionStorage",{getItem:(key:string)=>storage.get(key)??null,setItem:(key:string,value:string)=>storage.set(key,value),removeItem:(key:string)=>storage.delete(key)});
+  vi.stubGlobal("fetch", (url:string,...args:unknown[])=> url === "/api/auth/me"
+    ? Promise.resolve(response(200,{id:1,username:"synthetic-reception"})) : fetchMock(url,...args));
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("quick booking owns the complete patient-create and appointment request", () => {
+  it("fails closed if previously available recovery storage becomes unreadable", async () => {
+    enterNewPatient();
+    vi.stubGlobal("sessionStorage", {getItem:()=>{throw new Error("Synthetic storage failure");},setItem:vi.fn(),removeItem:vi.fn()});
+    const form=render();
+    await form.submit();
+    expect(writes("/api/patients")).toHaveLength(0);
+    expect(writes("/api/appointments")).toHaveLength(0);
+    expect(form.all.some(node=>node.props.role === "alert")).toBe(true);
+  });
+
   it("locks before a slow patient create and ignores same-tick or later repeated submission", async () => {
     const patient = deferred<ReturnType<typeof response>>();
     const appointment = deferred<ReturnType<typeof response>>();
@@ -105,7 +126,7 @@ describe("quick booking owns the complete patient-create and appointment request
     const repeated = form.submit(); // Same render, before React commits busy.
     const duringCreate = render();
     const later = duringCreate.submit();
-    expect(writes("/api/patients")).toHaveLength(1);
+    await vi.waitFor(()=>expect(writes("/api/patients")).toHaveLength(1));
     expect(duringCreate.tree!.props.busy).toBe(true);
     expect(duringCreate.find((node) => node.props.type === "submit").props.disabled).toBe(true);
     expect(duringCreate.find((node) => node.props["aria-label"] === "إغلاق").props.disabled).toBe(true);
@@ -115,7 +136,7 @@ describe("quick booking owns the complete patient-create and appointment request
     expect(render().tree!.props.busy).toBe(true);
     await render().submit();
     expect(writes("/api/appointments")).toHaveLength(1);
-    appointment.resolve(response(201, { id: 92001 }));
+    appointment.resolve(response(201, { id: 92001,status:"booked" }));
     await Promise.all([first, repeated, later]);
     expect(onSuccess).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -129,9 +150,9 @@ describe("quick booking owns the complete patient-create and appointment request
     const form = render(91001);
     const first = form.submit();
     const second = form.submit();
-    expect(writes("/api/appointments")).toHaveLength(1);
+    await vi.waitFor(()=>expect(writes("/api/appointments")).toHaveLength(1));
     expect(writes("/api/patients")).toHaveLength(0);
-    appointment.resolve(response(201, {}));
+    appointment.resolve(response(201, {id:92001,status:"booked"}));
     await Promise.all([first, second]);
   });
 
@@ -158,7 +179,7 @@ describe("quick booking owns the complete patient-create and appointment request
     expect(JSON.parse(writes("/api/appointments")[0][1].body)).toMatchObject({
       patientId: 91001, date: fields.date, time: fields.time, note: fields.note, doctorId: 91002, isNewPatient: true,
     });
-    appointment.resolve(response(201, {}));
+    appointment.resolve(response(201, {id:92001,status:"booked"}));
     await first;
     expectControlGroup(render(), false);
     expect(render().find((node) => node.props.id === "quick-appointment-patient").props.value).toBe("");
@@ -181,27 +202,28 @@ describe("quick booking owns the complete patient-create and appointment request
     expect(duringRetry.find((node) => node.props["data-action"] === "save-to-waiting-list")).toBeDefined();
     expect(duringRetry.find((node) => node.props["data-waiting-shift"] === "1")).toBeDefined();
     expect(duringRetry.find((node) => node.props.id === "quick-appointment-override").props.value).toBe("حالة ألم حاد");
+    await vi.waitFor(()=>expect(writes("/api/appointments")).toHaveLength(2));
     expect(JSON.parse(writes("/api/appointments")[1][1].body).overrideReason).toBe("حالة ألم حاد");
     retry.resolve(response(500, { message: "تعذّر الحجز" }));
     await pending;
     expectControlGroup(render(), false);
-    changeField("note", "يمكن تعديل الطلب بعد الفشل");
-    expect(render().find((node) => node.props.id === "quick-appointment-note").props.value).toBe("يمكن تعديل الطلب بعد الفشل");
+    expect(render().all.filter(node=>node.type === "fieldset")[1].props.disabled).toBe(true);
     expect(writes("/api/waiting-list")).toHaveLength(0);
   });
 
-  it.each(["response", "network", "json"])("releases the lock after patient-create %s failure and permits a retry", async (failure) => {
+  it.each(["response", "network", "json"])("releases the lock after patient-create %s failure, but never retries an uncertain creation", async (failure) => {
     if (failure === "response") fetchMock.mockResolvedValueOnce(response(400, {}));
     else if (failure === "network") fetchMock.mockRejectedValueOnce(new Error("offline"));
-    else fetchMock.mockResolvedValueOnce({ ...response(201, {}), json: async () => { throw new Error("invalid JSON"); } });
+    else fetchMock.mockResolvedValueOnce({ ...response(201, {id:92001,status:"booked"}), json: async () => { throw new Error("invalid JSON"); } });
     await enterNewPatient().submit();
     expect(render().tree!.props.busy).toBe(false);
     expectControlGroup(render(), false);
     expect(writes("/api/appointments")).toHaveLength(0);
     expect(onClose).not.toHaveBeenCalled();
     changeField("patient", "الاسم بعد التصحيح");
-    fetchMock.mockResolvedValueOnce(response(201, { id: 91001 })).mockResolvedValueOnce(response(201, {}));
+    fetchMock.mockResolvedValueOnce(response(201, { id: 91001 })).mockResolvedValueOnce(response(201, {id:92001,status:"booked"}));
     await render().submit();
+    if(failure !== "response") {expect(writes("/api/patients")).toHaveLength(1);expect(writes("/api/appointments")).toHaveLength(0);return;}
     expect(JSON.parse(writes("/api/patients")[1][1].body).fullName).toBe("الاسم بعد التصحيح");
     expect(writes("/api/patients")).toHaveLength(2);
     expect(writes("/api/appointments")).toHaveLength(1);
@@ -216,8 +238,21 @@ describe("quick booking owns the complete patient-create and appointment request
     expect(render().tree!.props.busy).toBe(false);
     expectControlGroup(render(), false);
     expect(onClose).not.toHaveBeenCalled();
-    fetchMock.mockResolvedValueOnce(response(201, {}));
-    await render().submit();
+    fetchMock.mockResolvedValueOnce(response(201, {id:92001,status:"booked"}));
+    if(failure === 409) await render().submit();
+    else {
+      await render().submit();expect(writes("/api/appointments")).toHaveLength(1);
+      fetchMock.mockReset();fetchMock.mockResolvedValueOnce(response(404,{}));
+      const check=render().find(node=>node.type === "button" && node.props.children === "تحقّق من نتيجة الحجز");
+      await (check.props.onClick as ()=>Promise<void>)();
+      await vi.waitFor(()=>expect(render().tree!.props.busy).toBe(false));
+      fetchMock.mockResolvedValueOnce(response(201,{id:92001,status:"booked"}));
+      const retry=render().find(node=>node.type === "button" && node.props.children === "أعد نفس الطلب");
+      await (retry.props.onClick as ()=>Promise<void>)();
+      await vi.waitFor(()=>expect(onSuccess).toHaveBeenCalledTimes(1));
+      expect(writes("/api/appointments")).toHaveLength(1);
+      return;
+    }
     expect(writes("/api/patients")).toHaveLength(1);
     expect(writes("/api/appointments")).toHaveLength(2);
     for (const [, options] of writes("/api/appointments")) {
@@ -231,7 +266,7 @@ describe("quick booking owns the complete patient-create and appointment request
     expect(fetchMock).not.toHaveBeenCalled();
     expect(render().tree!.props.busy).toBe(false);
     expectControlGroup(render(), false);
-    fetchMock.mockResolvedValueOnce(response(201, { id: 91001 })).mockResolvedValueOnce(response(201, {}));
+    fetchMock.mockResolvedValueOnce(response(201, { id: 91001 })).mockResolvedValueOnce(response(201, {id:92001,status:"booked"}));
     await enterNewPatient().submit();
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });

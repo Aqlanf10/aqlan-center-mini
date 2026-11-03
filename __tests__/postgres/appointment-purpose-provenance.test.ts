@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { PoolClient } from 'pg';
 import { openInventoryPurchaseFixture } from './_inventory-purchase-fixture';
 import { ProtectedAppointmentPurposeHistoryError, PURCHASE_RESET_FENCE, RESET_KEEP_TABLES, RESET_WIPE_TABLES } from '../../lib/clinic-reset';
 import { APPOINTMENT_PURPOSE_MIGRATION, validateAppointmentPurposeMigration } from '../../lib/appointment-purpose-migration-guard';
@@ -106,7 +105,7 @@ it('reset-first holds the purpose issuer fence through backup and refuses stale 
   });
   const resetting=fixture.db.resetClinicData({actor:'synthetic',actorRole:'admin'},backup)
     .then(value=>({ok:true as const,value}),error=>({ok:false as const,error}));
-  let writer:PoolClient|null=null;
+  let writer:DbClient|null=null;
   let waiting:Promise<{ok:true}|{ok:false;error:unknown}>|null=null;
   try {
     await Promise.race([inBackup,resetting.then(()=>{throw new Error('Reset left before the synthetic backup barrier');})]);

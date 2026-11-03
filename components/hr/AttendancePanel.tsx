@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useHrStaffSelection } from "./HrNavigation";
+import { useSetting } from "@/components/SettingsProvider";
 import { Modal } from "@/components/Modal";
 import { HrHistoryLauncher } from "./HistoryEditor";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -56,15 +57,19 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [reqCheckOut, setReqCheckOut] = useState("");
   const [reqReason, setReqReason] = useState("");
 
+  const centerStart=useSetting("clinic.day_start") || "09:00";
+  const centerEnd=useSetting("clinic.day_end") || "13:00";
+  const centerSecondStart=useSetting("clinic.shift2_start");
+  const centerSecondEnd=useSetting("clinic.shift2_end");
   // Schedule create modal
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [historyStaffId, setHistoryStaffId] = useState('');
   const [schedName, setSchedName] = useState("");
   const [schedPattern, setSchedPattern] = useState("morning");
-  const [schedStart, setSchedStart] = useState("08:00");
-  const [schedEnd, setSchedEnd] = useState("16:00");
-  const [schedSecondStart, setSchedSecondStart] = useState("16:00");
-  const [schedSecondEnd, setSchedSecondEnd] = useState("20:00");
+  const [schedStart, setSchedStart] = useState(centerStart);
+  const [schedEnd, setSchedEnd] = useState(centerEnd);
+  const [schedSecondStart, setSchedSecondStart] = useState(centerSecondStart);
+  const [schedSecondEnd, setSchedSecondEnd] = useState(centerSecondEnd);
   const [schedDays, setSchedDays] = useState<number[]>([0, 1, 2, 3, 4, 6]);
 
   const loadAttendance = useCallback(async () => {
@@ -546,7 +551,8 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
             {isAdmin && (
               <button
                 type="button"
-                onClick={() => setScheduleModalOpen(true)}
+                onClick={() => {setSchedPattern("morning");setSchedStart(centerStart);setSchedEnd(centerEnd);
+                  setSchedSecondStart(centerSecondStart);setSchedSecondEnd(centerSecondEnd);setScheduleModalOpen(true);}}
                 className="rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy-700"
               >
                 + إنشاء جدول وردية
@@ -745,7 +751,12 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
               <label className="mb-1 block text-xs font-semibold text-navy-700">نمط الوردية</label>
               <select
                 value={schedPattern}
-                onChange={(e) => setSchedPattern(e.target.value)}
+                onChange={(e) => {
+                  const pattern=e.target.value;setSchedPattern(pattern);
+                  if (pattern === "morning" || pattern === "split") {setSchedStart(centerStart);setSchedEnd(centerEnd);}
+                  if (pattern === "evening") {setSchedStart(centerSecondStart);setSchedEnd(centerSecondEnd);}
+                  if (pattern === "split") {setSchedSecondStart(centerSecondStart);setSchedSecondEnd(centerSecondEnd);}
+                }}
                 className="w-full rounded-xl border border-navy-200 bg-white p-2.5 text-sm outline-none"
               >
                 <option value="morning">وردية صباحية</option>

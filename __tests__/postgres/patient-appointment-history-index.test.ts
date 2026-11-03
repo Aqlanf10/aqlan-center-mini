@@ -17,7 +17,13 @@ const definition = "CREATE INDEX appointments_patient_history_idx ON public.appo
 const rows = async (pool: Pool) => {
   const out: Record<string, unknown[]> = {};
   for (const table of ["patients", "appointments", "invoices", "invoice_items", "payments", "cashier_shifts"]) {
-    out[table] = (await pool.query(`SELECT to_jsonb(t)::text AS row FROM ${table} t ORDER BY id`)).rows;
+    // The composed 0096 migration adds nullable metadata without backfilling it.
+    // Normalize absent old columns to null, but preserve and compare every actual
+    // value after upgrade so accidental classification/confirmation still fails.
+    const projection = table === "appointments"
+      ? "(jsonb_build_object('clinical_category',NULL,'staff_confirmed_at',NULL,'staff_confirmed_by',NULL) || to_jsonb(t))"
+      : "to_jsonb(t)";
+    out[table] = (await pool.query(`SELECT ${projection}::text AS row FROM ${table} t ORDER BY id`)).rows;
   }
   return out;
 };
@@ -92,7 +98,7 @@ it("serializes numbered/runtime racers and retries idempotently on a populated 0
   const competitor = new Pool({ connectionString: pool.options.connectionString!, ssl: false });
   try {
     const [runtime, numbered] = await Promise.all([applyRuntimeMigrationFiles(pool, [index]), migrate(competitor, { apply: true, files })]);
-    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0078", "0087", "0089", "0090", "0091", "0092"]);
+    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0078", "0087", "0089", "0090", "0091", "0092", "0095", "0096"]);
   } finally { await competitor.end(); }
   const oid = (await pool.query("SELECT 'appointments_patient_history_idx'::regclass::oid AS oid")).rows;
   expect(await applyRuntimeMigrationFiles(pool, [index])).toEqual([]);

@@ -90,8 +90,17 @@ function render(flushEffects = true) {
     },
     results: () => all.filter((element) => element.type === "li")
       .map((li) => elements(li).find((element) => element.type === "button")!),
-    submit: () => (all.find((element) => element.type === "form")!.props.onSubmit as
-      (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: vi.fn() }),
+    submit: (): Promise<void> => {
+      // This suite audits catalogue/search ownership; explicitly satisfy the
+      // independent new classification requirement through its rendered control.
+      const category = all.find(element => element.props["aria-label"] === "التصنيف السريري للموعد");
+      if (category && !category.props.value) {
+        (category.props.onChange as (event:{target:{value:string}})=>void)({target:{value:"orthodontics"}});
+        return render().submit();
+      }
+      return (all.find((element) => element.type === "form")!.props.onSubmit as
+        (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: vi.fn() });
+    },
   };
 }
 function text(node: ReactNode): string {
@@ -117,10 +126,13 @@ function resetHooks() { hooks.values = []; hooks.cursor = 0; hooks.effectCursor 
 beforeEach(() => {
   resetHooks(); open = true; patientProp = 91001; intent = "ortho_follow_up"; vi.clearAllMocks();
   serviceRequest = deferred(); vi.stubGlobal("fetch", fetchMock);
+  const storage = new Map<string,string>();
+  vi.stubGlobal("sessionStorage", { getItem: (key:string) => storage.get(key) ?? null, setItem: (key:string,value:string) => storage.set(key,value), removeItem: (key:string) => storage.delete(key) });
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (url === "/api/auth/me") return Promise.resolve(response(200, { id: 70001, username: "synthetic-booking-reception" }));
     if (url === "/api/parties?kind=doctor") return Promise.resolve(response(200, []));
     if (url === "/api/settings/appointment-services") return serviceRequest.promise;
-    if (url === "/api/appointments" && init?.method === "POST") return Promise.resolve(response(201, { id: 92001 }));
+    if (url === "/api/appointments" && init?.method === "POST") return Promise.resolve(response(201, { id: 92001, status: "booked" }));
     throw new Error(`Unexpected mocked fetch: ${url}`);
   });
 });
@@ -187,8 +199,9 @@ describe("explicit board follow-up booking intent", () => {
     render(); await services([catalog()]); open = false; render();
     serviceRequest = deferred(); open = true; render();
     const pending = deferred<ReturnType<typeof response>>();
-    fetchMock.mockImplementation((url) => url === "/api/appointments" ? pending.promise : serviceRequest.promise);
-    const submission = render().submit(); const original = structuredClone(payload());
+    fetchMock.mockImplementation((url) => url === "/api/appointments" ? pending.promise
+      : url === "/api/auth/me" ? Promise.resolve(response(200,{id:70001,username:"synthetic-booking-reception"})) : serviceRequest.promise);
+    const submission = render().submit(); await settle(); const original = structuredClone(payload());
     await services([{ ...catalog(), id: 81002, defaultDurationMinutes: 20 }]);
     expect(field("duration").props.value).toBe("10");
     expect(payload()).toEqual(original); expect(payload().bookingIntent).toBe("ortho_follow_up");
@@ -198,7 +211,15 @@ describe("explicit board follow-up booking intent", () => {
   });
   it("refreshes a server-rejected stale service without dropping protection or an explicit duration", async () => {
     render(); await services([catalog()]); change("duration", "45");
-    fetchMock.mockResolvedValueOnce(response(400, { message: "تعذّر تأكيد خدمة متابعة التقويم. أعد تحميل الخدمات أو اختر نوع الموعد والخدمة بعد المراجعة." }));
+    const originalFetch = fetchMock.getMockImplementation()!;
+    let rejected = false;
+    fetchMock.mockImplementation((url:string, init?:RequestInit) => {
+      if (url === "/api/appointments" && !rejected) {
+        rejected = true;
+        return Promise.resolve(response(400,{message:"تعذّر تأكيد خدمة متابعة التقويم. أعد تحميل الخدمات أو اختر نوع الموعد والخدمة بعد المراجعة."}));
+      }
+      return originalFetch(url,init);
+    });
     await render().submit();
     expect(render().find((node) => node.props.type === "submit").props.disabled).toBe(true);
     serviceRequest = deferred(); click(render().find((node) => node.type === "button" && text(node) === "إعادة تحميل الخدمات"));

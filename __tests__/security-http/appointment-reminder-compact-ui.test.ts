@@ -127,7 +127,7 @@ describe("compact appointment reminders on the built Arabic page", () => {
         expect(help).toEqual({ width: 1, height: 1, position: "absolute" });
         const controls = await card.locator('a[target="_blank"], button').allTextContents();
         expect(controls.map(text => text.trim())).toEqual([
-          fixture.label, "تأكيد الموظف", "📲 تأكيد", "🪑 وصل للعيادة", "نقل الموعد", "لم يحضر", "إلغاء", "🗑 حذف",
+          fixture.label, "تأكيد الموظف", "📲 تأكيد", "تأكيد المريض عبر الموظف", "🪑 وصل للعيادة", "نقل الموعد", "لم يحضر", "إلغاء", "🗑 حذف",
         ]);
         const geometry = await card.evaluate(node => {
           const card = node.getBoundingClientRect();
@@ -146,7 +146,9 @@ describe("compact appointment reminders on the built Arabic page", () => {
           expect(control.right).toBeLessThanOrEqual(geometry.right);
         }
         if (width === 1280) {
-          expect(geometry.height).toBeLessThanOrEqual(90);
+          // Explicit category metadata and patient confirmation add a second row.
+          // Keep the card bounded and every action on one aligned control row.
+          expect(geometry.height).toBeLessThanOrEqual(140);
           const centers = geometry.controls.map(control => control.center);
           expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(2);
         }

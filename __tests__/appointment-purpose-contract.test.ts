@@ -108,7 +108,7 @@ describe("explicit appointment purpose persistence — source contract", () => {
     const first=await POST(http('consultation'));
     expect(first.status).toBe(201);
     const recorded=vi.mocked(insertAppointmentPurposeProvenance).mock.calls[0][1];
-    vi.mocked(findDirectAppointmentCommandReceipt).mockResolvedValue({appointmentId:101,patientId:19,
+    vi.mocked(findDirectAppointmentCommandReceipt).mockResolvedValue({appointmentId:101,patientId:19,planScope:true,
       actorUserId:1,recordedBy:'synthetic',commandHash:recorded.commandHash!});
     vi.mocked(getAppointmentOnClient).mockResolvedValue({id:101,patientId:19,status:'cancelled'} as never);
     vi.mocked(insertAppointmentOnClient).mockClear();
@@ -127,7 +127,7 @@ describe("explicit appointment purpose persistence — source contract", () => {
   });
 
   it('rejects a reused key with a different actor without revealing the old appointment',async()=>{
-    vi.mocked(findDirectAppointmentCommandReceipt).mockResolvedValue({appointmentId:101,patientId:19,
+    vi.mocked(findDirectAppointmentCommandReceipt).mockResolvedValue({appointmentId:101,patientId:19,planScope:true,
       actorUserId:2,recordedBy:'another',commandHash:'a'.repeat(64)});
     const response=await POST(http('consultation'));
     expect(response.status).toBe(409);
@@ -138,7 +138,7 @@ describe("explicit appointment purpose persistence — source contract", () => {
   it('recovers only the original actor current status and marks response uncacheable',async()=>{
     vi.mocked(getPool).mockReturnValue({connect:vi.fn().mockResolvedValue({
       query:vi.fn().mockResolvedValue({rows:[]}),release:vi.fn()}),query:vi.fn()} as never);
-    vi.mocked(findDirectAppointmentCommandReceipt).mockResolvedValue({appointmentId:101,patientId:19,
+    vi.mocked(findDirectAppointmentCommandReceipt).mockResolvedValue({appointmentId:101,patientId:19,planScope:true,
       actorUserId:1,recordedBy:'synthetic',commandHash:'a'.repeat(64)});
     const response=await commandGET(new Request(`http://example.test/api/appointments/commands/${directCommandId}`),
       {params:Promise.resolve({id:directCommandId})});

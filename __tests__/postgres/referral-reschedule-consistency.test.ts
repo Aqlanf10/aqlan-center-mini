@@ -72,6 +72,14 @@ beforeAll(async () => {
   referringDoctor = await doctor("Synthetic referring doctor");
   receivingDoctor = await doctor("Synthetic receiving doctor");
   otherDoctor = await doctor("Synthetic other doctor");
+  // Booking now requires a proven roster. Explicit synthetic accounts and HR
+  // schedules keep this suite focused on referral identity and transactional moves.
+  for (const partyId of [referringDoctor, receivingDoctor, otherDoctor]) {
+    const [user] = await q<{ id: number }>("INSERT INTO users(username,display_name,password_hash,role,party_id) VALUES ($1,'Synthetic roster doctor','unused-synthetic-hash','doctor',$2) RETURNING id", [`synthetic-roster-${partyId}`, partyId]);
+    const [staff] = await q<{ id: number }>("INSERT INTO hr_staff(full_name,department,user_id,created_by) VALUES ('Synthetic referral roster','doctors',$1,'synthetic') RETURNING id", [user.id]);
+    await q(`INSERT INTO hr_work_schedules(staff_id,name,schedule_type,effective_from,working_days,shift_start_time,shift_end_time,created_by)
+      VALUES ($1,'Synthetic all-day roster','morning','2000-01-01','[0,1,2,3,4,5,6]','08:00','20:00','synthetic')`, [staff.id]);
+  }
 });
 
 afterAll(async () => {

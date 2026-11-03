@@ -1,5 +1,7 @@
 "use client";
 
+import { APPOINTMENT_CATEGORY_LABEL, type AppointmentCategory } from "@/lib/appointment-category";
+import { useSession } from "@/components/SessionProvider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GENDER_LABEL, ageText, type Gender } from "@/lib/patient";
 import { PATIENT_LIST_FILTERS, PATIENT_LIST_SORTS, type PatientListFilter, type PatientListSort } from "@/lib/patient-browse";
@@ -39,6 +41,9 @@ interface PatientSummary {
 interface PageResult { rows: PatientSummary[]; total: number; page: number; pageSize: number }
 
 export default function PatientsPage() {
+  const session = useSession();
+  const canFilterAppointmentCategory = Boolean(session && ["admin", "reception", "doctor"].includes(session.role));
+  const [appointmentCategory, setAppointmentCategory] = useState<AppointmentCategory | "">("");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PatientSummary[]>([]);
   /* (PAT-1) المرشّح والترتيب على الخادم — يعملان على كل المرضى لا على الصفحة المعروضة. */
@@ -65,9 +70,10 @@ export default function PatientsPage() {
     const isStale = () => requestId !== latestRequest.current;
     setLoading(true);
     try {
-      const url = term.trim().length >= 2
+      const base = term.trim().length >= 2
         ? `/api/patients?q=${encodeURIComponent(term.trim())}`
         : `/api/patients?page=${targetPage}&filter=${filter}&sort=${sort}${flag ? `&flag=${encodeURIComponent(flag)}` : ""}`;
+      const url = base + (canFilterAppointmentCategory && appointmentCategory ? `&appointmentCategory=${encodeURIComponent(appointmentCategory)}` : "");
       const response = await fetch(url, { cache: "no-store" });
       const payload = await response.json();
       if (isStale()) return;
@@ -89,7 +95,7 @@ export default function PatientsPage() {
     } finally {
       if (!isStale()) setLoading(false);
     }
-  }, [filter, sort, flag]);
+  }, [filter, sort, flag, appointmentCategory, canFilterAppointmentCategory]);
 
   // بحث بعد توقف الكتابة لا مع كل حرف: طلبٌ لكل حرف يُثقل الاتصال ويعيد نتيجة «مح»
   // بعد أن كتبت الاستقبال «محمد».
@@ -131,6 +137,20 @@ export default function PatientsPage() {
         aria-label="بحث عن مريض"
         className="mb-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-brand-blue"
       />
+
+      {canFilterAppointmentCategory ? <fieldset className="mb-3 rounded-xl border border-slate-200 p-3">
+        <legend className="px-1 text-xs font-bold">مرضى حسب تصنيف المواعيد</legend>
+        <p className="mb-2 text-xs text-slate-500">يشمل التصنيف المسجل في المواعيد السابقة؛ لا يحدد حالة العلاج الحالية.</p>
+        <div className="flex flex-wrap gap-1.5">
+          {([["", "كل التصنيفات"], ...Object.entries(APPOINTMENT_CATEGORY_LABEL)] as [AppointmentCategory | "", string][]).map(([value, label]) => (
+            <button key={value} type="button" aria-pressed={appointmentCategory === value}
+              onClick={() => { setAppointmentCategory(value); setPage(0); }}
+              className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${appointmentCategory === value ? "border-navy-800 bg-navy-800 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </fieldset> : null}
 
       {/* (PAT-1) مرشّحات القائمة — على كل المرضى — والترتيب. تظهر في التصفّح؛ البحث يتجاوزها. */}
       {!query.trim() ? (
@@ -182,7 +202,7 @@ export default function PatientsPage() {
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : filteredResults.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          {query.trim() || filter !== "all" || flag ? "لا توجد نتائج مطابقة لخيارات البحث أو الفلتر." : "لا مرضى مسجّلون بعد."}
+          {query.trim() || filter !== "all" || flag || appointmentCategory ? "لا توجد نتائج مطابقة لخيارات البحث أو الفلتر." : "لا مرضى مسجّلون بعد."}
         </p>
       ) : (
         <ul className="space-y-2">

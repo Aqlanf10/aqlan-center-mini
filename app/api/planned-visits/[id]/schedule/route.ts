@@ -87,7 +87,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const result = await schedulePlannedVisit({
       plannedVisitId, date, time, chairs: capacityContext.chairs,
       ...(hasPurpose ? {appointmentPurpose:source.appointmentPurpose as AppointmentPurpose,session} : {}),
-      judge: async (day, client, durationMinutes) => {
+      judge: async (day, client, durationMinutes, doctorId) => {
         if (hasPurpose) {
           const freshUser=await findUserByUsername(session.username,client);
           if (!freshUser) return {ok:false,conflict:{message:"تغيّرت صلاحية الحساب؛ حدّث الملف وأعد المحاولة."}};
@@ -102,7 +102,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         const judged = await judgeBookingInDay({
           sameDay: day, client, date, time, durationMinutes, service,
           context: capacityContext, canOverride, overrideReason,
-          patientId: rows[0].patient_id,
+          patientId: rows[0].patient_id, providerId:doctorId,
         });
         if (!judged.ok) return { ok: false, conflict: judged.conflict };
         if (judged.overridden) overrideState.verdict = judged.verdict;

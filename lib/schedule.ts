@@ -58,6 +58,10 @@ export function getAppointmentTypeBadge(type: string | null | undefined): string
 }
 
 export interface Appointment {
+  clinicalLinks?: {planId:number|null;visitIds:number[];caseIds:number[]};
+  clinicalCategory?: import("./appointment-category").AppointmentCategory | null;
+  staffConfirmedAt?: string | null;
+  staffConfirmedBy?: string | null;
   id: number;
   patientId: number;
   patientName: string;

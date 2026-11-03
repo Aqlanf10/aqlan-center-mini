@@ -64,7 +64,7 @@ export function ClinicHoursEditor({ values, versions, editable, onSaved }: {
 
   return <article aria-label="فترات الدوام" className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
     <h2 className="text-sm font-black text-navy-950">فترات الدوام</h2>
-    <p className="mt-1 text-xs leading-relaxed text-slate-500">دوام متواصل أو فترتان في اليوم نفسه. في وضع الفترتين، نهاية الفترة الأولى ليست نهاية اليوم؛ الوقت بين الفترتين فترة استراحة. الحجز اليدوي خارج الفترات يخضع لسياسة التحذير الحالية.</p>
+    <p className="mt-1 text-xs leading-relaxed text-slate-500">دوام متواصل أو فترتان في اليوم نفسه. في وضع الفترتين، نهاية الفترة الأولى ليست نهاية اليوم؛ الوقت بين الفترتين فترة استراحة. الحجز خارج الفترات أو عبر الاستراحة غير متاح.</p>
     {draft ? <fieldset disabled={saving} className="mt-4">
       <legend className="text-sm font-bold">نظام الدوام</legend>
       <div className="my-3 flex flex-wrap gap-4">

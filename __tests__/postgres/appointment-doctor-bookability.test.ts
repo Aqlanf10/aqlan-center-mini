@@ -43,10 +43,18 @@ afterAll(async () => {
 });
 
 async function party(kind: "doctor" | "supplier") {
-  return createParty({
+  const created = await createParty({
     name: `Synthetic ${kind} ${++sequence}`, kind, phone: null,
     commissionPercent: 0, note: null,
   });
+  if (kind === "doctor") {
+    // Selected doctors now need a proven roster, even for non-consuming services.
+    const { rows: [user] } = await getPool().query("INSERT INTO users(username,display_name,password_hash,role,party_id) VALUES ($1,'Synthetic bookability doctor','synthetic-unused-hash','doctor',$2) RETURNING id", [`synthetic-bookability-${created.id}`, created.id]);
+    const { rows: [staff] } = await getPool().query("INSERT INTO hr_staff(full_name,department,user_id,created_by) VALUES ('Synthetic bookability roster','doctors',$1,'synthetic') RETURNING id", [user.id]);
+    await getPool().query(`INSERT INTO hr_work_schedules(staff_id,name,schedule_type,effective_from,working_days,shift_start_time,shift_end_time,created_by)
+      VALUES ($1,'Synthetic full-day roster','morning','2000-01-01','[0,1,2,3,4,5,6]','08:00','20:00','synthetic')`, [staff.id]);
+  }
+  return created;
 }
 
 async function input() {
@@ -141,7 +149,7 @@ describe("selected appointment doctor must match the active-doctor picker", () =
   });
 });
 
-describe("existing appointment scheduling policy remains unchanged", () => {
+describe("appointment attribution and mandatory availability policy", () => {
   it("allows an unspecified doctor for provider-consuming services on create and reschedule", async () => {
     const request = await input();
     const booked = await bookAppointment({ ...request, serviceId: providerService }, actor);
@@ -165,19 +173,21 @@ describe("existing appointment scheduling policy remains unchanged", () => {
     }, actor)).toMatchObject({ ok: true, appointment: { doctorId: null } });
   });
 
-  it("preserves outside-clinic-hours as a warning rather than a rejection", async () => {
+  it("rejects outside-clinic-hours on create and reschedule without changing the existing appointment", async () => {
     const request = await input();
-    const booked = await bookAppointment({
-      ...request, time: "23:00", doctorId: activeDoctor, serviceId: providerService,
-    }, actor);
-    expect(booked).toMatchObject({ ok: true, warning: expect.any(String) });
+    expect(await bookAppointment({ ...request, time: "23:00", serviceId: providerService }, actor))
+      .toMatchObject({ ok: false, status: 409, conflict: { canOverride: false } });
+    expect((await getPool().query("SELECT id FROM appointments WHERE patient_id=$1", [request.patientId])).rows).toEqual([]);
+    const booked = await bookAppointment({ ...request, doctorId: activeDoctor, serviceId: providerService }, actor);
     if (!booked.ok) throw new Error("Fixture booking failed");
+    const before = await snapshot(booked.appointment.id);
     expect(await rescheduleAppointment({
       appointmentId: booked.appointment.id, date: request.date, time: "23:30", reason: "Synthetic move",
-    }, actor)).toMatchObject({ ok: true, warning: expect.any(String) });
+    }, actor)).toMatchObject({ ok: false, status: 409, conflict: { canOverride: false } });
+    expect(await snapshot(booked.appointment.id)).toEqual(before);
   });
 
-  it("keeps an attributed non-provider-consuming service bookable during doctor blocks", async () => {
+  it("rejects a selected doctor block even when the service does not consume provider capacity", async () => {
     const request = await input();
     await getPool().query(
       `INSERT INTO provider_blocks (provider_id, starts_at, ends_at, reason, created_by)
@@ -187,7 +197,8 @@ describe("existing appointment scheduling policy remains unchanged", () => {
     expect(await bookAppointment({ ...request, doctorId: activeDoctor, serviceId: providerService }, actor))
       .toMatchObject({ ok: false, status: 409 });
     expect(await bookAppointment({ ...request, doctorId: activeDoctor, serviceId: nonProviderService }, actor))
-      .toMatchObject({ ok: true });
+      .toMatchObject({ ok: false, status: 409, conflict: { canOverride: false } });
+    expect((await getPool().query("SELECT id FROM appointments WHERE patient_id=$1", [request.patientId])).rows).toEqual([]);
   });
 
   it("preserves provider conflicts but allows non-consuming attribution during an existing doctor booking", async () => {
