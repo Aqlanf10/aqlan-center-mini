@@ -5,7 +5,7 @@ import { parseOrthoStudyMediaUses, type OrthoStudyMediaUseDraft } from "./ortho-
 import { readOccurrenceEvidence, type OccurrenceEvidence } from "./ortho-case-occurrence";
 import { journeyHash, journeyId, type Checked } from "./ortho-case-journey-records";
 export const STUDY_TEMPLATE_KEY = "full-orthodontic-case" as const;
-export const STUDY_SOURCE_KINDS = ["assessment", "diagnosis", "strategy", "decision", "retention_event", "document", "ceph_study", "adjustment", "plan_consent"] as const;
+export const STUDY_SOURCE_KINDS = ["assessment", "diagnosis", "strategy", "decision", "retention_event", "document", "ceph_study", "adjustment", "plan_consent", "problem_review"] as const;
 export type StudySourceKind = typeof STUDY_SOURCE_KINDS[number];
 export interface StudySourceSelection { key: string; kind: StudySourceKind; id: number; version: number | null; contentHash: string }
 export interface StudyGroupDraft { id: string; label: string; occurrence: OccurrenceEvidence; phase: string | null; sourceKeys: string[] }

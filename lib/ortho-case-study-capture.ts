@@ -1,3 +1,4 @@
+import { readStudyProblemReview } from "./ortho-study-problem-review";
 import { permitsOrthoDocumentation, orthoDocumentationContext } from "./ortho-documentation-context";
 import type { CaseStatus as OrthoLifecycleStatus } from "./ortho";
 /** Strict immutable study capture envelope. Current authority is rechecked by
@@ -48,7 +49,11 @@ function envelope(raw: unknown, scope: JourneyScope, selection: StudySourceSelec
 }
 function payload(raw: unknown, scope: JourneyScope, s: StudySourceSelection): { value: unknown; images: boolean; plans: boolean } {
   let value: unknown = raw, images = false, plans = false;
-  if (s.kind === "assessment") {
+  if (s.kind === "problem_review") {
+    const result = readStudyProblemReview(raw, scope);
+    if (result.id !== s.id || s.version !== null || journeyContentHash(result) !== s.contentHash) fail();
+    value = result; images = result.source.requiresImages;
+  } else if (s.kind === "assessment") {
     const result = decodeAnyAssessmentRevision(raw, scope); if (!result.ok) fail(result.code);
     if (result.value.id !== s.id || result.value.version !== s.version || result.value.contentHash !== s.contentHash) fail();
     value = result.value; // Transitive current image authority is checked by the store, not inferred here.

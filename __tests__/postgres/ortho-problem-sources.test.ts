@@ -10,6 +10,8 @@ import { startOrthoRetention } from "../../lib/ortho-retention-transition-store"
 import { appendOrthoRetentionEvent } from "../../lib/ortho-retention-event-store";
 import { getOrthoStudySourceChoices } from "../../lib/ortho-case-study-inventory";
 import { saveOrthoCaseStudy, getOrthoCaseStudy } from "../../lib/ortho-case-study-store";
+import { projectStudyRecordedFacts } from "../../lib/ortho-case-study-recorded-facts";
+import { studyTextPresentation } from "../../lib/ortho-study-text-export";
 import { CASE_TEMPLATE_VERSION } from "../../lib/ortho-case-template";
 import { STUDY_TEMPLATE_HASH } from "../../lib/ortho-case-study-template";
 import type { StudySaveCommand, StudySourceSelection } from "../../lib/ortho-case-study";
@@ -72,11 +74,11 @@ describe("source -> clinician review -> shared problem -> existing treatment str
     const retention = await appendOrthoRetentionEvent({ ...x.scope, command: { schemaVersion: 1, clientRequestId: randomUUID(), expectedHeadId: null, reason: "Synthetic device delivery", arch: "upper", supersedesEntryId: null, archCorrectionReason: null, content: { kind: "device_delivery", occurrence: { occurredOn: null, dateProvenance: "unknown", sourceNote: "Original delivery date unknown" }, note: "", documentIds: [], deviceType: "fixed", description: "Synthetic device", extent: "Upper arch", labOrderId: null } } });
     expect(retention.ok).toBe(true);
     const sources: StudySourceSelection[] = [];
-    for (const kind of ["assessment", "strategy", "adjustment", "retention_event"] as const) {
+    for (const kind of ["assessment", "strategy", "adjustment", "retention_event", "problem_review"] as const) {
       const inventory = await getOrthoStudySourceChoices({ ...x.scope, kind }); if (!inventory.ok) throw Error(inventory.code);
-      expect(inventory.choices).toHaveLength(1); expect(inventory.choices[0].state).toBe("available"); sources.push(inventory.choices[0].selection!);
+      expect(inventory.choices).toHaveLength(kind === "problem_review" ? 4 : 1); expect(inventory.choices.every(c => c.state === "available")).toBe(true); sources.push(...inventory.choices.map(c => c.selection!));
     }
-    const studyCommand: StudySaveCommand = { schemaVersion: 1, clientRequestId: randomUUID(), expectedHead: null, baseDocumentedRevision: null, kind: "draft", documentedFrom: null, reason: "Synthetic connected study capture", content: { template: { key: "full-orthodontic-case", version: CASE_TEMPLATE_VERSION, contentHash: STUDY_TEMPLATE_HASH }, identityDisclosure: "case_only", sources, groups: [], mediaUses: [], comment: "Synthetic case sources remain selected explicitly", panels: [{ instanceId: "review1", layoutKey: "interview", included: true, state: "available", sourceKeys: sources.map(s => s.key), images: [], comment: "Integration capture only, no clinical conclusion inferred" }] } };
+    const studyCommand: StudySaveCommand = { schemaVersion: 1, clientRequestId: randomUUID(), expectedHead: null, baseDocumentedRevision: null, kind: "draft", documentedFrom: null, reason: "Synthetic connected study capture", content: { template: { key: "full-orthodontic-case", version: CASE_TEMPLATE_VERSION, contentHash: STUDY_TEMPLATE_HASH }, identityDisclosure: "case_only", sources, groups: [], mediaUses: [], comment: "Synthetic case sources remain selected explicitly", panels: [{ instanceId: "review1", layoutKey: "interview", included: true, state: "available", sourceKeys: sources.map(s => s.key), images: [], comment: "Integration capture only, no clinical conclusion inferred" }, { instanceId: "problem_sources", layoutKey: "problem-plan-strategy", included: true, state: "available", sourceKeys: sources.filter(s => s.kind === "problem_review" || s.kind === "strategy").map(s => s.key), images: [], comment: "Synthetic problem and plan with original source reviews" }] } };
     const study = await saveOrthoCaseStudy({ ...x.scope, command: studyCommand }); if (!study.ok) throw Error(study.code);
     const ref = { id: study.revision.id, contentHash: study.revision.contentHash };
     const documented = await saveOrthoCaseStudy({ ...x.scope, command: { ...studyCommand, clientRequestId: randomUUID(), kind: "documented", expectedHead: ref, documentedFrom: ref } }); if (!documented.ok) throw Error(documented.code);
@@ -85,6 +87,50 @@ describe("source -> clinician review -> shared problem -> existing treatment str
     expect(JSON.stringify(restored.revision!.content.sources.find(s => s.selection.kind === "strategy"))).toContain(command.label!);
     expect((await counts(x.scope.patientId))[0]).toEqual({ invoices: 0, payments: 0, visits: 1 });
     expect((await getOrthoProblemSources(x.scope))).toMatchObject({ ok: true, problems: [{ id: saved.problemId }] });
+    const facts = projectStudyRecordedFacts(restored.revision!.content, x.scope, "problem_sources", "documented");
+    expect(facts.complete).toBe(true); expect(JSON.stringify(facts.blocks)).toContain("Synthetic saved ceph interpretation");
+    expect(JSON.stringify(facts.blocks)).toContain("Synthetic reviewed objective");
+    const presentation = studyTextPresentation(restored.revision!, x.scope);
+    expect(presentation.pages.flatMap(p => p.lines).join("\n")).toContain("Synthetic clinical diagnosis");
+    // A new source revision/review must not alter the documented study.
+    const historical = JSON.stringify(restored.revision!.content), correction = structuredClone(x.command);
+    correction.commandId = randomUUID(); correction.expectedRevisionId = x.revision.id;
+    correction.content.observations.observations.find(o => o.id === pano.ref.member)!.value = { state: "recorded", text: "Synthetic later corrected source" };
+    expect((await appendOrthoAssessment({ ...x.scope, command: correction })).ok).toBe(true);
+    const latest = await getOrthoProblemSources(x.scope); if (!latest.ok) throw Error(latest.code);
+    const corrected = latest.candidates.find(c => c.identity === pano.identity)!;
+    expect(await appendOrthoProblemSource({ ...x.scope, command: review(corrected, { action: "link", problemId: saved.problemId, label: null, expectedReviewId: saved.reviewId }) })).toMatchObject({ ok: true });
+    const oldStudy = await getOrthoCaseStudy({ ...x.scope, revisionId: documented.revision.id }); if (!oldStudy.ok) throw Error(oldStudy.code);
+    expect(JSON.stringify(oldStudy.revision!.content)).toBe(historical);
+    expect(await saveOrthoCaseStudy({ ...x.scope, command: studyCommand })).toMatchObject({ ok: true, replayed: true });
+    // Source removal revokes access to both saved study and inventory, even
+    // though the review and captured text remain immutable in storage.
+    await f.pool.query("UPDATE patient_documents SET removed_at=clock_timestamp() WHERE id=$1", [x.documentId]);
+    expect(await getOrthoCaseStudy({ ...x.scope, revisionId: documented.revision.id })).toMatchObject({ ok: false, status: 403 });
+    expect(await getOrthoStudySourceChoices({ ...x.scope, kind: "problem_review" })).toMatchObject({ ok: false, status: 403 });
+  });
+  it("pins the selected review hash, serializes study saves and revokes access without duplicating records", async () => {
+    const x = await setup(), before = await counts(x.scope.patientId), read = await getOrthoProblemSources(x.scope); if (!read.ok) throw Error(read.code);
+    const saved = await appendOrthoProblemSource({ ...x.scope, command: review(read.candidates.find(c => c.ref.kind === "clinical_diagnosis")!) }); if (!saved.ok) throw Error(saved.code);
+    const inventory = await getOrthoStudySourceChoices({ ...x.scope, kind: "problem_review" }); if (!inventory.ok) throw Error(inventory.code);
+    expect(inventory.choices).toHaveLength(1); const selection = inventory.choices[0].selection!;
+    const command: StudySaveCommand = { schemaVersion: 1, clientRequestId: randomUUID(), expectedHead: null, baseDocumentedRevision: null, kind: "draft", documentedFrom: null,
+      reason: "Synthetic source review selection", content: { template: { key: "full-orthodontic-case", version: CASE_TEMPLATE_VERSION, contentHash: STUDY_TEMPLATE_HASH }, identityDisclosure: "case_only",
+        sources: [selection], groups: [], mediaUses: [], comment: "", panels: [{ instanceId: "sources", layoutKey: "diagnosis", included: true, state: "available", sourceKeys: [selection.key], images: [], comment: "" }] } };
+    const forged = structuredClone(command); forged.content.sources[0].contentHash = "0".repeat(64);
+    expect(await saveOrthoCaseStudy({ ...x.scope, command: forged })).toMatchObject({ ok: false, status: 409 });
+    expect((await f.pool.query("SELECT id FROM ortho_case_study_revisions WHERE ortho_case_id=$1", [x.scope.orthoCaseId])).rows).toHaveLength(0);
+    const commands = [command, { ...command, clientRequestId: randomUUID() }];
+    const results = await Promise.all(commands.map(command => saveOrthoCaseStudy({ ...x.scope, command })));
+    expect(results.filter(r => r.ok)).toHaveLength(1); expect(results.find(r => !r.ok)).toMatchObject({ status: 409 });
+    const winner = results.findIndex(r => r.ok); expect(await saveOrthoCaseStudy({ ...x.scope, command: commands[winner] })).toMatchObject({ ok: true, replayed: true });
+    expect((await f.pool.query("SELECT id FROM ortho_case_study_revisions WHERE ortho_case_id=$1", [x.scope.orthoCaseId])).rows).toHaveLength(1);
+    const other = await setup();
+    const foreign = await getOrthoStudySourceChoices({ ...other.scope, kind: "problem_review" }); expect(foreign).toMatchObject({ ok: true, choices: [] });
+    request.token = createSessionToken(x.scope.session); await f.pool.query("UPDATE users SET is_active=false WHERE id=$1", [x.userId]);
+    expect(await getOrthoCaseStudy(x.scope)).toMatchObject({ ok: false, status: 401 });
+    expect(await getOrthoStudySourceChoices({ ...x.scope, kind: "problem_review" })).toMatchObject({ ok: false, status: 401 });
+    expect(await counts(x.scope.patientId)).toEqual(before);
   });
   it("preserves approved problem text when a source changes and requires a new explicit linked review", async () => {
     const x = await setup(), first = await getOrthoProblemSources(x.scope); if (!first.ok) throw Error(first.code);

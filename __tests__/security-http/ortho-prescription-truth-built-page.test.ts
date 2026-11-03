@@ -112,6 +112,13 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
   expect(frame.top).toBeGreaterThanOrEqual(79);
   expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
   expect(frame.identityExposed).toBe(true);
+  const workup = card.getByRole("button", { name: "استكمال ملف التقويم خطوة بخطوة", exact: true });
+  const workupBounds = await workup.boundingBox();
+  expect(workupBounds?.width).toBeGreaterThanOrEqual(44); expect(workupBounds?.height).toBeGreaterThanOrEqual(44);
+  expect(await workup.evaluate(element => {
+    const r = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  })).toBe(true);
   const visibleContent = await card.evaluate(element => {
     const strategy = element.querySelector('[data-testid="ortho-strategy-editor"]')!;
     const specifications = strategy.nextElementSibling!;

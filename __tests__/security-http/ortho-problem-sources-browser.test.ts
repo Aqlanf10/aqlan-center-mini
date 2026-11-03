@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import sharp from "sharp";
+import JSZip from "jszip";
 import { Client } from "pg";
 import { chromium, type Browser, type Locator } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -78,6 +79,48 @@ describe("source review on the built unified orthodontic patient workflow", () =
       expect((await authedGet(`${endpoint}?patientId=${x.patientId}`, h.sessions.doctorB)).status).toBe(403);
       expect((await db.query("SELECT (SELECT count(*)::int FROM invoices WHERE patient_id=$1) invoices,(SELECT count(*)::int FROM payments WHERE patient_id=$1) payments,(SELECT count(*)::int FROM visits WHERE patient_id=$1) visits", [x.patientId])).rows[0]).toEqual({ invoices: 0, payments: 0, visits: 0 });
       expect(errors).toEqual([]); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); await panel.evaluate(el => el.scrollIntoView({ block: "start", behavior: "instant" })); await page.screenshot({ path: `.settings-ui-artifacts/ortho-problem-sources-${width}.png` });
+      // Continue through the actual saved study UI and both text export paths.
+      await page.getByRole("button", { name: /عرض الحالة/ }).click();
+      const study = page.getByRole("region", { name: "دراسة حالة التقويم", exact: true });
+      await study.getByLabel("إضافة المرجع إلى القسم", { exact: true }).selectOption("section_9");
+      await study.getByLabel("نوع مصدر الدراسة", { exact: true }).selectOption("problem_review");
+      const picker = study.getByRole("group", { name: "اختيار مصدر حقيقي", exact: true }), choices = picker.getByRole("button", { name: "اختيار", exact: true });
+      await expect.poll(() => choices.count()).toBe(3);
+      for (let i = 0; i < 3; i++) await choices.nth(i).click();
+      await study.getByLabel("نوع مصدر الدراسة", { exact: true }).selectOption("strategy");
+      await expect.poll(() => choices.count()).toBe(1); await choices.click();
+      await study.getByLabel("سبب حفظ النسخة", { exact: true }).fill("دراسة اصطناعية تربط المشكلة بمصادرها والخطة");
+      const studySaved = page.waitForResponse(r => r.url().includes(`/ortho/${x.orthoCaseId}/case-study/editor`) && r.request().method() === "POST");
+      await study.getByRole("button", { name: "حفظ مسودة الدراسة", exact: true }).click(); expect((await studySaved).status()).toBe(201);
+      const reviewPanel = study.getByRole("region", { name: "مراجعة الدراسة المحفوظة", exact: true });
+      await reviewPanel.getByRole("combobox", { name: "القسم المحفوظ المعروض", exact: true }).selectOption("section_9");
+      await reviewPanel.getByText("تصحيح موثق للمصدر الاصطناعي", { exact: true }).waitFor();
+      expect(await reviewPanel.innerText()).toContain("هدف اصطناعي مرتبط بالمشكلة نفسها");
+      expect(await reviewPanel.getByRole("table").evaluateAll(tables => tables.every(table => {
+        const container = table.parentElement!;
+        return container.scrollWidth <= container.clientWidth + 1 && [...table.querySelectorAll("td")].every(cell => cell.scrollWidth <= cell.clientWidth + 1);
+      }))).toBe(true);
+      await reviewPanel.evaluate(el => el.scrollIntoView({ block: "start", behavior: "instant" }));
+      await page.screenshot({ path: `.settings-ui-artifacts/ortho-study-problems-${width}.png` });
+      await study.getByLabel("سبب حفظ النسخة", { exact: true }).fill("توثيق الدراسة الاصطناعية بعد مراجعة المصادر والخطة");
+      const documented = page.waitForResponse(r => r.url().includes(`/ortho/${x.orthoCaseId}/case-study/editor`) && r.request().method() === "POST");
+      await study.getByRole("button", { name: "توثيق النسخة المحفوظة نفسها", exact: true }).click(); expect((await documented).status()).toBe(201);
+      const pptxHref = await study.getByRole("link", { name: "PowerPoint نصي قابل للتحرير", exact: true }).getAttribute("href");
+      const pptx = await context.request.get(new URL(pptxHref!, baseUrl).href); expect(pptx.status()).toBe(200); expect(pptx.headers()["cache-control"]).toContain("no-store");
+      const zip = await JSZip.loadAsync(await pptx.body()), slideFiles = Object.keys(zip.files).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name));
+      const slideText = (await Promise.all(slideFiles.map(name => zip.file(name)!.async("text")))).join("\n");
+      expect(slideText).toContain("مشكلة اصطناعية راجعها الطبيب"); expect(slideText).toContain("بصمة سجل المصدر وشواهده");
+      expect(slideText).toContain("هدف اصطناعي مرتبط بالمشكلة نفسها");
+      expect((await authedGet(pptxHref!, h.sessions.accountant)).status).toBe(403);
+      const printHref = await study.getByRole("link", { name: "طباعة النسخة المحفوظة / PDF نصي", exact: true }).getAttribute("href"), printed = await context.newPage();
+      try {
+        expect((await printed.goto(`${baseUrl}${printHref}`))?.status()).toBe(200);
+        expect(await printed.locator("main").innerText()).toContain("تصحيح موثق للمصدر الاصطناعي");
+        await printed.pdf({ path: `.settings-ui-artifacts/ortho-study-problems-${width}.pdf`, format: "A4", printBackground: true });
+      } finally { await printed.close(); }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); expect(errors).toEqual([]);
+      await page.getByRole("button", { name: /السجلات والسيفالومتري/ }).click();
+      await page.getByRole("button", { name: "التشخيص وقائمة المشاكل", exact: true }).click();
       await page.route(`**${endpoint}?*`, route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "Synthetic source outage" }) })); await page.reload(); await panel.getByText("تعذّرت قراءة مصادر قائمة المشاكل؛ لم يُعتبر السجل فارغاً. أعد القراءة.", { exact: true }).waitFor(); expect(await panel.getByRole("combobox", { name: "مصدر المشكلة", exact: true }).isDisabled()).toBe(true);
     } catch (error) { await writeFile(`.settings-ui-artifacts/ortho-problem-sources-failure-${width}.txt`, await page.locator("body").ariaSnapshot()); throw error; } finally { await context.close(); }
   });

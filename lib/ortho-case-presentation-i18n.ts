@@ -125,6 +125,7 @@ const sourceNames: Record<StudySourceKind, readonly [string, string]> = {
     "جلسات المتابعة",
     "Follow-up sessions"
   ],
+  "problem_review": ["مراجعة مصدر المشكلة", "Problem source review"],
   "plan_consent": [
     "الخطة والموافقة المسجلة",
     "Recorded plan and consent"

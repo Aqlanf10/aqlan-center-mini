@@ -56,10 +56,15 @@ async function storedState(patientId: number) {
   )).rows;
 }
 
-function waitForGet(page: Page, path: string) {
-  return page.waitForResponse((response) => response.request().method() === "GET"
+async function waitForGet(page: Page, path: string) {
+  const response = await page.waitForResponse((response) => response.request().method() === "GET"
     && new URL(response.url()).origin === baseUrl
     && `${new URL(response.url()).pathname}${new URL(response.url()).search}` === path);
+  // Capture the actual response body as soon as it arrives, before waiting for
+  // the page/navigation or the other GET. Chromium may retire a response's
+  // resource identifier after navigation; late response.json() then fails even
+  // for a 200. No response is mocked, retried or replaced with an API-only GET.
+  return { status: response.status(), payload: await response.json() as unknown };
 }
 
 describe("actual visit API contract reaches the cockpit", () => {
@@ -94,8 +99,8 @@ describe("actual visit API contract reaches the cockpit", () => {
         waitForGet(page, `/api/visits/readiness?patientId=${patientId}`),
         page.goto(`${baseUrl}/patients/${patientId}?tab=summary`, { waitUntil: "domcontentloaded" }),
       ]);
-      expect(listResponse.status()).toBe(200); expect(readyResponse.status()).toBe(200);
-      const rows = await listResponse.json() as ChairRow[];
+      expect(listResponse.status).toBe(200); expect(readyResponse.status).toBe(200);
+      const rows = listResponse.payload as ChairRow[];
       expect(Array.isArray(rows)).toBe(true);
       // Only status counts enter failure diagnostics; no patient names or records.
       const statusCounts = rows.reduce<Record<string, number>>((counts, row) => {
@@ -106,7 +111,7 @@ describe("actual visit API contract reaches the cockpit", () => {
       expect(rows.every((row) => Number.isSafeInteger(row.id) && row.id > 0
         && (row.patientId === null || (Number.isSafeInteger(row.patientId) && row.patientId > 0))
         && (row.chair === null || (Number.isSafeInteger(row.chair) && row.chair > 0)))).toBe(true);
-      const readiness = await readyResponse.json() as { visit: null | { visitId: number; patientId: number; status: string } };
+      const readiness = readyResponse.payload as { visit: null | { visitId: number; patientId: number; status: string } };
       if (kind === "no-visit") expect(readiness.visit).toBeNull();
       else expect(readiness.visit).toMatchObject({ visitId: waitingVisitId, patientId, status: "waiting" });
 

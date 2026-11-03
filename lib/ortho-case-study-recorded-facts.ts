@@ -1,6 +1,7 @@
 /** First source-specific semantic projection, working/unreviewed.
  * Captured facts only. Current authorization belongs to the caller's locked reader.
  * No source fetch, clinical inference, approval, formatting of money or render job. */
+import { readStudyProblemReview } from "./ortho-study-problem-review";
 import { decodeAnyAssessmentRevision } from "./ortho-assessment-persisted-v2";
 import { projectStudyAssessment, STUDY_CLINICAL_PANEL_FIELDS, type StudyClinicalPanel } from "./ortho-case-study-assessment-projection";
 import { canonicalJourneyJSON } from "./ortho-case-journey-json";
@@ -45,7 +46,17 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
     if (!captured) throw new Error("study_source_binding_missing");
     if (captured.state !== "available") { unavailable.push({ sourceKey: key, reason: captured.unavailableReason ?? "source_unavailable" }); continue; }
     const source = captured.selection, value = record(captured.payload);
-    if (source.kind === "assessment") {
+    if (source.kind === "problem_review" && ["diagnosis", "objectives", "problem-plan-strategy"].includes(panel.layoutKey)) {
+      const item = readStudyProblemReview(value, { ...scope, patientId: study.recordedPatientId }), evidence = item.source;
+      table(key, [["معرف المشكلة المشتركة", item.problemId], ["نص المشكلة وقت مراجعة هذا المصدر", item.problemLabelAtReview],
+        ["معرف مراجعة المصدر", item.id], ["المراجع", item.reviewedBy], ["معرف المراجع", item.actorId],
+        ["تاريخ المراجعة", item.reviewedAt], ["سبب المراجعة", item.reason], ["المراجعة السابقة", item.supersedesReviewId],
+        ["نوع المصدر", evidence.category], ["عنوان المصدر", evidence.title], ["الملاحظة أو النتيجة المحفوظة", evidence.summary],
+        ["السن أو الموضع المسجل", evidence.site], ["مسجل المصدر", evidence.recordedBy], ["تاريخ المصدر كما حفظ", evidence.recordedAt],
+        ["هوية المصدر", evidence.identity], ["معرف نسخة المصدر", evidence.ref.id], ["إصدار المصدر", evidence.ref.version],
+        ["رقم نسخة التقييم", evidence.assessmentVersion], ["بصمة سجل المصدر وشواهده", evidence.snapshotHash]]);
+      paragraph(key, "هذه مراجعة الطبيب المحفوظة لهذا المصدر، وليست تشخيصًا أو اعتمادًا جديدًا. نص المشكلة هو النص وقت المراجعة؛ قد تختلف عنه نسخة الخطة المختارة. شواهد الحساب التفصيلية محفوظة في التقييم الأصلي ويمكن اختيار نسخته في قسم القياسات.");
+    } else if (source.kind === "assessment") {
       const assessment = decodeAnyAssessmentRevision(value, { ...scope, patientId: study.recordedPatientId });
       if (!assessment.ok || assessment.value.schemaVersion !== 2) throw new Error("assessment_projection_schema_unavailable");
       const revision = assessment.value;

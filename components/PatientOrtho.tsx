@@ -990,7 +990,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                 }`}
               >
                 {workup && typeof workupStep === "number" ? <OrthoWorkupNavigation step={workupStep} legacy={row.status !== "assessment"} onSelect={navigateWorkup} onClose={() => setPillarForCase(row.id, currentPillar)} />
-                  : <div className="px-4 pt-3"><button type="button" className="min-h-11 rounded-lg border border-navy-300 bg-white px-3 text-sm font-bold text-navy-900" onClick={() => navigateWorkup(0)}>{row.status === "assessment" ? "إعداد ملف التقويم خطوة بخطوة" : "استكمال ملف التقويم خطوة بخطوة"}</button></div>}
+                  : <div className={currentPillar === "prescription" ? "hidden px-4 pt-3 sm:block" : "px-4 pt-3"}><button type="button" className="min-h-11 rounded-lg border border-navy-300 bg-white px-3 text-sm font-bold text-navy-900" onClick={() => navigateWorkup(0)}>{row.status === "assessment" ? "إعداد ملف التقويم خطوة بخطوة" : "استكمال ملف التقويم خطوة بخطوة"}</button></div>}
                 {/* رأس الحالة التقويمية */}
                 <div className={`border-b border-slate-100 bg-slate-50/70 ${workup ? "px-3 py-2" : currentPillar === "prescription" ? "px-3 py-1 sm:p-4" : "p-4"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1104,6 +1104,9 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
 
                 {/* أشرطة الأركان الأربعة التخصصية (Pillar Navigation) */}
                 {!workup && <div className="flex border-b border-slate-200 bg-white">
+                  {currentPillar === "prescription" && <button type="button"
+                    aria-label={row.status === "assessment" ? "إعداد ملف التقويم خطوة بخطوة" : "استكمال ملف التقويم خطوة بخطوة"}
+                    onClick={() => navigateWorkup(0)} className="min-h-11 min-w-11 flex-1 border-b-2 border-transparent px-1 text-xs font-bold text-navy-900 sm:hidden">الملف</button>}
                   {PILLAR_TABS.map((tab) => {
                     const isSelected = currentPillar === tab.key;
                     return (

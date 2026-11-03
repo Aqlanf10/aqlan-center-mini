@@ -1,6 +1,8 @@
 /** Fresh section/source authority for saved study reads, documentation and
  * export/recovery/download. Never authorizes from recorded patient identity. */
 import type { DbClient } from "./db";
+import { requireStudyProblemReviewRead } from "./ortho-study-problem-review-store";
+import type { StudyProblemReview } from "./ortho-study-problem-review";
 import { decodeAnyAssessmentRevision } from "./ortho-assessment-persisted-v2";
 import { requirePreparedAssessmentAccess, type StudyAssessmentAccess } from "./ortho-case-study-assessment-access";
 import { assertJourneyCurrent, journeyFail, type JourneyAuthority, type JourneyOwner } from "./ortho-case-journey-authority";
@@ -14,7 +16,9 @@ export async function requireCurrentStudyRead(client: DbClient, owner: JourneyOw
   for (const source of saved.sources) {
     if (source.access.images && !authority.canViewImages || source.access.plans && !authority.canViewPlans) journeyFail(403, "study_section_restricted");
     if (source.state !== "available") continue;
-    if (source.selection.kind === "assessment") {
+    if (source.selection.kind === "problem_review") {
+      await requireStudyProblemReviewRead(client, owner, authority, source.payload as StudyProblemReview, assessmentAccess);
+    } else if (source.selection.kind === "assessment") {
       const parsed = decodeAnyAssessmentRevision(source.payload, { patientId: saved.recordedPatientId,
         orthoCaseId: owner.orthoCaseId, clinicalCaseId: owner.clinicalCaseId });
       if (!parsed.ok) journeyFail(500, "invalid_study_assessment");

@@ -1,6 +1,8 @@
 /** Source-union discovery performs immutable reads only. Its caller locks the
  * complete external union once, before locking either case. */
 import type { DbClient } from "./db";
+import { readStudyProblemReviews, prepareStudyProblemReviewAccess } from "./ortho-study-problem-review-store";
+import type { StudyProblemReview } from "./ortho-study-problem-review";
 import { decodeAnyAssessmentRevision } from "./ortho-assessment-persisted-v2";
 import { decodeDecisionSavedContent, type DecisionSavedContent } from "./ortho-case-decision-content";
 import { decodeRetentionSavedContent, type RetentionSavedContent } from "./ortho-retention-history-store";
@@ -42,6 +44,8 @@ export async function prepareSavedStudySourceUnion(client: DbClient, owner: Jour
       const parsed = decodeAnyAssessmentRevision(source.payload, { ...owner, patientId: saved.recordedPatientId });
       if (!parsed.ok) journeyFail(500, "invalid_saved_assessment");
       await prepareStudyAssessmentAccess(client, owner, authority, [parsed.value], cache);
+    } else if (source.selection.kind === "problem_review") {
+      await prepareStudyProblemReviewAccess(client, owner, authority, [source.payload as StudyProblemReview], cache);
     } else if (source.selection.kind === "decision" || source.selection.kind === "retention_event") {
       const content = (source.payload as { content: unknown }).content; // strict capture decoder already checked the envelope
       if (source.selection.kind === "decision") {
@@ -60,6 +64,11 @@ export async function prepareSavedStudySourceUnion(client: DbClient, owner: Jour
 }
 export async function prepareIncomingStudySourceUnion(client: DbClient, owner: JourneyOwner, authority: JourneyAuthority,
   content: StudyDraftContent, cache: StudyAssessmentAccess) {
+  const reviewIds = content.sources.filter(s => s.kind === "problem_review").map(s => s.id);
+  if (reviewIds.length) {
+    const reviews = await readStudyProblemReviews(client, owner, reviewIds);
+    await prepareStudyProblemReviewAccess(client, owner, authority, [...reviews.values()], cache);
+  }
   if (content.sources.some(s => s.kind === "assessment")) {
     const clinical = await journeyClinicalSources(client, owner, authority, ["assessment"], cache, true);
     const selected = clinical.assessments.filter(r => content.sources.some(s => s.kind === "assessment" && s.id === r.id && s.version === r.version));

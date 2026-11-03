@@ -22,6 +22,8 @@ async function candidates(client: DbClient, owner: JourneyOwner, kind: StudySour
     const table = versioned[kind as keyof typeof versioned];
     return (await client.query<Candidate>(`SELECT id,version FROM ${table} WHERE ortho_case_id=$1 AND id>$2 ORDER BY id LIMIT 26`, [owner.orthoCaseId, afterId])).rows;
   }
+  if (kind === "problem_review") return (await client.query<Candidate>(`SELECT id,NULL::integer AS version FROM ortho_problem_source_reviews
+    WHERE patient_id=$1 AND ortho_case_id=$2 AND clinical_case_id=$3 AND id>$4 ORDER BY id LIMIT 26`, [owner.patientId, owner.orthoCaseId, owner.clinicalCaseId, afterId])).rows;
   if (kind === "document") return (await client.query<Candidate>(`SELECT id,NULL::integer AS version FROM patient_documents
     WHERE patient_id=$1 AND ortho_case_id=$2 AND removed_at IS NULL AND id>$3 ORDER BY id LIMIT 26`, [owner.patientId, owner.orthoCaseId, afterId])).rows;
   if (kind === "ceph_study") return (await client.query<Candidate>(`SELECT id,NULL::integer AS version FROM ceph_analyses
