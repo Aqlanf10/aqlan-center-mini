@@ -1,0 +1,790 @@
+{
+  "baseCommit": "cebe62f2e8d3d20a1196e10e9da892a30ec235cb",
+  "rows": [
+    {
+      "profileId": "paracetamol-adult-sdcep",
+      "row": {
+        "name": "Paracetamol / Acetaminophen",
+        "dose": "500 mg/tablet",
+        "form": "Tablet",
+        "frequency": "4 times daily; at least 6 hours apart",
+        "duration": "5 days",
+        "instructions": "4000 سقف المصدر وليس جرعة افتراضية، وقد يلزم سقف أقل حسب المريض. خطة المراجعة: Synthetic follow-up",
+        "instructionsEn": "Review plan: Synthetic follow-up",
+        "selection": {
+          "id": "paracetamol",
+          "amount": "2 tablet(s) (1000 mg)",
+          "confirmed": true,
+          "doseReview": {
+            "version": 1,
+            "mode": "calculated",
+            "profileId": "paracetamol-adult-sdcep",
+            "referenceVersion": "2026-11-01.expansion.1",
+            "input": {
+              "profileId": "paracetamol-adult-sdcep",
+              "referenceVersion": "2026-11-01.expansion.1",
+              "indication": "Synthetic reviewed indication",
+              "ageMonths": 360,
+              "ageVerified": true,
+              "weightKg": 70,
+              "currentWeightVerified": true,
+              "selectedDose": 1000,
+              "administrationsPer24h": 4,
+              "scheduleKind": "times-per-day",
+              "intervalHours": 6,
+              "durationDays": 5,
+              "reviewPlan": "Synthetic follow-up",
+              "product": {
+                "name": "Synthetic reviewed product",
+                "ingredientId": "paracetamol",
+                "formulation": "single-ingredient",
+                "labelUrl": "https://synthetic.invalid/label",
+                "kind": "tablet",
+                "strengthMg": 500,
+                "perMl": 5,
+                "measurementIncrementMl": 0.1,
+                "minimumAgeMonths": 4,
+                "labelVerified": true
+              },
+              "otherSameIngredientMg24h": 0,
+              "specialPopulationOrInteraction": false,
+              "antibioticIndicationReviewed": true
+            },
+            "result": {
+              "mgPerDose": 1000,
+              "mgPer24h": 4000,
+              "mlPerDose": null,
+              "tabletsPerDose": 2
+            }
+          }
+        }
+      },
+      "draft": {
+        "patientId": 1,
+        "visitId": 2,
+        "diagnosis": "Synthetic",
+        "notes": "",
+        "instructionsLang": "both",
+        "items": [
+          {
+            "name": "Paracetamol / Acetaminophen",
+            "dose": "500 mg/tablet",
+            "form": "Tablet",
+            "frequency": "4 times daily; at least 6 hours apart",
+            "duration": "5 days",
+            "instructions": "4000 سقف المصدر وليس جرعة افتراضية، وقد يلزم سقف أقل حسب المريض. خطة المراجعة: Synthetic follow-up",
+            "instructionsEn": "Review plan: Synthetic follow-up",
+            "selection": {
+              "id": "paracetamol",
+              "amount": "2 tablet(s) (1000 mg)",
+              "confirmed": true,
+              "doseReview": {
+                "version": 1,
+                "mode": "calculated",
+                "profileId": "paracetamol-adult-sdcep",
+                "referenceVersion": "2026-11-01.expansion.1",
+                "input": {
+                  "profileId": "paracetamol-adult-sdcep",
+                  "referenceVersion": "2026-11-01.expansion.1",
+                  "indication": "Synthetic reviewed indication",
+                  "ageMonths": 360,
+                  "ageVerified": true,
+                  "weightKg": 70,
+                  "currentWeightVerified": true,
+                  "selectedDose": 1000,
+                  "administrationsPer24h": 4,
+                  "scheduleKind": "times-per-day",
+                  "intervalHours": 6,
+                  "durationDays": 5,
+                  "reviewPlan": "Synthetic follow-up",
+                  "product": {
+                    "name": "Synthetic reviewed product",
+                    "ingredientId": "paracetamol",
+                    "formulation": "single-ingredient",
+                    "labelUrl": "https://synthetic.invalid/label",
+                    "kind": "tablet",
+                    "strengthMg": 500,
+                    "perMl": 5,
+                    "measurementIncrementMl": 0.1,
+                    "minimumAgeMonths": 4,
+                    "labelVerified": true
+                  },
+                  "otherSameIngredientMg24h": 0,
+                  "specialPopulationOrInteraction": false,
+                  "antibioticIndicationReviewed": true
+                },
+                "result": {
+                  "mgPerDose": 1000,
+                  "mgPer24h": 4000,
+                  "mlPerDose": null,
+                  "tabletsPerDose": 2
+                }
+              }
+            }
+          }
+        ],
+        "prescribingDoctorPartyId": 3,
+        "prescribingDoctorName": "Synthetic clinician"
+      },
+      "command": "{\"version\":1,\"patientId\":1,\"visitId\":2,\"prescribingDoctorPartyId\":3,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Paracetamol / Acetaminophen\",\"500 mg/tablet\",\"Tablet\",\"4 times daily; at least 6 hours apart\",\"5 days\",\"4000 سقف المصدر وليس جرعة افتراضية، وقد يلزم سقف أقل حسب المريض. خطة المراجعة: Synthetic follow-up\",\"Review plan: Synthetic follow-up\",\"paracetamol\",\"2 tablet(s) (1000 mg)\",true,\"dose-review-v1\",\"{\\\"version\\\":1,\\\"profileId\\\":\\\"paracetamol-adult-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"paracetamol-adult-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":360,\\\"ageVerified\\\":true,\\\"weightKg\\\":70,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":1000,\\\"administrationsPer24h\\\":4,\\\"scheduleKind\\\":\\\"times-per-day\\\",\\\"intervalHours\\\":6,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"paracetamol\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"tablet\\\",\\\"strengthMg\\\":500,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":1000,\\\"mgPer24h\\\":4000,\\\"mlPerDose\\\":null,\\\"tabletsPerDose\\\":2}}\"]]}",
+      "acknowledgement": "{\"ownerAuthority\":null,\"prescribingDoctorName\":\"Synthetic clinician\",\"prescribingDoctorPartyId\":3,\"patientId\":1,\"visitId\":2,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Paracetamol / Acetaminophen\",\"500 mg/tablet\",\"Tablet\",\"4 times daily; at least 6 hours apart\",\"5 days\",\"4000 سقف المصدر وليس جرعة افتراضية، وقد يلزم سقف أقل حسب المريض. خطة المراجعة: Synthetic follow-up\",\"Review plan: Synthetic follow-up\",\"paracetamol\",\"2 tablet(s) (1000 mg)\",true,\"dose-review-v1\",\"{\\\"version\\\":1,\\\"profileId\\\":\\\"paracetamol-adult-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"paracetamol-adult-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":360,\\\"ageVerified\\\":true,\\\"weightKg\\\":70,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":1000,\\\"administrationsPer24h\\\":4,\\\"scheduleKind\\\":\\\"times-per-day\\\",\\\"intervalHours\\\":6,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"paracetamol\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"tablet\\\",\\\"strengthMg\\\":500,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":1000,\\\"mgPer24h\\\":4000,\\\"mlPerDose\\\":null,\\\"tabletsPerDose\\\":2}}\"]]}"
+    },
+    {
+      "profileId": "paracetamol-child-aapd",
+      "row": {
+        "name": "Paracetamol / Acetaminophen",
+        "dose": "100 mg/5 mL",
+        "form": "Oral suspension",
+        "frequency": "As needed; maximum 4 doses/24h; at least 6 hours apart",
+        "duration": "5 days",
+        "instructions": "لا تُقسم جرعة mg/kg/dose على عدد المرات. عدد الجرعات والسقف المفرد يقرهما الطبيب/النشرة قبل التفعيل. خطة المراجعة: Synthetic follow-up",
+        "instructionsEn": "Review plan: Synthetic follow-up",
+        "selection": {
+          "id": "paracetamol",
+          "amount": "10 mL (200 mg)",
+          "confirmed": true,
+          "doseReview": {
+            "version": 1,
+            "mode": "calculated",
+            "profileId": "paracetamol-child-aapd",
+            "referenceVersion": "2026-11-01.expansion.1",
+            "input": {
+              "profileId": "paracetamol-child-aapd",
+              "referenceVersion": "2026-11-01.expansion.1",
+              "indication": "Synthetic reviewed indication",
+              "ageMonths": 60,
+              "ageVerified": true,
+              "weightKg": 20,
+              "currentWeightVerified": true,
+              "selectedDose": 10,
+              "administrationsPer24h": 4,
+              "scheduleKind": "prn-max",
+              "intervalHours": 6,
+              "durationDays": 5,
+              "reviewPlan": "Synthetic follow-up",
+              "product": {
+                "name": "Synthetic reviewed product",
+                "ingredientId": "paracetamol",
+                "formulation": "single-ingredient",
+                "labelUrl": "https://synthetic.invalid/label",
+                "kind": "oral-liquid",
+                "strengthMg": 100,
+                "perMl": 5,
+                "measurementIncrementMl": 0.1,
+                "minimumAgeMonths": 4,
+                "labelVerified": true,
+                "singleMaxMg": 500
+              },
+              "otherSameIngredientMg24h": 0,
+              "specialPopulationOrInteraction": false,
+              "antibioticIndicationReviewed": true
+            },
+            "result": {
+              "mgPerDose": 200,
+              "mgPer24h": 800,
+              "mlPerDose": 10,
+              "tabletsPerDose": null
+            }
+          }
+        }
+      },
+      "draft": {
+        "patientId": 1,
+        "visitId": 2,
+        "diagnosis": "Synthetic",
+        "notes": "",
+        "instructionsLang": "both",
+        "items": [
+          {
+            "name": "Paracetamol / Acetaminophen",
+            "dose": "100 mg/5 mL",
+            "form": "Oral suspension",
+            "frequency": "As needed; maximum 4 doses/24h; at least 6 hours apart",
+            "duration": "5 days",
+            "instructions": "لا تُقسم جرعة mg/kg/dose على عدد المرات. عدد الجرعات والسقف المفرد يقرهما الطبيب/النشرة قبل التفعيل. خطة المراجعة: Synthetic follow-up",
+            "instructionsEn": "Review plan: Synthetic follow-up",
+            "selection": {
+              "id": "paracetamol",
+              "amount": "10 mL (200 mg)",
+              "confirmed": true,
+              "doseReview": {
+                "version": 1,
+                "mode": "calculated",
+                "profileId": "paracetamol-child-aapd",
+                "referenceVersion": "2026-11-01.expansion.1",
+                "input": {
+                  "profileId": "paracetamol-child-aapd",
+                  "referenceVersion": "2026-11-01.expansion.1",
+                  "indication": "Synthetic reviewed indication",
+                  "ageMonths": 60,
+                  "ageVerified": true,
+                  "weightKg": 20,
+                  "currentWeightVerified": true,
+                  "selectedDose": 10,
+                  "administrationsPer24h": 4,
+                  "scheduleKind": "prn-max",
+                  "intervalHours": 6,
+                  "durationDays": 5,
+                  "reviewPlan": "Synthetic follow-up",
+                  "product": {
+                    "name": "Synthetic reviewed product",
+                    "ingredientId": "paracetamol",
+                    "formulation": "single-ingredient",
+                    "labelUrl": "https://synthetic.invalid/label",
+                    "kind": "oral-liquid",
+                    "strengthMg": 100,
+                    "perMl": 5,
+                    "measurementIncrementMl": 0.1,
+                    "minimumAgeMonths": 4,
+                    "labelVerified": true,
+                    "singleMaxMg": 500
+                  },
+                  "otherSameIngredientMg24h": 0,
+                  "specialPopulationOrInteraction": false,
+                  "antibioticIndicationReviewed": true
+                },
+                "result": {
+                  "mgPerDose": 200,
+                  "mgPer24h": 800,
+                  "mlPerDose": 10,
+                  "tabletsPerDose": null
+                }
+              }
+            }
+          }
+        ],
+        "prescribingDoctorPartyId": 3,
+        "prescribingDoctorName": "Synthetic clinician"
+      },
+      "command": "{\"version\":1,\"patientId\":1,\"visitId\":2,\"prescribingDoctorPartyId\":3,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Paracetamol / Acetaminophen\",\"100 mg/5 mL\",\"Oral suspension\",\"As needed; maximum 4 doses/24h; at least 6 hours apart\",\"5 days\",\"لا تُقسم جرعة mg/kg/dose على عدد المرات. عدد الجرعات والسقف المفرد يقرهما الطبيب/النشرة قبل التفعيل. خطة المراجعة: Synthetic follow-up\",\"Review plan: Synthetic follow-up\",\"paracetamol\",\"10 mL (200 mg)\",true,\"dose-review-v1\",\"{\\\"version\\\":1,\\\"profileId\\\":\\\"paracetamol-child-aapd\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"paracetamol-child-aapd\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":60,\\\"ageVerified\\\":true,\\\"weightKg\\\":20,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":10,\\\"administrationsPer24h\\\":4,\\\"scheduleKind\\\":\\\"prn-max\\\",\\\"intervalHours\\\":6,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"paracetamol\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"oral-liquid\\\",\\\"strengthMg\\\":100,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true,\\\"singleMaxMg\\\":500},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":200,\\\"mgPer24h\\\":800,\\\"mlPerDose\\\":10,\\\"tabletsPerDose\\\":null}}\"]]}",
+      "acknowledgement": "{\"ownerAuthority\":null,\"prescribingDoctorName\":\"Synthetic clinician\",\"prescribingDoctorPartyId\":3,\"patientId\":1,\"visitId\":2,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Paracetamol / Acetaminophen\",\"100 mg/5 mL\",\"Oral suspension\",\"As needed; maximum 4 doses/24h; at least 6 hours apart\",\"5 days\",\"لا تُقسم جرعة mg/kg/dose على عدد المرات. عدد الجرعات والسقف المفرد يقرهما الطبيب/النشرة قبل التفعيل. خطة المراجعة: Synthetic follow-up\",\"Review plan: Synthetic follow-up\",\"paracetamol\",\"10 mL (200 mg)\",true,\"dose-review-v1\",\"{\\\"version\\\":1,\\\"profileId\\\":\\\"paracetamol-child-aapd\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"paracetamol-child-aapd\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":60,\\\"ageVerified\\\":true,\\\"weightKg\\\":20,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":10,\\\"administrationsPer24h\\\":4,\\\"scheduleKind\\\":\\\"prn-max\\\",\\\"intervalHours\\\":6,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"paracetamol\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"oral-liquid\\\",\\\"strengthMg\\\":100,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true,\\\"singleMaxMg\\\":500},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":200,\\\"mgPer24h\\\":800,\\\"mlPerDose\\\":10,\\\"tabletsPerDose\\\":null}}\"]]}"
+    },
+    {
+      "profileId": "ibuprofen-adult-sdcep",
+      "row": {
+        "name": "Ibuprofen",
+        "dose": "400 mg/tablet",
+        "form": "Tablet",
+        "frequency": "4 times daily; at least 6 hours apart",
+        "duration": "5 days",
+        "instructions": "بعد الطعام إن أمكن؛ لا ترفع مثال1600 إلى2400 تلقائيًا، والفاصل يحتاج نشرة المنتج. خطة المراجعة: Synthetic follow-up يفضل تناوله بعد الطعام.",
+        "instructionsEn": "Review plan: Synthetic follow-up Preferably after food.",
+        "selection": {
+          "id": "ibuprofen",
+          "amount": "1 tablet(s) (400 mg)",
+          "confirmed": true,
+          "doseReview": {
+            "version": 2,
+            "mode": "calculated",
+            "profileId": "ibuprofen-adult-sdcep",
+            "referenceVersion": "2026-11-01.expansion.1",
+            "input": {
+              "profileId": "ibuprofen-adult-sdcep",
+              "referenceVersion": "2026-11-01.expansion.1",
+              "indication": "Synthetic reviewed indication",
+              "ageMonths": 360,
+              "ageVerified": true,
+              "weightKg": 70,
+              "currentWeightVerified": true,
+              "selectedDose": 400,
+              "administrationsPer24h": 4,
+              "scheduleKind": "times-per-day",
+              "intervalHours": 6,
+              "durationDays": 5,
+              "reviewPlan": "Synthetic follow-up",
+              "product": {
+                "name": "Synthetic reviewed product",
+                "ingredientId": "ibuprofen",
+                "formulation": "single-ingredient",
+                "labelUrl": "https://synthetic.invalid/label",
+                "kind": "tablet",
+                "strengthMg": 400,
+                "perMl": 5,
+                "measurementIncrementMl": 0.1,
+                "minimumAgeMonths": 4,
+                "labelVerified": true,
+                "minimumIntervalHours": 6,
+                "maxAdministrationsPer24h": 4
+              },
+              "otherSameIngredientMg24h": 0,
+              "specialPopulationOrInteraction": false,
+              "antibioticIndicationReviewed": true
+            },
+            "result": {
+              "mgPerDose": 400,
+              "mgPer24h": 1600,
+              "mlPerDose": null,
+              "tabletsPerDose": 1
+            }
+          }
+        }
+      },
+      "draft": {
+        "patientId": 1,
+        "visitId": 2,
+        "diagnosis": "Synthetic",
+        "notes": "",
+        "instructionsLang": "both",
+        "items": [
+          {
+            "name": "Ibuprofen",
+            "dose": "400 mg/tablet",
+            "form": "Tablet",
+            "frequency": "4 times daily; at least 6 hours apart",
+            "duration": "5 days",
+            "instructions": "بعد الطعام إن أمكن؛ لا ترفع مثال1600 إلى2400 تلقائيًا، والفاصل يحتاج نشرة المنتج. خطة المراجعة: Synthetic follow-up يفضل تناوله بعد الطعام.",
+            "instructionsEn": "Review plan: Synthetic follow-up Preferably after food.",
+            "selection": {
+              "id": "ibuprofen",
+              "amount": "1 tablet(s) (400 mg)",
+              "confirmed": true,
+              "doseReview": {
+                "version": 2,
+                "mode": "calculated",
+                "profileId": "ibuprofen-adult-sdcep",
+                "referenceVersion": "2026-11-01.expansion.1",
+                "input": {
+                  "profileId": "ibuprofen-adult-sdcep",
+                  "referenceVersion": "2026-11-01.expansion.1",
+                  "indication": "Synthetic reviewed indication",
+                  "ageMonths": 360,
+                  "ageVerified": true,
+                  "weightKg": 70,
+                  "currentWeightVerified": true,
+                  "selectedDose": 400,
+                  "administrationsPer24h": 4,
+                  "scheduleKind": "times-per-day",
+                  "intervalHours": 6,
+                  "durationDays": 5,
+                  "reviewPlan": "Synthetic follow-up",
+                  "product": {
+                    "name": "Synthetic reviewed product",
+                    "ingredientId": "ibuprofen",
+                    "formulation": "single-ingredient",
+                    "labelUrl": "https://synthetic.invalid/label",
+                    "kind": "tablet",
+                    "strengthMg": 400,
+                    "perMl": 5,
+                    "measurementIncrementMl": 0.1,
+                    "minimumAgeMonths": 4,
+                    "labelVerified": true,
+                    "minimumIntervalHours": 6,
+                    "maxAdministrationsPer24h": 4
+                  },
+                  "otherSameIngredientMg24h": 0,
+                  "specialPopulationOrInteraction": false,
+                  "antibioticIndicationReviewed": true
+                },
+                "result": {
+                  "mgPerDose": 400,
+                  "mgPer24h": 1600,
+                  "mlPerDose": null,
+                  "tabletsPerDose": 1
+                }
+              }
+            }
+          }
+        ],
+        "prescribingDoctorPartyId": 3,
+        "prescribingDoctorName": "Synthetic clinician"
+      },
+      "command": "{\"version\":1,\"patientId\":1,\"visitId\":2,\"prescribingDoctorPartyId\":3,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Ibuprofen\",\"400 mg/tablet\",\"Tablet\",\"4 times daily; at least 6 hours apart\",\"5 days\",\"بعد الطعام إن أمكن؛ لا ترفع مثال1600 إلى2400 تلقائيًا، والفاصل يحتاج نشرة المنتج. خطة المراجعة: Synthetic follow-up يفضل تناوله بعد الطعام.\",\"Review plan: Synthetic follow-up Preferably after food.\",\"ibuprofen\",\"1 tablet(s) (400 mg)\",true,\"dose-review-v2\",\"{\\\"version\\\":2,\\\"profileId\\\":\\\"ibuprofen-adult-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"ibuprofen-adult-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":360,\\\"ageVerified\\\":true,\\\"weightKg\\\":70,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":400,\\\"administrationsPer24h\\\":4,\\\"scheduleKind\\\":\\\"times-per-day\\\",\\\"intervalHours\\\":6,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"ibuprofen\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"tablet\\\",\\\"strengthMg\\\":400,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true,\\\"minimumIntervalHours\\\":6,\\\"maxAdministrationsPer24h\\\":4},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":400,\\\"mgPer24h\\\":1600,\\\"mlPerDose\\\":null,\\\"tabletsPerDose\\\":1}}\"]]}",
+      "acknowledgement": "{\"ownerAuthority\":null,\"prescribingDoctorName\":\"Synthetic clinician\",\"prescribingDoctorPartyId\":3,\"patientId\":1,\"visitId\":2,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Ibuprofen\",\"400 mg/tablet\",\"Tablet\",\"4 times daily; at least 6 hours apart\",\"5 days\",\"بعد الطعام إن أمكن؛ لا ترفع مثال1600 إلى2400 تلقائيًا، والفاصل يحتاج نشرة المنتج. خطة المراجعة: Synthetic follow-up يفضل تناوله بعد الطعام.\",\"Review plan: Synthetic follow-up Preferably after food.\",\"ibuprofen\",\"1 tablet(s) (400 mg)\",true,\"dose-review-v2\",\"{\\\"version\\\":2,\\\"profileId\\\":\\\"ibuprofen-adult-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"ibuprofen-adult-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":360,\\\"ageVerified\\\":true,\\\"weightKg\\\":70,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":400,\\\"administrationsPer24h\\\":4,\\\"scheduleKind\\\":\\\"times-per-day\\\",\\\"intervalHours\\\":6,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"ibuprofen\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"tablet\\\",\\\"strengthMg\\\":400,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true,\\\"minimumIntervalHours\\\":6,\\\"maxAdministrationsPer24h\\\":4},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":400,\\\"mgPer24h\\\":1600,\\\"mlPerDose\\\":null,\\\"tabletsPerDose\\\":1}}\"]]}"
+    },
+    {
+      "profileId": "ibuprofen-child-sdcep",
+      "row": {
+        "name": "Ibuprofen",
+        "dose": "100 mg/5 mL",
+        "form": "Oral suspension",
+        "frequency": "3 times daily; at least 8 hours apart",
+        "duration": "5 days",
+        "instructions": "لا تستبدل سقف30 بسقف40 من مرجع آخر. إذا تجاوزت جرعة الفئة سقف الوزن تُحال للمراجعة ولا تخفض صامتًا. خطة المراجعة: Synthetic follow-up يفضل تناوله بعد الطعام.",
+        "instructionsEn": "Review plan: Synthetic follow-up Preferably after food.",
+        "selection": {
+          "id": "ibuprofen",
+          "amount": "7.5 mL (150 mg)",
+          "confirmed": true,
+          "doseReview": {
+            "version": 2,
+            "mode": "calculated",
+            "profileId": "ibuprofen-child-sdcep",
+            "referenceVersion": "2026-11-01.expansion.1",
+            "input": {
+              "profileId": "ibuprofen-child-sdcep",
+              "referenceVersion": "2026-11-01.expansion.1",
+              "indication": "Synthetic reviewed indication",
+              "ageMonths": 60,
+              "ageVerified": true,
+              "weightKg": 20,
+              "currentWeightVerified": true,
+              "selectedDose": 150,
+              "administrationsPer24h": 3,
+              "scheduleKind": "times-per-day",
+              "intervalHours": 8,
+              "durationDays": 5,
+              "reviewPlan": "Synthetic follow-up",
+              "product": {
+                "name": "Synthetic reviewed product",
+                "ingredientId": "ibuprofen",
+                "formulation": "single-ingredient",
+                "labelUrl": "https://synthetic.invalid/label",
+                "kind": "oral-liquid",
+                "strengthMg": 100,
+                "perMl": 5,
+                "measurementIncrementMl": 0.1,
+                "minimumAgeMonths": 4,
+                "labelVerified": true,
+                "minimumIntervalHours": 6,
+                "maxAdministrationsPer24h": 3
+              },
+              "otherSameIngredientMg24h": 0,
+              "specialPopulationOrInteraction": false,
+              "antibioticIndicationReviewed": true
+            },
+            "result": {
+              "mgPerDose": 150,
+              "mgPer24h": 450,
+              "mlPerDose": 7.5,
+              "tabletsPerDose": null
+            }
+          }
+        }
+      },
+      "draft": {
+        "patientId": 1,
+        "visitId": 2,
+        "diagnosis": "Synthetic",
+        "notes": "",
+        "instructionsLang": "both",
+        "items": [
+          {
+            "name": "Ibuprofen",
+            "dose": "100 mg/5 mL",
+            "form": "Oral suspension",
+            "frequency": "3 times daily; at least 8 hours apart",
+            "duration": "5 days",
+            "instructions": "لا تستبدل سقف30 بسقف40 من مرجع آخر. إذا تجاوزت جرعة الفئة سقف الوزن تُحال للمراجعة ولا تخفض صامتًا. خطة المراجعة: Synthetic follow-up يفضل تناوله بعد الطعام.",
+            "instructionsEn": "Review plan: Synthetic follow-up Preferably after food.",
+            "selection": {
+              "id": "ibuprofen",
+              "amount": "7.5 mL (150 mg)",
+              "confirmed": true,
+              "doseReview": {
+                "version": 2,
+                "mode": "calculated",
+                "profileId": "ibuprofen-child-sdcep",
+                "referenceVersion": "2026-11-01.expansion.1",
+                "input": {
+                  "profileId": "ibuprofen-child-sdcep",
+                  "referenceVersion": "2026-11-01.expansion.1",
+                  "indication": "Synthetic reviewed indication",
+                  "ageMonths": 60,
+                  "ageVerified": true,
+                  "weightKg": 20,
+                  "currentWeightVerified": true,
+                  "selectedDose": 150,
+                  "administrationsPer24h": 3,
+                  "scheduleKind": "times-per-day",
+                  "intervalHours": 8,
+                  "durationDays": 5,
+                  "reviewPlan": "Synthetic follow-up",
+                  "product": {
+                    "name": "Synthetic reviewed product",
+                    "ingredientId": "ibuprofen",
+                    "formulation": "single-ingredient",
+                    "labelUrl": "https://synthetic.invalid/label",
+                    "kind": "oral-liquid",
+                    "strengthMg": 100,
+                    "perMl": 5,
+                    "measurementIncrementMl": 0.1,
+                    "minimumAgeMonths": 4,
+                    "labelVerified": true,
+                    "minimumIntervalHours": 6,
+                    "maxAdministrationsPer24h": 3
+                  },
+                  "otherSameIngredientMg24h": 0,
+                  "specialPopulationOrInteraction": false,
+                  "antibioticIndicationReviewed": true
+                },
+                "result": {
+                  "mgPerDose": 150,
+                  "mgPer24h": 450,
+                  "mlPerDose": 7.5,
+                  "tabletsPerDose": null
+                }
+              }
+            }
+          }
+        ],
+        "prescribingDoctorPartyId": 3,
+        "prescribingDoctorName": "Synthetic clinician"
+      },
+      "command": "{\"version\":1,\"patientId\":1,\"visitId\":2,\"prescribingDoctorPartyId\":3,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Ibuprofen\",\"100 mg/5 mL\",\"Oral suspension\",\"3 times daily; at least 8 hours apart\",\"5 days\",\"لا تستبدل سقف30 بسقف40 من مرجع آخر. إذا تجاوزت جرعة الفئة سقف الوزن تُحال للمراجعة ولا تخفض صامتًا. خطة المراجعة: Synthetic follow-up يفضل تناوله بعد الطعام.\",\"Review plan: Synthetic follow-up Preferably after food.\",\"ibuprofen\",\"7.5 mL (150 mg)\",true,\"dose-review-v2\",\"{\\\"version\\\":2,\\\"profileId\\\":\\\"ibuprofen-child-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"ibuprofen-child-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":60,\\\"ageVerified\\\":true,\\\"weightKg\\\":20,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":150,\\\"administrationsPer24h\\\":3,\\\"scheduleKind\\\":\\\"times-per-day\\\",\\\"intervalHours\\\":8,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"ibuprofen\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"oral-liquid\\\",\\\"strengthMg\\\":100,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true,\\\"minimumIntervalHours\\\":6,\\\"maxAdministrationsPer24h\\\":3},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":150,\\\"mgPer24h\\\":450,\\\"mlPerDose\\\":7.5,\\\"tabletsPerDose\\\":null}}\"]]}",
+      "acknowledgement": "{\"ownerAuthority\":null,\"prescribingDoctorName\":\"Synthetic clinician\",\"prescribingDoctorPartyId\":3,\"patientId\":1,\"visitId\":2,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Ibuprofen\",\"100 mg/5 mL\",\"Oral suspension\",\"3 times daily; at least 8 hours apart\",\"5 days\",\"لا تستبدل سقف30 بسقف40 من مرجع آخر. إذا تجاوزت جرعة الفئة سقف الوزن تُحال للمراجعة ولا تخفض صامتًا. خطة المراجعة: Synthetic follow-up يفضل تناوله بعد الطعام.\",\"Review plan: Synthetic follow-up Preferably after food.\",\"ibuprofen\",\"7.5 mL (150 mg)\",true,\"dose-review-v2\",\"{\\\"version\\\":2,\\\"profileId\\\":\\\"ibuprofen-child-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"ibuprofen-child-sdcep\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":60,\\\"ageVerified\\\":true,\\\"weightKg\\\":20,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":150,\\\"administrationsPer24h\\\":3,\\\"scheduleKind\\\":\\\"times-per-day\\\",\\\"intervalHours\\\":8,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"ibuprofen\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"oral-liquid\\\",\\\"strengthMg\\\":100,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true,\\\"minimumIntervalHours\\\":6,\\\"maxAdministrationsPer24h\\\":3},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":150,\\\"mgPer24h\\\":450,\\\"mlPerDose\\\":7.5,\\\"tabletsPerDose\\\":null}}\"]]}"
+    },
+    {
+      "profileId": "amoxicillin-child-aapd-q8",
+      "row": {
+        "name": "Amoxicillin",
+        "dose": "250 mg/5 mL",
+        "form": "Oral suspension",
+        "frequency": "Every 8 hours (3 doses/24h)",
+        "duration": "5 days",
+        "instructions": "الكمية هنا يومية، تقسم3؛ لا تنقل الجرعة كما هي لكل مرة. خطة المراجعة: Synthetic follow-up",
+        "instructionsEn": "Review plan: Synthetic follow-up",
+        "selection": {
+          "id": "amoxicillin",
+          "amount": "4 mL (200 mg)",
+          "confirmed": true,
+          "doseReview": {
+            "version": 1,
+            "mode": "calculated",
+            "profileId": "amoxicillin-child-aapd-q8",
+            "referenceVersion": "2026-11-01.expansion.1",
+            "input": {
+              "profileId": "amoxicillin-child-aapd-q8",
+              "referenceVersion": "2026-11-01.expansion.1",
+              "indication": "Synthetic reviewed indication",
+              "ageMonths": 60,
+              "ageVerified": true,
+              "weightKg": 20,
+              "currentWeightVerified": true,
+              "selectedDose": 30,
+              "administrationsPer24h": 3,
+              "scheduleKind": "fixed-interval",
+              "intervalHours": 8,
+              "durationDays": 5,
+              "reviewPlan": "Synthetic follow-up",
+              "product": {
+                "name": "Synthetic reviewed product",
+                "ingredientId": "amoxicillin",
+                "formulation": "single-ingredient",
+                "labelUrl": "https://synthetic.invalid/label",
+                "kind": "oral-liquid",
+                "strengthMg": 250,
+                "perMl": 5,
+                "measurementIncrementMl": 0.1,
+                "minimumAgeMonths": 4,
+                "labelVerified": true
+              },
+              "otherSameIngredientMg24h": 0,
+              "specialPopulationOrInteraction": false,
+              "antibioticIndicationReviewed": true
+            },
+            "result": {
+              "mgPerDose": 200,
+              "mgPer24h": 600,
+              "mlPerDose": 4,
+              "tabletsPerDose": null
+            }
+          }
+        }
+      },
+      "draft": {
+        "patientId": 1,
+        "visitId": 2,
+        "diagnosis": "Synthetic",
+        "notes": "",
+        "instructionsLang": "both",
+        "items": [
+          {
+            "name": "Amoxicillin",
+            "dose": "250 mg/5 mL",
+            "form": "Oral suspension",
+            "frequency": "Every 8 hours (3 doses/24h)",
+            "duration": "5 days",
+            "instructions": "الكمية هنا يومية، تقسم3؛ لا تنقل الجرعة كما هي لكل مرة. خطة المراجعة: Synthetic follow-up",
+            "instructionsEn": "Review plan: Synthetic follow-up",
+            "selection": {
+              "id": "amoxicillin",
+              "amount": "4 mL (200 mg)",
+              "confirmed": true,
+              "doseReview": {
+                "version": 1,
+                "mode": "calculated",
+                "profileId": "amoxicillin-child-aapd-q8",
+                "referenceVersion": "2026-11-01.expansion.1",
+                "input": {
+                  "profileId": "amoxicillin-child-aapd-q8",
+                  "referenceVersion": "2026-11-01.expansion.1",
+                  "indication": "Synthetic reviewed indication",
+                  "ageMonths": 60,
+                  "ageVerified": true,
+                  "weightKg": 20,
+                  "currentWeightVerified": true,
+                  "selectedDose": 30,
+                  "administrationsPer24h": 3,
+                  "scheduleKind": "fixed-interval",
+                  "intervalHours": 8,
+                  "durationDays": 5,
+                  "reviewPlan": "Synthetic follow-up",
+                  "product": {
+                    "name": "Synthetic reviewed product",
+                    "ingredientId": "amoxicillin",
+                    "formulation": "single-ingredient",
+                    "labelUrl": "https://synthetic.invalid/label",
+                    "kind": "oral-liquid",
+                    "strengthMg": 250,
+                    "perMl": 5,
+                    "measurementIncrementMl": 0.1,
+                    "minimumAgeMonths": 4,
+                    "labelVerified": true
+                  },
+                  "otherSameIngredientMg24h": 0,
+                  "specialPopulationOrInteraction": false,
+                  "antibioticIndicationReviewed": true
+                },
+                "result": {
+                  "mgPerDose": 200,
+                  "mgPer24h": 600,
+                  "mlPerDose": 4,
+                  "tabletsPerDose": null
+                }
+              }
+            }
+          }
+        ],
+        "prescribingDoctorPartyId": 3,
+        "prescribingDoctorName": "Synthetic clinician"
+      },
+      "command": "{\"version\":1,\"patientId\":1,\"visitId\":2,\"prescribingDoctorPartyId\":3,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Amoxicillin\",\"250 mg/5 mL\",\"Oral suspension\",\"Every 8 hours (3 doses/24h)\",\"5 days\",\"الكمية هنا يومية، تقسم3؛ لا تنقل الجرعة كما هي لكل مرة. خطة المراجعة: Synthetic follow-up\",\"Review plan: Synthetic follow-up\",\"amoxicillin\",\"4 mL (200 mg)\",true,\"dose-review-v1\",\"{\\\"version\\\":1,\\\"profileId\\\":\\\"amoxicillin-child-aapd-q8\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"amoxicillin-child-aapd-q8\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":60,\\\"ageVerified\\\":true,\\\"weightKg\\\":20,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":30,\\\"administrationsPer24h\\\":3,\\\"scheduleKind\\\":\\\"fixed-interval\\\",\\\"intervalHours\\\":8,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"amoxicillin\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"oral-liquid\\\",\\\"strengthMg\\\":250,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":200,\\\"mgPer24h\\\":600,\\\"mlPerDose\\\":4,\\\"tabletsPerDose\\\":null}}\"]]}",
+      "acknowledgement": "{\"ownerAuthority\":null,\"prescribingDoctorName\":\"Synthetic clinician\",\"prescribingDoctorPartyId\":3,\"patientId\":1,\"visitId\":2,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Amoxicillin\",\"250 mg/5 mL\",\"Oral suspension\",\"Every 8 hours (3 doses/24h)\",\"5 days\",\"الكمية هنا يومية، تقسم3؛ لا تنقل الجرعة كما هي لكل مرة. خطة المراجعة: Synthetic follow-up\",\"Review plan: Synthetic follow-up\",\"amoxicillin\",\"4 mL (200 mg)\",true,\"dose-review-v1\",\"{\\\"version\\\":1,\\\"profileId\\\":\\\"amoxicillin-child-aapd-q8\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"amoxicillin-child-aapd-q8\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":60,\\\"ageVerified\\\":true,\\\"weightKg\\\":20,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":30,\\\"administrationsPer24h\\\":3,\\\"scheduleKind\\\":\\\"fixed-interval\\\",\\\"intervalHours\\\":8,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"amoxicillin\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"oral-liquid\\\",\\\"strengthMg\\\":250,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":200,\\\"mgPer24h\\\":600,\\\"mlPerDose\\\":4,\\\"tabletsPerDose\\\":null}}\"]]}"
+    },
+    {
+      "profileId": "amoxicillin-child-aapd-q12",
+      "row": {
+        "name": "Amoxicillin",
+        "dose": "250 mg/5 mL",
+        "form": "Oral suspension",
+        "frequency": "Every 12 hours (2 doses/24h)",
+        "duration": "5 days",
+        "instructions": "مسار مستقل عنq8؛ لا تبديل التكرار وحده. خطة المراجعة: Synthetic follow-up",
+        "instructionsEn": "Review plan: Synthetic follow-up",
+        "selection": {
+          "id": "amoxicillin",
+          "amount": "6 mL (300 mg)",
+          "confirmed": true,
+          "doseReview": {
+            "version": 1,
+            "mode": "calculated",
+            "profileId": "amoxicillin-child-aapd-q12",
+            "referenceVersion": "2026-11-01.expansion.1",
+            "input": {
+              "profileId": "amoxicillin-child-aapd-q12",
+              "referenceVersion": "2026-11-01.expansion.1",
+              "indication": "Synthetic reviewed indication",
+              "ageMonths": 60,
+              "ageVerified": true,
+              "weightKg": 20,
+              "currentWeightVerified": true,
+              "selectedDose": 30,
+              "administrationsPer24h": 2,
+              "scheduleKind": "fixed-interval",
+              "intervalHours": 12,
+              "durationDays": 5,
+              "reviewPlan": "Synthetic follow-up",
+              "product": {
+                "name": "Synthetic reviewed product",
+                "ingredientId": "amoxicillin",
+                "formulation": "single-ingredient",
+                "labelUrl": "https://synthetic.invalid/label",
+                "kind": "oral-liquid",
+                "strengthMg": 250,
+                "perMl": 5,
+                "measurementIncrementMl": 0.1,
+                "minimumAgeMonths": 4,
+                "labelVerified": true
+              },
+              "otherSameIngredientMg24h": 0,
+              "specialPopulationOrInteraction": false,
+              "antibioticIndicationReviewed": true
+            },
+            "result": {
+              "mgPerDose": 300,
+              "mgPer24h": 600,
+              "mlPerDose": 6,
+              "tabletsPerDose": null
+            }
+          }
+        }
+      },
+      "draft": {
+        "patientId": 1,
+        "visitId": 2,
+        "diagnosis": "Synthetic",
+        "notes": "",
+        "instructionsLang": "both",
+        "items": [
+          {
+            "name": "Amoxicillin",
+            "dose": "250 mg/5 mL",
+            "form": "Oral suspension",
+            "frequency": "Every 12 hours (2 doses/24h)",
+            "duration": "5 days",
+            "instructions": "مسار مستقل عنq8؛ لا تبديل التكرار وحده. خطة المراجعة: Synthetic follow-up",
+            "instructionsEn": "Review plan: Synthetic follow-up",
+            "selection": {
+              "id": "amoxicillin",
+              "amount": "6 mL (300 mg)",
+              "confirmed": true,
+              "doseReview": {
+                "version": 1,
+                "mode": "calculated",
+                "profileId": "amoxicillin-child-aapd-q12",
+                "referenceVersion": "2026-11-01.expansion.1",
+                "input": {
+                  "profileId": "amoxicillin-child-aapd-q12",
+                  "referenceVersion": "2026-11-01.expansion.1",
+                  "indication": "Synthetic reviewed indication",
+                  "ageMonths": 60,
+                  "ageVerified": true,
+                  "weightKg": 20,
+                  "currentWeightVerified": true,
+                  "selectedDose": 30,
+                  "administrationsPer24h": 2,
+                  "scheduleKind": "fixed-interval",
+                  "intervalHours": 12,
+                  "durationDays": 5,
+                  "reviewPlan": "Synthetic follow-up",
+                  "product": {
+                    "name": "Synthetic reviewed product",
+                    "ingredientId": "amoxicillin",
+                    "formulation": "single-ingredient",
+                    "labelUrl": "https://synthetic.invalid/label",
+                    "kind": "oral-liquid",
+                    "strengthMg": 250,
+                    "perMl": 5,
+                    "measurementIncrementMl": 0.1,
+                    "minimumAgeMonths": 4,
+                    "labelVerified": true
+                  },
+                  "otherSameIngredientMg24h": 0,
+                  "specialPopulationOrInteraction": false,
+                  "antibioticIndicationReviewed": true
+                },
+                "result": {
+                  "mgPerDose": 300,
+                  "mgPer24h": 600,
+                  "mlPerDose": 6,
+                  "tabletsPerDose": null
+                }
+              }
+            }
+          }
+        ],
+        "prescribingDoctorPartyId": 3,
+        "prescribingDoctorName": "Synthetic clinician"
+      },
+      "command": "{\"version\":1,\"patientId\":1,\"visitId\":2,\"prescribingDoctorPartyId\":3,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Amoxicillin\",\"250 mg/5 mL\",\"Oral suspension\",\"Every 12 hours (2 doses/24h)\",\"5 days\",\"مسار مستقل عنq8؛ لا تبديل التكرار وحده. خطة المراجعة: Synthetic follow-up\",\"Review plan: Synthetic follow-up\",\"amoxicillin\",\"6 mL (300 mg)\",true,\"dose-review-v1\",\"{\\\"version\\\":1,\\\"profileId\\\":\\\"amoxicillin-child-aapd-q12\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"amoxicillin-child-aapd-q12\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":60,\\\"ageVerified\\\":true,\\\"weightKg\\\":20,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":30,\\\"administrationsPer24h\\\":2,\\\"scheduleKind\\\":\\\"fixed-interval\\\",\\\"intervalHours\\\":12,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"amoxicillin\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"oral-liquid\\\",\\\"strengthMg\\\":250,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":300,\\\"mgPer24h\\\":600,\\\"mlPerDose\\\":6,\\\"tabletsPerDose\\\":null}}\"]]}",
+      "acknowledgement": "{\"ownerAuthority\":null,\"prescribingDoctorName\":\"Synthetic clinician\",\"prescribingDoctorPartyId\":3,\"patientId\":1,\"visitId\":2,\"diagnosis\":\"Synthetic\",\"notes\":\"\",\"instructionsLang\":\"both\",\"items\":[[\"Amoxicillin\",\"250 mg/5 mL\",\"Oral suspension\",\"Every 12 hours (2 doses/24h)\",\"5 days\",\"مسار مستقل عنq8؛ لا تبديل التكرار وحده. خطة المراجعة: Synthetic follow-up\",\"Review plan: Synthetic follow-up\",\"amoxicillin\",\"6 mL (300 mg)\",true,\"dose-review-v1\",\"{\\\"version\\\":1,\\\"profileId\\\":\\\"amoxicillin-child-aapd-q12\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"mode\\\":\\\"calculated\\\",\\\"input\\\":{\\\"profileId\\\":\\\"amoxicillin-child-aapd-q12\\\",\\\"referenceVersion\\\":\\\"2026-11-01.expansion.1\\\",\\\"indication\\\":\\\"Synthetic reviewed indication\\\",\\\"ageMonths\\\":60,\\\"ageVerified\\\":true,\\\"weightKg\\\":20,\\\"currentWeightVerified\\\":true,\\\"selectedDose\\\":30,\\\"administrationsPer24h\\\":2,\\\"scheduleKind\\\":\\\"fixed-interval\\\",\\\"intervalHours\\\":12,\\\"durationDays\\\":5,\\\"reviewPlan\\\":\\\"Synthetic follow-up\\\",\\\"product\\\":{\\\"name\\\":\\\"Synthetic reviewed product\\\",\\\"ingredientId\\\":\\\"amoxicillin\\\",\\\"formulation\\\":\\\"single-ingredient\\\",\\\"labelUrl\\\":\\\"https://synthetic.invalid/label\\\",\\\"kind\\\":\\\"oral-liquid\\\",\\\"strengthMg\\\":250,\\\"perMl\\\":5,\\\"measurementIncrementMl\\\":0.1,\\\"minimumAgeMonths\\\":4,\\\"labelVerified\\\":true},\\\"otherSameIngredientMg24h\\\":0,\\\"specialPopulationOrInteraction\\\":false,\\\"antibioticIndicationReviewed\\\":true},\\\"result\\\":{\\\"mgPerDose\\\":300,\\\"mgPer24h\\\":600,\\\"mlPerDose\\\":6,\\\"tabletsPerDose\\\":null}}\"]]}"
+    }
+  ],
+  "projectionAndParserSections": {
+    "parseMedicationDoseProvenance": "export function parseMedicationDoseProvenance(value:unknown):MedicationDoseProvenance|null {\n if(!object(value)||(value.version!==1&&value.version!==2)||typeof value.profileId!=='string'||!value.profileId||value.profileId.length>100||typeof value.referenceVersion!=='string'||!value.referenceVersion||value.referenceVersion.length>100)return null;\n const common={version:value.version as 1|2,profileId:value.profileId,referenceVersion:value.referenceVersion};\n if(value.mode==='reference-only'&&exact(value,['version','mode','profileId','referenceVersion']))return {...common,mode:'reference-only'};\n if(value.mode!=='calculated'||!exact(value,['version','mode','profileId','referenceVersion','input','result']))return null;\n const input=(value.version===1?parseDoseReviewInput:parseDoseReviewInputV2)(value.input),r=value.result;\n if(!input||!object(r)||!exact(r,['mgPerDose','mgPer24h','mlPerDose','tabletsPerDose'])||['mgPerDose','mgPer24h'].some(k=>typeof r[k]!=='number'||!Number.isFinite(r[k]))||['mlPerDose','tabletsPerDose'].some(k=>r[k]!==null&&(typeof r[k]!=='number'||!Number.isFinite(r[k]))))return null;\n return {...common,mode:'calculated',input,result:{mgPerDose:r.mgPerDose as number,mgPer24h:r.mgPer24h as number,mlPerDose:r.mlPerDose as number|null,tabletsPerDose:r.tabletsPerDose as number|null}};\n}",
+    "createCalculatedDoseProvenance": "export function createCalculatedDoseProvenance(input:AnyDoseReviewInput):MedicationDoseProvenance|null {\n const version='minimumIntervalHours' in input.product?2:1;\n const parsed=(version===1?parseDoseReviewInput:parseDoseReviewInputV2)(input);if(!parsed)return null;\n const result=reviewMedicationDose(parsed);if(!result.ok)return null;\n return {version,mode:'calculated',profileId:input.profileId,referenceVersion:input.referenceVersion,input:parsed,result:{mgPerDose:result.mgPerDose,mgPer24h:result.mgPer24h,mlPerDose:result.mlPerDose,tabletsPerDose:result.tabletsPerDose}};\n}",
+    "asManualDoseReference": "export function asManualDoseReference(value:MedicationDoseProvenance):MedicationDoseProvenance {\n return {version:value.version,mode:'reference-only',profileId:value.profileId,referenceVersion:value.referenceVersion};\n}",
+    "calculatedDoseFields": "export function calculatedDoseFields(provenance:MedicationDoseProvenance) {\n if(provenance.mode!=='calculated')return null;\n const input=provenance.input,r=provenance.result,reference=doseReference(provenance.profileId);\n if(!reference)return null;\n const rule=doseCalculationRule(provenance.profileId,input.ageMonths);\n const amount=r.mlPerDose===null?`${r.tabletsPerDose} tablet(s) (${r.mgPerDose} mg)`:`${r.mlPerDose} mL (${r.mgPerDose} mg)`;\n const frequency=input.scheduleKind==='prn-max'?`As needed; maximum ${input.administrationsPer24h} doses/24h; at least ${input.intervalHours} hours apart`:input.scheduleKind==='fixed-interval'?`Every ${input.intervalHours} hours (${input.administrationsPer24h} doses/24h)`:`${input.administrationsPer24h} times daily; at least ${input.intervalHours} hours apart`;\n return { name:reference.generic_name, dose:input.product.kind==='tablet'?`${input.product.strengthMg} mg/tablet`:`${input.product.strengthMg} mg/${input.product.perMl} mL`,form:input.product.kind==='tablet'?'Tablet':'Oral suspension',amount,frequency,duration:`${input.durationDays} days`,instructions:`${reference.notes} خطة المراجعة: ${input.reviewPlan}${rule?.instructionsAr?` ${rule.instructionsAr}`:''}`,instructionsEn:`Review plan: ${input.reviewPlan}${rule?.instructionsEn?` ${rule.instructionsEn}`:''}` };\n}",
+    "canonicalMedicationDoseProvenance": "export function canonicalMedicationDoseProvenance(value:MedicationDoseProvenance):string { return JSON.stringify(parseMedicationDoseProvenance(value)); }"
+  }
+}

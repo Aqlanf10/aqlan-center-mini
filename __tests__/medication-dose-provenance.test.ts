@@ -23,7 +23,15 @@ it('non-profile canonical command bytes remain exactly unchanged',()=>{const ite
 it('does not serialize age, weight or product-label snapshot into draft print query items',()=>{const item=row(),printed=prescriptionDraftPrintItems([item]);expect(printed[0].selection).not.toHaveProperty('doseReview');const query=JSON.stringify(printed);expect(query).not.toContain('weightKg');expect(query).not.toContain('synthetic.invalid');expect(item.selection).toHaveProperty('doseReview');expect(printed[0].selection?.confirmed).toBe(true);});
 
 it('preserves published fab4 v1 snapshot, command and acknowledgement golden bytes',()=>{
- const item=row(),d=draft(item),sha=(value:string)=>createHash('sha256').update(value).digest('hex');
+ const item=row();
+ // Published golden bytes describe the historical reference, not today's new issuance.
+ const historical=item.selection!.doseReview!;
+ if(historical.mode!=='calculated')throw Error();
+ historical.referenceVersion='2026-11-01.expansion.1';
+ historical.input.referenceVersion='2026-11-01.expansion.1';
+ const d=draft(item),sha=(value:string)=>createHash('sha256').update(value).digest('hex');
+ expect(parseMedicationDoseProvenance(historical)).not.toBeNull();
+ expect(medicationDoseProvenanceProblem(historical,item as unknown as Record<string,unknown>)).toBeNull();
  expect(sha(canonicalMedicationDoseProvenance(item.selection!.doseReview!))).toBe('f425549035e9ebc2e6405aff9a0da6759fa5adab7353e54714d584497336f6c2');
  expect(sha(canonicalPrescriptionCommand(d))).toBe('6ef7fba16f8a8ce79baf4b443a676e7cd9d6df93d61eead9e1a8743c0228a1bc');
  expect(sha(canonicalPrescriptionForAck(d))).toBe('1054fb29ca9810503e08f979044798fe80f79c58f6ff3d111f56ed1a239d30c5');

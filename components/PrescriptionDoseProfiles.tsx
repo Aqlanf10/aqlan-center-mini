@@ -5,6 +5,11 @@ import { DOSE_REFERENCES,DOSE_REFERENCE_SOURCES,DOSE_REFERENCE_WARNINGS,DOSE_REF
 import { parseDoseReviewInput,parseDoseReviewInputV2,reviewMedicationDose } from '@/lib/medication-dose-review';
 import { createCalculatedDoseProvenance,calculatedDoseFields } from '@/lib/medication-dose-provenance';
 import type { RxItem } from '@/lib/prescription';
+import { filterDoseReferences, REGIMEN_GROUP_LABELS } from '@/lib/medication-regimen-browser';
+import { FluorideManualTemplate } from './FluorideManualTemplate';
+import { AntibioticManualTemplate } from './AntibioticManualTemplate';
+import { isAntibioticManualProfile } from '@/lib/antibiotic-manual-templates';
+import { ChlorhexidineManualTemplate } from './ChlorhexidineManualTemplate';
 
 const factLabels:Record<string,string>={
  times_per_day:'مرات في اليوم',minimum_interval_hours:'أقل فاصل بالساعات',interval_hours:'الفاصل بالساعات',interval_hours_range:'نطاق الفاصل بالساعات',as_needed:'عند الحاجة',divisions_per_day:'تقسيم الجرعة اليومية',times_per_day_by_age:'المرات حسب العمر',mg_per_24h:'حد mg خلال24ساعة',mg_per_kg_24h:'حد mg/kg خلال24ساعة',mg_per_single_dose:'حد الجرعة المفردة mg',maximum_administrations_24h:'أقصى مرات خلال24ساعة',max_administrations_24h:'أقصى مرات خلال24ساعة',example_days:'مدة المثال بالأيام — ليست اختيارًا تلقائيًا',range_days:'نطاق المدة بالأيام',review_day:'يوم المراجعة',stop:'شرط الإيقاف',selection:'اختيار المدة',total_days:'مجموع الأيام',reference_days:'أيام المرجع',continuation:'الاستمرار والمراجعة',example_total_days:'أيام المثال الكلية',adult:'بالغ',day1:'اليوم الأول',days2to5:'الأيام2–5',later_days:'الأيام التالية',amoxicillin:'مكوّن الأموكسيسيلين',clavulanate:'مكوّن الكلافولانات',routine_derived_mg_24h:'المجموع اليومي المشتق من النظام — ليس سقفًا عالميًا',regimen_derived_mg_24h:'المجموع اليومي المشتق — ليس سقفًا عالميًا',not_systemic_maximum:'ليس حدًا دوائيًا جهازيًا',not_global_maximum:'ليس سقفًا عامًا',no_mg_conversion:'لا تحويل إلىmg',mg_per_rinse:'mg في المضمضة',rinse_seconds:'ثواني المضمضة',brushing_seconds:'ثواني التفريش',timing:'التوقيت',max_unsupervised_days:'أقصى أيام دون إشراف',gingivitis:'التهاب اللثة',other_indications:'استطبابات أخرى',schedule:'الجدول',limits:'حدود المرجع والمجاميع',duration:'المدة والمراجعة'
@@ -23,15 +28,23 @@ export function PrescriptionDoseProfiles(props:Props) {
  return <DoseProfileChooser key={owner} {...props} disabled={props.disabled||owner==='unavailable'}/>;
 }
 function DoseProfileChooser({onSelect,disabled=false}:Props) {
+ const choiceIntent=useRef(0),activeChoice=useRef(false),blockedChoice=useRef(disabled);
+ useLayoutEffect(()=>{activeChoice.current=true;blockedChoice.current=disabled;return()=>{activeChoice.current=false;};},[disabled]);
+ const renderedChoice=choiceIntent.current;
+ const transfer=(item:RxItem)=>{if(activeChoice.current&&!blockedChoice.current&&choiceIntent.current===renderedChoice)onSelect(item);};
  const [profileId,setProfileId]=useState('');
+ const [query,setQuery]=useState(''),[group,setGroup]=useState('all'),[population,setPopulation]=useState('all');
+ const visible=filterDoseReferences(query,group,population);
  const reference=DOSE_REFERENCES.find(p=>p.id===profileId);
  return <details className="rounded-xl border border-sky-200 p-3 text-sm" data-dose-profile-review="source-specific"><summary className="cursor-pointer font-bold">الجرعات والتعليمات حسب الاستطباب والمرجع — مراجعة الطبيب</summary>
- <p className="my-2">اختر النظام بنفسك. لا اختيار مضاد تلقائي، ولا خلط مدة أو سقف من مرجع آخر. ستة محولات عددية للمراجعة فقط؛ بقية الملفات تعرض مرجعها ونقص التحويل صراحة.</p>
- <label>الملف المرجعي<select aria-label="الملف المرجعي للجرعة" value={profileId} onChange={e=>setProfileId(e.target.value)} className="m-2 max-w-full rounded border p-2"><option value="">اختر الاستطباب والنظام</option>{DOSE_REFERENCES.map(p=><option key={p.id} value={p.id}>{p.generic_name} — {p.id} — {p.indication_reference}</option>)}</select></label>
+ <p className="my-2">اختر النظام بنفسك. لا اختيار مضاد تلقائي، ولا خلط مدة أو سقف من مرجع آخر. ستة محولات عددية للمراجعة فقط؛ بعض الملفات توفر نقلًا نصيًا مراجعًا يدويًا؛ غيرها مرجع للقراءة فقط.</p>
+ <div className="my-2 flex flex-wrap gap-2"><label>بحث بالاسم أو الاستطباب<input aria-label="بحث في أنظمة أدوية الأسنان" value={query} onChange={e=>{choiceIntent.current++;setQuery(e.target.value);setProfileId('');}} className="m-2 rounded border p-2"/></label><label>المجموعة<select aria-label="مجموعة الدواء المرجعية" value={group} onChange={e=>{choiceIntent.current++;setGroup(e.target.value);setProfileId('');}} className="m-2 rounded border p-2"><option value="all">كل المجموعات</option>{Object.entries(REGIMEN_GROUP_LABELS).map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label><label>نطاق المرجع<select aria-label="نطاق المرجع العمري" value={population} onChange={e=>{choiceIntent.current++;setPopulation(e.target.value);setProfileId('');}} className="m-2 rounded border p-2"><option value="all">كل المراجع</option><option value="adult">يتضمن البالغين</option><option value="child">يتضمن الأطفال أو المراهقين</option></select></label></div>
+ <p role="status">{visible.length} ملفًا مطابقًا. التصفية لتنظيم المراجع فقط؛ ليست فحصًا لعمر المريض أو ملاءمة العلاج. اختر النظام صراحةً؛ لا اختيار تلقائي.</p>
+ <label>الملف المرجعي<select aria-label="الملف المرجعي للجرعة" value={profileId} onChange={e=>{choiceIntent.current++;setProfileId(e.target.value);}} className="m-2 max-w-full rounded border p-2"><option value="">اختر الاستطباب والنظام</option>{visible.map(p=><option key={p.id} value={p.id}>{p.generic_name} — {p.id} — {p.indication_reference}</option>)}</select></label>
  {reference&&<section key={reference.id} className="space-y-2"><p>{reference.population_reference}</p><p>{reference.indication_reference}</p><p>{reference.notes}</p><dl><dt>أساس الجرعة</dt><dd dir="ltr">{reference.dose_basis}</dd><dt>الجرعة المرجعية — ليست اختيارًا تلقائيًا</dt><dd><ReferenceFacts value={reference.reference_dose}/></dd><dt>الجدول والحدود والمدة</dt><dd><ReferenceFacts value={{schedule:reference.reference_schedule,limits:reference.reference_limits,duration:reference.duration_reference}}/></dd></dl>
  <ul>{reference.warning_ids.map(id=><li key={id} className="text-amber-900">{DOSE_REFERENCE_WARNINGS[id as keyof typeof DOSE_REFERENCE_WARNINGS]?.text_ar}</li>)}</ul>
  <ul>{reference.source_ids.map(id=>{const source=DOSE_REFERENCE_SOURCES.find(s=>s.id===id);return source?<li key={id}><a href={source.url} target="_blank" rel="noreferrer" className="underline">{source.title}</a> — {source.version}</li>:null;})}</ul>
- {doseCalculationRule(reference.id)?<DoseProfileForm key={reference.id} profileId={reference.id} onSelect={onSelect} disabled={disabled}/>:<p role="status" className="rounded bg-amber-50 p-2">{doseProfileCalculationBlocker(reference.id)}</p>}
+ {doseCalculationRule(reference.id)?<DoseProfileForm key={reference.id} profileId={reference.id} onSelect={transfer} disabled={disabled}/>:<><p role="status" className="rounded bg-amber-50 p-2">{doseProfileCalculationBlocker(reference.id)}</p>{reference.id==='fluoride-toothpaste5000'&&<FluorideManualTemplate key={reference.id} onSelect={transfer} disabled={disabled}/>} {isAntibioticManualProfile(reference.id)&&<AntibioticManualTemplate key={reference.id} profileId={reference.id} onSelect={transfer} disabled={disabled}/>} {reference.id==='chlorhexidine-02-label'&&<ChlorhexidineManualTemplate key={reference.id} onSelect={transfer} disabled={disabled}/>}</>}
  </section>}
  </details>;
 }

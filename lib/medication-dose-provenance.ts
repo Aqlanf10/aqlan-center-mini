@@ -1,3 +1,4 @@
+import { isDoseReferenceAcceptedForNewIssue } from './medication-dose-compatibility';
 import { doseCalculationRule,doseReference,DOSE_REFERENCE_VERSION } from './medication-dose-profiles';
 import { parseDoseReviewInput,parseDoseReviewInputV2,reviewMedicationDose,type AnyDoseReviewInput } from './medication-dose-review';
 
@@ -39,10 +40,13 @@ export function calculatedDoseFields(provenance:MedicationDoseProvenance) {
 }
 export function medicationDoseProvenanceProblem(value:unknown,row:Record<string,unknown>):string|null {
  const p=parseMedicationDoseProvenance(value);
- if(!p||p.referenceVersion!==DOSE_REFERENCE_VERSION||!doseReference(p.profileId))return 'مرجع الجرعة أو نسخته غير معروف؛ أعد الاختيار.';
+ if(!p||!isDoseReferenceAcceptedForNewIssue(p.profileId,p.referenceVersion))return 'مرجع الجرعة أو نسخته غير معروف؛ أعد الاختيار.';
  if(p.mode==='reference-only')return null;
  if(p.input.profileId!==p.profileId||p.input.referenceVersion!==p.referenceVersion)return 'مدخلات الحساب لا تطابق المرجع.';
- const recalculated=reviewMedicationDose(p.input);if(!recalculated.ok)return recalculated.problems.join(' ');
+ // Source-equivalent legacy input is verified against current semantics on a
+ // temporary copy only. Original command, acknowledgement and snapshot bytes stay unchanged.
+ const verificationInput=p.input.referenceVersion===DOSE_REFERENCE_VERSION?p.input:{...p.input,referenceVersion:DOSE_REFERENCE_VERSION};
+ const recalculated=reviewMedicationDose(verificationInput);if(!recalculated.ok)return recalculated.problems.join(' ');
  if(['mgPerDose','mgPer24h','mlPerDose','tabletsPerDose'].some(key=>p.result[key as keyof CalculatedDoseResult]!==recalculated[key as keyof CalculatedDoseResult]))return 'نتيجة الحساب لا تطابق إعادة التحقق الخادمي.';
  const fields=calculatedDoseFields(p);if(!fields)return 'لا توجد حقول حساب صالحة.';
  const selection=object(row.selection)?row.selection:null;

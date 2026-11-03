@@ -4,7 +4,7 @@ import { useSessionActions } from '@/components/SessionProvider';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MEDICATION_CATALOG_KEY as KEY, EMPTY_MEDICATION_CATALOG, parseMedicationCatalog, type CatalogMedication, type MedicationCatalog } from '@/lib/medication-catalog';
 const blank = ():CatalogMedication => ({id:crypto.randomUUID(),revision:1,enabled:true,name:'',arabicName:'',form:'',strength:'',population:'both',amount:'',frequency:'',duration:'',instructionsAr:'',instructionsEn:'',indication:'',cautions:'',sourceUrl:''});
-const labels = {name:'الاسم العلمي بالإنجليزية',arabicName:'الاسم بالعربية',form:'الشكل الدوائي',strength:'التركيز كما على المنتج (mg/tablet أو mg/5 mL)',amount:'مقدار الجرعة المرجعي — اختياري',frequency:'الفاصل والتكرار — اختياري',duration:'المدة والمراجعة — اختياري',instructionsAr:'تعليمات عربية',instructionsEn:'تعليمات إنجليزية',indication:'الاستطباب وحدود الاستخدام',cautions:'التحذيرات وموانع الاستخدام',sourceUrl:'رابط المرجع أو نشرة المنتج (HTTPS)'} as const;
+const labels = {name:'الاسم العلمي بالإنجليزية',arabicName:'الاسم بالعربية',form:'الشكل الدوائي وطريق الاستخدام',strength:'قوة المنتج أو تركيزه ووحدته (mg/tablet أو units/mL أو %)',amount:'مقدار الجرعة ووحدتها لكل مرة — اختياري',frequency:'الفاصل والتكرار — اختياري',duration:'المدة والمراجعة — اختياري',instructionsAr:'تعليمات عربية',instructionsEn:'تعليمات إنجليزية',indication:'الاستطباب وحدود الاستخدام',cautions:'التحذيرات وموانع الاستخدام',sourceUrl:'رابط المرجع أو نشرة المنتج (HTTPS)'} as const;
 export default function MedicationsSettings() {
  const {session,ready}=useSessionActions();
  const owner=ready&&session?JSON.stringify([session.username,session.role,session.permissions]):'unavailable';
