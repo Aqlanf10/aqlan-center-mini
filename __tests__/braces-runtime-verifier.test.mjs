@@ -74,10 +74,10 @@ async function addNextAlias(name = "pg", alias = PG_ALIAS) {
 async function replaceLink(file, target) { await rm(path.join(root, file)); await symlink(target, path.join(root, file)); }
 
 describe("narrow generated Next runtime module aliases", () => {
-  it("accepts real pg and scoped pglite alias shapes with full physical target and NFT evidence", async () => {
-    await addNextAlias(); await addNextAlias("@electric-sql/pglite", PGLITE_ALIAS);
+  it("accepts real pg, scoped pglite and direct sharp alias shapes with full physical target and NFT evidence", async () => {
+    await addNextAlias(); await addNextAlias("@electric-sql/pglite", PGLITE_ALIAS); await addNextAlias("sharp", ".next/node_modules/sharp-20c6a5da84e2135f");
     const proof = await verifyRuntimeArtifacts(root);
-    expect(proof.runtimeModuleAliases.map((alias) => alias.package).sort()).toEqual(["@electric-sql/pglite", "pg"]);
+    expect(proof.runtimeModuleAliases.map((alias) => alias.package).sort()).toEqual(["@electric-sql/pglite", "pg", "sharp"]);
     expect(proof.runtimeModuleAliases.find((alias) => alias.package === "pg")).toMatchObject({
       alias: PG_ALIAS, link: "../../node_modules/pg", target: "node_modules/pg", version: "1.0.0",
     });

@@ -33,8 +33,8 @@ function sourceMentionsBraces(value) {
 
 // Turbopack's traced external aliases are directory symlinks. They are NOT
 // permission to follow arbitrary links in the shipped filesystem. These are the
-// two package identities observed in this application's production NFT output.
-const generatedAlias = /^\.next\/node_modules\/(pg|@electric-sql\/pglite)-[0-9a-f]{16}$/;
+// explicit package identities observed in this application's production NFT output.
+const generatedAlias = /^\.next\/node_modules\/(pg|@electric-sql\/pglite|sharp)-[0-9a-f]{16}$/;
 
 async function inspectModuleAlias(full, artifactRoot, manifest, lock) {
   const relative = slash(path.relative(artifactRoot, full));

@@ -81,13 +81,18 @@ try {
     early?.analysis.phase === "during" && early?.analysis.xrayDate === "2026-08-20"
     && early?.analysis.device === "جهاز الفحص");
 
-  // المجموعة المرجعية المدمجة مزروعة بقيم كل التعريفات.
+  // Only definitions with a verified reference may have a seeded norm.
+  // Retired or reference-pending methods remain explicit gaps, never borrowed norms.
   const refSets = await db.listCephReferenceSets();
   const builtin = refSets.find((s) => s.key === "builtin_default");
-  const defCount = (await import("../lib/ceph.ts")).MEASUREMENTS.length;
-  check("المجموعة المرجعية المدمجة مزروعة كاملة", builtin != null
-    && Object.keys(builtin.values).length === defCount,
-    `${builtin ? Object.keys(builtin.values).length : 0}/${defCount} قيمة`);
+  const definitions = (await import("../lib/ceph.ts")).MEASUREMENTS;
+  const referenced = definitions.filter(d => !d.retired && !d.referencePending && d.mean !== null && d.tol !== null);
+  const expectedCodes = referenced.map(d => d.code).sort();
+  const actualCodes = Object.keys(builtin?.values ?? {}).sort();
+  check("المراجع المحققة محفوظة دون اختلاق مرجع للقياسات المعلقة أو التاريخية",
+    builtin != null && JSON.stringify(actualCodes) === JSON.stringify(expectedCodes)
+    && referenced.every(d => builtin.values[d.code].mean === d.mean && builtin.values[d.code].sd === d.tol),
+    `${actualCodes.length}/${expectedCodes.length} مرجع محقق`);
 
   const earlyComplete = await db.completeCephAnalysis(id, doctor);
   check("الاعتماد بلا معايرة يُرفض", earlyComplete.ok === false);
