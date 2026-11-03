@@ -134,6 +134,11 @@ describe("native compact print regression witnesses", () => {
         }));
       }, xml);
       writeFileSync(resolve(output, `${kind}-compact-geometry.json`), JSON.stringify({ syntheticOnly: true, pages }, null, 2));
+      if (prescription) {
+        // Whole-document text and page-bound checks miss a heading-only first page.
+        const firstPageText = pages[0]?.words.map(word => word.text).join(" ") ?? "";
+        expect(firstPageText).toContain(rxFixture.historicalIbuprofen || rxFixture.ibuprofen ? "Ibuprofen" : rxFixture.calculated ? "Amoxicillin" : rxFixture.long ? "SYN-MED-01" : "SYNTHETIC-RX-MEDICATION");
+      }
       if (kind === "lab") {
         const layout = await page.locator(`.${labStyles.labIdentity}`).evaluate(node => ({ display: getComputedStyle(node).display, parentDisplay: getComputedStyle(node.parentElement!).display, labelWeight: getComputedStyle(node.querySelector("span")!).fontWeight, identifierSize: getComputedStyle(node.querySelector("strong")!).fontSize }));
         writeFileSync(resolve(output, "lab-compact-layout.json"), JSON.stringify({ syntheticOnly: true, layout }, null, 2));
@@ -152,9 +157,25 @@ describe("native compact print regression witnesses", () => {
           expect(word.xMin).toBeGreaterThanOrEqual(0); expect(word.yMin).toBeGreaterThanOrEqual(0);
           expect(word.xMax).toBeLessThanOrEqual(paper.width); expect(word.yMax).toBeLessThanOrEqual(paper.height);
         }
-        if (rxFixture.long) {
+        if (prescription && !rxFixture.historicalIbuprofen) {
           const pageText = paper.words.map(word => word.text).join(" ");
-          for (const identity of ["SYN-RX-PATIENT", "SYN-RX-001", "SYN-SAVED-CLINICIAN", "Rx", "#11", ...(rxFixture.longIdentity ? ["SYN-PATIENT-LAST", "SYN-DOCTOR-LAST"] : [])]) expect(pageText).toContain(identity);
+          for (const identity of ["SYN-RX-PATIENT", "SYN-RX-001", "SYN-SAVED-CLINICIAN", "Rx", "#11"]) expect(pageText).toContain(identity);
+          if (rxFixture.longIdentity) {
+            const identities = [
+              "SYN-RX-PATIENT SYNTHETIC EXTENDED PATIENT IDENTITY FOR WRAPPING SYN-PATIENT-LAST",
+              "SYN-SAVED-CLINICIAN SYNTHETIC EXTENDED DOCTOR IDENTITY FOR WRAPPING SYN-DOCTOR-LAST",
+            ];
+            const identityHeader = await page.locator('.prescription-pages > thead').innerText();
+            // These synthetic identities are ASCII. Poppler may split hyphens,
+            // interleave the Arabic field label, or insert Rx #11 before the
+            // clinician's wrapped suffix. Remove those layout separators;
+            // every identity character must still occur in order on every page.
+            const extractedIdentity = pageText.replace(/Rx\s*#11/g, "").replace(/[^\x21-\x7e]|:/g, "");
+            for (const identity of identities) {
+              expect(identityHeader).toContain(identity);
+              expect(extractedIdentity).toContain(identity.replace(/\s/g, ""));
+            }
+          }
         }
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
@@ -172,9 +193,9 @@ describe("native compact print regression witnesses", () => {
           // Every rendered word remains within the single operator-selected A5 sheet (checked above).
           expect(pages).toHaveLength(1);
         }
-        if (rxFixture.long) {
+        if (prescription) {
           const finalPage = pages.at(-1)!.words.map(word => word.text).join(" ");
-          expect(finalPage).toContain("SYN-MED-20");
+          if (rxFixture.long) expect(finalPage).toContain("SYN-MED-20");
           expect(finalPage).toContain("Signature"); expect(finalPage).toContain("Stamp");
         }
         if (rxFixture.long) for (let index = 1; index <= 20; index++) {

@@ -97,7 +97,7 @@ export default async function PrescriptionPrintPage({
         <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact strictIdentity />
 
         {/* معلومات المريض */}
-        <table className="prescription-pages"><thead><tr><td>
+        <table className="prescription-pages"><thead><tr className="prescription-page-identity"><td>
         <PrintMetadata>
           <div className="line">
             <span style={{ color: "#475569" }}>المريض:</span>
@@ -188,8 +188,8 @@ export default async function PrescriptionPrintPage({
             const showAr = lang !== "en" && ar;
             const showEn = lang !== "ar" && en;
             return (
-              <tr key={idx} className="prescription-medication"><td>
-              <div dir="ltr"
+              <tr key={idx} className={`prescription-medication${rxItems.length === 1 ? " prescription-single-medication" : ""}`}><td>
+              <div dir="ltr" data-prescription-body="ltr"
                 style={{
                   borderBottom: "1px dashed #cbd5e1",
                   paddingBottom: "2.5mm",
@@ -229,7 +229,7 @@ export default async function PrescriptionPrintPage({
                 {(showAr || showEn) && (
                   <div style={{ marginTop: "1mm", display: "grid", gap: "0.8mm" }}>
                     {showAr && (
-                      <div style={{ fontSize: "8.5pt", color: "#475569" }} dir="rtl">
+                      <div style={{ fontSize: "8.5pt", color: "#475569", textAlign: "right" }} dir="rtl">
                         <span style={{ fontWeight: 700 }}>التعليمات: </span>
                         {ar}
                       </div>
