@@ -31792,12 +31792,33 @@ export async function getPatientFamilyRecord(familyId: number): Promise<PatientF
   return readFamilyRecord(getPool(), familyId);
 }
 
+/** (M2 slice 72) The same record read on the caller's snapshot or transaction. */
+export async function getPatientFamilyRecordWith(q: Pick<DbClient, "query">, familyId: number): Promise<PatientFamilyRecord | null> {
+  return readFamilyRecord(q, familyId);
+}
+
 /** عائلة المريض: رقمها، أو null بلا عائلة، أو undefined إن لم يوجد المريض. */
 export async function familyIdOfPatient(patientId: number): Promise<number | null | undefined> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ family_id: number | null }>(
+  return familyIdOfPatientWith(getPool(), patientId);
+}
+
+export async function familyIdOfPatientWith(q: Pick<DbClient, "query">, patientId: number): Promise<number | null | undefined> {
+  const { rows } = await q.query<{ family_id: number | null }>(
     `SELECT family_id FROM patients WHERE id = $1`, [patientId]);
   return rows[0] ? rows[0].family_id : undefined;
+}
+
+/**
+ * (M2 slice 72) Members of a family inside a clinician's patient scope (the same
+ * `DOCTOR_PATIENT_CONDITION` as the patient list and file).
+ */
+export async function familyMembersInDoctorScopeWith(q: Pick<DbClient, "query">, familyId: number, doctorPartyId: number): Promise<Set<number>> {
+  const { rows } = await q.query<{ id: number }>(
+    `SELECT patients.id FROM patients WHERE patients.family_id = $1 AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")} ORDER BY patients.id`,
+    [familyId, doctorPartyId],
+  );
+  return new Set(rows.map((row) => row.id));
 }
 
 /** يتحقق من الضامن المريض داخل المعاملة — لا ضامن بملفٍّ غير موجود. */
@@ -31813,54 +31834,18 @@ async function guarantorColumns(
 }
 
 /**
- * إنشاء عائلة باسمها وضامنها الاختياري وأفرادها الأوّلين — معاملةٌ واحدة: مريضٌ غير موجود أو في
- * عائلةٍ أخرى يُسقط الطلب كله (لا نقل صامت بين العائلات).
+ * The legacy family writers' transaction: BEGIN, the body, COMMIT on success and ROLLBACK
+ * on a refusal (the bodies refuse before writing) or an error. The bodies (`…On`) are the
+ * same code the canonical commands run inside their own admitted transaction (M2 slice 72).
  */
-export async function createPatientFamily(
-  draft: FamilyDraft, ctx: FamilyActor,
-): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure; patientId?: number }> {
+async function familyTransaction<T extends { ok: boolean }>(work: (client: DbClient) => Promise<T>): Promise<T> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const ids = draft.members.map((member) => member.patientId);
-    const { rows: locked } = ids.length
-      ? await client.query<{ id: number; full_name: string; family_id: number | null }>(
-        `SELECT id, full_name, family_id FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [ids])
-      : { rows: [] as { id: number; full_name: string; family_id: number | null }[] };
-    const byId = new Map(locked.map((row) => [row.id, row]));
-    for (const id of ids) {
-      const row = byId.get(id);
-      if (!row) { await client.query("ROLLBACK"); return { ok: false, reason: "patient_not_found", patientId: id }; }
-      if (row.family_id !== null) { await client.query("ROLLBACK"); return { ok: false, reason: "already_in_family", patientId: id }; }
-    }
-    const guarantor = await guarantorColumns(client, draft.guarantor);
-    if (!guarantor.ok) { await client.query("ROLLBACK"); return { ok: false, reason: "guarantor_not_found" }; }
-    const { rows: [created] } = await client.query<{ id: number }>(
-      `INSERT INTO patient_families (name, guarantor_patient_id, guarantor_name, guarantor_phone, note, created_by)
-       VALUES ($1, $2::int, $3::text, $4::text, $5::text, $6) RETURNING id`,
-      [draft.name, ...guarantor.values, draft.note, ctx.actor],
-    );
-    await insertAuditRow(client, {
-      action: "family.create", entity: "family", entityId: created.id, entityLabel: draft.name,
-      details: {
-        العائلة: created.id, الضامن: guarantorAuditText(draft.guarantor, guarantor.label),
-        الأفراد: draft.members.map((member) => `#${member.patientId}${member.role ? ` (${member.role})` : ""}`),
-      },
-      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-    });
-    for (const member of draft.members) {
-      await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
-        [member.patientId, created.id, member.role]);
-      await insertAuditRow(client, {
-        action: "family.link", entity: "patient", entityId: member.patientId, entityLabel: byId.get(member.patientId)?.full_name ?? null,
-        details: { العائلة: `${created.id} — ${draft.name}`, الصلة: member.role ?? "—" },
-        actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-      });
-    }
-    const family = await readFamilyRecord(client, created.id);
-    await client.query("COMMIT");
-    return { ok: true, family: family as PatientFamilyRecord };
+    const result = await work(client);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -31870,152 +31855,186 @@ export async function createPatientFamily(
 }
 
 /**
+ * إنشاء عائلة باسمها وضامنها الاختياري وأفرادها الأوّلين — معاملةٌ واحدة: مريضٌ غير موجود أو في
+ * عائلةٍ أخرى يُسقط الطلب كله (لا نقل صامت بين العائلات).
+ */
+export async function createPatientFamily(
+  draft: FamilyDraft, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure; patientId?: number }> {
+  return familyTransaction((client) => createPatientFamilyOn(client, draft, ctx));
+}
+
+/** The body of `createPatientFamily` on the caller's transaction. `receipt` (canonical
+ * request key) is added to the same-transaction create audit row. */
+export async function createPatientFamilyOn(
+  client: DbClient, draft: FamilyDraft, ctx: FamilyActor, receipt?: Readonly<Record<string, string>>,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure; patientId?: number }> {
+  const ids = draft.members.map((member) => member.patientId);
+  const { rows: locked } = ids.length
+    ? await client.query<{ id: number; full_name: string; family_id: number | null }>(
+      `SELECT id, full_name, family_id FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [ids])
+    : { rows: [] as { id: number; full_name: string; family_id: number | null }[] };
+  const byId = new Map(locked.map((row) => [row.id, row]));
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row) return { ok: false, reason: "patient_not_found", patientId: id };
+    if (row.family_id !== null) return { ok: false, reason: "already_in_family", patientId: id };
+  }
+  const guarantor = await guarantorColumns(client, draft.guarantor);
+  if (!guarantor.ok) return { ok: false, reason: "guarantor_not_found" };
+  const { rows: [created] } = await client.query<{ id: number }>(
+    `INSERT INTO patient_families (name, guarantor_patient_id, guarantor_name, guarantor_phone, note, created_by)
+     VALUES ($1, $2::int, $3::text, $4::text, $5::text, $6) RETURNING id`,
+    [draft.name, ...guarantor.values, draft.note, ctx.actor],
+  );
+  await insertAuditRow(client, {
+    action: "family.create", entity: "family", entityId: created.id, entityLabel: draft.name,
+    details: {
+      العائلة: created.id, الضامن: guarantorAuditText(draft.guarantor, guarantor.label),
+      الأفراد: draft.members.map((member) => `#${member.patientId}${member.role ? ` (${member.role})` : ""}`),
+      ...(receipt ?? {}),
+    },
+    actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+  });
+  for (const member of draft.members) {
+    await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
+      [member.patientId, created.id, member.role]);
+    await insertAuditRow(client, {
+      action: "family.link", entity: "patient", entityId: member.patientId, entityLabel: byId.get(member.patientId)?.full_name ?? null,
+      details: { العائلة: `${created.id} — ${draft.name}`, الصلة: member.role ?? "—" },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
+  }
+  const family = await readFamilyRecord(client, created.id);
+  return { ok: true, family: family as PatientFamilyRecord };
+}
+
+/**
  * ربط مريضٍ بعائلة بصلته — أو تغيير صلته إن كان فيها. مريضٌ في عائلةٍ أخرى يُرفض (409): يُفكّ
  * أولًا بقرارٍ صريح، لا يُنقل صامتًا.
  */
 export async function linkPatientToFamily(
   input: { familyId: number; patientId: number; role: FamilyRole | null }, ctx: FamilyActor,
 ): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const { rows: [family] } = await client.query<{ name: string }>(
-      `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
-    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
-    const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
-      `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
-    if (!patient) { await client.query("ROLLBACK"); return { ok: false, reason: "patient_not_found" }; }
-    if (patient.family_id !== null && patient.family_id !== input.familyId) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "already_in_family" };
-    }
-    const unchanged = patient.family_id === input.familyId && (patient.family_role ?? null) === input.role;
-    if (!unchanged) {
-      await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
-        [input.patientId, input.familyId, input.role]);
-      await insertAuditRow(client, {
-        action: "family.link", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
-        details: {
-          العائلة: `${input.familyId} — ${family.name}`, الصلة: input.role ?? "—",
-          ...(patient.family_id === input.familyId ? { الصلة_السابقة: patient.family_role ?? "—" } : {}),
-        },
-        actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-      });
-    }
-    const record = await readFamilyRecord(client, input.familyId);
-    await client.query("COMMIT");
-    return { ok: true, family: record as PatientFamilyRecord };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
+  return familyTransaction((client) => linkPatientToFamilyOn(client, input, ctx));
+}
+
+/** The body of `linkPatientToFamily`; `changed` tells whether it wrote. */
+export async function linkPatientToFamilyOn(
+  client: DbClient, input: { familyId: number; patientId: number; role: FamilyRole | null }, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord; changed: boolean } | { ok: false; reason: FamilyWriteFailure }> {
+  const { rows: [family] } = await client.query<{ name: string }>(
+    `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+  if (!family) return { ok: false, reason: "family_not_found" };
+  const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
+    `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+  if (!patient) return { ok: false, reason: "patient_not_found" };
+  if (patient.family_id !== null && patient.family_id !== input.familyId) return { ok: false, reason: "already_in_family" };
+  const unchanged = patient.family_id === input.familyId && (patient.family_role ?? null) === input.role;
+  if (!unchanged) {
+    await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
+      [input.patientId, input.familyId, input.role]);
+    await insertAuditRow(client, {
+      action: "family.link", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
+      details: {
+        العائلة: `${input.familyId} — ${family.name}`, الصلة: input.role ?? "—",
+        ...(patient.family_id === input.familyId ? { الصلة_السابقة: patient.family_role ?? "—" } : {}),
+      },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
   }
+  const record = await readFamilyRecord(client, input.familyId);
+  return { ok: true, family: record as PatientFamilyRecord, changed: !unchanged };
 }
 
 /** فكّ مريضٍ من عائلته. آخر فردٍ يُفكّ تبقى العائلة بعده فارغةً — لا تُحذف. */
 export async function unlinkPatientFromFamily(
   input: { familyId: number; patientId: number }, ctx: FamilyActor,
 ): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const { rows: [family] } = await client.query<{ name: string }>(
-      `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
-    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
-    const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
-      `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
-    if (!patient) { await client.query("ROLLBACK"); return { ok: false, reason: "patient_not_found" }; }
-    if (patient.family_id !== input.familyId) { await client.query("ROLLBACK"); return { ok: false, reason: "not_member" }; }
-    await client.query(`UPDATE patients SET family_id = NULL, family_role = NULL WHERE id = $1`, [input.patientId]);
-    await insertAuditRow(client, {
-      action: "family.unlink", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
-      details: { العائلة: `${input.familyId} — ${family.name}`, الصلة_السابقة: patient.family_role ?? "—" },
-      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-    });
-    const record = await readFamilyRecord(client, input.familyId);
-    await client.query("COMMIT");
-    return { ok: true, family: record as PatientFamilyRecord };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  return familyTransaction((client) => unlinkPatientFromFamilyOn(client, input, ctx));
+}
+
+export async function unlinkPatientFromFamilyOn(
+  client: DbClient, input: { familyId: number; patientId: number }, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  const { rows: [family] } = await client.query<{ name: string }>(
+    `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+  if (!family) return { ok: false, reason: "family_not_found" };
+  const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
+    `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+  if (!patient) return { ok: false, reason: "patient_not_found" };
+  if (patient.family_id !== input.familyId) return { ok: false, reason: "not_member" };
+  await client.query(`UPDATE patients SET family_id = NULL, family_role = NULL WHERE id = $1`, [input.patientId]);
+  await insertAuditRow(client, {
+    action: "family.unlink", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
+    details: { العائلة: `${input.familyId} — ${family.name}`, الصلة_السابقة: patient.family_role ?? "—" },
+    actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+  });
+  const record = await readFamilyRecord(client, input.familyId);
+  return { ok: true, family: record as PatientFamilyRecord };
 }
 
 /** تعيين الضامن أو تغييره أو إزالته — معلومةٌ لا تمسّ أي مال. */
 export async function setFamilyGuarantor(
   input: { familyId: number; guarantor: GuarantorDraft }, ctx: FamilyActor,
 ): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const { rows: [family] } = await client.query<{ name: string }>(
-      `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
-    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
-    const before = await readFamilyRecord(client, input.familyId);
-    const guarantor = await guarantorColumns(client, input.guarantor);
-    if (!guarantor.ok) { await client.query("ROLLBACK"); return { ok: false, reason: "guarantor_not_found" }; }
-    await client.query(
-      `UPDATE patient_families SET guarantor_patient_id = $2::int, guarantor_name = $3::text, guarantor_phone = $4::text WHERE id = $1`,
-      [input.familyId, ...guarantor.values],
-    );
-    await insertAuditRow(client, {
-      action: "family.guarantor", entity: "family", entityId: input.familyId, entityLabel: family.name,
-      details: {
-        قبل: before ? guarantorAuditText(before.guarantor, before.guarantor.name) : "—",
-        بعد: guarantorAuditText(input.guarantor, guarantor.label),
-      },
-      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-    });
-    const record = await readFamilyRecord(client, input.familyId);
-    await client.query("COMMIT");
-    return { ok: true, family: record as PatientFamilyRecord };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  return familyTransaction((client) => setFamilyGuarantorOn(client, input, ctx));
+}
+
+export async function setFamilyGuarantorOn(
+  client: DbClient, input: { familyId: number; guarantor: GuarantorDraft }, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  const { rows: [family] } = await client.query<{ name: string }>(
+    `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+  if (!family) return { ok: false, reason: "family_not_found" };
+  const before = await readFamilyRecord(client, input.familyId);
+  const guarantor = await guarantorColumns(client, input.guarantor);
+  if (!guarantor.ok) return { ok: false, reason: "guarantor_not_found" };
+  await client.query(
+    `UPDATE patient_families SET guarantor_patient_id = $2::int, guarantor_name = $3::text, guarantor_phone = $4::text WHERE id = $1`,
+    [input.familyId, ...guarantor.values],
+  );
+  await insertAuditRow(client, {
+    action: "family.guarantor", entity: "family", entityId: input.familyId, entityLabel: family.name,
+    details: {
+      قبل: before ? guarantorAuditText(before.guarantor, before.guarantor.name) : "—",
+      بعد: guarantorAuditText(input.guarantor, guarantor.label),
+    },
+    actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+  });
+  const record = await readFamilyRecord(client, input.familyId);
+  return { ok: true, family: record as PatientFamilyRecord };
 }
 
 /** تغيير اسم العائلة أو ملاحظتها. */
 export async function updateFamilyDetails(
   input: { familyId: number; name?: string; note?: string | null }, ctx: FamilyActor,
 ): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const { rows: [family] } = await client.query<{ name: string; note: string | null }>(
-      `SELECT name, note FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
-    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
-    const name = input.name ?? family.name;
-    const note = input.note === undefined ? family.note : input.note;
-    if (name !== family.name || note !== family.note) {
-      await client.query(`UPDATE patient_families SET name = $2, note = $3::text WHERE id = $1`, [input.familyId, name, note]);
-      await insertAuditRow(client, {
-        action: "family.rename", entity: "family", entityId: input.familyId, entityLabel: name,
-        details: {
-          ...(name !== family.name ? { الاسم_السابق: family.name, الاسم: name } : {}),
-          ...(note !== family.note ? { الملاحظة_السابقة: family.note ?? "—", الملاحظة: note ?? "—" } : {}),
-        },
-        actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-      });
-    }
-    const record = await readFamilyRecord(client, input.familyId);
-    await client.query("COMMIT");
-    return { ok: true, family: record as PatientFamilyRecord };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
+  return familyTransaction((client) => updateFamilyDetailsOn(client, input, ctx));
+}
+
+export async function updateFamilyDetailsOn(
+  client: DbClient, input: { familyId: number; name?: string; note?: string | null }, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord; changed: boolean } | { ok: false; reason: FamilyWriteFailure }> {
+  const { rows: [family] } = await client.query<{ name: string; note: string | null }>(
+    `SELECT name, note FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+  if (!family) return { ok: false, reason: "family_not_found" };
+  const name = input.name ?? family.name;
+  const note = input.note === undefined ? family.note : input.note;
+  const changed = name !== family.name || note !== family.note;
+  if (changed) {
+    await client.query(`UPDATE patient_families SET name = $2, note = $3::text WHERE id = $1`, [input.familyId, name, note]);
+    await insertAuditRow(client, {
+      action: "family.rename", entity: "family", entityId: input.familyId, entityLabel: name,
+      details: {
+        ...(name !== family.name ? { الاسم_السابق: family.name, الاسم: name } : {}),
+        ...(note !== family.note ? { الملاحظة_السابقة: family.note ?? "—", الملاحظة: note ?? "—" } : {}),
+      },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
   }
+  const record = await readFamilyRecord(client, input.familyId);
+  return { ok: true, family: record as PatientFamilyRecord, changed };
 }
 
 /**
@@ -32035,6 +32054,21 @@ export async function familyMemberBalances(patientIds: readonly number[]): Promi
   return result;
 }
 
+/** (M2 slice 72) The same balances inside the caller's read snapshot, one member at a
+ * time (the snapshot facade is serialized). */
+export async function familyMemberBalancesInSnapshot(patientIds: readonly number[], client: DbClient): Promise<Map<number, CurrencyBalance[]>> {
+  const result = new Map<number, CurrencyBalance[]>();
+  for (const patientId of [...new Set(patientIds)]) {
+    const ledger = await patientLedgerInSnapshot(patientId, client);
+    const planCurrencies = await patientPlanCurrencies(patientId, client);
+    const byCurrency = ledgerBalancesByCurrency(patientId, ledger, planCurrencies);
+    result.set(patientId, CURRENCIES
+      .map((currency) => ({ currency, balanceMinor: byCurrency[currency].dueMinor }))
+      .filter((line) => line.balanceMinor !== 0));
+  }
+  return result;
+}
+
 export interface FamilySuggestion {
   familyId: number;
   name: string;
@@ -32049,24 +32083,39 @@ export interface FamilySuggestion {
  */
 export async function findFamiliesByPhone(phone: string, limit = 5): Promise<FamilySuggestion[]> {
   await ensureSchema();
+  return findFamiliesByPhoneWith(getPool(), phone, limit, null);
+}
+
+/**
+ * (M2 slice 72) The same suggestions on the caller's snapshot. With a clinician scope
+ * (`doctorPartyId`), a family appears only through a member inside that scope: the
+ * match, the member count and the matched name never reach outside it, and the external
+ * guarantor's phone matches only a family with a visible member.
+ */
+export async function findFamiliesByPhoneWith(
+  q: Pick<DbClient, "query">, phone: string, limit: number, doctorPartyId: number | null,
+): Promise<FamilySuggestion[]> {
   const forms = phoneLookupForms(phone);
   if (forms.length === 0) return [];
-  const { rows } = await getPool().query<{
+  const inScope = doctorPartyId === null ? "TRUE" : DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$3");
+  const { rows } = await q.query<{
     family_id: number; name: string; member_count: number; patient_id: number | null; full_name: string; family_role: string | null;
   }>(
     `SELECT DISTINCT ON (f.id) f.id AS family_id, f.name,
-            (SELECT count(*)::int FROM patients m WHERE m.family_id = f.id) AS member_count,
+            (SELECT count(*)::int FROM patients WHERE patients.family_id = f.id AND ${inScope}) AS member_count,
             hit.patient_id, hit.full_name, hit.family_role
        FROM patient_families f
        JOIN LATERAL (
-         SELECT p.id AS patient_id, p.full_name, p.family_role, 0 AS rank FROM patients p
-          WHERE p.family_id = f.id AND (p.phone = ANY($1::text[]) OR p.alt_phone = ANY($1::text[]) OR p.guardian_phone = ANY($1::text[]))
+         SELECT patients.id AS patient_id, patients.full_name, patients.family_role, 0 AS rank FROM patients
+          WHERE patients.family_id = f.id AND ${inScope}
+            AND (patients.phone = ANY($1::text[]) OR patients.alt_phone = ANY($1::text[]) OR patients.guardian_phone = ANY($1::text[]))
          UNION ALL
          SELECT NULL::int, f.guarantor_name, NULL::text, 1 WHERE f.guarantor_phone = ANY($1::text[])
+           AND EXISTS (SELECT 1 FROM patients WHERE patients.family_id = f.id AND ${inScope})
        ) hit ON TRUE
       ORDER BY f.id DESC, hit.rank, hit.patient_id
       LIMIT $2`,
-    [forms, limit],
+    doctorPartyId === null ? [forms, limit] : [forms, limit, doctorPartyId],
   );
   return rows.map((row) => ({
     familyId: row.family_id, name: row.name, memberCount: row.member_count,
@@ -32077,17 +32126,31 @@ export async function findFamiliesByPhone(phone: string, limit = 5): Promise<Fam
 /** بحثٌ عن عائلة باسمها أو باسم/جوال أحد أفرادها — لربط مريضٍ بعائلةٍ قائمة. */
 export async function searchPatientFamilies(term: string, limit = 8): Promise<{ id: number; name: string; memberCount: number }[]> {
   await ensureSchema();
+  return searchPatientFamiliesWith(getPool(), term, limit, null);
+}
+
+/**
+ * (M2 slice 72) The same search on the caller's snapshot. With a clinician scope, only
+ * families with a member inside it, matched by the family name or by a member inside
+ * it, and the count is of those members.
+ */
+export async function searchPatientFamiliesWith(
+  q: Pick<DbClient, "query">, term: string, limit: number, doctorPartyId: number | null,
+): Promise<{ id: number; name: string; memberCount: number }[]> {
   const tokens = searchTokens(term);
   if (tokens.length === 0) return [];
+  const docParam = tokens.length + 2;
+  const inScope = doctorPartyId === null ? "TRUE" : DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${docParam}`);
   const parts = tokens.map((_, index) => `(${normalizedSql("f.name")} LIKE $${index + 2} ESCAPE '!'
-      OR EXISTS (SELECT 1 FROM patients WHERE patients.family_id = f.id AND ${PATIENT_HAYSTACK_SQL} LIKE $${index + 2} ESCAPE '!'))`);
-  const { rows } = await getPool().query<{ id: number; name: string; member_count: number }>(
-    `SELECT f.id, f.name, (SELECT count(*)::int FROM patients m WHERE m.family_id = f.id) AS member_count
+      OR EXISTS (SELECT 1 FROM patients WHERE patients.family_id = f.id AND ${inScope} AND ${PATIENT_HAYSTACK_SQL} LIKE $${index + 2} ESCAPE '!'))`);
+  const visible = doctorPartyId === null ? "" : ` AND EXISTS (SELECT 1 FROM patients WHERE patients.family_id = f.id AND ${inScope})`;
+  const { rows } = await q.query<{ id: number; name: string; member_count: number }>(
+    `SELECT f.id, f.name, (SELECT count(*)::int FROM patients WHERE patients.family_id = f.id AND ${inScope}) AS member_count
        FROM patient_families f
-      WHERE ${parts.join(" AND ")}
+      WHERE ${parts.join(" AND ")}${visible}
       ORDER BY f.name, f.id
       LIMIT $1`,
-    [limit, ...tokens.map(likeContains)],
+    [limit, ...tokens.map(likeContains), ...(doctorPartyId === null ? [] : [doctorPartyId])],
   );
   return rows.map((row) => ({ id: row.id, name: row.name, memberCount: row.member_count }));
 }

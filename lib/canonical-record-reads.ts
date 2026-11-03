@@ -48,6 +48,12 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:patients.directory": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]: one patient's file, only inside the actor's patient scope. */
   "read:patients.record": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze([]) }),
+  /** GET /api/families/[id] and /api/patients/[id]/family: members inside the patient
+   * scope; balances only with finance.patient-ledger.view (M2 slice 72). */
+  "read:families.record": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze([]) }),
+  /** GET /api/families (?q, ?phone): linking search for family writers, members inside
+   * the patient scope only (M2 slice 72). */
+  "read:families.search": Object.freeze({ record: "patient", need: Object.freeze(["patients.edit"] as const), anyOf: Object.freeze([]) }),
   /** Clinical sub-reads of one patient (medical history, vitals, problems): a clinical
    * grant (the care group of lib/canonical-patient-reads.ts) inside the patient scope. */
   "read:patients.clinical": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze(["clinical.plans.view", "clinical.visits.document", "clinical.xrays.view"] as const) }),

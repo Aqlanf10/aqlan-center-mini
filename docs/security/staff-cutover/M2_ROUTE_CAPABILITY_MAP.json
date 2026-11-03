@@ -815,11 +815,13 @@
    "admin",
    "reception"
   ],
-  "need": [],
+  "need": [
+   "patients.edit"
+  ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 72: record read read:families.search (patients.edit) in one owning snapshot; an own scope matches, names and counts only members inside it."
  },
  {
   "route": "/api/families",
@@ -833,8 +835,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 72: one admitted patients.edit transaction (legacy writer body); every member and a guarantor patient inside the scope; idempotent by requestKey (receipt in the same-transaction family.create audit row); no money in the response."
  },
  {
   "route": "/api/families/[id]",
@@ -847,8 +849,8 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 72: record read read:families.record; members inside the patient scope, an own scope never sees a family without its patients (404); balances, totals and the guarantor's phone only with finance.patient-ledger.view."
  },
  {
   "route": "/api/families/[id]",
@@ -862,8 +864,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 72: patients.edit; the family must have a member inside the scope; legacy writer body and audit row; no money in the response."
  },
  {
   "route": "/api/families/[id]/guarantor",
@@ -877,8 +879,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 72: patients.edit; a guarantor patient inside the scope; information only (no money written); no money in the response."
  },
  {
   "route": "/api/families/[id]/members",
@@ -892,8 +894,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 72: patients.edit; the patient and the family inside the scope; already in another family 409; legacy locks unchanged."
  },
  {
   "route": "/api/families/[id]/members/[patientId]",
@@ -907,8 +909,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 72: patients.edit; the patient and the family inside the scope; legacy writer body and audit row."
  },
  {
   "route": "/api/finance/commission-overrides",
@@ -3619,8 +3621,8 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 72: record read read:families.record; the patient inside the scope (404 like missing); the same family projection as GET /api/families/[id]."
  },
  {
   "route": "/api/patients/[id]/historical-documents",

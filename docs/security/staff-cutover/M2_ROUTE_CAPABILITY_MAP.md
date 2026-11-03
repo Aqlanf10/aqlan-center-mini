@@ -674,6 +674,19 @@ The read-only patient panel clears stale or failed responses and has no action o
   - Built journey `canonical-lab-accounting-journey` (2, portOffset 118). The orders and corrections journeys now expect 403 for posting without the grant.
 - **Lab group status:** every lab route method is now canonical. The only open item is the owner's post-dispatch decision.
 
+### Slice 72 — patient families (group 3: `/api/families`, `/api/families/[id]`, guarantor, members, `/api/patients/[id]/family`)
+- **Reads:** record reads `read:families.record` (no capability; a patient scope) and `read:families.search` (`patients.edit`, the linking search). One owning snapshot each.
+  - Members are shown inside the actor's patient scope. An `own` scope never learns a family without its patients: such a family reads as missing (404), and search and phone suggestions match, name and count only members inside the scope.
+  - A guarantor patient outside the scope is «a guarantor» with no name or number.
+- **Owner money rule (6615124926):** member balances, family totals and the guarantor's phone (the statement contact) only with `finance.patient-ledger.view`, from the canonical ledger engine in the same snapshot. Write responses never carry money; the panel re-reads. The legacy rule was the money role labels.
+- **Writes:** one admitted `patients.edit` transaction each (the legacy route allowed the admin and reception labels). The legacy writer bodies run unchanged (`createPatientFamilyOn`, `linkPatientToFamilyOn`, `unlinkPatientFromFamilyOn`, `setFamilyGuarantorOn`, `updateFamilyDetailsOn`): same locks, refusals and same-transaction audit rows. The legacy wrappers keep their transaction (BEGIN, body, COMMIT or ROLLBACK).
+  - Every patient a write names (member, guarantor patient, member to unlink) must be inside the scope, and an existing family must have a member inside it. Outside answers like missing.
+- **Duplicate prevention:** create needs a `requestKey`. Under an advisory lock on (actor, key), the receipt — the same-transaction `family.create` audit row — is looked up first: the same request returns the first family (`replayed`), another request with the key is refused (409). The shared family panel sends one key per opened create form.
+- **Screen:** the canonical patient file mounts the existing family panel; every call it makes is now canonical.
+- **Tests:**
+  - PG `families-canonical` (9): projection with and without the ledger grant, own scope (members, hidden guarantor, missing family, patient panel), search and suggestions inside the scope, concurrent double create, key reuse, own-scope writes refused outside, legacy rules and audit, concurrent link race, grant, scope and revocation. Legacy `patient-families` (12) unchanged.
+  - Built journey `canonical-families-journey` (2, portOffset 120). The patients journey now expects the family read on the file; the entry journey's not-yet-canonical example is now `/api/executive`.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

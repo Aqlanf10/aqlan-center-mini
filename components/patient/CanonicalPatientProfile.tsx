@@ -6,6 +6,7 @@ import { CanonicalCephStudies } from "./CanonicalCephStudies";
 import { CanonicalClinicalPlans } from "./CanonicalClinicalPlans";
 import { CanonicalPatientCases } from "./CanonicalPatientCases";
 import { CanonicalOrthoCases } from "./CanonicalOrthoCases";
+import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -171,6 +172,8 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
       ) : null}
 
       <ContactConsentPanel patientId={patientId} canRecord={canEdit} />
+      {/* M2 slice 72: family members inside the patient scope; balances only with the ledger grant (server-enforced). */}
+      <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone ?? null} />
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.ortho.view") && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalOrthoCases key={`${session.username}:${session.patientScope}:${session.capabilities?.join(",")}:${patientId}`} patientId={patientId} ownerKey={session.username} canEdit={session.isOwner === true || !!session.capabilities?.includes("clinical.ortho.edit")} canReadCoverage={session.isOwner === true || session.capabilities?.includes("finance.agreements.manage") === true} /> : null}
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.xrays.view") && (session.patientScope === "own" || session.patientScope === "all"))
