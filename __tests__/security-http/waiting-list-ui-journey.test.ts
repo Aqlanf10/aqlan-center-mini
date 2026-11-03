@@ -187,7 +187,7 @@ describe("السيناريو ب — شاشةُ القائمة: مكالمةٌ ت
 describe("السيناريو ج — رفضُ السعة يُنهي بتسجيلٍ بتفضيلاتٍ مقولة لا مفترضة", () => {
   /* ولا صفَّ انتظارٍ يُزرع في القاعدة هنا: الصفُّ يُنشأ **من الشاشة** كما تُنشئه
      الموظّفة — ضغطًا بضغطة — وإلا لم تُثبت الرحلةُ أنّ النموذج موصولٌ بما يُحفظ. */
-  const REJECT_TIME = "14:00";
+  const REJECT_TIME = "15:30";
   let occupying = 0;
   let chairsVersion: string | null = null;
 
@@ -238,6 +238,7 @@ describe("السيناريو ج — رفضُ السعة يُنهي بتسجيل�
 
     const dialog = page.getByRole("dialog");
     await dialog.waitFor({ timeout: 60_000 });
+    await dialog.getByLabel("التصنيف السريري للموعد",{exact:true}).selectOption("other");
 
     /* اختيارُ المريض من البحث — كما تفعل الموظّفة. */
     await dialog.getByPlaceholder("ابحث بالاسم أو اكتب اسم مريض جديد…").fill("مريض الأمن ب");
