@@ -1,0 +1,15 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-intake-flow
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+
+ Test Files  815 passed (815)
+      Tests  13978 passed (13978)
+   Start at  19:35:11
+   Duration  541.83s (transform 22.04s, setup 0ms, import 98.39s, tests 325.39s, environment 104ms)

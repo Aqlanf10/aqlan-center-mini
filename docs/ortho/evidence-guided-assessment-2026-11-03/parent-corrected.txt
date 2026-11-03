@@ -1,0 +1,12 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-completion-cancel.test.tsx __tests__/legacy-onboarding-checklist-refresh.test.tsx
+
+
+ RUN  v4.1.12 /workspace/ortho-intake-flow
+
+
+ Test Files  2 passed (2)
+      Tests  61 passed (61)
+   Start at  19:34:29
+   Duration  3.01s (transform 1.10s, setup 0ms, import 1.49s, tests 1.21s, environment 0ms)

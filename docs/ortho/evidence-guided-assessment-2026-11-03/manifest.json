@@ -1,0 +1,132 @@
+{
+  "scope": "Synthetic local evidence; partial assessment workflow; no staging or production acceptance",
+  "generated_at_utc": "2026-11-03T19:51:23.745989+00:00",
+  "codeCommit": "36b4ebeeb68bf01b85aed6b5e8e38797afbd718d",
+  "parentCommit": "f6d59c199c117310a0a0056be01cdba666f31f5c",
+  "buildId": "8JI3tm6qz8Uo2Kvbu2Kr8",
+  "node": "22.23.3",
+  "npm": "11.21.1",
+  "postgres": "18.6",
+  "branch": "feat/ortho-guided-assessment-20261103",
+  "files": [
+    {
+      "path": "browser.txt",
+      "sha256": "be216b26117db6407f135c406732cb5c79c6a9617d17906e2721ff0f454c3230",
+      "bytes": 692,
+      "raw_sha256": "be216b26117db6407f135c406732cb5c79c6a9617d17906e2721ff0f454c3230"
+    },
+    {
+      "path": "build.txt",
+      "sha256": "1952a89b3f1b25bca06930ed863cdbe5b48b0643376663aea713ef413ea61d46",
+      "bytes": 13446,
+      "raw_sha256": "8a64a7c6f4a54ad76de6e6b66d08be9614bbc447bdee6e4e2040befa295c081d"
+    },
+    {
+      "path": "lint-final.txt",
+      "sha256": "af1777a6f2aabb42dfab88492f434eaad0149c214fc48815c9e972251c2c3300",
+      "bytes": 10161,
+      "raw_sha256": "4f26ca043156c9f98f3b2c8d6369c27d214c0ae76087cdc5bb704ec7da46ba7d"
+    },
+    {
+      "path": "parent-corrected.txt",
+      "sha256": "fc56f86a5830c624168d2fcee0826d44142001a1a2867c667bbbc9c9ca96716d",
+      "bytes": 353,
+      "raw_sha256": "136dae119b274ddcd2146bb4d20981dd40edc3871efba8cd5a5911e65f793ab9"
+    },
+    {
+      "path": "parent-regression.txt",
+      "sha256": "3dbe859d9555249c3fd43940f6648fa0751d4cfacb6824da6f68431347255eda",
+      "bytes": 80654,
+      "raw_sha256": "19d860f4bde177e9e36d11501b6d14ee747a53255686fb90f40d988dd9ae6d36"
+    },
+    {
+      "path": "postgres-upgrade.txt",
+      "sha256": "8f284e7c3624610fb97f00caad1ca554e6369cfc8e89fa10d9ad38fb6fbc34a2",
+      "bytes": 523,
+      "raw_sha256": "3a19de386b1f4febfc163373c33aadb841ecde380ef3b03aa2626f07ab547d91"
+    },
+    {
+      "path": "runtime-braces-final.txt",
+      "sha256": "2e93982662d6260714c02c8ac2d6c7aca0a00efd19b38d9c6888b735421693d0",
+      "bytes": 108,
+      "raw_sha256": "2e93982662d6260714c02c8ac2d6c7aca0a00efd19b38d9c6888b735421693d0"
+    },
+    {
+      "path": "runtime-tooling-final.txt",
+      "sha256": "2314aef134a7c693351f0aaf571c182c277cb62491d8a9d76ff5344a02ce999c",
+      "bytes": 137,
+      "raw_sha256": "2314aef134a7c693351f0aaf571c182c277cb62491d8a9d76ff5344a02ce999c"
+    },
+    {
+      "path": "typecheck.txt",
+      "sha256": "88245602e0ab2b013eb5f0ab2475aafac8293f4cd2c728bbb85108fc88cffc72",
+      "bytes": 47,
+      "raw_sha256": "494c5900ca50ac372426c03ff676bd53571e0b70b3e4fe8eed6ce84138fd526d"
+    },
+    {
+      "path": "unit-all.txt",
+      "sha256": "7ef8099c2c06da76e307e2bd045d72b2f22da06f9012684540970c952648243c",
+      "bytes": 435,
+      "raw_sha256": "ba23cc2ce462796b9d94fe0962f0fb960e240906fc7a90019b2c991dc272b007"
+    },
+    {
+      "path": "unit-focused.txt",
+      "sha256": "545593448b9d9affa3c9bdcb671de2de1a5ec28b472abaf114741c2172ae539c",
+      "bytes": 390,
+      "raw_sha256": "37159ff3553534635d87365d3953d941438cf0bf6d4da242d30074d87d18f3d7"
+    },
+    {
+      "path": "assessment-390.png",
+      "sha256": "988b0f35255288fe652a773776d9a748a14f8f9c05b2c2d84031628b7c6fb91a",
+      "bytes": 169956
+    },
+    {
+      "path": "assessment-1280.png",
+      "sha256": "4642de3530796b80936083cd6ebe6cd097ec9dbf152c744bce4409cd26d25cb3",
+      "bytes": 223166
+    },
+    {
+      "path": "parent-ci-snapshot.json",
+      "sha256": "6f7c0b5d719056d7e2dbed65ce92e121c32ac5c77d4f740130895e18de91f671",
+      "bytes": 782
+    }
+  ],
+  "sources": [
+    {
+      "path": "__tests__/legacy-onboarding-checklist-refresh.test.tsx",
+      "sha256": "002df3881075eb40634ce6fc5e64205d983c0b01c38c732f1e4aa827fcee56b9"
+    },
+    {
+      "path": "__tests__/ortho-assessment-navigation.test.ts",
+      "sha256": "ff84d8232012752bf082a8bcce94b81ead346dc3b665e842c743079d86642d7c"
+    },
+    {
+      "path": "__tests__/ortho-completion-cancel.test.tsx",
+      "sha256": "0f38ff1e7519d056502f6417865e9ae1d938cec9f17fe5b6bd02950416b7a1d3"
+    },
+    {
+      "path": "__tests__/patient-ortho-read-safety.test.tsx",
+      "sha256": "ae9407231a8452f6b6ba848e31647601a9c85c100102c57826be34aaa13e8bc6"
+    },
+    {
+      "path": "__tests__/postgres/ortho-assessment-intake-migration.test.ts",
+      "sha256": "cbd8325193cb122248954e5e42a16c91ddcd29e388f2d377a265f50e4702cb6d"
+    },
+    {
+      "path": "__tests__/security-http/ortho-guided-assessment-browser.test.ts",
+      "sha256": "b3bd3466946ce41bb7e798c1eda24ae05520b05236b980fcc6ebfac1d2c49e97"
+    },
+    {
+      "path": "components/OrthoCaseAssessmentV2.tsx",
+      "sha256": "a4365123614a807e1e3d9b4af82c66fea3c28ae513f60ebda05248065bdf1d9e"
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "sha256": "35cb3b8e8121b4419c1af0da77e3b7ea167deb71e5eb9b8172e9234eef3f5b17"
+    },
+    {
+      "path": "lib/ortho-assessment-navigation.ts",
+      "sha256": "8f48c7ecb9e9f153466b5916e3e54fad3f7afe0b739b22b8dd55a9a9c6a72306"
+    }
+  ]
+}

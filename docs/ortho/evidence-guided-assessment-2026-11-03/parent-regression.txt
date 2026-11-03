@@ -1,0 +1,995 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-photo-visibility-ui.test.ts __tests__/patient-workflow-owner.test.tsx __tests__/ortho-completion-cancel.test.tsx __tests__/legacy-onboarding-checklist-refresh.test.tsx __tests__/ortho-adjustment-wire-defaults.test.tsx __tests__/patient-alert-page.test.tsx
+
+
+ RUN  v4.1.12 /workspace/ortho-intake-flow
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > generic new-case entry displays the exact invoice source without requiring an old installment plan
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > generic historical entry uses its approved source without a second plan or invoice
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > keeps the classifier unknown until its own current read succeeds
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > refreshes the same case after a real 51 agreement transition
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > withdraws parent references after a confirmed plan transition while the case reload stalls/fails, then restores the canonical classifier (51)
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > does not invalidate the classifier for an unsuccessful package mutation
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > preserves canonical INCLUDED when only the independent generic plans read fails
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires old labels on confirmed refresh HTTP 401 before reading an error body
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires old labels on confirmed refresh HTTP 403 before reading an error body
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires old labels on confirmed refresh HTTP 503 before reading an error body
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires labels after a fetch failure and retries only the canonical GET
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires labels after a body failure and retries only the canonical GET
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > rejects a successful classifier read whose case identity is 42
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > rejects a successful classifier read whose case identity is undefined
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: null
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"legacy":"true"}
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"complete":"true"}
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"adjustmentClass":"UNKNOWN"}
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"steps":null}
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"steps":[null]}
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"steps":[{"key":"plan","done":"false"}]}
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > times out a classifier fetch stall and ignores its late result after retry
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > times out a classifier body stall and ignores its late result after retry
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > an older delayed headers result cannot restore INCLUDED after a real unlink
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > an older delayed body result cannot restore INCLUDED after a real unlink
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > an older delayed denial cannot replace the current classifier after an explicit refresh
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on patient change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on principal change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on role change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on plan-permission change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on payment-permission change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on logout change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on patient change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on principal change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on role change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on plan-permission change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on payment-permission change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on logout change
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > A→B→A requires a fresh read and cannot revive A's accepted or pending labels
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > unmount aborts a pending classifier headers read without publishing afterward
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > unmount aborts a pending classifier body read without publishing afterward
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx (41 tests | 41 failed) 58ms
+     × generic new-case entry displays the exact invoice source without requiring an old installment plan 16ms
+     × generic historical entry uses its approved source without a second plan or invoice 2ms
+     × keeps the classifier unknown until its own current read succeeds 1ms
+     × refreshes the same case after a real 51 agreement transition 1ms
+     × withdraws parent references after a confirmed plan transition while the case reload stalls/fails, then restores the canonical classifier (51) 1ms
+     × does not invalidate the classifier for an unsuccessful package mutation 1ms
+     × preserves canonical INCLUDED when only the independent generic plans read fails 1ms
+     × retires old labels on confirmed refresh HTTP 401 before reading an error body 1ms
+     × retires old labels on confirmed refresh HTTP 403 before reading an error body 2ms
+     × retires old labels on confirmed refresh HTTP 503 before reading an error body 1ms
+     × retires labels after a fetch failure and retries only the canonical GET 1ms
+     × retires labels after a body failure and retries only the canonical GET 1ms
+     × rejects a successful classifier read whose case identity is 42 1ms
+     × rejects a successful classifier read whose case identity is undefined 1ms
+     × does not turn malformed canonical data into definitive labels: null 1ms
+     × does not turn malformed canonical data into definitive labels: {"legacy":"true"} 1ms
+     × does not turn malformed canonical data into definitive labels: {"complete":"true"} 1ms
+     × does not turn malformed canonical data into definitive labels: {"adjustmentClass":"UNKNOWN"} 1ms
+     × does not turn malformed canonical data into definitive labels: {"steps":null} 1ms
+     × does not turn malformed canonical data into definitive labels: {"steps":[null]} 1ms
+     × does not turn malformed canonical data into definitive labels: {"steps":[{"key":"plan","done":"false"}]} 1ms
+     × times out a classifier fetch stall and ignores its late result after retry 5ms
+     × times out a classifier body stall and ignores its late result after retry 1ms
+     × an older delayed headers result cannot restore INCLUDED after a real unlink 1ms
+     × an older delayed body result cannot restore INCLUDED after a real unlink 1ms
+     × an older delayed denial cannot replace the current classifier after an explicit refresh 1ms
+     × retires accepted labels immediately on patient change 1ms
+     × retires accepted labels immediately on principal change 1ms
+     × retires accepted labels immediately on role change 1ms
+     × retires accepted labels immediately on plan-permission change 1ms
+     × retires accepted labels immediately on payment-permission change 1ms
+     × retires accepted labels immediately on logout change 1ms
+     × retires pending results and stale package handlers on patient change 1ms
+     × retires pending results and stale package handlers on principal change 1ms
+     × retires pending results and stale package handlers on role change 1ms
+     × retires pending results and stale package handlers on plan-permission change 1ms
+     × retires pending results and stale package handlers on payment-permission change 1ms
+     × retires pending results and stale package handlers on logout change 1ms
+     × A→B→A requires a fresh read and cannot revive A's accepted or pending labels 1ms
+     × unmount aborts a pending classifier headers read without publishing afterward 1ms
+     × unmount aborts a pending classifier body read without publishing afterward 1ms
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > Cancel returns without a PATCH, reload, or local completion
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > accepting an empty optional note completes once and reloads
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves the accepted note verbatim: "  Synthetic completion note\nSecond line  "
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves the accepted note verbatim: "   "
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > a cancelled prompt can be reopened and explicitly accepted
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves discontinue's rejection of an absent or blank reason: null
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves discontinue's rejection of an absent or blank reason: ""
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves discontinue's rejection of an absent or blank reason: "  \n  "
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves discontinue's nonblank reason and distinct status
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > Cancel returns without a PATCH, reload, or local completion
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > accepting an empty optional note completes once and reloads
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves the accepted note verbatim: "  Synthetic completion note\nSecond line  "
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves the accepted note verbatim: "   "
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > a cancelled prompt can be reopened and explicitly accepted
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves discontinue's rejection of an absent or blank reason: null
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves discontinue's rejection of an absent or blank reason: ""
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves discontinue's rejection of an absent or blank reason: "  \n  "
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves discontinue's nonblank reason and distinct status
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active existing retainer click > repeated selected-type clicks send only the type and refresh from the server
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention existing retainer click > repeated selected-type clicks send only the type and refresh from the server
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+ ❯ __tests__/ortho-completion-cancel.test.tsx (20 tests | 20 failed) 55ms
+     × Cancel returns without a PATCH, reload, or local completion 34ms
+     × accepting an empty optional note completes once and reloads 1ms
+     × preserves the accepted note verbatim: "  Synthetic completion note\nSecond line  " 1ms
+     × preserves the accepted note verbatim: "   " 1ms
+     × a cancelled prompt can be reopened and explicitly accepted 1ms
+     × preserves discontinue's rejection of an absent or blank reason: null 1ms
+     × preserves discontinue's rejection of an absent or blank reason: "" 1ms
+     × preserves discontinue's rejection of an absent or blank reason: "  \n  " 1ms
+     × preserves discontinue's nonblank reason and distinct status 2ms
+     × Cancel returns without a PATCH, reload, or local completion 1ms
+     × accepting an empty optional note completes once and reloads 1ms
+     × preserves the accepted note verbatim: "  Synthetic completion note\nSecond line  " 1ms
+     × preserves the accepted note verbatim: "   " 1ms
+     × a cancelled prompt can be reopened and explicitly accepted 1ms
+     × preserves discontinue's rejection of an absent or blank reason: null 1ms
+     × preserves discontinue's rejection of an absent or blank reason: "" 1ms
+     × preserves discontinue's rejection of an absent or blank reason: "  \n  " 1ms
+     × preserves discontinue's nonblank reason and distinct status 1ms
+     × repeated selected-type clicks send only the type and refresh from the server 1ms
+     × repeated selected-type clicks send only the type and refresh from the server 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 61 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > generic new-case entry displays the exact invoice source without requiring an old installment plan
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:249:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > generic historical entry uses its approved source without a second plan or invoice
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:267:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > keeps the classifier unknown until its own current read succeeds
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:277:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > refreshes the same case after a real 51 agreement transition
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:290:55
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > withdraws parent references after a confirmed plan transition while the case reload stalls/fails, then restores the canonical classifier (51)
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:306:55
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > does not invalidate the classifier for an unsuccessful package mutation
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:332:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > actual orthodontic parent, checklist and package composition > preserves canonical INCLUDED when only the independent generic plans read fails
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:340:54
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires old labels on confirmed refresh HTTP 401 before reading an error body
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires old labels on confirmed refresh HTTP 403 before reading an error body
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires old labels on confirmed refresh HTTP 503 before reading an error body
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:350:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires labels after a fetch failure and retries only the canonical GET
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > retires labels after a body failure and retries only the canonical GET
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:366:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > rejects a successful classifier read whose case identity is 42
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > rejects a successful classifier read whose case identity is undefined
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:380:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: null
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"legacy":"true"}
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"complete":"true"}
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"adjustmentClass":"UNKNOWN"}
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"steps":null}
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"steps":[null]}
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > does not turn malformed canonical data into definitive labels: {"steps":[{"key":"plan","done":"false"}]}
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:390:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > times out a classifier fetch stall and ignores its late result after retry
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier failures and bounded retry > times out a classifier body stall and ignores its late result after retry
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:398:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > an older delayed headers result cannot restore INCLUDED after a real unlink
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > an older delayed body result cannot restore INCLUDED after a real unlink
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:412:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > an older delayed denial cannot replace the current classifier after an explicit refresh
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:424:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on patient change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on principal change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on role change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on plan-permission change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on payment-permission change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires accepted labels immediately on logout change
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:432:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on patient change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on principal change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on role change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on plan-permission change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on payment-permission change
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > retires pending results and stale package handlers on logout change
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:447:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > A→B→A requires a fresh read and cannot revive A's accepted or pending labels
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:468:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/61]⎯
+
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > unmount aborts a pending classifier headers read without publishing afterward
+ FAIL  __tests__/legacy-onboarding-checklist-refresh.test.tsx > classifier scope and stale completion retirement > unmount aborts a pending classifier body read without publishing afterward
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ PatientOrthoWorkspace components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ execute __tests__/legacy-onboarding-checklist-refresh.test.tsx:131:16
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:155:20
+ ❯ expand __tests__/legacy-onboarding-checklist-refresh.test.tsx:146:22
+ ❯ render __tests__/legacy-onboarding-checklist-refresh.test.tsx:167:12
+ ❯ mount __tests__/legacy-onboarding-checklist-refresh.test.tsx:213:26
+ ❯ __tests__/legacy-onboarding-checklist-refresh.test.tsx:486:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/61]⎯
+
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > Cancel returns without a PATCH, reload, or local completion
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > Cancel returns without a PATCH, reload, or local completion
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ Object.PatientOrthoWorkspace [as type] components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ render __tests__/ortho-completion-cancel.test.tsx:103:23
+ ❯ openRetention __tests__/ortho-completion-cancel.test.tsx:118:3
+ ❯ __tests__/ortho-completion-cancel.test.tsx:160:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/61]⎯
+
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > accepting an empty optional note completes once and reloads
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > accepting an empty optional note completes once and reloads
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ Object.PatientOrthoWorkspace [as type] components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ render __tests__/ortho-completion-cancel.test.tsx:103:23
+ ❯ openRetention __tests__/ortho-completion-cancel.test.tsx:118:3
+ ❯ __tests__/ortho-completion-cancel.test.tsx:170:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/61]⎯
+
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves the accepted note verbatim: "  Synthetic completion note\nSecond line  "
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves the accepted note verbatim: "   "
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves the accepted note verbatim: "  Synthetic completion note\nSecond line  "
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves the accepted note verbatim: "   "
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ Object.PatientOrthoWorkspace [as type] components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ render __tests__/ortho-completion-cancel.test.tsx:103:23
+ ❯ openRetention __tests__/ortho-completion-cancel.test.tsx:118:3
+ ❯ __tests__/ortho-completion-cancel.test.tsx:177:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/61]⎯
+
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > a cancelled prompt can be reopened and explicitly accepted
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > a cancelled prompt can be reopened and explicitly accepted
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ Object.PatientOrthoWorkspace [as type] components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ render __tests__/ortho-completion-cancel.test.tsx:103:23
+ ❯ openRetention __tests__/ortho-completion-cancel.test.tsx:118:3
+ ❯ __tests__/ortho-completion-cancel.test.tsx:184:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/61]⎯
+
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves discontinue's rejection of an absent or blank reason: null
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves discontinue's rejection of an absent or blank reason: ""
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves discontinue's rejection of an absent or blank reason: "  \n  "
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves discontinue's rejection of an absent or blank reason: null
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves discontinue's rejection of an absent or blank reason: ""
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves discontinue's rejection of an absent or blank reason: "  \n  "
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ Object.PatientOrthoWorkspace [as type] components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ render __tests__/ortho-completion-cancel.test.tsx:103:23
+ ❯ openRetention __tests__/ortho-completion-cancel.test.tsx:118:3
+ ❯ __tests__/ortho-completion-cancel.test.tsx:191:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/61]⎯
+
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active case completion prompt > preserves discontinue's nonblank reason and distinct status
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention case completion prompt > preserves discontinue's nonblank reason and distinct status
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ Object.PatientOrthoWorkspace [as type] components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ render __tests__/ortho-completion-cancel.test.tsx:103:23
+ ❯ openRetention __tests__/ortho-completion-cancel.test.tsx:118:3
+ ❯ __tests__/ortho-completion-cancel.test.tsx:200:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/61]⎯
+
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho active existing retainer click > repeated selected-type clicks send only the type and refresh from the server
+ FAIL  __tests__/ortho-completion-cancel.test.tsx > PatientOrtho retention existing retainer click > repeated selected-type clicks send only the type and refresh from the server
+TypeError: Cannot read properties of null (reading 'useSyncExternalStore')
+ ❯ process.env.NODE_ENV.exports.useSyncExternalStore node_modules/react/cjs/react.development.js:1270:33
+ ❯ Object.PatientOrthoWorkspace [as type] components/PatientOrtho.tsx:585:24
+    583|   const [activePillars, setActivePillars] = useState<Record<number, Or…
+    584|   const [diagnosticSections, setDiagnosticSections] = useState<Record<…
+    585|   const bookmarkHash = useSyncExternalStore(subscribeAssessmentBookmar…
+       |                        ^
+    586|   const bookmark = readAssessmentBookmark(bookmarkHash, patientId);
+    587|
+ ❯ render __tests__/ortho-completion-cancel.test.tsx:103:23
+ ❯ openRetention __tests__/ortho-completion-cancel.test.tsx:118:3
+ ❯ __tests__/ortho-completion-cancel.test.tsx:210:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/61]⎯
+
+
+ Test Files  2 failed | 4 passed (6)
+      Tests  61 failed | 113 passed (174)
+   Start at  19:33:56
+   Duration  7.01s (transform 1.55s, setup 0ms, import 2.45s, tests 3.63s, environment 1ms)
