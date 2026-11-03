@@ -1,0 +1,53 @@
+{
+  "scope": "Synthetic local tests only; not a production or staging acceptance",
+  "base": "10c06b34389e52314f4ac64c9e92c2aaa4930953",
+  "buildId": "6vFv_98uTDDk9s5PQj72f",
+  "files": [
+    {
+      "path": "browser.txt",
+      "bytes": 591,
+      "sha256": "330689fb884f3696f34f877fcf0aab1513577f7f1c0dc9a39a17f514460084d7"
+    },
+    {
+      "path": "ci-repair-postgres.txt",
+      "bytes": 682,
+      "sha256": "b78de2db99e699e49353e154147d3e7a97dce4d25a633a5b671398cb99943bbf"
+    },
+    {
+      "path": "contracts.txt",
+      "bytes": 424,
+      "sha256": "1b55e7803bdb5890f826e3daaa29795d257d849f8b2381d420be5865686279e6"
+    },
+    {
+      "path": "ortho-transition-1440.png",
+      "bytes": 330400,
+      "sha256": "fae1d34459eb5a6ca8647b6ed6faa9495794d165a606f014fff8a17ee731f271"
+    },
+    {
+      "path": "ortho-transition-390.png",
+      "bytes": 255703,
+      "sha256": "73de3ad44584afb766b7639d4e1df72a259b28ffdce629288a972353343286f6"
+    },
+    {
+      "path": "ortho-transition-768.png",
+      "bytes": 276197,
+      "sha256": "fac834f3c8ff3bfc0e82497e5384c31720bbeaaa908ba878fa3adcd1bc7c547f"
+    },
+    {
+      "path": "postgres.txt",
+      "bytes": 526,
+      "sha256": "a8fbe75b405de4b89d0486b7b524b5e09bdf2b5d61a5c6bd1bdd69ad1f68086e"
+    },
+    {
+      "path": "runtime.txt",
+      "bytes": 108,
+      "sha256": "cb058ee0f8f8c5abcef3b863846de5d2471a887c8374f46633110375b8beb785"
+    },
+    {
+      "path": "unit.txt",
+      "bytes": 244,
+      "sha256": "b74fff283b664906dc414ba93de4156c13231fc2ebc3c90b3b416b3f6523b86a"
+    }
+  ],
+  "codeCommit": "89e67620628bde0d31bcf6e2ad01276aae35206c"
+}

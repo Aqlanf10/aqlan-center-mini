@@ -1,0 +1,6 @@
+> vitest run __tests__/schema-fingerprint.test.ts __tests__/preflight-artifact.test.ts __tests__/schema-ownership-target.test.ts __tests__/docs-drift-guard.test.ts __tests__/ortho-retention-transition.test.ts
+ RUN  v4.1.12 /workspace/ortho-followthrough
+ Test Files  5 passed (5)
+      Tests  181 passed (181)
+   Start at  17:29:42
+   Duration  3.80s (transform 438ms, setup 0ms, import 658ms, tests 2.43s, environment 1ms)

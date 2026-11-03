@@ -1,0 +1,6 @@
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/hr-composed-backup.test.ts __tests__/postgres/hr-runtime-registration.test.ts __tests__/postgres/legacy-doctor-fk-compatibility.test.ts __tests__/postgres/patient-appointment-history-index.test.ts __tests__/postgres/periodontal-restore.test.ts __tests__/postgres/debt-installments-storage.test.ts __tests__/postgres/prescription-lineage-restore.test.ts __tests__/postgres/schema-fingerprint.test.ts
+ RUN  v4.1.12 /workspace/ortho-followthrough
+ Test Files  8 passed (8)
+      Tests  52 passed (52)
+   Start at  17:28:04
+   Duration  99.44s (transform 2.78s, setup 0ms, import 5.49s, tests 92.31s, environment 1ms)

@@ -1,0 +1,70 @@
+{
+  "buildId": "6vFv_98uTDDk9s5PQj72f",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "patientId": 3,
+  "orthoCaseId": 1,
+  "boardStatus": 200,
+  "boardContainsCase": true,
+  "boardPatientLinks": [
+    "/patients/3",
+    "/patients/3?tab=treatment"
+  ],
+  "defaultPillarWiresVisible": true,
+  "assessmentOpenerBeforeScroll": {
+    "x": 798.984375,
+    "y": 1413.5,
+    "width": 185.015625,
+    "height": 44
+  },
+  "assessmentBeginBeforeScroll": {
+    "x": 854.890625,
+    "y": 888.5,
+    "width": 116.109375,
+    "height": 44
+  },
+  "diagnosticDocumentHeight": 2460,
+  "headingsInDomOrder": [
+    {
+      "text": "حالة اصطناعية لفحص التنظيم",
+      "y": 1386
+    },
+    {
+      "text": "الخطة والمرجع المالي",
+      "y": 642.5
+    },
+    {
+      "text": "الرصيد الحالي لحساب المريض بالكامل، حسب العملة",
+      "y": 715.5
+    },
+    {
+      "text": "معرض سجلات الحالة والصور والأشعة (WebCeph Records Gallery)",
+      "y": 1143
+    },
+    {
+      "text": "التحليل السيفالومتري ومخطط ويب سيف (WebCeph)",
+      "y": 1661
+    },
+    {
+      "text": "📸 التوثيق الفوتوغرافي ومقارنة المراحل (Before / Progress / After)",
+      "y": 1856.5
+    },
+    {
+      "text": "📝 التشخيص السريري لهذه الحالة",
+      "y": 1968.5
+    },
+    {
+      "text": "التقييم وقياسات الحالة",
+      "y": 2120.5
+    }
+  ],
+  "emptyFieldAddButtons": 0,
+  "chiefNeededAddButton": false,
+  "draftPreservedAcrossPillars": true,
+  "caseCount": 1,
+  "errors": [],
+  "saved": false,
+  "scope": "Synthetic local browser navigation audit; no assessment was saved; not production acceptance"
+}

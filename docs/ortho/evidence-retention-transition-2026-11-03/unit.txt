@@ -1,0 +1,6 @@
+> vitest run
+ RUN  v4.1.12 /workspace/ortho-followthrough
+ Test Files  811 passed (811)
+      Tests  13933 passed (13933)
+   Start at  17:25:06
+   Duration  511.54s (transform 20.24s, setup 0ms, import 93.92s, tests 302.88s, environment 100ms)

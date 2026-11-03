@@ -1,0 +1,6 @@
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-retention-transition-migration.test.ts __tests__/postgres/ortho-retention-transition.test.ts __tests__/postgres/ortho-journey-integration.test.ts __tests__/postgres/ortho-retainer-date.test.ts __tests__/postgres/schema-ownership.test.ts
+ RUN  v4.1.12 /workspace/ortho-followthrough
+ Test Files  5 passed (5)
+      Tests  44 passed (44)
+   Start at  17:25:53
+   Duration  23.63s (transform 2.66s, setup 0ms, import 1.71s, tests 20.67s, environment 1ms)
