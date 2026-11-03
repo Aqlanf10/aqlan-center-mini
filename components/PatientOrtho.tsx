@@ -342,6 +342,10 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
   useLayoutEffect(() => {
     if (!parent) owner.activateStandaloneDraft(key, draft);
     lease.activate();
+    // Controls rendered before commit saw an inactive lease. Publish its
+    // activation even when all parent reads have already settled; otherwise
+    // a newly mounted form can stay disabled until an unrelated parent render.
+    render(value => value + 1);
     return () => { lease.retire(); if (!parent) owner.retire(); };
   }, [owner, parent, lease, draft, key]);
   const redraw = () => { if (lease.active && owner.active) render((value) => value + 1); };

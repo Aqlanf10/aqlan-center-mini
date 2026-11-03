@@ -36,7 +36,10 @@ function caseCard(page: Page, key: "A" | "B") {
   return page.locator("li").filter({ has: page.getByText(new RegExp(`^DIAG-CASE-${key}\\s*·`)) });
 }
 function diagnosisPanel(card: Locator, page: Page) {
-  return card.locator("section").filter({ has: page.getByRole("heading", { name: /التشخيص السريري لهذه الحالة/ }) });
+  // The assessment section also contains the independent problem-source
+  // review panel. Its select/alerts are not fields or read state of this form.
+  // Keep every diagnosis assertion scoped to the component's own root.
+  return card.locator("section > div").filter({ has: page.getByRole("heading", { name: /التشخيص السريري لهذه الحالة/ }) });
 }
 const draftLabels = ["الصنف الهيكلي", "الصنف السني", "الازدحام", "البعد الأفقي", "الإطباق", "ملاحظات التشخيص", "سبب التحديث"];
 async function expectBlankDraft(panel: Locator) {

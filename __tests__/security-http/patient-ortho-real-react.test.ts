@@ -195,6 +195,33 @@ async function open() {
 }
 
 describe("PatientOrtho paired grants and opaque local drafts in real React", () => {
+  it("enables a newly mounted intake after contact settles before the clinical grant, without another parent render", async () => {
+    const f = await open();
+    try {
+      const ids = await pair(f.page);
+      await f.page.evaluate((id) => {
+        const api = window.__patientOrthoFixture;
+        api.respond(id, api.patientBody());
+      }, ids.patient);
+      await f.page.clock.runFor(50);
+      await state(f.page, "loading");
+      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { cases: [] }), ids.ortho);
+      await state(f.page, "ready");
+      const reason = panel(f.page).getByLabel("سبب فتح التقييم", { exact: true });
+      await expect.poll(() => reason.isEnabled()).toBe(true);
+      await reason.fill("synthetic initial assessment draft");
+      expect(await reason.inputValue()).toBe("synthetic initial assessment draft");
+      expect(await writes(f.page)).toEqual([]);
+      // Enabling the committed form must not grant writes after a later denial.
+      await refresh(f.page);
+      const next = await pair(f.page);
+      await f.page.evaluate((id) => window.__patientOrthoFixture.headers(id, 403), next.ortho);
+      await state(f.page, "denied"); await hidden(f.page);
+      expect(await writes(f.page)).toEqual([]);
+      await f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
   it("replays StrictMode cleanup and fences an unmounted read and captured child refresh", async () => {
     const f = await open();
     try {
