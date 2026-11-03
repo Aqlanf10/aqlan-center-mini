@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from 'react';
+import type { ComponentProps, ReactElement, ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DoseProfileForm, PrescriptionDoseProfiles } from '../components/PrescriptionDoseProfiles';
@@ -14,12 +14,13 @@ vi.mock('react', async original => ({
   useState: () => [state.selected, (value: string) => { state.selected = value; }],
 }));
 type Element = ReactElement<Record<string, unknown>>;
+type OnSelect = ComponentProps<typeof PrescriptionDoseProfiles>['onSelect'];
 function nodes(node: ReactNode): Element[] {
   if (Array.isArray(node)) return node.flatMap(nodes);
   if (!node || typeof node !== 'object' || !('props' in node)) return [];
   return [node as Element, ...nodes((node as Element).props.children as ReactNode)];
 }
-function chooser(onSelect: ReturnType<typeof vi.fn>): Element {
+function chooser(onSelect: OnSelect): Element {
   const outer = PrescriptionDoseProfiles({ onSelect });
   return (outer.type as (props: unknown) => Element)(outer.props);
 }
@@ -30,7 +31,7 @@ describe('actual reference chooser selection and server-rendered safety text', (
     ['coamoxiclav-child-label-q12', '12 أسبوعًا فأكثر وأقل من 40 kg؛ عند 40 kg فأكثر يُراجع مسار البالغ وفق نشرة المنتج، ولا تحويل تلقائي.'],
     ['benzydamine-rinse-label', 'لا يُنصح به عند فرط الحساسية للأسبرين أو مضادات الالتهاب غير الستيرويدية، ويستلزم الحذر عند وجود ربو حالي أو سابق.'],
   ])('renders corrected %s text without a numeric form or transfer action', (profileId, expectedText) => {
-    const onSelect = vi.fn();
+    const onSelect = vi.fn<OnSelect>();
     const select = nodes(chooser(onSelect)).find(node => node.props['aria-label'] === 'الملف المرجعي للجرعة');
     expect(select).toBeDefined();
     (select!.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: profileId } });
