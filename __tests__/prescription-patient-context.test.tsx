@@ -173,10 +173,16 @@ describe("prescription patient context contract", () => {
     expect(elements(renderModal()).filter(node => node.props["aria-label"] === "اسم الدواء للسطر 1")).toHaveLength(1);
     change(find(renderModal(), (node) => node.props.placeholder === "Drug name"), "Amoxicillin");
     expect(text(renderModal())).toContain("خطر تحسسي حرج (Penicillin Allergy)");
-    click(button(renderModal(), "💬إرسال واتساب"));
-    // Incomplete new medication cannot escape issuance review through sharing.
+    const share = button(renderModal(), "💬واتساب غير متاح حاليًا");
+    expect(share.props.disabled).toBe(true);
+    expect(share.props.title).toContain("المشاركة متوقفة");
+    const callsBefore = fetchMock.mock.calls.length;
+    // Even direct callback invocation cannot bypass the disabled UI boundary.
+    click(share);
+    expect(fetchMock.mock.calls).toHaveLength(callsBefore);
     expect(openMock).not.toHaveBeenCalled();
-    expect(text(renderModal())).toContain("أكمل اسم الدواء");
+    expect(text(renderModal())).toContain("مشاركة واتساب غير متاحة حاليًا");
+    expect(text(renderModal())).toContain("لم تُفتح خدمة خارجية");
     expect(readCalls()[0][1]).toMatchObject({ cache: "no-store", signal: expect.any(AbortSignal) });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   });
@@ -187,7 +193,7 @@ describe("prescription patient context contract", () => {
     expect(modalProps()).toMatchObject({ patientContextStatus: "ready", medicalAlert: empty, patientPhone: empty });
     expect(text(renderModal())).not.toContain("تعذّر التحقق");
     expect(text(renderModal())).not.toContain("جارٍ تحميل التنبيهات");
-    expect(text(renderModal())).not.toContain("إرسال واتساب");
+    expect(text(renderModal())).not.toContain("واتساب غير متاح حاليًا");
   });
 
   it.each([
@@ -201,7 +207,7 @@ describe("prescription patient context contract", () => {
     readPatient = async () => response(200, payload); await mount(); await open();
     expect(modalProps()).toMatchObject({ patientContextStatus: "unavailable", medicalAlert: null, patientPhone: null });
     expect(text(renderModal())).toContain("حالة الحساسية والمخاطر غير معروفة هنا");
-    expect(text(renderModal())).not.toContain("إرسال واتساب");
+    expect(text(renderModal())).not.toContain("واتساب غير متاح حاليًا");
   });
 
   it.each([401, 403, 404, 503])("does not turn HTTP %i into a clear/empty safety context", async (status) => {
@@ -356,7 +362,8 @@ describe("optional PrescriptionModal context status", () => {
   it("preserves existing caller behavior when status is not provided", () => {
     const props = { isOpen: true, onClose: vi.fn(), patientId, patientName: "Synthetic patient", medicalAlert: "Known alert", patientPhone: "777100099" };
     const display = text(renderModal(props));
-    expect(display).toContain("Known alert"); expect(display).toContain("إرسال واتساب");
+    expect(display).toContain("Known alert"); expect(display).toContain("واتساب غير متاح حاليًا");
+    expect(button(renderModal(props), "💬واتساب غير متاح حاليًا").props.disabled).toBe(true);
     expect(display).not.toContain("تعذّر التحقق"); expect(display).not.toContain("جارٍ تحميل التنبيهات");
   });
   it.each(["loading", "unavailable"] as const)("renders the explicit %s warning with no fabricated alert", (patientContextStatus) => {
@@ -416,4 +423,5 @@ describe('durable issuance async owner fencing', () => {
   });
 
 });
+
 

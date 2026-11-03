@@ -1,7 +1,6 @@
 "use client";
 import { blankPrescriptionRow, appendPrescriptionSelection, canAcceptPrescriptionSelection, retireDraftDoseReferenceAt } from "@/lib/prescription-draft-rows";
 import {openSavedPrescriptionPrint} from "@/lib/prescription-print-opening";
-import { prescriptionDraftPrintItems } from "@/lib/prescription";
 import { PrescriptionStaleReferenceNotice } from "./PrescriptionStaleReferenceNotice";
 import { PrescriptionDoseProfiles } from "./PrescriptionDoseProfiles";
 import { prescriberUnavailableMessage } from "@/lib/prescription-prescriber-feedback";
@@ -12,9 +11,7 @@ import { changedMedicationSelection, createManualMedicationSelection, manualMedi
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./SessionProvider";
-import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
-import { toWhatsAppNumber } from "@/lib/reminders";
 import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
 import { PrescriptionClinicCatalog } from "./PrescriptionClinicCatalog";
 import { PrescriptionMedicationLibrary } from "./PrescriptionMedicationLibrary";
@@ -80,7 +77,6 @@ export function PrescriptionModal({
   defaultDoctorName = "",
   defaultDoctorPartyId = null,
 }: PrescriptionModalProps) {
-  const clinicName = useClinicName();
   // A closed modal stays mounted while the visit diagnosis is loaded/edited.
   // null inherits that current value; manual edits (including clearing) and
   // explicit template/print choices own the Rx draft across cancellation/reopening.
@@ -253,22 +249,6 @@ export function PrescriptionModal({
     return true;
   };
 
-  const buildPrintUrl = () => {
-    if (!validatePrintableItems()) return null;
-    /* معاينة مسودة معلنة (P0.9): تُطبع بعلامة «مسودة للمراجعة» وباسم الطبيب
-     * المدخل للمراجعة — لا اعتماد أو توقيع تلقائي. الوثيقة الرسمية وحدها (rx) تُطبع كوصفة صرف. */
-    const params = new URLSearchParams();
-    params.set("draft", "1");
-    if (selectedDoctorId) params.set("doctorPartyId", String(selectedDoctorId));
-    if (diagnosis) params.set("diagnosis", diagnosis);
-    if (notes) params.set("notes", notes);
-    params.set("lang", lang);
-    if (items.length > 0) {
-      params.set("items", JSON.stringify(prescriptionDraftPrintItems(items)));
-    }
-    return `/print/prescription/${patientId}?${params.toString()}`;
-  };
-
   /** إرسال الوصفة إلى الخادم — برمز إقرارٍ إن كان الطبيب أقرّ التحذيرات. */
   const submitToServer = async (operation: PrescriptionOperation, acknowledgedSafetyToken?: string) => {
     if (!commandScope || !patientId || !selectedDoctorId) throw new Error("لم يكتمل سياق الإصدار.");
@@ -351,7 +331,7 @@ export function PrescriptionModal({
     /* الوصفة وثيقة: تُحفَظ أوّلًا ثم تُطبَع من المحفوظ. والخادم هو المرجع
      * النهائي للسلامة (مراجعة الجولة الثانية — Blocker B):
      * - تعارضٌ حرج (409) ⇒ توقّف تام: لا طباعة رسمية ولا سقوط تلقائي إلى
-     *   مسودة؛ يُعرض سبب المنع، والمسودة زرّ منفصل صريح فقط.
+     *   مسودة؛ يُعرض سبب المنع، والمسودة تُراجع داخل النافذة فقط.
      * - تحذيرات غير حرجة ⇒ عرضٌ وإقرارٌ صريح قبل الحفظ والطباعة الرسمية.
      * - فشل الشبكة/500 قد يخفي إصدارًا ناجحًا: لا طباعة تلقائية ولا مفتاح جديد. */
     setCriticalBlock(null);
@@ -398,8 +378,7 @@ export function PrescriptionModal({
         operationFence.current.finish(operation);
       }
     }
-    const url = buildPrintUrl();
-    if (url && operationFence.current.current(operation)) window.open(url, "_blank");
+    if (operationFence.current.current(operation)) setPreserveError("الطباعة متاحة من النسخة المحفوظة فقط؛ أكمل سياق المريض والطبيب واحفظ الوصفة أولًا.");
     operationFence.current.finish(operation);
   };
 
@@ -454,43 +433,10 @@ export function PrescriptionModal({
     }
   };
 
-  /** تعليمات دواء واحد بلغة الروشتة المختارة. */
-  const instructionsLines = (item: RxItem): string[] => {
-    const ar = item.instructions.trim();
-    const en = item.instructionsEn.trim();
-    if (lang === "ar") return ar ? [ar] : [];
-    if (lang === "en") return en ? [en] : [];
-    return [ar, en].filter(Boolean);
-  };
-
-  const handleWhatsApp = () => {
-    const selectionError = manualMedicationSelectionError(items);
-    if (selectionError) { setPreserveError(selectionError); return; }
-    if (!patientPhone) return;
-    const phone = toWhatsAppNumber(patientPhone);
-    if (!phone) return;
-
-    const label = (ar: string, en: string) => lang === "ar" ? ar : lang === "en" ? en : `${ar} / ${en}`;
-    let text = `*${label("وصفة طبية", "Prescription")} — ${clinicName}*\n\n`;
-    text += `${label("المريض", "Patient")}: ${patientName}\n`;
-    if (diagnosis) text += `${label("التشخيص", "Diagnosis")}: ${diagnosis}\n`;
-    if (medicalAlert) text += `${label("تنبيه طبي", "Medical alert")}: ${medicalAlert}\n`;
-    text += `\n*${label("الأدوية", "Medications")}:*\n`;
-
-    items.forEach((item, idx) => {
-      text += `${idx + 1}. *${item.name}* ${item.dose ? `(${item.dose})` : ""}\n`;
-      text += `   - ${[item.form, item.selection?.amount, item.frequency, item.duration].filter(Boolean).join(" · ")}\n`;
-      for (const line of instructionsLines(item)) {
-        text += `   - ${line}\n`;
-      }
-    });
-
-    if (notes) text += `\n*${label("تعليمات إضافية", "Additional instructions")}:* ${notes}\n`;
-    text += `\n${label("مع تمنياتنا لكم بالشفاء العاجل", "Wishing you a speedy recovery")} 🦷`;
-
-    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
-    window.open(waUrl, "_blank");
-  };
+  // Sharing unsaved editable rows could bypass server safety and put clinical
+  // data in an external URL. Keep this explicitly unavailable until a separate
+  // active-saved-record, recipient and content review workflow is implemented.
+  const handleWhatsApp = () => setPreserveError("مشاركة واتساب غير متاحة حاليًا؛ يلزم مسار مستقل يراجع الوصفة المحفوظة النشطة والمستلم والمحتوى قبل المشاركة. لم تُفتح خدمة خارجية.");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
@@ -624,7 +570,7 @@ export function PrescriptionModal({
           ) : null}
 
           {/* منعٌ حرج من الخادم (409): توقّف تام — لا طباعة رسمية ولا مسودة
-              تلقائية؛ سبب المنع ظاهر، والمسودة زرّ منفصل صريح (مراجعة الجولة الثانية). */}
+              تلقائية؛ سبب المنع ظاهر، والمسودة تُراجع داخل النافذة دون رابط طباعة. */}
           {criticalBlock && (
             <div className="space-y-2.5 rounded-2xl border-2 border-red-500 bg-red-50 p-4 shadow-xs">
               <div className="flex items-center gap-2 text-xs font-black text-red-900">
@@ -648,13 +594,10 @@ export function PrescriptionModal({
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  const url = buildPrintUrl();
-                  if (url) window.open(url, "_blank");
-                }}
+                onClick={() => setPreserveError("المسودة للمراجعة داخل هذه النافذة فقط؛ الطباعة متاحة بعد حفظ وصفة معتمدة. صحّح سبب المنع قبل الحفظ، وستبقى جميع الحقول كما كتبتها.")}
                 className="rounded-xl border border-red-300 bg-white px-4 py-2 text-xs font-bold text-red-700 hover:bg-red-100 transition-colors"
               >
-                عرض مسودة غير معتمدة (لا تُصرف كوصفة)
+                مراجعة المسودة داخل النافذة
               </button>
             </div>
           )}
@@ -1022,6 +965,7 @@ export function PrescriptionModal({
 
         {/* تذييل النافذة والإجراءات */}
         <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="w-full text-xs text-slate-600">الطباعة من النسخة المحفوظة فقط. المسودة غير المحفوظة تبقى للمراجعة هنا.</p>
           {blockedSavedPrintId && commandState?.recoveredId === blockedSavedPrintId && commandState.status === "active" && <div role="status" className="flex w-full flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs">
             <span>الوصفة محفوظة ولم تُفتح نافذة الطباعة. افتح النسخة المحفوظة مباشرة؛ لا تبدأ إصدارًا جديدًا.</span>
             <a href={`/print/prescription/${patientId}?rx=${blockedSavedPrintId}`} target="_blank" rel="noopener noreferrer" className="rounded bg-slate-900 px-3 py-2 font-bold text-white">فتح الوصفة المحفوظة للطباعة #{blockedSavedPrintId}</a>
@@ -1047,10 +991,12 @@ export function PrescriptionModal({
               <button
                 type="button"
                 onClick={handleWhatsApp}
+                disabled
+                title="المشاركة متوقفة حتى يتوفر مسار آمن للوصفة المحفوظة والمستلم والمحتوى"
                 className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors"
               >
                 <span>💬</span>
-                <span>إرسال واتساب</span>
+                <span>واتساب غير متاح حاليًا</span>
               </button>
             )}
 

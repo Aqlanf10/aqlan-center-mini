@@ -402,18 +402,16 @@ describe("empty prescription caller fails closed before save or draft navigation
     expect(openMock).not.toHaveBeenCalled();
   });
 
-  it.each(["critical", "acknowledge"])("rejects emptied items from the %s secondary path", async (path) => {
+  it("rejects emptied items from the acknowledgement secondary path", async () => {
     render({ isOpen: true });
     expect(field(medicinePlaceholder).props.value).toBe("");
     change(medicinePlaceholder, "SyntheticDrug");
     completeManualLine();
-    const label = path === "critical" ? "عرض مسودة غير معتمدة (لا تُصرف كوصفة)" : "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا";
+    const label = "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا";
     await ready();
     fetchMock.mockResolvedValue({
-      status: path === "critical" ? 409 : 200,
-      json: async () => path === "critical"
-        ? { safetyAlerts: [{ id: "synthetic", title: "Synthetic", message: "Synthetic", medicationName: "SyntheticDrug", severity: "critical" }] }
-        : { requiresAcknowledgement: true, acknowledgementToken: "synthetic-token", safetyWarnings: [] },
+      status: 200,
+      json: async () => ({ requiresAcknowledgement: true, acknowledgementToken: "synthetic-token", safetyWarnings: [] }),
     });
     await ready();
     click(printLabel);
@@ -426,6 +424,32 @@ describe("empty prescription caller fails closed before save or draft navigation
     expect(openMock).not.toHaveBeenCalled();
     expect(contents(render().tree)).toContain(validation);
   });
+  it.each([false, true])("critical in-modal review preserves the draft without export, even when incomplete: %s", async (incomplete) => {
+    render({ isOpen: true });
+    change(medicinePlaceholder, "SyntheticDrug"); completeManualLine();
+    change(diagnosisPlaceholder, "Private synthetic diagnosis");
+    change(notesPlaceholder, "Private synthetic notes 0.2% https://example.test/a%2Fb");
+    await ready();
+    fetchMock.mockResolvedValue({ status: 409, json: async () => ({ safetyAlerts: [
+      { id: "synthetic", title: "Synthetic", message: "Synthetic", medicationName: "SyntheticDrug", severity: "critical" },
+    ] }) });
+    click(printLabel);
+    const label = "مراجعة المسودة داخل النافذة";
+    await vi.waitFor(() => expect(contents(render().tree)).toContain(label));
+    expect(writes()).toHaveLength(1);
+    if (incomplete) change(medicinePlaceholder, "   ");
+    const fields = [medicinePlaceholder, diagnosisPlaceholder, notesPlaceholder, "Strength / concentration + unit", "Clinician-entered amount per dose"];
+    const before = fields.map(placeholder => field(placeholder).props.value);
+    const calls = fetchMock.mock.calls.length;
+    click(label);
+    expect(contents(render().tree)).toContain("المسودة للمراجعة داخل هذه النافذة فقط؛ الطباعة متاحة بعد حفظ وصفة معتمدة.");
+    expect(fields.map(placeholder => field(placeholder).props.value)).toEqual(before);
+    expect(fetchMock.mock.calls).toHaveLength(calls);
+    expect(writes()).toHaveLength(1);
+    expect(openMock).not.toHaveBeenCalled();
+    expect(contents(render().tree)).toContain("الطباعة من النسخة المحفوظة فقط.");
+  });
+
 });
 
 it("never silently replaces a mismatched visit prescriber with the current clinician", async () => {
@@ -494,4 +518,5 @@ describe("prescriber lookup ownership and retry", () => {
     resolve(payload(6, "Dr Current")); await ready(); expect(physician().props.value).toBe("Dr Current");
   });
 });
+
 

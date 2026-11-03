@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Locator, type Page, type Route } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
-import { toWhatsAppNumber } from "../../lib/reminders";
 import { PROCEDURE_TEMPLATES } from "../../lib/prescription-procedure-templates";
 import { baseUrl, harness } from "./_server";
 
@@ -369,7 +368,7 @@ async function capturePatientContext(page: Page, width: number, contextState: "w
     { label: `${contextState} patient-context notice`, locator: warning },
     { label: "cancel", locator: panel.getByRole("button", { name: "إلغاء", exact: true }) },
     { label: "print", locator: panel.getByRole("button", { name: "حفظ وطباعة الوصفة (A6)", exact: true }) },
-    ...(contextState === "warning" ? [{ label: "synthetic phone action", locator: panel.getByRole("button", { name: /إرسال واتساب/ }) }] : []),
+    ...(contextState === "warning" ? [{ label: "synthetic phone action", locator: panel.getByRole("button", { name: /واتساب غير متاح حاليًا/ }) }] : []),
   ];
   const bounds = [];
   for (const { label, locator } of targets) {
@@ -419,7 +418,7 @@ describe("patient-file context in the built prescription consumer", () => {
     try {
       await f.open();
       await f.page.getByText("Penicillin allergy", { exact: true }).waitFor();
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).waitFor();
+      await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).waitFor();
       await f.diagnosis.fill("Independent Rx draft");
       await f.notes.fill(draftNotes);
       await fillMedicine(f.page);
@@ -429,19 +428,20 @@ describe("patient-file context in the built prescription consumer", () => {
       // A manual edit clears the same review contract as a library-origin edit.
       const manualReview = f.page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ });
       expect(await manualReview.isChecked()).toBe(false);
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).isDisabled()).toBe(true);
       expect(await prints(f.page)).toEqual([]);
       await manualReview.check();
       await capturePatientContext(f.page, width, "warning");
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
-      expect(await prints(f.page)).toEqual([expect.stringContaining("https://wa.me/967777100099?")]);
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).isDisabled()).toBe(true);
+      expect(await prints(f.page)).toEqual([]);
+      expect(f.requests).toEqual([]);
       await f.close();
       await f.visitDiagnosis.fill("Unsubmitted visit draft");
       f.holdPatientRead(); await f.open();
       await expect.poll(f.pendingPatientReads).toBe(1);
       await f.page.getByText(/جارٍ تحميل التنبيهات الطبية وبيانات التواصل/).waitFor();
       expect(await f.page.getByText("Penicillin allergy", { exact: true }).count()).toBe(0);
-      expect(await f.page.getByRole("button", { name: /إرسال واتساب/ }).count()).toBe(0);
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).count()).toBe(0);
       expect(await f.diagnosis.inputValue()).toBe("Independent Rx draft");
       expect(await f.notes.inputValue()).toBe(draftNotes);
       expect(await drugName.inputValue()).toBe("Amoxicillin");
@@ -474,13 +474,13 @@ describe("patient-file context in the built prescription consumer", () => {
     const f = await fixture("Synthetic real-GET contract", { id, real: true });
     try {
       await f.open();
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).waitFor();
+      await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).waitFor();
       expect(await f.page.getByText(/تعذّر التحقق من التنبيهات الطبية/).count()).toBe(0);
       if (payload.patient.medicalAlert) await f.page.getByText(payload.patient.medicalAlert, { exact: true }).waitFor();
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).isDisabled()).toBe(true);
       const opened = await prints(f.page);
-      expect(opened).toHaveLength(1);
-      expect(opened[0]).toContain(`https://wa.me/${toWhatsAppNumber(payload.patient.phone!)}?`);
+      expect(opened).toEqual([]);
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).getAttribute("title")).toContain("المشاركة متوقفة");
       expect(f.requests).toEqual([]); expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
     } finally { await f.context.close(); }
   });
@@ -578,3 +578,4 @@ it.each([1280, 390])("compact prescription starts writable with visible actions 
     expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
   } finally { await f.context.close(); }
 });
+
