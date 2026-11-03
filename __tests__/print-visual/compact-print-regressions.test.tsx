@@ -138,6 +138,12 @@ describe("native compact print regression witnesses", () => {
         // Whole-document text and page-bound checks miss a heading-only first page.
         const firstPageText = pages[0]?.words.map(word => word.text).join(" ") ?? "";
         expect(firstPageText).toContain(rxFixture.historicalIbuprofen || rxFixture.ibuprofen ? "Ibuprofen" : rxFixture.calculated ? "Amoxicillin" : rxFixture.long ? "SYN-MED-01" : "SYNTHETIC-RX-MEDICATION");
+        const firstMedicationFields = rxFixture.historicalIbuprofen || rxFixture.ibuprofen
+          ? ["100 mg/5 mL", "7.5 mL", "150 mg", "3 times daily"]
+          : rxFixture.calculated ? ["250 mg/5 mL", "4 mL", "200 mg", "Every 8 hours"]
+          : rxFixture.long ? ["SYN-DOSE-01", "SYN-AMOUNT-01", "SYN-FREQUENCY-01"]
+          : ["SYN-DOSE", "SYN-AMOUNT", "SYN-FREQUENCY"];
+        for (const field of firstMedicationFields) expect(firstPageText).toContain(field);
       }
       if (kind === "lab") {
         const layout = await page.locator(`.${labStyles.labIdentity}`).evaluate(node => ({ display: getComputedStyle(node).display, parentDisplay: getComputedStyle(node.parentElement!).display, labelWeight: getComputedStyle(node.querySelector("span")!).fontWeight, identifierSize: getComputedStyle(node.querySelector("strong")!).fontSize }));
