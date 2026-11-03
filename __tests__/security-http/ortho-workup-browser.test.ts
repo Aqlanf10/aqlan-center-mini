@@ -45,7 +45,9 @@ describe("one workup path over the existing record owners", () => {
       expect(writes).toEqual(mutations);
       expect((await db.query("SELECT (SELECT count(*)::int FROM ortho_cases WHERE patient_id=$1) cases,(SELECT count(*)::int FROM invoices WHERE patient_id=$1) invoices,(SELECT count(*)::int FROM visits WHERE patient_id=$1) visits,(SELECT count(*)::int FROM ortho_retention_entries WHERE patient_id=$1) retention,(SELECT count(*)::int FROM ortho_case_study_revisions WHERE patient_id=$1) study", [patientId])).rows[0]).toEqual({ cases: 1, invoices: 0, visits: 0, retention: 0, study: 0 });
       expect(errors).toEqual([]); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      const guide = page.getByRole("region", { name: "إعداد ملف التقويم خطوة بخطوة", exact: true }); await guide.scrollIntoViewIfNeeded(); await guide.screenshot({ path: `.settings-ui-artifacts/ortho-workup-${width}.png` });
+      const guide = page.getByRole("region", { name: "إعداد ملف التقويم خطوة بخطوة", exact: true }); await guide.evaluate(element => element.scrollIntoView({ block: "center", behavior: "instant" }));
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await guide.screenshot({ path: `.settings-ui-artifacts/ortho-workup-${width}.png` });
       await page.getByRole("button", { name: "العودة لأقسام الحالة", exact: true }).click(); expect(await guide.count()).toBe(0); await page.getByRole("navigation", { name: "أقسام تشخيص الحالة" }).waitFor();
     } finally { await context.close(); }
   });
