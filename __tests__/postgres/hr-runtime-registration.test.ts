@@ -1,3 +1,4 @@
+import { ORTHO_RECORD_UPLOADS_SQL } from "../../lib/ortho-record-uploads-schema";
 import { ORTHO_ASSESSMENT_INTAKE_SQL } from "../../lib/ortho-assessment-intake-schema";
 import { ORTHO_FACIAL_ANALYSIS_SQL } from "../../lib/ortho-facial-analysis-schema";
 import { ORTHO_CASE_JOURNEY_SQL } from "../../lib/ortho-case-journey-schema";
@@ -61,6 +62,7 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0101", name: "ortho_retention_transition", checksum: createHash("sha256").update(ORTHO_RETENTION_TRANSITION_SQL).digest("hex") },
     { version: "0102", name: "ortho_facial_analysis", checksum: createHash("sha256").update(ORTHO_FACIAL_ANALYSIS_SQL).digest("hex") },
     { version: "0103", name: "ortho_assessment_intake", checksum: createHash("sha256").update(ORTHO_ASSESSMENT_INTAKE_SQL).digest("hex") },
+    { version: "0104", name: "ortho_record_uploads", checksum: createHash("sha256").update(ORTHO_RECORD_UPLOADS_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts', 'prescription_issuance_commands']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);

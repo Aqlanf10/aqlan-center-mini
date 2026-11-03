@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeRecordUploadOwner } from "../lib/ortho-record-upload-owner";
 import { WebCephRecordsGrid } from "../components/WebCephRecordsGrid";
 
 // Real component handlers/effects, synthetic hooks and transport. This is not a
@@ -113,7 +114,9 @@ beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
   hooks.role = "doctor"; hooks.username = "synthetic-doctor";
   hooks.permissions = { canViewAllPatients: true, canViewXrays: true, canUploadXrays: true }; hooks.loggedOut = false;
-  fetchMock.mockReset(); props = { patientId: 11, orthoCaseId: 21 };
+  fetchMock.mockReset();
+  const uploadOwner = makeRecordUploadOwner({ patientId: 11, orthoCaseId: 21, actorId: 1, authorized: () => !hooks.loggedOut && props.patientId === 11 && props.orthoCaseId === 21, writable: () => hooks.permissions.canUploadXrays === true, deny: () => { hooks.loggedOut = true; } });
+  props = { patientId: 11, orthoCaseId: 21, uploadOwner }; uploadOwner.activate();
   read = (url) => response(url.endsWith("/documents") ? { documents: [document()] } : { analyses: [study()] });
   write = () => response({ id: 71 }, 201);
   fetchMock.mockImplementation((url: string, init?: RequestInit) => Promise.resolve(init?.method === "POST" ? write(url) : read(url)));
@@ -224,7 +227,7 @@ describe("record action ownership", () => {
   it("permits an existing exact-case analysis for a read-only doctor but not upload or creation", async () => {
     hooks.permissions.canUploadXrays = false; await ready();
     expect(picker().props.disabled).toBe(true); invoke(button("فتح التحليل (#61)")); expect(location.href).toBe("/ceph/61");
-    invoke(button("استبدال")); await selectFile(); await settle(); expect(writes()).toHaveLength(0);
+    invoke(button("إضافة نسخة أخرى")); await selectFile(); await settle(); expect(writes()).toHaveLength(0);
   });
   it("creates only one analysis on repeated clicks, with the current case, and ignores late foreign-owner navigation", async () => {
     const pending = deferred<unknown>(); read = url => response(url.endsWith("/documents") ? { documents: [document()] } : { analyses: [] });
@@ -234,14 +237,15 @@ describe("record action ownership", () => {
     pending.resolve(response({ id: 71 }, 201)); await ready(); expect(location.href).toBe("");
   });
   it("does not accept a file picker retained from a previous case", async () => {
-    await ready(); invoke(button("استبدال")); const oldInput = picker();
+    await ready(); invoke(button("إضافة نسخة أخرى")); const oldInput = picker();
     props = { ...props, orthoCaseId: 22 }; await ready(); await selectFile(oldInput); await settle(); expect(writes()).toHaveLength(0);
   });
-  it("uploads once and treats failed post-save refresh as unknown, without duplicate upload or auto-created analysis", async () => {
-    await ready(); invoke(button("استبدال")); const input = picker(); const pending = deferred<unknown>(); write = () => pending.promise;
-    selectFile(input); selectFile(input); expect(writes()).toHaveLength(1);
-    expect((writes()[0][1].body as FormData).get("orthoCaseId")).toBe("21");
-    read = () => response({}, 500); pending.resolve(response({ id: 71 }, 201)); await ready();
-    expect(text(render())).toContain("هذا لا يعني عدم وجود صور"); expect(writes()).toHaveLength(1); expect(location.href).toBe("");
+  it("stages the original file without upload, guessed date or stage, and keeps it through read failure", async () => {
+    await ready(); invoke(button("إضافة نسخة أخرى")); const input = picker();
+    selectFile(input); const draft = props.uploadOwner!.draft; selectFile(input);
+    expect(writes()).toHaveLength(0); expect(draft).toMatchObject({ stage: "", dateState: "", takenOn: "", sourceNote: "", photoView: "lateral_ceph" });
+    read = () => response({}, 500); unmount(); await ready();
+    expect(text(render())).toContain("هذا لا يعني عدم وجود صور"); expect(props.uploadOwner!.draft).toBe(draft);
+    expect(writes()).toHaveLength(0); expect(location.href).toBe("");
   });
 });

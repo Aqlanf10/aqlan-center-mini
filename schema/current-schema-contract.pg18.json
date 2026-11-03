@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 142,
-    "columns": 1853,
-    "constraints": 2288,
-    "indexes": 460,
-    "triggers": 127
+    "tables": 143,
+    "columns": 1865,
+    "constraints": 2316,
+    "indexes": 463,
+    "triggers": 132
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -2688,6 +2688,12 @@
           ]
         },
         "ortho_intake_bridge_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
+        "ortho_record_upload_bridge_scope": {
           "timing": "AFTER",
           "events": [
             "UPDATE"
@@ -11840,6 +11846,12 @@
             "UPDATE"
           ]
         },
+        "ortho_record_upload_case_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
         "ortho_retention_transition_case_scope": {
           "timing": "AFTER",
           "events": [
@@ -12260,6 +12272,162 @@
           ]
         },
         "ortho_facial_revisions_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "ortho_record_uploads": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "clinical_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "command": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "command_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "document_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "ortho_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "recorded_patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "request_fingerprint": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "document_id"
+        ],
+        [
+          "patient_id",
+          "actor_user_id",
+          "command_id"
+        ]
+      ],
+      "checks": [
+        "ortho_record_uploads_command_check",
+        "ortho_record_uploads_command_id_check",
+        "ortho_record_uploads_recorded_patient_id_check",
+        "ortho_record_uploads_request_fingerprint_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "clinical_case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "ortho_case_id"
+          ],
+          "refTable": "ortho_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "document_id"
+          ],
+          "refTable": "patient_documents",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "ortho_record_uploads_document_id_key": {
+          "columns": [
+            "document_id"
+          ],
+          "unique": true
+        },
+        "ortho_record_uploads_patient_id_actor_user_id_command_id_key": {
+          "columns": [
+            "patient_id",
+            "actor_user_id",
+            "command_id"
+          ],
+          "unique": true
+        },
+        "ortho_record_uploads_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "ortho_record_upload_scope": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        "ortho_record_uploads_immutable": {
           "timing": "BEFORE",
           "events": [
             "DELETE",
@@ -13527,6 +13695,12 @@
       },
       "triggers": {
         "ortho_facial_document_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
+        "ortho_record_upload_document_scope": {
           "timing": "AFTER",
           "events": [
             "UPDATE"

@@ -751,3 +751,31 @@ enabling assessment creation. An old binary cannot safely read the new state;
 rolling back code must not remove assessment records or restore NOT NULL over
 unknown facts. Restore rehearsals retain the exact migration registration and
 immutable event data. Review live schema drift before any migration execution.
+
+## 0104_ortho_record_uploads.sql — explicit image source and idempotent upload
+
+Adds `ortho_record_uploads` as an immutable source-command ledger pointing to the
+canonical `patient_documents` row and existing orthodontic/clinical case pair.
+The original file remains in the current content-addressed storage. No duplicate
+clinical photo table or financial transaction is introduced. Unknown capture
+date and stage remain NULL; upload time never supplies a capture date.
+
+Runtime registration and the numbered migration have identical bytes. The
+migration is additive and does not infer historical upload events or modify
+existing image metadata. An unregistered table collision fails instead of being
+adopted. PostgreSQL constraints check patient/case/document scope and the source
+fingerprint; changes to source title, view, stage, capture date or byte identity
+on these new documents require a separate reviewed correction workflow. The
+existing removal marker remains available, and retry cannot unhide a document.
+
+The route validates bytes, media signature, bounded single-frame raster decode
+and source hash before storage. The database transaction rechecks current user
+and image permissions, locks the patient, and commits document, receipt and
+audit together. Lost acknowledgements reuse the exact actor-scoped command and
+original File. Storage precedes the database transaction as in the existing
+file system: a refused transaction can leave an unreferenced content-addressed
+blob; this migration neither deletes those blobs nor changes backup retention.
+
+This remains an unmerged candidate. The inherited 0103 compatibility requirement
+for assessment/NULL-aware readers still applies; no production migration or
+rollback is authorized by this document.

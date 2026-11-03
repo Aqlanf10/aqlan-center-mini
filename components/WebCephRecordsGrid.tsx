@@ -1,12 +1,9 @@
 "use client";
 
-import { clinicDateString } from "@/lib/schedule";
-import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   WEBCEPH_RECORD_SLOTS,
   PHOTO_STAGE_LABEL,
-  suggestPhotoStage,
   type PhotoStage,
   type PhotoView,
 } from "@/lib/ortho-photos";
@@ -16,6 +13,9 @@ import {
   caseRecordSlots, caseRecordStudy, decodeOrthoRecordDocuments, decodeOrthoRecordStudies,
   ORTHO_RECORDS_READ_FAILURE, recordStudyId, type OrthoRecordDocument, type OrthoRecordStudy,
 } from "@/lib/ortho-records";
+
+import { OrthoRecordUpload } from "./OrthoRecordUpload";
+import type { RecordUploadOwner } from "@/lib/ortho-record-upload-owner";
 
 type Owner = { scope: readonly unknown[] };
 type OwnerRuntime = { owner: Owner; active: boolean; ready: boolean; busy: boolean; sequence: number;
@@ -29,13 +29,14 @@ export interface WebCephRecordsGridProps {
   orthoCaseId: number;
   currentPhase?: OrthoPhase;
   startDate?: string;
+  uploadOwner?: RecordUploadOwner;
 }
 
 export function WebCephRecordsGrid({
   patientId,
   orthoCaseId,
   currentPhase = "aligning",
-  startDate,
+  uploadOwner,
 }: WebCephRecordsGridProps) {
   const session = useSession();
   const hasSession = Boolean(session?.username?.trim());
@@ -79,17 +80,6 @@ export function WebCephRecordsGrid({
     };
   }, [owner]);
 
-  // المرحلة الزمنية المحددة للفلترة (افتراضياً: المقترحة تلقائياً أو "all")
-  const defaultStage = useMemo<PhotoStage>(() => {
-    if (currentPhase === "assessment") return "initial";
-    return suggestPhotoStage({
-      date: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
-      startDate: startDate || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
-      phase: currentPhase,
-      isFirstSession: false,
-    });
-  }, [startDate, currentPhase]);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
@@ -127,9 +117,10 @@ export function WebCephRecordsGrid({
     }
   }, [patientId, owner, canRead, currentRuntime]);
 
+  const savedDocumentId = uploadOwner?.lastDocumentId;
   useEffect(() => {
     void loadData();
-  }, [loadData]);
+  }, [loadData, savedDocumentId]);
 
   // خريطة الصور المقترنة بكل Slot
   const slotMap = useMemo(() => caseRecordSlots(documents, patientId, orthoCaseId, activeStage),
@@ -189,7 +180,7 @@ export function WebCephRecordsGrid({
   // تشغيل منتقي الملفات للسلوت المحدد
   const triggerUpload = (slotKey: PhotoView) => {
     const runtime = currentRuntime();
-    if (!runtime || !runtime.ready || runtime.busy || !canUpload) return;
+    if (!runtime || !runtime.ready || runtime.busy || !canUpload || !uploadOwner?.editable() || uploadOwner.draft) return;
     runtime.picker = slotKey;
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -197,51 +188,16 @@ export function WebCephRecordsGrid({
     }
   };
 
-  // رفع الصورة المحددة إلى الخادم وربطها بالسلوت والحالة
-  const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const runtime = currentRuntime();
-    const file = e.target.files?.[0];
-    const slotKey = runtime?.picker;
-    if (!runtime || !runtime.ready || runtime.busy || !canUpload || !file || !slotKey) return;
-    runtime.picker = null; runtime.busy = true;
-
-    setOperation({ owner, slot: slotKey });
-    setError(null);
-
-    const stageToSave = activeStage === "all" ? defaultStage : activeStage;
-    const slotDef = WEBCEPH_RECORD_SLOTS.find((s) => s.key === slotKey);
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("kind", slotDef?.category === "xray" ? "xray" : "photo");
-    formData.append("title", slotDef ? `${slotDef.labelAr} (${slotDef.labelEn})` : file.name);
-    formData.append("photoView", slotKey);
-    formData.append("photoStage", stageToSave);
-    formData.append("orthoCaseId", String(orthoCaseId));
-    formData.append("takenOn", clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
-
-    try {
-      const res = await fetch(`/api/patients/${patientId}/documents`, {
-        method: "POST",
-        body: formData,
-      });
-      const doc = await res.json();
-      if (!runtime.active) return;
-      if (!res.ok) {
-        setError(doc.message ?? "تعذّر رفع الصورة.");
-        return;
-      }
-
-      // Revalidate the saved link before offering analysis. Read recovery must
-      // never upload again or create a study from an unverified/stale document.
-      void loadData();
-    } catch {
-      if (runtime.active) setError("تعذّر الاتصال أثناء الرفع.");
-    } finally {
-      runtime.busy = false;
-      if (runtime.active) setOperation(null);
-    }
+  // Selection only stages the original file. No clinical date/stage is inferred.
+  const onFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const runtime = currentRuntime(), file = event.target.files?.[0], slot = runtime?.picker;
+    if (!runtime || !runtime.ready || runtime.busy || !canUpload || !uploadOwner?.editable() || !file || !slot) return;
+    runtime.picker = null;
+    const definition = WEBCEPH_RECORD_SLOTS.find(item => item.key === slot)!;
+    uploadOwner.select(file, slot, `${definition.labelAr} (${definition.labelEn})`);
+    event.target.value = "";
   };
+  const uploadDisabled = !canUpload || !uploadOwner?.editable() || !!uploadOwner?.draft || Boolean(operation?.owner === owner);
 
   const categories = [
     { key: "xray", title: "⚡ الأشعة التشخيصية (Radiographs)", desc: "سيفالومتري جانبي وأمامي وبانوراما" },
@@ -317,13 +273,14 @@ export function WebCephRecordsGrid({
         </div>
       ) : null}
 
-      {/* مدخل ملف مخفي للرفع المباشر */}
+      {canRead && uploadOwner && <OrthoRecordUpload owner={uploadOwner} caseId={orthoCaseId} />}
+      {/* File selection opens the explicit provenance form. */}
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp"
         className="hidden"
-        disabled={!ready || !canUpload || Boolean(operation?.owner === owner)}
+        disabled={!ready || uploadDisabled}
         onChange={(e) => void onFileSelected(e)}
       />
 
@@ -342,7 +299,7 @@ export function WebCephRecordsGrid({
                   <span className="text-[10px] text-slate-400 font-normal">{cat.desc}</span>
                 </div>
 
-                <div className={`grid gap-2.5 ${
+                <div className={`grid items-start gap-2.5 ${
                   cat.key === "xray"
                     ? "grid-cols-1 sm:grid-cols-3"
                     : cat.key === "extraoral"
@@ -380,14 +337,14 @@ export function WebCephRecordsGrid({
                         </div>
 
                         {/* المحتوى: صورة أو زر رفع */}
-                        <div className="relative aspect-4/3 w-full overflow-hidden bg-slate-900/5">
+                        <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-slate-900/5">
                           {isUploading ? (
                             <div className="flex h-full flex-col items-center justify-center gap-1 text-purple-700">
                               <span className="animate-spin text-lg">⏳</span>
                               <span className="text-[10px] font-bold">جارٍ الرفع…</span>
                             </div>
                           ) : doc ? (
-                            <div className="relative h-full w-full">
+                            <div className="absolute inset-0">
                               <img
                                 src={`/api/documents/${doc.id}`}
                                 alt={slot.labelAr}
@@ -403,7 +360,7 @@ export function WebCephRecordsGrid({
                               )}
 
                               {/* طبقة الأزرار والإجراءات عند التحويم */}
-                              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-slate-950/70 p-2 opacity-0 backdrop-blur-xs transition-opacity group-hover:opacity-100">
+                              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-slate-950/70 p-2 opacity-0 backdrop-blur-xs transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                                 {isCephTarget ? (
                                   <button
                                     type="button"
@@ -427,10 +384,10 @@ export function WebCephRecordsGrid({
                                 <button
                                   type="button"
                                   onClick={() => triggerUpload(slot.key)}
-                                  disabled={!canUpload || Boolean(operation?.owner === owner)}
+                                  disabled={uploadDisabled}
                                   className="w-full rounded-lg bg-slate-800/90 py-1 text-center text-[10px] font-medium text-white hover:bg-slate-700 transition-colors"
                                 >
-                                  🔄 استبدال
+                                  إضافة نسخة أخرى
                                 </button>
                               </div>
                             </div>
@@ -438,7 +395,7 @@ export function WebCephRecordsGrid({
                             <button
                               type="button"
                               onClick={() => triggerUpload(slot.key)}
-                              disabled={!canUpload || Boolean(operation?.owner === owner)}
+                              disabled={uploadDisabled}
                               className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-slate-400 hover:text-slate-700 transition-colors"
                             >
                               <span className="text-xl">
@@ -452,6 +409,7 @@ export function WebCephRecordsGrid({
                           )}
                         </div>
 
+                        {doc && <details className="break-words px-2 py-1 text-[10px]"><summary>تاريخ التصوير: {doc.takenOn ?? "غير معلوم"}</summary><p>مرحلة الصورة: {doc.photoStage ? PHOTO_STAGE_LABEL[doc.photoStage as PhotoStage] ?? doc.photoStage : "غير معلومة"}</p><p>تاريخ الرفع: {doc.uploadedAt.slice(0, 10)}</p>{doc.note && <p className="whitespace-pre-wrap">{doc.note}</p>}</details>}
                         {/* الشريط السفلي الخاص بالـ Lateral Ceph */}
                         {isCephTarget && doc && (
                           <div className="bg-purple-100/80 px-2 py-1 text-center">

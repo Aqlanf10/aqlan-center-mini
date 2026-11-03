@@ -39,6 +39,7 @@ import { makeStudyMountOwner, type StudyMountOwner } from "@/lib/ortho-case-stud
 import { makeRetentionRecoveryLedger } from "@/lib/ortho-retention-recovery";
 import { makeStudyRecoveryLedger } from "@/lib/ortho-case-study-recovery";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
+import { makeRecordUploadOwner, type RecordUploadOwner } from "@/lib/ortho-record-upload-owner";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore,
@@ -164,7 +165,7 @@ type OrthoOwner = {
   readSequence: number; mutationSequence: number; denialSequence: number;
   controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null;
   cases: OrthoCase[]; drafts: Map<string, Draft>; mutations: Set<Mutation>;
-  assessments: Map<number, AssessmentOwnerV2>;
+  assessments: Map<number, AssessmentOwnerV2>; uploads: Map<number, RecordUploadOwner>;
   studies: Map<number, StudyMountOwner>; retentions: Map<number, RetentionMountOwner>;
   studyRecovery: ReturnType<typeof makeStudyRecoveryLedger>; retentionRecovery: ReturnType<typeof makeRetentionRecoveryLedger>;
   deny: () => void;
@@ -180,7 +181,7 @@ const OrthoOwnerContext = createContext<OrthoOwner | null>(null);
 function makeOwner(standalone = false): OrthoOwner {
   const owner: OrthoOwner = { active: false, denied: false, clinical: standalone, contact: standalone, standalone,
     readSequence: 0, mutationSequence: 0, denialSequence: 0, controller: null, timer: null,
-    cases: [], drafts: new Map(), assessments: new Map(), studies: new Map(), retentions: new Map(),
+    cases: [], drafts: new Map(), assessments: new Map(), uploads: new Map(), studies: new Map(), retentions: new Map(),
     studyRecovery: makeStudyRecoveryLedger(), retentionRecovery: makeRetentionRecoveryLedger(), mutations: new Set(), deny: () => {},
     activate: () => { owner.active = true; },
     activateStandaloneDraft: (key, draft) => {
@@ -193,6 +194,7 @@ function makeOwner(standalone = false): OrthoOwner {
       owner.denied = true; owner.clinical = false; owner.contact = false;
       owner.denialSequence++; owner.controller?.abort(); owner.cases = [];
       for (const assessment of owner.assessments.values()) assessment.invalidateRead();
+      for (const upload of owner.uploads.values()) upload.invalidateRead();
       for (const study of owner.studies.values()) study.invalidateRead();
       for (const retention of owner.retentions.values()) retention.invalidateRead();
       owner.clearTimer();
@@ -202,6 +204,7 @@ function makeOwner(standalone = false): OrthoOwner {
     },
     beginRead: (controller) => {
       for (const assessment of owner.assessments.values()) assessment.invalidateRead();
+      for (const upload of owner.uploads.values()) upload.invalidateRead();
       for (const study of owner.studies.values()) study.invalidateRead();
       for (const retention of owner.retentions.values()) retention.invalidateRead();
       owner.controller?.abort();
@@ -213,6 +216,7 @@ function makeOwner(standalone = false): OrthoOwner {
     },
     retireRead: () => {
       for (const assessment of owner.assessments.values()) assessment.invalidateRead();
+      for (const upload of owner.uploads.values()) upload.invalidateRead();
       for (const study of owner.studies.values()) study.invalidateRead();
       for (const retention of owner.retentions.values()) retention.invalidateRead();
       owner.controller?.abort(); owner.readSequence++; owner.clearTimer();
@@ -285,6 +289,8 @@ function retireOwner(owner: OrthoOwner) {
   for (const key of owner.drafts.keys()) disposeDraft(owner, key);
   for (const assessment of owner.assessments.values()) assessment.retire();
   owner.assessments.clear();
+  for (const upload of owner.uploads.values()) upload.retire();
+  owner.uploads.clear();
   for (const study of owner.studies.values()) study.retire();
   for (const retention of owner.retentions.values()) retention.retire();
   owner.studies.clear(); owner.retentions.clear();
@@ -530,7 +536,7 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
   const canLeave = useCallback(() => {
     if (!owner.active) return false;
     const drafts = [...owner.drafts.values()].filter((draft) => draft.active);
-    const assessments = [...owner.assessments.values()];
+    const assessments = [...owner.assessments.values(), ...owner.uploads.values()];
     const records = [...owner.studies.values(), ...owner.retentions.values()];
     if (records.some(record => record.busy || record.uncertain)) return false;
     if (assessments.some(assessment => !assessment.canLeave(() => true))) return false;
@@ -549,7 +555,7 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if ([...owner.studies.values(), ...owner.retentions.values()].some(record => record.needsUnloadWarning())
+      if ([...owner.studies.values(), ...owner.retentions.values(), ...owner.uploads.values()].some(record => record.needsUnloadWarning())
         || [...owner.drafts.entries()].some(([key, draft]) => (key.startsWith("retention-transition:") || key === "assessment-intake" || key.startsWith("treatment-start:")) && (draft.dirty || draft.busy || draft.uncertain))) {
         event.preventDefault(); event.returnValue = "";
       }
@@ -1195,12 +1201,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                           onContinue={() => { const next = assessmentNeighbour(currentSection, 1); if (next) navigateAssessment(next); }} /></div>
                       {/* معرض سجلات الحالة والأشعة المعياري الـ 12 كمنصة WebCeph */}
                       <section hidden={currentSection !== "records"}>
-                        <WebCephRecordsGrid
-                          patientId={patientId}
-                          orthoCaseId={row.id}
-                          currentPhase={row.phase}
-                          startDate={row.startDate ?? undefined}
-                        />
+                        <OwnedRecordsGrid patientId={patientId} caseRow={row} />
                       </section>
 
                       {/* السيفالومتري ومخطط ويب سيف (WebCeph Station) */}
@@ -2445,4 +2446,24 @@ function IntakeCommandForm({patientId,caseRow,onSaved}:{patientId:number;caseRow
   {error&&<p role="alert" className="text-sm text-amber-900">{error}</p>}
   {draft.uncertain&&pending?<button type="button" disabled={draft.busy} className="min-h-11 rounded-lg border px-3" onClick={()=>void save(true)}>التحقق من فتح الحالة أو بدء العلاج بنفس الطلب</button>:<button type="button" disabled={disabled||starting&&caseRow?.status!=="assessment"} className="min-h-11 rounded-lg bg-navy-800 px-4 text-white" onClick={()=>void save(false)}>{starting?"حفظ بدء العلاج على هذه الحالة":"فتح ملف التقييم"}</button>}
  </section>;
+}
+
+/** File drafts and unresolved commands belong to the patient workspace. */
+function OwnedRecordsGrid({ patientId, caseRow }: { patientId: number; caseRow: OrthoCase }) {
+  const parent = useContext(OrthoOwnerContext)!;
+  const session = useSession();
+  const permitted = !!session && (session.role === "admin" || session.role === "reception"
+    || session.role === "doctor" && session.permissions?.canViewXrays === true && session.permissions?.canUploadXrays === true);
+  const [upload] = useState(() => Number.isSafeInteger(session?.id) && session!.id! > 0 ? parent.uploads.get(caseRow.id) ?? makeRecordUploadOwner({
+    patientId, orthoCaseId: caseRow.id, actorId: session!.id!,
+    authorized: () => parent.active && !parent.denied && parent.clinical && parent.cases.some(row => row.id === caseRow.id),
+    writable: () => permitted, deny: () => parent.deny(),
+  }) : null);
+  const [, redraw] = useState(0);
+  useLayoutEffect(() => {
+    if (!upload) return;
+    parent.uploads.set(caseRow.id, upload); upload.activate();
+    return upload.subscribe(() => redraw(value => value + 1));
+  }, [parent, upload, caseRow.id]);
+  return <WebCephRecordsGrid patientId={patientId} orthoCaseId={caseRow.id} currentPhase={caseRow.phase} uploadOwner={upload ?? undefined} />;
 }

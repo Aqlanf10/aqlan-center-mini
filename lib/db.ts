@@ -38,6 +38,7 @@ import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
 import { ORTHO_CASE_JOURNEY_SQL } from './ortho-case-journey-schema';
 import { ORTHO_RETENTION_TRANSITION_SQL } from './ortho-retention-transition-schema';
 import { ORTHO_ASSESSMENT_INTAKE_SQL } from "./ortho-assessment-intake-schema";
+import { ORTHO_RECORD_UPLOADS_SQL } from "./ortho-record-uploads-schema";
 import { ORTHO_FACIAL_ANALYSIS_SQL } from './ortho-facial-analysis-schema';
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
@@ -2130,6 +2131,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0101", name: "ortho_retention_transition", filename: "0101_ortho_retention_transition.sql", sql: ORTHO_RETENTION_TRANSITION_SQL, checksum: checksumOf(ORTHO_RETENTION_TRANSITION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0102", name: "ortho_facial_analysis", filename: "0102_ortho_facial_analysis.sql", sql: ORTHO_FACIAL_ANALYSIS_SQL, checksum: checksumOf(ORTHO_FACIAL_ANALYSIS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0103", name: "ortho_assessment_intake", filename: "0103_ortho_assessment_intake.sql", sql: ORTHO_ASSESSMENT_INTAKE_SQL, checksum: checksumOf(ORTHO_ASSESSMENT_INTAKE_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0104", name: "ortho_record_uploads", filename: "0104_ortho_record_uploads.sql", sql: ORTHO_RECORD_UPLOADS_SQL, checksum: checksumOf(ORTHO_RECORD_UPLOADS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -22620,7 +22622,7 @@ export async function validateDocumentAssociations(
   }
 }
 
-export async function recordDocument(input: {
+export type RecordDocumentInput = {
   patientId: number;
   visitId: number | null;
   kind: DocumentKind;
@@ -22638,29 +22640,33 @@ export async function recordDocument(input: {
   photoView?: string | null;
   width?: number | null;
   height?: number | null;
-}): Promise<PatientDocument> {
+};
+export async function recordDocument(input: RecordDocumentInput): Promise<PatientDocument> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client) => {
-    await validateDocumentAssociations(input, client);
-    const { rows } = await client.query<DocumentRow>(
-      `INSERT INTO patient_documents
-         (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
-          note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view,
-          width, height)
-       VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
-               $12::int, $13::int, $14::text, $15::text, $16::int, $17::int)
-       RETURNING ${DOCUMENT_COLUMNS}`,
-      [
-        input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
-        input.sizeBytes, input.sha256, input.storageKey,
-        input.note?.trim() || null, input.takenOn, input.uploadedBy,
-        input.orthoCaseId ?? null, input.adjustmentId ?? null,
-        input.photoStage ?? null, input.photoView ?? null,
-        input.width ?? null, input.height ?? null,
-      ],
-    );
-    return toDocument(rows[0]);
-  });
+  return withTransaction(getPool(), client => recordDocumentWith(client, input));
+}
+
+/** Canonical writer shared by atomic source-specific upload commands. */
+export async function recordDocumentWith(client: DbClient, input: RecordDocumentInput): Promise<PatientDocument> {
+  await validateDocumentAssociations(input, client);
+  const { rows } = await client.query<DocumentRow>(
+    `INSERT INTO patient_documents
+       (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
+        note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view,
+        width, height)
+     VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
+             $12::int, $13::int, $14::text, $15::text, $16::int, $17::int)
+     RETURNING ${DOCUMENT_COLUMNS}`,
+    [
+      input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
+      input.sizeBytes, input.sha256, input.storageKey,
+      input.note?.trim() || null, input.takenOn, input.uploadedBy,
+      input.orthoCaseId ?? null, input.adjustmentId ?? null,
+      input.photoStage ?? null, input.photoView ?? null,
+      input.width ?? null, input.height ?? null,
+    ],
+  );
+  return toDocument(rows[0]);
 }
 
 /**
