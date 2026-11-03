@@ -1,0 +1,15 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-facial-analysis-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-face
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  18:54:30
+   Duration  14.88s (transform 71ms, setup 0ms, import 578ms, tests 9.94s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

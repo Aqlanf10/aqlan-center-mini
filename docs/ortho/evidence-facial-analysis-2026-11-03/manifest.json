@@ -1,0 +1,59 @@
+{
+  "scope": "Synthetic local checks only. No deployment or whole-unit acceptance.",
+  "codeCommit": "b1a2b917d7e3717bb3ab40f4c39e53ae0692fdea",
+  "buildId": "_gflvs9rens2cncztcmK4",
+  "unitApplicationCommit": "534f1b2121365dc42299b4c28c34040888e2e305",
+  "runtimeGuardUnitAtCodeCommit": true,
+  "files": [
+    {
+      "path": "browser.txt",
+      "sha256": "6890bb4feea1d9b723fd3c9b41be57b5067ca43ce2df918b6a559fc6f143d416",
+      "bytes": 556
+    },
+    {
+      "path": "ceph-operational.txt",
+      "sha256": "9fb372b6acb512b943216158fa8c488537ed930c4dace271ea5cb6b876a0264d",
+      "bytes": 2760
+    },
+    {
+      "path": "facial-saved-1280.png",
+      "sha256": "af98c88b3ed968cfd6d297779905a15639a2946e5513df76f388b9ff4109109a",
+      "bytes": 310693
+    },
+    {
+      "path": "facial-saved-390.png",
+      "sha256": "7b96eb16e5e31541716ce41dc526740eca478f3a9a6c28b66bbc845ce791af58",
+      "bytes": 225235
+    },
+    {
+      "path": "postgres-facial.txt",
+      "sha256": "8367d5e88edb14d7145adbb3ae9bcafa212e307dea2cd38a280d25b576761066",
+      "bytes": 659
+    },
+    {
+      "path": "postgres-schema.txt",
+      "sha256": "3448ac691a8284a08534e6fa2ee6bde6c9a067e209d8fd794425be17ca1cade5",
+      "bytes": 656
+    },
+    {
+      "path": "runtime-tooling.txt",
+      "sha256": "582afcc33f583031390946b9d468420446cb5124c97ad166a56bb555d1ac9a54",
+      "bytes": 137
+    },
+    {
+      "path": "runtime-unit.txt",
+      "sha256": "c212d8e11ac88238a573d1a276690fe6bcbe6f6fbdd86b0c39ccf885add303fc",
+      "bytes": 168
+    },
+    {
+      "path": "runtime.txt",
+      "sha256": "ae79c34cf7487793d8fb74ef9cf163bfbd0ac261b4f01bbb3175da7653f9f06e",
+      "bytes": 108
+    },
+    {
+      "path": "unit.txt",
+      "sha256": "b1870cee4c4d78fd1cf15efb1131d1a4a5e17adee6215dc0d70f2c6717f4bf6c",
+      "bytes": 187
+    }
+  ]
+}
