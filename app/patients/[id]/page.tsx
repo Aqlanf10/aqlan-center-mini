@@ -38,6 +38,7 @@ import { PatientReferrals } from "@/components/PatientReferrals";
 import { PatientCases } from "@/components/PatientCases";
 import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
+import { RadiologyRequests } from "@/components/RadiologyRequests";
 import { SavedPrescriptions } from "@/components/SavedPrescriptions";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
 import { ConsentModal } from "@/components/ConsentModal";
@@ -1057,6 +1058,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         />
       ) : null}
 
+      <RadiologyRequests patientId={patient.id} visitId={typeof checkoutVisitRequest === "number" ? checkoutVisitRequest : undefined} />
       <SavedPrescriptions key={`${patient.id}:${checkoutVisitRequest}`} patientId={patient.id} visitId={typeof checkoutVisitRequest === "number" ? checkoutVisitRequest : undefined} />
 
       <PrescriptionModal
