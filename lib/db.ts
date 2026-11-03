@@ -6504,7 +6504,10 @@ export async function listLabServicesWith(q: Pick<DbClient, "query">, includeIna
 
 export async function getLabService(id: number): Promise<LabService | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return getLabServiceWith(getPool(), id);
+}
+export async function getLabServiceWith(q: Pick<DbClient, "query">, id: number): Promise<LabService | null> {
+  const { rows } = await q.query<{
     id: number; name: string; code: string | null; category: string;
     tooth_scope: string; requires_shade: boolean;
     default_days: number; description: string | null; is_active: boolean;
@@ -12308,7 +12311,10 @@ const toLaboratory = (r: LaboratoryRow): Laboratory => ({
 
 export async function listLaboratories(): Promise<Laboratory[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<LaboratoryRow>(
+  return listLaboratoriesWith(getPool());
+}
+export async function listLaboratoriesWith(q: Pick<DbClient, "query">): Promise<Laboratory[]> {
+  const { rows } = await q.query<LaboratoryRow>(
     `${LAB_LIST_SELECT}
      WHERE p.kind = 'lab'
      GROUP BY p.id
@@ -12319,7 +12325,10 @@ export async function listLaboratories(): Promise<Laboratory[]> {
 
 export async function getLaboratory(id: number): Promise<Laboratory | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<LaboratoryRow>(
+  return getLaboratoryWith(getPool(), id);
+}
+export async function getLaboratoryWith(q: Pick<DbClient, "query">, id: number): Promise<Laboratory | null> {
+  const { rows } = await q.query<LaboratoryRow>(
     `${LAB_LIST_SELECT}
      WHERE p.id = $1 AND p.kind = 'lab'
      GROUP BY p.id`,
@@ -12344,7 +12353,10 @@ export async function createLaboratory(input: {
   customAccountName?: string | null;
 }): Promise<Laboratory> {
   await ensureSchema();
-  const { rows } = await getPool().query<LaboratoryRow>(
+  return createLaboratoryWith(getPool(), input);
+}
+export async function createLaboratoryWith(q: Pick<DbClient, "query">, input: Parameters<typeof createLaboratory>[0]): Promise<Laboratory> {
+  const { rows } = await q.query<LaboratoryRow>(
     `INSERT INTO parties (name, kind, phone, whatsapp, address, contact_person, currency, delivery_days,
                           note, is_active, expense_account_code, payable_account_code, auto_post_journal, custom_account_name)
      VALUES ($1, 'lab', $2::text, $3::text, $4::text, $5::text, $6::text, $7, $8::text, $9, $10, $11, $12, $13::text)
@@ -12386,7 +12398,10 @@ export async function updateLaboratory(id: number, input: {
   customAccountName?: string | null;
 }): Promise<Laboratory | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  return updateLaboratoryWith(getPool(), id, input);
+}
+export async function updateLaboratoryWith(q: Pick<DbClient, "query">, id: number, input: Parameters<typeof updateLaboratory>[1]): Promise<Laboratory | null> {
+  const { rows } = await q.query<{ id: number }>(
     `UPDATE parties SET
        name                 = COALESCE($2::text, name),
        phone                = CASE WHEN $3::boolean THEN $4::text ELSE phone END,
@@ -12421,13 +12436,16 @@ export async function updateLaboratory(id: number, input: {
     ],
   );
   if (!rows[0]) return null;
-  return getLaboratory(id);
+  return getLaboratoryWith(q, id);
 }
 
 /** حذف المختبر: له طلبات؟ يُعطّل ولا يُمحى — سجل الالتزامات المالية فوق رغبة الحذف. */
 export async function deleteLaboratory(id: number): Promise<{ ok: boolean; reason?: string }> {
   await ensureSchema();
-  const pool = getPool();
+  return deleteLaboratoryWith(getPool(), id);
+}
+/** The same inside a caller-owned transaction (M2 slice 70a); the caller locks the party row first. */
+export async function deleteLaboratoryWith(pool: Pick<DbClient, "query">, id: number): Promise<{ ok: boolean; reason?: string }> {
   const { rows: orderCount } = await pool.query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM lab_orders WHERE party_id = $1`,
     [id],

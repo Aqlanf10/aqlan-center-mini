@@ -11,12 +11,35 @@ import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import type { LabServiceCategory, LabToothScope } from "@/lib/lab";
 
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalLabDirectoryRefusal, readCanonicalLabServices } from "@/lib/canonical-lab-directory";
 export const dynamic = "force-dynamic";
+
+const SESSION_ENDED = "انتهت الجلسة. سجّل الدخول من جديد.";
+/** M2 slice 70a: the canonical branch of a lab-directory request — never the legacy session. */
+async function canonicalDirectory(run: (handle: import("@/lib/staff-durable-session").VerifiedDurableSession) => Promise<unknown>, fallback: string, status = 200): Promise<NextResponse | null> {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: SESSION_ENDED }, { status: 401, headers: NO_STORE });
+  if (selected.kind !== "canonical") return null;
+  try {
+    return NextResponse.json(await run(selected.handle), { status, headers: NO_STORE });
+  } catch (error) {
+    if (error instanceof CanonicalLabDirectoryRefusal) return NextResponse.json({ code: error.code, message: error.message, ...(error.field ? { field: error.field } : {}) }, { status: error.status, headers: NO_STORE });
+    return canonicalPatientReadFailure(error, fallback);
+  }
+}
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  {
+    const params = new URL(request.url).searchParams;
+    const includeInactive = params.get("all") === "1" || params.get("includeInactive") === "true";
+    const canonical = await canonicalDirectory(handle => readCanonicalLabServices(handle, { includeInactive }), "تعذّر تحميل دليل خدمات المختبر.");
+    if (canonical) return canonical;
+  }
   const session = await requireSession();
   if (!session) return denied();
 

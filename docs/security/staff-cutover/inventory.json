@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "a6d1e1c9667f4c2fc307d5008cd6eef36f9631eae34bd04def6a360b721d4805",
+  "sourceDigest": "21adf6582a2e511476adb55d836a646d5d8b736b0875d8da9a25995213c8e176",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -53,7 +53,9 @@
     "finance.invoices.create",
     "finance.agreements.manage",
     "clinical.lab.order",
-    "clinical.lab.cancel"
+    "clinical.lab.cancel",
+    "clinical.lab.view",
+    "clinical.laboratories.manage"
   ],
   "summary": {
     "routeMethods": 420,
@@ -429,6 +431,7 @@
     "app/settings/import/page.tsx",
     "app/settings/lab-pricing/page.tsx",
     "app/settings/lab-services/page.tsx",
+    "app/settings/laboratories/layout.tsx",
     "app/settings/laboratories/page.tsx",
     "app/settings/laboratories/services/page.tsx",
     "app/settings/material-rates/page.tsx",
@@ -1851,15 +1854,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 45
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 70
         },
         {
           "symbol": "requireSession",
-          "line": 167
+          "line": 189
         }
       ]
     },
@@ -1872,11 +1875,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 43
         },
         {
           "symbol": "requireSession",
-          "line": 36
+          "line": 59
         }
       ]
     },
@@ -1889,7 +1892,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 45
         },
         {
           "symbol": "revalidateSessionInTransaction",
@@ -1897,7 +1900,7 @@
         },
         {
           "symbol": "revalidateSessionInTransaction",
-          "line": 28
+          "line": 49
         }
       ]
     },
@@ -1910,15 +1913,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 49
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 79
         },
         {
           "symbol": "requireSession",
-          "line": 171
+          "line": 216
         }
       ]
     },
@@ -1931,11 +1934,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 43
         },
         {
           "symbol": "requireSession",
-          "line": 28
+          "line": 60
         }
       ]
     },
@@ -4565,6 +4568,10 @@
     },
     {
       "file": "app/print/layout.tsx",
+      "directHelperEvidence": []
+    },
+    {
+      "file": "app/settings/laboratories/layout.tsx",
       "directHelperEvidence": []
     }
   ],
@@ -8446,11 +8453,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 43
         },
         {
           "symbol": "requireSession",
-          "line": 36
+          "line": 59
         }
       ]
     },
@@ -8472,11 +8479,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 43
         },
         {
           "symbol": "requireSession",
-          "line": 36
+          "line": 59
         }
       ]
     },
@@ -8498,15 +8505,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 45
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 70
         },
         {
           "symbol": "requireSession",
-          "line": 167
+          "line": 189
         }
       ]
     },
@@ -8530,15 +8537,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 45
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 70
         },
         {
           "symbol": "requireSession",
-          "line": 167
+          "line": 189
         }
       ]
     },
@@ -8560,15 +8567,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 45
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 70
         },
         {
           "symbol": "requireSession",
-          "line": 167
+          "line": 189
         }
       ]
     },
@@ -8591,7 +8598,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 45
         },
         {
           "symbol": "revalidateSessionInTransaction",
@@ -8599,7 +8606,7 @@
         },
         {
           "symbol": "revalidateSessionInTransaction",
-          "line": 28
+          "line": 49
         }
       ]
     },
@@ -8623,11 +8630,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 43
         },
         {
           "symbol": "requireSession",
-          "line": 28
+          "line": 60
         }
       ]
     },
@@ -8649,11 +8656,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 43
         },
         {
           "symbol": "requireSession",
-          "line": 28
+          "line": 60
         }
       ]
     },
@@ -8675,15 +8682,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 49
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 79
         },
         {
           "symbol": "requireSession",
-          "line": 171
+          "line": 216
         }
       ]
     },
@@ -8707,15 +8714,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 49
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 79
         },
         {
           "symbol": "requireSession",
-          "line": 171
+          "line": 216
         }
       ]
     },
@@ -8737,15 +8744,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 49
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 79
         },
         {
           "symbol": "requireSession",
-          "line": 171
+          "line": 216
         }
       ]
     },

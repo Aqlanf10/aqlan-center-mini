@@ -171,7 +171,7 @@ it("legacy and canonical envelopes never cross: legacy token refused on canonica
  expect((await refused.json()).message).toMatch(ARABIC);
  expect((await me(legacy)).status).toBe(401);
  // A route that is not canonical yet (M2 map order) refuses the canonical cookie.
- const legacyRoute = await api("/api/laboratories", owner.cookie);
+ const legacyRoute = await api("/api/lab/pricing", owner.cookie);
  expect([401, 403]).toContain(legacyRoute.status);
  // A canonical cookie never falls through to a (valid-looking) Bearer. The tamper
  // always changes a full 6-bit signature character (replacing the final character

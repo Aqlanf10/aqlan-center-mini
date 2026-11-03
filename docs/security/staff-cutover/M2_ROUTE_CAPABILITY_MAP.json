@@ -2372,8 +2372,9 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70a: one owning snapshot under clinical.lab.view; active services by default, all on request. The catalogue carries no prices.",
+  "projection": {"legacy": "every admitted role read the catalogue.", "groups": {"catalogue": "service name, code, category, tooth scope, shade requirement, default days, order counts — every clinical.lab.view holder"}, "rows": "the whole catalogue"}
  },
  {
   "route": "/api/lab/services",
@@ -2425,8 +2426,9 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70a: as GET /api/lab/services for one service.",
+  "projection": {"legacy": "every admitted role read the service.", "groups": {"catalogue": "every clinical.lab.view holder"}, "rows": "one service"}
  },
  {
   "route": "/api/lab/services/[id]",
@@ -2454,8 +2456,9 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70a: one owning snapshot under clinical.lab.order (the legacy route allowed admin/doctor labels); answers whether the lab work-intent schema is installed.",
+  "projection": {"legacy": "admin/doctor role labels.", "groups": {"capability": "supported: boolean — clinical.lab.order holders"}, "rows": "none"}
  },
  {
   "route": "/api/laboratories",
@@ -2470,8 +2473,9 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70a: one owning snapshot under clinical.lab.view; the accounting group (currency, expense/payable accounts, automatic posting, custom account name) only with finance.payables.record (the legacy route showed it to every role).",
+  "projection": {"legacy": "every admitted role read every lab with its accounting configuration.", "groups": {"directory": "name, contact, delivery days, note, active flag, order counts — every clinical.lab.view holder", "accounting": "currency, expense and payable accounts, automatic posting, custom account name — only with finance.payables.record"}, "rows": "every lab (a directory, not patient records)"}
  },
  {
   "route": "/api/laboratories",
@@ -2484,8 +2488,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70a: one admitted clinical.laboratories.manage transaction (the legacy route allowed the admin role label); contact and clinical fields only, the accounting group refused (409 lab_money_not_canonical) — a new lab gets the legacy defaults (YER, 5101/2101, automatic posting); the settings.update audit row commits with the write."
  },
  {
   "route": "/api/laboratories/[id]",
@@ -2498,8 +2502,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70a: one admitted clinical.laboratories.manage transaction; the party row locked; the legacy rule kept (a lab with orders is deactivated, never erased); the audit row commits with the write."
  },
  {
   "route": "/api/laboratories/[id]",
@@ -2514,8 +2518,9 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70a: as GET /api/laboratories for one lab (404 laboratory_not_found).",
+  "projection": {"legacy": "every admitted role read the lab with its accounting configuration.", "groups": {"directory": "every clinical.lab.view holder", "accounting": "only with finance.payables.record"}, "rows": "one lab"}
  },
  {
   "route": "/api/laboratories/[id]",
@@ -2528,8 +2533,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 70a: one admitted clinical.laboratories.manage transaction; the party row locked first; contact and clinical fields only, the accounting group refused (409 lab_money_not_canonical); the audit row (with the changed fields) commits with the write."
  },
  {
   "route": "/api/messages",

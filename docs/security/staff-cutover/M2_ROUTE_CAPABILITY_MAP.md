@@ -618,6 +618,20 @@ The read-only patient panel clears stale or failed responses and has no action o
   - Legacy suites `lab-prescription-completion`, `lab-shade-persistence`, `auto-lab-doctor-attribution`, `lab-work-intent-lifecycle` (PG 60) and the five route/write unit files (72): unchanged and passing.
   - Built journey `canonical-lab-corrections-journey` (2, portOffset 112).
 
+### Slice 70a — laboratory directory, services catalogue reads, work-intent capability
+- **Reads:** one owning snapshot under `clinical.lab.view`, covering `GET /api/laboratories(/[id])` and `GET /api/lab/services(/[id])`. Labs and services are directories, not patient records.
+  - The lab's accounting group (currency, expense/payable accounts, automatic posting, custom account name) is added only with `finance.payables.record`; the legacy route showed it to every role.
+  - The services catalogue carries no prices.
+- **Writes:** `POST /api/laboratories`, `PATCH/DELETE /api/laboratories/[id]`, each one admitted `clinical.laboratories.manage` transaction; the legacy route checked the admin role label.
+  - Contact and clinical fields only. The accounting group is refused (409 `lab_money_not_canonical`); a new lab gets the legacy defaults.
+  - The party row is locked before a change, and the `settings.update` audit row commits with the write.
+  - Delete keeps the legacy rule: a lab with orders is deactivated, never erased.
+- **Capability:** `GET /api/lab/work-intents/capability` under `clinical.lab.order`; the legacy route checked admin/doctor labels.
+- **Runtime actions added:** `clinical.lab.view` and `clinical.laboratories.manage`.
+- **Screen:** `/settings/laboratories` is registered for `clinical.laboratories.manage`. Its layout mounts `CanonicalLaboratoriesDirectory` on the exact path (list, add, edit, deactivate/delete with confirmation). The entry journey's not-yet-canonical example is now `/api/lab/pricing`.
+- **Not in 70a:** services writes and pricing (`finance.lab-prices.edit`, seven methods). They are slice 70b; the legacy pricing read shows cost prices to every role, which is an owner decision point.
+- **Tests:** PG `lab-canonical-directory` (5), including concurrent changes that both land and are both audited; built journey `canonical-lab-directory-journey` (2, portOffset 114).
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 
