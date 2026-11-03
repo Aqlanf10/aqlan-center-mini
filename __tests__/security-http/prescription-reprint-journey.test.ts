@@ -271,12 +271,14 @@ it.each(['amoxicillin','ibuprofen'] as const)('built %s dose-profile picker issu
     expect(Number(paper![2])).toBeGreaterThan(417); expect(Number(paper![2])).toBeLessThan(423);
     const normalize = (value: string) => value.normalize('NFKC').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim();
     const pdfText = normalize(execFileSync('pdftotext', ['-raw', pdfPath, '-'], { encoding: 'utf8' }));
-    for (const value of [items[0].name, items[0].dose, amount, items[0].frequency, items[0].duration, items[0].instructionsEn, 'Physician', 'Signature & Stamp', `Rx #${saved.id}`, '04-253028']) {
+    for (const value of [items[0].name, items[0].dose, ...(ibu ? ['7.5 mL', '150 mg'] : ['4 mL', '200 mg']), items[0].frequency, items[0].duration, items[0].instructionsEn, 'Physician', 'Signature & Stamp', `Rx #${saved.id}`, '04-253028']) {
       expect(pdfText).toContain(normalize(value));
     }
     // Arabic PDF text extraction reorders bidi words; preserve its complete
     // saved source in the rendered page, and require Arabic glyphs in the PDF.
     const renderedText = normalize(await receptionPage.locator('body').innerText());
+    // Parenthesis order in PDF extraction is bidi-dependent; DOM retains exact amount.
+    expect(renderedText).toContain(normalize(amount));
     expect(renderedText).toContain(normalize(items[0].instructions));
     expect(renderedText).toContain(normalize(before.prescribing_doctor_name));
     expect(pdfText).toMatch(/[\u0600-\u06ff]/);

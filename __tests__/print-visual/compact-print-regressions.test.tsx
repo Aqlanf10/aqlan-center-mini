@@ -142,11 +142,14 @@ describe("native compact print regression witnesses", () => {
         }
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
-        const references = rxFixture.historicalIbuprofen ? ["Ibuprofen", "100 mg/5 mL", "7.5 mL (150 mg)", "3 times daily; at least 8 hours apart", "5 days", historicalIbuprofenItem.instructionsEn, "Signature & Stamp", "Physician", SETTING_DEFAULTS["clinic.phone"]] : rxFixture.calculated ? [rxFixture.ibuprofen?"Ibuprofen":"Amoxicillin", rxFixture.ibuprofen?"100 mg/5 mL":"250 mg/5 mL", rxFixture.ibuprofen?"7.5 mL (150 mg)":"4 mL (200 mg)", rxFixture.ibuprofen?"3 times daily":"Every 8 hours", ...(rxFixture.ibuprofen?["at least 8 hours apart","Preferably after food."]:[]), "5 days", "SYN-CALCULATED-PLAN", "SYN-CALCULATED-END", "SYN-SAVED-CLINICIAN"] : kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
+        const references = rxFixture.historicalIbuprofen ? ["Ibuprofen", "100 mg/5 mL", "7.5 mL", "150 mg", "3 times daily; at least 8 hours apart", "5 days", historicalIbuprofenItem.instructionsEn, "Signature & Stamp", "Physician", SETTING_DEFAULTS["clinic.phone"]] : rxFixture.calculated ? [rxFixture.ibuprofen?"Ibuprofen":"Amoxicillin", rxFixture.ibuprofen?"100 mg/5 mL":"250 mg/5 mL", rxFixture.ibuprofen?"7.5 mL (150 mg)":"4 mL (200 mg)", rxFixture.ibuprofen?"3 times daily":"Every 8 hours", ...(rxFixture.ibuprofen?["at least 8 hours apart","Preferably after food."]:[]), "5 days", "SYN-CALCULATED-PLAN", "SYN-CALCULATED-END", "SYN-SAVED-CLINICIAN"] : kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
           ? ["SYN-RX-PATIENT", "SYN-RX-001", ...(rxFixture.long ? Array.from({ length: 20 }, (_, index) => `SYN-MED-${String(index + 1).padStart(2, "0")}`) : ["SYNTHETIC-RX-MEDICATION"]), "SYN-AMOUNT", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", "SYN-SAVED-CLINICIAN", "SYN-SAVED-DIAGNOSIS"]
           : ["SYN-PROV-ORIGINAL-BHGFBCDEFABCD", "SYN-REV-00002", "SYN-REP-00003"];
         for (const reference of references) expect(rxFixture.calculated || rxFixture.historicalIbuprofen ? text.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").replace(/\s+/g, " ") : text).toContain(reference);
         if (rxFixture.historicalIbuprofen) {
+          // PDF bidi extraction may move the closing parenthesis before Dose.
+          // Preserve the exact complete clinical amount in the rendered source.
+          expect(body).toContain(historicalIbuprofenItem.selection.amount);
           expect(body).toContain(historicalIbuprofenItem.instructions);
           expect(body).toContain(historicalIbuprofenItem.instructionsEn);
           expect(body).toContain("طبيب الأمن أ");
