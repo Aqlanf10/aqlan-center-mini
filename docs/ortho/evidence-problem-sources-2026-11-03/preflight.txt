@@ -1,0 +1,5 @@
+> aqlan-center@0.1.0 build:preflight
+> node --import tsx scripts/build-preflight.ts && node .preflight/runner/run.mjs --help
+
+Preflight artifact built: 76 immutable migration assets; Node 22.
+db:preflight: explicit DATABASE_URL, plus DATABASE_ENVIRONMENT for remote targets. JSON only; no writes. Optional --purchase-receipts-readiness: bounded source-derived 0065 catalog shape only, not operational availability. Optional --fingerprint-drilldown: compact 64-bucket summary for columns/constraints/internalTriggers; --fingerprint-drilldown=SECTION:00 through :3f selects one bucket. Unknown identities/text withheld; hashes are not encryption. Optional stdout is limited to 48 KiB. Exit 0 = evidence collected, 1 = incomplete/failed. Registry status is separate from adoption readiness.

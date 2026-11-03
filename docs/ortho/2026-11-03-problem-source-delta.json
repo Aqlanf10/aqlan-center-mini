@@ -1,0 +1,305 @@
+{
+  "source": {
+    "library_file_id": "libfile_3264db5ea3248191b1703154440d7912",
+    "sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+    "bytes": 126204,
+    "lines": 624,
+    "hash_verified": true
+  },
+  "baseCommit": "3b539c9cbbc403f012262c1f6edc291ff9a8b0cd",
+  "codeCommit": "c5210f80aa8b322d6cb26600d44dc14a57865ddd",
+  "full_plan_accepted": false,
+  "scope": "Phase 10 source review -> canonical problem -> existing strategy; limited connected service journey and browser workflow",
+  "requirements": [
+    {
+      "id": "V2R093",
+      "source_line": 93,
+      "section": "ب. تجربة الاستخدام المستهدفة",
+      "requirement": "| 8 | خلاصة التشخيص وقائمة المشكلات | تجميع الملاحظات والقياسات والتحليلات والصور مع مصادرها، ثم مراجعة الطبيب وصياغة التشخيص واعتماده |",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P1",
+      "inspection_targets": [
+        "components/PatientOrtho.tsx",
+        "components/OrthoCaseStudy.tsx"
+      ],
+      "verified_evidence": [
+        "__tests__/postgres/ortho-problem-sources.test.ts",
+        "__tests__/security-http/ortho-problem-sources-browser.test.ts"
+      ],
+      "assessment": "قائمة مشكلة واحدة بمصادرها ومراجعتها، دون إعادة كتابة المشكلة في الخطة. لا يغطي جميع حقول التشخيص والمشاكل المركبة.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R094",
+      "source_line": 94,
+      "section": "ب. تجربة الاستخدام المستهدفة",
+      "requirement": "| 9 | الأهداف وخطة العلاج والميكانيكا | أهداف وبدائل وإجراءات واستراتيجيات وإرساء وخطة مسافات وموافقات مرتبطة بالمشكلات |",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P1",
+      "inspection_targets": [
+        "components/PatientOrtho.tsx",
+        "components/OrthoCaseStudy.tsx"
+      ],
+      "verified_evidence": [
+        "__tests__/security-http/ortho-problem-sources-browser.test.ts"
+      ],
+      "assessment": "حفظ هدف واستراتيجية بمعرف المشكلة نفسه من واجهة الخطة. البدائل والإرساء وخطة المسافات المنظمة ليست قبولاً لهذه المرحلة.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R103",
+      "source_line": 103,
+      "section": "ب. تجربة الاستخدام المستهدفة",
+      "requirement": "- المرحلة التالية تستفيد من بيانات السابقة تلقائيًا. لكل قيمة وصورة ونتيجة مالك واحد، ويُفتح مصدرها للتعديل من الملخص أو العرض.",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P1",
+      "inspection_targets": [
+        "components/PatientOrtho.tsx",
+        "components/OrthoCaseStudy.tsx"
+      ],
+      "verified_evidence": [
+        "lib/ortho-problem-source-candidates.ts",
+        "__tests__/security-http/ortho-problem-sources-browser.test.ts"
+      ],
+      "assessment": "تعاد قراءة مصادر الحالة المحفوظة ويعاد استخدام معرف المشكلة؛ تعديل كل مصدر مباشرة من الملخص غير مكتمل.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R142",
+      "source_line": 142,
+      "section": "ج. مصدر واحد للحقيقة ونموذج البيانات",
+      "requirement": "| المشكلة والهدف | كيانات قابلة للربط بخطة العلاج الأصلية | مشكلة واحدة قد ترتبط بعدة أهداف وإجراءات؛ لا نسخ منفصلة غير متزامنة |",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P0",
+      "inspection_targets": [
+        "lib/ortho-case-journey-authority.ts",
+        "lib/ortho-case-study-store.ts",
+        "lib/ortho-retention-event-store.ts"
+      ],
+      "verified_evidence": [
+        "lib/ortho-problem-source-candidates.ts",
+        "__tests__/postgres/ortho-problem-sources.test.ts"
+      ],
+      "assessment": "تعاد الاستفادة من معرف المشكلة الأصلي في الاستراتيجية، ويمكن ربط عدة مصادر بمشكلة واحدة دون نسخها. لم يثبت ربط كل إجراء علاجي وأهداف متعددة بها في رحلة متصفح كاملة.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R160",
+      "source_line": 160,
+      "section": "ج. مصدر واحد للحقيقة ونموذج البيانات",
+      "requirement": "- قواعد التزامن في الخادم والمعاملة وقاعدة البيانات: مفاتيح تكرار للإنشاء، فحص الإصدار عند التعديل، وتعارض واضح عند تعديل طبيبين السجل نفسه. لا يكفي تعطيل الزر في المتصفح.",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P0",
+      "inspection_targets": [
+        "lib/ortho-case-journey-authority.ts",
+        "lib/ortho-case-study-store.ts",
+        "lib/ortho-retention-event-store.ts"
+      ],
+      "verified_evidence": [
+        "__tests__/postgres/ortho-problem-sources.test.ts",
+        "__tests__/security-http/ortho-problem-sources-browser.test.ts"
+      ],
+      "assessment": "تحققت إعادة الطلب نفسه وفقد إيصال الحفظ وسباق مراجعتين وتعارض تبويب قديم وتزامن الكاتب السريري الفعلي؛ القبول يخص المسار الجديد ولا يثبت كل سجلات الوحدة.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R226",
+      "source_line": 226,
+      "section": "ز. تحليل الموديلات والمساحة",
+      "requirement": "9. تتغذى قائمة المشكلات وخطة المسافات وجدول العرض تلقائيًا من نتائج التحليل المختار بإصداره؛ الطبيب يراجع الاستنتاج السريري، ولا ينقل الأرقام يدويًا بين الشاشات.",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P1",
+      "inspection_targets": [
+        "lib/ortho-assessment-v2.ts",
+        "components/OrthoCaseAssessmentV2.tsx"
+      ],
+      "verified_evidence": [
+        "__tests__/security-http/ortho-problem-sources-browser.test.ts"
+      ],
+      "assessment": "تُقرأ نتائج التحليل المحفوظة بإصدارها وملاحظاتها التابعة دون إعادة إدخال أرقامها؛ يراجع الطبيب الاستنتاج ويربطه بالمشكلة. خطة المسافات المنظمة وتغذية سجل المصادر في التصدير ما زالت ناقصة.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R283",
+      "source_line": 283,
+      "section": "ط. تسجيل الزيارة اليومية",
+      "requirement": "6. ما تغير في المشكلة أو الهدف، والخطوة التالية، والفترة/التاريخ المطلوب للمراجعة. الحجز الفعلي منفصل ويُربط بالنية الصحيحة للمتابعة.",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P1",
+      "inspection_targets": [
+        "components/PatientOrtho.tsx",
+        "__tests__/postgres/visit-flow-ortho-attach.test.ts"
+      ],
+      "verified_evidence": [
+        "__tests__/postgres/ortho-problem-sources.test.ts"
+      ],
+      "assessment": "اختبار خدمة يربط المشكلة بالخطة ثم يسجل زيارة في حالة واحدة. لا يثبت ربط إجراء الزيارة بهدف ولا إنشاء الحجز من كل مدخل.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R418",
+      "source_line": 418,
+      "section": "ل. مولّد Case Presentation",
+      "requirement": "| A19–A20 | جدول Problem List / Treatment Plan / Strategies | روابط المشاكل والخطة والاستراتيجيات |",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P1",
+      "inspection_targets": [
+        "components/OrthoCaseStudy.tsx",
+        "lib/ortho-study-text-export.ts"
+      ],
+      "verified_evidence": [
+        "__tests__/postgres/ortho-problem-sources.test.ts",
+        "lib/ortho-case-study.ts"
+      ],
+      "assessment": "الدراسة تختار نسخة الاستراتيجية التي تحمل معرف المشكلة، لكن سجل مراجعة مصادر المشكلة ليس مصدر دراسة مستقلاً ولا يثبت اكتمال التصدير.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R459",
+      "source_line": 459,
+      "section": "ل. مولّد Case Presentation",
+      "requirement": "| 8 | قائمة المشكلات والتشخيص والأهداف | نسخة التشخيص والخطة المختارة |",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P1",
+      "inspection_targets": [
+        "components/OrthoCaseStudy.tsx",
+        "lib/ortho-study-text-export.ts"
+      ],
+      "verified_evidence": [
+        "__tests__/postgres/ortho-problem-sources.test.ts"
+      ],
+      "assessment": "اختيرت نسخ التقييم والخطة والإجراء والتثبيت في دراسة موثقة باختبار خدمة. سجل المصادر الجديد والتصدير المصور الكامل لم يتحققا.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R460",
+      "source_line": 460,
+      "section": "ل. مولّد Case Presentation",
+      "requirement": "| 9 | Problem / Treatment Plan / Strategies | روابط المشكلات والأهداف وخطة الميكانيكا |",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P1",
+      "inspection_targets": [
+        "components/OrthoCaseStudy.tsx",
+        "lib/ortho-study-text-export.ts"
+      ],
+      "verified_evidence": [
+        "__tests__/postgres/ortho-problem-sources.test.ts"
+      ],
+      "assessment": "معرف المشكلة معاد الاستخدام في الاستراتيجية والدراسة. قبول لوحة التصدير بكل المصادر والميكانيكا ما زال ناقصاً.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R502",
+      "source_line": 502,
+      "section": "ن. الاستضافة وStaging",
+      "requirement": "4. شغّل ترحيلات PostgreSQL الحقيقية على نسخة اختبار لها مخطط ممثل، واختبر الاستيراد والعودة الآمنة واستعادة النسخة الاحتياطية. نجاح PGlite وحده لا يكفي لتغييرات القيود والتزامن.",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P0",
+      "inspection_targets": [
+        "docs/ortho/2026-11-03-integration-review.md"
+      ],
+      "verified_evidence": [
+        "__tests__/postgres/ortho-problem-sources-migration.test.ts",
+        "__tests__/postgres/ortho-problem-sources-restore.test.ts"
+      ],
+      "assessment": "اختبارات PostgreSQL 18.6 تشمل ترقية 0104 وإرجاع الترحيل المتعارض واستعادة SQL والأرشيف بمراجعات فعلية. لا إثبات استيجنج أو ترقية بيانات إنتاج.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R596",
+      "source_line": 596,
+      "section": "ف. ما يجب تسليمه داخل المستودع",
+      "requirement": "5. عقود API والتحقق والصلاحيات وحالات الأخطاء والتزامن، لا مواصفات شاشة وحدها.",
+      "status": "موجود لكنه غير مترابط",
+      "priority": "P1",
+      "inspection_targets": [
+        "docs/ortho/2026-11-03-integration-review.md"
+      ],
+      "verified_evidence": [
+        "__tests__/ortho-problem-sources.test.ts",
+        "__tests__/postgres/ortho-problem-sources.test.ts",
+        "__tests__/security-http/ortho-problem-sources-browser.test.ts"
+      ],
+      "assessment": "عقود وصلاحيات API وتبويب قديم وسباق مراجعات وتزامن الكاتب السريري وفشل التدقيق وإعادة الطلب المفقود تحققت في المسار الجديد فقط.",
+      "evidence": [
+        "2026-11-03-problem-source-integration.md"
+      ],
+      "full_requirement_accepted": false
+    }
+  ],
+  "explicit_request_checks": [
+    {
+      "check": "clinical, assessment measurements/results, panoramic and saved ceph interpretation selectable from exact case",
+      "status": "موجود ومتحقق",
+      "evidence": "__tests__/postgres/ortho-problem-sources.test.ts"
+    },
+    {
+      "check": "one shared problem reused by multiple sources and strategy, shown once",
+      "status": "موجود ومتحقق",
+      "evidence": "__tests__/security-http/ortho-problem-sources-browser.test.ts"
+    },
+    {
+      "check": "numeric source never becomes automatic final diagnosis",
+      "status": "موجود ومتحقق",
+      "evidence": "__tests__/security-http/ortho-problem-sources-browser.test.ts"
+    },
+    {
+      "check": "changed source preserves approved text and requires explicit new-version review",
+      "status": "موجود ومتحقق",
+      "evidence": "__tests__/postgres/ortho-problem-sources.test.ts"
+    },
+    {
+      "check": "lost acknowledgements, concurrent/stale review, revoked authority and audit rollback",
+      "status": "موجود ومتحقق",
+      "evidence": "__tests__/postgres/ortho-problem-sources.test.ts; __tests__/security-http/ortho-problem-sources-browser.test.ts"
+    },
+    {
+      "check": "problem-source history selected as independent source in study and exports",
+      "status": "ناقص",
+      "evidence": "lib/ortho-case-study.ts STUDY_SOURCE_KINDS"
+    },
+    {
+      "check": "full browser visit to retention to illustrated case presentation",
+      "status": "غير متحقق",
+      "evidence": "PostgreSQL service journey covers selected stages only"
+    },
+    {
+      "check": "multiple problems from one source, splitting, merging and correcting an unchanged-source link",
+      "status": "ناقص",
+      "evidence": "migrations/0105_ortho_problem_sources.sql"
+    }
+  ]
+}

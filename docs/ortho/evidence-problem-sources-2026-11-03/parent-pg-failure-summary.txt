@@ -1,0 +1,8 @@
+2026-11-03T21:49:13.3047950Z  FAIL  __tests__/postgres/schema-fingerprint.test.ts > reproduces the reviewed policy solely from fresh numbered/runtime source schemas
+2026-11-03T21:49:13.3049609Z AssertionError: expected { …(3) } to deeply equal { …(3) }
+2026-11-03T21:49:13.4146038Z  FAIL  __tests__/postgres/schema-fingerprint.test.ts > cannot learn a private template1 object, and rejects a nonempty builder target
+2026-11-03T21:49:13.4147023Z AssertionError: expected { …(3) } to deeply equal { …(3) }
+2026-11-03T21:49:13.4558320Z  Test Files  1 failed | 321 passed (322)
+2026-11-03T21:49:13.4558768Z       Tests  2 failed | 3742 passed (3744)
+2026-11-03T21:49:13.4870135Z ##[error]AssertionError: expected { …(3) } to deeply equal { …(3) }
+2026-11-03T21:49:13.5162473Z ##[error]AssertionError: expected { …(3) } to deeply equal { …(3) }

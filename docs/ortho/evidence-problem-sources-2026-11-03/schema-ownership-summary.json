@@ -1,0 +1,12 @@
+{
+  "summary": {
+    "applicationSchemaEqual": false,
+    "characterizationOk": true,
+    "knownDifferences": 0,
+    "openConvergenceFindings": 16,
+    "unexpectedDifferences": 0,
+    "openFindingsManifestMatch": true
+  },
+  "sourceRecordedHead": "3b539c9cbbc403f012262c1f6edc291ff9a8b0cd",
+  "note": "Operational characterization was taken with phase10 worktree changes before final deferred-FK refinement. Final schema-fingerprint and schema-ownership tests passed together in postgres-acceptance.txt. Do not read the recorded parent SHA as a clean-checkout measurement."
+}

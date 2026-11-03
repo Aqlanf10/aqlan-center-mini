@@ -1,0 +1,55 @@
+/workspace/ortho-panorama-flow/components/PatientOrtho.tsx
+   337:51  warning  React Hook useMemo has unnecessary dependencies: 'authority', 'caseId', and 'patientId'. Either exclude them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   react-hooks/exhaustive-deps
+   340:48  warning  React Hook useMemo has unnecessary dependencies: 'draft' and 'owner'. Either exclude them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      react-hooks/exhaustive-deps
+   639:44  warning  React Hook useMemo has unnecessary dependencies: 'authority' and 'patientId'. Either exclude them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              react-hooks/exhaustive-deps
+   771:21  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-panorama-flow/components/PatientOrtho.tsx:771:21
+  769 |   }, [owner, patientId, readUsername, readRole, deny]);
+  770 |
+> 771 |   useEffect(() => { load(); }, [load]);
+      |                     ^^^^ Avoid calling setState() directly within an effect
+  772 |
+  773 |   const refreshAfterConfirmedChange = () => {
+  774 |     if (!owner.active || owner.denied) return;                                                                                                                                                                                                                                                                                                                         react-hooks/set-state-in-effect
+  1567:54  warning  React Hook useMemo has unnecessary dependencies: 'booking' and 'form.draft'. Either exclude them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               react-hooks/exhaustive-deps
+  2170:26  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-panorama-flow/components/PatientOrtho.tsx:2170:26
+  2168 |   }, [patientId, orthoCaseId]);
+  2169 |
+> 2170 |   useEffect(() => { void load(); }, [load]);
+       |                          ^^^^ Avoid calling setState() directly within an effect
+  2171 |
+  2172 |   const columns = useMemo(() => buildComparison(photos), [photos]);
+  2173 |   const withPhotos = columns.filter((column) => column.count > 0);                                                                                                                                                                                                                                                                                     react-hooks/set-state-in-effect
+  2513:60  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-panorama-flow/components/PatientOrtho.tsx:2513:60
+  2511 |     if (kind === "study") {
+  2512 |       const owner = parent.studies.get(caseId) ?? makeStudyMountOwner({ ...shared, recovery: parent.studyRecovery });
+> 2513 |       parent.studies.set(caseId, owner); owner.activate(); setBinding(owner);
+       |                                                            ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  2514 |     } else {
+  2515 |       const owner = parent.retentions.get(caseId) ?? makeRetentionMountOwner({ ...shared, recovery: parent.retentionRecovery });
+  2516 |       parent.retentions.set(caseId, owner); owner.activate(); setBinding(owner);  react-hooks/set-state-in-effect
+
+✖ 7 problems (0 errors, 7 warnings)

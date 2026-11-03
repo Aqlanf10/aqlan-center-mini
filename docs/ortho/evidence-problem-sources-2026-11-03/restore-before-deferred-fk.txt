@@ -1,0 +1,23 @@
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-problem-sources-restore.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-problem-sources-restore.test.ts (2 tests | 1 failed) 12890ms
+   × restores populated source lineage and exact original command after newer review using sql 1487ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-problem-sources-restore.test.ts > restores populated source lineage and exact original command after newer review using sql
+Error: Command failed: /workspace/.cloud-tools/node_modules/node/bin/node scripts/restore.mjs /tmp/ortho-problem-restore-61QwN3/backup.sql
+فشلت الاستعادة: insert or update on table "ortho_problem_source_reviews" violates foreign key constraint "ortho_problem_source_reviews_supersedes_review_id_fkey"
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  21:46:37
+   Duration  16.07s (transform 2.05s, setup 0ms, import 2.51s, tests 12.89s, environment 0ms)

@@ -1,0 +1,105 @@
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/schema-fingerprint.test.ts __tests__/postgres/schema-ownership.test.ts __tests__/postgres/debt-installments-storage.test.ts __tests__/postgres/hr-composed-backup.test.ts __tests__/postgres/prescription-lineage-restore.test.ts __tests__/postgres/periodontal-restore.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+stderr | __tests__/postgres/schema-ownership.test.ts > PG18 schema ownership characterization > preserves legitimate service-specific waiting rows on cold start
+SCHEMA_DIAGNOSTIC_SOURCE_UNVERIFIED: current-schema-contract was not emitted as a complete accepted catalog; original assertion follows.
+
+ ❯ __tests__/postgres/schema-ownership.test.ts (6 tests | 2 failed) 12905ms
+     × builds migrations and ensureSchema independently, compares them, and leaves no generated databases 7875ms
+     × preserves legitimate service-specific waiting rows on cold start 1911ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/schema-ownership.test.ts > PG18 schema ownership characterization > builds migrations and ensureSchema independently, compares them, and leaves no generated databases
+AssertionError: expected [ Array(143) ] to have a length of 142 but got 143
+
+- Expected
++ Received
+
+- 142
++ 143
+
+ ❯ __tests__/postgres/schema-ownership.test.ts:314:40
+    312|       .filter((entry) => entry.table !== "schema_migrations");
+    313|
+    314|     expect(migrationApplicationTables).toHaveLength(143);
+       |                                        ^
+    315|     expect(runtimeApplicationTables).toHaveLength(143);
+    316|     for (const catalog of [migrationApplicationTables, runtimeApplicat…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/postgres/schema-ownership.test.ts > PG18 schema ownership characterization > preserves legitimate service-specific waiting rows on cold start
+AssertionError: expected [ …(9) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "committed": "1865",
++     "fresh": "1882",
++     "path": "counts.columns",
++   },
++   {
++     "committed": "2316",
++     "fresh": "2354",
++     "path": "counts.constraints",
++   },
++   {
++     "committed": "463",
++     "fresh": "468",
++     "path": "counts.indexes",
++   },
++   {
++     "committed": "143",
++     "fresh": "144",
++     "path": "counts.tables",
++   },
++   {
++     "committed": "132",
++     "fresh": "137",
++     "path": "counts.triggers",
++   },
++   {
++     "committed": "(غائب)",
++     "fresh": "{\"events\":[\"UPDATE\"],\"timing\":\"AFTER\"}",
++     "path": "tables.clinical_cases.triggers.ortho_problem_source_bridge_scope",
++   },
++   {
++     "committed": "(غائب)",
++     "fresh": "{\"events\":[\"UPDATE\"],\"timing\":\"AFTER\"}",
++     "path": "tables.ortho_cases.triggers.ortho_problem_source_case_scope",
++   },
++   {
++     "committed": "(غائب)",
++     "fresh": "{\"checks\":[\"ortho_problem_source_reviews_command_id_check\",\"ortho_problem_source_reviews_problem_label_check\",\"ortho_problem_source_reviews_reason_check\",\"ortho…",
++     "path": "tables.ortho_problem_source_reviews",
++   },
++   {
++     "committed": "(غائب)",
++     "fresh": "{\"events\":[\"UPDATE\"],\"timing\":\"AFTER\"}",
++     "path": "tables.patient_problems.triggers.ortho_problem_source_problem_scope",
++   },
++ ]
+
+ ❯ __tests__/postgres/schema-ownership.test.ts:566:87
+    564|     const { value: generatedContract, postgresVersionNum } = generated…
+    565|     try {
+    566|       expect(structuralDiffs(committedContract as SchemaContract, gene…
+       |                                                                                       ^
+    567|     } catch (comparisonFailure) {
+    568|       try { await emitSourceCandidate(generatedContract, postgresVersi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  2 failed | 35 passed (37)
+   Start at  21:38:02
+   Duration  85.06s (transform 3.02s, setup 0ms, import 3.02s, tests 80.42s, environment 1ms)

@@ -1,0 +1,40 @@
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-workup-browser.test.ts __tests__/security-http/ortho-guided-assessment-browser.test.ts __tests__/security-http/ortho-record-upload-browser.test.ts __tests__/security-http/ortho-retention-transition-browser.test.ts __tests__/security-http/ortho-case-navigation-browser.test.ts __tests__/security-http/patient-ortho-navigation-ui.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-case-navigation-browser.test.ts (2 tests | 2 failed) 6533ms
+     × opens the same case from the board and preserves partial reviews at 390px 2857ms
+     × opens the same case from the board and preserves partial reviews at 1280px 2905ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-case-navigation-browser.test.ts > case-oriented diagnostic sections and incremental saved evidence > opens the same case from the board and preserves partial reviews at 390px
+ FAIL  __tests__/security-http/ortho-case-navigation-browser.test.ts > case-oriented diagnostic sections and incremental saved evidence > opens the same case from the board and preserves partial reviews at 1280px
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ __tests__/security-http/ortho-case-navigation-browser.test.ts:51:78
+     49|       expect(await chief.isVisible()).toBe(false);
+     50|       await page.getByRole("button", { name: "الصور والأشعة", exact: t…
+     51|       expect(await page.getByTestId("ortho-case-assessment-v2").isVisi…
+       |                                                                              ^
+     52|       await page.getByRole("button", { name: "المقابلة والتاريخ", exac…
+     53|       expect(await chief.inputValue()).toBe("شكوى اصطناعية محفوظة على …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  2 failed | 24 passed (26)
+   Start at  21:44:40
+   Duration  86.25s (transform 177ms, setup 0ms, import 712ms, tests 79.43s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

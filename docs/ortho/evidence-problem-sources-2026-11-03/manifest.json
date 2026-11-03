@@ -1,0 +1,347 @@
+{
+  "scope": "Phase10 reviewed source to canonical problem to strategy; synthetic service journey and selected browser journeys only. Not full module, all 52 scenarios, staging or production acceptance.",
+  "codeCommit": "c5210f80aa8b322d6cb26600d44dc14a57865ddd",
+  "parentCommit": "3b539c9cbbc403f012262c1f6edc291ff9a8b0cd",
+  "branch": "feat/ortho-problem-sources-20261103",
+  "buildId": "vY7MEUmCXU_3dDf6vhPxj",
+  "node": "22.23.3",
+  "npm": "11.21.1",
+  "postgres": "18.6",
+  "generated_at_utc": "2026-11-03T22:05:37.369798+00:00",
+  "tests": {
+    "unit": {
+      "files": 819,
+      "passed": 13993
+    },
+    "postgres": {
+      "files": 12,
+      "passed": 67
+    },
+    "http_browser": {
+      "files": 9,
+      "passed": 39
+    },
+    "runtime_braces": {
+      "files": 9428,
+      "traces": 373
+    },
+    "runtime_tooling": {
+      "traces": 743,
+      "manifests": 86
+    }
+  },
+  "evidenceNotes": [
+    "Application sources were built and tested in the worktree then committed unchanged as codeCommit. The stable full unit suite ran without source edits; focused final PostgreSQL and browser suites use final source hashes.",
+    "The prior full unit run imported the old runtime SQL mirror before the deferred-FK edit and later read the new migration file. Its one mismatch is retained; the stable whole suite supersedes it.",
+    "SQL restore of reverse physical review order failed before the self-reference became DEFERRABLE INITIALLY DEFERRED; both SQL and archive restore now pass.",
+    "Previous navigation expectations hid the assessment in records; records now legitimately contains panoramic assessment. Updated test asserts panoramic visible and chief complaint absent.",
+    "Two historical parent CI schema-fingerprint failures stem from pre-0104 disclosure fingerprints; new source-derived policy is verified locally. Historical CI remains failed.",
+    "Whole-repository lint precedes final focused refinements; the final targeted lint and application build check changed implementation. Full lint has 0 errors and 354 warnings, targeted lint 0 errors and 7 existing PatientOrtho warnings.",
+    "No patient reference slide, identity, image or measurement is included. Screenshots and journey records are synthetic.",
+    "Committed text logs normalize ANSI colors and trailing whitespace; raw_sha256 identifies each original where recorded."
+  ],
+  "referenceSources": {
+    "allysa": {
+      "sha256": "9f71c119fd4fd0cfe12a8e65284900687293863910379a606b64eba9b626febd",
+      "bytes": 9556108,
+      "slidesVisuallyInspected": 43
+    },
+    "approvedPlan": {
+      "sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+      "acceptanceScenarios": 52,
+      "allAccepted": false
+    }
+  },
+  "files": [
+    {
+      "path": "unit-stable.txt",
+      "sha256": "ee63ad40010cedb8dd5dc5f16e984b871911256d55eaa420009869eb368f5bd1",
+      "bytes": 435,
+      "raw_sha256": "3dcf7336d5fbcec357b549650eb99f97b5393dabe9b1bfebec4c81493b7a9c61"
+    },
+    {
+      "path": "unit-focused.txt",
+      "sha256": "965c5a1ef742465fe602b4cc0cbdc0c8f019180733674d97c075a1a5bd4a2eca",
+      "bytes": 453,
+      "raw_sha256": "557d93567065f02a1400bf389aa86ff08a1bfb84164e3b493e9ac14fb330a8e0"
+    },
+    {
+      "path": "postgres-acceptance.txt",
+      "sha256": "14bfb56d4fb796505050379c3cac51d44791788f49a51366151355026544f007",
+      "bytes": 1044,
+      "raw_sha256": "024afa304b7291bf42ab7a1b77d4c8851dd38c2668117dcfd8490af8238977ee"
+    },
+    {
+      "path": "browser-acceptance.txt",
+      "sha256": "1227d853b86e448f39b51ce140001f3984dbf3a293ffd26f33e62c07f77dfc77",
+      "bytes": 1054,
+      "raw_sha256": "5cd5de07d15b10e78723764fd1405a143bc216edc544a347042f86d5de5ab259"
+    },
+    {
+      "path": "typecheck.txt",
+      "sha256": "8751ee6efb4a81e87d5dd4c5a9781a393fefa63b3f4324ba036fbe8676dc4a27",
+      "bytes": 46,
+      "raw_sha256": "494c5900ca50ac372426c03ff676bd53571e0b70b3e4fe8eed6ce84138fd526d"
+    },
+    {
+      "path": "lint-targeted.txt",
+      "sha256": "58b466c2bf2c3248e764c13557559f67b0fef8411ae1b0e802997f72623344d1",
+      "bytes": 10176,
+      "raw_sha256": "e3e29951d9df42c3a46458f20d47550b9b74b67cd1265e1df46d4e29f4cdf374"
+    },
+    {
+      "path": "build.txt",
+      "sha256": "e6cf4ff2cb4e5fd470ceb077d73c36e01d48e64f9377ccc5a8494d6fc9d95c91",
+      "bytes": 13292,
+      "raw_sha256": "270a0db0a6c7e5b194db908f6a78bdf75439050896f96089a408bfdcd66aca57"
+    },
+    {
+      "path": "preflight.txt",
+      "sha256": "8f90051f5f2a6ad54cdd078cafa3d496a21ed6be809134170ca587e0c5ff6191",
+      "bytes": 788,
+      "raw_sha256": "b3cde5b936a6b5943239c80f48f74762dd2213aff42de9959b8c37577213e696"
+    },
+    {
+      "path": "runtime-braces.txt",
+      "sha256": "8ee948f661309e8451bccba086691acee409fd21ab8b2ed6021b4c871bbc88da",
+      "bytes": 108,
+      "raw_sha256": "8ee948f661309e8451bccba086691acee409fd21ab8b2ed6021b4c871bbc88da"
+    },
+    {
+      "path": "runtime-tooling.txt",
+      "sha256": "06dc50d9c736e90d47c5766985eac49cc7601bce0e623c58932d907042a6ebe3",
+      "bytes": 137,
+      "raw_sha256": "06dc50d9c736e90d47c5766985eac49cc7601bce0e623c58932d907042a6ebe3"
+    },
+    {
+      "path": "unit-before-registry-fixes.txt",
+      "sha256": "a34274c2a758c7cfc137410a3f80398622d78bf4115675aa00bf4ca40ce88a99",
+      "bytes": 3121,
+      "raw_sha256": "9d80ca692c56ac63905edd112bd81d429a4b9c084d90e507d894488bb40ccd60"
+    },
+    {
+      "path": "unit-during-source-change.txt",
+      "sha256": "9cfaa810448ef645637e6844ab56d04db212bd20f442a479c11663c1fd7fed06",
+      "bytes": 2513,
+      "raw_sha256": "812c0aa23e81341d1718ef0e49e32f0ee3c0b61358f69e7ad92dbdd5808310fd"
+    },
+    {
+      "path": "restore-before-deferred-fk.txt",
+      "sha256": "c185f0278addab3b62cb5d561cd086f56e3ce801105e66b9f8c91466b06015ae",
+      "bytes": 1287,
+      "raw_sha256": "3f12307eea2628ec9d314b98bc84656d6d9c13f26f84017517ce32ca49a66018"
+    },
+    {
+      "path": "browser-before-navigation-expectation-fix.txt",
+      "sha256": "1c213e5e8df34fff8f46862256d15ff1075f5ee1d108f46b31eb28cb7231746d",
+      "bytes": 2443,
+      "raw_sha256": "686dfb0c747ff8b4bb1cfba95b8f1397ef51957f21ad83a5f9c7dc4a9884e949"
+    },
+    {
+      "path": "concurrency-restore.txt",
+      "sha256": "33361ab47befe9bc2f456bc00933e49932badfa6dab266aa28d681c9d5c727e8",
+      "bytes": 517,
+      "raw_sha256": "da4325ed3aa49624045747f23442b3e9dda5c1da2e33d716b74cf5cdafcf171a"
+    },
+    {
+      "path": "schema-compatibility-before-policy-fix.txt",
+      "sha256": "0ab9760f9545ff4398c7e3fd0918574272e48d581a4432e7afcca4645926cb74",
+      "bytes": 4289,
+      "raw_sha256": "4f5ef2f70766509593adf956673a20d06ede24d337e7c217ba2ca14e56a6cd55"
+    },
+    {
+      "path": "schema-final.txt",
+      "sha256": "dd48dee73e0a795fe17dca981b924c5c815dad1a62384065b9ce2e326cb0f77f",
+      "bytes": 503,
+      "raw_sha256": "1f28961c82adbb024c4588e9bc36c78b9a02716d29d3c3787d228062287decdf"
+    },
+    {
+      "path": "lint-full-summary.txt",
+      "sha256": "624a478949bf13ff2c990338301ec7a0ea7532c85a35a7d525ae94ca7b8d2f98",
+      "bytes": 113,
+      "raw_sha256": "6739498bea08cfbddcfc972ab8011cb4fdb61c1799faff9321c63acc669d14ba",
+      "note": "Final four lines only; full raw lint log retained in workspace. 0 errors and 354 existing warnings."
+    },
+    {
+      "path": "problem-sources-390.png",
+      "sha256": "40c45096fbe6b7684a7dbbe890583b55e235c5acc8b6425b34c8350d81f131ca",
+      "bytes": 68710,
+      "note": "Synthetic fixtures only; visually reviewed at this viewport."
+    },
+    {
+      "path": "problem-sources-1280.png",
+      "sha256": "afff46bb2263832aaa739fcd5d07835fc0d8c287f4187d653ab32bbfdf824c21",
+      "bytes": 100429,
+      "note": "Synthetic fixtures only; visually reviewed at this viewport."
+    },
+    {
+      "path": "parent-ci-snapshot.json",
+      "sha256": "a35c4144982e832e6890f7c8fedeb7049df9d33e872d0081e5b3f450d5d27e2b",
+      "bytes": 775,
+      "note": "Historical parent phase9 evidence, not CI acceptance of this code commit."
+    },
+    {
+      "path": "parent-pg-failure-summary.txt",
+      "sha256": "2b387e95eabfaaf532068acd2d61a65d3cb2624bff2d6f9df652ec187e4f7ec4",
+      "bytes": 856,
+      "note": "Historical parent phase9 evidence, not CI acceptance of this code commit."
+    },
+    {
+      "path": "schema-ownership-summary.json",
+      "sha256": "cd6ccfc7951c5e99a17b55de480c103afb3a2b2c9d29a0b4d43e56efd32117a1",
+      "bytes": 576,
+      "raw_sha256": "72fee76b0377fb242888d2bbb449eb6ae0fed94f505c3a36e60e3192140adc3b",
+      "note": "Summary only, full raw characterization is retained in workspace."
+    }
+  ],
+  "sources": [
+    {
+      "path": "__tests__/migrations.test.ts",
+      "sha256": "a6d80447cb810f98ce87b63a057240d2dfc4cb1c87a8afbcdc8c9846a68a86e0"
+    },
+    {
+      "path": "__tests__/ortho-problem-sources.test.ts",
+      "sha256": "a2e2b91d931a25016d752df65a5f97b292e96d037d5e4a3b6a44c23ebadde5e5"
+    },
+    {
+      "path": "__tests__/patient-appointment-history-schema.test.ts",
+      "sha256": "e45b8513a98a42adc074fad44cf22b80366e0056351fb8e168d2aba7b2b1a611"
+    },
+    {
+      "path": "__tests__/periodontal-candidate-chain.test.ts",
+      "sha256": "4e53d05532e23773eeffefe182b915b68165083c2ca9149bd15a5e3a7af064f2"
+    },
+    {
+      "path": "__tests__/periodontal-schema.test.ts",
+      "sha256": "871d99009892f8b794bf3229dbdb9b9ef1f15ace79462f29e8a33266ab2772b8"
+    },
+    {
+      "path": "__tests__/postgres/_periodontal-fixture.ts",
+      "sha256": "6e4ee16f1fb98391b180975267b09b23554580a3782b950b871bd57c4da4b5c8"
+    },
+    {
+      "path": "__tests__/postgres/debt-installments-storage.test.ts",
+      "sha256": "19e9a5aadf6e214c836c411a0d0b33183fa0becbe827473bf994ad276eb6db92"
+    },
+    {
+      "path": "__tests__/postgres/hr-composed-backup.test.ts",
+      "sha256": "e3e799924c5e12c1e4514a859740376a2d2fc7c4c7d95fdf4a24b595231c080f"
+    },
+    {
+      "path": "__tests__/postgres/hr-runtime-registration.test.ts",
+      "sha256": "6d0053052a280048472789792460a2ab835eecc0acc78a969b89ae8007d38dec"
+    },
+    {
+      "path": "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts",
+      "sha256": "60cee9f38101dfff6c66da1274db91b13543c21e1728606f541d0ac97fce6901"
+    },
+    {
+      "path": "__tests__/postgres/ortho-problem-sources-migration.test.ts",
+      "sha256": "77b2cd7899833ce1cd51f049bacdd44b511564157d71b70c948f956d9d24f3ae"
+    },
+    {
+      "path": "__tests__/postgres/ortho-problem-sources-restore.test.ts",
+      "sha256": "e99e6265c462929b8a4c6f4dd4b692661a76aebd6c6bb0765b11937a35c852ad"
+    },
+    {
+      "path": "__tests__/postgres/ortho-problem-sources.test.ts",
+      "sha256": "7eb7ec31c5e70e13a66c7c92a153ab1a73fb72037151ab915d33c8dea5491552"
+    },
+    {
+      "path": "__tests__/postgres/patient-appointment-history-index.test.ts",
+      "sha256": "279c97f1e9f4a063d43f17cfea576ca79cd3b6399614faf093990a303b217e20"
+    },
+    {
+      "path": "__tests__/postgres/periodontal-restore.test.ts",
+      "sha256": "22bc6911bf68cee494e281fa7ff1d263f27025f9826872d4c018f7dc9cb992b1"
+    },
+    {
+      "path": "__tests__/postgres/prescription-lineage-restore.test.ts",
+      "sha256": "1d79692c5bbc19a8510ab777f47320fcc2de3db5a896853a56067434bf623793"
+    },
+    {
+      "path": "__tests__/postgres/schema-ownership.test.ts",
+      "sha256": "6e15647a264d4ba6e7387cd456a6fb167ee812c68343649f10dcaee969ce36e2"
+    },
+    {
+      "path": "__tests__/schema-preflight-cli.test.ts",
+      "sha256": "c91a2119113190619a3087dc9333c311a00346c6c57a6ba538c1c86a43a46385"
+    },
+    {
+      "path": "__tests__/security-http/hr-temporal-history-ui.test.ts",
+      "sha256": "f54fbe6355467b64a5203c939511fc16e7a3768af25d451a4d239bf99e4ff1f4"
+    },
+    {
+      "path": "__tests__/security-http/ortho-case-navigation-browser.test.ts",
+      "sha256": "d74a2b5a56a3625ed332a1dc9e19a33278b8663942a68489ba5d603468b9c166"
+    },
+    {
+      "path": "__tests__/security-http/ortho-problem-sources-browser.test.ts",
+      "sha256": "7ebf9d9a39a1721247832b7e763663b00786914f57566eb097e8495f4b77e21b"
+    },
+    {
+      "path": "app/api/ortho/[id]/problem-sources/route.ts",
+      "sha256": "c9fdf52d1d1d3d7377a19b53de248105fb9e4f53e45ba58fd09f666ff83c2f65"
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "sha256": "1d66306d329c00236568b9354c7d8abfc8b693fe8dff433a659a935b2a9df2c7"
+    },
+    {
+      "path": "docs/DATABASE_MIGRATIONS.md",
+      "sha256": "2db42fb5b3fb7a69bc258c243128e02764a7e9333db5cd52488f13320fb097b8"
+    },
+    {
+      "path": "lib/audit.ts",
+      "sha256": "0c9d6a2c517b89815b394b2c34352b3e53a417303990834247cbae35dccbf01a"
+    },
+    {
+      "path": "lib/clinic-reset.ts",
+      "sha256": "aa2f751d20f625ffde2b8a2c808d975c263cfcb0ba09455e00a26ec247f7eb4d"
+    },
+    {
+      "path": "lib/db.ts",
+      "sha256": "0595cb14a90b801bb49cc12397f107ae33aa7059bdd33c707d4dd4d259fa4f6b"
+    },
+    {
+      "path": "lib/http-permissions.ts",
+      "sha256": "752edfdcaf78ab37b9a3f5d0e0e2a2e3240ef705be91f05478b4cb555e288755"
+    },
+    {
+      "path": "lib/ortho-problem-source-candidates.ts",
+      "sha256": "d965d3f674f19ba7b682e67c3e2e3874cddab8fe65aff083edb6179905019010"
+    },
+    {
+      "path": "lib/ortho-problem-source-client.ts",
+      "sha256": "a5d01338cb7b856bb380a7a7d006f93f0bc177684582d92d60cf791b8d167da8"
+    },
+    {
+      "path": "lib/ortho-problem-source-store.ts",
+      "sha256": "decc669b1237e660399429f1073d10c608ae8c197f497f5bc6e5fe5b40e48b3f"
+    },
+    {
+      "path": "lib/ortho-problem-sources-schema.ts",
+      "sha256": "8a133892c708285ecc450054d1b5dc946b7dfc150251263e9677a2b40a2604a7"
+    },
+    {
+      "path": "lib/ortho-problem-sources.ts",
+      "sha256": "99a303748c864fd35bc5fc1947132b4d3686f7f857307ba007df7ae6a4c0f6c6"
+    },
+    {
+      "path": "migrations/0105_ortho_problem_sources.sql",
+      "sha256": "10ba70389fe069cf4f04a2373c13d4a29ff1718151860eb5aa44690395325a9b"
+    },
+    {
+      "path": "schema/current-schema-contract.pg18.json",
+      "sha256": "17dad8a3f906350a3cf4d13ac07eeb99e7bc0ce0c430a9832344829c795c593a"
+    },
+    {
+      "path": "schema/preflight-disclosure.pg18.json",
+      "sha256": "66b72b5d855ae04ae269911806fe602a9d95f49b21e106a1dac2e316e0a38869"
+    },
+    {
+      "path": "scripts/verify-schema-ownership.ts",
+      "sha256": "6b546306757a6cef76fea691c97e73a64a476517d2bf66a1d114569fca9d7c0e"
+    }
+  ]
+}

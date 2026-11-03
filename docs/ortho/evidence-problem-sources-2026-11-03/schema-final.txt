@@ -1,0 +1,12 @@
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/schema-fingerprint.test.ts __tests__/postgres/schema-ownership.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  2 passed (2)
+      Tests  16 passed (16)
+   Start at  21:48:31
+   Duration  32.05s (transform 2.89s, setup 0ms, import 771ms, tests 30.01s, environment 0ms)

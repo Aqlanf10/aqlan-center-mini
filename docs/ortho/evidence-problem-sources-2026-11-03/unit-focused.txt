@@ -1,0 +1,11 @@
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-problem-sources.test.ts __tests__/schema-preflight-cli.test.ts __tests__/periodontal-schema.test.ts __tests__/periodontal-candidate-chain.test.ts __tests__/docs-drift-guard.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+
+ Test Files  5 passed (5)
+      Tests  29 passed (29)
+   Start at  21:51:08
+   Duration  2.51s (transform 668ms, setup 0ms, import 1.03s, tests 270ms, environment 1ms)

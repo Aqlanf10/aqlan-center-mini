@@ -1,0 +1,49 @@
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+ ❯ __tests__/ortho-problem-sources.test.ts (3 tests | 1 failed) 31ms
+     × pins the additive migration to the runtime mirror without a historical backfill 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ortho-problem-sources.test.ts > explicit source-to-problem review contract > pins the additive migration to the runtime mirror without a historical backfill
+AssertionError: expected 'CREATE TABLE ortho_problem_source_rev…' to be 'CREATE TABLE ortho_problem_source_rev…' // Object.is equality
+
+- Expected
++ Received
+
+@@ -11,11 +11,11 @@
+   source_identity TEXT NOT NULL CHECK(length(source_identity) BETWEEN 1 AND 160),
+   source_version TEXT NOT NULL CHECK(source_version ~ '^sha256:[a-f0-9]{64}$'),
+   source_snapshot JSONB NOT NULL CHECK(jsonb_typeof(source_snapshot)='object' AND octet_length(source_snapshot::text)<=262144),
+   problem_label TEXT NOT NULL CHECK(length(btrim(problem_label)) BETWEEN 1 AND 2000),
+   reason TEXT NOT NULL CHECK(length(btrim(reason)) BETWEEN 1 AND 1000),
+-  supersedes_review_id INTEGER REFERENCES ortho_problem_source_reviews(id) ON DELETE RESTRICT,
++  supersedes_review_id INTEGER REFERENCES ortho_problem_source_reviews(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+   command_id TEXT NOT NULL CHECK(command_id ~ '^[a-zA-Z0-9_-]{16,80}$'),
+   request_fingerprint TEXT NOT NULL CHECK(request_fingerprint ~ '^[a-f0-9]{64}$'),
+   UNIQUE(patient_id,actor_user_id,command_id),
+   UNIQUE(ortho_case_id,source_identity,source_version),
+   UNIQUE(supersedes_review_id)
+
+ ❯ __tests__/ortho-problem-sources.test.ts:28:79
+     26|   });
+     27|   it("pins the additive migration to the runtime mirror without a hist…
+     28|     expect(readFileSync("migrations/0105_ortho_problem_sources.sql", "…
+       |                                                                               ^
+     29|     expect(ORTHO_PROBLEM_SOURCES_SQL).not.toMatch(/INSERT INTO patient…
+     30|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 818 passed (819)
+      Tests  1 failed | 13992 passed (13993)
+   Start at  21:44:38
+   Duration  603.60s (transform 26.15s, setup 0ms, import 111.86s, tests 349.92s, environment 123ms)

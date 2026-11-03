@@ -1,0 +1,31 @@
+{
+  "capturedAt": "2026-11-03T21:58:18.430Z",
+  "runId": 41719471769,
+  "head": "3b539c9cbbc403f012262c1f6edc291ff9a8b0cd",
+  "jobs": [
+    {
+      "id": 126208106380,
+      "name": "Synthetic contract print and watermark",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 126208106946,
+      "name": "Typecheck, Lint, Unit, Audit, Build",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 126208107111,
+      "name": "PostgreSQL 18 integration, schema and operational journeys",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 126219157969,
+      "name": "Built-app HTTP security and hosted browser",
+      "status": "in_progress",
+      "conclusion": null
+    }
+  ]
+}
