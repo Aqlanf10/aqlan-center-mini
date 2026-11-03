@@ -1,0 +1,32 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-panoramic-review-browser.test.ts __tests__/security-http/ortho-followup-reminder-built-page.test.ts __tests__/security-http/ortho-records-case-ui.test.ts __tests__/security-http/patient-ceph-post-built-page.test.ts __tests__/security-http/patient-diagnosis-ui.test.ts __tests__/security-http/hr-temporal-history-ui.test.ts __tests__/security-http/ortho-workup-browser.test.ts __tests__/security-http/ortho-record-upload-browser.test.ts __tests__/security-http/ortho-guided-assessment-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-panoramic-review-browser.test.ts (3 tests | 2 failed) 54754ms
+     × keeps image-specific findings, the original complaint and immutable corrections through lost replies at 390px 25446ms
+     × keeps image-specific findings, the original complaint and immutable corrections through lost replies at 1280px 25496ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-panoramic-review-browser.test.ts > source-bound panoramic review on the built patient page > keeps image-specific findings, the original complaint and immutable corrections through lost replies at 390px
+ FAIL  __tests__/security-http/ortho-panoramic-review-browser.test.ts > source-bound panoramic review on the built patient page > keeps image-specific findings, the original complaint and immutable corrections through lost replies at 1280px
+TimeoutError: locator.selectOption: Timeout 20000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('ortho-case-assessment-v2').getByLabel('نسخة التقييم', { exact: true })[22m
+
+ ❯ __tests__/security-http/ortho-panoramic-review-browser.test.ts:65:67
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 8 passed (9)
+      Tests  2 failed | 30 passed (32)
+   Start at  20:54:37
+   Duration  150.53s (transform 562ms, setup 0ms, import 1.27s, tests 142.63s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

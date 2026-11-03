@@ -1,0 +1,535 @@
+{
+  "source": {
+    "library_file_id": "libfile_3264db5ea3248191b1703154440d7912",
+    "sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+    "bytes": 126204,
+    "lines": 624,
+    "hash_verified": true
+  },
+  "codeCommit": "2491eb7843d994fa3917133d7b61302575c8db57",
+  "buildId": "fKkEcuFxPWVM7NCZ3q92f",
+  "full_plan_accepted": false,
+  "scope": "Phase 9 panoramic integration and explicit cast/space audit; original historical matrix unchanged",
+  "requirements": [
+    {
+      "id": "V2R091",
+      "source_line": 91,
+      "requirement": "| 6 | البانوراما | ربط الصورة الأصلية وتاريخها، وفحص الطبيب ونتائجه وتعليقاته المرتبطة بالأسنان؛ لا تُستنتج نتيجة شعاعية من اسم الملف |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R102",
+      "source_line": 102,
+      "requirement": "- أزرار «السابق» و«حفظ والمتابعة» ومؤشر خطوات واضح؛ يمكن الرجوع لأي جزء وتسجيل مسودة أو تخطي جزء غير متاح مع إظهار النقص. لا تحبس الطبيب في معالج خطي يمنع تقديم الرعاية.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R103",
+      "source_line": 103,
+      "requirement": "- المرحلة التالية تستفيد من بيانات السابقة تلقائيًا. لكل قيمة وصورة ونتيجة مالك واحد، ويُفتح مصدرها للتعديل من الملخص أو العرض.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R104",
+      "source_line": 104,
+      "requirement": "- الحالة الجديدة تبدأ بالمقابلة، والحالة القديمة تبدأ بتحديد الوضع الحالي وما توفر من الأرشيف، والزيارة الدورية تفتح نموذج الزيارة المختصر. لا يُجبر العائد على إعادة إعداد الحالة.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R105",
+      "source_line": 105,
+      "requirement": "- أظهر حالة كل خطوة: لم تبدأ / مسودة / مكتملة المدخلات / تحتاج مراجعة / معتمدة حيث ينطبق الاعتماد. اكتمال الحقول ليس اعتمادًا سريريًا.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R106",
+      "source_line": 106,
+      "requirement": "- ترتيب إدخال البيانات هو الترتيب أعلاه حسب طلب المالك؛ قالب دراسة الحالة الخاص بالمركز يحتفظ بتوزيع وترتيب شرائحه المرجعية المحددين في القسم «ل». اختلاف موضع إدخال القياس عن موضع شريحته لا يسبب إعادة الإدخال أو إعادة ترتيب يدوي.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R218",
+      "source_line": 218,
+      "requirement": "1. واجهة الفكين بمخطط الأسنان وترقيمها، وحقل العرض الأنسي الوحشي لكل سن مع الوحدة وحالة السن. التنقل بين الحقول بالكيبورد، ودعم الأرقام العربية والإنجليزية مع تحويل منضبط للفاصل العشري. لا تخلط الأرقام الصحيحة بالمليمتر والقيم النصية المستوردة.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R219",
+      "source_line": 219,
+      "requirement": "2. لوحة قياسات للقوس العلوي والسفلي: المحيط/الطول المتاح، والقطاعات عند استخدام طريقة قطاعية، والعروض/الأعماق أو القياسات الإضافية التي يحتاجها التحليل المختار. كل حقل له اسم ومخطط إرشادي لنقاط القياس والوحدة، وليس خانة «حجم القوس» مبهمة لكل الطرق.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R220",
+      "source_line": 220,
+      "requirement": "3. المدخلات مخزنة في مجموعة قياسات مؤرخة ذات مصدر واحد. عند إدخال القوس كإجمالي أو كمقاطع، حدد الطريقة المستخدمة؛ إذا أُدخلا معًا أظهر الفرق للتحقق ولا تجمعهما أو تختَر أحدهما بصمت.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R221",
+      "source_line": 221,
+      "requirement": "4. قائمة «اختر التحليل» تعرض التحليلات المدعومة مع جاهزية كل واحد: جاهز للحساب / يحتاج قياسات محددة / لا ينطبق على نوع الأسنان / غير مفعّل لعدم اكتمال توثيقه. اسم غير منفذ لا يظهر كأنه تحليل جاهز.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R222",
+      "source_line": 222,
+      "requirement": "5. اختيار التحليل يشغله تلقائيًا بمجرد اكتمال مدخلاته، ويُظهر النتيجة وجدول المدخلات والمعادلة الموثقة وإصدارها والوحدة والتفسير الحسابي. لا يطلب كتابة المجموع أو النسبة أو الفرق يدويًا إذا أمكن اشتقاقها من القياسات الأصلية.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R223",
+      "source_line": 223,
+      "requirement": "6. أتح اختيار عدة تحليلات وتشغيل جميع الجاهز منها على نفس مجموعة القياسات. لا تعِد طلب قياس سُجل بالفعل للفك والسن والتاريخ والمصدر المناسبين.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R224",
+      "source_line": 224,
+      "requirement": "7. أحجام الأسنان وطول القوس وحدهما لا يكفيان لجميع أنواع التحليل. إذا اختار الطبيب تحليلًا يحتاج عرضًا بين نقاط معينة أو قياسًا قاعديًا أو جدول تنبؤ أو معايرة/قياسًا شعاعيًا، اعرض **المدخلات الإضافية الناقصة فقط بالاسم وطريقة القياس**. لا تختلقها ولا تستبدلها بمتوسط غير ظاهر.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R225",
+      "source_line": 225,
+      "requirement": "8. بعد تعديل قيمة، أعد حساب مسودات التحليلات المعتمدة عليها فقط وأظهر أنها تغيرت. التحليل المعتمد سابقًا يبقى ثابتًا؛ أنشئ مسودة إصدار جديد مع مقارنة الأثر بدل تغيير الماضي أو العرض المؤرشف.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R226",
+      "source_line": 226,
+      "requirement": "9. تتغذى قائمة المشكلات وخطة المسافات وجدول العرض تلقائيًا من نتائج التحليل المختار بإصداره؛ الطبيب يراجع الاستنتاج السريري، ولا ينقل الأرقام يدويًا بين الشاشات.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R235",
+      "source_line": 235,
+      "requirement": "| قياسات أولية | الأسنان بترقيم FDI، العرض الأنسي الوحشي، الأسنان المفقودة/غير البازغة/غير المقاسة، أطوال ومقاطع الأقواس، العروض، الإطباق والجهة ومصدر القياس |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R236",
+      "source_line": 236,
+      "requirement": "| الأسنان الدائمة | المساحة المتاحة والمطلوبة، فرق المسافة لكل فك، Bolton الأمامي والكلي، ونقص/زيادة الحجم السني مع بيان الفك المرجعي |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R237",
+      "source_line": 237,
+      "requirement": "| العرض والقواعد العظمية | Ashley Howe، Pont، Linder Harth؛ تعريف نقاط القياس والمعاملات وقيود التفسير، بعد توثيقها |",
+      "priority": "P2",
+      "status": "ناقص",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R238",
+      "source_line": 238,
+      "requirement": "| الأسنان المختلطة | Moyers بجداول موثقة وإصدار ومستوى احتمال، Tanaka–Johnston، Nance وHuckaba مع تصحيح التكبير ومرجع القياس |",
+      "priority": "P2",
+      "status": "ناقص",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R239",
+      "source_line": 239,
+      "requirement": "| التحليلات المسماة دون تفصيل كافٍ في المراجع | Carey، Korkhaus، Peck–Peck وHixon–Oldfather وStanley–Kerber: سجل ما يحتاج مرجعًا أصليًا ومواصفة حسابية قبل التفعيل؛ لا تخترع معادلات لإكمال قائمة أسماء |",
+      "priority": "P2",
+      "status": "ناقص",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R243",
+      "source_line": 243,
+      "requirement": "- لكل تحليل مواصفة: المدخلات المطلوبة، الأسنان الداخلة، الفك، المعادلة والإصدار، الوحدة، اتجاه الإشارة، سياسة التقريب، والقيم التي تمنع الحساب. يُراجع المرجع الأصلي قبل البرمجة، ولا تعتمد الشرائح وحدها لضمان صحة سريرية.",
+      "priority": "P2",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R244",
+      "source_line": 244,
+      "requirement": "- استخدم في عرض فرق المساحة تعريفًا معلنًا متسقًا؛ مثال المواصفة المطلوبة: المتاح ناقص المطلوب، السالب نقص مساحة والموجب فائض. لا يتبدل المعنى بين شاشة وأخرى.",
+      "priority": "P2",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R245",
+      "source_line": 245,
+      "requirement": "- قياسات الأسنان المخزنة تفصيلية؛ لا يُطلب من الطبيب إدخال المجموع يدويًا ثم الأسنان مرة ثانية. الإدخال اليدوي للمجموع القديم جائز لكن يُوسم بأنه إجمالي دون تفصيل.",
+      "priority": "P2",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R246",
+      "source_line": 246,
+      "requirement": "- لا تحسب Bolton الكامل إذا نقصت الأسنان المطلوبة دون أن يختار الطبيب تحليلًا بديلًا موثقًا. لا تعوّض السن المفقود تلقائيًا، ولا تستخدم صفرًا بدل القيمة المجهولة.",
+      "priority": "P2",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R247",
+      "source_line": 247,
+      "requirement": "- افصل نسبة Bolton عن مقدار الزيادة بالمليمتر، وبيّن أي فك اعتُمد مرجعًا. تُحسب القيم بدقة كافية ويقع التقريب عند العرض، لا في مراحل وسيطة كما في بعض أمثلة الشرائح.",
+      "priority": "P2",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R248",
+      "source_line": 248,
+      "requirement": "- جداول Moyers بيانات مرجعية بإصدار وتوثيق، لا صورة منخفضة الدقة يُخمَّن منها الرقم. إن لم يُتحقق الجدول، يمكن إدخال القيمة من الطبيب مع مصدرها ويظل الحساب الآلي غير مفعل.",
+      "priority": "P2",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R249",
+      "source_line": 249,
+      "requirement": "- تحليل الأسنان المختلطة يفرق بين القواطع المستخدمة للتنبؤ ومجموع الأسنان المطلوب للفك الجاري تقييمه؛ لا ينسخ مجموع الفك السفلي للفك العلوي تلقائيًا.",
+      "priority": "P2",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R250",
+      "source_line": 250,
+      "requirement": "- الشعاع غير المعاير/المشوه أو قياسه غير المعروف لا يعطي قياسًا سريريًا مؤكدًا. لا تُطلب صورة جديدة آليًا لمجرد أن التحليل يحتوي حقلًا شعاعيًا.",
+      "priority": "P2",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R261",
+      "source_line": 261,
+      "requirement": "- وصف الجهاز والبراكيت والشق لكل فك عند اختلافهما، تواريخ التركيب والتغيير، وطريقة العلاج: ثابت، متحرك، وظيفي، مصففات أو مزيج.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R262",
+      "source_line": 262,
+      "requirement": "- مراحل الميكانيكا المخططة: alignment/leveling، أعمال المرحلة العاملة، إدارة المسافات، الإنهاء والتثبيت. المرحلة قابلة للتخصيص والعودة إليها مع السبب؛ لا يفرض البرنامج وصفة أسلاك واحدة.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R263",
+      "source_line": 263,
+      "requirement": "- تسلسل أسلاك مخطط منفصل عن الأسلاك المركبة فعليًا. المقاس والمقطع والمادة والوحدة حقول منضبطة؛ الحروف الغامضة والمقاسات المستوردة القديمة تظهر للمراجعة دون تصحيح صامت.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R264",
+      "source_line": 264,
+      "requirement": "- بناءً على C: خيارات IPR، expansion، distalization، uprighting، derotation، proclination، extraction، وأعمال space closure. يسجل الطبيب الاستطباب الذي اعتمده والبديل وسبب الاختيار؛ لا يحوله النظام تلقائيًا إلى أمر علاج.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R265",
+      "source_line": 265,
+      "requirement": "- ميزانية مساحة لكل فك: النقص المقاس، المقترح الحصول عليه من كل إجراء، الاستخدام المخطط، والمسافة المقاسة لاحقًا. التقديرات تقريبية وليست قياسات، ولا تجمع فوائد متداخلة مرتين.",
+      "priority": "P1",
+      "status": "ناقص",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R266",
+      "source_line": 266,
+      "requirement": "- IPR: كل تماس محدد بسنّين، المقدار المخطط، المنفذ في كل جلسة، المجموع التراكمي، والتاريخ والطبيب. لا تسجل المقدار مرة لكل سن ثم تضاعفه. تجاوز المخطط أو حد معتمد يُظهر مراجعة واضحة؛ لا تستورد حدًا عامًا من المحاضرة لكل الأسنان.",
+      "priority": "P1",
+      "status": "ناقص",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R267",
+      "source_line": 267,
+      "requirement": "- التوسيع: الجهاز والفك وتاريخ التركيب وتعليمات الطبيب ونسخها وسجل ما أُبلغ/لوحظ والقياسات. لا تُولد معدلات تفعيل افتراضية من العمر أو من C15.",
+      "priority": "P1",
+      "status": "ناقص",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R268",
+      "source_line": 268,
+      "requirement": "- القلع: الأسنان المطلوبة، الموافقة، الإحالة، وتاريخ التنفيذ المؤكد. «مخطط للقلع» يختلف عن «مخلوع» في المخطط السني.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R269",
+      "source_line": 269,
+      "requirement": "- الإرساء/TADs: الموضع والتاريخ والإجراء والحالة والتغيير/الإزالة والمضاعفات؛ مصدر واحد مرتبط بالزيارة وخطة الحالة.",
+      "priority": "P1",
+      "status": "ناقص",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R270",
+      "source_line": 270,
+      "requirement": "- المسافات والإغلاق: الفك والمقطع/الأسنان والمسافة المقاسة وطريقة الإغلاق والإرساء والتغير بين الزيارات، دون احتساب كل قياس تحسنًا تلقائيًا.",
+      "priority": "P1",
+      "status": "ناقص",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R271",
+      "source_line": 271,
+      "requirement": "- إجراءات اللثة والترميم والجراحة والزراعة وغيرها تحال إلى خطة المريض المشتركة؛ لا ينشئ التقويم نسخًا من ملفات التخصصات الأخرى.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R272",
+      "source_line": 272,
+      "requirement": "- اعتماد الخطة وموافقة المريض عمليتان متميزتان. تحفظ نسخة الخطة التي وافق عليها المريض وأي تغييرات لاحقة وموافقتها عند الحاجة.",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "evidence": [
+        "2026-11-03-panoramic-review.md",
+        "2026-11-03-cast-space-review.md",
+        "2026-11-03-allysa-original-review.md"
+      ],
+      "full_requirement_accepted": false
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+
+ Test Files  6 passed (6)
+      Tests  122 passed (122)
+   Start at  20:48:07
+   Duration  4.94s (transform 1.16s, setup 0ms, import 1.61s, tests 2.47s, environment 1ms)

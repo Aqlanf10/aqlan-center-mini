@@ -1,0 +1,11 @@
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+
+ Test Files  818 passed (818)
+      Tests  13990 passed (13990)
+   Start at  20:53:05
+   Duration  571.70s (transform 24.47s, setup 0ms, import 104.53s, tests 346.34s, environment 108ms)

@@ -1,0 +1,146 @@
+[
+  {
+    "run": 41702693540,
+    "head": "f6d59c199c117310a0a0056be01cdba666f31f5c",
+    "status": "completed",
+    "conclusion": "failure",
+    "checked_at_utc": "2026-11-03T21:10:38.986748+00:00",
+    "jobs": [
+      {
+        "id": 126149805862,
+        "name": "Typecheck, Lint, Unit, Audit, Build",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126149805983,
+        "name": "Synthetic contract print and watermark",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126149806431,
+        "name": "PostgreSQL 18 integration, schema and operational journeys",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126157821551,
+        "name": "Built-app HTTP security and hosted browser",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "id": 126183312886,
+        "name": "Required CI gates (fail closed)",
+        "status": "completed",
+        "conclusion": "failure"
+      }
+    ]
+  },
+  {
+    "run": 41707192447,
+    "head": "edb974a68900f914e7ae3ac246fbb9e96b66b63f",
+    "status": "completed",
+    "conclusion": "failure",
+    "checked_at_utc": "2026-11-03T21:10:42.336633+00:00",
+    "jobs": [
+      {
+        "id": 126165518988,
+        "name": "PostgreSQL 18 integration, schema and operational journeys",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126165519262,
+        "name": "Synthetic contract print and watermark",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126165519448,
+        "name": "Typecheck, Lint, Unit, Audit, Build",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126175648583,
+        "name": "Built-app HTTP security and hosted browser",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "id": 126202418996,
+        "name": "Required CI gates (fail closed)",
+        "status": "completed",
+        "conclusion": "failure"
+      }
+    ]
+  },
+  {
+    "run": 41712068814,
+    "head": "75f9671b0c5877875fb86546206ff3183ca7b735",
+    "status": "in_progress",
+    "conclusion": null,
+    "checked_at_utc": "2026-11-03T21:10:44.909003+00:00",
+    "jobs": [
+      {
+        "id": 126182398995,
+        "name": "Synthetic contract print and watermark",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126182399361,
+        "name": "PostgreSQL 18 integration, schema and operational journeys",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "id": 126182399485,
+        "name": "Typecheck, Lint, Unit, Audit, Build",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126193192002,
+        "name": "Built-app HTTP security and hosted browser",
+        "status": "in_progress",
+        "conclusion": null
+      }
+    ]
+  },
+  {
+    "run": 41715619576,
+    "head": "33f430cb9f9c84354a6c8f3a97b5fa102f6cba81",
+    "status": "in_progress",
+    "conclusion": null,
+    "checked_at_utc": "2026-11-03T21:10:47.129723+00:00",
+    "jobs": [
+      {
+        "id": 126194699453,
+        "name": "PostgreSQL 18 integration, schema and operational journeys",
+        "status": "in_progress",
+        "conclusion": null
+      },
+      {
+        "id": 126194699744,
+        "name": "Synthetic contract print and watermark",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126194699884,
+        "name": "Typecheck, Lint, Unit, Audit, Build",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 126201219744,
+        "name": "Built-app HTTP security and hosted browser",
+        "status": "in_progress",
+        "conclusion": null
+      }
+    ]
+  }
+]

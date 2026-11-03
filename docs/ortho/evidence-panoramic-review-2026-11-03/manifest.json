@@ -1,0 +1,137 @@
+{
+  "scope": "Synthetic assessment/panoramic integration only; not full clinical workflow, 52-scenario or staging acceptance",
+  "codeCommit": "2491eb7843d994fa3917133d7b61302575c8db57",
+  "parentCommit": "33f430cb9f9c84354a6c8f3a97b5fa102f6cba81",
+  "branch": "feat/ortho-panoramic-review-20261103",
+  "buildId": "fKkEcuFxPWVM7NCZ3q92f",
+  "node": "22.23.3",
+  "npm": "11.21.1",
+  "postgres": "18.6",
+  "generated_at_utc": "2026-11-03T21:10:47.136442+00:00",
+  "browserAcceptance": "29 other tests from broad run + 3 panoramic tests after test-only selector correction; 32 distinct, not 32 in a single passing run",
+  "files": [
+    {
+      "path": "unit-all.txt",
+      "sha256": "734c70c5340c2d99d5ce0851556bcbe79771dfff73dd242695ab37e8f24a50c0",
+      "bytes": 397,
+      "raw_sha256": "90f9b5208067b432508f4c9ef887d147841463a9155d57440e44ff0768da8b26"
+    },
+    {
+      "path": "unit-focused.txt",
+      "sha256": "e2d2977b4bf8d559b13cd6eb6a139a565515e6d496e5a12d0204629d26a2709c",
+      "bytes": 218,
+      "raw_sha256": "790e1aa74d556085d5ee5f99444b86fe47a5d03ddf6ec2adb9183eff3071aa72"
+    },
+    {
+      "path": "postgres.txt",
+      "sha256": "041da19040f93ba3d6144103da01bc53c8d2f048c6bcbccba9a2d4b20d482a32",
+      "bytes": 523,
+      "raw_sha256": "621ed6ad56cdfa7cbd5722750a500b991393c672e6fa91104b8a911ea208f4d8"
+    },
+    {
+      "path": "browser-broad-with-selector-failures.txt",
+      "sha256": "618bd21bc0091814fac6201dca9ec79d935e7f4174fed14dfcf087ebf91f9eb6",
+      "bytes": 2304,
+      "raw_sha256": "618bd21bc0091814fac6201dca9ec79d935e7f4174fed14dfcf087ebf91f9eb6"
+    },
+    {
+      "path": "browser-panoramic-accepted.txt",
+      "sha256": "8e0cfff1dd14d6c16d1d37320f8c5f34d19328f0eea641f40f98902da8d400e3",
+      "bytes": 568,
+      "raw_sha256": "8e0cfff1dd14d6c16d1d37320f8c5f34d19328f0eea641f40f98902da8d400e3"
+    },
+    {
+      "path": "lint.txt",
+      "sha256": "82c17edd14fbaaeac8dbc2851dd771f352ea2f620d37018bc50c6c016a9ca22e",
+      "bytes": 10177,
+      "raw_sha256": "b488c6061c0e806c50026c8c683721682f14cbc3782b8b420ad3c95d8da67226"
+    },
+    {
+      "path": "test-lint-accepted.txt",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build.txt",
+      "sha256": "7545f4e851a7cc5fc2fbe16afab3046d134992efa5fded3dbb2bb09821a5a52f",
+      "bytes": 13488,
+      "raw_sha256": "92187a627158d80e47fc4443c82d2521b7f4c0ab5a632b0cf09fe91a8d2cebbb"
+    },
+    {
+      "path": "preflight.txt",
+      "sha256": "ce1e46cdfacfcbb217e240a858285810f878aaabcf55b5645723b8d1827645a6",
+      "bytes": 789,
+      "raw_sha256": "ce1e46cdfacfcbb217e240a858285810f878aaabcf55b5645723b8d1827645a6"
+    },
+    {
+      "path": "runtime-braces.txt",
+      "sha256": "7ad37cab911508d72067b3216b42dc3e659601d28a9b642c11c517771ea6895a",
+      "bytes": 108,
+      "raw_sha256": "7ad37cab911508d72067b3216b42dc3e659601d28a9b642c11c517771ea6895a"
+    },
+    {
+      "path": "runtime-tooling.txt",
+      "sha256": "17d1a88dbe10e5c5a864ace12baef4b6d1c5bcf030977f685d6c97f198ac97b4",
+      "bytes": 137,
+      "raw_sha256": "17d1a88dbe10e5c5a864ace12baef4b6d1c5bcf030977f685d6c97f198ac97b4"
+    },
+    {
+      "path": "panoramic-390.png",
+      "sha256": "485d70e97b214a0476b3c0e9fbc3ee3557198e0639cc95f577190741e1fbd700",
+      "bytes": 67083
+    },
+    {
+      "path": "panoramic-1280.png",
+      "sha256": "9eee731a07a78ad7a9639e8e424c4868111d90457342f7718c8353ddb698d682",
+      "bytes": 83399
+    },
+    {
+      "path": "parent-ci-snapshot.json",
+      "sha256": "b1159252aca5d60919a27c76de1cafdcbdcc665821d11e0abadb82bfee465452",
+      "bytes": 3934
+    }
+  ],
+  "sources": [
+    {
+      "path": "__tests__/ortho-panoramic-findings.test.ts",
+      "sha256": "b5387a5cbb56f2ab7afa13590b151f46c37942cf1c42993c5f1d445eff8c6ec2"
+    },
+    {
+      "path": "__tests__/postgres/ortho-panoramic-findings.test.ts",
+      "sha256": "a972188bf50fac18534afe7de904df2dd87dfc7c7402dcd15e71e9b521c0f619"
+    },
+    {
+      "path": "__tests__/security-http/ortho-panoramic-review-browser.test.ts",
+      "sha256": "dedfc0298f1dcf7d1fc2d9e41445613d6c26b24ecda9eea4d008261fb340b503"
+    },
+    {
+      "path": "components/OrthoAssessmentProgressV2.tsx",
+      "sha256": "501f1f7404a0104d46294cbef398c4cec6d93c9dee8419cc3c9c3fef3dff7e65"
+    },
+    {
+      "path": "components/OrthoCaseAssessmentV2.tsx",
+      "sha256": "2ddb29937bcb6e79c34e18fc90e14565fb75f006ca2315dd5b4e422ee4e57af3"
+    },
+    {
+      "path": "components/OrthoPanoramicReview.tsx",
+      "sha256": "658268d21e134ebe4a68726f9fa7ac77aa7fc95b28e5b6f8e3998ae06d7e3091"
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "sha256": "671c37e8159aa9a06c557b193e5328eb25914f793c91e8a2c22f347212fddcd5"
+    },
+    {
+      "path": "lib/ortho-assessment-store.ts",
+      "sha256": "2ec2dad2e87ad4de6076a9ded993b0ad60bf90dd415e52bb46558c86de163a1d"
+    },
+    {
+      "path": "lib/ortho-panoramic-findings.ts",
+      "sha256": "b34219845e49d2669f50633c203a8a8623fa8d08bd3846796b9eedbf3913f548"
+    },
+    {
+      "path": "lib/ortho-panoramic-source-validation.ts",
+      "sha256": "b06c81455aada550613aefb171e7feb50adb005aee373b536607c2050e08db41"
+    }
+  ]
+}
