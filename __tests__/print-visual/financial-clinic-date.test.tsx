@@ -9,6 +9,7 @@ import tailwindcss from "tailwindcss";
 import autoprefixer from "autoprefixer";
 import tailwindConfig from "../../tailwind.config";
 import { SETTING_DEFAULTS } from "../../lib/settings";
+import { EMPTY_STATEMENT_EVIDENCE } from "../../lib/patient-statement-projection";
 
 const fixture = vi.hoisted(() => {
   const createdAt = "2026-10-29T23:31:00Z";
@@ -29,7 +30,7 @@ vi.mock("@/lib/db", async original => ({ ...await original<typeof import("../../
   getPatient: async () => ({ id: 17, fullName: "مريض اصطناعي", patientNumber: "SYN-17" }),
   getPayment: async () => fixture.payment, getInvoice: async () => fixture.invoice,
   patientStatementSnapshot: async () => ({ ledger: { invoices: [fixture.invoice], payments: [fixture.payment], openings: [] },
-    planCurrencies: new Map(), plans: [], historicalAgreements: [] }),
+    planCurrencies: new Map(), plans: [], historicalAgreements: [], statementEvidence: EMPTY_STATEMENT_EVIDENCE }),
 }));
 import StatementPage from "../../app/print/statement/[id]/page";
 import InvoicePage from "../../app/print/invoice/[id]/page";
