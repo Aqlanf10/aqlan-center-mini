@@ -16,6 +16,11 @@
       "bytes": 2760
     },
     {
+      "path": "ceph-verifier-unit.txt",
+      "sha256": "96decd4eb94db66bfed2d9980606da74fe6a949da7b6d7d78513e4d8ad3065eb",
+      "bytes": 210
+    },
+    {
       "path": "facial-saved-1280.png",
       "sha256": "af98c88b3ed968cfd6d297779905a15639a2946e5513df76f388b9ff4109109a",
       "bytes": 310693
@@ -55,5 +60,6 @@
       "sha256": "b1870cee4c4d78fd1cf15efb1131d1a4a5e17adee6215dc0d70f2c6717f4bf6c",
       "bytes": 187
     }
-  ]
+  ],
+  "verifierRegressionCommit": "9d2c56a85e74d0b05111a3155e105bd152e0a201"
 }

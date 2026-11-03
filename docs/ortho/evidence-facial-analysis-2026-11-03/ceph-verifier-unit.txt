@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 /workspace/ortho-face
+
+
+ Test Files  1 passed (1)
+      Tests  233 passed (233)
+   Start at  19:03:07
+   Duration  1.59s (transform 206ms, setup 0ms, import 208ms, tests 1.24s, environment 0ms)
+
