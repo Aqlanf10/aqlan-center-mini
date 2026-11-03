@@ -43,3 +43,7 @@ Library resolved `libfile_e22c6d7f4b84819188139c2fa534d459`, version2, filename 
 Local Docker container `aqlan-appointments-pg18-20261103`, PostgreSQL18.6, new synthetic database only, bound127.0.0.1:55432. Node22.23.3 available at `/workspace/.cloud-tools/node_modules/node/bin/node`. Runtime default Node24 is not repository target. No live DB credentials or patient data used.
 
 No merge or deployment is authorized by this continuation. Staging acceptance remains separate after source/CI review.
+
+## Later read-only Staging refresh, 2026-11-03 21:39 UTC
+
+During this appointments task, another authorized workflow advanced Staging. Railway's service-filtered deployment metadata now confirms successful deployment `8175f9a2-bc1c-4cad-b79c-32bff18858db`, created21:17:37Z, source `7baeff369f775dbe6999f4e80734369097bb6006` on `feat/rx-patient-print-v3-20261103` (PR520). The earlier `cebe62f2` deployment is now REMOVED. The initial inventory above is a point-in-time baseline, not the final live state. This appointments agent performed only this metadata read; it did not deploy or modify that environment. PR522 remains independently stacked on PR515 and is not incorporated into that Staging release.

@@ -269,6 +269,10 @@ export function withDefaults(stored: Partial<Record<string, string>>): SettingsM
   const hasSavedHours = ["clinic.day_start","clinic.day_end","clinic.shift2_start","clinic.shift2_end"]
     .some(key => Object.prototype.hasOwnProperty.call(stored,key));
   if (hasSavedHours) {
+    // Settings saves are partial. Preserve the former fallback for a missing
+    // first-shift endpoint in an already configured center.
+    result["clinic.day_start"] = stored["clinic.day_start"] || "09:00";
+    result["clinic.day_end"] = stored["clinic.day_end"] || "21:00";
     result["clinic.shift2_start"] = stored["clinic.shift2_start"] ?? "";
     result["clinic.shift2_end"] = stored["clinic.shift2_end"] ?? "";
   }

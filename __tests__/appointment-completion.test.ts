@@ -22,6 +22,8 @@ describe('appointment completion boundaries',()=>{
     expect(withDefaults({})).toMatchObject({'clinic.day_start':'09:00','clinic.day_end':'13:00','clinic.shift2_start':'15:00','clinic.shift2_end':'19:00'});
     expect(withDefaults({'clinic.day_start':'09:00','clinic.day_end':'21:00'})).toMatchObject({'clinic.day_end':'21:00','clinic.shift2_start':'','clinic.shift2_end':''});
     expect(withDefaults({'clinic.shift2_start':'','clinic.shift2_end':''})['clinic.shift2_start']).toBe('');
+    expect(withDefaults({'clinic.day_start':'10:00'})).toMatchObject({'clinic.day_start':'10:00','clinic.day_end':'21:00','clinic.shift2_start':'','clinic.shift2_end':''});
+    expect(withDefaults({'clinic.day_end':'18:00'})).toMatchObject({'clinic.day_start':'09:00','clinic.day_end':'18:00','clinic.shift2_start':'','clinic.shift2_end':''});
   });
   it('late display uses clinic time and tolerance, never rewrites booked/no-show status',()=>{
     expect(isLateAppointment(appointment,new Date('2030-01-15T13:44:00Z'),'Asia/Aden',15)).toBe(false);
