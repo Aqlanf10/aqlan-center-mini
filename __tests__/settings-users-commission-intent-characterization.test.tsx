@@ -6,6 +6,7 @@ import UsersAndDoctorsPage from "../app/settings/users/page";
 import { parseDoctorPermissions, parseDoctorCommissionConfig, type DoctorCommissionConfig } from "../lib/doctor-permissions";
 import { resolvePolicyForShare } from "../lib/commission";
 import { CommissionCategoryEditor } from "../components/settings/CommissionCategoryEditor";
+vi.mock("../components/SessionProvider", () => ({ useSession: () => null }));
 type Hooks = { values: unknown[]; cursor: number; changed: boolean; mounted: boolean; lateUpdates: number;
   effects: Map<number, { deps?: readonly unknown[]; cleanup?: () => void; layout: boolean }>;
   memos: Map<number, { deps?: readonly unknown[]; value: unknown }>; pending: Array<() => void>; layout: Array<() => void> };

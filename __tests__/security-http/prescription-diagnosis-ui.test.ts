@@ -24,6 +24,7 @@ const prescriptionId = 98103;
 const acknowledgementToken = "synthetic-prescription-acknowledgement";
 const draftNotes = "تعليمات تجريبية محفوظة في المسودة";
 const medicine = {
+  selection: { id: "manual", amount: "Synthetic amount", confirmed: true },
   name: "SyntheticRx", dose: "fixture dose", form: "Tablets",
   frequency: "fixture frequency", duration: "fixture duration",
   instructions: "تعليمات تجريبية", instructionsEn: "Synthetic instructions",
@@ -45,6 +46,7 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
   let patientPayload: unknown = patientRead.body ?? { patient: { id: contextPatientId, medicalAlert: null, phone: null }, visits: [], appointments: [] };
   let patientStatus = patientRead.status ?? 200;
   let holdPatient = false;
+  let failPrescriber = false;
   const pendingPatients: Route[] = [];
   const context = await browser.newContext({
     viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block",
@@ -103,7 +105,15 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
       else if (holdPatient) pendingPatients.push(route);
       else await json(route, patientPayload, patientStatus);
     }
-    else if (path === `/api/patients/${contextPatientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [] });
+    else if (path === `/api/patients/${contextPatientId}/prescriptions`) {
+      if (failPrescriber) await json(route, { message: "Synthetic identity outage" }, 503);
+      else await json(route, { prescriptions: [], suggestions: [], prescriberOptions: { issuerId: 98104, canChooseAnyDoctor: false, doctors: [{ id: 98104, name: "طبيب تجريبي" }] } });
+    }
+    // Exact safe catalogue read introduced by the real picker. Other settings
+    // methods/query variants remain unexpected and no real settings read escapes.
+    else if (method === "GET" && path === "/api/settings" && url.search === "") {
+      await json(route, { "clinical.medication_catalog": JSON.stringify({ schemaVersion: 1, entries: [] }) });
+    }
     else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties") await json(route, [{ id: 98104, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);
@@ -144,6 +154,7 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
       await diagnosis.waitFor({ state: "detached" });
     };
     return { context, page, visitDiagnosis, diagnosis, notes, open, close, requests, unexpected, errors,
+      failPrescriberRead: (failed: boolean) => { failPrescriber = failed; },
       setPatientResponse: (body: unknown, status = 200) => { patientPayload = body; patientStatus = status; },
       holdPatientRead: () => { holdPatient = true; },
       pendingPatientReads: () => pendingPatients.length,
@@ -178,6 +189,8 @@ async function fillMedicine(page: Page) {
     ["التعليمات بالعربية (بعد الأكل…)", medicine.instructions],
     ["Instructions in English (after meals…)", medicine.instructionsEn],
   ]) await page.getByPlaceholder(placeholder, { exact: true }).fill(value);
+  await page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).fill(medicine.selection.amount);
+  await page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ }).check();
 }
 
 async function assertMedicine(page: Page) {
@@ -214,28 +227,41 @@ describe("prescription diagnosis draft in the built visit page", () => {
       expect(await prints(f.page)).toEqual([]);
 
       const expected = {
-        patientId, diagnosis: "Updated diagnosis before prescription print", notes: draftNotes,
+        commandKey: "",
+        patientId, visitId, prescribingDoctorPartyId: 98104, diagnosis: "Updated diagnosis before prescription print", notes: draftNotes,
         instructionsLang: "en", items: [medicine],
       };
       f.holdPrescriptionPreview();
-      await f.page.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }).click();
+      await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).click();
       await expect.poll(() => f.requests.length).toBe(1);
+      expect(f.requests[0].commandKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      expected.commandKey = f.requests[0].commandKey as string;
       expect(f.requests).toEqual([expected]);
       expect(await prints(f.page)).toEqual([]);
-      // The same ownership applies while the initial POST is still in flight,
-      // before any safety response has returned.
+      // Closing retires the asynchronous owner, not the pinned draft or durable key.
+      // A late response must not publish a safety acknowledgement or print.
       await f.close();
       await f.visitDiagnosis.fill("Later visit edit while save is pending");
       await f.open();
       expect(await f.diagnosis.inputValue()).toBe(expected.diagnosis);
       expect(await f.notes.inputValue()).toBe(draftNotes);
       await assertMedicine(f.page);
-      expect(await f.page.getByRole("button", { name: "جارٍ حفظ الوصفة…", exact: true }).isDisabled()).toBe(true);
+      const printButton = f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true });
+      await expect.poll(() => printButton.isEnabled()).toBe(true);
       expect(f.requests).toEqual([expected]);
       expect(await prints(f.page)).toEqual([]);
+      const lateResponse = f.page.waitForResponse(response => new URL(response.url()).pathname === "/api/prescriptions" && response.request().method() === "POST");
       await f.releasePrescriptionPreview();
+      await (await lateResponse).finished();
+      await f.page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       const acknowledge = f.page.getByRole("button", { name: "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا", exact: true });
+      expect(await acknowledge.count()).toBe(0);
+      expect(await prints(f.page)).toEqual([]);
+      expect(f.requests).toEqual([expected]);
+      // Only an explicit retry owned by the reopened modal may show a new preview.
+      await printButton.click();
       await acknowledge.waitFor();
+      expect(f.requests).toEqual([expected, expected]);
       // Printing now owns the reviewed Rx draft: a later visit edit must not
       // silently change the diagnosis carried by the acknowledgement retry.
       await f.close();
@@ -250,7 +276,7 @@ describe("prescription diagnosis draft in the built visit page", () => {
       await f.page.screenshot({ path: ".settings-ui-artifacts/prescription-diagnosis-pinned.png" });
       await acknowledge.click();
       await expect.poll(() => prints(f.page)).toEqual([`/print/prescription/${patientId}?rx=${prescriptionId}`]);
-      expect(f.requests).toEqual([expected, { ...expected, acknowledgedSafetyToken: acknowledgementToken }]);
+      expect(f.requests).toEqual([expected, expected, { ...expected, acknowledgedSafetyToken: acknowledgementToken }]);
       // Pinning a submitted draft must not disable a deliberate later edit.
       await f.diagnosis.fill("Deliberately revised prescription diagnosis");
       expect(await f.diagnosis.inputValue()).toBe("Deliberately revised prescription diagnosis");
@@ -319,7 +345,7 @@ async function capturePatientContext(page: Page, width: number, contextState: "w
   const targets: Array<{ label: string; locator: Locator }> = [
     { label: `${contextState} patient-context notice`, locator: warning },
     { label: "cancel", locator: panel.getByRole("button", { name: "إلغاء", exact: true }) },
-    { label: "print", locator: panel.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }) },
+    { label: "print", locator: panel.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }) },
     ...(contextState === "warning" ? [{ label: "synthetic phone action", locator: panel.getByRole("button", { name: /إرسال واتساب/ }) }] : []),
   ];
   const bounds = [];
@@ -377,6 +403,12 @@ describe("patient-file context in the built prescription consumer", () => {
       const drugName = f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true });
       await drugName.fill("Amoxicillin");
       await f.page.getByText("خطر تحسسي حرج (Penicillin Allergy)", { exact: true }).waitFor();
+      // A manual edit clears the same review contract as a library-origin edit.
+      const manualReview = f.page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ });
+      expect(await manualReview.isChecked()).toBe(false);
+      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
+      expect(await prints(f.page)).toEqual([]);
+      await manualReview.check();
       await capturePatientContext(f.page, width, "warning");
       await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
       expect(await prints(f.page)).toEqual([expect.stringContaining("https://wa.me/967777100099?")]);
@@ -430,3 +462,54 @@ describe("patient-file context in the built prescription consumer", () => {
     } finally { await f.context.close(); }
   });
 });
+
+
+it("blocks issuance on prescriber lookup failure and permits explicit safe retry", async () => {
+  const f = await fixture();
+  try {
+    f.failPrescriberRead(true); await f.open(); await fillMedicine(f.page);
+    await f.page.getByText("تعذر التحقق من هوية الطبيب الواصف. الإصدار والمعاينة متوقفان حتى ينجح التحقق.", { exact: true }).waitFor();
+    expect(await f.page.getByLabel("الطبيب الواصف", { exact: true }).inputValue()).toBe("");
+    expect(await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).isDisabled()).toBe(true);
+    expect(f.requests).toEqual([]); expect(await prints(f.page)).toEqual([]);
+    f.failPrescriberRead(false); await f.page.getByRole("button", { name: "إعادة التحقق من الطبيب", exact: true }).click();
+    await expect.poll(() => f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).isEnabled()).toBe(true);
+    expect(await f.page.getByLabel("الطبيب الواصف", { exact: true }).inputValue()).toBe("طبيب تجريبي");
+    expect(f.requests).toEqual([]); expect(await prints(f.page)).toEqual([]);
+    expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+  } finally { await f.context.close(); }
+});
+
+it("explicit generic choice fills only a name, never saves or prints, and requires complete reviewed manual fields", async () => {
+  const f = await fixture("Synthetic diagnosis never selects an antibiotic");
+  try {
+    await f.open();
+    expect(await f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).count()).toBe(0);
+    await f.page.locator("summary").filter({ hasText: "مكتبة أدوية إرشادية" }).click();
+    const choose = f.page.getByRole("button", { name: "اختيار اسم أموكسيسيلين فقط — أكمل التفاصيل يدويًا", exact: true });
+    await expect.poll(() => choose.isEnabled()).toBe(true);
+    await choose.click();
+    expect(await f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).inputValue()).toBe("Amoxicillin");
+    for (const placeholder of ["Strength / concentration", "Form (Tablets / Syrup)", "Frequency (every 8 hours)", "Duration (5 days)"]) expect(await f.page.getByPlaceholder(placeholder, { exact: true }).inputValue()).toBe("");
+    expect(await f.page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).inputValue()).toBe("");
+    expect(f.requests).toHaveLength(0); expect(await prints(f.page)).toEqual([]);
+    await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).click();
+    expect(f.requests).toHaveLength(0); expect(await prints(f.page)).toEqual([]);
+    await f.page.getByPlaceholder("Strength / concentration", { exact: true }).fill("synthetic strength");
+    await f.page.getByPlaceholder("Form (Tablets / Syrup)", { exact: true }).fill("synthetic form");
+    await f.page.getByPlaceholder("Frequency (every 8 hours)", { exact: true }).fill("synthetic frequency");
+    await f.page.getByPlaceholder("Duration (5 days)", { exact: true }).fill("synthetic duration");
+    await f.page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).fill("synthetic amount");
+    await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).click(); expect(f.requests).toHaveLength(0);
+    const review = f.page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ });
+    await review.check();
+    await f.page.getByPlaceholder("Duration (5 days)", { exact: true }).fill("changed synthetic duration");
+    expect(await review.isChecked()).toBe(false);
+    await review.check();
+    await f.page.getByRole("button", { name: "طباعة الروشتة (A6)", exact: true }).click();
+    await expect.poll(() => f.requests.length).toBe(1);
+    expect(f.requests[0].items).toEqual([expect.objectContaining({ name: "Amoxicillin", dose: "synthetic strength", duration: "changed synthetic duration", selection: { id: "amoxicillin", amount: "synthetic amount", confirmed: true } })]);
+    expect(await prints(f.page)).toEqual([]); // Existing server warning still requires its own acknowledgement.
+    expect(f.unexpected).toEqual([]);
+  } finally { await f.context.close(); }
+}, 120_000);

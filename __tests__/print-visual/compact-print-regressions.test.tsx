@@ -1,3 +1,7 @@
+import { DOSE_REFERENCE_VERSION } from "../../lib/medication-dose-profiles";
+import { createCalculatedDoseProvenance, calculatedDoseFields } from "../../lib/medication-dose-provenance";
+const rxFixture = vi.hoisted(() => ({ long: false, longIdentity: false, calculated: false, ibuprofen: false }));
+vi.mock("@/lib/prescription-prescriber", () => ({ prescriptionPrescriberOptions: async () => ({ issuerId: 5, canChooseAnyDoctor: false, doctors: [{ id: 5, name: "SYN-DRAFT-CLINICIAN" }] }) }));
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,14 +16,21 @@ import { SETTING_DEFAULTS } from "../../lib/settings";
 import { dispatchOrder } from "../fixtures/lab-dispatch";
 import { assertLabDispatchPdfFields } from "../helpers/lab-dispatch-pdf-fields";
 
+function calculatedRxItem() {
+ const baseInput={profileId:'amoxicillin-child-aapd-q8',referenceVersion:DOSE_REFERENCE_VERSION,indication:'Synthetic reviewed indication',ageMonths:60,ageVerified:true,weightKg:20,currentWeightVerified:true,selectedDose:30,administrationsPer24h:3,scheduleKind:'fixed-interval' as const,intervalHours:8,durationDays:5,reviewPlan:'SYN-CALCULATED-PLAN '+('Review synthetic instructions and follow-up. '.repeat(7))+'SYN-CALCULATED-END',product:{name:'SYN-LONG-PRODUCT '+('synthetic '.repeat(12)),ingredientId:'amoxicillin' as const,formulation:'single-ingredient' as const,labelUrl:'https://synthetic.invalid/label',kind:'oral-liquid' as const,strengthMg:250,perMl:5,measurementIncrementMl:0.1,minimumAgeMonths:4,labelVerified:true},otherSameIngredientMg24h:0,specialPopulationOrInteraction:false,antibioticIndicationReviewed:true};
+ const input=rxFixture.ibuprofen?{...baseInput,profileId:'ibuprofen-child-sdcep',selectedDose:150,scheduleKind:'times-per-day' as const,product:{...baseInput.product,ingredientId:'ibuprofen' as const,strengthMg:100,minimumAgeMonths:6,minimumIntervalHours:6,maxAdministrationsPer24h:3}}:baseInput;
+ const doseReview=createCalculatedDoseProvenance(input);if(!doseReview)throw Error('Invalid calculated print fixture');
+ const {amount,...fields}=calculatedDoseFields(doseReview)!;return {...fields,selection:{id:rxFixture.ibuprofen?'ibuprofen':'amoxicillin',amount,confirmed:true,doseReview}};
+}
+
 vi.mock("@/lib/session", () => ({ requireSession: async () => ({ role: "admin", username: "SYN-DRAFT-CLINICIAN" }) }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: async () => true }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null, ReprintMark: () => null }));
 vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", printCount: async () => 0,
-  getSettingsSafe: async () => SETTING_DEFAULTS,
+  getSettingsSafe: async () => SETTING_DEFAULTS, getPrescriptionPrintSettings: async () => SETTING_DEFAULTS,
   patientAppointmentsFrom: async () => [{ id: 1, patientId: 2, scheduledDate: "2031-01-04", scheduledTime: "09:30", status: "booked" }],
-  getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
-  getPrescription: async () => ({ id: 11, patientId: 1, createdBy: "SYN-SAVED-CLINICIAN", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: [{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }] }),
+  getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: rxFixture.longIdentity ? "SYN-RX-PATIENT SYNTHETIC EXTENDED PATIENT IDENTITY FOR WRAPPING SYN-PATIENT-LAST" : "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
+  getPrescription: async () => ({ id: 11, patientId: 1, prescribingDoctorName: rxFixture.longIdentity ? "SYN-SAVED-CLINICIAN SYNTHETIC EXTENDED DOCTOR IDENTITY FOR WRAPPING SYN-DOCTOR-LAST" : "SYN-SAVED-CLINICIAN", createdBy: "SYN-ACTOR", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: rxFixture.calculated ? [calculatedRxItem()] : Array.from({ length: rxFixture.long ? 20 : 1 }, (_, index) => ({ selection: { id: "manual", amount: rxFixture.long ? `SYN-AMOUNT-${String(index + 1).padStart(2, "0")}` : "SYN-AMOUNT", confirmed: true }, name: rxFixture.long ? `SYN-MED-${String(index + 1).padStart(2, "0")}` : "SYNTHETIC-RX-MEDICATION", dose: rxFixture.long ? `SYN-DOSE-${String(index + 1).padStart(2, "0")}` : "SYN-DOSE", form: "Tablets", frequency: rxFixture.long ? `SYN-FREQUENCY-${String(index + 1).padStart(2, "0")}` : "SYN-FREQUENCY", duration: rxFixture.long ? `SYN-DURATION-${String(index + 1).padStart(2, "0")}` : "SYN-DURATION", instructions: `تعليمات اصطناعية للاختبار ${index + 1}`, instructionsEn: rxFixture.long ? `SYN-INSTRUCTIONS-${String(index + 1).padStart(2, "0")}` : "SYN-INSTRUCTIONS" })) }),
   getLabOrderById: async () => dispatchOrder({ labName: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456", serviceName: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", workType: "SYNTHETIC-DISPATCH-SERVICE-1234567890123" }),
   getPayment: async () => ({ id: 1, receiptNumber: "SYN-PROV-ORIGINAL-BHGFBCDEFABCD", patientName: "SYNTHETIC-RECEIPT-PROVENANCE", invoiceId: 1, kind: "payment", amountMinor: 50000, currency: "YER", method: "cash", createdBy: "SYNTHETIC-SIGNER", createdAt: "2000-03-02T22:00:00.000Z" }),
 }));
@@ -51,16 +62,20 @@ function labCss() {
   return css.toString();
 }
 describe("native compact print regression witnesses", () => {
-  it.each(["receipt", "lab", "prescription-saved", "prescription-draft", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
+  it.each(["receipt", "lab", "prescription-saved", "prescription-draft", "prescription-long", "prescription-long-identity", "prescription-calculated", "prescription-ibuprofen-calculated", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
     const prescription = kind.startsWith("prescription-");
+    rxFixture.long = kind.startsWith("prescription-long");
+    rxFixture.longIdentity = kind === "prescription-long-identity";
+    rxFixture.calculated = kind === "prescription-calculated" || kind === "prescription-ibuprofen-calculated";
+    rxFixture.ibuprofen = kind === "prescription-ibuprofen-calculated";
     const node = kind === "patient-card" ? await PatientCardPage({ params: Promise.resolve({ id: "2" }) }) : prescription
-      ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(kind === "prescription-saved"
+      ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(kind !== "prescription-draft"
         ? { rx: "11", diagnosis: "SYN-URL-TAMPER" }
-        : { draft: "1", lang: "both", diagnosis: "SYN-DRAFT-DIAGNOSIS", items: JSON.stringify([{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }]) }) })
+        : { draft: "1", doctorPartyId: "5", lang: "both", diagnosis: "SYN-DRAFT-DIAGNOSIS", items: JSON.stringify([{ selection: { id: "manual", amount: "SYN-AMOUNT", confirmed: true }, name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }]) }) })
       : await (kind === "receipt" ? ReceiptPage : LabPage)({ params: Promise.resolve({ id: "1" }) });
     const body = renderToStaticMarkup(<><PrintDocumentWatermark /><div className="print-root">{node}</div></>);
     const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
-    const css = globalCss + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + (kind === "lab" ? labCss() : "");
+    const css = globalCss + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + (kind === "lab" ? labCss() : "") + (prescription ? readFileSync(resolve("app/print/prescription/[id]/prescription.css"), "utf8") : "");
     if (kind === "lab") expect(css).toContain(`.${labStyles.sheet} .${labStyles.labIdentity} { display: block; line-height: 1.35; }`);
     const output = resolve(".settings-ui-artifacts/unified-print");
     mkdirSync(output, { recursive: true });
@@ -74,7 +89,7 @@ describe("native compact print regression witnesses", () => {
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(image => image.decode().catch(() => undefined))); });
       await page.emulateMedia({ media: "print" });
       await page.screenshot({ path: resolve(output, `${kind}-compact.png`), fullPage: true });
-      const pdf = await page.pdf({ path: resolve(output, `${kind}-compact.pdf`), format: ["receipt", "patient-card"].includes(kind) ? "A6" : prescription ? "A5" : "A4", printBackground: true, displayHeaderFooter: false });
+      const pdf = await page.pdf({ path: resolve(output, `${kind}-compact.pdf`), format: ["receipt", "patient-card"].includes(kind) ? "A6" : "A4", preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
       const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
       const pages = await page.evaluate(raw => {
         const doc = new DOMParser().parseFromString(raw, "application/xml");
@@ -93,26 +108,38 @@ describe("native compact print regression witnesses", () => {
         expect(pages.length).toBeGreaterThan(0);
         assertLabDispatchPdfFields(pages, { service: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", lab: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456" });
       } else {
-        expect(pages).toHaveLength(1);
-        expect(Math.abs(pages[0].width - (prescription ? 148 : 105) * 72 / 25.4)).toBeLessThan(1);
-        expect(Math.abs(pages[0].height - (prescription ? 210 : 148) * 72 / 25.4)).toBeLessThan(1);
-        for (const word of pages[0].words) {
+        if (rxFixture.long) expect(pages.length).toBeGreaterThan(1);
+        else if (rxFixture.calculated) expect(pages.length).toBeGreaterThan(0);
+        else expect(pages).toHaveLength(1);
+        for (const paper of pages) {
+        expect(Math.abs(paper.width - 105 * 72 / 25.4)).toBeLessThan(1);
+        expect(Math.abs(paper.height - 148 * 72 / 25.4)).toBeLessThan(1);
+        for (const word of paper.words) {
           expect([word.xMin, word.xMax, word.yMin, word.yMax].every(Number.isFinite)).toBe(true);
           expect(word.xMin).toBeGreaterThanOrEqual(0); expect(word.yMin).toBeGreaterThanOrEqual(0);
-          expect(word.xMax).toBeLessThanOrEqual(pages[0].width); expect(word.yMax).toBeLessThanOrEqual(pages[0].height);
+          expect(word.xMax).toBeLessThanOrEqual(paper.width); expect(word.yMax).toBeLessThanOrEqual(paper.height);
+        }
+        if (rxFixture.long) {
+          const pageText = paper.words.map(word => word.text).join(" ");
+          for (const identity of ["SYN-RX-PATIENT", "SYN-RX-001", "SYN-SAVED-CLINICIAN", "Rx", "#11", ...(rxFixture.longIdentity ? ["SYN-PATIENT-LAST", "SYN-DOCTOR-LAST"] : [])]) expect(pageText).toContain(identity);
+        }
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
-        const references = kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
-          ? ["SYN-RX-PATIENT", "SYN-RX-001", "SYNTHETIC-RX-MEDICATION", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", kind === "prescription-saved" ? "SYN-SAVED-CLINICIAN" : "SYN-DRAFT-CLINICIAN", kind === "prescription-saved" ? "SYN-SAVED-DIAGNOSIS" : "SYN-DRAFT-DIAGNOSIS"]
+        const references = rxFixture.calculated ? [rxFixture.ibuprofen?"Ibuprofen":"Amoxicillin", rxFixture.ibuprofen?"100 mg/5 mL":"250 mg/5 mL", rxFixture.ibuprofen?"7.5 mL (150 mg)":"4 mL (200 mg)", rxFixture.ibuprofen?"3 times daily":"Every 8 hours", ...(rxFixture.ibuprofen?["at least 8 hours apart","Preferably after food."]:[]), "5 days", "SYN-CALCULATED-PLAN", "SYN-CALCULATED-END", "SYN-SAVED-CLINICIAN"] : kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
+          ? ["SYN-RX-PATIENT", "SYN-RX-001", ...(rxFixture.long ? Array.from({ length: 20 }, (_, index) => `SYN-MED-${String(index + 1).padStart(2, "0")}`) : ["SYNTHETIC-RX-MEDICATION"]), "SYN-AMOUNT", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", kind !== "prescription-draft" ? "SYN-SAVED-CLINICIAN" : "SYN-DRAFT-CLINICIAN", kind !== "prescription-draft" ? "SYN-SAVED-DIAGNOSIS" : "SYN-DRAFT-DIAGNOSIS"]
           : ["SYN-PROV-ORIGINAL-BHGFBCDEFABCD", "SYN-REV-00002", "SYN-REP-00003"];
-        for (const reference of references) expect(text).toContain(reference);
+        for (const reference of references) expect(rxFixture.calculated ? text.replace(/\s+/g, " ") : text).toContain(reference);
+        if (rxFixture.long) for (let index = 1; index <= 20; index++) {
+          for (const field of ["AMOUNT", "DOSE", "FREQUENCY", "DURATION", "INSTRUCTIONS"]) expect(text).toContain(`SYN-${field}-${String(index).padStart(2, "0")}`);
+        }
         if (kind === "patient-card") {
           expect(body).not.toContain('class="print-metadata');
           expect(text.replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")).toContain(SETTING_DEFAULTS["clinic.phone"]);
         }
+        if (rxFixture.calculated) { expect(body).not.toContain("synthetic.invalid"); expect(body).not.toContain("weightKg"); expect(body).not.toContain("SYN-LONG-PRODUCT"); }
         if (prescription) {
           expect(text).not.toContain("SYN-URL-TAMPER");
-          expect(text.includes("DRAFT")).toBe(kind === "prescription-draft");
+          expect(text.includes("UNAPPROVED DRAFT")).toBe(false);
         }
       }
     } finally { await browser.close(); }
