@@ -36,7 +36,7 @@ const analysis: Parameters<typeof CephTracer>[0]["analysis"] = {
 describe("modern visual patient event ownership", () => {
   it("renders drag state without moving a landmark, resets on release, and saves the original coordinates", async () => {
     const fetch = vi.fn(async (_url: string, _request: RequestInit) => ({ ok: true, json: async () => ({}) })); vi.stubGlobal("fetch", fetch);
-    const component = () => CephTracer({ patientName: "Synthetic", patientBirthYear: null, analysis, initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: null, refValues: null, refSetName: null, diagnosis: null });
+    const component = () => CephTracer({ clinicTimeZone: "Asia/Aden", patientName: "Synthetic", patientBirthYear: null, analysis, initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: null, refValues: null, refSetName: null, diagnosis: null });
     let tree = render(component);
     nodes(tree).find(node => node.type === "img")!.props.onLoad({ currentTarget: { naturalWidth: 400, naturalHeight: 400 } });
     tree = render(component);
@@ -50,7 +50,7 @@ describe("modern visual patient event ownership", () => {
   });
   it("does not allow pointer dragging or saving approved landmarks", () => {
     const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
-    const component = () => CephTracer({ patientName: "Synthetic", patientBirthYear: null, analysis: { ...analysis, status: "completed" }, initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: [], refValues: null, refSetName: null, diagnosis: null });
+    const component = () => CephTracer({ clinicTimeZone: "Asia/Aden", patientName: "Synthetic", patientBirthYear: null, analysis: { ...analysis, status: "completed" }, initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: [], refValues: null, refSetName: null, diagnosis: null });
     let tree = render(component); nodes(tree).find(node => node.type === "img")!.props.onLoad({ currentTarget: { naturalWidth: 400, naturalHeight: 400 } }); tree = render(component);
     const circle = nodes(tree).find(node => node.type === "circle" && node.props.onPointerDown)!;
     const capture = vi.fn(); circle.props.onPointerDown({ currentTarget: { setPointerCapture: capture } });
