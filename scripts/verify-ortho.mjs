@@ -115,10 +115,10 @@ try {
   check("لا إكمال بلا مثبّت", !early.ok, early.ok ? "" : early.message);
 
   await db.setRetainer({ id: opened.id, retainer: "essix", deliveredOn: "2026-08-20" });
-  const inRetention = await db.getOrthoCase(opened.id, today);
-  check("تسجيل المثبّت ينقلها إلى التثبيت", inRetention.status === "retention", inRetention.status);
+  const afterRetainer = await db.getOrthoCase(opened.id, today);
+  check("تسجيل المثبّت وحده يحفظ مرحلة العلاج؛ الانتقال يحتاج قراراً مستقلاً", afterRetainer.status === afterSecond.status, afterRetainer.status);
   check("والمثبّت محفوظ بتاريخه",
-    inRetention.retainer === "essix" && inRetention.retainerOn === "2026-08-20");
+    afterRetainer.retainer === "essix" && afterRetainer.retainerOn === "2026-08-20");
 
   const closed = await db.closeOrthoCase({
     id: opened.id, status: "completed", actor: "فحص", note: "نتيجة جيدة",

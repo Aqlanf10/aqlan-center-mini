@@ -28,6 +28,8 @@ import { PatientDiagnosis } from "./PatientDiagnosis";
 import { OrthoCaseAssessmentV2, type AssessmentLifetimeV2 } from "./OrthoCaseAssessmentV2";
 import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
+import { readRetentionTransitionCommand, readRetentionTransitionRead, type RetentionTransitionCommand, type RetentionTransitionRead } from "@/lib/ortho-retention-transition";
+import { verifyRetentionTransitionSaved } from "@/lib/ortho-retention-transition-client";
 import { OrthoRetentionEvents } from "./OrthoRetentionEvents";
 import { OrthoCaseStudyMount } from "./OrthoCaseStudyMount";
 import { makeRetentionMountOwner, type RetentionMountOwner } from "@/lib/ortho-retention-mount-owner";
@@ -376,6 +378,110 @@ function UncertainWrite({ draft }: { draft: Draft }) {
   </p> : null;
 }
 
+/** Explicit clinician decision; the owner retains the exact command across pillar changes. */
+function RetentionTransition({ patientId, row, onSaved }: { patientId: number; row: OrthoCase; onSaved: () => void }) {
+  const form = useOrthoDraft(`retention-transition:${row.id}`, patientId, row.id);
+  const { owner, draft } = form;
+  const [reason, setReason] = form.field("reason", "");
+  const [retentionPlan, setPlan] = form.field("retentionPlan", "");
+  const [dateProvenance, setProvenance] = form.field("dateProvenance", "");
+  const [occurredOn, setDate] = form.field("occurredOn", "");
+  const [sourceNote, setSource] = form.field("sourceNote", "");
+  const [confirmed, setConfirmed] = form.field("confirmed", false);
+  const [pending] = form.field<RetentionTransitionCommand | null>("pending", null);
+  const [read, setRead] = useState<RetentionTransitionRead | null>(null);
+  const [error, setError] = useState("");
+  const [readVersion, reload] = useState(0);
+  const url = `/api/ortho/${row.id}/retention-transition`;
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), ORTHO_PARENT_READ_TIMEOUT_MS);
+    const current = () => active && owner.active && !owner.denied && owner.clinical && draft.active;
+    void (async () => {
+      try {
+        const response = await fetch(`${url}?patientId=${patientId}`, { cache: "no-store", signal: controller.signal });
+        if (!current()) return;
+        if (response.status === 401 || response.status === 403) { owner.deny(); return; }
+        if (!response.ok) throw new Error("تعذّرت قراءة قرار الانتقال. أعد القراءة قبل الحفظ.");
+        const value = readRetentionTransitionRead(await response.json(), { patientId, orthoCaseId: row.id });
+        if (current()) { setRead(value); setError(""); }
+      } catch { if (current()) { setRead(null); setError("تعذّرت قراءة قرار الانتقال. أعد القراءة قبل الحفظ."); } }
+      finally { clearTimeout(timeout); }
+    })();
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+  }, [owner, draft, url, patientId, row.id, row.status, readVersion]);
+  const save = async (retry: boolean) => {
+    let command: RetentionTransitionCommand;
+    try {
+      command = retry && pending ? pending : readRetentionTransitionCommand({ schemaVersion: 1, clientRequestId: crypto.randomUUID(),
+        expectedPhase: read?.phase, confirmed, reason, retentionPlan,
+        occurrence: { occurredOn: dateProvenance === "unknown" ? null : occurredOn, dateProvenance, sourceNote } });
+    } catch { setError("أكمل القرار وخطة المتابعة ومصدر التاريخ، ثم أكّد انتهاء العلاج النشط."); return; }
+    const actorId = form.session?.id;
+    const operation = retry ? form.beginRetry(!!pending && !!actorId && !!read) : form.begin(!!read?.canTransition && !!actorId);
+    if (!operation || !actorId || !read) return;
+    form.commit("pending", command); setError("");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    let saved = false;
+    try {
+      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId, command }), signal: controller.signal });
+      if (!form.checkHeaders(response, operation)) return;
+      const payload: unknown = await response.json();
+      if (!form.current(operation)) return;
+      if (!response.ok) {
+        const refusal = payload as { ok?: unknown; code?: unknown; message?: unknown };
+        if (!retry && [400, 409].includes(response.status) && refusal?.ok === false && typeof refusal.code === "string") {
+          form.commit("pending", null);
+          setError(typeof refusal.message === "string" ? refusal.message : "لم يُحفظ القرار. أعد القراءة وراجع البيانات.");
+          setRead(null); return;
+        }
+        throw new Error("unconfirmed_transition");
+      }
+      const receipt = await verifyRetentionTransitionSaved(payload, { patientId, orthoCaseId: row.id, clinicalCaseId: read.clinicalCaseId, actorId, command }, response.status);
+      if (!form.current(operation)) return;
+      for (const [key, value] of Object.entries({ pending: null, reason: "", retentionPlan: "", dateProvenance: "", occurredOn: "", sourceNote: "", confirmed: false })) draft.settleField(key, value);
+      setRead({ ok: true, patientId, orthoCaseId: row.id, clinicalCaseId: receipt.clinicalCaseId, status: "retention", phase: "retention", canTransition: false, transition: receipt });
+      saved = true;
+    } catch { if (form.current(operation)) { form.uncertain(); setError("لم تتأكد نتيجة الحفظ. تحقّق بنفس الطلب المحفوظ لتجنب التكرار."); } }
+    finally { clearTimeout(timeout); form.finish(operation); }
+    if (saved && form.caseGranted()) onSaved();
+  };
+  const writable = form.editable() && !!read?.canTransition;
+  return <section aria-label="قرار بدء متابعة التثبيت" className="rounded-2xl border border-emerald-200 bg-white p-4 space-y-3">
+    <h4 className="font-black text-navy-900">إنهاء العلاج النشط وبدء متابعة التثبيت</h4>
+    <p className="text-xs text-slate-600">يسجّل هذا القرار الانتقال إلى التثبيت مع بقاء ملف الحالة مفتوحاً للمتابعة. تسليم الأجهزة ونزع البراكيت والمواعيد تحتاج توثيقاً مستقلاً.</p>
+    <p className="text-xs text-slate-600">راجع البيانات قبل التأكيد؛ تعديل قرار الانتقال أو عكسه غير متاح حالياً.</p>
+    {read?.transition ? <div className="rounded-xl bg-emerald-50 p-3 text-sm space-y-2">
+      <p className="font-bold">سُجّل قرار الانتقال إلى التثبيت</p>
+      <p>{read.transition.command.reason}</p>
+      <p>تاريخ انتهاء العلاج: {read.transition.command.occurrence.occurredOn ?? "غير معروف"}</p>
+      <p>مصدر التاريخ: {read.transition.command.occurrence.sourceNote}</p>
+      <p className="whitespace-pre-wrap">خطة المتابعة: {read.transition.command.retentionPlan}</p>
+      <p>المرحلة السابقة: {PHASE_LABEL[read.transition.command.expectedPhase]}</p>
+      <p>وثّقه: {read.transition.createdBy} — وقت التدوين: <time dateTime={read.transition.createdAt}>{new Date(read.transition.createdAt).toLocaleString("ar", { timeZone: CLINIC_ZONE_FALLBACK })}</time></p>
+    </div> : read && !read.canTransition ? <p className="text-sm">لا يتاح انتقال جديد لهذه الحالة أو لهذه الصلاحية. لا يوجد قرار انتقال موثق في هذا السجل.</p> : null}
+    {!read?.transition && <form onSubmit={event => { event.preventDefault(); void save(false); }} className="space-y-3">
+      <fieldset disabled={!writable} className="space-y-3 disabled:opacity-60">
+        <label className="block text-sm">سبب إنهاء العلاج النشط<textarea className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" maxLength={500} value={reason} onChange={e => setReason(e.target.value)} required /></label>
+        <label className="block text-sm">خطة متابعة التثبيت<textarea className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" maxLength={4000} value={retentionPlan} onChange={e => setPlan(e.target.value)} required /></label>
+        <label className="block text-sm">مصدر تاريخ انتهاء العلاج<select aria-label="مصدر تاريخ انتهاء العلاج" className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" value={dateProvenance} onChange={e => setProvenance(e.target.value)} required>
+          <option value="">اختر مصدر التاريخ</option><option value="contemporaneous_record">سجل معاصر للحدث</option><option value="retrospective_record">تدوين بأثر رجعي</option><option value="historical_source">مصدر تاريخي</option><option value="unknown">التاريخ غير معروف</option>
+        </select></label>
+        {dateProvenance && dateProvenance !== "unknown" && <label className="block text-sm">تاريخ انتهاء العلاج النشط<input className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" min="1900-01-01" value={occurredOn} onChange={e => setDate(e.target.value)} required /></label>}
+        <label className="block text-sm">توضيح مصدر تاريخ الانتقال<textarea className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" maxLength={1000} value={sourceNote} onChange={e => setSource(e.target.value)} required /></label>
+        <label className="flex gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} required />أؤكد قرار إنهاء العلاج النشط والانتقال إلى متابعة التثبيت</label>
+        <button type="submit" className="rounded-xl bg-emerald-700 px-4 py-2 text-white font-bold">تسجيل قرار بدء التثبيت</button>
+      </fieldset>
+    </form>}
+    {error && <p role="alert" className="text-sm text-amber-900">{error}</p>}
+    {draft.uncertain && pending ? <button type="button" disabled={draft.busy} onClick={() => void save(true)} className="rounded-xl border p-2 text-sm font-bold">التحقق من قرار التثبيت بنفس الطلب</button>
+      : !read && <button type="button" disabled={draft.busy} onClick={() => reload(v => v + 1)} className="rounded-xl border p-2 text-sm">إعادة قراءة قرار التثبيت</button>}
+  </section>;
+}
+
 function readCases(payload: unknown, patientId: number): OrthoCase[] {
   const list = payload && typeof payload === "object" ? (payload as { cases?: unknown }).cases : null;
   if (!Array.isArray(list)) throw new Error("تعذّر التحقق من حالات التقويم.");
@@ -434,7 +540,8 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if ([...owner.studies.values(), ...owner.retentions.values()].some(record => record.needsUnloadWarning())) {
+      if ([...owner.studies.values(), ...owner.retentions.values()].some(record => record.needsUnloadWarning())
+        || [...owner.drafts.entries()].some(([key, draft]) => key.startsWith("retention-transition:") && (draft.dirty || draft.busy || draft.uncertain))) {
         event.preventDefault(); event.returnValue = "";
       }
     };
@@ -1118,6 +1225,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   {/* ────────────────── الركن الرابع: التثبيت والاستبقاء ────────────────── */}
                   {currentPillar === "retention" && (
                     <div className="space-y-4">
+                      <RetentionTransition patientId={patientId} row={row} onSaved={refreshAfterConfirmedChange} />
                       <OrthoJourneyPanel kind="retention" patientId={patientId} caseId={row.id} patientName={patient?.name ?? ""} />
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="mb-3 flex items-center justify-between">
@@ -1136,7 +1244,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                         {live && (
                           <div className="rounded-xl bg-slate-50 p-3 border border-slate-200">
                             <p className="mb-2 text-xs font-bold text-slate-700">
-                              الملخص القديم لا يحدد الفك أو عدد الأجهزة. وثّق الأجهزة ومراجعاتها في السجل التفصيلي أعلاه:
+                              الملخص القديم لا يحدد الفك أو عدد الأجهزة. تغيير النوع هنا لا ينهي العلاج النشط. وثّق القرار والأجهزة ومراجعاتها في السجل أعلاه:
                             </p>
                             <div className="flex flex-wrap gap-2 mb-3">
                               {(Object.keys(RETAINER_LABEL) as RetainerType[]).map((type) => (

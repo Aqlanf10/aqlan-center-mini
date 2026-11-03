@@ -25,6 +25,7 @@ describe("patient appointment history index provenance", () => {
       "0092_prescribing_doctor_snapshot.sql",
       "0093_prescription_issuance_commands.sql",
       "0100_ortho_case_journey.sql",
+      "0101_ortho_retention_transition.sql",
     ]);
   });
 

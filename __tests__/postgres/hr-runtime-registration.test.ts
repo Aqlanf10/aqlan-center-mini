@@ -1,3 +1,5 @@
+import { ORTHO_CASE_JOURNEY_SQL } from "../../lib/ortho-case-journey-schema";
+import { ORTHO_RETENTION_TRANSITION_SQL } from "../../lib/ortho-retention-transition-schema";
 import { PRESCRIPTION_ISSUANCE_SQL } from "../../lib/prescription-issuance-schema";
 import { BOOKING_REQUEST_PREFERENCES_SQL } from "../../lib/prescription-migration-lineage";
 import { PRESCRIBING_DOCTOR_SNAPSHOT_SQL, PRESCRIBING_DOCTOR_IDENTITY_SQL } from "../../lib/prescribing-doctor-schema";
@@ -53,6 +55,8 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0091", name: "prescribing_doctor_identity", checksum: createHash("sha256").update(PRESCRIBING_DOCTOR_IDENTITY_SQL).digest("hex") },
     { version: "0092", name: "prescribing_doctor_snapshot", checksum: createHash("sha256").update(PRESCRIBING_DOCTOR_SNAPSHOT_SQL).digest("hex") },
     { version: "0093", name: "prescription_issuance_commands", checksum: createHash("sha256").update(PRESCRIPTION_ISSUANCE_SQL).digest("hex") },
+    { version: "0100", name: "ortho_case_journey", checksum: createHash("sha256").update(ORTHO_CASE_JOURNEY_SQL).digest("hex") },
+    { version: "0101", name: "ortho_retention_transition", checksum: createHash("sha256").update(ORTHO_RETENTION_TRANSITION_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts', 'prescription_issuance_commands']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);

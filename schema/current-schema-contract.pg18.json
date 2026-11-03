@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 139,
-    "columns": 1809,
-    "constraints": 2193,
-    "indexes": 448,
-    "triggers": 114
+    "tables": 140,
+    "columns": 1825,
+    "constraints": 2228,
+    "indexes": 452,
+    "triggers": 118
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -2680,7 +2680,14 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ortho_retention_transition_bridge_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
     },
     "collection_attempt_retirements": {
       "columns": {
@@ -11651,7 +11658,14 @@
           "unique": false
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ortho_retention_transition_case_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
     },
     "ortho_decision_revisions": {
       "columns": {
@@ -12186,6 +12200,178 @@
           ]
         },
         "ortho_retention_physical_integrity": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "ortho_retention_transitions": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "clinical_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "command_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "date_provenance": {
+          "type": "text",
+          "nullable": false
+        },
+        "from_phase": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "occurred_on": {
+          "type": "date",
+          "nullable": true
+        },
+        "ortho_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "recorded_patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "request_fingerprint": {
+          "type": "text",
+          "nullable": false
+        },
+        "retention_plan": {
+          "type": "text",
+          "nullable": false
+        },
+        "source_note": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "clinical_case_id"
+        ],
+        [
+          "ortho_case_id"
+        ]
+      ],
+      "checks": [
+        "ortho_retention_transitions_check",
+        "ortho_retention_transitions_command_id_check",
+        "ortho_retention_transitions_created_by_check",
+        "ortho_retention_transitions_date_provenance_check",
+        "ortho_retention_transitions_from_phase_check",
+        "ortho_retention_transitions_reason_check",
+        "ortho_retention_transitions_recorded_patient_id_check",
+        "ortho_retention_transitions_request_fingerprint_check",
+        "ortho_retention_transitions_retention_plan_check",
+        "ortho_retention_transitions_source_note_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "clinical_case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "ortho_case_id"
+          ],
+          "refTable": "ortho_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "ortho_retention_transitions_clinical_case_id_key": {
+          "columns": [
+            "clinical_case_id"
+          ],
+          "unique": true
+        },
+        "ortho_retention_transitions_ortho_case_id_key": {
+          "columns": [
+            "ortho_case_id"
+          ],
+          "unique": true
+        },
+        "ortho_retention_transitions_patient_idx": {
+          "columns": [
+            "patient_id",
+            "ortho_case_id"
+          ],
+          "unique": false
+        },
+        "ortho_retention_transitions_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "ortho_retention_transitions_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_retention_transitions_scope": {
           "timing": "AFTER",
           "events": [
             "INSERT",

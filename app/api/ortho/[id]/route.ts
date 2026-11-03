@@ -118,6 +118,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
+    if (session.role !== "admin" && session.role !== "doctor") return forbidden("تغيير مرحلة العلاج أو المثبّت أو إغلاق الحالة يحتاج قرار الطبيب.");
+
     if (typeof source.phase === "string") {
       if (!Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase)) {
         return NextResponse.json({ message: "مرحلة غير معروفة." }, { status: 400 });

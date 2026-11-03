@@ -250,7 +250,7 @@ describe("real PostgreSQL retainer delivery dates", () => {
     const before = await state(id); const otherBefore = await state(unrelated);
     expect(await setRetainerForProbe({ id, retainer: type, deliveredOn: type === "none" ? null : D2,
       preserveExistingDeliveryDate: true })).toBe(true);
-    expect(await state(id)).toEqual({ ...before, retainer: type, retainer_on: expected, status: "retention" });
+    expect(await state(id)).toEqual({ ...before, retainer: type, retainer_on: expected });
     expect(await state(unrelated)).toEqual(otherBefore);
     expect((await db!.getOrthoCase(id, D2))?.retainerOn).toBe(expected);
   });
@@ -286,7 +286,7 @@ describe("real PostgreSQL retainer delivery dates", () => {
   it("real PATCH none clears a known date and permits completion; null retainer still blocks it", async () => {
     const id = await fixture("essix", D1);
     expect((await patch(id, { retainer: "none", retainerOn: D0 })).status).toBe(200);
-    expect(await state(id)).toMatchObject({ retainer: "none", retainer_on: null, status: "retention" });
+    expect(await state(id)).toMatchObject({ retainer: "none", retainer_on: null, status: "active" });
     expect((await patch(id, { retainer: "none" })).status).toBe(200);
     expect(await db!.closeOrthoCase({ id, status: "completed", actor: ACTOR, note: null })).toEqual({ ok: true });
     const missingRetainer = await fixture(); const before = await state(missingRetainer);
@@ -347,7 +347,7 @@ describe("observed PostgreSQL lock-current decisions", () => {
       () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: D1, preserveExistingDeliveryDate: true }), SETTER,
       () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: D2, preserveExistingDeliveryDate: true }), SETTER);
     expect([first, second]).toEqual([true, true]);
-    expect(await state(id)).toMatchObject({ retainer: "essix", retainer_on: D1, status: "retention" });
+    expect(await state(id)).toMatchObject({ retainer: "essix", retainer_on: D1, status: "active" });
   });
 
   it.each(["completed", "discontinued"] as const)("%s before a waiting PATCH rechecks the closed guard", async (status) => {

@@ -36,6 +36,7 @@ import HR_TEMPORAL_RUNTIME_MIGRATIONS from './hr-temporal-schema.generated.json'
 import { applyRuntimeMigrationFiles } from './migrations';
 import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
 import { ORTHO_CASE_JOURNEY_SQL } from './ortho-case-journey-schema';
+import { ORTHO_RETENTION_TRANSITION_SQL } from './ortho-retention-transition-schema';
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
 import { HR_PAYROLL_SQL } from "./hr-payroll-schema";
@@ -2124,6 +2125,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), HR_TEMPORAL_RUNTIME_MIGRATIONS);
     await applyOrthoAssessmentRuntime(getPool());
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0100", name: "ortho_case_journey", filename: "0100_ortho_case_journey.sql", sql: ORTHO_CASE_JOURNEY_SQL, checksum: checksumOf(ORTHO_CASE_JOURNEY_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0101", name: "ortho_retention_transition", filename: "0101_ortho_retention_transition.sql", sql: ORTHO_RETENTION_TRANSITION_SQL, checksum: checksumOf(ORTHO_RETENTION_TRANSITION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -23312,8 +23314,7 @@ export async function setRetainer(input: {
                 AND retainer = $2::text AND retainer_on IS NOT NULL
               THEN retainer_on
               ELSE $3::date
-            END,
-            status = CASE WHEN status = 'active' THEN 'retention' ELSE status END
+            END
       WHERE id = $1 AND status IN ('active','retention')`,
     [input.id, input.retainer, input.deliveredOn, input.preserveExistingDeliveryDate === true],
   );
