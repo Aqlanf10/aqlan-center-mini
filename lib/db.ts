@@ -7361,14 +7361,7 @@ export async function updateLabOrderClinicalOn(client: DbClient, id: number, inp
 
 export async function updateLabOrderAccounting(
   orderId: number,
-  input: {
-    expenseCategoryId?: number | null;
-    expenseAccountCode?: string | null;
-    payableAccountCode?: string | null;
-    isPosted?: boolean;
-    costMinor?: number | null;
-    costCurrency?: Currency | null;
-    exchangeRate?: number;
+  input: LabAccountingInput & {
     session?: import("./auth").SessionPayload;
     actor?: string;
     actorRole?: string;
@@ -7384,6 +7377,64 @@ export async function updateLabOrderAccounting(
     if (input.session && (!activeSession || !(await import("./roles")).canHandleMoney(activeSession.role))) {
       throw new LabFinancialBoundaryError("lab_accounting_forbidden", "انتهت الجلسة أو تغيّرت صلاحية العملية المالية؛ لم تتغير التكلفة.");
     }
+    const outcome = await updateLabOrderAccountingOn(client, orderId, input, {
+      actor: { username: input.actor || "system", role: input.actorRole ?? null },
+      // Internal callers without a session keep the legacy contract: no patient check.
+      canAccessPatientMoney: activeSession
+        ? async patientId => (await import("./patient-access")).canViewPatientMoney(activeSession, patientId)
+        : null,
+    });
+    if (outcome === "not_found") {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    // An exact no-op commits as before (nothing was written).
+    if (outcome === "updated" && activeSession && activeSession.expiresAt < Date.now()) {
+      throw new LabFinancialBoundaryError("lab_accounting_forbidden", "انتهت الجلسة أثناء الانتظار؛ لم تُحفظ العملية المالية.");
+    }
+    await client.query("COMMIT");
+    const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
+    return full[0] ? toLabOrder(full[0]) : null;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** The accounting fields an accounting edit may change (cost, currency, rate,
+ * expense category, accounts, posting). */
+export interface LabAccountingInput {
+  expenseCategoryId?: number | null;
+  expenseAccountCode?: string | null;
+  payableAccountCode?: string | null;
+  isPosted?: boolean;
+  costMinor?: number | null;
+  costCurrency?: Currency | null;
+  exchangeRate?: number;
+}
+/** Who edits a lab order's accounting (M2 slice 71): the legacy session wrapper or the
+ * canonical admitted operation. */
+export interface LabAccountingAuthority {
+  readonly actor: { readonly username: string; readonly role: string | null };
+  /** Financial access to this patient's money (checked after the order row lock, with the
+   * patient row key-share locked NOWAIT); null = no patient check (legacy internal callers). */
+  readonly canAccessPatientMoney: ((patientId: number) => Promise<boolean>) | null;
+}
+
+/**
+ * The accounting edit inside the CALLER's transaction: the order row locked, patient
+ * money access, the link/settlement/period guards, the FX precision rules, the order
+ * and payable updated (or the payable created), tracking and audit rows. `not_found`:
+ * no such order; `unchanged`: an exact no-op (nothing written). Refusals throw.
+ */
+export async function updateLabOrderAccountingOn(
+  client: DbClient,
+  orderId: number,
+  input: LabAccountingInput,
+  authority: LabAccountingAuthority,
+): Promise<"not_found" | "unchanged" | "updated"> {
     const { rows: orderRows } = await client.query<{
       id: number; patient_id: number;
       party_id: number | null;
@@ -7412,14 +7463,13 @@ export async function updateLabOrderAccounting(
     );
 
     if (!orderRows[0]) {
-      await client.query("ROLLBACK");
-      return null;
+      return "not_found";
     }
     const order = orderRows[0];
-    if (activeSession) {
-      // Money roles retain their canonical financial access, not new clinical access.
+    if (authority.canAccessPatientMoney) {
+      // Money roles retain their financial access, not new clinical access.
       const patient = (await client.query("SELECT id FROM patients WHERE id=$1 FOR KEY SHARE NOWAIT", [order.patient_id])).rows[0];
-      if (!patient || !await (await import("./patient-access")).canViewPatientMoney(activeSession, order.patient_id)) {
+      if (!patient || !await authority.canAccessPatientMoney(order.patient_id)) {
         throw new LabFinancialBoundaryError("lab_accounting_patient_forbidden", "لا تملك صلاحية مالية لهذا الملف.");
       }
     }
@@ -7523,9 +7573,7 @@ export async function updateLabOrderAccounting(
       || isPosted !== (order.is_posted !== false);
     const needsPayable = !order.payable_id && order.party_id && resolvedCost != null && resolvedCost > 0;
     if (!moneyChanged && !accountingChanged && !needsPayable) {
-      await client.query("COMMIT");
-      const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
-      return full[0] ? toLabOrder(full[0]) : null;
+      return "unchanged";
     }
 
     // Payment writers lock the payable before inserting their settlement. NOWAIT
@@ -7634,7 +7682,7 @@ export async function updateLabOrderAccounting(
           order.party_id,
           `${order.work_type}${order.tooth_numbers ? ` [سن ${order.tooth_numbers}]` : ""}${order.details ? ` — ${order.details}` : ""}`,
           resolvedCost, resolvedCurrency, resolvedRate, baseAmount,
-          orderId, dateText(order.due_date), input.actor || "system",
+          orderId, dateText(order.due_date), authority.actor.username,
           expenseCatId, expenseAccCode, payableAccCode, isPosted,
         ],
       );
@@ -7658,14 +7706,14 @@ export async function updateLabOrderAccounting(
       null,
       null,
       note,
-      input.actor || "system",
-      input.actorRole || "accountant",
+      authority.actor.username,
+      authority.actor.role || "accountant",
       client,
     );
 
     await insertAuditRow(client, {
       action: "lab_order.accounting", entity: "lab_order", entityId: orderId,
-      actor: input.actor || "system", actorRole: input.actorRole ?? null,
+      actor: authority.actor.username, actorRole: authority.actor.role,
       details: {
         previous: { costMinor: order.cost_minor, currency: order.cost_currency, exchangeRate: order.exchange_rate,
           baseAmountMinor: order.base_amount_minor, expenseCategoryId: order.expense_category_id,
@@ -7676,18 +7724,7 @@ export async function updateLabOrderAccounting(
       },
     });
 
-    if (activeSession && activeSession.expiresAt < Date.now()) {
-      throw new LabFinancialBoundaryError("lab_accounting_forbidden", "انتهت الجلسة أثناء الانتظار؛ لم تُحفظ العملية المالية.");
-    }
-    await client.query("COMMIT");
-    const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
-    return full[0] ? toLabOrder(full[0]) : null;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+    return "updated";
 }
 
 /**

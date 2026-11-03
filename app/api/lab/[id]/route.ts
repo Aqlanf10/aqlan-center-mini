@@ -35,6 +35,7 @@ import type { VerifiedDurableSession } from "@/lib/staff-durable-session";
 import {
   CanonicalLabCorrectionRefusal, commandCanonicalLabClinical, commandCanonicalLabPrescription, commandCanonicalLabShade,
 } from "@/lib/canonical-lab-corrections";
+import { CanonicalLabAccountingRefusal, commandCanonicalLabAccounting } from "@/lib/canonical-lab-accounting";
 
 export const dynamic = "force-dynamic";
 
@@ -49,15 +50,15 @@ const SESSION_ENDED = "انتهت الجلسة. سجّل الدخول من جد�
 /** One HTTP mapping for the canonical lab-order branch (M2 slice 67): bounded codes,
  * Arabic messages, no driver text, never cached. */
 function canonicalLabFailure(error: unknown, fallback: string): NextResponse {
-  if (error instanceof CanonicalLabOrderRefusal || error instanceof CanonicalLabCorrectionRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  if (error instanceof CanonicalLabOrderRefusal || error instanceof CanonicalLabCorrectionRefusal || error instanceof CanonicalLabAccountingRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
   if (error instanceof LabFinancialBoundaryError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
   if ((error as { code?: string } | null)?.code === "55P03") return NextResponse.json({ code: "lab_status_busy", message: "يوجد تحديث جارٍ؛ حدّث الإرسالية وأعد المحاولة." }, { status: 409, headers: NO_STORE });
   return canonicalPatientReadFailure(error, fallback);
 }
 
-/** M2 slices 67 and 69: status, due date, events and the clinical corrections
- * (prescription, clinical, shade) on the canonical runtime; accounting and posting are
- * refused explicitly until their own reviewed slice, never the legacy session. */
+/** M2 slices 67, 69 and 71: status, due date, events, the clinical corrections
+ * (prescription, clinical, shade) and accounting/posting on the canonical runtime; any
+ * other action is refused explicitly; never the legacy session. */
 async function canonicalPatch(request: Request, handle: VerifiedDurableSession, rawId: string): Promise<NextResponse> {
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
@@ -70,7 +71,10 @@ async function canonicalPatch(request: Request, handle: VerifiedDurableSession, 
     if (source.action === "complete_prescription") return NextResponse.json(await commandCanonicalLabPrescription(handle, rawId, source), { headers: NO_STORE });
     if (source.action === "update_clinical") return NextResponse.json(await commandCanonicalLabClinical(handle, rawId, source), { headers: NO_STORE });
     if (source.action === "update_shade") return NextResponse.json(await commandCanonicalLabShade(handle, rawId, source), { headers: NO_STORE });
-    // Accounting and posting (update_accounting, post, unpost) stay refused here.
+    // M2 slice 71: accounting and posting under finance.payables.record.
+    if (source.action === "update_accounting" || source.action === "post" || source.action === "unpost") {
+      return NextResponse.json(await commandCanonicalLabAccounting(handle, rawId, source), { headers: NO_STORE });
+    }
     if (source.action !== undefined) canonicalLabActionNotMigrated();
     if (source.dueDate !== undefined) return NextResponse.json(await commandCanonicalLabDueDate(handle, rawId, source), { headers: NO_STORE });
     return NextResponse.json(await commandCanonicalLabStatus(handle, rawId, source), { headers: NO_STORE });

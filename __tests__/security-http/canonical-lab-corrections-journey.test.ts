@@ -41,7 +41,7 @@ beforeAll(async () => {
 }, 300_000);
 afterAll(async () => { await journey?.close(); }, 60_000);
 
-it("HTTP: the corrections need clinical.visits.document; stale state is refused; accounting stays refused", async () => {
+it("HTTP: the corrections need clinical.visits.document; stale state is refused; posting needs the finance grant", async () => {
   const orderOnly = await journey.login("orderOnly");
   const denied = await journey.api(`/api/lab/${ids.sent}`, orderOnly.cookie, patch({ action: "update_shade", shadeSpecification: null, expectedShadeSpecification: null }));
   expect(denied.status).toBe(403);
@@ -52,7 +52,8 @@ it("HTTP: the corrections need clinical.visits.document; stale state is refused;
   expect(stale.status).toBe(409);
   expect((await stale.json()).message).toMatch(ARABIC);
   const accounting = await journey.api(`/api/lab/${ids.sent}`, documenter.cookie, patch({ action: "post" }));
-  expect([accounting.status, (await accounting.json()).code]).toEqual([409, "lab_action_not_canonical"]);
+  // Slice 71: posting needs finance.payables.record, which the documenter lacks.
+  expect(accounting.status).toBe(403);
   expect(await row(ids.needed)).toMatchObject({ status: "needed", party_id: null });
   expect(await journey.ddlLog()).toEqual([]);
 });

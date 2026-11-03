@@ -653,6 +653,27 @@ The read-only patient panel clears stale or failed responses and has no action o
   - PG `lab-canonical-pricing` (7): refusal for list/resolve, revocation, editor without amounts, atomic close-previous, validation, pair lock wait, services writes, legacy create fix.
   - Built journey `canonical-lab-pricing-journey` (2, portOffset 116).
 
+### Slice 71 — lab-order accounting (`PATCH /api/lab/[id]`: `update_accounting`, `post`, `unpost`)
+- **Admission:** one admitted `finance.payables.record` transaction (the map's branch requirement). The legacy route allowed money roles by label.
+- **Writer:** the legacy writer's own body (`updateLabOrderAccountingOn`, `LabAccountingAuthority`). The legacy wrapper keeps its session revalidation and money-role check, its no-patient-check contract for internal callers, and its no-op commit.
+- **Guards, unchanged:**
+  - payable link validation;
+  - settlement evidence refusal;
+  - the `finance.locked_before` period lock, the linked visit invoice included;
+  - saved-snapshot and FX precision rules;
+  - the NOWAIT lock order on payable and settings;
+  - the payable updated or created once;
+  - tracking and `lab_order.accounting` audit with the write.
+- **Scope:** the patient must be inside the actor's patient scope; outside reads as missing, and `none` is refused. The legacy rule was "money roles any patient; doctors their accessible patients".
+- **Exchange rate:** from settings (server-owned), with the optional `expectedExchangeRate` quote fence; the legacy parsing is kept field for field.
+- **Owner money rule (6615124926):** the response carries amounts only with `finance.cost-prices.view`.
+- **Screen:** `CanonicalLabAccounting` on the board for `finance.payables.record` holders (post, unpost, cost with its currency). It shows no amounts.
+- **Tests:**
+  - PG `lab-canonical-accounting` (6): post/unpost with tracking and audit, cost change in sync with the payable, exact no-op, currency required, settlement and period lock refused, concurrent edits consistent, scope, grant, revocation.
+  - Legacy accounting suites: PG 161 and unit 145, unchanged.
+  - Built journey `canonical-lab-accounting-journey` (2, portOffset 118). The orders and corrections journeys now expect 403 for posting without the grant.
+- **Lab group status:** every lab route method is now canonical. The only open item is the owner's post-dispatch decision.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

@@ -2228,7 +2228,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 67: status and due date in one admitted clinical.lab.order transaction (setLabOrderStatusOn / setLabOrderDueDateOn): the order row locked first, an order outside the patient scope answers like a missing one (own = DOCTOR_PATIENT_CONDITION, none refused), an optional expectedStatus compared under the lock (409 lab_status_changed), the legacy transition map, prescription gate, tracking row and money effects unchanged (an unpaid payable removed on cancel, a paid one kept; receipt/fitting recognises the payable once). The lab_order.cancel audit row commits with the cancel. The response carries the clinical projection unless finance.cost-prices.view. Due date: open work only (needed, sent, in_progress, remake); a real calendar date. Slice 69 adds complete_prescription, update_clinical and update_shade (see branches). Accounting and posting (update_accounting, post, unpost) are refused explicitly in the canonical branch (409 lab_action_not_canonical) until their own reviewed slice.",
+  "note": "M2 slice 67: status and due date in one admitted clinical.lab.order transaction (setLabOrderStatusOn / setLabOrderDueDateOn): the order row locked first, an order outside the patient scope answers like a missing one (own = DOCTOR_PATIENT_CONDITION, none refused), an optional expectedStatus compared under the lock (409 lab_status_changed), the legacy transition map, prescription gate, tracking row and money effects unchanged (an unpaid payable removed on cancel, a paid one kept; receipt/fitting recognises the payable once). The lab_order.cancel audit row commits with the cancel. The response carries the clinical projection unless finance.cost-prices.view. Due date: open work only (needed, sent, in_progress, remake); a real calendar date. Slice 69 adds complete_prescription, update_clinical and update_shade (see branches). Slice 71 adds accounting and posting (update_accounting, post, unpost) under finance.payables.record (see branches). Any other action is refused explicitly (409 lab_action_not_canonical).",
   "branches": {
    "discriminator": "action",
    "values": {
@@ -2248,19 +2248,19 @@
      "need": [
       "finance.payables.record"
      ],
-     "note": "Recognises the lab cost."
+     "note": "Recognises the lab cost. M2 slice 71: canonical — one admitted finance.payables.record transaction (updateLabOrderAccountingOn) inside the patient scope (outside = 404, none refused); the legacy writer's guards unchanged (payable link, settlement, finance.locked_before incl. the linked visit invoice, saved snapshot, FX precision, NOWAIT lock order); the exchange rate from settings with the optional expectedExchangeRate fence; payable updated or created once; tracking and lab_order.accounting audit with the write; amounts in the response only with finance.cost-prices.view (owner rule 6615124926)."
     },
     "unpost": {
      "need": [
       "finance.payables.record"
      ],
-     "note": "Reverses the recognition with a reason."
+     "note": "Reverses the recognition with a reason. M2 slice 71: canonical — one admitted finance.payables.record transaction (updateLabOrderAccountingOn) inside the patient scope (outside = 404, none refused); the legacy writer's guards unchanged (payable link, settlement, finance.locked_before incl. the linked visit invoice, saved snapshot, FX precision, NOWAIT lock order); the exchange rate from settings with the optional expectedExchangeRate fence; payable updated or created once; tracking and lab_order.accounting audit with the write; amounts in the response only with finance.cost-prices.view (owner rule 6615124926)."
     },
     "update_accounting": {
      "need": [
       "finance.payables.record"
      ],
-     "note": ""
+     "note": "M2 slice 71: canonical — one admitted finance.payables.record transaction (updateLabOrderAccountingOn) inside the patient scope (outside = 404, none refused); the legacy writer's guards unchanged (payable link, settlement, finance.locked_before incl. the linked visit invoice, saved snapshot, FX precision, NOWAIT lock order); the exchange rate from settings with the optional expectedExchangeRate fence; payable updated or created once; tracking and lab_order.accounting audit with the write; amounts in the response only with finance.cost-prices.view (owner rule 6615124926)."
     },
     "update_clinical": {
      "need": [
