@@ -1,0 +1,295 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+stdout | __tests__/security-http/daily-clinic-report-ui.test.ts > daily clinic full-result A4 print proof > prints only explicitly targeted receipt settlements and never invents a YER agreement
+
+stdout | __tests__/security-http/daily-clinic-report-ui.test.ts
+
+ ❯ __tests__/security-http/daily-clinic-report-ui.test.ts (34 tests | 1 failed) 30408ms
+     × prints only explicitly targeted receipt settlements and never invents a YER agreement 2222ms
+ ❯ __tests__/security-http/report-page-design-ui.test.ts (6 tests | 1 failed) 10593ms
+     × prints actual A4 paper with unique value associations and rejects a cut-off final row 2849ms
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts (1 test | 1 skipped) 5ms
+stdout | __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts (3 tests | 1 failed) 9802ms
+     × keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels 6036ms
+ ❯ __tests__/security-http/patient-lab-status-refusal-ui.test.ts (12 tests | 12 skipped) 3ms
+ ❯ __tests__/security-http/patient-diagnosis-ui.test.ts (4 tests | 3 failed) 5713ms
+     × reads one case, saves through the real route and captures RTL at 1280 1450ms
+     × reads one case, saves through the real route and captures RTL at 390 1351ms
+     × shows a failed read as unavailable, retries to real case data and never claims an empty history 1060ms
+ ❯ __tests__/security-http/ortho-assessment-intake-browser.test.ts (3 tests | 1 failed) 28341ms
+     × keeps one identity, incremental findings and explicit start at 390px 20794ms
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts (8 tests | 8 skipped) 3ms
+ ❯ __tests__/security-http/inventory-foundation-http-ui.test.ts (4 tests | 4 skipped) 80ms
+ ❯ __tests__/security-http/inventory-disabled-http-ui.test.ts (2 tests | 2 skipped) 12ms
+ ❯ __tests__/security-http/inventory-overview-visual.test.ts (2 tests | 2 skipped) 35ms
+ ❯ __tests__/security-http/hr-payroll-attendance-disclosure.test.ts (1 test | 1 failed) 96ms
+   × discloses that attendance and leave do not automatically adjust payroll, without writes 95ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/inventory-disabled-http-ui.test.ts [ __tests__/security-http/inventory-disabled-http-ui.test.ts ]
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/security-http/inventory-disabled-http-ui.test.ts:15:28
+     13|   db = new Client({ connectionString: url.toString(), ssl: false });
+     14|   await db.connect();
+     15|   browser = await chromium.launch({ headless: true, ...(process.env.IN…
+       |                            ^
+     16| });
+     17| afterAll(async () => { await browser?.close(); await db?.end(); });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
+
+ FAIL  __tests__/security-http/inventory-foundation-http-ui.test.ts [ __tests__/security-http/inventory-foundation-http-ui.test.ts ]
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/security-http/inventory-foundation-http-ui.test.ts:39:28
+     37|   unknownId = await create(`${witness}-missing`);
+     38|   freeId = await create(`${witness}-free`, "0");
+     39|   browser = await chromium.launch({ headless: true, ...(process.env.IN…
+       |                            ^
+     40|   await mkdir(evidence, { recursive: true });
+     41| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
+
+ FAIL  __tests__/security-http/inventory-overview-visual.test.ts [ __tests__/security-http/inventory-overview-visual.test.ts ]
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/security-http/inventory-overview-visual.test.ts:10:672
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
+
+ FAIL  __tests__/security-http/lab-dispatch-privacy-ui.test.ts [ __tests__/security-http/lab-dispatch-privacy-ui.test.ts ]
+AssertionError: expected undefined to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+undefined
+
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:64:26
+     62|
+     63| beforeAll(async () => {
+     64|   expect(process.env.CI).toBe("true");
+       |                          ^
+     65|   expect(process.env.GITHUB_ACTIONS).toBe("true");
+     66|   expect(new URL(baseUrl).origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  __tests__/security-http/patient-lab-read-state-ui.test.ts [ __tests__/security-http/patient-lab-read-state-ui.test.ts ]
+AssertionError: expected undefined to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+undefined
+
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:15:26
+     13| let h: Awaited<ReturnType<typeof harness>>;
+     14| beforeAll(async () => {
+     15|   expect(process.env.CI).toBe("true");
+       |                          ^
+     16|   expect(process.env.GITHUB_ACTIONS).toBe("true");
+     17|   expect(new URL(baseUrl).origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+ FAIL  __tests__/security-http/patient-lab-status-refusal-ui.test.ts [ __tests__/security-http/patient-lab-status-refusal-ui.test.ts ]
+AssertionError: expected undefined to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+undefined
+
+ ❯ __tests__/security-http/patient-lab-status-refusal-ui.test.ts:17:26
+     15| let h: Awaited<ReturnType<typeof harness>>;
+     16| beforeAll(async () => {
+     17|   expect(process.env.CI).toBe("true");
+       |                          ^
+     18|   expect(process.env.GITHUB_ACTIONS).toBe("true");
+     19|   expect(new URL(baseUrl).origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/14]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/daily-clinic-report-ui.test.ts > daily clinic full-result A4 print proof > prints only explicitly targeted receipt settlements and never invents a YER agreement
+AssertionError: PDF page 6, word "جّسملا", box {"xMin":673.788821,"xMax":698.221526,"yMin":25.137153,"yMax":47.339948}, page 841.91998×594.95996pt; CSS margin 10mm: expected 25.137153 to be greater than or equal to 25.34645669291339
+ ❯ assertPaperBounds __tests__/security-http/daily-clinic-report-ui.test.ts:284:34
+
+ ❯ __tests__/security-http/daily-clinic-report-ui.test.ts:590:56
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/14]⎯
+
+ FAIL  __tests__/security-http/hr-payroll-attendance-disclosure.test.ts > discloses that attendance and leave do not automatically adjust payroll, without writes
+Error: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝ Failed to launch browser.
+ ❯ executablePathOrDie node_modules/playwright-core/lib/coreBundle.js:33180:19
+ ❯ Object.executablePathOrDie node_modules/playwright-core/lib/coreBundle.js:33211:49
+ ❯ Chromium._prepareToLaunch node_modules/playwright-core/lib/coreBundle.js:39787:43
+ ❯ Chromium._launchProcess node_modules/playwright-core/lib/coreBundle.js:39799:26
+ ❯ Chromium._innerLaunch node_modules/playwright-core/lib/coreBundle.js:39712:86
+ ❯ Chromium._innerLaunchWithRetries node_modules/playwright-core/lib/coreBundle.js:39699:18
+ ❯ node_modules/playwright-core/lib/coreBundle.js:57198:22
+ ❯ _ProgressController.run node_modules/playwright-core/lib/coreBundle.js:12374:27
+ ❯ BrowserServerLauncherImpl.launchServer node_modules/playwright-core/lib/coreBundle.js:57189:21
+ ❯ BrowserType2.launchServer node_modules/playwright-core/lib/coreBundle.js:63318:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/14]⎯
+
+ FAIL  __tests__/security-http/ortho-assessment-intake-browser.test.ts > first diagnostic case from module through saved assessment to explicit treatment > keeps one identity, incremental findings and explicit start at 390px
+TimeoutError: locator.fill: Timeout 20000ms exceeded.
+Call log:
+[2m  - waiting for getByLabel('سبب فتح التقييم', { exact: true })[22m
+[2m    - locator resolved to <input disabled value="" maxlength="500" aria-label="سبب فتح التقييم" class="block min-h-11 w-full rounded-lg border p-2"/>[22m
+[2m    - fill("تقييم أولي اصطناعي دون بدء علاج")[22m
+[2m  - attempting fill action[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying fill action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying fill action[22m
+[2m      - waiting 100ms[22m
+[2m    38 × waiting for element to be visible, enabled and editable[22m
+[2m       - element is not enabled[22m
+[2m     - retrying fill action[22m
+[2m       - waiting 500ms[22m
+
+ ❯ __tests__/security-http/ortho-assessment-intake-browser.test.ts:78:71
+     76|         try {
+     77|             await enter();
+     78|             await page.getByLabel("سبب فتح التقييم", { exact: true }).…
+       |                                                                       ^
+     79|             await page.getByRole("button", { name: "فتح ملف التقييم", …
+     80|             if (width === 390) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/14]⎯
+
+ FAIL  __tests__/security-http/patient-diagnosis-ui.test.ts > case-scoped diagnosis on the built RTL patient page > reads one case, saves through the real route and captures RTL at 1280
+ FAIL  __tests__/security-http/patient-diagnosis-ui.test.ts > case-scoped diagnosis on the built RTL patient page > reads one case, saves through the real route and captures RTL at 390
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ __tests__/security-http/patient-diagnosis-ui.test.ts:111:57
+    110|       expect(await skeletal.inputValue()).toBe("صياغة هيكلية تجريبية غ…
+    111|       expect(f.writes).toEqual([]);
+    112|       await skeletalChoices.list.getByRole("option", { name: "Class II…
+       |                     ^
+    113|       expect(await skeletal.inputValue()).toBe("Class II");
+    114|       expect(await panel.getByRole("combobox").count()).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/14]⎯
+
+ FAIL  __tests__/security-http/patient-diagnosis-ui.test.ts > case-scoped diagnosis on the built RTL patient page > shows a failed read as unavailable, retries to real case data and never claims an empty history
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ __tests__/security-http/patient-diagnosis-ui.test.ts:243:111
+    242|       expect(await panel.textContent()).toContain("هذا لا يعني عدم وجو…
+    243|       expect(await panel.getByText("لا تشخيص سريري مسجل لهذه الحالة بع…
+    244|       expect(await panel.getByRole("button", { name: /تحديث التشخيص|سج…
+       | ^
+    245|       failed = false; await panel.getByRole("button", { name: "إعادة ت…
+    246|       await panel.getByText(noteA, { exact: true }).waitFor(); expect(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/14]⎯
+
+ FAIL  __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+Error: PDF signature receipt fragments violate exact glyph geometry
+ ❯ assertReceiptPrintPdfSignature __tests__/helpers/print-pdf-glyphs.ts:120:11
+    118|     || Math.abs(right.yMin - left.yMin) > 2 || gap < 0 || gap > 0.5
+    119|     || merged.text !== expectedLabel) {
+    120|     throw new Error("PDF signature receipt fragments violate exact gly…
+       |           ^
+    121|   }
+    122|   // Neither input words nor their geometry change. The unchanged shar…
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:338:9
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:247:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/14]⎯
+
+ FAIL  __tests__/security-http/report-page-design-ui.test.ts > built daily report design evidence > prints actual A4 paper with unique value associations and rejects a cut-off final row
+AssertionError: PDF association 117 with stat0: expected '' to be 'روضحلايلامجإ' // Object.is equality
+
+- Expected
++ Received
+
+- روضحلايلامجإ
+
+ ❯ nearby __tests__/security-http/report-page-design-ui.test.ts:446:121
+    444|       && candidate.xMax >= word.xMin - horizontal && candidate.xMin <=…
+    445|     );
+    446|     expect(glyphSequence(neighbors.filter((candidate) => candidate !==…
+       |                                                                                                                         ^
+    447|   };
+    448|   statValues.forEach((value, index) => nearby(value, `stat${index}`, 6…
+ ❯ __tests__/security-http/report-page-design-ui.test.ts:448:40
+ ❯ assertPdfContent __tests__/security-http/report-page-design-ui.test.ts:448:14
+ ❯ __tests__/security-http/report-page-design-ui.test.ts:666:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/14]⎯
+
+
+ Test Files  12 failed | 265 passed | 3 skipped (280)
+      Tests  8 failed | 1866 passed | 60 skipped (1934)
+   Start at  22:42:56
+   Duration  2585.71s (transform 6.95s, setup 0ms, import 7.59s, tests 2571.04s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

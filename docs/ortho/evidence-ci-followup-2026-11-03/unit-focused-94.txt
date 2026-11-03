@@ -1,0 +1,13 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/patient-ortho-read-safety.test.tsx __tests__/ortho-assessment-intake.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+
+ Test Files  2 passed (2)
+      Tests  94 passed (94)
+   Start at  23:30:55
+   Duration  3.00s (transform 750ms, setup 0ms, import 926ms, tests 1.80s, environment 0ms)
+

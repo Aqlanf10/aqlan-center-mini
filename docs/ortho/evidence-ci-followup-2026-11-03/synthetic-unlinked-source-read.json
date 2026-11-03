@@ -1,0 +1,10 @@
+{
+  "status": 409,
+  "bridgeCount": 0,
+  "payload": {
+    "ok": false,
+    "status": 409,
+    "code": "bridge_missing",
+    "message": "تعذّر التحقق من سجل الحالة؛ أعد القراءة وراجع الصلاحيات والمراجع."
+  }
+}

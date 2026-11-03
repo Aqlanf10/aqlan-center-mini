@@ -1,0 +1,32 @@
+{
+  "runId": 41735718686,
+  "head": "ed0036ce128ac45e04969572e89da1f68f3f1479",
+  "observedAt": "2026-11-03 23:42:36 UTC",
+  "jobs": [
+    {
+      "id": 126264271554,
+      "name": "PostgreSQL 18 integration, schema and operational journeys",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 126264271678,
+      "name": "Synthetic contract print and watermark",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 126264271862,
+      "name": "Typecheck, Lint, Unit, Audit, Build",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 126270673537,
+      "name": "Built-app HTTP security and hosted browser",
+      "status": "in_progress",
+      "conclusion": null
+    }
+  ],
+  "note": "Parent commit only. Local lease fix 8435b2d2 has not been pushed at capture."
+}

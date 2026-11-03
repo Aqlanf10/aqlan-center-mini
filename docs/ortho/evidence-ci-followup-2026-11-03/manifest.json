@@ -1,0 +1,190 @@
+{
+  "scope": "CI follow-up: committed-view activation and diagnosis-only test scope; full orthodontic acceptance remains false",
+  "applicationCommit": "8435b2d23ef89bc482103cefbbc37d3db81ed03d",
+  "parentCommit": "ed0036ce128ac45e04969572e89da1f68f3f1479",
+  "buildId": "3lBzHKTgCgncorHZUPEpu",
+  "generatedAtUtc": "2026-11-03T23:48:28.504671+00:00",
+  "tests": {
+    "unitFocused": {
+      "passed": 94,
+      "files": 2
+    },
+    "unitWhole": {
+      "passed": 13996,
+      "files": 820,
+      "durationSeconds": 525.15,
+      "confirmedVia": "final Vitest summary and exited process; process handle lost on environment reconnect"
+    },
+    "browserRegression": {
+      "passed": 66,
+      "files": 8,
+      "durationSeconds": 217.41,
+      "confirmedVia": "final Vitest summary and harness teardown; process handle lost on environment reconnect"
+    },
+    "typecheck": "passed",
+    "lint": {
+      "errors": 0,
+      "warnings": 8,
+      "newWarnings": 1
+    },
+    "build": "passed",
+    "preflight": "passed",
+    "runtimeBoundaryChecks": "passed",
+    "httpWholeAfterFix": "not_run_locally; hosted result required",
+    "oldLocalHttp": "failed; recorded separately; not accepted",
+    "all52AcceptanceScenariosAccepted": false,
+    "runtimeBraces": {
+      "passed": true,
+      "exitCode": 0,
+      "files": 9529,
+      "traces": 373
+    },
+    "runtimeTooling": {
+      "passed": true,
+      "traces": 743,
+      "manifests": 86,
+      "sourceMaps": 370,
+      "confirmedVia": "final success message and generated proof file after completed process; follow-up handle unavailable",
+      "proofSha256": "29af5dc7c435b67947ee31ab7a37acea3e75f0e1fe9d2ef6820ede8320a1f190",
+      "scope": "Only available validated maps are inspected. Empty indexed maps give zero source attribution. Unmapped/minified arbitrary bundled code is not proven absent."
+    }
+  },
+  "environment": {
+    "node": "22.23.3",
+    "npm": "11.21.1",
+    "postgres": "18.6",
+    "playwright": "1.63.0",
+    "localChromium": "151.0.7922.173",
+    "pinnedChromium": "153.0.8010.12 revision1243",
+    "pinnedBrowserAvailability": "official download denied403 Domain forbidden"
+  },
+  "sourceFiles": [
+    {
+      "path": "components/PatientOrtho.tsx",
+      "sha256": "3bf738bdcdfec6160b8582ce1b69efc33d8d1f875f070d3745f27d30e328e084"
+    },
+    {
+      "path": "__tests__/security-http/patient-diagnosis-ui.test.ts",
+      "sha256": "665e2369f07ce1a2a7d26bab87ce1fded98f1e879c463f539dbd1ffe34b75201"
+    },
+    {
+      "path": "__tests__/security-http/patient-ortho-real-react.test.ts",
+      "sha256": "08e14acd7364cabe48d8009f25ff791f174734097518231a0670554b1c1d6207"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "path": "browser-regression-66.txt",
+      "bytes": 1006,
+      "sha256": "bda0b3372d131c87844da1c010e6d48cde8384f315e798251f6e3d1b345306da"
+    },
+    {
+      "path": "build.txt",
+      "bytes": 13525,
+      "sha256": "60b393a9b02cd246a90dbe5e9b8a4731ca0a5f9b71c335e26ab7ff678e759e17"
+    },
+    {
+      "path": "ceph-empty-input-existing-behavior.json",
+      "bytes": 933,
+      "sha256": "aa263fd55f4b3c97cef6b820a4b357ff6ef3e2836a38bc847c0ba53d37551bc3"
+    },
+    {
+      "path": "diagnosis-scope-18-browser.txt",
+      "bytes": 949,
+      "sha256": "e5770c3436c219c1933de0b9e2bbb0f2767eacf893ea5aaca528a467c2378d3c"
+    },
+    {
+      "path": "http-full-before-fix.txt",
+      "bytes": 17956,
+      "sha256": "f6515a00a232b6a9f8a92c96631a043ebd017716a592f15a9735ceefd6ca320f"
+    },
+    {
+      "path": "intake-lease-after.txt",
+      "bytes": 607,
+      "sha256": "449f141f9c8991f55fd293886db36363d5173db9d1b95052d14e9806d6df5fa6"
+    },
+    {
+      "path": "intake-lease-before.txt",
+      "bytes": 1944,
+      "sha256": "67add5d2e4fe154dddfa0b6de0f2351ee1f970f880751b8ce2c447b4423856fd"
+    },
+    {
+      "path": "lint.txt",
+      "bytes": 11620,
+      "sha256": "2e317d91eef6109e7c3a6dd9726c8331fc1848e6f06e4715890228e65c921a27"
+    },
+    {
+      "path": "ortho-diagnosis-case-390.png",
+      "bytes": 71177,
+      "sha256": "a8ab3a102ef25c16cd4de75c40fed69219ae8b618db8eb46194c39a11960a648"
+    },
+    {
+      "path": "ortho-intake-assessment-390.png",
+      "bytes": 181487,
+      "sha256": "354d7ccb31669a5309bd2a5fc71be7df5c2c3bccfcb2f5ecc246674a0f2f2f4c"
+    },
+    {
+      "path": "parent-ci-snapshot.json",
+      "bytes": 864,
+      "sha256": "cd96d1cc6d69521474fbd668e439308a335e4b15d7ecf94ab7ea1045575c350d"
+    },
+    {
+      "path": "phase10-http-failure-index.json",
+      "bytes": 802,
+      "sha256": "9fb98e37b1cd63645d77ef6cce5d3be804ca00c00e96566b479600d32795c931"
+    },
+    {
+      "path": "preflight.txt",
+      "bytes": 789,
+      "sha256": "b3cde5b936a6b5943239c80f48f74762dd2213aff42de9959b8c37577213e696"
+    },
+    {
+      "path": "prior-ci-and-local-triage.json",
+      "bytes": 3157,
+      "sha256": "32831232f2bd592aca998d384445a4b7630f425ca011d8c5b5c597a9860748d3"
+    },
+    {
+      "path": "runtime-braces.txt",
+      "bytes": 108,
+      "sha256": "3b1f2670ebda5d22e944607ccfce7f9d04181ff7b1e6e241b0c0ff087dd34bd4"
+    },
+    {
+      "path": "runtime-tooling.txt",
+      "bytes": 137,
+      "sha256": "a45d0daee90d3a91f02c605a4ac6153916a17360c2e147704ddc9e18629acf60"
+    },
+    {
+      "path": "synthetic-unlinked-source-read.json",
+      "bytes": 263,
+      "sha256": "54c25d46b10535e4b0810d6dee84e5cd71e4dbc9d123d8d806ec7ea15c77cbd0"
+    },
+    {
+      "path": "typecheck.txt",
+      "bytes": 48,
+      "sha256": "494c5900ca50ac372426c03ff676bd53571e0b70b3e4fe8eed6ce84138fd526d"
+    },
+    {
+      "path": "unit-all-13996.txt",
+      "bytes": 437,
+      "sha256": "ef57c213d563198c6fd5752823e0a518e66c53c9d81bb926506c2fe67463fbd1"
+    },
+    {
+      "path": "unit-focused-94.txt",
+      "bytes": 345,
+      "sha256": "d8cbab2a929348ed0a487478e8d8b7833f13364df42f067a3045e52c118de0cc"
+    }
+  ],
+  "limits": [
+    "No production, staging or real-patient mutation",
+    "No PR creation pending owner approval",
+    "Existing ceph empty-input inference gap remains unresolved; see report",
+    "No original lecture/case images or data included"
+  ],
+  "visualReview": {
+    "inspected": [
+      "ortho-intake-assessment-390.png",
+      "ortho-diagnosis-case-390.png"
+    ],
+    "scope": "Two synthetic built-page screenshots; not full visual acceptance of all module screens"
+  }
+}

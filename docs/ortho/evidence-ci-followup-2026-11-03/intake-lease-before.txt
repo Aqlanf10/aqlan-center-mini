@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/patient-ortho-real-react.test.ts -t enables a newly mounted intake
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/patient-ortho-real-react.test.ts (48 tests | 1 failed | 47 skipped) 3095ms
+     × enables a newly mounted intake after contact settles before the clinical grant, without another parent render 1571ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/patient-ortho-real-react.test.ts > PatientOrtho paired grants and opaque local drafts in real React > enables a newly mounted intake after contact settles before the clinical grant, without another parent render
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ __tests__/security-http/patient-ortho-real-react.test.ts:211:51
+    209|       await state(f.page, "ready");
+    210|       const reason = panel(f.page).getByLabel("سبب فتح التقييم", { exa…
+    211|       await expect.poll(() => reason.isEnabled()).toBe(true);
+       |                                                   ^
+    212|       await reason.fill("synthetic initial assessment draft");
+    213|       expect(await reason.inputValue()).toBe("synthetic initial assess…
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ __tests__/security-http/patient-ortho-real-react.test.ts:211:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 47 skipped (48)
+   Start at  23:29:10
+   Duration  8.51s (transform 72ms, setup 0ms, import 476ms, tests 3.10s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

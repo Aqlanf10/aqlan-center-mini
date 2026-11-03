@@ -1,0 +1,26 @@
+{
+  "inputMeasurements": 0,
+  "sagittal": {
+    "classification": "Indeterminate",
+    "severity": "normal",
+    "descriptionAr": "تعذر تحديد العلاقة الهيكلية السهمية بدقة",
+    "detailsAr": [],
+    "maxilla": "normal",
+    "mandible": "normal"
+  },
+  "vertical": {
+    "pattern": "Indeterminate",
+    "descriptionAr": "نمو عمودي متوازن",
+    "detailsAr": [],
+    "growthTendencyAr": "نمط نمو عمودي متناسق ومتوازن (Mesofacial)"
+  },
+  "treatment": {
+    "extractionDecision": "non-extraction",
+    "extractionRationaleAr": "خطة غير قالعة مع رصف وتسوية وتنسيق الإطباق.",
+    "growthModification": false,
+    "expansion": false,
+    "anchorageOrTADs": false,
+    "orthognathicSurgery": false,
+    "narrativePlanAr": "• قرار القلع: خطة غير قالعة مع رصف وتسوية وتنسيق الإطباق."
+  }
+}

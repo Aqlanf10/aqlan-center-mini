@@ -1,0 +1,100 @@
+{
+  "application_commit": "b9e7a5d97563b8d28fa4d747c25fbf4471a9f1c3",
+  "published_head": "ed0036ce128ac45e04969572e89da1f68f3f1479",
+  "phase10": {
+    "run": 41727840922,
+    "head": "b436c244f3e31f208733f6523ae764453c7886b7",
+    "quality": "success",
+    "postgres": "success",
+    "print": "success",
+    "http": "failure",
+    "failure_index_artifact": 13279101624,
+    "artifact_sha256": "6eb2707a7b9cb68296d757164c9236d4996c3f1ceffe19222f55db64320cacf2",
+    "passed": 1930,
+    "failed": 4,
+    "failed_files": {
+      "ortho-prescription-truth-built-page.test.ts": 1,
+      "patient-diagnosis-ui.test.ts": 3
+    },
+    "fullJobLogAttempt": {
+      "job": 126244318804,
+      "result": "connector Transport closed",
+      "retried": false
+    }
+  },
+  "local_diagnosis_scope": {
+    "old_selector": "section containing diagnosis heading",
+    "observed_comboboxes_before_editor": [
+      "source problem select"
+    ],
+    "observed_other_panel_alert": "bridge_missing",
+    "synthetic_fixture_bridge_count": 0,
+    "diagnosis_data_visible": true,
+    "mutations": 0,
+    "fix": "scope to direct div containing diagnosis heading",
+    "lint_exit": 0,
+    "focused_rerun": {
+      "passed": 18,
+      "files": 7,
+      "durationSeconds": 150.45,
+      "application": "b9e7a5d9 with diagnosis test scope fix; before lease activation fix"
+    }
+  },
+  "full_local_http": {
+    "started": "2026-11-03T22:42:56Z",
+    "exitCode": 1,
+    "durationSeconds": 2585.71,
+    "loaded_diagnosis_test_before_scope_fix": true,
+    "files": {
+      "failed": 12,
+      "passed": 265,
+      "skipped": 3,
+      "total": 280
+    },
+    "tests": {
+      "failed": 8,
+      "passed": 1866,
+      "skipped": 60,
+      "total": 1934
+    },
+    "testFailures": {
+      "patient-diagnosis-ui": {
+        "count": 3,
+        "reason": "source-review select and alert included in diagnosis-only assertions"
+      },
+      "ortho-assessment-intake-browser": {
+        "count": 1,
+        "reason": "390px intake reason input remained disabled; timeout before mutation"
+      },
+      "daily-clinic-report-ui": {
+        "count": 1,
+        "reason": "PDF Arabic word top bbox0.2093pt outside allowed range"
+      },
+      "report-page-design-ui": {
+        "count": 1,
+        "reason": "PDF statistic117 nearby glyph association empty"
+      },
+      "receipt-provenance-ui": {
+        "count": 1,
+        "reason": "PDF receipt signature glyph geometry mismatch"
+      },
+      "hr-payroll-attendance-disclosure": {
+        "count": 1,
+        "reason": "pinned Chromium1243 executable unavailable"
+      }
+    },
+    "suiteFailures": {
+      "missingPinnedChromium": [
+        "inventory-disabled-http-ui",
+        "inventory-foundation-http-ui",
+        "inventory-overview-visual"
+      ],
+      "hostedOnlyCIFlags": [
+        "lab-dispatch-privacy-ui",
+        "patient-lab-read-state-ui",
+        "patient-lab-status-refusal-ui"
+      ]
+    },
+    "environment": "Local Chromium151; Playwright requires153revision1243; official download denied403 Domain forbidden. Print-root-cause browser attribution not established. No CI flags spoofed and no gates lowered."
+  }
+}
