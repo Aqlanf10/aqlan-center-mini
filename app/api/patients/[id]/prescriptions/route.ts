@@ -1,5 +1,8 @@
+import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
 import { NextResponse } from "next/server";
-import { listPatientPrescriptions, prescribedBefore } from "@/lib/db";
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalPatientPrescriptions } from "@/lib/canonical-clinical-records";
+import { listMedicalHistory, listPatientPrescriptions, prescribedBefore } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -13,6 +16,12 @@ export const dynamic = "force-dynamic";
  * ولا تُفرض: التكرار الإداري المريح ليس قرارًا سريريًّا.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const canonical = await canonicalPatientGet(
+    (await context.params).id,
+    readCanonicalPatientPrescriptions,
+    "تعذّرت قراءة الوصفات.",
+  );
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -31,11 +40,18 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const [prescriptions, suggestions] = await Promise.all([
+    const [prescriptions, suggestions, prescriberOptions, historyRows] = await Promise.all([
       listPatientPrescriptions(patientId),
       prescribedBefore(patientId),
+      prescriptionPrescriberOptions(session),
+      typeof listMedicalHistory === "function" ? listMedicalHistory(patientId, 1).catch(() => []) : Promise.resolve([]),
     ]);
-    return NextResponse.json({ prescriptions, suggestions });
+    return NextResponse.json({
+      prescriptions,
+      suggestions,
+      prescriberOptions,
+      latestMedicalHistory: historyRows[0] ?? null,
+    });
   } catch {
     return NextResponse.json({ message: "تعذّرت قراءة الوصفات." }, { status: 500 });
   }

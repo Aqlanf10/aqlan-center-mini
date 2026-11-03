@@ -9,12 +9,18 @@ import { GET as publicPhoto } from "../app/api/branding/login-photo/route";
 import { validateTypedSetting } from "../lib/settings-validate";
 import { PUBLIC_SETTING_KEYS } from "../lib/settings";
 
-const mocks = vi.hoisted(() => ({
-  session: vi.fn(), read: vi.fn(), save: vi.fn(), put: vi.fn(), file: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  // Storage-object guard (lib/file-cleanup.ts): a synthetic lock connection that records its SQL.
+  const lockSql: string[] = [];
+  const lockClient = { query: vi.fn(async (sql: string) => { lockSql.push(sql); return { rows: [] }; }), release: vi.fn() };
+  return {
+    session: vi.fn(), read: vi.fn(), save: vi.fn(), put: vi.fn(), file: vi.fn(), remove: vi.fn(),
+    lockSql, pool: { connect: vi.fn(async () => lockClient), query: vi.fn(async () => ({ rows: [{ referenced: true }] })) },
+  };
+});
 vi.mock("../lib/session", () => ({ requireSession: mocks.session }));
-vi.mock("../lib/db", () => ({ readStoredSettings: mocks.read, saveSettingsAudited: mocks.save }));
-vi.mock("../lib/files", () => ({ putFile: mocks.put, readFileByKey: mocks.file }));
+vi.mock("../lib/db", () => ({ readStoredSettings: mocks.read, saveSettingsAudited: mocks.save, getPool: () => mocks.pool }));
+vi.mock("../lib/files", () => ({ putFile: mocks.put, readFileByKey: mocks.file, removeFileByKey: mocks.remove }));
 
 // Synthetic 1x1 raster only; never reads or copies the owner's portrait.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", "base64");
@@ -184,6 +190,10 @@ describe("login photo permissions and bounded writes", () => {
       values:{ [ASSET]:JSON.stringify(asset()),[VISIBLE]:"false" },
     }));
     expect(stored.get(VISIBLE)?.value).toBe("false");
+    // The content-addressed object stays under the shared storage guard until the row commits.
+    expect(mocks.lockSql.some((sql) => sql.includes("pg_advisory_lock_shared"))).toBe(true);
+    expect(mocks.lockSql.some((sql) => sql.includes("pg_advisory_unlock_shared"))).toBe(true);
+    expect(mocks.remove).not.toHaveBeenCalled();
   });
   it("stale visibility cannot publish a replacement image", async () => {
     configure(false);

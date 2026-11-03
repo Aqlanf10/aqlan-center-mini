@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  taskLinksDeleteCanonicalResponse,
+  taskLinksPostCanonicalResponse,
+} from "@/lib/canonical-messages-tasks";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { addTaskLink, canUseTasks, isTaskLinkKind, removeTaskLink } from "@/lib/hr";
@@ -8,12 +14,21 @@ export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 
 /**
  * ربط المهمة بسجلٍّ موجود (مريض/أمر مختبر/بند مخزون): الوصول إلى السجل يُفحص
  * هنا على الخادم بصلاحيات سجلّه الأصلي — الربط لا يمنح وصولًا ولا يفتح سجلًا.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return taskLinksPostCanonicalResponse(request, rawId, selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canUseTasks(session.role)) {
@@ -49,6 +64,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
 /** فكّ رابطٍ بعينه عن المهمة. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return taskLinksDeleteCanonicalResponse(request, rawId, selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canUseTasks(session.role)) {

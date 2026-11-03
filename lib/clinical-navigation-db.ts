@@ -20,7 +20,15 @@ export async function resolveClinicalNavigationContext(patientId: number, reques
   } finally { client.release(); }
 }
 
-async function readContext(db: DbClient, patientId: number, requested: ClinicalNavigationContext): Promise<ClinicalContextResolution> {
+export async function readClinicalNavigationContextWith(
+  db: Pick<DbClient, "query">,
+  patientId: number,
+  requested: ClinicalNavigationContext,
+): Promise<ClinicalContextResolution> {
+  return readContext(db, patientId, requested);
+}
+
+async function readContext(db: Pick<DbClient, "query">, patientId: number, requested: ClinicalNavigationContext): Promise<ClinicalContextResolution> {
   const mismatch = { ok: false, reason: "context_mismatch" } as const;
   const missing = { ok: false, reason: "not_found" } as const;
   if (requested.patientId !== undefined && requested.patientId !== patientId) return mismatch;

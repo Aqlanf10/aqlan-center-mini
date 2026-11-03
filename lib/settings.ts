@@ -44,6 +44,9 @@ export type SettingKey =
   | "documents.max_megabytes"
   | "workflow.doctor_financial_view"
   | "display.privacy_mode"
+  | "display.voice_uri"
+  | "display.voice_rate"
+  | "display.voice_pause_ms"
   | "display.voice"
   | "display.delay_notice"
   | "display.show_ortho"
@@ -87,7 +90,13 @@ export type SettingKey =
   | "scheduling.new_patient_daily_limit"
   /* (CHAIR-1) الجاهزية للكرسي: بوابة النداء (افتراضيًّا تحذير لا منع)، وتنبيه الرصيد عند الوصول. */
   | "ops.require_clearance_before_call"
-  | "reception.balance_warning_minor";
+  | "reception.balance_warning_minor"
+  /* (SEC-05) أعلام تشغيل الواجهات العامة بقرار المالك. */
+  | "portal.enabled"
+  | "booking.public_enabled"
+  /* (CLIN-07) منع الحجز خارج ساعات الورديات وأيام العطلة الأسبوعية إلا بتجاوز موثق. */
+  | "scheduling.strict_hours"
+  | "clinic.closed_weekdays";
 
 /**
  * القيم الافتراضية.
@@ -149,6 +158,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // نطق الاسم صوتيًا عند النداء. المتصفح لا يسمح بالصوت قبل لمسة، فالنطق لا
   // يعمل فعلًا إلا بعد ضغطة «تشغيل صوت النداء» على التلفاز نفسه.
   "display.voice": "true",
+  "display.voice_uri": "",
+  "display.voice_rate": "0.9",
+  "display.voice_pause_ms": "300",
   // رسالة الاعتذار عن التأخير — يشغّلها الاستقبال بضغطة من لوحة اليوم،
   // فلا يبقى المرضى متضايقين بلا تفسير.
   "display.delay_notice": "false",
@@ -223,6 +235,10 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* (CHAIR-1) عتبة تلوين الرصيد عند الوصول لكل عملة بوحداتها الصغرى (JSON). فارغٌ = مغلق.
      معلومةٌ لا منع: لا توقف علاجًا ولا تحوّل دفعةً مقدَّمة إلى إيراد. */
   "reception.balance_warning_minor": "",
+  "portal.enabled": "true",
+  "booking.public_enabled": "true",
+  "scheduling.strict_hours": "false",
+  "clinic.closed_weekdays": "",
 };
 
 export type SettingsMap = Record<SettingKey, string>;
@@ -256,6 +272,8 @@ export const PUBLIC_SETTING_KEYS: SettingKey[] = [
   "clinical.phrases_exam",
   "clinical.phrases_diagnosis",
   "clinical.phrases_next",
+  "portal.enabled",
+  "booking.public_enabled",
 ];
 
 export function withDefaults(stored: Partial<Record<string, string>>): SettingsMap {
@@ -382,6 +400,9 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "display.voice" || key === "display.delay_notice" || key === "display.show_ortho") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
+  if (key === "display.voice_uri" && trimmed.length > 256) return "معرّف الصوت أطول من 256 حرفًا.";
+  if (key === "display.voice_rate" && (!trimmed || !Number.isFinite(Number(trimmed)) || Number(trimmed) < 0.7 || Number(trimmed) > 1.1)) return "سرعة الصوت بين 0.7 و1.1.";
+  if (key === "display.voice_pause_ms" && (!trimmed || !Number.isInteger(Number(trimmed)) || Number(trimmed) < 0 || Number(trimmed) > 1000)) return "الوقفة بين 0 و1000 مللي ثانية.";
   if (key === "display.announcements") {
     // السطر الفارغ مقبول: يعني «استعمل الافتراضي». السطر الموجود لا يُقبل إلا
     // بصيغة «العنوان | النص» — والرسالة تسمّي رقم السطر ليجده المدير فورًا.
@@ -432,7 +453,7 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "reminders.auto_language") {
     if (!/^[a-z]{2}(_[A-Z]{2})?$/.test(trimmed)) return "رمز لغة القالب مثل ar أو en_US.";
   }
-  if (key === "ai.clinical_external") {
+  if (key === "ai.clinical_external" || key === "portal.enabled" || key === "booking.public_enabled") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
   if (key === "backup.schedule_time") {

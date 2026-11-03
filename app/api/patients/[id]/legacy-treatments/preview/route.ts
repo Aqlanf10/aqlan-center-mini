@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { previewLegacyTreatmentCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, getSettings } from "@/lib/db";
@@ -7,6 +9,7 @@ import { LEGACY_TREATMENT_MESSAGE, parseLegacyTreatmentRequest } from "@/lib/leg
 import { openingBalanceAccess } from "@/lib/opening-access";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +21,9 @@ export const dynamic = "force-dynamic";
  * الرفض المتوقَّع يعود 200 بسببٍ ورسالة عربية (المعاينة تحذّر؛ الحفظ يرفض فعلًا تحت الأقفال).
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return previewLegacyTreatmentCanonicalResponse(selected.handle, request, (await context.params).id);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const settings = await getSettings().catch(() => null);

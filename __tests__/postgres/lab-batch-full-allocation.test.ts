@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import type { DbClient, QueryResult } from "../../lib/db";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -166,19 +166,11 @@ async function fullAllocation(result: BatchSuccess, selected: { order: Order; re
   )).toEqual(selectedIds.map((id) => ({ lab_order_id: id, action: "financial_settlement", expense_id: result.expense.id })));
 }
 
-beforeAll(async () => {
-  // Existing PG suite lifecycle, guarded using the ORIGINAL environment before
-  // stubPostgresEnv removes Railway markers. Never select a production target.
+beforeEach(async () => {
+  // Guarded ORIGINAL environment target, recreated per test without bypassing identity/history guards.
+  await db.resetPoolForTesting();
   await dropPublicSchema(target.testUrl.toString());
   await db.ensureSchema();
-}, 180_000);
-
-beforeEach(async () => {
-  // Existing isolated-PG reset pattern; do not disable append-only/FK guards.
-  // Keep HR append-only/FK guards active: parent TRUNCATE CASCADE would
-  // traverse even empty history tables. These isolated fixtures contain no HR rows.
-  await q(`TRUNCATE party_opening_advances, expense_payable_allocations, expenses, payables, lab_order_tracking, lab_orders,
-                    patients, cashier_shifts, audit_log RESTART IDENTITY CASCADE`);
   await q("DELETE FROM parties");
   await q("INSERT INTO cashier_shifts (opened_by) VALUES ($1)", [ACTOR]);
 });

@@ -22,7 +22,13 @@ export const dynamic = "force-dynamic";
 export default async function PartyStatementPrintPage({ params }: { params: Promise<{ id: string }> }) {
   // صفحة الطباعة بابٌ خلفي إلى المال لو تُركت مفتوحة لكل من يملك جلسة.
   const session = await requireSession();
-  if (!session || !canViewMoney(session.role)) notFound();
+  if (
+    !session ||
+    !canViewMoney(session.role) ||
+    ((session.role === "cashier" || session.role === "accountant") && !session.financeAccess?.viewSuppliers)
+  ) {
+    notFound();
+  }
 
   const { id: rawId } = await params;
   const id = Number(rawId);

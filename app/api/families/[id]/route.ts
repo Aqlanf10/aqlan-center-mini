@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { getFamilyCanonicalResponse, updateFamilyCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { updateFamilyDetails } from "@/lib/db";
 import { idOf, json, readBody } from "@/lib/case-route";
 import { buildFamilyView } from "@/lib/family-view";
 import { familyFailure, familyResponse, familyWriter } from "@/lib/family-route";
 import { parseFamilyName, parseFamilyNote } from "@/lib/patient-families";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
 /** (PAT-4) العائلة كما يراها صاحب الجلسة: الأفراد بوصوله إليهم، والأرصدة لمن يرى المال. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return getFamilyCanonicalResponse(selected.handle, (await params).id);
   const session = await requireSession();
   if (!session) return json("انتهت الجلسة. سجّل الدخول من جديد.", 401);
   const familyId = idOf((await params).id);
@@ -27,6 +33,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 /** تعديل اسم العائلة أو ملاحظتها. */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return updateFamilyCanonicalResponse(selected.handle, request, (await params).id);
   const guard = await familyWriter();
   if (!guard.ok) return guard.response;
   const familyId = idOf((await params).id);

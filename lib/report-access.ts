@@ -1,3 +1,5 @@
+import type { StaffCapability } from "./staff-capability-catalogue";
+
 /**
  * سياسة الوصول إلى مركز التقارير.
  *
@@ -104,18 +106,33 @@ export function isKnownUnifiedReport(report: string): report is UnifiedReportId 
  * محاسبٌ أُغلقت عنه العمولات لا يصل إليها من مركز التقارير أيضًا.
  */
 const COMMISSION_REPORTS = new Set<string>(["doctor-commission", "commission-detail"]);
+const SUPPLIER_REPORTS = new Set<string>(["suppliers"]);
+const PATIENT_LEDGER_REPORTS = new Set<string>(["debt", "aging", "collections", "patient-statement"]);
+const GENERAL_FINANCIAL_REPORTS = new Set<string>([
+  "daily", "monthly", "annual", "services", "specialty", "doctor", "lab", "plan-double-billing", "pre-system-receipts",
+]);
+
+export interface ReportFinanceAccessShape {
+  viewCommissions?: boolean;
+  viewReports?: boolean;
+  viewSuppliers?: boolean;
+  viewPatientLedger?: boolean;
+}
 
 export function canAccessUnifiedReport(
   role: string | null | undefined,
   report: string,
   /** صلاحيات المحاسب الدقيقة من الجلسة (`financeAccess`) — بلا قيمة: الافتراضي الكامل للدور. */
-  access?: { viewCommissions?: boolean } | null,
+  access?: ReportFinanceAccessShape | null,
 ): boolean {
   if (!isKnownUnifiedReport(report)) return false;
   if (role === "admin") return true;
   if (role === "reception") return RECEPTION_REPORTS.has(report);
   if (role === "accountant") {
     if (COMMISSION_REPORTS.has(report) && access?.viewCommissions === false) return false;
+    if (SUPPLIER_REPORTS.has(report) && access?.viewSuppliers === false) return false;
+    if (PATIENT_LEDGER_REPORTS.has(report) && access?.viewPatientLedger === false) return false;
+    if (GENERAL_FINANCIAL_REPORTS.has(report) && access?.viewReports === false) return false;
     return ACCOUNTANT_REPORTS.has(report);
   }
   return false;
@@ -129,7 +146,78 @@ export function reportIsAdminOnly(report: string): boolean {
 export function reportVisibleToRole(
   role: string | null | undefined,
   report: string,
-  access?: { viewCommissions?: boolean } | null,
+  access?: ReportFinanceAccessShape | null,
 ): boolean {
   return canAccessUnifiedReport(role, report, access);
+}
+
+const CLINICAL_ONLY_REPORTS = new Set<string>([
+  "treatment-plans",
+  "plan-intelligence",
+  "ortho-duplicate-adjustments",
+  "lab-intelligence",
+]);
+
+const MIXED_REVENUE_OPERATIONAL_REPORTS = new Set<string>([
+  "practice-overview",
+  "practice-trends",
+]);
+
+const OPERATIONAL_REPORTS = new Set<string>([
+  "patients",
+  "visits",
+  "appointments",
+  "recall",
+  "inventory",
+  "internal-referrals",
+  "chair-flow",
+  "provider-utilization",
+  "chair-utilization",
+  "appointment-performance",
+  "unscheduled-treatment",
+  "new-patient-intelligence",
+  "recall-intelligence",
+]);
+
+/** Canonical capability-based access to each unified report (never role-label based). */
+export function canCanonicalAccessUnifiedReport(
+  report: string,
+  granted: (capability: StaffCapability) => boolean,
+): boolean {
+  if (!isKnownUnifiedReport(report)) return false;
+  if (report === "options") {
+    return (
+      granted("reports.operational.view") ||
+      granted("reports.financial.view") ||
+      granted("reports.clinical.view")
+    );
+  }
+  if (COMMISSION_REPORTS.has(report)) {
+    return granted("reports.financial.view") && granted("finance.commissions.view-all");
+  }
+  if (SUPPLIER_REPORTS.has(report)) {
+    return granted("reports.financial.view") && granted("finance.suppliers.view");
+  }
+  if (report === "patient-statement") {
+    return (
+      (granted("reports.financial.view") || granted("reports.operational.view")) &&
+      granted("finance.patient-ledger.view")
+    );
+  }
+  if (PATIENT_LEDGER_REPORTS.has(report)) {
+    return granted("reports.financial.view") && granted("finance.patient-ledger.view");
+  }
+  if (GENERAL_FINANCIAL_REPORTS.has(report)) {
+    return granted("reports.financial.view");
+  }
+  if (CLINICAL_ONLY_REPORTS.has(report)) {
+    return granted("reports.clinical.view");
+  }
+  if (MIXED_REVENUE_OPERATIONAL_REPORTS.has(report)) {
+    return granted("reports.financial.view") && granted("reports.operational.view");
+  }
+  if (OPERATIONAL_REPORTS.has(report)) {
+    return granted("reports.operational.view");
+  }
+  return false;
 }

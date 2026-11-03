@@ -65,12 +65,12 @@ export default function ReadinessPage() {
         title="جاهزية الإطلاق والتشغيل"
         subtitle="فحص شامل لكافة وحدات وتكوينات النظام للتأكد من جاهزية المركز للعمل اليومي"
         links={[
-          { href: "/settings", label: "عام" },
+          { href: "/settings", label: "الإعدادات المركزية" },
           { href: "/settings/readiness", label: "جاهزية الإطلاق", current: true },
+          { href: "/settings/backup", label: "إدارة النسخ والاستعادة" },
+          { href: "/settings/history", label: "سجل تغييرات الإعدادات" },
           { href: "/settings/users", label: "المستخدمون والصلاحيات" },
-          { href: "/settings/audit", label: "سجل التدقيق" },
-          { href: "/settings/export", label: "النسخ والتصدير" },
-          { href: "/settings/ai", label: "الذكاء الاصطناعي" },
+          { href: "/settings/audit", label: "سجل التدقيق العام" },
         ]}
       />
 

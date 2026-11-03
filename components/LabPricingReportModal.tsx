@@ -93,12 +93,13 @@ export function LabPricingReportModal({
     // محتوى الرمز بياناتٌ آلية (JSON) تُقرأ بالماسح — والنصوص العربية فيه
     // تجعل من يمسحه من فريق المركز يقرؤه كما يقرأ سائر التقارير.
     const payload = JSON.stringify({
-      title: "تقرير قواعد تسعير المختبرات",
+      title: "كشف داخلي لقواعد تسعير المختبرات",
+      unsigned: true,
       clinic: resolvedName,
       lab: labName,
       issueDate: today,
       activeRulesCount: activeRules.length,
-      docType: "A4-Official-Lab-Pricing",
+      docType: "A4-Internal-Lab-Pricing",
     });
 
     QRCode.toDataURL(payload, {

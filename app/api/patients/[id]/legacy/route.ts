@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { patientLegacyArchiveCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { patientLegacyHistory } from "@/lib/db";
 import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +13,9 @@ export const dynamic = "force-dynamic";
  * حارس الملف مع صلاحية قراءة ماله: الأرشيف يحتوي مبالغ حتى لو كان مسدّدًا بالكامل.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return patientLegacyArchiveCanonicalResponse(selected.handle, (await context.params).id);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const id = Number((await context.params).id);

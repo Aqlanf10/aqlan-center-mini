@@ -199,3 +199,66 @@ export async function readReconciledPlanPosition(client:DbClient,plan:{id:number
  const progress=planProgress({totalMinor:principal,status:"active",installments:header.source_snapshot.schedules.map(row=>({number:row.number,dueDate:row.due_date,amountMinor:safe(row.amount_minor)}))},paid,today);
  return {kind:"invoice_backed",invoiceIds:members.map(row=>row.invoice_id),paidMinor:paid,remainingMinor:progress.remainingMinor,progress,schedules:[],message:"اتفاق مسوّى متعدد المصادر؛ التحصيل من حساب المريض على فاتورة المصدر، وليس بإصدار قسط جديد."};
 }
+
+async function lockAttemptByUser(client: DbClient, userId: number, command: AgreementReconciliationCommand) {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended('aqlan:agreement-reconcile:'||$1::text||':'||$2::text,0))", [userId, command.operationKey]);
+}
+
+async function attemptByUser(
+  client: DbClient,
+  planId: number,
+  command: AgreementReconciliationCommand,
+  userId: number,
+): Promise<AgreementReconciliationAttemptStatus> {
+  const requestHash = digest(agreementReconciliationIntentText(planId, command));
+  const saved = (await client.query<EventRow>(
+    "SELECT * FROM agreement_reconciliations WHERE actor_id=$1 AND operation_key=$2",
+    [userId, command.operationKey],
+  )).rows[0];
+  if (saved) {
+    if (saved.plan_id !== planId || saved.request_hash !== requestHash || saved.expected_source_hash !== command.expectedSourceHash) {
+      fail("operation_key_conflict", "مفتاح الطلب محفوظ لمحاولة مختلفة.");
+    }
+    if (saved.receipt.planId !== planId || saved.receipt.patientId !== saved.patient_id
+      || saved.receipt.operationKey !== command.operationKey || saved.receipt.expectedSourceHash !== command.expectedSourceHash) {
+      fail("agreement_review_required", "إقرار التسوية المحفوظ يحتاج مراجعة.");
+    }
+    return { state: "committed", receipt: saved.receipt };
+  }
+  const rejected = (await client.query<{
+    plan_id: number; patient_id: number; request_hash: string;
+    expected_source_hash: string; observed_source_hash: string; rejected_at: Date;
+  }>(
+    "SELECT * FROM agreement_reconciliation_rejections WHERE actor_id=$1 AND operation_key=$2",
+    [userId, command.operationKey],
+  )).rows[0];
+  if (rejected) {
+    if (rejected.plan_id !== planId || rejected.request_hash !== requestHash || rejected.expected_source_hash !== command.expectedSourceHash) {
+      fail("operation_key_conflict", "مفتاح الرفض المحفوظ يخص محاولة مختلفة.");
+    }
+    return {
+      state: "rejected",
+      planId,
+      patientId: rejected.patient_id,
+      operationKey: command.operationKey,
+      expectedSourceHash: command.expectedSourceHash,
+      requestHash,
+      observedSourceHash: rejected.observed_source_hash,
+      rejectedAt: rejected.rejected_at.toISOString(),
+      code: "agreement_source_changed",
+    };
+  }
+  return { state: "unresolved" };
+}
+
+/** @internal Shared non-`server-only` primitives for `lib/canonical-agreement-reconciliation.ts`. */
+export const agreementReconciliationInternal = Object.freeze({
+  fail,
+  safe,
+  digest,
+  validate,
+  installed,
+  snapshot,
+  lockAttemptByUser,
+  attemptByUser,
+});

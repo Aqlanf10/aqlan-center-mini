@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,9 +19,11 @@ export const BASELINE_VERSION = "0001";
 
 const MIGRATION_FILENAME_PATTERN = /^(\d{4})_([a-z0-9_]+)\.sql$/;
 
-/** مجلد الهجرات مشتق من موقع هذا الملف (lib/ → ../migrations) لا من cwd. */
+/** مجلد الهجرات مشتق من موقع هذا الملف (lib/ → ../migrations)، مع سقوط آمن لجذر حزمة standalone عند التجميع. */
 export function defaultMigrationsDir(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
+  const adjacent = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
+  if (existsSync(/*turbopackIgnore: true*/ adjacent)) return adjacent;
+  return path.resolve(process.cwd(), "migrations");
 }
 
 
@@ -34,13 +37,13 @@ export function checksumOf(sql: string): string {
  */
 export async function loadMigrationFiles(dir?: string): Promise<MigrationFile[]> {
   const resolved = dir ?? defaultMigrationsDir();
-  const entries = await readdir(resolved);
+  const entries = await readdir(/*turbopackIgnore: true*/ resolved);
   const files: MigrationFile[] = [];
   for (const filename of entries) {
     const match = MIGRATION_FILENAME_PATTERN.exec(filename);
     if (!match) continue;
     if (filename.startsWith(".")) continue;
-    const sql = await readFile(path.join(resolved, filename), "utf8");
+    const sql = await readFile(/*turbopackIgnore: true*/ path.join(resolved, filename), "utf8");
     files.push({
       version: match[1],
       name: match[2],

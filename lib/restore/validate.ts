@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { parseIdentityProvenance, type IdentityProvenance } from "./identity-provenance";
 import { documentEntryName, type ParsedArchive } from "./archive";
 import { resolveInsideBase, validateDestinationBatch, validateRelativePath } from "../safe-path";
 
@@ -27,6 +28,8 @@ export interface BackupManifest {
   createdAt: string;
   databaseSha256: string;
   documents: ManifestDocument[];
+  /** Present only for a canonical source (restore protocol B1): lineage, never authority. */
+  identityProvenance?: IdentityProvenance;
 }
 
 export interface ValidatedDocument {
@@ -107,8 +110,11 @@ export function parseManifest(raw: unknown): { manifest: BackupManifest } | { er
       removedAt: typeof doc.removedAt === "string" ? doc.removedAt : null,
     });
   }
-  if (errors.length > 0) return { errors };
-  return { manifest: manifest as unknown as BackupManifest };
+  const provenance = parseIdentityProvenance(manifest.identityProvenance);
+  if (provenance === "invalid") errors.push("سطر أصل الهوية في manifest غير صالح.");
+  if (errors.length > 0 || provenance === "invalid") return { errors };
+  const { identityProvenance: _raw, ...rest } = manifest as unknown as BackupManifest;
+  return { manifest: { ...rest, ...(provenance ? { identityProvenance: provenance } : {}) } };
 }
 
 /**

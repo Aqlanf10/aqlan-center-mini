@@ -44,8 +44,19 @@ export interface DrillReport {
 }
 
 async function resolvedPath(value: string): Promise<string> {
-  const absolute = path.resolve(value);
-  return realpath(absolute).catch(() => absolute);
+  let current = path.resolve(value);
+  const tail: string[] = [];
+  while (true) {
+    try {
+      const real = await realpath(current);
+      return tail.length > 0 ? path.join(real, ...tail.reverse()) : real;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return path.resolve(value);
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  }
 }
 
 function isWithin(child: string, parent: string): boolean {

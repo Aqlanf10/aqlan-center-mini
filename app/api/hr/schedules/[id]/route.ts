@@ -1,4 +1,10 @@
 import { IdentityPreviewError } from "@/lib/hr-identity-preview";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  hrScheduleDetailGetCanonicalResponse,
+  hrScheduleDetailPatchCanonicalResponse,
+} from "@/lib/canonical-hr";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { HrWorkforceMutationError } from "@/lib/hr-contracts-attendance";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -15,18 +21,24 @@ export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrScheduleDetailGetCanonicalResponse(context, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (session.role !== "admin" && session.role !== "reception") {
     return NextResponse.json({ message: "عرض الدوام والحضور وإدارته للمدير والاستقبال فقط." }, { status: 403 });
   }
 
-  const { id } = await params;
+  const { id } = await context.params;
   try {
     const schedule = await getWorkScheduleById(id);
     if (!schedule) {
@@ -41,15 +53,19 @@ export async function GET(
 
 export async function PATCH(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrScheduleDetailPatchCanonicalResponse(request, context, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) {
     return NextResponse.json({ message: "إدارة جداول العمل للمدير وحده." }, { status: 403 });
   }
 
-  const { id } = await params;
+  const { id } = await context.params;
   let body: unknown;
   try {
     body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);

@@ -1,13 +1,23 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  hrPayrollDisburseGetCanonicalResponse,
+  hrPayrollDisbursePostCanonicalResponse,
+} from "@/lib/canonical-hr";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canManageStaff } from "@/lib/hr";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 import { hrPayrollWriteAuthorizer } from "@/lib/hr-payroll-authority";
 import { disbursePayrollItem, disburseEntireRun, findDisbursementByRequestId, reversePayrollDisbursement, HrPayrollError, type DisburseInput } from "@/lib/hr-payroll";
 export const dynamic = "force-dynamic";
-const denied = (status: number) => NextResponse.json({ message: status === 401 ? "انتهت الجلسة. سجّل الدخول من جديد." : "صرف الرواتب والمستحقات للمدير وحده." }, { status });
+const denied = (status: number) => NextResponse.json({ message: status === 401 ? "انتهت الجلسة. سجّل الدخول من جديد." : "صرف الرواتب والمستحقات للمدير وحده." }, { status, headers: status === 401 ? NO_STORE : undefined });
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied(401);
+  if (selected.kind === "canonical") return hrPayrollDisburseGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied(401);
   if (!canManageStaff(session.role)) return denied(403);
@@ -21,6 +31,9 @@ export async function GET(request: Request) {
   }
 }
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied(401);
+  if (selected.kind === "canonical") return hrPayrollDisbursePostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied(401);
   if (!canManageStaff(session.role)) return denied(403);
@@ -32,7 +45,9 @@ export async function POST(request: Request) {
   try {
     if (p.action === "reverse") {
       if (typeof p.reason !== "string" || !(typeof p.disbursementId === "string" || typeof p.disbursementId === "number")) throw new HrPayrollError("invalid_reversal",400,"حدّد حركة الصرف وسبب العكس.");
-      return NextResponse.json({ success: true, disbursement: await reversePayrollDisbursement(p.disbursementId,{ reason:p.reason },session,hrPayrollWriteAuthorizer(session)) });
+      return withHttpIdempotency(request, "hr.payroll.reverse", session.username, { disbursementId: String(p.disbursementId), reason: p.reason }, async () =>
+        NextResponse.json({ success: true, disbursement: await reversePayrollDisbursement(p.disbursementId as string | number,{ reason:p.reason as string },session,hrPayrollWriteAuthorizer(session)) }),
+      );
     }
     if (p.action && p.action !== "disburse") throw new HrPayrollError("invalid_action",400,"العملية غير صالحة.");
     if (typeof p.clientRequestId !== "string" || !p.clientRequestId.trim()) throw new HrPayrollError("request_key_required",400,"مفتاح الطلب الثابت مطلوب للصرف.");

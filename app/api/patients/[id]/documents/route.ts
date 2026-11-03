@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
+import { canonicalPatientGet, NO_STORE } from "@/lib/canonical-patient-http";
 import {
-  DocumentAssociationError, getSettings, listPatientDocuments, recordAudit, recordDocument,
+  canonicalClinicalRecordsFailure,
+  commandCanonicalDocumentUpload,
+  readCanonicalPatientDocuments,
+} from "@/lib/canonical-clinical-records";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  DocumentAssociationError, getPool, getSettings, listPatientDocuments, recordAudit, recordDocument,
   validateDocumentAssociations,
 } from "@/lib/db";
-import { putFile, storageStatus } from "@/lib/files";
+import { putFile, storageStatus, type StoredFile } from "@/lib/files";
+import { cleanupUncommittedStoredFile, plannedStorageKey, withStorageKeyGuard } from "@/lib/file-cleanup";
 import { imageSize } from "@/lib/imageSize";
 import { isAdmin } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, isDocumentKind, validateUpload } from "@/lib/storage";
@@ -38,6 +46,12 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const canonical = await canonicalPatientGet(
+    (await context.params).id,
+    readCanonicalPatientDocuments,
+    "تعذّر تحميل المستندات.",
+  );
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -63,6 +77,27 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let form: FormData;
+    try {
+      form = await readBoundedFormData(request, UPLOAD_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const outcome = await commandCanonicalDocumentUpload(selected.handle, (await context.params).id, form);
+      if (outcome.kind === "rejected_signature") {
+        return NextResponse.json({ message: outcome.message }, { status: 400, headers: NO_STORE });
+      }
+      return NextResponse.json(outcome.document, { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر حفظ الملف. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -163,23 +198,36 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
        التراكب والمقارنة يرسمان فوق الشععة فيحتاجان مقاسها، و`null` ليست عطلًا
        فالمستندُ PDF لا أبعاد صورة له. */
     const dimensions = imageSize(bytes);
-    const stored = await putFile(bytes, check.extension);
-    const document = await recordDocument({
-      patientId, visitId, kind, title,
-      mimeType: file.type,
-      sizeBytes: stored.sizeBytes,
-      sha256: stored.sha256,
-      storageKey: stored.key,
-      note,
-      takenOn,
-      uploadedBy: session.username,
-      orthoCaseId,
-      adjustmentId,
-      photoStage,
-      photoView,
-      width: dimensions?.width ?? null,
-      height: dimensions?.height ?? null,
-    });
+    // Peer-review #6/#8: hold the storage-object guard from before the write until the
+    // referencing row committed; reconcile a newly written object after any failure.
+    const plannedKey = plannedStorageKey(bytes, check.extension);
+    let stored: StoredFile | null = null;
+    let document: Awaited<ReturnType<typeof recordDocument>>;
+    try {
+      document = await withStorageKeyGuard(getPool(), plannedKey, async () => {
+        const written = await putFile(bytes, check.extension);
+        stored = written;
+        return recordDocument({
+          patientId, visitId, kind, title,
+          mimeType: file.type,
+          sizeBytes: written.sizeBytes,
+          sha256: written.sha256,
+          storageKey: written.key,
+          note,
+          takenOn,
+          uploadedBy: session.username,
+          orthoCaseId,
+          adjustmentId,
+          photoStage,
+          photoView,
+          width: dimensions?.width ?? null,
+          height: dimensions?.height ?? null,
+        });
+      });
+    } catch (writeError) {
+      await cleanupUncommittedStoredFile(stored);
+      throw writeError;
+    }
     void recordAudit({
       action: "document.upload",
       entity: "patient_documents",

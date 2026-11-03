@@ -1,12 +1,29 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalPlanCaseFailure, commandCanonicalChangeCaseStatus } from "@/lib/canonical-plans-and-cases";
 import { changeClinicalCaseStatus, getClinicalCase } from "@/lib/db";
 import { checkCaseStatusChange } from "@/lib/cases";
 import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
 /** (CASE-MODEL-1) تغيير حالة الحالة التخصصية: المسار المسموح وحده، والمنتهية لا تُعاد فتحها (409). */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) return read.response;
+    try {
+      const { id } = await params;
+      return NextResponse.json(await commandCanonicalChangeCaseStatus(selected.handle, id, read.body), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر تحديث الحالة. أعد المحاولة.");
+    }
+  }
   const id = idOf((await params).id);
   if (!id) return json("رقم حالة غير صالح.", 400);
   const read = await readBody(request);

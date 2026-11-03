@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { createGzip } from "node:zlib";
 import { Readable } from "node:stream";
-import { CLINIC_TIME_ZONE, documentsForArchive, recordAudit } from "@/lib/db";
+import { CLINIC_TIME_ZONE, documentsForArchive, expenseAttachmentsForArchive, recordAudit } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { readFileByKey, storageStatus } from "@/lib/files";
 import { isAdmin } from "@/lib/roles";
 import { safeEntryName, tarEnd, tarHeader, tarPadding } from "@/lib/tar";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalBackupDocumentsGet } from "@/lib/canonical-owner-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +24,14 @@ export const dynamic = "force-dynamic";
  */
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalBackupDocumentsGet(selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -33,8 +43,12 @@ export async function GET() {
   const storage = await storageStatus();
   if (!storage.ready) return NextResponse.json({ message: storage.message }, { status: 503 });
 
-  const rows = await documentsForArchive();
-  if (rows.length === 0) {
+  const [rows, expenseRows] = await Promise.all([
+    documentsForArchive(),
+    expenseAttachmentsForArchive(),
+  ]);
+  const totalCount = rows.length + expenseRows.length;
+  if (totalCount === 0) {
     return NextResponse.json({ message: "لا توجد أشعة أو مستندات بعد." }, { status: 404 });
   }
 
@@ -60,6 +74,18 @@ export async function GET() {
       yield tarPadding(bytes.length);
     }
 
+    for (const att of expenseRows) {
+      const bytes = await readFileByKey(att.storageKey);
+      if (!bytes) { missing.push(`${att.voucherNumber} · ${att.title}`); continue; }
+      const folder = safeEntryName(att.voucherNumber, `EXP-${att.expenseId}`);
+      const extension = att.storageKey.split(".").pop() ?? "bin";
+      const base = safeEntryName(att.title, String(att.id));
+      const name = `أشعة-${stamp}/مرفقات-المصروفات/${folder}/${att.id}-${base}.${extension}`;
+      yield tarHeader(name, bytes.length, att.uploadedAt);
+      yield new Uint8Array(bytes);
+      yield tarPadding(bytes.length);
+    }
+
     // ملفّاتٌ موصوفة في القاعدة ومفقودة من القرص تُذكر داخل الأرشيف نفسه — لا في
     // سجلٍّ لا يقرؤه أحد. من يفتح الأرشيف بعد سنة يجب أن يعرف ما الذي لم يصله.
     if (missing.length > 0) {
@@ -76,8 +102,8 @@ export async function GET() {
   void recordAudit({
     action: "backup.download",
     entity: "patient_documents",
-    entityLabel: `أرشيف الأشعة — ${rows.length} ملفًّا`,
-    details: { عدد_الملفات: rows.length },
+    entityLabel: `أرشيف الأشعة والمرفقات — ${totalCount} ملفًّا`,
+    details: { عدد_الملفات: totalCount, أشعة_المرضى: rows.length, مرفقات_المصروفات: expenseRows.length },
     actor: session.username,
     actorRole: session.role,
   });

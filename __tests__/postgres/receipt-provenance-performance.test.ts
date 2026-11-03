@@ -5,18 +5,20 @@ import { validatePostgresTestTarget } from "./_safe-target";
 import { captureReceiptQueries, evidenceFrames, explainCapturedQueries, safeRunProvenance, sha256 } from "./_receipt-query-evidence";
 import { unavailableReceiptProvenance, type ReceiptProvenance } from "../../lib/receipt-provenance";
 
-// Authored SOURCE ONLY. Execute later only in the existing disposable PG18 job.
+// Synthetic proof only: local disposable PostgreSQL 18 or the existing CI job.
 // Guard BEFORE stubPostgresEnv removes deployment markers and before app import.
 validatePostgresTestTarget(process.env, { allowDatabaseUrlFallback: true });
 assertRealPostgresUrl();
 stubPostgresEnv();
 const { ensureSchema, getPool, resetPoolForTesting, openShift, recordPayment, correctPayment } = await import("../../lib/db");
-const { readReceiptProvenance, RECEIPT_PROVENANCE_CONTEXT_LIMIT, RECEIPT_PROVENANCE_REQUEST_LIMIT } =
+const { readReceiptProvenance, readReceiptProvenanceInSnapshot, RECEIPT_PROVENANCE_CONTEXT_LIMIT, RECEIPT_PROVENANCE_REQUEST_LIMIT } =
   await import("../../lib/receipt-provenance-db");
 
-const BASE = "b18f762486d8f7b1a84bb855cb454b7a48f28217";
+// Exact WORK source with the SELECT-only snapshot helper for slice 26. Keep literal
+// fingerprints: another reader change must fail until reviewed and remeasured.
+const BASE = "8e477eb8c15323567fdb6f75496a6f5925dee9fd";
 const SOURCE_HASHES = {
-  "lib/receipt-provenance-db.ts": "4dd0c716013b25df510d36570e27181e4d680a9dd4daa7da2d68809367db187b",
+  "lib/receipt-provenance-db.ts": "88d5a290b4297d803240c1e060cad8e9a3b7dd3bac1a5e6d078d0612dc1f5c10",
   "lib/receipt-provenance.ts": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b",
 };
 const UNRELATED_ROWS = 8_000;
@@ -85,7 +87,7 @@ function assertChain(result: Record<string, ReceiptProvenance>, fixture: Chain, 
 }
 
 beforeAll(async () => {
-  // Source fingerprints bind evidence to the immutable accepted production reader.
+  // Evidence describes these exact reader bytes, not a production acceptance.
   for (const [path, digest] of Object.entries(SOURCE_HASHES)) expect(sha256(readFileSync(path))).toBe(digest);
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
@@ -142,6 +144,29 @@ describe("actual receipt provenance SELECT plans at bounded scale", () => {
       expect(capture.connections).toBe(1); expect(capture.releases).toBe(1);
       expect(capture.statements).toEqual(["begin", ...entry.selectRows.map(() => "select"), "commit"]);
       expect(capture.selects.map(row => row.rowCount)).toEqual(entry.selectRows);
+      // The canonical owning snapshot needs SELECT-only composition (SAVEPOINT
+      // is forbidden by its facade). Prove the new helper executes the identical
+      // bounded SQL/parameters and returns the identical projection. Reuse the
+      // plans below only after exact equality; do not duplicate the large payload.
+      const composed = await captureReceiptQueries(pool, async () => {
+        const client = await pool.connect();
+        let committed = false;
+        try {
+          await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const result = await readReceiptProvenanceInSnapshot(client, entry.ids);
+          await client.query("COMMIT"); committed = true;
+          return result;
+        } finally {
+          try { if (!committed) await client.query("ROLLBACK"); }
+          finally { client.release(); }
+        }
+      });
+      expect(pool.connect).toBe(originalConnect);
+      expect(composed.connections).toBe(1); expect(composed.releases).toBe(1);
+      expect(composed.statements).toEqual(capture.statements);
+      expect(composed.selects.map(({ elapsedMs: _elapsedMs, ...select }) => select))
+        .toEqual(capture.selects.map(({ elapsedMs: _elapsedMs, ...select }) => select));
+      expect(composed.result).toEqual(capture.result);
       expect(capture.selects[0].parameters).toEqual([entry.ids, 5_001]);
       if (capture.selects.length === 2) {
         expect(capture.selects[1].parameters[0]).toHaveLength(4_998);
@@ -169,18 +194,21 @@ describe("actual receipt provenance SELECT plans at bounded scale", () => {
       results.push({ name: entry.name, requestedIds: entry.ids.length, distinctPatients: entry.name.startsWith("multi") ? 1_000 : 1,
         contextRows: entry.contextRows, selectCount: capture.selects.length, transactionStatements: capture.statements,
         connections: capture.connections, releases: capture.releases, instrumentedReaderElapsedMs: capture.elapsedMs,
+        composedReader: { instrumentedElapsedMs: composed.elapsedMs, identicalSqlParametersRowsAndResult: true,
+          connections: composed.connections, releases: composed.releases, transactionStatements: composed.statements },
         correctnessPassed: true, noWritesAfterReader: true, noWritesAfterExplain: true, plans });
     }
     const sourceFiles = [...Object.keys(SOURCE_HASHES), "__tests__/postgres/receipt-provenance-performance.test.ts",
       "__tests__/postgres/_receipt-query-evidence.ts", "__tests__/receipt-query-evidence.test.ts"];
     const evidence = { schema: "receipt-query-plan-v1", synthetic: true, allCasesPassed: true,
       repository: "Aqlanf10/aqlan-center-mini", baseSha: BASE,
-      acceptedManifestSha256: "1477b771268f3ba7a3ac1547ff93d2965b2e32f18cb097169e3c4a6ca22344c9",
-      acceptedDiffSha256: "06f3a940c7a55bde0b51fee503c6050ee13e115b31622211ff683ac6fc2e0b46",
+      historicalAcceptance: { baseSha: "b18f762486d8f7b1a84bb855cb454b7a48f28217",
+        manifestSha256: "1477b771268f3ba7a3ac1547ff93d2965b2e32f18cb097169e3c4a6ca22344c9",
+        diffSha256: "06f3a940c7a55bde0b51fee503c6050ee13e115b31622211ff683ac6fc2e0b46" },
       run: safeRunProvenance(process.env), serverVersionNum: serverVersion,
       sources: sourceFiles.map(path => ({ path, sha256: sha256(readFileSync(path)) })), fixtureCounts,
       fixtureStatistics: "ANALYZE payments; ANALYZE audit_log; before capture", plannerSettingsForced: false,
-      measurement: "single instrumented read then EXPLAIN ANALYZE replay; warm cache possible; no latency SLA",
+      measurement: "one instrumented legacy read and one SELECT-only composition, then EXPLAIN ANALYZE replay of identical SQL/parameters; warm cache possible; no latency SLA",
       results };
     // No evidence is emitted if any case, snapshot, capture, cleanup or replay fails.
     for (const frame of evidenceFrames(evidence)) console.log(frame);

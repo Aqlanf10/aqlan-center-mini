@@ -80,6 +80,12 @@ export async function POST(request: Request) {
   /* أقصى مدى للحجز من الإعداد `scheduling.max_days_ahead` — والافتراضيّ داخل
      الدالّة يحفظ سلوك اليوم إن غاب المفتاح أو فسد. */
   const bookingSettings = await getSettings();
+  if (bookingSettings["booking.public_enabled"] === "false") {
+    return NextResponse.json(
+      { message: "استقبال طلبات المواعيد عبر الموقع متوقف حاليًا. يرجى التواصل مع المركز هاتفيًا." },
+      { status: 403 },
+    );
+  }
   const validation = validateBookingRequest(
     source, today, Number(bookingSettings["scheduling.max_days_ahead"]),
   );

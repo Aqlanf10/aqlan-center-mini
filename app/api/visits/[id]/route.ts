@@ -6,6 +6,9 @@ import { callVisitAgain, callVisitGated, clearVisit, deferVisitPayment, deleteVi
 import { normalizeEmergencyReason } from "@/lib/chair-readiness";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalVisitFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalVisitMove, deleteCanonicalVisit, parseCanonicalVisitMove } from "@/lib/canonical-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +27,28 @@ function gatedResponse(result: GatedMoveResult, conflictMessage: string) {
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 12 + slice 35): queue moves, defer, link, open_file on visits.manage.
+    const visitId = Number((await context.params).id);
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_visit_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const moved = await commandCanonicalVisitMove(selected.handle, visitId, parseCanonicalVisitMove(canonicalBody));
+      if (moved.kind === "cleared") return NextResponse.json({ ok: true, clearedAt: moved.clearedAt, clearedBy: moved.clearedBy, already: moved.already }, { headers: NO_STORE });
+      if (moved.kind === "deferred") return NextResponse.json({ ok: true, already: moved.already, message: moved.message }, { headers: NO_STORE });
+      if (moved.kind === "linked") return NextResponse.json({ ok: true, patientName: moved.patientName }, { headers: NO_STORE });
+      if (moved.kind === "file_opened") return NextResponse.json({ ok: true, patientId: moved.patientId, created: moved.created }, { headers: NO_STORE });
+      return NextResponse.json(moved.warning ? { ...moved.visit, warning: moved.warning } : moved.visit, { headers: NO_STORE });
+    } catch (error) {
+      return canonicalVisitFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -192,6 +217,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
 /* حذف زيارة — المدير وحده، وللتشغيلية غير الموقّعة وغير المفوترة فقط. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const visitId = Number((await context.params).id);
+    let reason: string | null = null;
+    try {
+      const body = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES);
+      if (typeof body?.reason === "string" && body.reason.trim()) {
+        reason = body.reason.trim().slice(0, 300);
+      }
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      /* لا سبب — ليس شرطًا */
+    }
+    try {
+      return NextResponse.json(await deleteCanonicalVisit(selected.handle, visitId, reason), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalVisitFailure(error, "تعذّر حذف الزيارة. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -220,6 +268,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const result = await deleteVisit(id, { actor: session.username, actorRole: session.role, reason });
     if (!result.ok) {
+      if (result.reason === "lab_linked") return NextResponse.json({message:"هذه الزيارة مرتبطة بهوية مختبر دائمة؛ لا تُحذف دون معالجة سريرية صريحة للروابط."},{status:409});
       if (result.reason === "signed") {
         return NextResponse.json(
           { message: "الزيارة موقّعة سريريًا — وثّقت عمل الطبيب ولا تُمحى." },

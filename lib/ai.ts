@@ -253,6 +253,8 @@ export async function saveAiSettings(
  */
 export function sanitizeForPrivacy(text: string): string {
   return text
+    // (CLIN-03) تنقيح أرقام ملفات المرضى المنسّقة مثل P-7000 أو P7001 حتى لو كانت 4 خانات.
+    .replace(/\bP-?[\d\u0660-\u0669]{1,19}\b/gi, "•••")
     // أرقام من 5 خانات فأكثر: هواتف، ملفات، هويات. أقل من ذلك قيمٌ سريرية مشروعة
     // (سنوات ميلاد، زوايا، قياسات) — فلا تُمسّ حتى لا يفسد الاقتراح نفسه.
     .replace(/[\d\u0660-\u0669]{5,}/g, "•••")

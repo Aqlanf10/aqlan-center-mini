@@ -6,6 +6,9 @@ import { parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { readPriceBatch } from "@/lib/servicePricing";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { servicesBatchPriceCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +21,9 @@ export const dynamic = "force-dynamic";
  * لا شيء منها: رقمٌ خاطئ في سطرٍ واحد يردّها كلَّها باسم صاحبه.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return servicesBatchPriceCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

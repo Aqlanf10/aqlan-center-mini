@@ -3,8 +3,14 @@ import { CLINIC_TIME_ZONE, getOpenShift, listShifts, listShiftPayments, listShif
 import { requireSession } from "@/lib/session";
 import { canViewMoney } from "@/lib/roles";
 import { type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { reconciliationGetCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export async function GET(req: NextRequest) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return reconciliationGetCanonicalResponse(selected.handle);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "غير مصرح." }, { status: 401 });
   if (!canViewMoney(session.role)) {

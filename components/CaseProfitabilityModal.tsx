@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { formatMoney, parseAmount, toInputAmount, type Currency } from "@/lib/money";
+import { formatMoney, MINOR_UNITS, parseAmount, toInputAmount, type Currency } from "@/lib/money";
 import {
   calculateCaseProfitability,
   PROFITABILITY_TIER_META,
@@ -19,6 +19,7 @@ interface CaseProfitabilityModalProps {
   onClose: () => void;
 }
 
+/** القيم النموذجية معرّفة بالريال اليمني الفعلي (وحدة صغرى = 1 ريال يمني، لا مضروبة بـ 100 — FIN-03). */
 const SAMPLE_PRESETS: { id: string; name: string; patient: string; procedures: ProcedureCostInput[] }[] = [
   {
     id: "zirconia_bridge",
@@ -28,25 +29,25 @@ const SAMPLE_PRESETS: { id: string; name: string; patient: string; procedures: P
       {
         serviceName: "تاج زركونيا سن داعم #14",
         toothCode: 14,
-        revenueMinor: 5000000,
-        labCostMinor: 1500000,
-        materialCostMinor: 400000,
+        revenueMinor: 50000,
+        labCostMinor: 15000,
+        materialCostMinor: 4000,
         doctorCommissionPercent: 30,
       },
       {
         serviceName: "دمية زركونيا مفقود #15",
         toothCode: 15,
-        revenueMinor: 4500000,
-        labCostMinor: 1500000,
-        materialCostMinor: 250000,
+        revenueMinor: 45000,
+        labCostMinor: 15000,
+        materialCostMinor: 2500,
         doctorCommissionPercent: 30,
       },
       {
         serviceName: "تاج زركونيا سن داعم #16",
         toothCode: 16,
-        revenueMinor: 5000000,
-        labCostMinor: 1500000,
-        materialCostMinor: 400000,
+        revenueMinor: 50000,
+        labCostMinor: 15000,
+        materialCostMinor: 4000,
         doctorCommissionPercent: 30,
       },
     ],
@@ -59,17 +60,17 @@ const SAMPLE_PRESETS: { id: string; name: string; patient: string; procedures: P
       {
         serviceName: "غرسة سنية تيتانيوم فورية #21",
         toothCode: 21,
-        revenueMinor: 14000000,
+        revenueMinor: 140000,
         labCostMinor: 0,
-        materialCostMinor: 3800000,
+        materialCostMinor: 38000,
         doctorCommissionPercent: 25,
       },
       {
         serviceName: "دعامة زركونيا وتاج إيماكس على زرعة",
         toothCode: 21,
-        revenueMinor: 8500000,
-        labCostMinor: 2800000,
-        materialCostMinor: 700000,
+        revenueMinor: 85000,
+        labCostMinor: 28000,
+        materialCostMinor: 7000,
         doctorCommissionPercent: 30,
       },
     ],
@@ -82,25 +83,25 @@ const SAMPLE_PRESETS: { id: string; name: string; patient: string; procedures: P
       {
         serviceName: "علاج عصب ضرس سفلي 4 قنوات #36",
         toothCode: 36,
-        revenueMinor: 4500000,
+        revenueMinor: 45000,
         labCostMinor: 0,
-        materialCostMinor: 850000,
+        materialCostMinor: 8500,
         doctorCommissionPercent: 35,
       },
       {
         serviceName: "وتد فايبر وبناء قلب السن بالكمبوزيت",
         toothCode: 36,
-        revenueMinor: 2200000,
+        revenueMinor: 22000,
         labCostMinor: 0,
-        materialCostMinor: 450000,
+        materialCostMinor: 4500,
         doctorCommissionPercent: 30,
       },
       {
         serviceName: "تاج بورسلين مدمج بمعدن (PFM)",
         toothCode: 36,
-        revenueMinor: 3200000,
-        labCostMinor: 1100000,
-        materialCostMinor: 300000,
+        revenueMinor: 32000,
+        labCostMinor: 11000,
+        materialCostMinor: 3000,
         doctorCommissionPercent: 30,
       },
     ],
@@ -112,9 +113,9 @@ const SAMPLE_PRESETS: { id: string; name: string; patient: string; procedures: P
     procedures: [13, 12, 11, 21, 22, 23].map((tooth) => ({
       serviceName: `عدسة فينير إيماكس جمالية #${tooth}`,
       toothCode: tooth,
-      revenueMinor: 4500000,
-      labCostMinor: 1400000,
-      materialCostMinor: 350000,
+      revenueMinor: 45000,
+      labCostMinor: 14000,
+      materialCostMinor: 3500,
       doctorCommissionPercent: 30,
     })),
   },
@@ -205,13 +206,14 @@ export function CaseProfitabilityModal({
 
   const handleAddProcedure = () => {
     setSelectedPresetId("custom");
+    const scale = MINOR_UNITS[currency] === 1 ? 1 : 0.2;
     setActiveProcedures((prev) => [
       ...prev,
       {
         serviceName: "إجراء سني جديد",
-        revenueMinor: 2500000,
+        revenueMinor: Math.round(25000 * scale),
         labCostMinor: 0,
-        materialCostMinor: 300000,
+        materialCostMinor: Math.round(3000 * scale),
         doctorCommissionPercent: 30,
       },
     ]);
@@ -264,7 +266,7 @@ export function CaseProfitabilityModal({
                       setActiveProcedures((prev) => prev.map((procedure, index) =>
                         index === 0
                           ? { ...procedure, materialCostMinor: issuedCost.materialCostMinor }
-                          : procedure));
+                          : { ...procedure, materialCostMinor: 0 }));
                     }}
                     title="من حركات المخزون المسجّلة على هذا المريض — بالمتوسّط المرجّح لحظة كل صرف"
                     className="mt-1 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-[11px] font-bold text-teal-800 hover:bg-teal-100"

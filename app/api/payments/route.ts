@@ -14,6 +14,9 @@ import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { paymentsCreateCanonicalResponse, paymentsListCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -23,10 +26,20 @@ const denied = () =>
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return paymentsListCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
+  }
+  if (
+    (session.role === "cashier" || session.role === "accountant") &&
+    session.financeAccess?.viewPatientLedger === false &&
+    session.financeAccess?.collectPayments === false
+  ) {
+    return NextResponse.json({ message: "عرض المقبوضات خارج صلاحياتك المالية." }, { status: 403 });
   }
   const requested = new URL(request.url).searchParams.get("date") ?? "";
   const date = DATE_PATTERN.test(requested)
@@ -39,6 +52,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return paymentsCreateCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.collectPayments)) {

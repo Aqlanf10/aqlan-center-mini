@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   angleAtVertex, angleBetween, classifyZ, computeAll, computeMmPerPixel, enrichWithRefs,
-  interpret, isCephLandmarkCode, lateralOffset, LANDMARKS, MEASUREMENTS, measure,
+  interpret, isCephLandmarkCode, lateralOffset, LANDMARKS, MEASUREMENTS, measure, measureSteinerSnGoGn,
   missingFor, OPTIONAL_LANDMARKS, pixelsToMm, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, summarize, zScore,
   type LandmarkCode, type LandmarkMap, type MeasurementDef, type Pt,
@@ -132,6 +132,11 @@ describe("القياسات على الحالة التركيبية", () => {
     expect(byCode("L1NB_A")).toBeCloseTo(25, 1);
     expect(byCode("INTER")).toBeCloseTo(131, 1);
     expect(byCode("SNGOGN")).toBeCloseTo(31.6, 0);
+    // S25 / R31: SNGOGN preserves Go–Me for historical stability with explicit note,
+    // while measureSteinerSnGoGn computes Steiner's explicit Go–Gn angle when Gn !== Me.
+    expect(MEASUREMENTS.find((m) => m.code === "SNGOGN")?.note).toContain("Go–Me");
+    expect(measureSteinerSnGoGn(CASE)).toBeCloseTo(25.2, 1);
+    expect(measureSteinerSnGoGn({ ...CASE, Gn: CASE.Me })).toBeCloseTo(measure("SNGOGN", CASE, SCALE), 5);
     expect(byCode("FANGLE")).toBeCloseTo(87, 1);
     expect(byCode("YAXIS")).toBeCloseTo(63.8, 0);
   });

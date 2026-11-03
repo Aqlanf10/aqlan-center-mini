@@ -19,6 +19,7 @@ import {
   labToothInputProblem,
 } from "@/lib/lab";
 import { LabDentalChart } from "./LabDentalChart";
+import { LabPrescriptionEditor } from "./LabPrescriptionEditor";
 import { LabPrescriptionModal } from "./LabPrescriptionModal";
 import { LabDeliveryAppointmentModal } from "./LabDeliveryAppointmentModal";
 import { useClinicName, useSetting } from "./SettingsProvider";
@@ -132,6 +133,8 @@ export function PatientLabOrders({
      الخادم — فكان حقل التكلفة هنا يفشل دائمًا بلا جهة. */
   const [registeredLabs, setRegisteredLabs] = useState<{ id: number; name: string }[]>([]);
   const [prescriptionSelection, setPrescriptionSelection] = useState<OwnedOrder | null>(null);
+  const [editorSelection, setEditorSelection] = useState<OwnedOrder | null>(null);
+  const editorOrder = editorSelection?.owner === owner ? editorSelection.order : null;
   const [deliverySelection, setDeliverySelection] = useState<OwnedOrder | null>(null);
   const prescriptionOrder = prescriptionSelection?.owner === owner ? prescriptionSelection.order : null;
   const deliveryAppointmentOrder = deliverySelection?.owner === owner ? deliverySelection.order : null;
@@ -153,6 +156,7 @@ export function PatientLabOrders({
     setStatusError(null);
     setShowAdd(false);
     setPrescriptionSelection(null);
+    setEditorSelection(null);
     setDeliverySelection(null);
     setRegisteredLabs([]);
     // A reused instance must not carry a patient-specific draft into its new scope.
@@ -393,6 +397,43 @@ export function PatientLabOrders({
       if (!owner.active) return;
       if (!res.ok) {
         setError(data?.message ?? "تعذّر إلغاء الإرسالية.");
+        return;
+      }
+      await load();
+    } catch {
+      if (owner.active) setError("تعذّر الاتصال بالخادم.");
+    } finally {
+      if (owner.active) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
+    }
+  };
+
+  const requestRemake = async (order: LabOrder) => {
+    if (!owner.active || busy || mutationPending.current) return;
+    const reason = window.prompt(`سبب طلب إعادة تصنيع «${order.workType}» لدى «${order.labName}»:`, "عدم مطابقة الإطباق أو الحواف");
+    if (!reason || reason.trim().length < 2) return;
+    const nextDue = window.prompt("موعد التسليم المتوقع للإعادة (YYYY-MM-DD):", initialDueDate()) ?? "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDue.trim())) {
+      setError("حدد تاريخ تسليم صحيح بصيغة YYYY-MM-DD.");
+      return;
+    }
+    mutationPending.current = true;
+    setBusy(true);
+    setStatusError(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/lab/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remake", remakeReason: reason.trim(), newDueDate: nextDue.trim() }),
+      });
+      if (!owner.active) return;
+      const data = await res.json().catch(() => null);
+      if (!owner.active) return;
+      if (!res.ok) {
+        setError(data?.message ?? "تعذّر إنشاء طلب إعادة التصنيع.");
         return;
       }
       await load();
@@ -687,7 +728,7 @@ export function PatientLabOrders({
                       التسليم: {friendlyDate(order.dueDate)}
                     </p>
                     <p className="text-[11px] text-slate-400">
-                      أُرسل: {friendlyDate(order.sentDate)}
+                      {order.status === "needed" ? "لم يُرسل بعد" : `أُرسل: ${friendlyDate(order.sentDate)}`}
                     </p>
                   </div>
                 </div>
@@ -700,7 +741,7 @@ export function PatientLabOrders({
 
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5 text-xs">
                   <div>
-                    {order.baseAmountMinor ? (
+                    {typeof order.baseAmountMinor === "number" && order.baseAmountMinor > 0 ? (
                       <span className="text-[11px] font-bold text-slate-500">
                         التكلفة: {formatMoney(order.baseAmountMinor, base)}
                       </span>
@@ -708,6 +749,7 @@ export function PatientLabOrders({
                   </div>
 
                   <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+                    {order.status === "needed" && ["admin", "doctor"].includes(session?.role ?? "") && <button type="button" className="min-h-11 rounded-lg bg-sky-700 px-3 text-white" onClick={() => setEditorSelection({ owner, order })}>استكمال الإرسالية</button>}
                     {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button" onClick={() => setClinicalOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تصحيح الإرسالية</button>}
                     {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button"
                       onClick={() => setShadeOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تعديل ألوان الأسنان</button>}
@@ -768,6 +810,19 @@ export function PatientLabOrders({
                       </>
                     ) : null}
 
+                    {(order.status === "received" || order.status === "delivered")
+                      && session && ["admin", "doctor", "reception"].includes(session.role) ? (
+                      <button
+                        type="button"
+                        onClick={() => void requestRemake(order)}
+                        disabled={busy}
+                        className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 hover:bg-amber-100"
+                        title="إنشاء طلب إعادة تصنيع مرتبط بهذا العمل بلا تكلفة إضافية على العيادة"
+                      >
+                        🔄 إعادة تصنيع
+                      </button>
+                    ) : null}
+
                     <a
                       href={`/lab`}
                       className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
@@ -782,6 +837,7 @@ export function PatientLabOrders({
         </div>
       )}
 
+      {editorOrder && <LabPrescriptionEditor key={`${scope}:${editorOrder.id}`} order={editorOrder} onClose={() => { setEditorSelection(null); void load(); }} onSaved={() => { if (owner.active) { setEditorSelection(null); void load(); } }} />}
       {/* نافذة استمارة طلب المعمل */}
       {clinicalOrder && orders.some(order => order.id === clinicalOrder.id) && (
         <LabOrderClinicalEditor key={`${session?.username}:${session?.role}:${clinicalOrder.id}`} order={clinicalOrder}

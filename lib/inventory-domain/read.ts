@@ -1,12 +1,14 @@
-import { ensureSchema, getPool, getInventoryItemDetail } from "../db";
+import { ensureSchema, getPool, getInventoryItemDetailWith, type DbClient } from "../db";
 import type { CostedMovement } from "../inventoryCost";
 import { inventoryValuation, type Valuation } from "./valuation";
 
 /** New inventory read boundary; old supplier/payable links remain unchanged. */
-export async function inventoryDetailWithLinks(id: number) {
-  const detail = await getInventoryItemDetail(id);
+export async function inventoryDetailWithLinks(id: number, q?: Pick<DbClient, "query">) {
+  if (!q) await ensureSchema();
+  const db = q ?? getPool();
+  const detail = await getInventoryItemDetailWith(db, id);
   if (!detail) return null;
-  const { rows } = await getPool().query<{ id: number; party_id: number | null; payable_id: number | null }>(
+  const { rows } = await db.query<{ id: number; party_id: number | null; payable_id: number | null }>(
     "SELECT id, party_id, payable_id FROM inventory_movements WHERE item_id = $1", [id],
   );
   const links = new Map(rows.map(row => [row.id, row]));
@@ -19,9 +21,10 @@ export async function inventoryDetailWithLinks(id: number) {
 export interface ValuedInventoryItem extends Valuation {
   id: number; name: string; category: string; unit: string;
 }
-export async function readInventoryValuation() {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+export async function readInventoryValuation(q?: Pick<DbClient, "query">) {
+  if (!q) await ensureSchema();
+  const db = q ?? getPool();
+  const { rows } = await db.query<{
     id: number; name: string; category: string; unit: string; kind: CostedMovement["kind"];
     qty: string; unit_cost_minor: string | null; is_return: boolean | null;
   }>(`SELECT i.id, i.name, i.category, i.unit, m.kind, m.qty, m.unit_cost_minor, m.is_return

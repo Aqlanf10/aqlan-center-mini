@@ -16,7 +16,10 @@ const boundary = vi.hoisted(() => ({
   createLabOrder: vi.fn(), findUserByUsername: vi.fn(), listParties: vi.fn(), recordAudit: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
-vi.mock("@/lib/db", () => ({ ...boundary, CLINIC_TIME_ZONE: "Asia/Riyadh" }));
+vi.mock("@/lib/db", () => ({
+  ...boundary, CLINIC_TIME_ZONE: "Asia/Riyadh",
+  doctorOwnedPatientIds: vi.fn(), doctorOwnsPatient: vi.fn(), patientHasVisitToday: vi.fn(),
+}));
 import { GET as reportGET } from "../app/api/report/route";
 import { GET as labGET } from "../app/api/lab/route";
 

@@ -18,6 +18,11 @@ import { isPreferredChannel, normalizePatientEmail, normalizePatientFlags, parse
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure, canonicalPatientWriteFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalPatientUpdate } from "@/lib/canonical-patient-writes";
+import { readCanonicalPatientFile } from "@/lib/canonical-patient-reads";
+import { canonicalEndoVisitFailure, deleteCanonicalPatient } from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +57,22 @@ async function doctorBlocked(patientId: number, skipAllGrant = false): Promise<s
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 2): one owning snapshot, patient inside the scope,
+    // projection by grant. The bounded appointments projection mode is not canonical yet.
+    const id = readId((await context.params).id);
+    if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+    if (new URL(_request.url).searchParams.has("projection")) {
+      return NextResponse.json({ code: "projection_not_canonical", message: "هذا العرض لم يُنقل بعد إلى الهوية الموحّدة." }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
+    }
+    try {
+      return NextResponse.json(await readCanonicalPatientFile(selected.handle, id), { headers: { "Cache-Control": "private, no-store" } });
+    } catch (error) {
+      return canonicalPatientReadFailure(error, "تعذّر تحميل ملف المريض.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const { id: rawId } = await context.params;
@@ -79,6 +100,24 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 8): one admitted `patients.edit` transaction, the patient
+  // inside the current scope, field groups by grant, audit atomic with the change.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    const canonicalId = readId((await context.params).id);
+    if (canonicalId === null) return NextResponse.json({ code: "invalid_patient_input", message: "رقم المريض غير صالح." }, { status: 400, headers: NO_STORE });
+    let canonicalBody: unknown;
+    try { canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    if (!canonicalBody || typeof canonicalBody !== "object" || Array.isArray(canonicalBody)) return NextResponse.json({ code: "invalid_patient_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    try {
+      return NextResponse.json(await commandCanonicalPatientUpdate(selected.handle, canonicalId, canonicalBody as Record<string, unknown>), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPatientWriteFailure(error, "تعذّر حفظ التعديل. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const { id: rawId } = await context.params;
@@ -191,6 +230,26 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
  * والفواتير والدفعات والخطط والأشعة وأعمال المعمل في معاملة واحدة، ويترك
  * صورةً كاملة في سجل التدقيق. التأكيد بالإجابة برقم الملف نفسه من الواجهة. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    let canonicalBody: unknown = {};
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      /* الجسم فارغ — يُرفض التحذير أدناه */
+    }
+    try {
+      return NextResponse.json(await deleteCanonicalPatient(selected.handle, Number(rawId), canonicalBody), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر حذف الملف. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

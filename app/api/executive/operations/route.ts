@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, getPool } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalExecutiveOperationsGet } from "@/lib/canonical-admin-reports-settings";
 import { canReadOperationalOverview, parseOperationalQuery } from "@/lib/leadership-operations";
 import { readOperationalOverview } from "@/lib/leadership-operations-db";
 
 export const dynamic = "force-dynamic";
 const json = (value: unknown, status = 200) => NextResponse.json(value, { status, headers: { "Cache-Control": "private, no-store" } });
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") return canonicalExecutiveOperationsGet(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
   if (!canReadOperationalOverview(session.role)) return json({ message: "المراجعة التشغيلية للإدارة فقط." }, 403);

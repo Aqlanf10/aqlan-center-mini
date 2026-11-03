@@ -8,7 +8,15 @@ import { refusalMessage } from "@/lib/supplier-payments";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { canDoctorViewExpenses } from "@/lib/doctor-permissions";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  expensesDeleteCanonicalResponse,
+  expensesGetCanonicalResponse,
+  expensesPostCanonicalResponse,
+} from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +26,9 @@ const denied = () =>
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expensesGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   /* صلاحيات الوكيل المساعد: المصروفات من «المالية المخفية» — تُفتح للطبيب
@@ -45,6 +56,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expensesPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
@@ -64,31 +78,36 @@ export async function POST(request: Request) {
   if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: parsed.status });
   const request_ = parsed.value;
 
-  try {
-    const { expense, reason, quote } = await recordExpense({
-      category: request_.category, partyId: request_.partyId, payeeText: request_.payeeText,
-      amountMinor: request_.amountMinor, currency: request_.currency, baseCurrency: base,
-      exchangeRate: request_.exchangeRate, payableId: request_.payableId, note: request_.note,
-      createdBy: session.username, actorRole: session.role, rates: settingsRates,
-      payableExchangeRate: request_.payableExchangeRate,
-      rateOverrideReason: request_.rateOverrideReason,
-      prepaymentReason: request_.prepaymentReason,
-      expectedQuote: request_.expectedQuote,
-    });
-    if (reason) {
-      return NextResponse.json(
-        { message: refusalMessage(reason, quote), code: reason, quote },
-        { status: refusalStatus(reason) },
-      );
+  return withHttpIdempotency(request, "expenses.create", session.username, source, async () => {
+    try {
+      const { expense, reason, quote } = await recordExpense({
+        category: request_.category, partyId: request_.partyId, payeeText: request_.payeeText,
+        amountMinor: request_.amountMinor, currency: request_.currency, baseCurrency: base,
+        exchangeRate: request_.exchangeRate, payableId: request_.payableId, note: request_.note,
+        createdBy: session.username, actorRole: session.role, rates: settingsRates,
+        payableExchangeRate: request_.payableExchangeRate,
+        rateOverrideReason: request_.rateOverrideReason,
+        prepaymentReason: request_.prepaymentReason,
+        expectedQuote: request_.expectedQuote,
+      });
+      if (reason) {
+        return NextResponse.json(
+          { message: refusalMessage(reason, quote), code: reason, quote },
+          { status: refusalStatus(reason) },
+        );
+      }
+      return NextResponse.json(expense, { status: 201 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر تسجيل الصرف. أعد المحاولة." }, { status: 500 });
     }
-    return NextResponse.json(expense, { status: 201 });
-  } catch {
-    return NextResponse.json({ message: "تعذّر تسجيل الصرف. أعد المحاولة." }, { status: 500 });
-  }
+  });
 }
 
 /* حذف سند صرف — المدير وحده، وضمن ورديةٍ مفتوحة، ولا لسند يسدّد التزامًا. */
 export async function DELETE(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expensesDeleteCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

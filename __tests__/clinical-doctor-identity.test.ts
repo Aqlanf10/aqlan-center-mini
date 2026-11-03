@@ -55,6 +55,8 @@ function domain<T>(name: string, dependencies: Record<string, unknown>): T {
   const output: Record<string, unknown> = {};
   const load = (name: string) => {
     if (name === "./endodontics-db") return { hasMeaningfulEndoVisit: async () => false };
+    // This legacy performer protocol intentionally exercises an installation without the optional lab proposal.
+    if (name === "./lab-work-intent-db") return { labWorkIntentSupported: async () => false };
     throw new Error(`Unexpected dependency in isolated domain protocol: ${name}`);
   };
   // Private helpers use the same exact-source extraction as exported domain functions.

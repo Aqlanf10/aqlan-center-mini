@@ -7,6 +7,9 @@ import { FinancialCurrencyIntegrityError, isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { fxGetCanonicalResponse, fxPostCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +29,9 @@ function asOfFrom(request: Request): string {
 }
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return fxGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewFinancialReports(session.role)) return forbidden();
@@ -45,6 +51,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return fxPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return forbidden();

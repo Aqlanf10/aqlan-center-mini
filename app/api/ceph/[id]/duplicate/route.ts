@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { canonicalCephFailure, commandCanonicalCephDuplicate } from "@/lib/canonical-ceph";
+import { NO_STORE } from "@/lib/canonical-patient-http";
 import { duplicateCephAnalysis, getCephStudy } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +20,23 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: raw } = await context.params;
+    const id = Number(raw);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return NextResponse.json({ code: "invalid_ceph_input", message: "رقم التحليل غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(await commandCanonicalCephDuplicate(selected.handle, id), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalCephFailure(error, "تعذّر فتح نسخة التصحيح.");
+    }
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   const { id: raw } = await context.params;

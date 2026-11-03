@@ -4,6 +4,11 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getSettings, listMaterialRates, setMaterialRate } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalMaterialRatesGet,
+  canonicalMaterialRatesPost,
+} from "@/lib/canonical-admin-reports-settings";
 import { parseRateBp } from "@/lib/materialRate";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +22,14 @@ export const dynamic = "force-dynamic";
  * الأطباء، فلا تُكتب إلا بيد المالك.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalMaterialRatesGet(selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -33,6 +46,14 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalMaterialRatesPost(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

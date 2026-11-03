@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { permitsOrthoDocumentation, orthoDocumentationContext } from "./ortho-documentation-context";
 import type { SessionPayload } from "./auth";
-import { ensureSchema, findUserByUsername, getPool, insertAuditRow, type DbClient } from "./db";
+import { ensureSchema, findUserByUsername, getPool, insertAuditRow, patientInDoctorScopeWith, type DbClient, type DbPool } from "./db";
 import { canAccessPatient } from "./patient-access";
 import { requireSession } from "./session";
 import {
@@ -9,6 +9,10 @@ import {
   type StrategyCanonicalContext, type StrategyCommand, type StrategyPlanItemReference,
   type StrategyProblemReference, type StrategyProjection, type StrategyRecordingContext, type StrategyRevision, type StrategyScope,
 } from "./ortho-treatment-strategy";
+import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
+import { staffAdmissionRefusal } from "./staff-capability-editor";
+import type { VerifiedDurableSession } from "./staff-durable-session";
+import { staffOperationCapabilities, staffOperationIdentity, staffOperationPatientScope, withStaffOperation } from "./staff-operation-runtime";
 
 /** This store only appends clinical documentation. Existing case, problem, plan,
  * treatment, financial and lifecycle writers retain exclusive ownership. */
@@ -111,11 +115,17 @@ function assertUnexpired(authority: Authority): void {
   if (authority.actor.session.expiresAt < Date.now()) fail(401, "session_expired", "انتهت الجلسة. سجّل الدخول من جديد.");
 }
 
-async function lockOwner(client: DbClient, input: OwnerInput, write: boolean): Promise<LockedOwner> {
+async function lockOwner(
+  client: Pick<DbClient, "query">,
+  input: Pick<OwnerInput, "orthoCaseId" | "patientId">,
+  write: boolean,
+  lock = true,
+): Promise<LockedOwner> {
   // Never add a funding-plan lock after these locks. Existing item deletion
   // starts at its plan; taking the reverse order here would introduce deadlock.
+  const lockClause = lock ? (write ? "FOR UPDATE" : "FOR SHARE") : "";
   const { rows: cases } = await client.query<{ id: number; patient_id: number; status: string }>(
-    `SELECT id, patient_id, status FROM ortho_cases WHERE id = $1 AND patient_id = $2 ${write ? "FOR UPDATE" : "FOR SHARE"}`,
+    `SELECT id, patient_id, status FROM ortho_cases WHERE id = $1 AND patient_id = $2 ${lockClause}`,
     [input.orthoCaseId, input.patientId]);
   const ortho = cases[0];
   if (!ortho || ortho.patient_id !== input.patientId) fail(404, "ortho_case_not_found", "حالة التقويم غير متاحة لهذا المريض.");
@@ -123,7 +133,7 @@ async function lockOwner(client: DbClient, input: OwnerInput, write: boolean): P
     fail(409, "invalid_case_state", "تعذّر التحقق من حالة التقويم الحالية.");
   }
   const { rows: bridges } = await client.query<{ id: number; patient_id: number; ortho_case_id: number; specialty: string }>(
-    `SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 ${write ? "FOR UPDATE" : "FOR SHARE"}`,
+    `SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 ${lockClause}`,
     [input.orthoCaseId]);
   if (bridges.length > 1 || (bridges[0] && (bridges[0].patient_id !== ortho.patient_id || bridges[0].ortho_case_id !== ortho.id || bridges[0].specialty !== "orthodontics"))) {
     fail(409, "scope_mismatch", "الرابط السريري لا يطابق المريض وحالة التقويم المحددين.");
@@ -171,7 +181,7 @@ function historyEntry(revision: StrategyRevision): OrthoStrategyHistoryEntry {
     recordedPatientId: revision.recordedPatientId,
     recordingContext: revision.recordingContext, createdAt: revision.createdAt, createdBy: revision.createdBy, reason: revision.reason };
 }
-async function validatedHistory(client: DbClient, scope: StrategyScope): Promise<{ stored: StoredRow[]; revisions: StrategyRevision[] }> {
+async function validatedHistory(client: Pick<DbClient, "query">, scope: StrategyScope): Promise<{ stored: StoredRow[]; revisions: StrategyRevision[] }> {
   // Validate the whole anchored lineage before any projection, replay or new
   // append. A plausible head must not conceal a skipped or cyclic predecessor.
   const { rows: stored } = await client.query<StoredRow>(`SELECT ${COLUMNS} FROM ortho_strategy_revisions
@@ -189,7 +199,11 @@ async function validatedHistory(client: DbClient, scope: StrategyScope): Promise
   }
   return { stored, revisions };
 }
-function requirePlanLinks(authority: Authority, revisions: (StrategyRevision | null)[], command: StrategyCommand): void {
+function requirePlanLinks(
+  authority: Pick<Authority, "planVisible" | "planLinksWritable">,
+  revisions: (StrategyRevision | null)[],
+  command: StrategyCommand,
+): void {
   const linked = command.rows.some(row => row.planItemIds.length > 0)
     || revisions.some(revision => revision?.rows.some(row => row.planItems.length > 0));
   if (linked && (!authority.planVisible || !authority.planLinksWritable)) {
@@ -212,7 +226,11 @@ async function lockReferences(client: DbClient, scope: StrategyScope, command: S
 /** Returns only minimal clinical fields. A historical ID now owned by somebody
  * else gets an identity-only unavailable marker, never that owner's data. */
 async function canonicalContext(
-  client: DbClient, scope: StrategyScope, authority: Authority, revisions: StrategyRevision[], command?: StrategyCommand,
+  client: Pick<DbClient, "query">,
+  scope: StrategyScope,
+  authority: Pick<Authority, "planVisible" | "clinicalWritable" | "planLinksWritable">,
+  revisions: StrategyRevision[],
+  command?: StrategyCommand,
 ): Promise<StrategyCanonicalContext> {
   const problemIds = sortedIds([...revisions.flatMap(revision => revision.rows.map(row => row.problem.id)),
     ...(command?.rows.map(row => row.problemId) ?? [])]);
@@ -377,4 +395,160 @@ export async function appendOrthoTreatmentStrategy(
     assertUnexpired(authority);
     return { ok: true, revision: checked(projectStrategyRevision(revision, context), 500), replayed: false };
   });
+}
+
+function mapCanonicalStrategyError(error: unknown): OrthoStrategyFailure | null {
+  if (error instanceof StoreFault) return { ok: false, status: error.status, code: error.code, message: error.message };
+  const refusal = staffAdmissionRefusal(error);
+  if (refusal) {
+    const message = /RECORD_SCOPE_DENIED$/.test(refusal.code) ? "لا تملك صلاحية عرض ملفات المرضى." : refusal.message;
+    return { ok: false, status: refusal.status, code: refusal.code, message };
+  }
+  return null;
+}
+
+export async function getCanonicalOrthoTreatmentStrategy(
+  session: VerifiedDurableSession,
+  orthoCaseId: number,
+  options: { revisionId?: number } = {},
+): Promise<OrthoStrategyReadResult> {
+  if (!isId(orthoCaseId)) return { ok: false, status: 400, code: "invalid_scope", message: "رقم الحالة غير صالح." };
+  if (options.revisionId !== undefined && !isId(options.revisionId)) {
+    return { ok: false, status: 400, code: "invalid_revision", message: "رقم المراجعة غير صالح." };
+  }
+  try {
+    return await runCanonicalReadSnapshot(session, "read:ortho.case", async (query, snapshotScope) => {
+      const caseRow = (await query.query<{ patient_id: number }>("SELECT patient_id FROM ortho_cases WHERE id = $1", [orthoCaseId])).rows[0];
+      if (!caseRow) fail(404, "ortho_case_not_found", "الحالة غير موجودة.");
+      if (snapshotScope.patientScope.kind === "own" && !(await patientInDoctorScopeWith(query, snapshotScope.patientScope.clinicianPartyId, caseRow.patient_id))) {
+        fail(404, "ortho_case_not_found", "الحالة غير موجودة.");
+      }
+      const clinicalWritable = snapshotScope.granted("clinical.ortho.edit");
+      const planVisible = snapshotScope.granted("clinical.plans.view");
+      const planLinksWritable = clinicalWritable && planVisible && snapshotScope.granted("clinical.plans.edit");
+      const authority = { clinicalWritable, planVisible, planLinksWritable };
+      const owner = await lockOwner(query, { patientId: caseRow.patient_id, orthoCaseId }, false, false);
+      if (owner.clinicalCaseId === null) {
+        return {
+          ok: true as const, state: "bridge_missing" as const, ...owner, clinicalCaseId: null,
+          planVisible, clinicalWritable, planLinksWritable,
+          canRevise: false, history: [], revision: null, choices: { problems: [], planItems: [] },
+        };
+      }
+      const scope = scopeOf(owner);
+      const { revisions } = await validatedHistory(query, scope);
+      const selected = options.revisionId === undefined ? revisions[0] ?? null
+        : revisions.find(revision => revision.id === options.revisionId) ?? null;
+      if (options.revisionId !== undefined && selected === null) fail(404, "revision_not_found", "النسخة المحددة غير متاحة لهذه الحالة.");
+      const context = await canonicalContext(query, scope, authority, selected ? [selected] : []);
+      const revision = selected ? checked(projectStrategyRevision(selected, context), 500) : null;
+      return {
+        ok: true as const, state: "ready" as const, ...owner, clinicalCaseId: scope.clinicalCaseId,
+        planVisible, clinicalWritable, planLinksWritable,
+        canRevise: clinicalWritable && ([selected, revisions[0] ?? null].every(rev =>
+          !rev?.rows.some(row => row.planItems.length > 0)) || planLinksWritable),
+        history: revisions.map(historyEntry), revision,
+        choices: {
+          problems: context.problems.filter(problem => problem.patientId === scope.patientId && problem.caseId === scope.clinicalCaseId),
+          planItems: planVisible ? context.planItems.filter(item => item.patientId === scope.patientId && item.caseId === scope.clinicalCaseId) : [],
+        },
+      };
+    }, { errorPrefix: "STAFF_READ", maxBytes: 2 * 1024 * 1024 });
+  } catch (error) {
+    const mapped = mapCanonicalStrategyError(error);
+    if (mapped) return mapped;
+    throw error;
+  }
+}
+
+export async function appendCanonicalOrthoTreatmentStrategy(
+  session: VerifiedDurableSession,
+  orthoCaseId: number,
+  rawCommand: unknown,
+  pool: DbPool = getPool(),
+): Promise<OrthoStrategyWriteResult> {
+  if (!isId(orthoCaseId)) return { ok: false, status: 400, code: "invalid_scope", message: "رقم الحالة غير صالح." };
+  try {
+    return await withStaffOperation(pool, session, "clinical.ortho.edit", async (client, handle) => {
+      const command = checked(checkStrategyCommand(rawCommand), 400);
+      const initialCase = (await client.query<{ patient_id: number }>("SELECT patient_id FROM ortho_cases WHERE id = $1", [orthoCaseId])).rows[0];
+      if (!initialCase) fail(404, "ortho_case_not_found", "الحالة غير موجودة.");
+      const lockedPatient = (await client.query<{ id: number }>("SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE", [initialCase.patient_id])).rows[0];
+      const identity = await staffOperationIdentity(client, handle, "clinical.ortho.edit");
+      const patientScope = await staffOperationPatientScope(client, handle, "clinical.ortho.edit");
+      if (patientScope.kind === "none") fail(403, "patient_access_denied", "غير مصرّح لك بملف هذا المريض.");
+      if (!lockedPatient) fail(404, "ortho_case_not_found", "الحالة غير موجودة.");
+      if (patientScope.kind === "own" && !(await patientInDoctorScopeWith(client, patientScope.clinicianPartyId, lockedPatient.id))) {
+        fail(404, "ortho_case_not_found", "الحالة غير موجودة.");
+      }
+      const granted = await staffOperationCapabilities(client, handle, "clinical.ortho.edit", ["clinical.plans.view", "clinical.plans.edit"] as const);
+      const planVisible = granted.has("clinical.plans.view");
+      const planLinksWritable = planVisible && granted.has("clinical.plans.edit");
+      const authority = { clinicalWritable: true, planVisible, planLinksWritable };
+      const userRow = (await client.query<{ display_name: string | null }>("SELECT display_name FROM users WHERE id = $1", [identity.userId])).rows[0];
+      const actorName = userRow?.display_name?.trim() || identity.username;
+
+      const owner = await lockOwner(client, { patientId: lockedPatient.id, orthoCaseId }, true, true);
+      const scope = scopeOf(owner);
+      const hash = fingerprint(command);
+      const { stored, revisions } = await validatedHistory(client, scope);
+      const replayIndex = stored.findIndex(row => row.actor_user_id === identity.userId && row.command_id === command.commandId);
+      if (replayIndex >= 0) {
+        const original = revisions[replayIndex];
+        const predecessor = revisions[replayIndex + 1] ?? null;
+        requirePlanLinks(authority, [original, predecessor], command);
+        if (stored[replayIndex].request_fingerprint !== hash) fail(409, "command_conflict", "استُخدم معرّف الحفظ لطلب مختلف.");
+        const context = await canonicalContext(client, scope, authority, [original]);
+        return { ok: true as const, revision: checked(projectStrategyRevision(original, context), 500), replayed: true };
+      }
+      const previous = revisions[0] ?? null;
+      requirePlanLinks(authority, [previous], command);
+      if (command.expectedRevisionId !== (previous?.id ?? null)) fail(409, "stale_revision", "تغيرت نسخة الخطة. أعد قراءتها قبل المراجعة.");
+      await lockReferences(client, scope, command);
+      const context = await canonicalContext(client, scope, authority, [], command);
+      requirePlanLinks(authority, [previous], command);
+      context.clinicalWriteAllowed = true;
+      context.planVisibility = planVisible ? "allowed" : "restricted";
+      context.planLinksWritable = planLinksWritable;
+      const bound = checked(bindStrategyRows(command, context, previous));
+      const { rows: identities } = await client.query<{ id: number; created_at: Date }>(
+        `SELECT nextval(pg_get_serial_sequence('ortho_strategy_revisions', 'id'))::int AS id, clock_timestamp() AS created_at`);
+      const revIdentity = identities[0];
+      if (!revIdentity || !(revIdentity.created_at instanceof Date) || !Number.isFinite(revIdentity.created_at.getTime())) {
+        fail(500, "invalid_revision_identity", "تعذّر إنشاء هوية النسخة المحفوظة.");
+      }
+      const revision = checked(decodeStrategyRevision({
+        ...scope, recordedPatientId: scope.patientId, id: revIdentity.id, schemaVersion: 1,
+        version: (previous?.version ?? 0) + 1, supersedesRevisionId: previous?.id ?? null,
+        createdAt: revIdentity.created_at.toISOString(), createdBy: actorName, recordingContext: owner.recordingContext,
+        reason: command.reason, rows: bound,
+      }, scope), 500);
+      if (Buffer.byteLength(JSON.stringify(revision), "utf8") > MAX_STORED_DOCUMENT_BYTES) {
+        fail(413, "revision_too_large", "حجم النسخة وروابطها يتجاوز الحد المسموح.");
+      }
+      await client.query(`INSERT INTO ortho_strategy_revisions
+        (id, patient_id, recorded_patient_id, ortho_case_id, clinical_case_id, version, supersedes_revision_id, schema_version,
+         actor_user_id, created_by, created_at, command_id, request_fingerprint, reason, recording_context, rows)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::int, $8, $9, $10, $11::timestamptz, $12, $13, $14, $15, $16::jsonb)`,
+      [revision.id, scope.patientId, revision.recordedPatientId, scope.orthoCaseId, scope.clinicalCaseId, revision.version, revision.supersedesRevisionId,
+        revision.schemaVersion, identity.userId, revision.createdBy, revision.createdAt, command.commandId, hash,
+        revision.reason, revision.recordingContext, JSON.stringify(revision.rows)]);
+      await insertAuditRow(client, {
+        action: "ortho.strategy_revision", entity: "patient", entityId: scope.patientId,
+        actor: actorName, actorRole: identity.role,
+        details: {
+          revisionId: revision.id, recordedPatientId: revision.recordedPatientId,
+          orthoCaseId: scope.orthoCaseId, clinicalCaseId: scope.clinicalCaseId,
+          version: revision.version, supersedesRevisionId: revision.supersedesRevisionId, actorUserId: identity.userId,
+          recordingContext: revision.recordingContext, reason: revision.reason, rowCount: revision.rows.length,
+          linkCount: revision.rows.reduce((count, row) => count + row.planItems.length, 0),
+        },
+      });
+      return { ok: true as const, revision: checked(projectStrategyRevision(revision, context), 500), replayed: false };
+    });
+  } catch (error) {
+    const mapped = mapCanonicalStrategyError(error);
+    if (mapped) return mapped;
+    throw error;
+  }
 }

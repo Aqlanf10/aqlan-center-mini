@@ -8,6 +8,12 @@ const mocks = vi.hoisted(() => ({
   orthoCase: vi.fn(),
   clinicalVisit: vi.fn(),
   poolQuery: vi.fn(),
+  convList: vi.fn(),
+  unreadCount: vi.fn(),
+  urgentCount: vi.fn(),
+  openPast: vi.fn(),
+  missedAppts: vi.fn(),
+  lapsedPatients: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({
@@ -56,7 +62,26 @@ vi.mock("@/lib/db", () => ({
     name: "test.pdf",
   })),
   markAppointmentFollowedUp: vi.fn(async () => true),
+  markPatientRecalled: vi.fn(async () => true),
+  listOpenPastAppointments: mocks.openPast,
+  listMissedAppointments: mocks.missedAppts,
+  listLapsedPatients: mocks.lapsedPatients,
+  staffConversationList: mocks.convList,
+  unreadMessageCount: mocks.unreadCount,
+  urgentUnreadMessageCount: mocks.urgentCount,
+  broadcastMessages: vi.fn(async () => []),
+  directMessages: vi.fn(async () => []),
+  editStaffMessage: vi.fn(async () => ({ ok: true })),
+  deleteStaffMessage: vi.fn(async () => ({ ok: true })),
+  getStaffUserById: vi.fn(async () => null),
   updateLabOrderAccounting: vi.fn(async () => ({ id: 1 })),
+  deleteLabOrder: vi.fn(async () => ({ ok: true })),
+  getLabOrderById: vi.fn(async () => null),
+  labOrderEvents: vi.fn(async () => []),
+  setLabOrderDueDate: vi.fn(async () => null),
+  setLabOrderStatus: vi.fn(async () => null),
+  createLabOrderRemake: vi.fn(async () => ({ ok: true })),
+  patientHasVisitToday: vi.fn(async () => false),
   createInventoryMovement: vi.fn(async () => ({ ok: true, movement: { id: 1 }, balance: 10 })),
   patientLedger: vi.fn(async () => ({ invoices: [], payments: [], opening: 0 })),
   CLINIC_TIME_ZONE: "Asia/Aden",
@@ -79,7 +104,7 @@ import { GET as diagnosesGet, POST as diagnosesPost } from "../app/api/patients/
 import { POST as plannedSchedulePost } from "../app/api/planned-visits/[id]/schedule/route";
 import { GET as messagesGet, POST as messagesPost } from "../app/api/messages/route";
 import { GET as messageFileGet } from "../app/api/messages/file/[id]/route";
-import { POST as recallPost } from "../app/api/recall/route";
+import { GET as recallGet, POST as recallPost } from "../app/api/recall/route";
 import { PATCH as labPatch } from "../app/api/lab/[id]/route";
 import { POST as inventoryMovementsPost } from "../app/api/inventory/[id]/movements/route";
 import { GET as ledgerGet } from "../app/api/patients/[id]/ledger/route";
@@ -379,6 +404,30 @@ describe("حماية عزل المرضى ومكافحة ثغرات IDOR في ا�
         { params: Promise.resolve({ id: "99" }) },
       );
       expect(res.status).toBe(403);
+    });
+
+    it("يقيّد محادثات المرضى وشارات غير المقروء وقوائم الاستدعاء للطبيب المقيّد أو غير المربوط (SEC-03)", async () => {
+      mocks.user.mockResolvedValue({ id: 7, isActive: true, permissions: { canViewAllPatients: false } });
+      mocks.convList.mockResolvedValue({ staff: [], patients: [], broadcast: { unread: 0 } });
+      mocks.unreadCount.mockResolvedValue(0);
+      mocks.urgentCount.mockResolvedValue(0);
+      mocks.openPast.mockResolvedValue([]);
+      mocks.missedAppts.mockResolvedValue([]);
+      mocks.lapsedPatients.mockResolvedValue([]);
+
+      const convRes = await messagesGet(new Request("http://localhost/api/messages?conversations=1"));
+      expect(convRes.status).toBe(200);
+      expect(mocks.convList).toHaveBeenCalledWith(7, 7);
+      expect(mocks.unreadCount).toHaveBeenCalledWith(7, 7);
+      expect(mocks.urgentCount).toHaveBeenCalledWith(7, 7);
+
+      // Unbound doctor fails closed with null scope
+      mocks.staff.mockResolvedValue({ userId: 8, username: "unbound_doc", role: "doctor", partyId: null });
+      const recallRes = await recallGet(new Request("http://localhost/api/recall?weeks=6"));
+      expect(recallRes.status).toBe(200);
+      expect(mocks.openPast).toHaveBeenCalledWith(null);
+      expect(mocks.missedAppts).toHaveBeenCalledWith(null);
+      expect(mocks.lapsedPatients).toHaveBeenCalledWith(6, null);
     });
   });
 });

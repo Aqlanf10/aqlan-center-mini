@@ -3,8 +3,12 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { ActiveVisitExists, addVisit, listTodayVisits, recordAudit, startVisitFromPlannedVisit } from "@/lib/db";
+import { canAccessPatient, canDoctorAccessAllPatients } from "@/lib/patient-access";
 import { listReceptionHandoffs } from "@/lib/reception-handoff-db";
 import { canReadReceptionHandoff, isHandoffDate } from "@/lib/reception-handoff";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalVisitFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalArrival, parseCanonicalArrival, readCanonicalTodayVisits } from "@/lib/canonical-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +18,20 @@ function failed(message: string, status = 500) {
 }
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 11): today's queue inside the actor's patient scope.
+    // The reception hand-off view is not canonical yet.
+    if (new URL(request.url).searchParams.size > 0) {
+      return NextResponse.json({ code: "view_not_canonical", message: "هذا العرض لم يُنقل بعد إلى الهوية الموحّدة." }, { status: 409, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(await readCanonicalTodayVisits(selected.handle), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalVisitFailure(error, "تعذّر تحميل قائمة اليوم. تحقق من الاتصال ثم أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -32,6 +50,10 @@ export async function GET(request: Request) {
     } catch { return failed("تعذّر تحديث الزيارات الموقّعة. أعد المحاولة."); }
   }
   try {
+    if (session.role === "doctor" && !(await canDoctorAccessAllPatients(session))) {
+      const docScope = typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null;
+      return NextResponse.json(await listTodayVisits(docScope));
+    }
     return NextResponse.json(await listTodayVisits());
   } catch {
     // تفاصيل الاستثناء لا تخرج في الاستجابة — قد تحمل رابط قاعدة البيانات.
@@ -40,9 +62,29 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 11): arrival on visits.manage, patient inside the scope.
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_visit_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const input = parseCanonicalArrival(canonicalBody);
+      return NextResponse.json(await commandCanonicalArrival(selected.handle, input), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalVisitFailure(error, "تعذّر تسجيل المريض. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (session.role === "cashier" || session.role === "accountant") {
+    return failed("غير مصرّح للأدوار المالية بفتح الزيارات السريرية.", 403);
   }
   let body: unknown;
   try {
@@ -52,6 +94,8 @@ export async function POST(request: Request) {
   }
 
   const source = (body ?? {}) as Record<string, unknown>;
+
+  class VisitPatientScopeDenied extends Error {}
 
   /*
    * بدء الزيارة من زيارةٍ مخطَّطة — الرحلة V2.
@@ -63,11 +107,24 @@ export async function POST(request: Request) {
   const rawPlannedVisitId = Number(source.plannedVisitId);
   if (Number.isInteger(rawPlannedVisitId) && rawPlannedVisitId > 0) {
     try {
-      const started = await startVisitFromPlannedVisit({
-        plannedVisitId: rawPlannedVisitId,
-        actor: session.username,
-        actorRole: session.role,
-      });
+      const started = await startVisitFromPlannedVisit(
+        session.role === "doctor"
+          ? {
+              plannedVisitId: rawPlannedVisitId,
+              actor: session.username,
+              actorRole: session.role,
+              admit: async (plannedPatientId) => {
+                if (!(await canAccessPatient(session, plannedPatientId))) {
+                  throw new VisitPatientScopeDenied();
+                }
+              },
+            }
+          : {
+              plannedVisitId: rawPlannedVisitId,
+              actor: session.username,
+              actorRole: session.role,
+            },
+      );
       if (started && "appointmentConflict" in started) {
         return failed("تغيّر الموعد المرتبط أو أُغلق. أعد الحجز قبل بدء الجلسة.", 409);
       }
@@ -86,7 +143,10 @@ export async function POST(request: Request) {
         actor: session.username, actorRole: session.role,
       });
       return NextResponse.json(started, { status: 201 });
-    } catch {
+    } catch (error) {
+      if (error instanceof VisitPatientScopeDenied) {
+        return failed("هذا الملف ليس من مرضاك ولا توجد إحالة استقبال نشطة لك.", 403);
+      }
       return failed("تعذّر بدء الزيارة من الجلسة المخطَّطة. أعد المحاولة.");
     }
   }
@@ -109,6 +169,19 @@ export async function POST(request: Request) {
     : (session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
       ? session.partyId
       : null);
+
+  // (SEC-01) الطبيب المقيّد بنطاق مرضاه لا يفتح زيارة لمريض غير مسند أو بلا إحالة نشطة ولا باسم طبيب آخر.
+  if (session.role === "doctor") {
+    const allScope = await canDoctorAccessAllPatients(session);
+    if (!allScope) {
+      if (!patientId || !(await canAccessPatient(session, patientId))) {
+        return failed("غير مصرّح بفتح زيارة لمريض غير مسند لك إلا عبر إحالة الاستقبال.", 403);
+      }
+      if (Number.isInteger(rawDoctorId) && rawDoctorId > 0 && rawDoctorId !== session.partyId) {
+        return failed("لا يمكنك فتح زيارة باسم طبيب آخر.", 403);
+      }
+    }
+  }
 
   try {
     const visit = await addVisit({

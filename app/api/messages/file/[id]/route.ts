@@ -37,13 +37,17 @@ export async function GET(
     return NextResponse.json({ message: "المرفق غير موجود." }, { status: 404 });
   }
 
+  if (payload.recipientType === "staff_all" && (portal || !session)) {
+    return NextResponse.json({ message: "لا يمكنك الوصول إلى هذا الملف." }, { status: 403 });
+  }
+
   if (portal) {
     const mine = payload.senderPatientId === portal.patientId
       || payload.recipientPatientId === portal.patientId;
     if (!mine) {
       return NextResponse.json({ message: "لا يمكنك الوصول إلى هذا الملف." }, { status: 403 });
     }
-    return fileResponse(payload.mime, payload.data, payload.name);
+    return fileResponse(payload.mime, payload.data, payload.name, payload.bytes);
   }
 
   if (!session) {
@@ -69,11 +73,11 @@ export async function GET(
     );
   }
 
-  return fileResponse(payload.mime, payload.data, payload.name);
+  return fileResponse(payload.mime, payload.data, payload.name, payload.bytes);
 }
 
-function fileResponse(mime: string, base64: string, name: string | null): NextResponse {
-  const buffer = Buffer.from(base64, "base64");
+function fileResponse(mime: string, base64: string, name: string | null, rawBytes?: Buffer | null): NextResponse {
+  const buffer = rawBytes ?? Buffer.from(base64, "base64");
   const isImage = mime.startsWith("image/");
   // الاسم في الرأس يُرمَّز UTF-8 الممتد فتصل الأسماء العربية سليمة، ولا يدخل
   // الرأس أي محرف تحكم — sanitizeFileName كفلت ذلك عند الإدراج.
@@ -84,7 +88,7 @@ function fileResponse(mime: string, base64: string, name: string | null): NextRe
       "Content-Type": mime,
       "Content-Length": String(buffer.byteLength),
       "Content-Disposition": `${isImage ? "inline" : "attachment"}; filename*=UTF-8''${encodedName}`,
-      "Cache-Control": "private, max-age=86400",
+      "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Accept-Ranges": "none",
     },

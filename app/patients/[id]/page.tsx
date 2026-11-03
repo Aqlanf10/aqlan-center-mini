@@ -21,6 +21,7 @@ import {
 } from "@/lib/patient";
 
 import { toWhatsAppNumber } from "@/lib/reminders";
+import { PatientNumberEditor } from "@/components/patient/PatientNumberEditor";
 import { PatientLedger } from "@/components/PatientLedger";
 import { LegacyHistory } from "@/components/LegacyHistory";
 import { ClinicalVisit } from "@/components/ClinicalVisit";
@@ -38,6 +39,7 @@ import { PatientReferrals } from "@/components/PatientReferrals";
 import { PatientCases } from "@/components/PatientCases";
 import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
+import { SavedPrescriptions } from "@/components/SavedPrescriptions";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
 import { ConsentModal } from "@/components/ConsentModal";
 import { PostOpModal } from "@/components/PostOpModal";
@@ -59,6 +61,7 @@ import { useDismissibleDetails } from "@/components/useDismissibleDetails";
 import { CLINIC_BASE_CURRENCY, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
+import { CanonicalPatientProfile } from "@/components/patient/CanonicalPatientProfile";
 import { useSetting } from "@/components/SettingsProvider";
 import { isAdmin, canViewMoney, canHandleMoney } from "@/lib/roles";
 import { readPatientAccountHeader } from "@/lib/patient-account-header";
@@ -122,6 +125,8 @@ export default function PatientFilePage({ params, searchParams }: {
 }) {
   const { id } = use(params);
   const query = searchParams ? use(searchParams) : undefined;
+  // الهوية الموحّدة (M2): ملفٌّ من قراءةٍ واحدة مُسقطة؛ لا يُستدعى أي مسارٍ لم يُنقل بعد.
+  if (useSession()?.canonical === true) return <CanonicalPatientProfile key={id} patientId={id} />;
   return <PatientFileWorkspace key={id} id={id} checkoutVisitRequest={readCheckoutVisitRequest(query?.checkoutVisit)} />;
 }
 
@@ -1036,6 +1041,9 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         </p>
       ) : null}
 
+      {/* Separate identity command; owner-keyed to discard stale patient/session requests. */}
+      {admin ? <div className="mb-4"><PatientNumberEditor key={alertScope} patientId={patient.id} onChanged={() => void load()} /></div> : null}
+
       {editing ? (
         <PatientEditor
           patient={patient}
@@ -1047,6 +1055,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           onError={setError}
         />
       ) : null}
+
+      <SavedPrescriptions key={`${patient.id}:${checkoutVisitRequest}`} patientId={patient.id} visitId={typeof checkoutVisitRequest === "number" ? checkoutVisitRequest : undefined} />
 
       <PrescriptionModal
         isOpen={showRxModal}

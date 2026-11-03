@@ -92,14 +92,18 @@ export interface LegacyOpeningPosition {
 
 export async function listLegacyOpeningPositions(patientId: number): Promise<LegacyOpeningPosition[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ currency: string }>(
+  return listLegacyOpeningPositionsWith(getPool(), patientId);
+}
+/** Opening positions over a caller-owned query facade (no ensureSchema, no DDL). */
+export async function listLegacyOpeningPositionsWith(q: Pick<DbClient, "query">, patientId: number): Promise<LegacyOpeningPosition[]> {
+  const { rows } = await q.query<{ currency: string }>(
     `SELECT currency FROM patient_opening_balances WHERE patient_id = $1 ORDER BY currency`,
     [patientId],
   );
   const positions: LegacyOpeningPosition[] = [];
   for (const row of rows) {
     if (!isCurrency(row.currency)) throw new Error(`عملة رصيد افتتاحي غير صالحة: ${row.currency}`);
-    const position = await openingPosition(getPool() as unknown as DbClient, patientId, row.currency);
+    const position = await openingPosition(q as unknown as DbClient, patientId, row.currency);
     if (position) positions.push({ currency: row.currency, ...position });
   }
   return positions;
@@ -161,7 +165,7 @@ export async function listLegacyBalanceArrangements(
   patientId: number,
   today: string,
   includeCancelled = false,
-  reader?: DbClient,
+  reader?: Pick<DbClient, "query">,
 ): Promise<LegacyBalanceArrangementView[]> {
   if (!reader) await ensureSchema();
   const source = reader ?? getPool();
@@ -179,6 +183,91 @@ export async function listLegacyBalanceArrangements(
 export type CreateLegacyArrangementResult =
   | { ok: true; arrangement: LegacyBalanceArrangementView }
   | { ok: false; reason: "patient_not_found" | "no_opening_balance" | "opening_settled" | "already_active" | "installment_exceeds_remaining" };
+
+export async function createLegacyBalanceArrangementInTx(
+  client: DbClient,
+  input: {
+    patientId: number;
+    currency: Currency;
+    cadence: LegacyArrangementCadence;
+    installmentMinor: number;
+    firstDueDate: string | null;
+    note: string | null;
+    createdBy: string;
+    today: string;
+  },
+): Promise<CreateLegacyArrangementResult> {
+  const patient = await client.query(`SELECT 1 FROM patients WHERE id = $1 FOR SHARE`, [input.patientId]);
+  if (!patient.rowCount) return { ok: false, reason: "patient_not_found" };
+  const locked = await client.query(
+    `SELECT 1 FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2 FOR UPDATE`,
+    [input.patientId, input.currency],
+  );
+  if (!locked.rowCount) return { ok: false, reason: "no_opening_balance" };
+  const position = await openingPosition(client, input.patientId, input.currency);
+  if (!position || position.remainingMinor <= 0) return { ok: false, reason: "opening_settled" };
+  if (input.installmentMinor > position.remainingMinor) return { ok: false, reason: "installment_exceeds_remaining" };
+  const active = await client.query(
+    `SELECT id FROM legacy_balance_arrangements
+      WHERE patient_id = $1 AND currency = $2 AND cancelled_at IS NULL FOR UPDATE`,
+    [input.patientId, input.currency],
+  );
+  const debtSchedule = await client.query(`SELECT a.id FROM debt_repayment_arrangements a
+    JOIN LATERAL (SELECT status FROM debt_repayment_revisions WHERE arrangement_id=a.id ORDER BY version DESC LIMIT 1) r ON TRUE
+    WHERE a.patient_id=$1 AND a.opening_currency=$2 AND r.status='active'`, [input.patientId, input.currency]);
+  if (active.rowCount || debtSchedule.rowCount) return { ok: false, reason: "already_active" };
+  await client.query("SAVEPOINT legacy_arr_insert");
+  let created: ArrangementRow;
+  try {
+    const inserted = await client.query<ArrangementRow>(
+      `INSERT INTO legacy_balance_arrangements
+         (patient_id, currency, cadence, installment_minor, starting_due_minor,
+          first_due_date, note, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8)
+       RETURNING *`,
+      [
+        input.patientId, input.currency, input.cadence, input.installmentMinor,
+        position.remainingMinor, input.cadence === "monthly" ? input.firstDueDate : null,
+        input.note, input.createdBy,
+      ],
+    );
+    await client.query("RELEASE SAVEPOINT legacy_arr_insert");
+    created = inserted.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT legacy_arr_insert").catch(() => {});
+    if ((error as { code?: string } | null)?.code === "23505") {
+      return { ok: false, reason: "already_active" };
+    }
+    throw error;
+  }
+  return { ok: true, arrangement: await viewOf(created, input.today, client) };
+}
+
+export async function cancelLegacyBalanceArrangementInTx(
+  client: DbClient,
+  input: {
+    patientId: number;
+    arrangementId: number;
+    actor: string;
+    reason: string;
+  },
+): Promise<CancelLegacyArrangementResult> {
+  const { rows } = await client.query<ArrangementRow>(
+    `UPDATE legacy_balance_arrangements
+        SET cancelled_by = $3, cancelled_at = NOW(), cancel_reason = $4
+      WHERE id = $1 AND patient_id = $2 AND cancelled_at IS NULL
+      RETURNING *`,
+    [input.arrangementId, input.patientId, input.actor, input.reason],
+  );
+  if (rows[0]) return { ok: true, arrangement: rowToArrangement(rows[0]) };
+  const existing = await client.query(
+    `SELECT cancelled_at FROM legacy_balance_arrangements WHERE id = $1 AND patient_id = $2`,
+    [input.arrangementId, input.patientId],
+  );
+  return existing.rowCount
+    ? { ok: false, reason: "already_cancelled" }
+    : { ok: false, reason: "not_found" };
+}
 
 export async function createLegacyBalanceArrangement(input: {
   patientId: number;

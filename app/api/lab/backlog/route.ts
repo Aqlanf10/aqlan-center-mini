@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
+import { readCanonicalLabBacklogResponse } from "@/lib/canonical-lab";
 import { CLINIC_TIME_ZONE, getPool } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canReadLabBacklog, parseLabBacklogQuery } from "@/lib/lab-backlog";
 import { readLabBacklog } from "@/lib/lab-backlog-db";
 
 export const dynamic = "force-dynamic";
 const json = (value: unknown, status = 200) => NextResponse.json(value, { status, headers: { "Cache-Control": "private, no-store" } });
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") return readCanonicalLabBacklogResponse(selected.handle, request);
   const session = await requireSession();
   if (!session) return json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
   if (!canReadLabBacklog(session.role)) return json({ message: "قائمة متابعة المعمل الشاملة للإدارة فقط." }, 403);

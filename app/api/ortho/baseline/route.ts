@@ -5,6 +5,9 @@ import { clinicDateString } from "@/lib/schedule";
 import { canAccessPatient } from "@/lib/patient-access";
 import { idOf, json, readBody } from "@/lib/case-route";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalOrthoFailure, commandCanonicalOrthoBaseline } from "@/lib/canonical-ortho-operations";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,19 @@ export const dynamic = "force-dynamic";
  * والكاشير والمحاسب خارج مسارات التقويم أصلًا (قائمة السماح عند الباب). ولا فاتورة ولا زيارة تُنشأ هنا.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) return read.response;
+    try {
+      return NextResponse.json(await commandCanonicalOrthoBaseline(selected.handle, read.body), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalOrthoFailure(error, "تعذّر تسجيل الحالة السابقة. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return json("انتهت الجلسة. سجّل الدخول من جديد.", 401);
   if (session.role !== "doctor" && session.role !== "admin") {
@@ -42,7 +58,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await recordOrthoBaseline({
-      ...draft.value, responsibleDoctorId, patientId, actor: session.username, actorRole: session.role,
+      ...draft.value, responsibleDoctorId, patientId, admittedSession: session, actor: session.username, actorRole: session.role,
     });
     if (!result.ok) {
       const messages = {

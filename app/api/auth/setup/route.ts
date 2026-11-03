@@ -1,6 +1,7 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { countUsers, createFirstAdmin } from "@/lib/db";
-import { hashPassword } from "@/lib/auth";
+import { MAX_PASSWORD_LENGTH, hashPassword } from "@/lib/auth";
 import {
   bodyErrorResponse,
   hasJsonContentType,
@@ -67,8 +68,21 @@ export async function POST(request: Request) {
   }
 
   const source = (body ?? {}) as Record<string, unknown>;
+  try {
+    if ((await countUsers()) > 0) {
+      return NextResponse.json(
+        { message: "تم الإعداد مسبقًا. سجّل الدخول بحسابك." },
+        { status: 409 },
+      );
+    }
+  } catch {
+    return NextResponse.json({ message: "تعذّر التحقق من حالة الإعداد." }, { status: 500 });
+  }
+
   const token = typeof source.token === "string" ? source.token : "";
-  if (token !== expected) {
+  const tokenDigest = createHash("sha256").update(token, "utf8").digest();
+  const expectedDigest = createHash("sha256").update(expected, "utf8").digest();
+  if (!token || !timingSafeEqual(tokenDigest, expectedDigest)) {
     return NextResponse.json({ message: "رمز الإعداد غير صحيح." }, { status: 403 });
   }
 
@@ -80,8 +94,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اسم المستخدم والاسم الظاهر مطلوبان." }, { status: 400 });
   }
   // ثمانية أحرف حدٌّ أدنى صريح: بلا حدّ، أول كلمة مرور ستكون رقم الهاتف.
-  if (password.length < 8) {
-    return NextResponse.json({ message: "كلمة المرور يجب ألا تقل عن 8 أحرف." }, { status: 400 });
+  if (password.length < 8 || password.length > MAX_PASSWORD_LENGTH) {
+    return NextResponse.json({ message: `كلمة المرور يجب أن تكون بين 8 و${MAX_PASSWORD_LENGTH} حرفًا.` }, { status: 400 });
   }
 
   try {

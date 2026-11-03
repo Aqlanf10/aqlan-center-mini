@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  hrContractDetailGetCanonicalResponse,
+  hrContractDetailPatchCanonicalResponse,
+  hrContractDetailPostCanonicalResponse,
+} from "@/lib/canonical-hr";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
@@ -19,18 +26,24 @@ export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 const forbidden = () =>
   NextResponse.json({ message: "إدارة العقود للمدير وحده." }, { status: 403 });
 
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrContractDetailGetCanonicalResponse(context, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) return forbidden();
 
-  const { id } = await params;
+  const { id } = await context.params;
   try {
     const contract = await getContractById(id);
     if (!contract) {
@@ -46,13 +59,17 @@ export async function GET(
 
 export async function PATCH(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrContractDetailPatchCanonicalResponse(request, context, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) return forbidden();
 
-  const { id } = await params;
+  const { id } = await context.params;
   let body: unknown;
   try {
     body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
@@ -87,13 +104,17 @@ export async function PATCH(
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrContractDetailPostCanonicalResponse(request, context, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) return forbidden();
 
-  const { id } = await params;
+  const { id } = await context.params;
   let body: unknown;
   try {
     body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);

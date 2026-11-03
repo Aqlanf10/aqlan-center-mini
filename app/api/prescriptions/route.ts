@@ -1,12 +1,17 @@
+import { getPrescriptionOwnerAuthority } from "@/lib/prescription-owner";
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { commandCanonicalPrescriptionCreate } from "@/lib/canonical-clinical-records";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getClinicalVisit, getPatient, findUserByUsername, savePrescription } from "@/lib/db";
+import { getClinicalVisit, getParty, getPatient, findUserByUsername, listMedicalHistory, savePrescription } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import { checkPrescriptionDraft } from "@/lib/prescription";
 import { evaluatePrescriptionSafety } from "@/lib/medication-safety";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 import {
   buildSafetyAcknowledgementToken,
   verifySafetyAcknowledgementToken,
@@ -44,6 +49,22 @@ export const dynamic = "force-dynamic";
  *   يرها. وانتهاء الصلاحية (١٠ دقائق) يُسقط الرمز أيضًا.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: Record<string, unknown>;
+    try {
+      const raw = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES);
+      body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return commandCanonicalPrescriptionCreate(request, selected.handle, body);
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -56,7 +77,10 @@ export async function POST(request: Request) {
   }
   /* الفحص المركزي الموحّد للقدرة السريرية (lib/clinical-identity.ts) —
      نفس الفحص الذي تحرس به أدوات AI السريرية وإبطال الوصفات. */
-  const capability = clinicalCapabilityOf({ role: session.role, doctorPartyId: user.partyId });
+  if (session.userId !== user.id || session.username !== user.username || session.role !== user.role) {
+    return NextResponse.json({ message: "تغيّرت هوية الحساب؛ أعد تسجيل الدخول." }, { status: 403 });
+  }
+  const capability = clinicalCapabilityOf({ role: user.role, doctorPartyId: user.partyId });
   if (!capability.ok) {
     return NextResponse.json({ message: capability.reason }, { status: 403 });
   }
@@ -69,12 +93,36 @@ export async function POST(request: Request) {
 
   const patientId = Number(body.patientId);
   const rawVisit = Number(body.visitId);
-  const visitId = Number.isInteger(rawVisit) && rawVisit > 0 ? rawVisit : null;
+  if (body.visitId !== undefined && body.visitId !== null && (!Number.isSafeInteger(rawVisit) || rawVisit <= 0)) {
+    return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
+  }
+  const visitId = Number.isSafeInteger(rawVisit) && rawVisit > 0 ? rawVisit : null;
   const acknowledgedSafetyToken =
     typeof body.acknowledgedSafetyToken === "string" && body.acknowledgedSafetyToken.length > 0
       ? body.acknowledgedSafetyToken
       : null;
+  // Keep the existing issuer ID/void contract; prescribing identity is separate.
+  const issuerDoctor = await getParty(doctorPartyId!).catch(() => null);
+  if (!issuerDoctor || issuerDoctor.kind !== "doctor" || !issuerDoctor.isActive || !issuerDoctor.name.trim()) {
+    return NextResponse.json({ message: "هوية الحساب السريرية غير نشطة أو غير صالحة." }, { status: 403 });
+  }
+  const selectedId = body.prescribingDoctorPartyId === undefined ? doctorPartyId! : Number(body.prescribingDoctorPartyId);
+  if (!Number.isSafeInteger(selectedId) || selectedId <= 0) {
+    return NextResponse.json({ message: "اختر طبيبًا صالحًا من القائمة." }, { status: 400 });
+  }
+  const ownerAuthority = selectedId !== doctorPartyId ? await getPrescriptionOwnerAuthority(user) : null;
+  if (selectedId !== doctorPartyId && !ownerAuthority) {
+    return NextResponse.json({ message: "اختيار طبيب آخر لإصدار الوصفة متاح للمالك الطبيب المرتبط بهوية موثوقة فقط." }, { status: 403 });
+  }
+  const selectedDoctor = selectedId === doctorPartyId ? issuerDoctor : await getParty(selectedId).catch(() => null);
+  if (!selectedDoctor || selectedDoctor.kind !== "doctor" || !selectedDoctor.isActive || !selectedDoctor.name.trim()) {
+    return NextResponse.json({ message: "الطبيب المحدد غير موجود أو غير نشط." }, { status: 400 });
+  }
+  const prescribingDoctorName = selectedDoctor.name;
   const draft = checkPrescriptionDraft({
+    ownerAuthority,
+    prescribingDoctorName,
+    prescribingDoctorPartyId: selectedId,
     patientId,
     visitId,
     diagnosis: body.diagnosis,
@@ -109,12 +157,31 @@ export async function POST(request: Request) {
      أو بوصفةٍ بديلة). والتحذيرات غير الحرجة لا تُحفظ وتُنسى: تُعرض، ويُقرّها
      الطبيب صراحةً، وربطُ الإقرار بالوصفة نفسها **وبالتحذيرات التي رآها**
      برمزٍ خادمي قصير العمر (Blocker B ثم الجولة الثالثة). */
-  const patient = await getPatient(draft.value.patientId).catch(() => null);
-  if (patient) {
-    /* دائمًا يُعاد التقييم من الملف الحالي وقت كل طلب — لا حالة عميل. */
+  let patient: Awaited<ReturnType<typeof getPatient>>;
+  let historyRows: Awaited<ReturnType<typeof listMedicalHistory>>;
+  try {
+    [patient, historyRows] = await Promise.all([
+      getPatient(draft.value.patientId),
+      typeof listMedicalHistory === "function"
+        ? listMedicalHistory(draft.value.patientId, 1)
+        : Promise.resolve([]),
+    ]);
+  } catch {
+    return NextResponse.json(
+      { message: "تعذر تحميل ملف المريض للتحقق من السلامة؛ أعد المحاولة." },
+      { status: 503 },
+    );
+  }
+  if (!patient) {
+    return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
+  }
+  const latestMedicalHistory = historyRows[0] ?? null;
+  if (patient || latestMedicalHistory) {
+    /* دائمًا يُعاد التقييم من الملف والتاريخ الطبي المهيكل الحاليين وقت كل طلب — لا حالة عميل. */
     const alerts = evaluatePrescriptionSafety(
       draft.value.items.map((item) => ({ name: item.name, dose: item.dose })),
-      patient.medicalAlert,
+      patient?.medicalAlert ?? null,
+      latestMedicalHistory,
     );
     const critical = alerts.filter((alert) => alert.severity === "critical");
     if (critical.length > 0) {
@@ -195,22 +262,26 @@ export async function POST(request: Request) {
         );
       }
       /* الإقرار صالح ومطابق: تُحفظ الوصفة وتُعاد التحذيرات معها للاطلاع. */
-      try {
-        const record = await savePrescription(draft.value, session.username, doctorPartyId);
-        return NextResponse.json(
-          { id: record.id, createdAt: record.createdAt, safetyWarnings: warnings, acknowledged: true },
-          { status: 201 },
-        );
-      } catch {
-        return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
-      }
+      return withHttpIdempotency(request, "prescriptions.create", session.username, draft.value, async () => {
+        try {
+          const record = await savePrescription(draft.value, session.username, doctorPartyId);
+          return NextResponse.json(
+            { id: record.id, createdAt: record.createdAt, safetyWarnings: warnings, acknowledged: true },
+            { status: 201 },
+          );
+        } catch {
+          return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
+        }
+      });
     }
   }
 
-  try {
-    const record = await savePrescription(draft.value, session.username, doctorPartyId);
-    return NextResponse.json({ id: record.id, createdAt: record.createdAt }, { status: 201 });
-  } catch {
-    return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
-  }
+  return withHttpIdempotency(request, "prescriptions.create", session.username, draft.value, async () => {
+    try {
+      const record = await savePrescription(draft.value, session.username, doctorPartyId);
+      return NextResponse.json({ id: record.id, createdAt: record.createdAt }, { status: 201 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
+    }
+  });
 }

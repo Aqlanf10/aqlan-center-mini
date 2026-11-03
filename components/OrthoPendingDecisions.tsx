@@ -16,8 +16,12 @@ export function OrthoPendingDecisions() {
   const session = useSession();
   const [pending, setPending] = useState<Pending[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const canNoCharge = session?.role === "admin" || session?.role === "doctor";
-  const canBill = session?.role === "admin" || session?.role === "reception";
+  const canNoCharge = session?.canonical
+    ? Boolean(session.isOwner || session.capabilities?.includes("clinical.ortho.edit"))
+    : session?.role === "admin" || session?.role === "doctor";
+  const canBill = session?.canonical
+    ? Boolean(session.isOwner || session.capabilities?.includes("finance.invoices.create"))
+    : session?.role === "admin" || session?.role === "reception";
 
   const load = useCallback(async () => {
     try {

@@ -3,6 +3,9 @@ import { fillProvisionalServicePrices, listServices, recordAudit } from "@/lib/d
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { provisionalFills } from "@/lib/provisionalPrices";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { servicesProvisionalPriceCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +17,9 @@ export const dynamic = "force-dynamic";
  * قراره. وتعديلُ السعر بيد المالك لاحقًا يمسح الوسم — لأنّه حينها قرارُه.
  */
 export async function POST() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return servicesProvisionalPriceCanonicalResponse(selected.handle);
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

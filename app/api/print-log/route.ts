@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { recordAudit, recordPrint } from "@/lib/db";
+import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
+import { canAccessPatient } from "@/lib/patient-access";
+import { getPrescription, recordAudit, recordPrint } from "@/lib/db";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPrintLogPost } from "@/lib/canonical-users-self";
 
 export const dynamic = "force-dynamic";
 
-const DOC_TYPES = ["receipt", "invoice", "voucher", "statement", "prescription"] as const;
+const DOC_TYPES = ["receipt", "invoice", "voucher", "statement", "prescription", "card"] as const;
 
 /**
  * يسجّل طبعة مستند ويقول إن كانت إعادة.
@@ -16,6 +20,14 @@ const DOC_TYPES = ["receipt", "invoice", "voucher", "statement", "prescription"]
  * وعدّه طباعةً يجعل كل سند يُراجَع مرةً يظهر «معاد طبعه» زورًا — فتفقد العلامة معناها.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalPrintLogPost(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -27,16 +39,29 @@ export async function POST(request: Request) {
   }
   const source = (body ?? {}) as Record<string, unknown>;
   const docType = String(source.docType ?? "");
-  const docId = String(source.docId ?? "");
+  let docId = String(source.docId ?? "");
   if (!(DOC_TYPES as readonly string[]).includes(docType) || !docId) {
     return NextResponse.json({ message: "مستند غير معروف." }, { status: 400 });
   }
 
-  /* الوصفات وثائق سريرية: طباعتها وإعادة طباعتها للطبيب والمدير — والسندات
-     المالية للإدارة والاستقبال. فحص النوع قبل فحص الدور. */
+  /* Prescription logging needs an actual active record and patient scope;
+     reception additionally requires its dedicated stored-print grant. */
   if (docType === "prescription") {
-    if (!isAdmin(session.role) && session.role !== "doctor") {
-      return NextResponse.json({ message: "طباعة الوصفات للطبيب والمدير." }, { status: 403 });
+    if (!await canPrintSavedPrescription(session)) {
+      return NextResponse.json({ message: "لا تملك صلاحية طباعة الوصفات المحفوظة." }, { status: 403 });
+    }
+    const id = Number(docId), patientId = Number(source.patientId);
+    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(patientId) || patientId <= 0)
+      return NextResponse.json({ message: "حدد الوصفة والمريض الصحيحين." }, { status: 400 });
+    const rx = await getPrescription(id).catch(() => null);
+    if (!rx || rx.patientId !== patientId || rx.status !== "active")
+      return NextResponse.json({ message: "الوصفة غير متاحة للطباعة أو ملغاة." }, { status: 404 });
+    if (!await canAccessPatient(session, rx.patientId).catch(() => false))
+      return NextResponse.json({ message: "غير مصرح بالوصول إلى المريض." }, { status: 403 });
+    docId = String(rx.id);
+  } else if (docType === "card") {
+    if (!isAdmin(session.role) && session.role !== "reception" && session.role !== "doctor") {
+      return NextResponse.json({ message: "طباعة بطاقة الموعد للإدارة والاستقبال والطبيب." }, { status: 403 });
     }
   } else if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "المستندات المالية للإدارة والاستقبال." }, { status: 403 });
@@ -53,6 +78,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ reprint: previous > 0, previous });
   } catch {
+    if (docType === "prescription") return NextResponse.json({ message: "تعذر تسجيل طباعة الوصفة؛ لم تُفتح نافذة الطباعة." }, { status: 500 });
     // الطباعة لا تُمنع لتعذّر التسجيل: ورقةٌ بلا علامة أهون من مريض بلا سند.
     return NextResponse.json({ reprint: false, previous: 0 });
   }

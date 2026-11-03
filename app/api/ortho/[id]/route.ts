@@ -5,10 +5,20 @@ import {
   CLINIC_TIME_ZONE, closeOrthoCase, findUserByUsername, getOrthoCase, linkOrthoCasePlan, recordAdjustment,
   setOrthoPhase, setRetainer,
 } from "@/lib/db";
-import { isElasticClass, PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
+import { PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalOrthoCaseId, readCanonicalOrthoCase } from "@/lib/canonical-ortho-reads";
+import {
+  canonicalOrthoFailure,
+  commandCanonicalOrthoPatch,
+  commandCanonicalOrthoRecordAdjustment,
+} from "@/lib/canonical-ortho-operations";
+
+import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +38,27 @@ const forbidden = (msg = "غير مصرّح لك بالوصول لهذه الح�
 
 /** تسجيل شدّة. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const { id } = await context.params;
+      const result = await commandCanonicalOrthoRecordAdjustment(selected.handle, id, body);
+      return result.created
+        ? NextResponse.json({ id: result.id, visitId: result.visitId, attachedToToday: result.attachedToToday }, { status: 201, headers: NO_STORE })
+        : NextResponse.json({ id: result.id, existing: true, visitId: result.visitId, attachedToToday: result.attachedToToday }, { status: 200, headers: NO_STORE });
+    } catch (error) {
+      return canonicalOrthoFailure(error, "تعذّر تسجيل الشدّة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);
@@ -48,30 +79,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const doneOn = typeof source.doneOn === "string" && DATE_PATTERN.test(source.doneOn)
     ? source.doneOn : today;
-  const phase = typeof source.phase === "string" && Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase)
-    ? (source.phase as keyof typeof PHASE_LABEL) : null;
-  const elastics = isElasticClass(source.elastics) ? source.elastics : "none";
-  const nextWeeks = Math.round(Number(source.nextWeeks ?? 4));
-  if (!Number.isFinite(nextWeeks) || nextWeeks < 1 || nextWeeks > 52) {
-    return NextResponse.json({ message: "المدة حتى الشدّة القادمة بين أسبوع و52 أسبوعًا." }, { status: 400 });
+  const checked = checkOrthoSessionDraft({ ...source, caseId });
+  if (!checked.ok || !checked.value) {
+    return NextResponse.json({ message: checked.ok ? "بيانات جلسة التقويم غير صالحة." : checked.message }, { status: 400 });
   }
-
-  const text = (value: unknown, limit: number) =>
-    typeof value === "string" && value.trim() ? value.trim().slice(0, limit) : null;
 
   try {
     const result = await recordAdjustment({
-      caseId,
       visitId: Number.isInteger(Number(source.visitId)) && Number(source.visitId) > 0
         ? Number(source.visitId) : null,
-      doneOn, phase,
-      upperWire: text(source.upperWire, 40),
-      lowerWire: text(source.lowerWire, 40),
-      elastics,
-      elasticNote: text(source.elasticNote, 120),
-      done: text(source.done, 400),
-      nextWeeks,
-      note: text(source.note, 300),
+      ...checked.value,
+      doneOn,
       recordedBy: session.username,
       actorRole: session.role,
     });
@@ -88,6 +106,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
 /** تغيير المرحلة، أو تسجيل المثبّت، أو إغلاق الحالة. */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const { id } = await context.params;
+      return NextResponse.json(await commandCanonicalOrthoPatch(selected.handle, id, body), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalOrthoFailure(error, "تعذّر تنفيذ الإجراء.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);
@@ -171,6 +207,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      const caseId = canonicalOrthoCaseId((await context.params).id, new URL(_request.url).searchParams);
+      return NextResponse.json(await readCanonicalOrthoCase(selected.handle, caseId), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPatientReadFailure(error, "تعذّر تحميل تفاصيل التقويم.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);

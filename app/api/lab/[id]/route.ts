@@ -1,10 +1,15 @@
+import { LabFinancialBoundaryError } from "@/lib/lab-financial-boundary";
 import { labClinicalEditProblem, parseLabClinicalSnapshot } from "@/lib/lab-clinical-edit";
 import { parseLabShadeSpecification } from "@/lib/lab-shades";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { deleteCanonicalLabOrderResponse, patchCanonicalLabOrderResponse } from "@/lib/canonical-lab";
+import { NO_STORE } from "@/lib/canonical-patient-http";
 import {
+  createLabOrderRemake,
   deleteLabOrder,
+  findUserByUsername,
   getLabOrderById,
   getSettings,
   labOrderEvents,
@@ -15,12 +20,18 @@ import {
   updateLabOrderShades,
   updateLabOrderClinical,
 } from "@/lib/db";
+import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
+import { canAccessPatient } from "@/lib/patient-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
 import type { LabOrderStatus } from "@/lib/lab";
 import { isLabAccountingRate } from "@/lib/lab-accounting-edit";
+
+import { completeLabPrescription, LabPrescriptionError } from "@/lib/lab-prescription-write";
+import { validateLabPrescription } from "@/lib/lab-prescription-input";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +43,26 @@ const STATUSES: LabOrderStatus[] = [
 ];
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "رقم العمل غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return patchCanonicalLabOrderResponse(selected.handle, id, (body ?? {}) as Record<string, unknown>);
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -49,6 +80,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const source = (body ?? {}) as Record<string, unknown>;
 
   try {
+    if (source.action === "complete_prescription") {
+      if (typeof source.expected !== "string" || typeof source.dispatch !== "boolean") {
+        return NextResponse.json({ message: "بيانات مراجعة الطلب غير صالحة." }, { status: 400 });
+      }
+      let prescription;
+      try { prescription = validateLabPrescription(source.prescription, source.dispatch); }
+      catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "بيانات غير صالحة." }, { status: 400 }); }
+      const result = await completeLabPrescription(id, prescription, source.expected, source.dispatch, session);
+      return NextResponse.json(result);
+    }
+
     if (source.action === "update_clinical") {
       if (!["admin", "doctor", "reception"].includes(session.role)) return NextResponse.json({ message: "غير مصرح بتصحيح الإرسالية." }, { status: 403 });
       const clinical = parseLabClinicalSnapshot(source.clinical);
@@ -78,11 +120,68 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (result === "conflict") return NextResponse.json({ message: "تغيّرت الألوان منذ فتح الإرسالية؛ أعد تحميلها قبل التعديل." }, { status: 409 });
       return NextResponse.json({ ok: true, shadeSpecification: next.value });
     }
-
     /* سجل أحداث الطلب (المختبرات V2) — قبل أي تغيير أو بدونه عند الطلب المجرد. */
     if (source.action === "events") {
+      if (session.role === "doctor") {
+        const existing = await getLabOrderById(id);
+        if (!existing) return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+        if (!(await canAccessPatient(session, existing.patientId))) {
+          return NextResponse.json({ message: "غير مصرح لهذا المريض." }, { status: 403 });
+        }
+      }
       const events = await labOrderEvents(id);
       return NextResponse.json({ events });
+    }
+
+    /* (CLIN-05) طلب إعادة تصنيع (Remake) مرتبط بالإرسالية الأصلية بلا تكلفة إضافية. */
+    if (source.action === "remake") {
+      if (!["admin", "doctor", "reception"].includes(session.role)) {
+        return NextResponse.json({ message: "غير مصرح بطلب إعادة تصنيع." }, { status: 403 });
+      }
+      const remakeReason = typeof source.remakeReason === "string" ? source.remakeReason.trim().slice(0, 300) : "";
+      const newDueDate = typeof source.newDueDate === "string" ? source.newDueDate.trim() : "";
+      if (remakeReason.length < 2) {
+        return NextResponse.json({ message: "اكتب سبب إعادة التصنيع بوضوح." }, { status: 400 });
+      }
+      if (!DATE_PATTERN.test(newDueDate)) {
+        return NextResponse.json({ message: "حدد موعد تسليم صحيح للإعادة." }, { status: 400 });
+      }
+      const existing = await getLabOrderById(id);
+      if (!existing) {
+        return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+      }
+      if (!(await canAccessPatient(session, existing.patientId))) {
+        return NextResponse.json({ message: "غير مصرح لهذا المريض." }, { status: 403 });
+      }
+      if (existing.status !== "received" && existing.status !== "delivered") {
+        return NextResponse.json({ message: "إعادة التصنيع متاحة للأعمال المستلمة أو المسلمة فقط." }, { status: 409 });
+      }
+      const remake = await createLabOrderRemake(id, {
+        remakeReason,
+        newDueDate,
+        details: typeof source.details === "string" && source.details.trim() ? source.details.trim().slice(0, 300) : null,
+        shade: typeof source.shade === "string" && source.shade.trim() ? source.shade.trim().slice(0, 30) : null,
+        stumpShade: typeof source.stumpShade === "string" && source.stumpShade.trim() ? source.stumpShade.trim().slice(0, 30) : null,
+        actor: session.username,
+        actorRole: session.role,
+      });
+      if (!remake) {
+        return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+      }
+      await recordAudit({
+        action: "lab_order.create",
+        entity: "lab_order",
+        entityId: String(remake.id),
+        entityLabel: `إعادة تصنيع معمل: ${remake.patientName} (${remake.labName})`,
+        details: { الأصل: id, السبب: remakeReason, التسليم: newDueDate },
+        actor: session.username,
+        actorRole: session.role,
+      });
+      const hideRemakeCosts = session.role === "doctor"
+        && !canDoctorViewCostPrices((await findUserByUsername(session.username).catch(() => null))?.permissions, session.role);
+      return NextResponse.json(hideRemakeCosts
+        ? { ...remake, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null, payableId: null }
+        : remake);
     }
 
     /* إجراءات الربط المحاسبي والترحيل النهائي (بنود المصروفات): تحديث البند
@@ -122,8 +221,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       let costCurrency: Currency | undefined = undefined;
       let exchangeRate: number | undefined = undefined;
       if (source.cost !== undefined && String(source.cost).trim() !== "") {
-        const curr = typeof source.costCurrency === "string" ? source.costCurrency : "YER";
-        costCurrency = isCurrency(curr) ? curr : "YER";
+        if (!isCurrency(source.costCurrency)) {
+          return NextResponse.json({ code: "lab_accounting_currency_required", message: "اختر عملة التكلفة الفعلية؛ لا تُفترض عملة تلقائيًا." }, { status: 400 });
+        }
+        costCurrency = source.costCurrency;
         costMinor = parseAmount(String(source.cost), costCurrency);
         if (costMinor === null || costMinor < 0) {
           return NextResponse.json({ message: "اكتب تكلفة صحيحة أو اتركها فارغة." }, { status: 400 });
@@ -144,11 +245,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
             return NextResponse.json({ code: "lab_accounting_rate_changed", message: "تغيّر سعر الصرف أو تعذّر التحقق منه. حدّث المعاينة وراجعها قبل الحفظ." }, { status: 409 });
           }
         }
+        if (!isLabAccountingRate(exchangeRate)) {
+          return NextResponse.json({ code: "lab_accounting_rate_invalid", message: "سعر صرف عملة التكلفة غير صالح؛ راجع الإعدادات قبل الحفظ." }, { status: 409 });
+        }
       } else if (source.cost === null || source.cost === "") {
         costMinor = null;
       }
 
       const updated = await updateLabOrderAccounting(id, {
+        session,
         expenseCategoryId,
         expenseAccountCode,
         payableAccountCode,
@@ -166,9 +271,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json(updated);
     }
 
+    const maskLabCostsIfNeeded = async <T extends { costMinor?: number | null; costCurrency?: Currency | null; baseAmountMinor?: number | null; exchangeRate?: number | null; payableId?: number | null }>(order: T): Promise<T> => {
+      if (session.role !== "doctor") return order;
+      const user = await findUserByUsername(session.username).catch(() => null);
+      if (canDoctorViewCostPrices(user?.permissions, session.role)) return order;
+      return { ...order, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null, payableId: null };
+    };
+
     if (typeof source.dueDate === "string") {
       if (!DATE_PATTERN.test(source.dueDate)) {
         return NextResponse.json({ message: "تاريخ غير صالح." }, { status: 400 });
+      }
+      if (session.role === "doctor") {
+        const existing = await getLabOrderById(id);
+        if (!existing) return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+        if (!(await canAccessPatient(session, existing.patientId))) {
+          return NextResponse.json({ message: "غير مصرح لهذا المريض." }, { status: 403 });
+        }
       }
       const updated = await setLabOrderDueDate(id, source.dueDate);
       if (!updated) {
@@ -177,12 +296,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           { status: 409 },
         );
       }
-      return NextResponse.json(updated);
+      return NextResponse.json(await maskLabCostsIfNeeded(updated));
     }
 
     const status = typeof source.status === "string" ? source.status : "";
     if (!STATUSES.includes(status as LabOrderStatus)) {
       return NextResponse.json({ message: "حالة غير معروفة." }, { status: 400 });
+    }
+    if (session.role === "doctor") {
+      const existingForScope = await getLabOrderById(id);
+      if (existingForScope && !(await canAccessPatient(session, existingForScope.patientId))) {
+        return NextResponse.json({ message: "غير مصرح لهذا المريض." }, { status: 403 });
+      }
     }
     /* إلغاء الإرسالية قرار إداري لا تشغيلي: يمسّ المال (يعكس الالتزام غير
      * المسدَّد) ويوقف عملًا قائمًا عند المختبر — للمدير وحده. طلب «لم يُرسل بعد»
@@ -196,7 +321,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         );
       }
     }
+    if (status === "sent") {
+      const existing = await getLabOrderById(id);
+      if (existing?.status === "needed") {
+        return NextResponse.json({ message: "استكمل بيانات الإرسالية وراجعها من زر استكمال الإرسالية أولًا." }, { status: 409 });
+      }
+    }
     const updated = await setLabOrderStatus(id, status as LabOrderStatus, {
+      session,
       actor: session.username,
       actorRole: session.role,
       notes: typeof source.note === "string" && source.note.trim() ? source.note.trim().slice(0, 300) : null,
@@ -225,8 +357,21 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actorRole: session.role,
       });
     }
-    return NextResponse.json(updated);
+    return NextResponse.json(await maskLabCostsIfNeeded(updated));
   } catch (error) {
+    if ((error as { code?: string }).code === "55P03") return NextResponse.json({ code: "lab_status_busy", message: "يوجد تحديث جارٍ؛ حدّث الإرسالية وأعد المحاولة." }, { status: 409 });
+    if (error instanceof LabFinancialBoundaryError) {
+      const boundaryMessages: Record<string, string> = {
+        lab_settled_money_review: "للإرسالية أثر سداد؛ لا يمكن تغيير بياناتها المالية. راجع التسوية المحاسبية دون تعديل المدفوعات السابقة.",
+        lab_accounting_money_review: "لا يمكن تصفير أو مسح التزام قائم أو تبديل عملته دون مبلغ كامل معتمد؛ راجع التصحيح المالي. لم يتغير شيء.",
+        lab_payable_link_review: "ربط الالتزام المالي للإرسالية غير متسق؛ راجعه قبل التعديل.",
+      };
+      const message = error.message.startsWith("lab_order_") && boundaryMessages[error.code]
+        ? boundaryMessages[error.code]
+        : error.message;
+      return NextResponse.json({ message, code: error.code }, { status: error.status });
+    }
+    if (error instanceof LabPrescriptionError) return NextResponse.json({ message: error.message }, { status: error.status });
     const code = error instanceof Error ? error.message : "";
     if (code === "lab_order_accounting_price_invalid") return NextResponse.json({ code, message: "التكلفة المعدّلة يجب أن تكون مبلغًا موجبًا؛ لا يمكن مسح الالتزام المالي من هذا الإجراء." }, { status: 400 });
     const accountingConflicts: Record<string, string> = {
@@ -243,6 +388,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 /* حذف أمر مختبر نهائيًا — المدير وحده، والالتزام المسدَّد يمنعه (يُلغى سريريًا
  * بدله). الإلغاء للموقف الطبيعي، والحذف للسجل الخاطئ الذي لا مكان له أصلًا. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "رقم العمل غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    let reason: string | null = null;
+    try {
+      const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      const source = (body ?? {}) as Record<string, unknown>;
+      if (typeof source.reason === "string" && source.reason.trim()) {
+        reason = source.reason.trim().slice(0, 300);
+      }
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+    }
+    return deleteCanonicalLabOrderResponse(selected.handle, id, reason);
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -280,6 +448,9 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     if (!result.ok) {
       if (result.reason === "reason_required") {
         return NextResponse.json({ message: "اكتب سبب الحذف النهائي — يُسجَّل في التدقيق." }, { status: 400 });
+      }
+      if (result.reason === "source_linked") {
+        return NextResponse.json({ code: "lab_source_linked", message: "الإرسالية مرتبطة بمصدر علاجي أو فاتورة؛ لا يمكن حذف هويتها. استخدم الإلغاء المسموح مع حفظ الأثر." }, { status: 409 });
       }
       if (result.reason === "settled") {
         return NextResponse.json(

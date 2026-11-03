@@ -16,7 +16,7 @@ const fixture = vi.hoisted(() => ({ rows: 3 }));
 const settings = { ...SETTING_DEFAULTS, "clinic.phone": "777000123" };
 vi.mock("@/lib/session", () => ({ requireSession: async () => ({ role: "admin" }) }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
-vi.mock("@/lib/db", () => ({ getSettingsSafe: async () => settings }));
+vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", getSettingsSafe: async () => settings }));
 vi.mock("@/lib/reports", () => ({ dbTodayISO: async () => "2031-01-15" }));
 vi.mock("@/lib/hr", async () => ({
   ...await import("../../lib/hr-shared"),

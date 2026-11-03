@@ -5,12 +5,12 @@ import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { friendlyDateLong, toWhatsAppNumber } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import {
-  LAPSE_LABEL,
   LAPSE_OPTIONS,
+  lapseLabelForWeeks,
   openPastText,
+  parseConfiguredLapseWeeks,
   recallText,
   sinceText,
-  type LapseWeeks,
   type OpenPastAppointment,
   type RecallRow,
 } from "@/lib/recall";
@@ -43,11 +43,25 @@ const TEMPLATE_NAMES: Record<MessageTemplate, string> = {
 
 export default function RecallPage() {
   const session = useSession();
-  const canSeeProposals = session?.role === "admin" || session?.role === "reception";
+  /* A canonical session (M2 slice 24) reads the recall lists inside its patient scope and
+     books from the canonical day view; the legacy-only panels are not mounted for it. */
+  const canonical = session?.canonical === true;
+  const canSeeProposals = !canonical && (session?.role === "admin" || session?.role === "reception");
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
-  const [feed, setFeed] = useState<RecallFeed>({ openPast: [], missed: [], lapsed: [], weeks: 6 });
-  const [weeks, setWeeks] = useState<LapseWeeks>(6);
+  const configuredLapseWeeks = parseConfiguredLapseWeeks(useSetting("recall.lapse_weeks"));
+  const [feed, setFeed] = useState<RecallFeed>({ openPast: [], missed: [], lapsed: [], weeks: configuredLapseWeeks });
+  const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
+  const weeks = weeksOverride ?? configuredLapseWeeks;
+  const setWeeks = useCallback((nextWeeks: number) => setWeeksOverride(nextWeeks), []);
+  const lapseOptions = useMemo(
+    () => (
+      (LAPSE_OPTIONS as readonly number[]).includes(configuredLapseWeeks)
+        ? [...LAPSE_OPTIONS]
+        : [...new Set([configuredLapseWeeks, ...LAPSE_OPTIONS])].sort((a, b) => a - b)
+    ),
+    [configuredLapseWeeks],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -62,6 +76,14 @@ export default function RecallPage() {
   const [rebookPatient, setRebookPatient] = useState<{ id: number; name: string } | null>(null);
 
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
+  const rebookFor = useCallback((row: RecallRow) => {
+    if (canonical) {
+      // The canonical day view's booking form, with this patient chosen (the server re-proves the scope).
+      window.location.assign(`/appointments?bookPatient=${row.patientId}&bookName=${encodeURIComponent(row.patientName)}`);
+      return;
+    }
+    setRebookPatient({ id: row.patientId, name: row.patientName });
+  }, [canonical]);
 
   const load = useCallback(async (targetWeeks: number, showSpinner = false) => {
     if (showSpinner) setLoading(true);
@@ -189,7 +211,7 @@ export default function RecallPage() {
           <span className="text-[10px] text-amber-700">يحتاجون إعادة جدولة</span>
         </div>
         <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-3.5 shadow-2xs">
-          <span className="text-[11px] font-bold text-blue-800">انقطعوا عن العلاج ({LAPSE_LABEL[weeks]})</span>
+          <span className="text-[11px] font-bold text-blue-800">انقطعوا عن العلاج ({lapseLabelForWeeks(weeks)})</span>
           <p className="mt-1 text-xl font-black text-blue-900">{feed.lapsed.length}</p>
           <span className="text-[10px] text-blue-700">يحتاجون تذكير بالمتابعة</span>
         </div>
@@ -249,7 +271,7 @@ export default function RecallPage() {
         {/* فترات الانقطاع */}
         <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
           <span className="text-[11px] font-bold text-slate-500">مدة الانقطاع:</span>
-          {LAPSE_OPTIONS.map((option) => (
+          {lapseOptions.map((option) => (
             <button
               key={option}
               onClick={() => setWeeks(option)}
@@ -259,7 +281,7 @@ export default function RecallPage() {
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              {LAPSE_LABEL[option]}
+              {lapseLabelForWeeks(option)}
             </button>
           ))}
           <button
@@ -363,7 +385,7 @@ export default function RecallPage() {
                       today={today}
                       busy={busy}
                       onDone={markDone}
-                      onRebook={() => setRebookPatient({ id: row.patientId, name: row.patientName })}
+                      onRebook={() => rebookFor(row)}
                       clinicName={clinicName}
                       clinicPhone={clinicPhone}
                     />
@@ -394,7 +416,7 @@ export default function RecallPage() {
                       today={today}
                       busy={busy}
                       onDone={markDone}
-                      onRebook={() => setRebookPatient({ id: row.patientId, name: row.patientName })}
+                      onRebook={() => rebookFor(row)}
                       clinicName={clinicName}
                       clinicPhone={clinicPhone}
                     />
@@ -413,7 +435,7 @@ export default function RecallPage() {
       )}
 
       {/* نافذة إعادة حجز موعد مباشر */}
-      {rebookPatient ? (
+      {rebookPatient && !canonical ? (
         <QuickAppointmentModal
           patientId={rebookPatient.id}
           patientName={rebookPatient.name}

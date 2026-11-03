@@ -51,6 +51,14 @@ export default function AccountPage() {
     <main className="mx-auto max-w-md p-4 pb-24">
       <PageHeader title="حسابي" subtitle={session ? `${session.displayName || session.username} — ${session.username}` : undefined} />
 
+      <a
+        href="/hr/me"
+        className="mb-4 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-extrabold text-navy-900 shadow-2xs transition hover:border-navy-300 hover:bg-slate-50"
+      >
+        <span>ملفي الوظيفي — العقد والدوام وأرصدة الإجازات</span>
+        <span aria-hidden="true">←</span>
+      </a>
+
       <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="تغيير كلمة المرور">
         <h2 className="mb-3 text-sm font-extrabold">تغيير كلمة المرور</h2>
         <label className="mb-2 block text-xs font-bold text-slate-600">

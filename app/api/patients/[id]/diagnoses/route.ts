@@ -1,3 +1,7 @@
+import { canonicalPatientGet, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalClinicalRecordsFailure, commandCanonicalDiagnosisCreate } from "@/lib/canonical-clinical-records";
+import { readCanonicalDiagnoses, CanonicalPatientReadRefusal } from "@/lib/canonical-patient-reads";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -30,6 +34,14 @@ const parseCaseId = (value: unknown): number | null | "invalid" => {
 
 /** تاريخ التشخيص — كل النسخ، الأحدث أولًا. لا يُعدّل شيء هنا: تاريخٌ يُقرأ. */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 4): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await context.params).id, (handle, id) => {
+    const query = new URL(request.url).searchParams;
+    const orthoCaseId = parseCaseId(query.get("orthoCaseId"));
+    if (orthoCaseId === "invalid" || query.getAll("orthoCaseId").length > 1) throw new CanonicalPatientReadRefusal("invalid_patient_query", "رقم حالة التقويم غير صالح.");
+    return readCanonicalDiagnoses(handle, id, orthoCaseId);
+  }, "تعذّر تحميل التشخيص.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -61,6 +73,27 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
  * بعد سنوات ما رأى الطبيب ومتى، لا آخرُ كلامٍ صيغ بأثر رجعي.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const source = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+      return NextResponse.json(
+        await commandCanonicalDiagnosisCreate(selected.handle, (await context.params).id, source),
+        { status: 201, headers: NO_STORE },
+      );
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر حفظ التشخيص. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (session.role !== "doctor" && session.role !== "admin") {

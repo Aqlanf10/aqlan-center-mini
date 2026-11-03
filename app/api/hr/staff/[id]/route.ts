@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  hrStaffDetailGetCanonicalResponse,
+  hrStaffDetailPatchCanonicalResponse,
+} from "@/lib/canonical-hr";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
@@ -12,11 +18,17 @@ export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 const forbidden = () =>
   NextResponse.json({ message: "إدارة ملفات الطاقم وشروط الأجر للمدير وحده." }, { status: 403 });
 
 /** تفاصيل ملف موظف مع سجل تغييراته وربطه — للمدير وحده (فيها شروط الأجر). */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrStaffDetailGetCanonicalResponse(context, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) return forbidden();
@@ -36,6 +48,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
 /** تعديل ملف موظف أو ربط/فكّ ربط حسابه — كل فعلٍ يسجَّل بفاعله وسببه. */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrStaffDetailPatchCanonicalResponse(request, context, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) return forbidden();

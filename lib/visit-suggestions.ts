@@ -16,6 +16,8 @@ export interface VisitSuggestionInput {
   nextPlanned: { title: string; afterDays: number | null } | null;
   /** بترتيب الأولوية: الطبيب الداخل (إن كان طبيبًا)، طبيب الجلسة المخطَّطة، طبيب الموعد، طبيب المريض الأساسي. */
   doctorCandidates: (number | null)[];
+  /** Verified active providers for every unfinished active work plan; null means unresolved. */
+  workDoctorCandidates?: (number | null)[];
 }
 
 export interface VisitSuggestions {
@@ -42,15 +44,19 @@ export function buildVisitSuggestions(input: VisitSuggestionInput): VisitSuggest
   else if (type && note) chiefComplaint = `${type} — ${note}`;
   else if (note) chiefComplaint = note;
   else if (type) chiefComplaint = type;
-  else if (input.inOrtho) chiefComplaint = "متابعة تقويم — شدّ دوري";
+  // An active orthodontic case does not establish today's reason or performed work.
 
   const next = input.nextPlanned;
   const nextPlan = next
     ? `الجلسة القادمة: ${next.title}${next.afterDays ? ` — بعد ${arabicDays(next.afterDays)}` : ""}`
     : null;
 
+  const workDoctors = input.workDoctorCandidates ?? [];
+  const uniqueWorkDoctor = workDoctors.length > 0
+    && workDoctors.every(id => Number.isSafeInteger(id) && (id as number) > 0)
+    && new Set(workDoctors).size === 1 ? workDoctors[0] : null;
   return {
-    doctorId: input.doctorCandidates.find((id): id is number => Number.isInteger(id) && (id as number) > 0) ?? null,
+    doctorId: input.doctorCandidates.find((id): id is number => Number.isInteger(id) && (id as number) > 0) ?? uniqueWorkDoctor,
     chiefComplaint: chiefComplaint ? clip(chiefComplaint, 300) : null,
     nextPlan: nextPlan ? clip(nextPlan, 300) : null,
   };

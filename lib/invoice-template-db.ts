@@ -1,22 +1,46 @@
 /** Transaction-owned authority for template invoices. No process settings cache or second connection. */
 import { getSettingsInTransaction, type DbClient, type Service } from "./db";
+import type { LabWorkRetirement } from "./lab-work-intent-contract";
 import type { LinkedInvoiceLineInput } from "./invoice-linkage-db";
 import { invoiceCommandFingerprint, invoiceTemplateRequestFingerprint, parseInvoiceCommand, hasInvoiceCatalogQuote, invoiceCatalogRequestFingerprint } from "./invoice-template";
 import { checkInvoiceAuthority } from "./invoice-pricing";
+import type { CanonicalPriceCapabilities } from "./price-authority";
 import { foreignRatesFromSettings } from "./service-pricing";
 import type { SessionPayload } from "./auth";
 import { revalidateSessionInTransaction } from "./session";
 import { canHandleMoney } from "./roles";
 import { invoicePricingAudit } from "./invoice-price-settings-db";
 
-export type InvoiceTemplateAuthority = { source: Record<string, unknown>; fingerprint: string; session: SessionPayload };
+export type CanonicalInvoiceTemplateAuthority = {
+  userId: number | null;
+  username: string;
+  role: string;
+  canDocumentLabWork: boolean;
+  priceCapabilities: CanonicalPriceCapabilities;
+  verifyLiveSession: (client: DbClient) => Promise<void>;
+};
+export type InvoiceTemplateAuthority = {
+  source: Record<string, unknown>;
+  fingerprint: string;
+  session?: SessionPayload;
+  canonical?: CanonicalInvoiceTemplateAuthority;
+};
 export class InvoiceTemplateAuthorizationError extends Error {
   readonly code = "INVOICE_SESSION_REVOKED";
   constructor() { super("انتهت صلاحية الجلسة أثناء انتظار الطلب؛ سجّل الدخول قبل استعادة نتيجته."); }
 }
 /** Only an already admitted signed payload from the route, never client JSON. */
 export async function assertInvoiceTemplateSession(client: DbClient, session: SessionPayload | undefined,
-  actor: { createdBy: string; actorRole: string | null }): Promise<void> {
+  actor: { createdBy: string; actorRole: string | null }, canonical?: CanonicalInvoiceTemplateAuthority): Promise<void> {
+  if (canonical) {
+    if (canonical.username !== actor.createdBy || canonical.role !== actor.actorRole) throw new InvoiceTemplateAuthorizationError();
+    try {
+      await canonical.verifyLiveSession(client);
+    } catch {
+      throw new InvoiceTemplateAuthorizationError();
+    }
+    return;
+  }
   if (!session) throw new InvoiceTemplateAuthorizationError();
   const current = await revalidateSessionInTransaction(session, client);
   if (!current || !canHandleMoney(current.role) || current.username !== actor.createdBy || current.role !== actor.actorRole) throw new InvoiceTemplateAuthorizationError();
@@ -37,28 +61,35 @@ function itemsFingerprint(items: readonly LinkedInvoiceLineInput[]): string {
     item.templatePlan ? [item.templatePlan.templateId, item.templatePlan.version, item.templatePlan.stepKey,
       item.templatePlan.billingRule, item.templatePlan.sessionPlan.map((session) =>
         [session.title, session.minutes, session.afterDays, session.visitKey, session.visitTitle])] : null,
+    ...(item.labWork ? [{ labWork: item.labWork }] : []),
   ]));
 }
 
 /** Call after patient/replay handling, before any invoice/plan writes; caller owns transaction lifetime. */
 export async function validateInvoiceTemplateInTransaction(client: DbClient, input: {
   templateAuthority?: InvoiceTemplateAuthority; catalogueAuthority?: InvoiceTemplateAuthority; items: LinkedInvoiceLineInput[]; actorRole: string | null;
-  idempotencyKey: string | null; requestHash: string | null;
+  idempotencyKey: string | null; requestHash: string | null; labRetirements?: LabWorkRetirement[];
   patientId: number;visitId?:number; baseCurrency: string; existingPlanId?: number | null; discountMinor: number; note: string | null;
   createdBy: string; auditDetails?: Record<string, unknown>;
 }): Promise<void> {
+  if ((input.items.some(item=>item.labWork) || input.labRetirements !== undefined) && !input.templateAuthority && !input.catalogueAuthority) throw new InvoiceTemplateAuthorizationError();
   const usesTemplate = input.items.some((item) => item.templatePlan !== undefined);
   if (!usesTemplate && !input.catalogueAuthority) {
     if (input.templateAuthority) throw new InvoiceTemplateAuthorityError();
     return;
   }
   const authority = usesTemplate ? input.templateAuthority : input.catalogueAuthority;
-  if (!authority?.session) throw new InvoiceTemplateAuthorizationError();
-  if (usesTemplate && (input.idempotencyKey === null || input.requestHash !== invoiceTemplateRequestFingerprint(authority.source,
-    { username: input.createdBy, role: input.actorRole ?? "", userId: authority.session.userId ?? null }))) throw new InvoiceTemplateAuthorityError();
+  if (!authority?.session && !authority?.canonical) throw new InvoiceTemplateAuthorizationError();
+  const principal = authority.canonical
+    ? { username: input.createdBy, role: input.actorRole ?? "", userId: authority.canonical.userId }
+    : { username: input.createdBy, role: input.actorRole ?? "", userId: authority.session!.userId ?? null };
+  if (usesTemplate && (input.idempotencyKey === null || input.requestHash !== invoiceTemplateRequestFingerprint(authority.source, principal))) {
+    throw new InvoiceTemplateAuthorityError();
+  }
   if (!usesTemplate && input.idempotencyKey !== null && hasInvoiceCatalogQuote(authority.source)
-    && input.requestHash !== invoiceCatalogRequestFingerprint(authority.source,
-      { username: input.createdBy, role: input.actorRole ?? "", userId: authority.session.userId ?? null })) throw new InvoiceTemplateAuthorityError();
+    && input.requestHash !== invoiceCatalogRequestFingerprint(authority.source, principal)) {
+    throw new InvoiceTemplateAuthorityError();
+  }
   // SHARE settings covers missing/default keys too. Template service references
   // are explicit, so new catalogue inserts cannot change the selected services.
   // This path performs only same-client DB work and synchronous validation under
@@ -81,7 +112,13 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     if ((error as { code?: string }).code === "55P03") throw new InvoiceTemplateBusyError();
     throw error;
   }
-  await assertInvoiceTemplateSession(client, authority.session, input);
+  await assertInvoiceTemplateSession(client, authority.session, input, authority.canonical);
+  if (input.items.some(item => item.labWork) || input.labRetirements !== undefined) {
+    const allowedLab = authority.canonical
+      ? authority.canonical.canDocumentLabWork
+      : authority.session!.role === "admin" || authority.session!.role === "doctor";
+    if (!allowedLab) throw new InvoiceTemplateAuthorizationError();
+  }
   const minor = (value: string): number => {
     const number = Number(value);
     if (!Number.isSafeInteger(number) || number < 0) throw new InvoiceTemplateAuthorityError();
@@ -99,10 +136,13 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     || current.patientId !== input.patientId || current.baseCurrency !== input.baseCurrency
     || current.existingPlanId !== (input.existingPlanId ?? null) || (current.visitId??null)!==(input.visitId??null) || current.discountMinor !== input.discountMinor
     || current.note !== input.note || current.idempotencyKey !== input.idempotencyKey
+    || JSON.stringify(current.labRetirements) !== JSON.stringify(input.labRetirements)
     || itemsFingerprint(current.items) !== itemsFingerprint(input.items)) throw new InvoiceTemplateAuthorityError();
   const pricing = checkInvoiceAuthority({ requireInvoiceManualReason:true,
     lines: current.authorityLines, currency: current.baseCurrency, rates: foreignRatesFromSettings(settings),
-    role: input.actorRole ?? "", maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
+    role: input.actorRole ?? "",
+    ...(authority.canonical ? { capabilities: authority.canonical.priceCapabilities } : {}),
+    maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
     totalMinor: current.items.reduce((sum, item) => sum + item.quantity * item.unitPriceMinor, 0),
     discountMinor: current.discountMinor,
     discountReason: typeof authority.source.discountReason === "string" ? authority.source.discountReason : null,

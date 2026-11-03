@@ -1,12 +1,19 @@
 import { NextResponse } from "next/server";
-import { getExpense, getSettings, listExpenseAttachments, recordAudit, recordExpenseAttachment } from "@/lib/db";
-import { putFile, storageStatus } from "@/lib/files";
+import { getExpense, getPool, getSettings, listExpenseAttachments, recordAudit, recordExpenseAttachment } from "@/lib/db";
+import { putFile, storageStatus, type StoredFile } from "@/lib/files";
+import { cleanupUncommittedStoredFile, plannedStorageKey, withStorageKeyGuard } from "@/lib/file-cleanup";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, validateUpload } from "@/lib/storage";
 import { requireSession } from "@/lib/session";
 import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
 import { UPLOAD_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { contentMatchesMimeType, SIGNATURE_MISMATCH_MESSAGE } from "@/lib/magic-bytes";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  expenseAttachmentsCreateCanonicalResponse,
+  expenseAttachmentsListCanonicalResponse,
+} from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +37,12 @@ const expenseIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return expenseAttachmentsListCanonicalResponse(rawId, selected.handle);
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewMoney(session.role)) return forbidden();
@@ -43,6 +56,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return expenseAttachmentsCreateCanonicalResponse(request, rawId, selected.handle);
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role)) return forbidden();
@@ -76,17 +95,25 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const rawTitle = typeof form.get("title") === "string" ? String(form.get("title")).trim() : "";
   const title = (rawTitle || file.name || "إيصال").slice(0, 120);
 
+  let stored: StoredFile | null = null;
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
     if (!contentMatchesMimeType(bytes, file.type)) {
       return NextResponse.json({ message: SIGNATURE_MISMATCH_MESSAGE }, { status: 400 });
     }
-    const stored = await putFile(bytes, check.extension);
-    const attachment = await recordExpenseAttachment({
-      expenseId, title, mimeType: file.type, sizeBytes: stored.sizeBytes,
-      sha256: stored.sha256, storageKey: stored.key, uploadedBy: session.username,
+    // Peer-review #6/#8: guarded write + reconciliation of an unreferenced new object.
+    const attachment = await withStorageKeyGuard(getPool(), plannedStorageKey(bytes, check.extension), async () => {
+      const written = await putFile(bytes, check.extension);
+      stored = written;
+      return recordExpenseAttachment({
+        expenseId, title, mimeType: file.type, sizeBytes: written.sizeBytes,
+        sha256: written.sha256, storageKey: written.key, uploadedBy: session.username,
+      });
     });
-    if (!attachment) return NextResponse.json({ message: "سند الصرف غير موجود." }, { status: 404 });
+    if (!attachment) {
+      await cleanupUncommittedStoredFile(stored);
+      return NextResponse.json({ message: "سند الصرف غير موجود." }, { status: 404 });
+    }
     /* يُنتظر قبل الرد: سطر التدقيق جزءٌ من الفعل لا ذيلٌ بعده — من رأى «تم»
        ثم فتح السجل يجده (وكان يسبقه أحيانًا تحت الحِمل). وrecordAudit يبتلع أخطاءه. */
     await recordAudit({
@@ -97,6 +124,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
     return NextResponse.json(attachment, { status: 201 });
   } catch {
+    await cleanupUncommittedStoredFile(stored);
     return NextResponse.json({ message: "تعذّر حفظ الملف. أعد المحاولة." }, { status: 500 });
   }
 }

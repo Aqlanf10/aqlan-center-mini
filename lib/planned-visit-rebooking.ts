@@ -1,3 +1,4 @@
+import { readReturnBookingContext } from "./return-booking-context";
 import {
   CLINIC_TIME_ZONE, getPool, insertAppointmentOnClient, insertAuditRow,
   lockAppointmentServiceForBooking, transitionInternalReferralOnClient, writeAppointmentInDay,
@@ -8,7 +9,7 @@ import { revalidateSessionInTransaction } from "./session";
 import { canAccessPatient } from "./patient-access";
 import { canActOnReferral } from "./referrals";
 import { lockBookableAppointmentDoctor } from "./appointment-doctor";
-import { loadCapacityContext } from "./capacity-context";
+import { loadCapacityContext, loadCapacityContextWith } from "./capacity-context";
 import { judgeBookingInDay } from "./book-appointment";
 import { PURCHASE_RESET_FENCE } from "./clinic-reset";
 import type { BookingConflict } from "./book-appointment";
@@ -20,13 +21,13 @@ import { MAX_DURATION, MIN_DURATION } from "./appointment-services";
 
 export type PlannedRebookResult =
   | { ok: true; appointmentId: number; title: string; replayed: boolean }
-  | { ok: false; status: 400 | 401 | 403 | 404 | 409; message: string; conflict?: BookingConflict };
+  | { ok: false; status: 400 | 401 | 403 | 404 | 409; message: string; code?: string; conflict?: BookingConflict };
 type Success = Extract<PlannedRebookResult, { ok: true }>;
 class RebookRejected extends Error {
   constructor(readonly result: Exclude<PlannedRebookResult, { ok: true }>) { super(result.message); }
 }
-function reject(status: 400 | 401 | 403 | 404 | 409, message: string): never {
-  throw new RebookRejected({ ok: false, status, message });
+function reject(status: 400 | 401 | 403 | 404 | 409, message: string, code?: string): never {
+  throw new RebookRejected({ ok: false, status, message, ...(code ? { code } : {}) });
 }
 interface LockedPlan {
   id: number; patient_id: number; appointment_id: number | null; title: string;
@@ -48,32 +49,82 @@ const INTENT_CONFLICT = "استُخدم رقم هذه المحاولة لطلب 
  * planned row and retained in append-only audit_log. No migration is needed.
  * Replays bypass capacity/lifecycle, not current session or patient-read access.
  */
+/** Who acts, as the rebooking writer sees it (legacy session or canonical identity). */
+export interface RebookActor { userId: number; username: string; role: string; partyId: number | null }
+/**
+ * The authority the writer consults at its fixed points in the lock order (M2 slice 23):
+ * the legacy session (revalidated in the transaction, patient access by role and
+ * ownership, referral scheduling by role), or the canonical admitted operation (its
+ * own transaction, patient scope, grants and appointment scope).
+ */
+export interface RebookAuthority {
+  /** The caller's admitted transaction (canonical); absent: the writer owns its own. */
+  readonly client?: DbClient;
+  revalidate(client: DbClient): Promise<RebookActor | null>;
+  canAccessPatient(actor: RebookActor, patientId: number, client: DbClient): Promise<boolean>;
+  canScheduleReferral(actor: RebookActor, referral: { doctor_party_id: number | null; to_party_id: number | null }): boolean;
+  stillValid(): boolean;
+  /** The legacy role gate, checked right after the intent parses (as before). */
+  admitsRole?(): boolean;
+  /** An extra rule for the replacement's doctor (canonical own appointment scope). */
+  admitsDoctor?(doctorId: number | null): boolean;
+}
+
+function legacyAuthority(admitted: SessionPayload): RebookAuthority {
+  // The session revalidated at the writer's fixed point is the one patient access uses,
+  // exactly as before: no second revalidation query.
+  let current: SessionPayload | null = null;
+  return {
+    revalidate: async client => {
+      current = await revalidateSessionInTransaction(admitted, client);
+      return current && { userId: current.userId, username: current.username, role: current.role, partyId: current.partyId ?? null };
+    },
+    canAccessPatient: async (_actor, patientId, client) => !!current && canAccessPatient(current, patientId, undefined, client, "nowait"),
+    canScheduleReferral: (actor, referral) => canActOnReferral({ action: "schedule", role: actor.role, actorPartyId: actor.partyId,
+      referringPartyId: referral.doctor_party_id, receivingPartyId: referral.to_party_id }),
+    stillValid: () => admitted.expiresAt >= Date.now(),
+    admitsRole: () => ["admin", "reception", "doctor"].includes(admitted.role),
+  };
+}
+
 export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: SessionPayload): Promise<PlannedRebookResult> {
+  return rebookPlannedVisitWith(input, legacyAuthority(admitted));
+}
+
+export async function rebookPlannedVisitWith(input: PlannedRebookIntent, authority: RebookAuthority): Promise<PlannedRebookResult> {
   const parsed = parsePlannedRebookIntent(input.plannedVisitId, {
     expectedAppointmentId: input.expectedAppointmentId, expectedGeneration: input.expectedGeneration, date: input.date, time: input.time,
     reason: input.reason, requestId: input.requestId,
+    ...(input.nearbyAppointmentConfirmation === undefined ? {} : { nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation }),
+    ...(input.returnBookingSource === undefined ? {} : { returnBookingSource: input.returnBookingSource }),
+    ...(input.returnBookingFingerprint === undefined ? {} : { returnBookingFingerprint: input.returnBookingFingerprint }),
   });
   if (!parsed) return { ok: false, status: 400, message: "أدخل موعدًا صحيحًا وسبب إعادة الحجز ورقم محاولة صالحًا." };
   input = parsed;
-  if (!["admin", "reception", "doctor"].includes(admitted.role)) return { ok: false, status: 403, message: "غير مصرّح لك بإعادة الحجز." };
-  const capacityContext = await loadCapacityContext();
+  if (authority.admitsRole && !authority.admitsRole()) return { ok: false, status: 403, message: "غير مصرّح لك بإعادة الحجز." };
+  const capacityContext = authority.client
+    ? await loadCapacityContextWith(authority.client)
+    : await loadCapacityContext();
   // Never trust this unlocked preview for writing. It only identifies all referral
   // appointment locks that must precede the planned row; a changed set is rejected.
-  const { rows: previewRows } = await getPool().query<{ referral_id: number | null }>(
+  const { rows: previewRows } = await (authority.client ?? getPool()).query<{ referral_id: number | null }>(
     "SELECT referral_id FROM appointments WHERE id = $1", [input.expectedAppointmentId]);
   const previewReferralId = previewRows[0]?.referral_id ?? null;
   let replay: Success | null = null;
   let plan: LockedPlan | undefined;
   let old: LockedAppointment | undefined;
-  let session: SessionPayload | null = null;
+  let session: RebookActor | null = null;
   let appointmentLocks: number[] = [];
   let service: Awaited<ReturnType<typeof lockAppointmentServiceForBooking>> = null;
   let doctorId: number | null = null;
   const intent = { plannedVisitId: input.plannedVisitId, expectedAppointmentId: input.expectedAppointmentId,
     expectedGeneration: input.expectedGeneration,
-    date: input.date, time: input.time, reason: input.reason };
+    date: input.date, time: input.time, reason: input.reason,
+    ...(input.returnBookingSource === undefined ? {} : { returnBookingSource: JSON.stringify(input.returnBookingSource) }),
+    ...(input.returnBookingFingerprint === undefined ? {} : { returnBookingFingerprint: input.returnBookingFingerprint }) };
   try {
     const result = await writeAppointmentInDay({
+      client: authority.client,
       date: input.date,
       // Reset takes this existing fence exclusively before acquiring wipe-table
       // locks. Cooperate before the day lock or any table read, avoiding a reversed
@@ -95,9 +146,9 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
            FROM planned_visits WHERE id = $1 FOR UPDATE`, [input.plannedVisitId]);
         plan = plans[0];
         if (!plan) reject(404, "الزيارة المخطَّطة غير موجودة.");
-        session = await revalidateSessionInTransaction(admitted, client);
+        session = await authority.revalidate(client);
         if (!session) reject(401, "انتهت الجلسة أو تغيّرت صلاحيات الحساب. سجّل الدخول من جديد.");
-        if (!await canAccessPatient(session, plan.patient_id, undefined, client, "nowait")) reject(403, "غير مصرّح لك بملف هذا المريض.");
+        if (!await authority.canAccessPatient(session, plan.patient_id, client)) reject(403, "غير مصرّح لك بملف هذا المريض.");
         // Reset keeps users/audit but reuses clinical IDs. The held planned and
         // appointment table locks conflict with its EXCLUSIVE/TRUNCATE locks.
         // Check the generation here, not in the unlocked preview, and reject old
@@ -149,7 +200,17 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
           `SELECT $1::date + $2::time > clock_timestamp() AT TIME ZONE $3 AS valid`, [input.date, input.time, CLINIC_TIME_ZONE]);
         if (!future.valid) reject(400, "اختر موعدًا قادمًا بتوقيت العيادة.");
         if (!Number.isInteger(plan.duration_minutes) || plan.duration_minutes < MIN_DURATION || plan.duration_minutes > MAX_DURATION) reject(409, "مدة الجلسة تحتاج مراجعة قبل إعادة الحجز.");
-        doctorId = plan.doctor_id ?? old.doctor_id;
+        if (typeof input.returnBookingFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(input.returnBookingFingerprint)) {
+          reject(409, "تحقّق من سياق العودة والطبيب المسؤول قبل إعادة الحجز.", "return_booking_context_required");
+        }
+        const origin = { kind: "planned_visit" as const, id: plan.id };
+        const responsible = await readReturnBookingContext(client, plan.patient_id, input.returnBookingSource ?? origin, { lock: true, origin });
+        if (!responsible.ok) reject(409, responsible.message, responsible.code);
+        if (input.returnBookingFingerprint !== undefined && input.returnBookingFingerprint !== responsible.fingerprint) {
+          reject(409, "تغيّر الطبيب المسؤول. حدّث اقتراح الحجز وراجعه قبل التأكيد.", "return_booking_source_changed");
+        }
+        doctorId = responsible.doctorId;
+        if (authority.admitsDoctor && !authority.admitsDoctor(doctorId)) reject(403, "هذه الجلسة تُحجز على طبيب الحالة المسؤول؛ يعيد حجزها من يملك نطاق المواعيد كاملًا.");
         if (!await lockBookableAppointmentDoctor(client, doctorId)) reject(409, "الطبيب غير متاح للحجز.");
         let serviceId = old.service_id;
         if (!serviceId && old.appointment_type) {
@@ -162,12 +223,14 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
         if (old.chair_no !== null && (old.chair_no < 1 || old.chair_no > capacityContext.chairs)) reject(409, "كرسي الموعد غير متاح. راجع الجلسة أولًا.");
         const judged = await judgeBookingInDay({ sameDay: day, client, date: input.date, time: input.time,
           durationMinutes: plan.duration_minutes, service, context: capacityContext,
-          providerId: doctorId, chairNo: old.chair_no, isNewPatient: old.is_new_patient,
-          patientId: plan.patient_id, canOverride: false, overrideReason: "" });
+          providerId: doctorId, requireAssignedProvider: true, chairNo: old.chair_no, isNewPatient: old.is_new_patient,
+          patientId: plan.patient_id, canOverride: false, overrideReason: "",
+          nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
+          bookingActor: `${session.userId}:${session.username}`, bookingScope: JSON.stringify({ entry: "planned-rebook", ...intent, requestId: input.requestId }) });
         return judged.ok ? { ok: true } : { ok: false, conflict: judged.conflict };
       },
       commit: async (client: DbClient): Promise<Success> => {
-        if (!await revalidateSessionInTransaction(admitted, client)) reject(401, "انتهت الجلسة. سجّل الدخول وأعد المحاولة نفسها.");
+        if (!await authority.revalidate(client)) reject(401, "انتهت الجلسة. سجّل الدخول وأعد المحاولة نفسها.");
         if (replay) return replay;
         if (!plan || !old || !session) throw new Error("Missing locked rebooking context");
         const created = await insertAppointmentOnClient(client, {
@@ -187,8 +250,7 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
             lockedAppointmentIds: [...appointmentLocks, created.id],
             authorize: async current => {
               if (current.patient_id !== plan!.patient_id || current.to_party_id !== doctorId) reject(409, STALE);
-              if (!canActOnReferral({ action: "schedule", role: session!.role, actorPartyId: session!.partyId ?? null,
-                referringPartyId: current.doctor_party_id, receivingPartyId: current.to_party_id })) reject(403, "إعادة حجز الإحالة للاستقبال أو الطبيب المحال إليه.");
+              if (!authority.canScheduleReferral(session!, current)) reject(403, "إعادة حجز الإحالة للاستقبال أو الطبيب المحال إليه.");
               const { rows: [currentReferral] } = await client.query<{ workflow_state: string }>(
                 "SELECT workflow_state FROM patient_referrals WHERE id = $1", [old!.referral_id]);
               if (!["requested", "accepted"].includes(currentReferral?.workflow_state)) reject(409, "تغيّرت حالة الإحالة. حدّث الملف.");
@@ -196,7 +258,7 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
           });
           if (!referral.ok) reject(409, "تعذّر ربط موعد الإحالة. حدّث الملف وراجع حالتها.");
         }
-        if (!await revalidateSessionInTransaction(admitted, client)) reject(401, "انتهت الجلسة أثناء الحجز. سجّل الدخول وأعد المحاولة نفسها.");
+        if (!await authority.revalidate(client)) reject(401, "انتهت الجلسة أثناء الحجز. سجّل الدخول وأعد المحاولة نفسها.");
         // Only the live inverse pointer moves. Historical status, timestamps,
         // cancellation reason, referral identity and status log remain untouched.
         await client.query("UPDATE appointments SET planned_visit_id = NULL WHERE id = $1 AND planned_visit_id = $2", [old.id, plan.id]);
@@ -211,7 +273,7 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
             intent, response, oldAppointmentId: old.id, newAppointmentId: created.id,
             oldAppointment: old.snapshot, newAppointment: replacement.snapshot },
         });
-        if (admitted.expiresAt < Date.now()) reject(401, "انتهت الجلسة أثناء الحجز. سجّل الدخول وأعد المحاولة نفسها.");
+        if (!authority.stillValid()) reject(401, "انتهت الجلسة أثناء الحجز. سجّل الدخول وأعد المحاولة نفسها.");
         return { ok: true, ...response, replayed: false };
       },
     });
@@ -219,7 +281,7 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
       message: (result.conflict as BookingConflict).message, conflict: result.conflict as BookingConflict };
   } catch (error) {
     if (error instanceof RebookRejected) return error.result;
-    if ((error as { code?: string }).code === "55P03") return { ok: false, status: 409,
+    if ((error as { code?: string }).code === "55P03") return { ok: false, status: 409, code: "return_booking_source_changed",
       message: "يجري تحديث العلاج المرتبط بهذه الجلسة. حدّث الملف وأعد المحاولة." };
     throw error;
   }

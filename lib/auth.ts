@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { financeAccessFor, type FinanceAccess } from "./finance-permissions";
 
@@ -15,6 +15,7 @@ const scrypt = promisify(scryptCb);
  */
 
 const SCRYPT_KEY_LENGTH = 64;
+export const MAX_PASSWORD_LENGTH = 200;
 
 /**
  * تجزئة كلمة المرور بـ scrypt وملح عشوائي لكل مستخدم.
@@ -23,6 +24,9 @@ const SCRYPT_KEY_LENGTH = 64;
  * scrypt مُكلف بالذاكرة عمدًا: كسر قائمة كلمات مرور مسروقة يصير بطيئًا بدل أن يكون فوريًا.
  */
 export async function hashPassword(password: string): Promise<string> {
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    throw new Error("PASSWORD_TOO_LONG");
+  }
   const salt = randomBytes(16).toString("hex");
   const derived = (await scrypt(password, salt, SCRYPT_KEY_LENGTH)) as Buffer;
   return `scrypt:${salt}:${derived.toString("hex")}`;
@@ -35,6 +39,7 @@ export async function hashPassword(password: string): Promise<string> {
  * من التجزئة حرفًا حرفًا. `timingSafeEqual` لا تفعل ذلك — ولهذا السبب وحده هي هنا.
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  if (!password || password.length > MAX_PASSWORD_LENGTH) return false;
   const [scheme, salt, expected] = stored.split(":");
   if (scheme !== "scrypt" || !salt || !expected) return false;
   const derived = (await scrypt(password, salt, SCRYPT_KEY_LENGTH)) as Buffer;
@@ -44,6 +49,8 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 export interface SessionPayload {
+  /** Signed canonical identity, optional for legacy application compatibility. */
+  authority?: import("./staff-authenticated-identity").StaffIdentityClaims;
   userId: number;
   username: string;
   role: string;
@@ -54,6 +61,7 @@ export interface SessionPayload {
   credentialVersion?: string;
   financeAccess?: FinanceAccess;
   permissionVersion?: string;
+  sessionNonce?: string;
 }
 
 function secret(): string {
@@ -70,8 +78,9 @@ function sign(data: string): string {
   return createHmac("sha256", secret()).update(data).digest("base64url");
 }
 
-export function sessionCredentialVersion(passwordHash: string): string {
-  return createHmac("sha256", secret()).update(`credential:${passwordHash}`).digest("base64url");
+export function sessionCredentialVersion(passwordHash: string, sessionVersion = 0): string {
+  const versionSuffix = Number.isInteger(sessionVersion) && sessionVersion > 0 ? `:v${sessionVersion}` : "";
+  return createHmac("sha256", secret()).update(`credential:${passwordHash}${versionSuffix}`).digest("base64url");
 }
 
 /** A permissions edit revokes existing restricted-role sessions immediately. */
@@ -81,30 +90,86 @@ export function sessionPermissionVersion(role: string, raw: unknown): string {
     .digest("base64url");
 }
 
+const forbiddenLegacyMarkers = ["authority", "staffAuthority", "durableIdentity"] as const;
+export function hasCanonicalSessionMarker(payload: object): boolean {
+  return forbiddenLegacyMarkers.some(key => Object.hasOwn(payload, key));
+}
+
 /** جلسة موقّعة: البيانات ظاهرة، والتوقيع هو ما يمنع تزويرها. */
 export function createSessionToken(payload: SessionPayload): string {
+  if (hasCanonicalSessionMarker(payload)) throw new Error("CANONICAL_SESSION_ISSUANCE_UNSUPPORTED");
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${body}.${sign(body)}`;
 }
 
-export function readSessionToken(token: string | undefined): SessionPayload | null {
-  if (!token) return null;
-  const [body, signature] = token.split(".");
-  if (!body || !signature) return null;
-
-  const expected = sign(body);
-  const given = Buffer.from(signature);
-  const want = Buffer.from(expected);
-  if (given.length !== want.length || !timingSafeEqual(given, want)) return null;
-
-  try {
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as SessionPayload;
-    // التوقيع يمنع التزوير، والانتهاء يمنع بقاء جلسة مسروقة صالحة إلى الأبد.
-    if (typeof payload.expiresAt !== "number" || payload.expiresAt < Date.now()) return null;
-    if (typeof payload.userId !== "number") return null;
-    return payload;
-  } catch {
-    return null;
+const durableClaimKeys = ["durableIdentity", "expiresAt", "userId", "username"] as const;
+const durableIdentityKeys = ["accountEpoch", "controlEpoch", "credentialVersion", "generationId", "permissionRevision", "policyVersion", "provider", "realmId", "registryRevision", "schemaVersion", "subjectId"] as const;
+const exactKeys = (value: unknown, keys: readonly string[]) => !!value && typeof value === "object" && !Array.isArray(value)
+  && Object.getPrototypeOf(value) === Object.prototype && Object.keys(value).sort().join(",") === keys.join(",");
+/**
+ * PRIVATE durable signer. Only `lib/staff-durable-issuer.ts` may import it; an AST
+ * allowlist test enforces that. It reuses the existing signing configuration without
+ * exposing it and refuses anything but the exact durable shape (no legacy role,
+ * no extra field). The issuer derives every value from a locked, freshly proved
+ * account tuple and then round-trips the token through the strict durable parser.
+ */
+export function signDurableSessionClaims(claims: unknown): string {
+  if (!exactKeys(claims, durableClaimKeys) || !exactKeys((claims as { durableIdentity: unknown }).durableIdentity, durableIdentityKeys)) {
+    throw new Error("DURABLE_SESSION_SHAPE_INVALID");
   }
+  const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  return `${body}.${sign(body)}`;
 }
 
+/** Signature envelope only, NOT authentication. Canonical and legacy payloads
+ * have separate strict consumers; no caller-provided identity is trusted here. */
+export function readSignedSessionEnvelope(token: string | undefined): unknown | null {
+  if (typeof token !== "string" || token.length > 32768) return null;
+  const segments = token.split(".");
+  if (segments.length !== 2) return null;
+  const [body, signature] = segments;
+  if (!body || !signature || !/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]+$/.test(signature)) return null;
+  const given = Buffer.from(signature);
+  const want = Buffer.from(sign(body));
+  if (given.length !== want.length || !timingSafeEqual(given, want)) return null;
+  try { return JSON.parse(Buffer.from(body, "base64url").toString()); }
+  catch { return null; }
+}
+
+declare const legacyEvidenceBrand: unique symbol;
+export interface VerifiedLegacySession { readonly [legacyEvidenceBrand]: true }
+const legacyPayloadSources = new WeakMap<object, string>();
+const legacyEvidenceSources = new WeakMap<VerifiedLegacySession, string>();
+/** Only an actual verified parser result (or server-derived result retaining its
+ * private source) can yield evidence. Copies and request JSON never qualify. */
+export function legacySessionEvidence(payload: SessionPayload): VerifiedLegacySession | null {
+  const token=legacyPayloadSources.get(payload);
+  if(!token || !readSessionToken(token))return null;
+  const evidence=Object.freeze({}) as VerifiedLegacySession;
+  legacyEvidenceSources.set(evidence,token);return evidence;
+}
+export function revalidateLegacySessionEvidence(evidence: VerifiedLegacySession): SessionPayload | null {
+  const token=legacyEvidenceSources.get(evidence);return token?readSessionToken(token):null;
+}
+/** Carries original signed provenance, never trust in the caller's overrides. */
+export function carryLegacySessionEvidence(source: SessionPayload, derived: SessionPayload): SessionPayload {
+  const token=legacyPayloadSources.get(source);
+  if(token)legacyPayloadSources.set(derived,token);
+  return derived;
+}
+/** SHA-256 digest of the original signed legacy session token, for per-session logout revocation. */
+export function legacySessionTokenHash(payload: SessionPayload): string | null {
+  const token = legacyPayloadSources.get(payload);
+  if (!token) return null;
+  return createHash("sha256").update(token).digest("hex");
+}
+
+export function readSessionToken(token: string | undefined): SessionPayload | null {
+  const payload = readSignedSessionEnvelope(token);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || hasCanonicalSessionMarker(payload)) return null;
+  const candidate = payload as Partial<SessionPayload>;
+  if (typeof candidate.expiresAt !== "number" || !Number.isFinite(candidate.expiresAt) || candidate.expiresAt <= Date.now()) return null;
+  if (!Number.isSafeInteger(candidate.userId) || (candidate.userId ?? 0) < 1) return null;
+  legacyPayloadSources.set(candidate,token!);
+  return candidate as SessionPayload;
+}

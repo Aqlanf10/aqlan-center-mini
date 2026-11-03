@@ -32,12 +32,20 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  const { databaseUrlForProject } = await import("../lib/database-scope");
   const { decideTls } = await import("../lib/db-tls");
   const { classifyDbTarget } = await import("../lib/db-target");
-  const target = classifyDbTarget(raw, process.env);
+  let effectiveUrl: string;
+  try {
+    effectiveUrl = databaseUrlForProject(raw, process.env);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+  const target = classifyDbTarget(effectiveUrl, process.env);
   let tlsMode: string;
   try {
-    tlsMode = decideTls(raw).mode;
+    tlsMode = decideTls(effectiveUrl).mode;
   } catch (error) {
     console.error(`رفض سياسة TLS قبل أي اتصال: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
@@ -52,8 +60,8 @@ async function main(): Promise<number> {
   const files = await loadMigrationFiles();
 
   const client = new Client({
-    connectionString: raw,
-    ssl: decideTls(raw).ssl === false ? false : { ...(decideTls(raw).ssl as object) },
+    connectionString: effectiveUrl,
+    ssl: decideTls(effectiveUrl).ssl === false ? false : { ...(decideTls(effectiveUrl).ssl as object) },
   });
   try {
     await client.connect();

@@ -18,6 +18,8 @@ import type { Role } from "./roles";
  *  - `SHARED_MEDIA`: وسائط الرسائل — مفتوحة بالبادئة، والمسار يفحص جلسة الطاقم أو البوابة.
  *  - `WEBHOOK`: يطرقه مزوّد خارجي — مفتوح بالبادئة، وحارسه التوقيع أو مفتاح الاستقبال.
  *  - `INTERNAL`: مهام مجدولة بتوكن Bearer سرّي — يمرّ من باب الجلسة ويفحص السرّ.
+ *  - `CANONICAL`: مسار الهوية الموحّدة وحدها — يمرّ من باب الجلسة، والمسار يقبل الجلسة
+ *    الموحّدة بإثبات قاعدة البيانات الحالي وقدرته الدقيقة؛ أي جلسة قديمة بأي دور مرفوضة.
  *
  * الرسائل العربية الدقيقة للرفض تبقى في المسارات نفسها (يعتمد عليها المستخدم والاختبارات)؛
  * هذه المصفوفة لا تغيّر سلوك أي مسار — تسجّله وتجعله قابلًا للتحقق.
@@ -28,7 +30,7 @@ import type { Role } from "./roles";
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export const HTTP_METHODS: readonly HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
-export type HttpAccessClass = "public" | "portal" | "shared-media" | "webhook" | "internal";
+export type HttpAccessClass = "public" | "portal" | "shared-media" | "webhook" | "internal" | "canonical";
 export type HttpAccess = HttpAccessClass | readonly Role[];
 
 const PUBLIC: HttpAccess = "public";
@@ -36,6 +38,7 @@ const PORTAL: HttpAccess = "portal";
 const SHARED_MEDIA: HttpAccess = "shared-media";
 const WEBHOOK: HttpAccess = "webhook";
 const INTERNAL: HttpAccess = "internal";
+const CANONICAL: HttpAccess = "canonical";
 
 /** المدير وحده. */
 const ADMIN: readonly Role[] = ["admin"];
@@ -47,6 +50,16 @@ const FRONT_DESK: readonly Role[] = ["admin", "reception"];
 const CLINICAL: readonly Role[] = ["admin", "doctor"];
 
 export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<HttpMethod, HttpAccess>>>>> = {
+  /* الهوية الموحّدة: دليل الطاقم (staff.view) ومحرّر الصلاحيات (staff.permissions.edit). */
+  "/api/staff-access": { GET: CANONICAL },
+  "/api/staff-access/[id]": { GET: CANONICAL, PATCH: CANONICAL },
+  /* محرّر الحسابات (staff.view للقراءة؛ الكتابة بحسب الحقل: staff.profile.edit، staff.accounts.disable، عمليات المالك). */
+  "/api/staff-access/[id]/account": { GET: CANONICAL, PATCH: CANONICAL },
+  "/api/lab/work-intents/capability": { GET: CLINICAL },
+  "/api/visits/[id]/lab-work-command": { GET: CLINICAL },
+  "/api/ortho/[id]/followup-coverage": { GET: ADMIN, POST: ADMIN, PUT: ADMIN },
+  "/api/settings/patient-numbering": { GET: ADMIN, PATCH: ADMIN },
+  "/api/patients/[id]/statement": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/hr/identity-preview": { GET: ADMIN, POST: ADMIN },
   "/api/hr/staff": { GET: ADMIN, POST: ADMIN },
   "/api/hr/staff/[id]": { GET: ADMIN, PATCH: ADMIN },
@@ -69,6 +82,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/hr/settings": { GET: ADMIN, PATCH: ADMIN },
   "/api/hr/settings/history": { GET: ADMIN },
   "/api/hr/reports": { GET: ADMIN },
+  "/api/hr/me": { GET: ["admin", "reception", "doctor", "assistant", "cashier", "accountant"] },
   "/api/tasks": { GET: CLINIC, POST: CLINIC },
   "/api/tasks/[id]": { GET: CLINIC, PATCH: CLINIC },
   "/api/tasks/[id]/comments": { POST: CLINIC },
@@ -135,12 +149,17 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/inventory/[id]": { GET: CLINIC, PATCH: FRONT_DESK },
   "/api/inventory/[id]/movements": { POST: CLINIC },
   "/api/inventory/patient-cost": { GET: CLINIC },
+  // Legacy roles below; a canonical session is admitted inside the route by the exact
+  // capability of each read/command (M3a, lib/inventory-domain/canonical-procurement-transport.ts).
   "/api/inventory/procurement": { GET: CLINIC, POST: CLINIC },
   "/api/inventory/value": { GET: ADMIN },
   "/api/invoices": { GET: ["admin", "reception", "cashier", "accountant"], POST: FRONT_DESK },
   "/api/invoices/clinical-preview": { POST: FRONT_DESK },
   "/api/invoices/[id]": { GET: ["admin", "reception", "cashier", "accountant"], PATCH: FRONT_DESK },
   "/api/invoices/[id]/correct": { GET: ADMIN, POST: ADMIN },
+  "/api/invoices/[id]/add-service": { GET: ADMIN, PUT: ADMIN, POST: ADMIN },
+  "/api/invoices/[id]/archive": { GET: ["admin", "reception", "cashier", "accountant"], POST: ADMIN },
+  "/api/invoices/archive": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/lab": { GET: CLINIC, POST: CLINIC },
   "/api/lab/backlog": { GET: ADMIN },
   "/api/lab/[id]": { PATCH: CLINIC, DELETE: ADMIN },
@@ -160,13 +179,16 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ortho/[id]": { GET: CLINIC, POST: CLINIC, PATCH: CLINIC },
   "/api/ortho/[id]/strategy": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/assessment": { GET: CLINIC, POST: CLINICAL },
+  "/api/patients/[id]/return-booking-context": { GET: ["admin", "reception", "doctor"] },
+  // Decided by the actor's live grants (canViewResponsibilitySuggestion / canConfirmCaseResponsibility) plus patient access.
+  "/api/patients/[id]/responsibility": { GET: ["admin", "reception", "doctor"], PATCH: ["admin", "reception", "doctor"] },
   "/api/ortho/adjustments/[id]/billing-decision": { POST: CLINIC },
   "/api/ortho/baseline": { POST: CLINICAL },
   "/api/ortho/billing-decisions": { GET: CLINIC },
   "/api/ortho/followups": { GET: CLINIC },
   "/api/parties": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ADMIN },
   "/api/parties/[id]": { PATCH: ADMIN },
-  "/api/party-openings": { GET: ADMIN, POST: ADMIN, PATCH: ADMIN },
+  "/api/party-openings": { GET: ["admin", "accountant"], POST: ADMIN, PATCH: ADMIN },
   "/api/patients": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: CLINIC },
   "/api/patients/[id]": { GET: ["admin", "reception", "doctor", "assistant"], PATCH: CLINIC, DELETE: ADMIN },
   "/api/patients/[id]/arrival-panel": { GET: ["admin", "reception", "doctor", "cashier"] },
@@ -198,10 +220,12 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients/[id]/materials": { GET: CLINIC },
   "/api/patients/[id]/medical-history": { GET: CLINIC, POST: CLINIC },
   "/api/patients/[id]/merge": { POST: ADMIN },
+  "/api/patients/[id]/number": { GET: ADMIN, PATCH: ADMIN },
   "/api/patients/[id]/photo": { PUT: CLINIC },
   "/api/patients/[id]/plans": { GET: CLINIC },
   "/api/patients/[id]/clinical-context": { GET: CLINIC },
   "/api/patients/[id]/treatment-financial-context": { GET: ["admin", "reception", "cashier", "accountant"] },
+  "/api/patients/[id]/prescriptions/saved": { GET: CLINIC },
   "/api/patients/[id]/prescriptions": { GET: CLINICAL },
   "/api/patients/[id]/problems": { GET: CLINIC, POST: CLINICAL },
   "/api/patients/[id]/referrals": { GET: CLINIC, POST: CLINICAL },
@@ -290,7 +314,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/visits/[id]/billing-preview": { GET: CLINIC },
   "/api/visits/[id]/financial-context": { GET: ["admin", "reception", "doctor", "assistant"] },
   "/api/visits/[id]/clinical": { GET: ["admin", "reception", "doctor", "assistant"], POST: ["admin", "doctor", "assistant"] },
-  "/api/visits/[id]/materials": { GET: CLINIC },
+  "/api/visits/[id]/materials": { GET: CLINIC, POST: CLINIC },
   "/api/visits/[id]/next": { POST: CLINIC },
   "/api/visits/[id]/reception-handoff": { POST: FRONT_DESK },
   "/api/visits/[id]/walkout": { GET: CLINIC },
@@ -390,6 +414,8 @@ export function apiRouteVerdict(pathname: string, method: string): ApiRouteVerdi
 
 /** الأدوار التي يرفضها المسار دائمًا لهذا الفعل — لاختبار المصفوفة على HTTP. */
 export function rolesAlwaysDenied(access: HttpAccess, roles: readonly Role[]): Role[] {
+  // مسار الهوية الموحّدة يرفض كل جلسة قديمة بأي دور.
+  if (access === "canonical") return [...roles];
   if (isAccessClass(access)) return [];
   return roles.filter((role) => !access.includes(role));
 }

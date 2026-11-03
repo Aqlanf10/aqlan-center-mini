@@ -2,9 +2,10 @@
  * أدوات التقويم والمتابعات والتحليل السيفالومتري (Orthodontics AI Tools)
  */
 
-import { orthoFollowupBoard, listPatientCephAnalyses, doctorOwnedPatientIds } from "../db";
+import { CLINIC_TIME_ZONE, orthoFollowupBoard, listPatientCephAnalyses, doctorOwnedPatientIds } from "../db";
 import { classifyFollowups, BUCKET_LABEL, type FollowupBucket } from "../ortho-followup";
 import { canAccessPatient } from "../patient-access";
+import { clinicDateString } from "../schedule";
 import type { SessionPayload } from "../auth";
 import type { AiToolContext, ToolExecutionResult, KpiCard, StructuredTable } from "./types";
 
@@ -25,7 +26,7 @@ export async function getOrthoFollowupsDue(
   }
 
   try {
-    const today = context.todayISO || new Date().toISOString().slice(0, 10);
+    const today = context.todayISO || clinicDateString(new Date(), CLINIC_TIME_ZONE);
     let board = await orthoFollowupBoard(today).catch(() => []);
 
     /* عزل الطبيب (P0.14): اللوحة والتجميعات والأعداد كلها تُحسب بعد التصفية —

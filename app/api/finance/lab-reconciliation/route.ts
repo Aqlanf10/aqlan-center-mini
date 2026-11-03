@@ -16,6 +16,12 @@ import {
 } from "@/lib/lab-reconciliation";
 import { LAB_BALANCE_VIEW, projectLabBalanceOverview } from "@/lib/lab-balance-overview";
 import type { Currency } from "@/lib/money";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  labReconciliationGetCanonicalResponse,
+  labReconciliationPostCanonicalResponse,
+} from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +33,9 @@ const privateJson = (body: unknown, status = 200) => NextResponse.json(body, {
 });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return labReconciliationGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   const { searchParams } = new URL(request.url);
   if (!session) return searchParams.has("view")
@@ -77,9 +86,9 @@ export async function GET(request: Request) {
         return NextResponse.json({ message: "المختبر غير موجود." }, { status: 404 });
       }
 
-      // الأوامر الخاصة بهذا المختبر غير المسددة أو المستلمة حديثاً
+      // الأوامر الخاصة بهذا المختبر غير المسددة أو المستلمة حديثاً (مع استبعاد المسودات غير المرحّلة FIN-04)
       const partyOrders = allOrders.filter(
-        (o) => o.partyId === targetPartyId || o.labName === party.name,
+        (o) => (o.partyId === targetPartyId || o.labName === party.name) && o.isPosted !== false,
       );
 
       const reconcileItems: ReconcileOrderItem[] = partyOrders.map((o) => ({
@@ -108,7 +117,7 @@ export async function GET(request: Request) {
     // إحصائيات عامة لكافة المختبرات
     const labStats = labParties.map((party) => {
       const partyOrders = allOrders.filter(
-        (o) => o.partyId === party.id || o.labName === party.name,
+        (o) => (o.partyId === party.id || o.labName === party.name) && o.isPosted !== false,
       );
       const unsettled = partyOrders.filter((o) => o.financialStatus !== "paid");
 
@@ -138,6 +147,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return labReconciliationPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

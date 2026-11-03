@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalClinicalRecordsFailure, commandCanonicalProblemStatus } from "@/lib/canonical-clinical-records";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { changePatientProblemStatus, getPatientProblemOwner } from "@/lib/db";
 import { checkProblemStatus } from "@/lib/cases";
 import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
@@ -7,6 +10,20 @@ export const dynamic = "force-dynamic";
 
 /** (CASE-MODEL-1) تغيير حالة مشكلة: نشطة / محلولة / غير نشطة — مُدقَّق. */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) return read.response;
+    try {
+      return NextResponse.json(
+        await commandCanonicalProblemStatus(selected.handle, (await params).id, read.body),
+        { headers: NO_STORE },
+      );
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر تحديث المشكلة. أعد المحاولة.");
+    }
+  }
   const id = idOf((await params).id);
   if (!id) return json("رقم مشكلة غير صالح.", 400);
   const read = await readBody(request);

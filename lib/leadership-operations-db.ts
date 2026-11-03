@@ -142,9 +142,12 @@ async function readSection(pool: Pick<DbPool, "query">, source: OperationalSourc
   }
 }
 export async function readOperationalOverview(pool: Pick<DbPool, "query">, input: OperationalQuery, timeZone: string): Promise<OperationalOverview> {
-  const sections = await Promise.all([
-    ...(input.lane !== "doctor" ? [readSection(pool, "appointments", input.day, timeZone, input.appointmentPage)] : []),
-    ...(input.lane !== "reception" ? [readSection(pool, "referrals", input.day, timeZone, input.referralPage)] : []),
-  ]);
+  const sections: OperationalSection[] = [];
+  if (input.lane !== "doctor") {
+    sections.push(await readSection(pool, "appointments", input.day, timeZone, input.appointmentPage));
+  }
+  if (input.lane !== "reception") {
+    sections.push(await readSection(pool, "referrals", input.day, timeZone, input.referralPage));
+  }
   return { day: input.day, timeZone, lane: input.lane, sections };
 }

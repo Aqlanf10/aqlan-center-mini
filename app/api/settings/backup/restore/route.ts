@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireBackupAdminReadOnly } from "@/lib/backupReadOnly";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { admitCanonicalBackupOwner } from "@/lib/canonical-backup-readonly";
 import { isValidBackupArchiveId, resolveBackupDirectory } from "@/lib/backupVolume";
 import { runAdminRestoreDrill } from "@/lib/restore/admin";
 import { isAdmin } from "@/lib/roles";
@@ -13,15 +15,29 @@ const noStore = (body: unknown, status: number): NextResponse =>
   NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 export async function POST(request: Request) {
-  const auth = await requireBackupAdminReadOnly();
-  if (!auth.ok) {
-    return noStore(
-      { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن." : "سجّل الدخول من جديد." },
-      auth.reason === "users-unreadable" ? 503 : 401,
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "سجّل الدخول من جديد." }, 401);
+  let actorUsername: string;
+  if (selected.kind === "canonical") {
+    const admitted = await admitCanonicalBackupOwner(
+      selected.handle,
+      "استعادة النسخ الاحتياطية للمدير وحده.",
+      "المصادقة غير متاحة الآن.",
     );
-  }
-  if (!isAdmin(auth.session.role)) {
-    return noStore({ message: "استعادة النسخ الاحتياطية للمدير وحده." }, 403);
+    if ("response" in admitted) return admitted.response;
+    actorUsername = admitted.username;
+  } else {
+    const auth = await requireBackupAdminReadOnly();
+    if (!auth.ok) {
+      return noStore(
+        { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن." : "سجّل الدخول من جديد." },
+        auth.reason === "users-unreadable" ? 503 : 401,
+      );
+    }
+    if (!isAdmin(auth.session.role)) {
+      return noStore({ message: "استعادة النسخ الاحتياطية للمدير وحده." }, 403);
+    }
+    actorUsername = auth.session.username;
   }
 
   let body: unknown;
@@ -57,7 +73,7 @@ export async function POST(request: Request) {
   const result = await runAdminRestoreDrill({
     backupDir,
     backupId,
-    actor: auth.session.username,
+    actor: actorUsername,
   });
 
   if (result.ok) {

@@ -60,6 +60,15 @@ vi.mock("react", async (original) => {
     useLayoutEffect: effect(true), useEffect: effect(false),
   };
 });
+// This suite owns prescription/visit lifetimes, not browser IndexedDB/Web Locks.
+// Keep the real clinical command hook; supply only its independent platform boundaries.
+vi.mock("../lib/clinical-lab-operation-reference", async original => ({
+  ...await original<typeof import("../lib/clinical-lab-operation-reference")>(),
+  readClinicalLabReference: async () => ({ revision: 0, pending: null }),
+}));
+vi.mock("../lib/clinical-visit-browser-lock", () => ({
+  withClinicalVisitBrowserLock: async (_scope: unknown, run: () => Promise<unknown>) => run(),
+}));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: state.username, role: state.role, permissions: state.permissions }) }));
 vi.mock("../components/SettingsProvider", () => ({ useSetting: () => "", useClinicName: () => "Synthetic clinic" }));
 vi.mock("../components/ToothPicker", () => ({ ToothField: () => null }));
@@ -150,7 +159,7 @@ beforeEach(() => {
     if (clinical) return response(200, options?.method === "POST" ? { ok: true } : structuredClone(visits.get(Number(clinical[1]))));
     const patient = url.match(/^\/api\/patients\/(\d+)$/);
     if (patient) return readPatient(Number(patient[1]));
-    if (/^\/api\/patients\/\d+\/prescriptions$/.test(url)) return response(200, { prescriptions: [], suggestions: [] });
+    if (/^\/api\/patients\/\d+\/prescriptions$/.test(url)) return response(200, { prescriptions: [], suggestions: [], prescriberOptions: { issuerId: 94001, canChooseAnyDoctor: false, doctors: [{ id: 94001, name: "Synthetic clinician" }] } });
     if (url === "/api/services") return response(200, []);
     if (url === "/api/parties?kind=doctor") return response(200, [{ id: 94001, name: "Synthetic clinician" }]);
     throw new Error(`Unexpected request blocked: ${url}`);
@@ -171,7 +180,9 @@ describe("prescription patient context contract", () => {
     change(find(renderModal(), (node) => node.props.placeholder === "Drug name (e.g. Augmentin / Brufen)"), "Amoxicillin");
     expect(text(renderModal())).toContain("خطر تحسسي حرج (Penicillin Allergy)");
     click(button(renderModal(), "💬إرسال واتساب"));
-    expect(openMock).toHaveBeenCalledWith(expect.stringContaining("https://wa.me/967777100099?"), "_blank");
+    // Incomplete new medication cannot escape issuance review through sharing.
+    expect(openMock).not.toHaveBeenCalled();
+    expect(text(renderModal())).toContain("أكمل اسم الدواء");
     expect(readCalls()[0][1]).toMatchObject({ cache: "no-store", signal: expect.any(AbortSignal) });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   });

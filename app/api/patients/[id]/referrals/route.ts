@@ -1,3 +1,7 @@
+import { canonicalPatientGet, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalClinicalRecordsFailure, commandCanonicalReferralCreate } from "@/lib/canonical-clinical-records";
+import { readCanonicalReferrals } from "@/lib/canonical-patient-reads";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -19,6 +23,9 @@ function patientIdOf(raw: string): number | null {
 
 /** (P3-8) إحالات المريض — يراها كل من يملك الوصول إلى ملفه. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 4): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await params).id, readCanonicalReferrals, "تعذّر تحميل الإحالات.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const patientId = patientIdOf((await params).id);
@@ -38,6 +45,27 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
  * (الفحص المركزي نفسه الذي يحرس الوصفات). الاستقبال يسجّل النتيجة ولا يصدر الخطاب.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let body: Record<string, unknown>;
+    try {
+      const raw = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES);
+      body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(
+        await commandCanonicalReferralCreate(selected.handle, (await params).id, body),
+        { status: 201, headers: NO_STORE },
+      );
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر حفظ الإحالة. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = patientIdOf((await params).id);

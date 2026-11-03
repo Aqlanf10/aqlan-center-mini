@@ -13,19 +13,20 @@ export async function requireHrHistorySchema(client: Pick<DbClient, 'query'>): P
     AND to_regclass('public.hr_effective_revisions') IS NOT NULL AND to_regclass('public.hr_temporal_write_receipts') IS NOT NULL AS available`);
   if (!row?.available) historyFail('integration_pending', 'توثيق التاريخ غير مفعّل في هذه النسخة؛ يلزم اعتماد إدماج المخطط أولًا.', 503);
 }
-export async function recordHrHistory(pool: DbPool, authority: HrTemporalAuthority, input: HrHistoryCommand): Promise<HrHistoryReceipt> {
+export async function recordHrHistoryInTransaction(
+  client: DbClient,
+  authority: HrTemporalAuthority,
+  input: HrHistoryCommand,
+): Promise<HrHistoryReceipt> {
   requireHrTemporalAuthority(authority);
-  // Re-validate even trusted server callers; the subject and operation cannot be smuggled in a body.
   const { staffId, operation, ...body } = input;
   const kind = operation === 'employment.record' ? 'employment' : operation === 'schedule.record' ? 'schedule' : historyFail('invalid_operation', 'عملية تاريخ غير صالحة.', 400);
   const command = parseHrHistoryCommand(body, kind, staffId), canonical = canonicalHrIntent(command);
   const digest = createHash('sha256').update(canonical).digest('hex');
-  let callbackCompleted = false;
-  try { return await withTransaction(pool, async client => {
+  try {
     const actor = await authority.verify(client);
     if (command.expectedUsername !== actor.username) historyFail('owner_changed', 'تغيّر صاحب الجلسة؛ لا يُعاد طلب محفوظ باسم مستخدم آخر.', 403);
     await requireHrHistorySchema(client);
-    // Existing authority-before-resource order: user SHARE → staff → stream → request.
     const staff = await client.query('SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE', [staffId]);
     if (!staff.rows.length) historyFail('staff_not_found', 'ملف الموظف غير موجود.', 404);
     await authority.verify(client);
@@ -37,7 +38,7 @@ export async function recordHrHistory(pool: DbPool, authority: HrTemporalAuthori
     if (prior.rows.length) {
       if (prior.rows[0].intent_digest !== digest || prior.rows[0].intent_canonical !== canonical) historyFail('request_reused', 'استُخدم مفتاح الطلب لمحتوى مختلف؛ راجع الطلب الأصلي.', 409);
       await authority.verify(client); authority.assertCurrent();
-      callbackCompleted = true; return immutableJson(prior.rows[0].response as HrHistoryReceipt);
+      return immutableJson(prior.rows[0].response as HrHistoryReceipt);
     }
     const timeline = await appendHrTimelineInTransaction(client, { kind, subjectKey: String(staffId) }, {
       expectedRevision: command.expectedRevision, reason: command.reason, append: command.append, supersedeIds: command.supersedeIds,
@@ -48,14 +49,12 @@ export async function recordHrHistory(pool: DbPool, authority: HrTemporalAuthori
     await insertAuditRow(client, { action: 'hr.staff.update', entity: 'hr_effective_revision', entityId: `${stream.id}:${timeline.revision}`,
       entityLabel: `تاريخ الموظف ${staffId}`, actor: actor.username, actorRole: actor.role,
       details: { staffId, operation, revision: timeline.revision, supersedeIds: command.supersedeIds, appendedIds: command.append.map(fact => fact.id), reason: command.reason, intentDigest: digest, activation: HR_TEMPORAL_ACTIVATION } });
-    // No hr_staff/current-schedule/financial projection is activated in this slice.
     await client.query(`INSERT INTO hr_temporal_write_receipts(actor_user_id,operation,request_id,staff_id,stream_id,revision,intent_digest,intent_canonical,intent,response)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8::text,$8::text::jsonb,$9::jsonb)`, [actor.userId, operation, command.requestId, staffId, stream.id, timeline.revision, digest, canonical, JSON.stringify(result)]);
     await authority.verify(client); authority.assertCurrent();
-    callbackCompleted = true; return result;
-  }); } catch (error) {
-    // A failed COMMIT/response is never labeled a refusal. No automatic new request ID.
-    if (!callbackCompleted && (error instanceof HrTemporalError || (error instanceof HrHistoryError && error.status !== 401 && error.status !== 403))) {
+    return result;
+  } catch (error) {
+    if (error instanceof HrTemporalError || (error instanceof HrHistoryError && error.status !== 401 && error.status !== 403)) {
       const message = error instanceof HrHistoryError ? error.message : error.code === 'stale_revision'
         ? 'تغيّرت المراجعة؛ أعد التحميل وراجع التصحيح دون الكتابة فوقها.' : `الفترة أو الجدول يحتاج تصحيحًا (${error.code}).`;
       throw new HrHistoryWriteRefusal(error.code, message, error instanceof HrHistoryError ? error.status : error.code === 'stale_revision' ? 409 : 400,
@@ -63,4 +62,12 @@ export async function recordHrHistory(pool: DbPool, authority: HrTemporalAuthori
     }
     throw error;
   }
+}
+
+export async function recordHrHistory(pool: DbPool, authority: HrTemporalAuthority, input: HrHistoryCommand): Promise<HrHistoryReceipt> {
+  requireHrTemporalAuthority(authority);
+  const { staffId, operation, ...body } = input;
+  const kind = operation === 'employment.record' ? 'employment' : operation === 'schedule.record' ? 'schedule' : historyFail('invalid_operation', 'عملية تاريخ غير صالحة.', 400);
+  parseHrHistoryCommand(body, kind, staffId);
+  return withTransaction(pool, async client => recordHrHistoryInTransaction(client, authority, input));
 }

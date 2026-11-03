@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  hrPayrollPeriodsGetCanonicalResponse,
+  hrPayrollPeriodsPostCanonicalResponse,
+} from "@/lib/canonical-hr";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canManageStaff } from "@/lib/hr";
 import { hrPayrollWriteAuthorizer } from "@/lib/hr-payroll-authority";
 import {
@@ -14,11 +20,15 @@ import {
 export const dynamic = "force-dynamic";
 
 const denied = () =>
-  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 const forbidden = () =>
   NextResponse.json({ message: "إدارة مسير الرواتب للمدير وحده." }, { status: 403 });
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return hrPayrollPeriodsGetCanonicalResponse(selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) return forbidden();
@@ -33,6 +43,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return hrPayrollPeriodsPostCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) return forbidden();

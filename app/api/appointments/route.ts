@@ -6,8 +6,13 @@ import {
 } from "@/lib/db";
 import { labReadinessFor, type LabReadinessItem } from "@/lib/lab-readiness";
 import { clinicDateString, type Appointment } from "@/lib/schedule";
+import type { ReturnBookingSource } from "@/lib/return-booking-context";
 import { bookAppointment } from "@/lib/book-appointment";
+import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { CanonicalAppointmentRefusal, CanonicalBookingConflict, commandCanonicalBooking, parseCanonicalBooking, readCanonicalAppointmentDay } from "@/lib/canonical-appointments";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +44,18 @@ async function withLabReadiness(list: Appointment[], date: string): Promise<(App
 }
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 15): one day inside the appointment scope; lab
+    // readiness with the operational summary.
+    try {
+      return NextResponse.json(await readCanonicalAppointmentDay(selected.handle, new URL(request.url).searchParams.get("date") ?? ""),
+        { headers: { ...NO_STORE, "X-Clinic-Time-Zone": CLINIC_TIME_ZONE } });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر تحميل مواعيد اليوم.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const date = new URL(request.url).searchParams.get("date") ?? "";
@@ -72,6 +89,24 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 16): one admitted appointments.create transaction
+    // through the same capacity engine; refusals answer as below.
+    let canonicalBody: unknown;
+    try { canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; return NextResponse.json({ code: "invalid_booking_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+    try {
+      const result = await commandCanonicalBooking(selected.handle, parseCanonicalBooking(canonicalBody));
+      return NextResponse.json(result.warning ? { ...result.appointment, warning: result.warning } : result.appointment, { status: 201, headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalBookingConflict) return NextResponse.json(error.conflict, { status: 409, headers: NO_STORE });
+      if (error instanceof CanonicalAppointmentRefusal && error.engineCode) {
+        return NextResponse.json({ code: error.engineCode, message: error.message }, { status: error.status, headers: NO_STORE });
+      }
+      return canonicalWaitingFailure(error, "تعذّر حجز الموعد. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   let body: unknown;
@@ -88,9 +123,23 @@ export async function POST(request: Request) {
   };
 
   try {
+    const patientId = Number(source.patientId);
+    if (Number.isInteger(patientId) && patientId > 0 && !await canAccessPatient(session, patientId)) {
+      return NextResponse.json({ message: "غير مصرّح لك بحجز موعد لهذا المريض." }, { status: 403 });
+    }
     /* التجاوز يُقرأ من المستخدم في القاعدة لا من الجلسة: الجلسة كوكي، والصلاحية
        قرارٌ يُغيَّر من شاشة المستخدمين فيسري فورًا لا بعد خروجٍ ودخول. */
     const actor = await findUserByUsername(session.username).catch(() => null);
+    const requestedDoctorId = integer("doctorId");
+    const actorDoctorPartyId = actor?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+    if (
+      session.role === "doctor"
+      && !actor?.permissions?.canViewAllAppointments
+      && requestedDoctorId !== null
+      && requestedDoctorId !== actorDoctorPartyId
+    ) {
+      return NextResponse.json({ message: "لا يمكنك حجز موعد باسم طبيب آخر." }, { status: 403 });
+    }
     /* بابٌ واحد للحجز — هو نفسه الذي يمرّ منه الوكيل الذكي. */
     const result = await bookAppointment({
       patientId: Number(source.patientId),
@@ -101,12 +150,16 @@ export async function POST(request: Request) {
       appointmentType: text("appointmentType", 60),
       bookingIntent: source.bookingIntent === "ortho_follow_up" ? "ortho_follow_up" : undefined,
       note: text("note", 300),
-      doctorId: integer("doctorId"),
+      doctorId: requestedDoctorId ?? (session.role === "doctor" ? actorDoctorPartyId : null),
       chairNo: source.chairNo == null || source.chairNo === "" ? null : Number(source.chairNo),
       overrideReason: text("overrideReason", 300),
+      nearbyAppointmentConfirmation: text("nearbyAppointmentConfirmation", 4096),
+      returnBookingSource: source.returnBookingSource as ReturnBookingSource | null | undefined,
+      returnBookingOrigin: source.returnBookingOrigin as ReturnBookingSource | null | undefined,
+      returnBookingFingerprint: text("returnBookingFingerprint", 128),
       isNewPatient: source.isNewPatient === true,
     }, {
-      username: session.username,
+      username: session.username, userId: session.userId,
       role: session.role,
       doctorPartyId: actor?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null),
       canOverrideCapacity: actor?.permissions?.canOverrideCapacity === true,
@@ -116,7 +169,7 @@ export async function POST(request: Request) {
     if (!result.ok) {
       return result.status === 409
         ? NextResponse.json(result.conflict, { status: 409 })
-        : NextResponse.json({ message: result.message }, { status: 400 });
+        : NextResponse.json({ message: result.message, ...(result.code ? { code: result.code } : {}) }, { status: 400 });
     }
     /* تنبيهٌ لا خطأ: الموعد حُجز، والاستقبال تُخبَر لتتأكّد قبل أن تَعِد المريض. */
     return NextResponse.json(

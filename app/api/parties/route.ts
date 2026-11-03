@@ -6,6 +6,9 @@ import { PARTY_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { isPartyKind } from "@/lib/expenses";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { partiesGetCanonicalResponse, partiesPostCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +16,23 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return partiesGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   const kind = new URL(request.url).searchParams.get("kind");
   try {
+    const canSeeEmployees = isAdmin(session.role)
+      || (session.role === "accountant" && session.financeAccess?.viewReports !== false);
+    if (kind === "employee" && !canSeeEmployees) {
+      return NextResponse.json([]);
+    }
     const parties = await listParties(isPartyKind(kind) ? kind : undefined);
+    const visible = canSeeEmployees ? parties : parties.filter((p) => p.kind !== "employee");
     if (!isAdmin(session.role)) {
       return NextResponse.json(
-        parties.map((p) => {
+        visible.map((p) => {
           if (p.kind === "doctor" && p.id !== session.partyId) {
             return { ...p, commissionPercent: 0 };
           }
@@ -28,13 +40,16 @@ export async function GET(request: Request) {
         }),
       );
     }
-    return NextResponse.json(parties);
+    return NextResponse.json(visible);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الجهات." }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return partiesPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   // نسبة العمولة تحكم ما يُصرف للأطباء شهريًا، فإنشاء الجهات وتعديلها للمدير وحده.

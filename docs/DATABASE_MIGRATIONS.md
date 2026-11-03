@@ -589,6 +589,52 @@ Require exact-head PostgreSQL, schema/ownership, populated SQL/full-archive
 restore, HTTP/browser retry and Staging acceptance evidence before release.
 Neither this listing nor passing unit tests alone authorizes Production rollout.
 
+### 0081_invoice_archive.sql / 0082_invoice_service_additions.sql
+
+Local activation candidate: immutable documentary archive events/refusals and separate dated service-addition receipts/refusals. Runtime registers exact migration bytes under the common migration lock; no baseline adoption;0079 is the separately reviewed routine orthodontic coverage migration and0080 is the separately reviewed patient-numbering migration below. Archive never changes financial/clinical rows; adding service creates a separate invoice through existing financial/clinical authority.
+
+All four evidence tables are protected reset history: any row refuses reset before backup; empty tables participate under EXCLUSIVE locks and READ COMMITTED-only empty TRUNCATE guards. Backup restores archive versions in order and invoice items before addition receipts. Historical actor status and subsequent source cancellation do not invalidate restore; current authorization remains enforced by command writers.
+
+These changes are local only pending complete synthetic activation/ownership evidence and root review; no production activation or deployment is claimed.
+
+### 0080_patient_numbering.sql
+
+Local patient-file numbering activation: new generated files start at P-07000 or
+above the sequence/current/retired high-water. Existing numbers are never mass
+rewritten. Explicit admin edits retain stable patient IDs and immutable aliases;
+normalized current/retired ownership is enforced, including official restore.
+Runtime/file SQL bytes and checksum must match;0079 is separately registered routine orthodontic coverage.0081/0082
+may already be locally registered before this migration is added.
+
+Predeployment `--patient-numbering-readiness` is a mandatory count-only read-only
+gate: ambiguous historical aliases block release and require separate reviewed
+correction, never automatic cleanup. Current patients or historical aliases block
+factory reset; the patient-number sequence is never restarted. Local verification
+is not a Production readiness claim.
+
+### 0079_ortho_followup_coverage.sql
+
+Local activation of explicit routine-adjustment coverage revisions and durable
+exact-command refusal receipts. An ordinary invoice alone does not imply covered
+followups. Current source applicability is checked separately from immutable
+historical decisions; signed visits carry exact adjustment/revision manifests.
+Existing signed history cannot acquire a new proof or have its proof rewritten.
+Patient reassignment preserves recorded ownership and requires current-source
+review, not retrospective financial or clinical mutation.
+
+Numbered and runtime SQL are byte-identical and registered by checksum. Prior
+migration files remain unchanged. An exact registered 0080/0081/0082 database may
+apply missing 0079 as an additive migration; pre-existing unregistered proposal
+tables are refused, not adopted. Both coverage history tables are protected from
+populated reset and restore with their guards enabled. Migration-driven populated
+SQL/full-archive replay, upgrade, ownership and local UI evidence are required;
+local activation does not authorize Production deployment.
+
+
+## Local laboratory identity reservation (2026-10-26)
+
+`0074_lab_work_intents.sql` is locally registered in the isolated unified lab branch, with exact paired runtime SQL. It excludes deferred0073 clinical authorization and keeps0075 cross-domain corrections unregistered. It adds explicit work/member/source/command identity without legacy-source backfill, protects historical graphs and fresh-snapshot lab history, and uses READ COMMITTED UUID insertion fences compatible with0080. See [local scope, baseline adoption refusal and remaining gates](LAB_UNIFIED_LOCAL_ACCEPTANCE_20261026.md). This is not a live migration or deployment approval.
+
 ### 0087_agreement_reminder_metadata.sql
 
 Additive replacement of the reconciliation terms guard permits only
@@ -620,3 +666,44 @@ Application shade edits commit their audit record in the same transaction and
 use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
+
+### 0090_booking_request_preferences.sql
+
+Retains the historical booking metadata migration byte-for-byte (SHA-256
+`608eeee37b44a59cb4d26e915bd0b2610cf619103905be1fca0c2abe77c52e25`).
+Adds nullable request key/hash, non-null JSONB preferences, and a partial unique
+request-key index. This preserves existing requests and does not enable booking
+application routes. The previously unshipped Rx name-snapshot migration moves
+to 0092; an existing registry identifying 0090 as that Rx migration is rejected,
+never renamed or adopted automatically.
+
+### 0091_prescribing_doctor_identity.sql
+
+Adds nullable `prescriptions.prescribing_doctor_party_id` INTEGER for that
+separate prescribing identity. Existing `doctor_party_id` remains the issuing
+clinician and retains its void-authorization contract; `created_by` and audit
+actor remain the actual issuing account. No legacy backfill or permission grant.
+
+### 0092_prescribing_doctor_snapshot.sql
+
+Adds nullable `prescriptions.prescribing_doctor_name` TEXT, populated only for
+new prescriptions from the server-validated prescribing doctor. Legacy rows
+remain NULL; current registry or printing-user names are not historical evidence.
+0091 does not depend on this name column. Its SQL bytes remain unchanged.
+
+All three migrations use identical numbered/runtime SQL and checksum registration.
+CLI and runtime migration preflight reject wrong names/checksums, adopted rows,
+missing or differently typed registered columns, incorrect booking indexes, and
+unregistered column residue before applying the pending extension. Historical
+registry rows and their timestamps are retained on in-place upgrade.
+Application rollback must preserve the columns and migration history. Exact-head
+PostgreSQL/schema/restore gates and review are required before any rollout.
+
+### 0095_remediation_security_and_indexes.sql
+
+Additive security and performance migration:
+- Adds `users.session_version`, `users.is_owner` (strictly explicit owner issuance; no automatic promotion of admin accounts), and `patients.portal_secret_version`.
+- Aligns uncustomized non-lab `parties` GL account defaults with `lib/accounting.ts` (`5201/2105`, `5301/2106`, `5401/2107`).
+- Adds `audit_log_no_truncate` statement guard on `audit_log`.
+- Permits transaction-scoped owner paper-archive `< 7000` collision override while preserving immutable `retired_patient_numbers`.
+- Adds hot foreign-key indexes on `visits`, `payments`, and `invoices`.

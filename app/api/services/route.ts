@@ -10,6 +10,9 @@ import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { readForeignPrices } from "@/lib/service-foreign-prices";
 import { catalogPricesByCurrency, foreignRatesFromSettings } from "@/lib/service-pricing";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { servicesCreateCanonicalResponse, servicesListCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +20,9 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return servicesListCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   /* صلاحيات الوكيل المساعد: لائحة الأسعار من «المالية المخفية» — الطبيب يراها
@@ -48,6 +54,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return servicesCreateCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role)) {

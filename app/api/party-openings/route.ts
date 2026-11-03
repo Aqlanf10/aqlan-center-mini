@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  createPartyOpeningCanonicalResponse,
+  listPartyOpeningsCanonicalResponse,
+  updatePartyOpeningCanonicalResponse,
+} from "@/lib/canonical-patient-finance-history";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
@@ -10,6 +16,7 @@ import { rateFromSettings } from "@/lib/settings";
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -32,10 +39,13 @@ const text = (value: unknown, max: number): string | null =>
   typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return listPartyOpeningsCanonicalResponse(selected.handle);
   const session = await requireSession();
   if (!session) return denied();
-  if (!canViewFinancialReports(session.role)) {
-    return NextResponse.json({ message: "الأرصدة السابقة لمن يرى التقارير المالية." }, { status: 403 });
+  if (!canViewFinancialReports(session.role) || (session.role === "accountant" && session.financeAccess?.viewSuppliers === false)) {
+    return NextResponse.json({ message: "الأرصدة السابقة لمن يرى ذمم الموردين والتقارير المالية." }, { status: 403 });
   }
   try {
     const [openings, labs, suppliers] = await Promise.all([
@@ -58,6 +68,9 @@ async function readBody(request: Request): Promise<Record<string, unknown> | Nex
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return createPartyOpeningCanonicalResponse(selected.handle, request);
   const session = await requireSession();
   if (!session) return denied();
   if (session.role !== "admin") return adminOnly();
@@ -110,6 +123,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return updatePartyOpeningCanonicalResponse(selected.handle, request);
   const session = await requireSession();
   if (!session) return denied();
   if (session.role !== "admin") return adminOnly();

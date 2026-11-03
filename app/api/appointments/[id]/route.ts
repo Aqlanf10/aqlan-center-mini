@@ -1,3 +1,4 @@
+import type { ReturnBookingSource } from "@/lib/return-booking-source";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -9,6 +10,9 @@ import { rescheduleAppointment } from "@/lib/book-appointment";
 import { findUserByUsername } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { CanonicalAppointmentRefusal, CanonicalBookingConflict, commandCanonicalAppointmentDelete, commandCanonicalAppointmentMove, commandCanonicalReschedule, parseCanonicalAppointmentMove, parseCanonicalReschedule } from "@/lib/canonical-appointments";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +50,29 @@ async function candidatesForFreedSlot(
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slices 17–18: a canonical envelope moves or reschedules the appointment in one
+     admitted `appointments.edit` transaction; it never falls back to the legacy session. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const { id: canonicalId } = await context.params;
+    let canonicalBody: unknown;
+    try { canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; return NextResponse.json({ code: "invalid_booking_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+    try {
+      if ((canonicalBody as Record<string, unknown> | null)?.action === "reschedule") {
+        const moved = await commandCanonicalReschedule(selected.handle, Number(canonicalId), parseCanonicalReschedule(canonicalBody));
+        return NextResponse.json({ ok: true, appointment: moved.appointment, warning: moved.warning }, { headers: NO_STORE });
+      }
+      return NextResponse.json(await commandCanonicalAppointmentMove(selected.handle, Number(canonicalId), parseCanonicalAppointmentMove(canonicalBody)), { headers: NO_STORE });
+    } catch (error) {
+      // The legacy route's shapes: a capacity conflict with its reasons; an engine code.
+      if (error instanceof CanonicalBookingConflict) return NextResponse.json({ message: error.conflict.message, conflict: error.conflict }, { status: 409, headers: NO_STORE });
+      if (error instanceof CanonicalAppointmentRefusal && error.engineCode) {
+        return NextResponse.json({ code: error.engineCode, message: error.message }, { status: error.status, headers: NO_STORE });
+      }
+      return canonicalWaitingFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+    }
+  }
   /* الفاعل يُحمل إلى سجلّ الانتقالات: «مَن ألغى هذا الموعد» سؤالٌ يُسأل بعد أسبوع،
      ولا يجيبه سجلٌّ يقول «الاستقبال» عن ستّة أشخاص. */
   const session = await requireSession();
@@ -127,10 +154,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           ? undefined : (body_.doctorId == null ? null : Number(body_.doctorId)),
         chairNo: body_.chairNo === undefined
           ? undefined : (body_.chairNo == null ? null : Number(body_.chairNo)),
+        nearbyAppointmentConfirmation: typeof body_.nearbyAppointmentConfirmation === "string" ? body_.nearbyAppointmentConfirmation.slice(0, 4096) : null,
+        transferToCurrentResponsibleDoctor: body_.transferToCurrentResponsibleDoctor === true,
+        returnBookingSource: body_.returnBookingSource as ReturnBookingSource | null | undefined,
+        returnBookingOrigin: body_.returnBookingOrigin as ReturnBookingSource | null | undefined,
+        returnBookingFingerprint: typeof body_.returnBookingFingerprint === "string" ? body_.returnBookingFingerprint.slice(0, 128) : null,
         reason: bodyReason ?? "",
         overrideReason: typeof body_.overrideReason === "string" ? body_.overrideReason : null,
       }, {
-        username: session.username,
+        username: session.username, userId: session.userId,
         role: session.role,
         doctorPartyId: user?.partyId ?? null,
         /* صلاحيةُ التجاوز من المستخدم في الخادم لا من الطلب. */
@@ -144,7 +176,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         });
       }
       return NextResponse.json(
-        { message: result.message, conflict: result.conflict ?? null },
+        { message: result.message, conflict: result.conflict ?? null, ...(result.code ? { code: result.code } : {}) },
         { status: result.status },
       );
     }
@@ -175,6 +207,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
 /* حذف موعد نهائيًا — المدير وحده، وللموعد الذي لم يتحول زيارةً بعد. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 19: a canonical envelope deletes under `appointments.cancel` and the
+     appointment scope, with the audit row atomic; it never falls back. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const { id: canonicalId } = await context.params;
+    let canonicalReason: string | null = null;
+    try {
+      const body = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES);
+      if (typeof body?.reason === "string" && body.reason.trim()) canonicalReason = body.reason.trim().slice(0, 300);
+    } catch (error) {
+      // The reason is optional: an empty or unreadable body means no reason; only an
+      // oversized body refuses (413).
+      const bounded = bodyErrorResponse(error); if (bounded?.status === 413) return bounded;
+    }
+    try {
+      return NextResponse.json(await commandCanonicalAppointmentDelete(selected.handle, Number(canonicalId), canonicalReason), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر حذف الموعد. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

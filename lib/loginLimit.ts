@@ -1,6 +1,6 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { consumeLoginAttempt } from "./db";
-import { clientIpFromForwardedFor } from "./net";
+import { clientIpFromForwardedFor, isTrustedProxy } from "./net";
 
 /**
  * حدُّ محاولات الدخول المشترك — الطاقم والبوابة على السواء.
@@ -38,30 +38,53 @@ export function accountLimitKey(scope: "staff" | "portal", identifier: string): 
   return createHmac("sha256", secret).update(`${scope}:account:${identifier.trim().toLowerCase()}`).digest("hex");
 }
 
+/**
+ * مفاتيح الحدّ المشترك لمحاولة واحدة — الحساب دائمًا، والمصدر خلف الوسيط الموثوق.
+ * null بلا سرّ: يبقى الحدّ القديم وحده يعمل بجدوله (لا يُفتح الباب).
+ * المصدر الوحيد للمفاتيح: الدخول القديم والموحّد يستهلكان المفاتيح نفسها.
+ */
+export function loginLimitKeys(
+  scope: "staff" | "portal",
+  identifier: string,
+  headers: Headers,
+): { key: string; maximum: number }[] | null {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret || secret.length < 32) return null;
+  const hmac = (value: string) =>
+    createHmac("sha256", secret).update(value).digest("hex");
+
+  const normalizedId = identifier.trim().toLowerCase();
+  if (isTrustedProxy()) {
+    /* آخر قيمة في السلسلة — التي أضافها الوسيط الموثوق نفسه؛ الأولى يكتبها
+       العميل فيمكنه تزويرها (lib/net.ts). عزل عداد الحساب بـ (IP + الحساب)
+       يمنع مهاجمًا خارجيًا من قفل حساب المدير من عنوان آخر، مع بقاء سقف المصدر
+       وسقف واسع للحساب ضد التوزيع الشبكي. */
+    const address = clientIpFromForwardedFor(headers.get("x-forwarded-for"));
+    if (address) {
+      return [
+        { key: hmac(`${scope}:ip_account:${address}:${normalizedId}`), maximum: ACCOUNT_ATTEMPTS },
+        { key: hmac(`${scope}:source:${address}`), maximum: SOURCE_ATTEMPTS },
+        { key: hmac(`${scope}:account:${normalizedId}`), maximum: SOURCE_ATTEMPTS },
+      ];
+    }
+  }
+  return [
+    { key: hmac(`${scope}:account:${normalizedId}`), maximum: ACCOUNT_ATTEMPTS },
+  ];
+}
+
+/** مفتاح الحدّ القديم لحساب الطاقم (sha256 للاسم بأحرف صغيرة) — كما كان في مسار الدخول. */
+export function legacyStaffAccountKey(username: string): string {
+  return createHash("sha256").update(username.toLowerCase()).digest("hex");
+}
+
 export async function consumeLoginAttemptFor(
   scope: "staff" | "portal",
   identifier: string,
   headers: Headers,
 ): Promise<LoginAttemptResult> {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret || secret.length < 32) {
-    // بلا سرٍّ لا بصمة HMAC: نترك الحدّ القديم يعمل بجدوله لا نفتح الباب.
-    return { allowed: true, retryAfterSeconds: 0 };
-  }
-  const hmac = (value: string) =>
-    createHmac("sha256", secret).update(value).digest("hex");
-
-  const limits: { key: string; maximum: number }[] = [
-    { key: hmac(`${scope}:account:${identifier.trim().toLowerCase()}`), maximum: ACCOUNT_ATTEMPTS },
-  ];
-  if (process.env.TRUST_PROXY === "true") {
-    /* آخر قيمة في السلسلة — التي أضافها الوسيط الموثوق نفسه؛ الأولى يكتبها
-       العميل فيمكنه تزويرها (lib/net.ts). */
-    const address = clientIpFromForwardedFor(headers.get("x-forwarded-for"));
-    if (address) {
-      limits.push({ key: hmac(`${scope}:source:${address}`), maximum: SOURCE_ATTEMPTS });
-    }
-  }
-
+  const limits = loginLimitKeys(scope, identifier, headers);
+  // بلا سرٍّ لا بصمة HMAC: نترك الحدّ القديم يعمل بجدوله لا نفتح الباب.
+  if (!limits) return { allowed: true, retryAfterSeconds: 0 };
   return consumeLoginAttempt(limits, WINDOW_MINUTES);
 }

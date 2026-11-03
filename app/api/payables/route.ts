@@ -2,10 +2,16 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createPayable, getParty, getSettings, partyBalances, partyNativeBalanceSnapshot, partyStatement, recordAudit } from "@/lib/db";
+import { resolveClinicZone } from "@/lib/clinicZone";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { payablesGetCanonicalResponse, payablesPostCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +21,9 @@ const denied = () =>
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return payablesGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewMoney(session.role)) {
@@ -57,6 +66,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return payablesPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role)) {
@@ -91,6 +103,11 @@ export async function POST(request: Request) {
     ? source.category.trim().slice(0, 40) : null;
 
   const settings = await getSettings();
+  const today = clinicDateString(new Date(), resolveClinicZone(process.env.CLINIC_TIME_ZONE));
+  const lockedBefore = (settings["finance.locked_before"] ?? "").trim();
+  if (lockedBefore && today < lockedBefore) {
+    return NextResponse.json({ message: "الفترة المحاسبية مقفلة. لا يمكن تسجيل التزام جديد في فترة مقفلة." }, { status: 409 });
+  }
   // (TD-05) الأساس دستوري من الكود — والإعدادات تبقى لأسعار الصرف.
   const base = CLINIC_BASE_CURRENCY;
   const exchangeRate = rateFromSettings(settings, currency, base);
@@ -98,31 +115,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "سعر الصرف غير مضبوط في الإعدادات." }, { status: 409 });
   }
 
-  try {
-    const party = await getParty(partyId);
-    if (!party) return NextResponse.json({ message: "الجهة غير موجودة." }, { status: 404 });
-    // The manual form omits category. Resolve its default from the stored party,
-    // while retaining explicit categories and the existing non-lab fallback.
-    const category = requestedCategory ?? (party.kind === "lab" ? "lab" : "supplier");
-    const payable = await createPayable({
-      partyId, category, description, amountMinor, currency,
-      baseCurrency: base, exchangeRate, labOrderId: null, dueDate,
-      createdBy: session.username,
-    });
-    if (!payable) return NextResponse.json({ message: "تعذّر حفظ الالتزام." }, { status: 500 });
-    /* (P0-2) الالتزام أصل رصيد المورد وحارس سداده — تسجيله يُدقَّق. */
-    await recordAudit({
-      action: "payable.create",
-      entity: "payable", entityId: payable.id, entityLabel: payable.description,
-      details: {
-        الجهة: payable.partyName, البيان: payable.description, المبلغ: payable.amountMinor,
-        العملة: payable.currency, سعر_الصرف: payable.exchangeRate,
-        المكافئ: payable.baseAmountMinor, الاستحقاق: payable.dueDate, التصنيف: payable.category,
-      },
-      actor: session.username, actorRole: session.role,
-    });
-    return NextResponse.json(payable, { status: 201 });
-  } catch {
-    return NextResponse.json({ message: "تعذّر حفظ الالتزام. تأكد من الجهة." }, { status: 500 });
-  }
+  return withHttpIdempotency(request, "payables.create", session.username, source, async () => {
+    try {
+      const party = await getParty(partyId);
+      if (!party) return NextResponse.json({ message: "الجهة غير موجودة." }, { status: 404 });
+      // The manual form omits category. Resolve its default from the stored party,
+      // while retaining explicit categories and the existing non-lab fallback.
+      const category = requestedCategory ?? (party.kind === "lab" ? "lab" : "supplier");
+      const payable = await createPayable({
+        partyId, category, description, amountMinor, currency,
+        baseCurrency: base, exchangeRate, labOrderId: null, dueDate,
+        createdBy: session.username,
+      });
+      if (!payable) return NextResponse.json({ message: "تعذّر حفظ الالتزام." }, { status: 500 });
+      /* (P0-2) الالتزام أصل رصيد المورد وحارس سداده — تسجيله يُدقَّق. */
+      await recordAudit({
+        action: "payable.create",
+        entity: "payable", entityId: payable.id, entityLabel: payable.description,
+        details: {
+          الجهة: payable.partyName, البيان: payable.description, المبلغ: payable.amountMinor,
+          العملة: payable.currency, سعر_الصرف: payable.exchangeRate,
+          المكافئ: payable.baseAmountMinor, الاستحقاق: payable.dueDate, التصنيف: payable.category,
+        },
+        actor: session.username, actorRole: session.role,
+      });
+      return NextResponse.json(payable, { status: 201 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر حفظ الالتزام. تأكد من الجهة." }, { status: 500 });
+    }
+  });
 }

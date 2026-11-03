@@ -1,10 +1,11 @@
-import type { DbPool } from './db';
+import type { DbClient, DbPool } from './db';
 import { loadStaffContracts, payTermsKey, profileFromRow, governingContractOn, type ContractInput, type ProfileInput } from './hr-pay-terms';
 import { addCalendarDays, assertRange, immutableJson, selectTemporal, type TemporalTimeline } from './hr-temporal';
 import { selectHrSchedule, type HrEffectiveSchedule } from './hr-schedule-segments';
 import { selectApprovedHrPolicy, type EmploymentFact, type HrPolicyTimelines } from './hr-effective-policy';
 import { readHrTimeline } from './hr-temporal-store';
-import { readHrPolicyHistories, readHrStaffScope, withHrHistoryRead } from './hr-temporal-read';
+import { readHrPolicyHistories, readHrStaffScope, readHrStaffScopeInSnapshot, withHrHistoryRead } from './hr-temporal-read';
+import { requireHrHistorySchema } from './hr-temporal-write';
 import { historyFail, canonicalHrIntent } from './hr-temporal-request';
 import type { HrTemporalAuthority } from './hr-temporal-authority';
 
@@ -68,6 +69,16 @@ export function explainHrPayrollHistory(input: HrPayrollHistoryInput) {
     partitions, requiresProrationReview, partialCoverage, scheduleIssues, historyContextResolved: partitions.every(part => part.blockers.length === 0),
     operationalReady: false, activation: 'documented_only', profileTermsObservation: { kind: 'legacy_current_terms', value: input.profile },
     warning: 'هذه معاينة سياق تاريخي فقط: ليست مبلغًا أو اعتمادًا أو استحقاقًا. لا تغيّر المسير المعتمد ولا تتجاوز حراس المال الحالية. اكتمال دفعة بصمات لا يثبت اكتمال فترة الرواتب.' });
+}
+export async function readHrPayrollHistoryInSnapshot(client: Pick<DbClient, 'query'>, staffId: number, from: string, to: string) {
+  assertRange(from, to);
+  await requireHrHistorySchema(client);
+  const staff = await readHrStaffScopeInSnapshot(client, staffId);
+  const employment = await readHrTimeline<EmploymentFact>(client, { kind: 'employment', subjectKey: String(staffId) });
+  const schedule = await readHrTimeline<HrEffectiveSchedule>(client, { kind: 'schedule', subjectKey: String(staffId) });
+  const policies = await readHrPolicyHistories(client), contracts = await loadStaffContracts(client as DbClient, staffId);
+  const { rows: [snapshot] } = await client.query('SELECT transaction_timestamp()::text AS read_at');
+  return immutableJson({ staffId, fullName: staff.full_name, readAt: snapshot.read_at, ...explainHrPayrollHistory({ from, to, employment, schedule, policies, contracts, profile: profileFromRow(staff) }) });
 }
 export async function readHrPayrollHistory(pool: DbPool, authority: HrTemporalAuthority, staffId: number, from: string, to: string) {
   assertRange(from, to);

@@ -1,3 +1,8 @@
+import { NextResponse } from "next/server";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { canonicalAssessmentQuery, readCanonicalOrthoAssessment } from "@/lib/canonical-ortho-assessment";
+import { AssessmentStoreFault } from "@/lib/ortho-assessment-authority";
 import { journeyRouteError, routeId, type JourneyRouteContext } from "@/lib/ortho-journey-route";
 import { readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -22,6 +27,17 @@ async function scope(context: JourneyRouteContext, write: boolean) {
   return { ok: true as const, session, patientId: row.patient_id, orthoCaseId };
 }
 export async function GET(request: Request, context: JourneyRouteContext) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const { caseId, revisionId } = canonicalAssessmentQuery((await context.params).id, new URL(request.url).searchParams);
+      return NextResponse.json(await readCanonicalOrthoAssessment(selected.handle, caseId, revisionId), { headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof AssessmentStoreFault) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر قراءة التقييم؛ لم يُعتبر السجل فارغًا.");
+    }
+  }
   try {
     const owner = await scope(context, false); if (!owner.ok) return owner.response;
     const query = orthoQuery(request, ["acceptSchema", "revisionId"]);

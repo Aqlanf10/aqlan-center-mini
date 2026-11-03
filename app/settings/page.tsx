@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { DisplayVoicePreview } from "@/components/settings/DisplayVoicePreview";
 import { LoginPhotoEditor } from "@/components/settings/LoginPhotoEditor";
 import { LOGIN_PHOTO_KEYS } from "@/lib/login-photo";
 import { ClinicHoursEditor } from "@/components/settings/ClinicHoursEditor";
 import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 import { InstallApp } from "@/components/InstallApp";
 import { PageHeader } from "@/components/PageHeader";
+import { useSession } from "@/components/SessionProvider";
 import { Modal } from "@/components/Modal";
 import {
   CATEGORY_LABEL,
@@ -26,11 +28,29 @@ import {
   settingControlKind,
 } from "@/lib/settings-ui";
 import { CLINIC_HOURS_KEYS, validateSettingSet, validateTypedSetting } from "@/lib/settings-validate";
+import { SETTING_KEY_CLASSES, SETTING_WRITE_REQUIREMENT } from "@/lib/settings-capabilities";
+import { isAdmin } from "@/lib/roles";
+import {
+  primaryDomainForCategory,
+  projectSettingsDomains,
+  searchSettingsLinks,
+  type SettingsViewerContext,
+} from "@/lib/settings-navigation";
+import { SettingsInstitutionalDirectory } from "@/components/settings/SettingsInstitutionalDirectory";
 
 interface SettingsSnapshot {
   values: Record<string, string>;
   versions: Record<string, string | null>;
   secrets: Record<string, boolean>;
+  /** Canonical session only: the keys the server says this account may write now
+   * (`__canWrite`, same snapshot as the values). Display only; every write re-proves. */
+  canWrite: ReadonlySet<string> | null;
+}
+
+/** Owner-only setting classes (lib/settings-capabilities.ts), shown as such to delegates. */
+function ownerOnlySetting(key: string): boolean {
+  const entry = Object.prototype.hasOwnProperty.call(SETTING_KEY_CLASSES, key) ? SETTING_KEY_CLASSES[key] : undefined;
+  return entry !== undefined && "ownerOnly" in SETTING_WRITE_REQUIREMENT[entry.class];
 }
 
 interface MePayload { role?: string | null; displayName?: string | null; }
@@ -67,26 +87,12 @@ const CATEGORY_HELP: Partial<Record<SettingCategory, string>> = {
   clinical: "حدود الملفات والتنبيهات ذات الصلة بالسجل السريري والمخزون.",
   finance: "سياسات مالية حساسة؛ بعضها يتطلب سببًا موثقًا عند التغيير.",
   reception: "الانتظار وشاشة الصالة والضبط اليومي للاستقبال.",
+  messaging: "سياسات التذكير الآلي وموافقة المريض على المراسلة الخارجية.",
+  feature_flags: "تفعيل أو إيقاف البوابة العامة للمرضى ونموذج طلب الحجز الخارجي.",
   staff: "سياسات الرؤية والصلاحيات التي يفرضها الخادم.",
   branding: "النصوص والهوية الظاهرة للمريض.",
   backup: "سياسة النسخ الاحتياطي؛ لا تُكشف أسرار أو مفاتيح تشفير هنا.",
 };
-
-const SPECIALIZED_LINKS = [
-  ["/settings/users", "المستخدمون والصلاحيات"],
-  ["/settings/appointment-services", "خدمات المواعيد وأنواع الزيارات"],
-  ["/settings/service-materials", "ربط الخدمات بالمواد"],
-  ["/settings/finance-expenses", "بنود وميزانيات المصروفات"],
-  ["/settings/material-rates", "نسب إهلاك المواد"],
-  ["/settings/laboratories", "المختبرات"],
-  ["/settings/lab-services", "دليل خدمات المختبر"],
-  ["/settings/lab-pricing", "تسعير المختبر"],
-  ["/settings/export", "النسخ والتصدير"],
-  ["/settings/reset", "إعادة الضبط (مسح البيانات التجريبية)"],
-  ["/settings/import", "استيراد مرضى المركز القديم"],
-  ["/settings/ai", "الذكاء الاصطناعي"],
-  ["/settings/messaging", "قنوات الرسائل: واتساب، الرسائل النصية، البريد"],
-] as const;
 
 function parseSettingsPayload(payload: Record<string, unknown>): SettingsSnapshot {
   const values: Record<string, string> = {};
@@ -100,7 +106,10 @@ function parseSettingsPayload(payload: Record<string, unknown>): SettingsSnapsho
   const secrets = payload.__secrets && typeof payload.__secrets === "object"
     ? payload.__secrets as Record<string, boolean>
     : {};
-  return { values, versions, secrets };
+  const canWrite = Array.isArray(payload.__canWrite)
+    ? new Set(payload.__canWrite.filter((key): key is string => typeof key === "string"))
+    : null;
+  return { values, versions, secrets, canWrite };
 }
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {
@@ -161,9 +170,13 @@ function SettingInput({ definition, value, onChange }: {
 
 export default function SettingsPage() {
   const router = useRouter();
+  const session = useSession();
+  // Canonical identity (owner decision 5): editability comes from the server's
+  // per-key answer, never from a role label; screens not yet canonical are not linked.
+  const canonical = session?.canonical === true;
   const categories = useMemo(() => visibleCategories(), []);
   const [selectedCategory, setSelectedCategory] = useState<SettingCategory>(categories[0] ?? "general");
-  const [snapshot, setSnapshot] = useState<SettingsSnapshot>({ values: {}, versions: {}, secrets: {} });
+  const [snapshot, setSnapshot] = useState<SettingsSnapshot>({ values: {}, versions: {}, secrets: {}, canWrite: null });
   const [role, setRole] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -318,26 +331,69 @@ export default function SettingsPage() {
     }
   }, [backupRunning]);
 
-  const canViewHistory = roleCan(role, "settings.view_history");
+  const effectiveRole = role ?? session?.role ?? null;
+  const legacyAdmin = !canonical && isAdmin(effectiveRole);
+  const canViewHistory = !canonical && roleCan(effectiveRole, "settings.view_history");
+  const mayEdit = (definition: SettingDefinition) => canonical
+    ? Boolean(snapshot.canWrite?.has(definition.key))
+    : Boolean(role && canManageCategory(role, definition.category) && !definition.systemLocked);
+  const canEditAny = canonical ? (snapshot.canWrite?.size ?? 0) > 0 : Boolean(role && canManageCategory(role, "general"));
+  const hoursEditable = canonical
+    ? CLINIC_HOURS_KEYS.every((key) => snapshot.canWrite?.has(key))
+    : Boolean(role && canManageCategory(role, "hours"));
+  const loginPhotoEditable = canonical
+    ? (session?.isOwner === true || (session?.capabilities ?? []).includes("settings.operational.edit"))
+    : Boolean(role && canManageCategory(role, "branding"));
+  const announcementsEditable = canonical
+    ? (session?.isOwner === true || (session?.capabilities ?? []).includes("settings.operational.edit"))
+    : Boolean(role && canManageCategory(role, "reception"));
+  const staffTab = canonical && (session?.isOwner === true || (session?.capabilities ?? []).includes("staff.view"));
+  const procurementSetupTab = canonical && (session?.isOwner === true || (session?.capabilities ?? []).includes("inventory.references.view"));
 
-  const headerLinks = [
+  const viewerContext = useMemo<SettingsViewerContext>(
+    () => ({
+      canonical,
+      role: effectiveRole,
+      isOwner: session?.isOwner === true,
+      capabilities: session?.capabilities ?? [],
+    }),
+    [canonical, effectiveRole, session?.isOwner, session?.capabilities],
+  );
+  const institutionalDomains = useMemo(
+    () => projectSettingsDomains(viewerContext, categories),
+    [viewerContext, categories],
+  );
+  const matchingSpecializedLinks = useMemo(
+    () => searchSettingsLinks(query, viewerContext),
+    [query, viewerContext],
+  );
+  const selectedDomain = primaryDomainForCategory(selectedCategory);
+
+  const headerLinks = canonical ? [
+    { href: "/settings", label: "العيادة والتشغيل والمالية", current: true },
+    ...(staffTab ? [{ href: "/staff-access", label: "الطاقم والصلاحيات" }] : []),
+    ...(procurementSetupTab ? [{ href: "/inventory/procurement/setup", label: "تهيئة المخزون والمشتريات" }] : []),
+  ] : [
     { href: "/settings", label: "الإعدادات المركزية", current: true },
+    ...(legacyAdmin ? [{ href: "/settings/readiness", label: "جاهزية الإطلاق" }] : []),
     ...(canViewHistory ? [{ href: "/settings/history", label: "سجل تغييرات الإعدادات" }] : []),
-    { href: "/settings/users", label: "المستخدمون والصلاحيات" },
-    { href: "/settings/audit", label: "سجل التدقيق العام" },
+    ...(legacyAdmin ? [
+      { href: "/settings/users", label: "المستخدمون والصلاحيات" },
+      { href: "/settings/audit", label: "سجل التدقيق العام" },
+    ] : []),
   ];
 
   return (
     <main className="mx-auto max-w-7xl p-4 pb-16" dir="rtl">
-      <PageHeader title="الإعدادات المركزية" subtitle="سياسات المركز الفعلية من مصدر واحد — بلا مفاتيح صورية ولا تعديل مباشر للقاعدة" links={headerLinks} />
+      <PageHeader title="الإعدادات المركزية" subtitle="سياسات المركز الفعلية من مصدر واحد — موزّعة على ثمانية نطاقات مؤسسية بلا مفاتيح صورية" links={headerLinks} />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
         <div>
           <p className="text-sm font-black text-navy-950">{displayName ? `مرحبًا ${displayName}` : "إدارة إعدادات المركز"}</p>
-          <p className="mt-1 text-xs text-slate-500">{role && canManageCategory(role, "general") ? "يمكنك تعديل الفئات المصرح بها. التغييرات الحساسة تُسجّل مع سببها." : "عرض للقراءة فقط حسب صلاحيات حسابك."}</p>
+          <p className="mt-1 text-xs text-slate-500">{canEditAny ? (canonical ? "يمكنك تعديل المفاتيح المصرّح بها لحسابك فقط؛ كل حفظ يُتحقّق منه على الخادم ويُسجّل في التدقيق." : "يمكنك تعديل الفئات المصرح بها. التغييرات الحساسة تُسجّل مع سببها.") : "عرض للقراءة فقط حسب صلاحيات حسابك."}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link href="/settings/plan-templates" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">قوالب الخطط</Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {!canonical && (effectiveRole === "admin" || effectiveRole === "reception" || effectiveRole === "doctor") ? <Link href="/settings/plan-templates" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">قوالب الخطط</Link> : null}
           {canViewHistory ? <Link href="/settings/history" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">سجل التغييرات</Link> : null}
           <button type="button" onClick={() => void load()} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">تحديث</button>
         </div>
@@ -349,7 +405,7 @@ export default function SettingsPage() {
       {loading ? (
         <section aria-busy="true" className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">جارٍ تحميل الإعدادات…</section>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <div className="grid gap-4 lg:grid-cols-[272px_minmax(0,1fr)]">
           <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-3 lg:sticky lg:top-4">
             <label htmlFor="settings-search" className="text-xs font-bold text-slate-700">بحث في الإعدادات</label>
             <input id="settings-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)}
@@ -359,25 +415,45 @@ export default function SettingsPage() {
             <button type="button" aria-expanded={categoriesOpen} aria-controls="settings-categories" onClick={() => setCategoriesOpen(!categoriesOpen)} className="mt-3 w-full rounded-xl bg-slate-50 px-3 py-2 text-right text-sm font-bold lg:hidden">
               الفئات · {CATEGORY_LABEL[selectedCategory]} {categoriesOpen ? "▴" : "▾"}
             </button>
-            <nav id="settings-categories" aria-label="فئات الإعدادات" className={`mt-4 ${categoriesOpen ? "grid" : "hidden"} grid-cols-2 gap-2 sm:grid-cols-3 lg:grid lg:grid-cols-1`}>
-              {categories.map((category) => {
-                const active = !query && selectedCategory === category;
-                return (
-                  <button key={category} type="button" onClick={() => { setSelectedCategory(category); setQuery(""); setCategoriesOpen(false); }}
-                    aria-current={active ? "page" : undefined}
-                    className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold transition ${active ? "bg-navy-950 text-white" : "bg-slate-50 text-slate-700 hover:bg-slate-100"}`}>
-                    <span>{CATEGORY_LABEL[category]}</span>
-                    <span className={active ? "text-white/70" : "text-slate-400"}>{definitionsInCategory(category).length}</span>
-                  </button>
-                );
-              })}
+            <nav id="settings-categories" aria-label="فئات الإعدادات" className={`mt-4 ${categoriesOpen ? "grid" : "hidden"} gap-3 lg:grid`}>
+              {institutionalDomains.filter((domain) => domain.categories.length > 0).map((domain) => (
+                <div key={domain.id} className="min-w-0 space-y-1.5">
+                  <p className="px-1 text-[10px] font-extrabold text-slate-400">{domain.title}</p>
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-1">
+                    {domain.categories.map((category) => {
+                      const active = !query && selectedCategory === category;
+                      return (
+                        <button key={category} type="button" onClick={() => { setSelectedCategory(category); setQuery(""); setCategoriesOpen(false); }}
+                          aria-current={active ? "page" : undefined}
+                          className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold transition ${active ? "bg-navy-950 text-white" : "bg-slate-50 text-slate-700 hover:bg-slate-100"}`}>
+                          <span>{CATEGORY_LABEL[category]}</span>
+                          <span className={active ? "text-white/70" : "text-slate-400"}>{definitionsInCategory(category).length}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </nav>
           </aside>
 
           <section className="min-w-0">
             <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-4">
-              <h1 className="text-lg font-black text-navy-950">{query ? `نتائج البحث عن «${query}»` : CATEGORY_LABEL[selectedCategory]}</h1>
+              {!query && selectedDomain ? (
+                <p className="mb-1 text-[11px] font-bold text-slate-400">{selectedDomain.title}</p>
+              ) : null}
+              <h2 className="text-lg font-black text-navy-950">{query ? `نتائج البحث عن «${query}»` : CATEGORY_LABEL[selectedCategory]}</h2>
               <p className="mt-1 text-xs leading-relaxed text-slate-500">{query ? `${searchResults.length} إعدادًا مطابقًا من الفئات الظاهرة.` : CATEGORY_HELP[selectedCategory] ?? "إعدادات مستخدمة فعليًا في النظام الحالي."}</p>
+              {query && matchingSpecializedLinks.length > 0 ? (
+                <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2.5">
+                  <span className="text-[11px] font-bold text-slate-500">شاشات متخصصة مطابقة:</span>
+                  {matchingSpecializedLinks.map(({ link }) => (
+                    <Link key={link.href} href={link.href} className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-navy-900 hover:bg-slate-100">
+                      {link.label}
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             {searchResults.length === 0 ? (
@@ -386,7 +462,7 @@ export default function SettingsPage() {
               <div className="grid gap-3 xl:grid-cols-2">
                 {searchResults.some((definition) => LOGIN_PHOTO_KEYS.some(key => key === definition.key)) ? (
                   <LoginPhotoEditor values={snapshot.values} versions={snapshot.versions}
-                    editable={Boolean(role && canManageCategory(role, "branding"))}
+                    editable={loginPhotoEditable}
                     onSaved={(payload) => {
                       setSnapshot(current => current ? {
                         ...current,
@@ -398,12 +474,12 @@ export default function SettingsPage() {
                 ) : null}
                 {searchResults.some((definition) => CLINIC_HOURS_KEYS.some((key) => key === definition.key)) ? (
                   <ClinicHoursEditor values={snapshot.values} versions={snapshot.versions}
-                    editable={Boolean(role && canManageCategory(role, "hours"))}
+                    editable={hoursEditable}
                     onSaved={(payload) => { setSnapshot(parseSettingsPayload(payload)); router.refresh(); }} />
                 ) : null}
                 {searchResults.filter((definition) => !LOGIN_PHOTO_KEYS.some(key => key === definition.key) && !CLINIC_HOURS_KEYS.some((key) => key === definition.key)).map((definition) => {
                   const value = snapshot.values[definition.key] ?? definition.defaultValue;
-                  const editable = Boolean(role && canManageCategory(role, definition.category) && !definition.systemLocked);
+                  const editable = mayEdit(definition);
                   const isDefault = definition.sensitivity === "secret" ? false : isDefaultSettingValue(definition, value);
                   return (
                     <article key={definition.key} aria-label={definition.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -413,7 +489,7 @@ export default function SettingsPage() {
                             <h2 className="text-sm font-black text-navy-950">{definition.label}</h2>
                             {definition.systemLocked ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">محكوم بالنظام</span>
                               : definition.sensitivity !== "secret" ? <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isDefault ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700"}`}>{isDefault ? "افتراضي" : "مخصّص"}</span> : null}
-                            {!editable && !definition.systemLocked ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">للقراءة فقط</span> : null}
+                            {!editable && !definition.systemLocked ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">{canonical && ownerOnlySetting(definition.key) && session?.isOwner !== true ? "للمالك فقط" : "للقراءة فقط"}</span> : null}
                           </div>
                           {definition.description ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{definition.description}</p> : null}
                         </div>
@@ -441,7 +517,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {!query && selectedCategory === "backup" && canManageCategory(role, "backup") ? (
+            {!query && ((!canonical && selectedCategory === "backup" && canManageCategory(role, "backup")) || (canonical && selectedCategory === "backup" && session?.isOwner === true)) ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -451,12 +527,14 @@ export default function SettingsPage() {
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Link
-                      href="/settings/backup"
-                      className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-navy-950 hover:bg-slate-50"
-                    >
-                      إدارة النسخ والاستعادة
-                    </Link>
+                    {!canonical ? (
+                      <Link
+                        href="/settings/backup"
+                        className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-navy-950 hover:bg-slate-50"
+                      >
+                        إدارة النسخ والاستعادة
+                      </Link>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => void runManualBackup()}
@@ -479,7 +557,7 @@ export default function SettingsPage() {
               </div>
             ) : null}
 
-            {!query && selectedCategory === "reception" && canManageCategory(role, "reception") ? (
+            {!query && selectedCategory === "reception" && announcementsEditable ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
                 <h2 className="mb-2 text-sm font-black text-navy-950">إعلانات شاشة الصالة</h2>
                 <p className="mb-3 text-xs text-slate-500">الإعلانات سجلات مستقلة؛ الحقل النصّي القديم مقفل للقراءة حفاظًا على التوافق.</p>
@@ -499,13 +577,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-black text-navy-950">إدارات متخصصة</h2>
-        <p className="mt-1 text-xs text-slate-500">هذه وحدات مستقلة وليست مفاتيح عامة؛ بقيت في شاشاتها المتخصصة بدل تحويل الإعدادات إلى محرر قاعدة بيانات.</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {SPECIALIZED_LINKS.map(([href, label]) => <Link key={href} href={href} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">{label}</Link>)}
-        </div>
-      </section>
+      <SettingsInstitutionalDirectory domains={institutionalDomains} canonical={canonical} />
 
       {editor ? (
         <Modal labelledBy="setting-dialog-title" busy={saving} onClose={() => setEditor(null)}>
@@ -528,7 +600,8 @@ export default function SettingsPage() {
             ) : (
               <div className="mt-4">
                 <label className="text-xs font-bold text-slate-700">القيمة الجديدة</label>
-                <SettingInput definition={editor.definition} value={editor.draft} onChange={(draft) => setEditor((current) => current ? { ...current, draft, conflict: null } : current)} />
+                {editor.definition.key !== "display.voice_uri" ? <SettingInput definition={editor.definition} value={editor.draft} onChange={(draft) => setEditor((current) => current ? { ...current, draft, conflict: null } : current)} /> : null}
+                {["display.voice_uri", "display.voice_rate", "display.voice_pause_ms"].includes(editor.definition.key) ? <DisplayVoicePreview values={{ ...snapshot.values, [editor.definition.key]: editor.draft }} onVoiceChange={editor.definition.key === "display.voice_uri" ? draft => setEditor(current => current ? { ...current, draft, conflict: null } : current) : undefined} /> : null}
                 {editor.definition.unit ? <p className="mt-1 text-[11px] text-slate-400">الوحدة: {editor.definition.unit}</p> : null}
                 {editorProblem ? <p role="alert" className="mt-2 text-xs font-bold text-red-700">{editorProblem}</p> : null}
               </div>

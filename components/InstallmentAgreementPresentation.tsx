@@ -35,6 +35,7 @@ export type AgreementInstallmentRow = {
   key: string | number; number: string | number; dueDate: string; amountMinor: number; paid: boolean;
   /** Verified settlement detail for invoice schedules; never infer payment from a proposal. */
   settledMinor?: number; remainingMinor?: number;
+  overdue?: boolean;
 };
 
 export function AgreementInstallmentTable({ rows, currency }: { rows: AgreementInstallmentRow[]; currency: Currency }) {
@@ -55,8 +56,8 @@ export function AgreementInstallmentTable({ rows, currency }: { rows: AgreementI
       <td className="num">{formatMoney(row.amountMinor, currency)}</td>
       <td className="num">{row.settledMinor === undefined ? "—" : formatMoney(row.settledMinor, currency)}</td>
       <td className="num">{row.remainingMinor === undefined ? "—" : formatMoney(row.remainingMinor, currency)}</td>
-      <td style={{ textAlign: "center", fontWeight: 700, color: row.paid ? "#15803d" : "#b45309" }}>
-        {row.paid ? "مسدد ✓" : (row.settledMinor ?? 0) > 0 ? "مسدد جزئيًا" : "مستحق"}
+      <td style={{ textAlign: "center", fontWeight: 700, color: row.paid ? "#15803d" : row.overdue ? "#b91c1c" : "#b45309" }}>
+        {row.paid ? "مسدد ✓" : (row.settledMinor ?? 0) > 0 ? (row.overdue ? "مسدد جزئيًا · متأخر" : "مسدد جزئيًا") : (row.overdue ? "متأخر" : "مستحق")}
       </td>
     </tr>)}</tbody>
   </table></div>;

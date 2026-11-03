@@ -66,10 +66,15 @@ describe("حدّ محاولات الدخول المشترك", () => {
     process.env.TRUST_PROXY = "true";
     await consumeLoginAttemptFor("staff", "doctor", headers({ "x-forwarded-for": "198.51.100.9, 203.0.113.7" }));
     const limits = mocks.consume.mock.calls[1][0];
-    expect(limits).toHaveLength(2);
+    expect(limits).toHaveLength(3);
+    expect(limits[0].maximum).toBe(ACCOUNT_ATTEMPTS);
     expect(limits[1].maximum).toBe(SOURCE_ATTEMPTS);
-    expect(limits[1].key).not.toBe(limits[0].key);
-    expect(limits[1].key).not.toContain("203.0.113.7");
+    expect(limits[2].maximum).toBe(SOURCE_ATTEMPTS);
+    expect(new Set(limits.map((limit: { key: string }) => limit.key)).size).toBe(3);
+    for (const limit of limits) {
+      expect(limit.key).not.toContain("203.0.113.7");
+      expect(limit.key).not.toContain("doctor");
+    }
   });
 
   it("بلا سرٍّ (أو سرٍّ قصير) يُترك الحدّ القديم يعمل — لا يُستهلك شيء", async () => {

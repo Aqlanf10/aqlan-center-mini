@@ -28,6 +28,7 @@ export async function DebtRepaymentAgreementPrint({ id, version, today }: { id: 
       number: row.kind === "down_payment" ? "مقدمة مقترحة" : `قسط ${index + 1 - (schedule.terms.installments[0]?.kind === "down_payment" ? 1 : 0)}`,
       dueDate: row.dueDate, amountMinor: row.amountMinor, paid: row.remainingMinor === 0,
       settledMinor: row.settledMinor, remainingMinor: row.remainingMinor,
+      overdue: row.remainingMinor > 0 && row.dueDate < today,
     }))} />
     <p className="footer-note" style={{ marginTop: "2mm" }}>المقدمة المقترحة موعد سداد وليست سند قبض. المسدد الفعلي أعلاه من السندات والتسويات المسجلة فقط.</p>
     <AgreementTermsAndSignatures terms={STANDARD_PLAN_TERMS} />

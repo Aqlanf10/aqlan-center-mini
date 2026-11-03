@@ -1,12 +1,33 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalPlanCaseFailure,
+  commandCanonicalAddPlanItemDependency,
+  commandCanonicalRemovePlanItemDependency,
+} from "@/lib/canonical-plans-and-cases";
 import { addPlanItemDependency, getPlanItemPatient, removePlanItemDependency } from "@/lib/db";
 import { checkDependencyDraft } from "@/lib/cases";
 import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
 /** (CASE-MODEL-1) «هذا البند يتطلب ذاك» — للمريض نفسه وبلا دورات. تحذيرٌ لا منع عند التنفيذ. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) return read.response;
+    try {
+      const { id } = await params;
+      return NextResponse.json(await commandCanonicalAddPlanItemDependency(selected.handle, id, read.body), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر حفظ الاعتماد. أعد المحاولة.");
+    }
+  }
   const itemId = idOf((await params).id);
   if (!itemId) return json("رقم بند غير صالح.", 400);
   const read = await readBody(request);
@@ -38,6 +59,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      const { id } = await params;
+      const rawRequires = new URL(request.url).searchParams.get("requires");
+      return NextResponse.json(await commandCanonicalRemovePlanItemDependency(selected.handle, id, rawRequires), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر إزالة الاعتماد. أعد المحاولة.");
+    }
+  }
   const itemId = idOf((await params).id);
   if (!itemId) return json("رقم بند غير صالح.", 400);
   const requiresItemId = idOf(new URL(request.url).searchParams.get("requires") ?? "");

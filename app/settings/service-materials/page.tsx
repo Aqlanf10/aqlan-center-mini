@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
 
 /**
  * ربط الخدمات بالمستهلكات (المواصفة §٢٠) — «ماذا يستهلك كل إجراء؟».
@@ -104,16 +105,12 @@ export default function ServiceMaterialsPage() {
   };
 
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
-      <header className="mb-4">
-        <h1 className="text-xl font-extrabold leading-tight">ربط الخدمات بالمستهلكات</h1>
-        <p className="text-xs text-slate-500">
-          عرّف ماذا تستهلك كل خدمة — والنظام يخصمه تلقائيًا عند توقيع الزيارة
-        </p>
-        <div className="mt-2">
-          <a href="/settings" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">‹ الإعدادات</a>
-        </div>
-      </header>
+    <main className="mx-auto max-w-3xl p-4 pb-24" dir="rtl">
+      <PageHeader
+        title="ربط الخدمات بالمستهلكات"
+        subtitle="عرّف ماذا تستهلك كل خدمة سريرية — والنظام يخصمه تلقائيًا عند توقيع الزيارة"
+        back={{ href: "/settings", label: "الإعدادات المركزية" }}
+      />
 
       {error ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>

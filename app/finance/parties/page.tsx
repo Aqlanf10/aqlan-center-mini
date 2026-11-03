@@ -22,7 +22,8 @@ interface Party {
   note: string | null; commissionPercent: number; isActive: boolean;
 }
 
-const KINDS: PartyKind[] = ["lab", "supplier", "doctor"];
+const FORM_KINDS: PartyKind[] = ["lab", "supplier", "doctor"];
+const DISPLAY_KINDS: PartyKind[] = ["lab", "supplier", "doctor", "employee"];
 
 export default function PartiesPage() {
   const session = useSession();
@@ -147,7 +148,7 @@ function PartyList({ canMutate, canRead }: { canMutate: boolean; canRead: boolea
       {canMutate ? <form onSubmit={add} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-sm font-bold">جهة جديدة</h2>
         <div className="mb-2 flex gap-1.5">
-          {KINDS.map((kind) => (
+          {FORM_KINDS.map((kind) => (
             <button key={kind} type="button" onClick={() => setForm((current) => ({ ...current, kind }))}
               className={`flex-1 rounded-xl border px-3 py-2 text-sm font-bold ${
                 form.kind === kind ? "border-brand-blue bg-brand-blue text-white" : "border-slate-200 bg-white text-slate-600"
@@ -182,7 +183,7 @@ function PartyList({ canMutate, canRead }: { canMutate: boolean; canRead: boolea
           لا جهات بعد. أضف مختبراتك وأطباءك أولًا.
         </p>
       ) : (
-        KINDS.map((kind) => {
+        DISPLAY_KINDS.map((kind) => {
           const list = parties.filter((party) => party.kind === kind);
           if (list.length === 0) return null;
           return (
@@ -206,8 +207,9 @@ function PartyList({ canMutate, canRead }: { canMutate: boolean; canRead: boolea
                     ) : null}
                     {/* الرصيد بجانب الاسم لا في شاشة أخرى: من يفتح قائمة الجهات
                         يسأل عن المستحق، لا عن أسمائها. والأطباء مستثنون لأن
-                        مستحقهم يُحسب من نسبتهم على المحصّل في تقرير العمولات. */}
-                    {kind !== "doctor" ? (
+                        مستحقهم يُحسب من نسبتهم على المحصّل في تقرير العمولات،
+                        والموظفون تُدار مستحقاتهم عبر مسيرات الرواتب. */}
+                    {kind === "lab" || kind === "supplier" ? (
                       !balances?.has(party.id) ? (
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">الرصيد غير متاح</span>
                       ) : balances.get(party.id)!.length === 0 ? (
@@ -222,6 +224,11 @@ function PartyList({ canMutate, canRead }: { canMutate: boolean; canRead: boolea
                     {kind === "doctor" ? (
                       <a href="/finance/commissions" className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">
                         عمولاته
+                      </a>
+                    ) : null}
+                    {kind === "employee" ? (
+                      <a href="/hr?tab=payroll" className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">
+                        مسيرات الرواتب
                       </a>
                     ) : null}
                     {canMutate ? <button

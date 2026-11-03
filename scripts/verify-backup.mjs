@@ -149,6 +149,17 @@ try {
     const { rows } = await sourceClient.query(`SELECT COALESCE(MAX(id),0)::int AS m FROM "${table}"`);
     beforeSeq.set(sequence, rows[0].m);
   }
+  const STANDALONE_SEQUENCES = [
+    "patient_number_seq",
+    "invoice_number_seq",
+    "receipt_number_seq",
+    "voucher_number_seq",
+  ];
+  const beforeStandaloneSeq = new Map();
+  for (const seqName of STANDALONE_SEQUENCES) {
+    const { rows } = await sourceClient.query(`SELECT last_value::bigint AS last, is_called FROM "${seqName}"`);
+    beforeStandaloneSeq.set(seqName, rows[0]);
+  }
   await sourceClient.end();
   sourceClient = null;
 
@@ -216,6 +227,13 @@ try {
     if (rows[0].last < rows[0].max) badSequences.push(`${sequence}: ${rows[0].last} < ${rows[0].max}`);
     if (beforeSeq.get(sequence) !== rows[0].max) {
       badSequences.push(`${sequence}: أكبر رقمٍ اختلف — المصدر ${beforeSeq.get(sequence)} · المستعادة ${rows[0].max}`);
+    }
+  }
+  for (const seqName of ["patient_number_seq", "invoice_number_seq", "receipt_number_seq", "voucher_number_seq"]) {
+    const expected = beforeStandaloneSeq.get(seqName);
+    const { rows } = await db.getPool().query(`SELECT last_value::bigint AS last, is_called FROM "${seqName}"`);
+    if (BigInt(rows[0].last) < BigInt(expected.last) || (BigInt(rows[0].last) === BigInt(expected.last) && expected.is_called && !rows[0].is_called)) {
+      badSequences.push(`${seqName}: المستعادة (${rows[0].last}/${rows[0].is_called}) أقل من المصدر (${expected.last}/${expected.is_called})`);
     }
   }
   check("العدّادات مضبوطة فوق أكبر رقمٍ مستعاد", badSequences.length === 0, badSequences.join(" | "));

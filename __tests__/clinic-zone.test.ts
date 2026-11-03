@@ -42,7 +42,7 @@ describe("توقيت العيادة", () => {
     const offenders: string[] = [];
     for (const dir of GUARDED_DIRS) {
       for (const file of sourceFiles(dir)) {
-        const rel = relative(ROOT, file);
+        const rel = relative(ROOT, file).replaceAll("\\", "/");
         if (rel === SOURCE) continue;
         if (zone.test(readFileSync(file, "utf8"))) offenders.push(rel);
       }

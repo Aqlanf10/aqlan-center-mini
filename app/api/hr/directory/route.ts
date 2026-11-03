@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { hrDirectoryGetCanonicalResponse } from "@/lib/canonical-hr";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { listStaffDirectory } from "@/lib/hr";
 import { canAssignTasks } from "@/lib/hr";
 import { requireSession } from "@/lib/session";
@@ -16,6 +19,12 @@ const forbidden = () =>
  * وusers الإدارية تبقى في مسارها المحروس.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") return hrDirectoryGetCanonicalResponse(selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canAssignTasks(session.role)) return forbidden();

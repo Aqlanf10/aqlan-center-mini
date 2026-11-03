@@ -32,6 +32,7 @@ export interface PortalPayload {
   patientNumber: string;
   fullName: string;
   expiresAt: number;
+  secretVersion?: number;
 }
 
 function portalSecret(): string {
@@ -94,7 +95,7 @@ export function validatePortalLogin(raw: unknown): PortalLoginValidation {
   if (phone.replace(/\D/g, "").length < MIN_PHONE_DIGITS) {
     return { ok: false, message: "أدخل رقم هاتف صحيحًا." };
   }
-  if (!patientNumber || patientNumber.length > 20) {
+  if (!patientNumber || patientNumber.length > 21) {
     return { ok: false, message: "أدخل رقم الملف كما أُعطي لك." };
   }
   return { ok: true, value: { phone, patientNumber } };

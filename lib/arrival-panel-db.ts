@@ -1,5 +1,5 @@
 import {
-  CLINIC_TIME_ZONE, computeDebtRows, ensureSchema, getPool, listPatientCases, listPatientPlans, openOrthoCaseFor,
+  CLINIC_TIME_ZONE, computeDebtRows, ensureSchema, getPool, listPatientCases, listPatientPlans, openOrthoCaseFor, type DbClient,
 } from "./db";
 import { arrivalSuggestions, buildArrivalCurrencyLines, type ArrivalCurrencyLine, type ArrivalSuggestion } from "./arrival-panel";
 import { listLegacyBalanceArrangements, listLegacyOpeningPositions } from "./legacy-balance-arrangements-db";
@@ -29,38 +29,76 @@ export interface ArrivalPanel {
  */
 export async function arrivalPanel(patientId: number, options: { includeMoney: boolean }): Promise<ArrivalPanel | null> {
   await ensureSchema();
-  const pool = getPool();
+  return arrivalPanelWith(getPool(), patientId, options, {
+    debts: (ids, includeNonPositive) => computeDebtRows(ids, includeNonPositive),
+    openings: listLegacyOpeningPositions,
+    arrangements: (id, today) => listLegacyBalanceArrangements(id, today),
+    plans: listPatientPlans,
+    cases: listPatientCases,
+    ortho: openOrthoCaseFor,
+  });
+}
+
+/** Data sources of the panel. The legacy path passes the standalone readers (each with
+ * its own snapshot, unchanged); the canonical path passes readers bound to its one
+ * owning snapshot facade. */
+export interface ArrivalPanelSources {
+  debts(patientIds: readonly number[], includeNonPositive: boolean): ReturnType<typeof computeDebtRows>;
+  openings(patientId: number): ReturnType<typeof listLegacyOpeningPositions>;
+  arrangements(patientId: number, today: string): ReturnType<typeof listLegacyBalanceArrangements>;
+  plans(patientId: number, today: string): ReturnType<typeof listPatientPlans>;
+  cases(patientId: number): ReturnType<typeof listPatientCases>;
+  ortho(patientId: number, today: string): ReturnType<typeof openOrthoCaseFor>;
+}
+export interface ArrivalPanelOptions {
+  readonly includeMoney: boolean;
+  /** Read cases and orthodontic status (default true). Not read at all when false. */
+  readonly includeClinical?: boolean;
+  /** Today's appointments: undefined lists all, a number lists that clinician's only,
+   * null reads none. */
+  readonly appointmentDoctorPartyId?: number | null;
+}
+export async function arrivalPanelWith(
+  pool: Pick<DbClient, "query">,
+  patientId: number,
+  options: ArrivalPanelOptions,
+  sources: ArrivalPanelSources,
+): Promise<ArrivalPanel | null> {
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const includeClinical = options.includeClinical !== false;
+  const appointmentDoctor = options.appointmentDoctorPartyId;
   const { rows: [patient] } = await pool.query<{ id: number; full_name: string }>(
     `SELECT id, full_name FROM patients WHERE id = $1`, [patientId]);
   if (!patient) return null;
 
   const [appointmentRows, visitRows, cases, ortho] = await Promise.all([
-    pool.query<{ id: number; time: string; appointment_type: string | null; status: string; doctor_name: string | null; planned_title: string | null }>(
+    appointmentDoctor === null ? Promise.resolve({ rows: [] as { id: number; time: string; appointment_type: string | null; status: string; doctor_name: string | null; planned_title: string | null }[] })
+      : pool.query<{ id: number; time: string; appointment_type: string | null; status: string; doctor_name: string | null; planned_title: string | null }>(
       `SELECT a.id, to_char(a.scheduled_time, 'HH24:MI') AS time, a.appointment_type, a.status,
               d.name AS doctor_name, pv.title AS planned_title
          FROM appointments a
          LEFT JOIN parties d ON d.id = a.doctor_id
          LEFT JOIN planned_visits pv ON pv.id = a.planned_visit_id
         WHERE a.patient_id = $1 AND a.scheduled_date = $2::date AND a.status <> 'cancelled'
-        ORDER BY a.scheduled_time`, [patientId, today]),
+          AND ($3::int IS NULL OR a.doctor_id = $3::int)
+        ORDER BY a.scheduled_time`, [patientId, today, appointmentDoctor ?? null]),
     pool.query<{ id: number; status: string }>(
       `SELECT id, status FROM visits
         WHERE patient_id = $1 AND signed_at IS NULL AND status NOT IN ('done', 'cancelled')
           AND (arrived_at AT TIME ZONE $2)::date = $3::date
         ORDER BY id DESC LIMIT 1`, [patientId, CLINIC_TIME_ZONE, today]),
-    listPatientCases(patientId),
-    openOrthoCaseFor(patientId, today),
+    includeClinical ? sources.cases(patientId) : Promise.resolve([]),
+    includeClinical ? sources.ortho(patientId, today) : Promise.resolve(null),
   ]);
 
   let money: ArrivalPanel["money"] = null;
   if (options.includeMoney) {
     const [debtRows, openings, arrangements, plans, invoiceRows] = await Promise.all([
       /* includeNonPositive: الرصيد الدائن (سالب) يُعرض «رصيد دائن» لا يُسقط صفرًا. */
-      computeDebtRows([patientId], true),
-      listLegacyOpeningPositions(patientId),
-      listLegacyBalanceArrangements(patientId, today),
-      listPatientPlans(patientId, today),
+      sources.debts([patientId], true),
+      sources.openings(patientId),
+      sources.arrangements(patientId, today),
+      sources.plans(patientId, today),
       pool.query<{ currency: string; count: string }>(
         `SELECT base_currency AS currency, count(*)::text AS count FROM invoices
           WHERE patient_id = $1 AND status = 'open' GROUP BY base_currency`, [patientId]),

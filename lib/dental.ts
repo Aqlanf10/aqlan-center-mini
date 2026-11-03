@@ -178,11 +178,11 @@ export function chartSummary(chart: Map<number, ToothState>): ChartSummary {
 }
 
 /**
- * أسطح السن للحشوات: M D O B L (إنسي، وحشي، إطباقي، دهليزي، لساني).
+ * أسطح السن للحشوات والترميمات: M D O I B L (إنسي، وحشي، إطباقي، قاطعي، دهليزي، لساني).
  *
- * تُحفظ نصًّا قصيرًا مرتّبًا لا مجموعةً: «MOD» هو ما يكتبه الطبيب وما يقرؤه المختبر.
+ * تُحفظ نصًّا قصيرًا مرتّبًا لا مجموعةً: «MOD» أو «MI» هو ما يكتبه الطبيب وما يقرؤه المختبر.
  */
-export const SURFACES = ["M", "D", "O", "B", "L"] as const;
+export const SURFACES = ["M", "D", "O", "I", "B", "L"] as const;
 
 export function normalizeSurfaces(raw: string | null | undefined): string | null {
   if (!raw) return null;

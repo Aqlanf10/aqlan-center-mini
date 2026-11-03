@@ -57,6 +57,8 @@ const READ: readonly Method[] = ["GET", "HEAD"];
 /** ما يشترك فيه كل دور: الجلسة نفسها (من أنا، الخروج)، والحساب الشخصي وكلمة المرور. */
 const COMMON: Rule[] = [
   { path: "/account" },
+  { path: "/hr/me" },
+  { path: "/api/hr/me" },
   { path: "/api/auth/me" },
   { path: "/api/auth/logout", methods: ["POST"] },
   { path: "/api/auth/password", methods: ["POST"] },
@@ -83,6 +85,8 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/payments/attempts/retire", methods: ["POST"] },
     { path: "/api/invoices" },
     { path: "/api/invoices/[id]" },
+    { path: "/api/invoices/[id]/archive" },
+    { path: "/api/invoices/archive" },
     { path: "/api/expenses", methods: ["GET", "POST"] },
     { path: "/api/expenses/quote", methods: ["POST"] },
     { path: "/api/expenses/[id]/attachments", methods: ["GET", "POST"] },
@@ -115,10 +119,13 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/payments" },
     { path: "/api/invoices" },
     { path: "/api/invoices/[id]" },
+    { path: "/api/invoices/[id]/archive" },
+    { path: "/api/invoices/archive" },
     { path: "/api/expenses" },
     { path: "/api/expenses/[id]/attachments" },
     { path: "/api/expense-attachments/[id]" },
     { path: "/api/payables" },
+    { path: "/api/party-openings" },
     { path: "/api/finance/debts" },
     { path: "/api/finance/reconciliation" },
     { path: "/api/finance/lab-accounting" },
@@ -176,39 +183,47 @@ function matches(rulePath: string, pathname: string): boolean {
  */
 export function restrictedRouteAllowed(role: string | null | undefined, pathname: string, method: Method, rawAccess?: unknown): boolean {
   if (!isGatedRole(role)) return true;
+  const cleanPath = pathname !== "/" ? pathname.replace(/\/+$/, "") : "/";
   const verb = method.toUpperCase();
   if (role === "assistant") {
-    return ASSISTANT_RULES.some((rule) => matches(rule.path, pathname) && (rule.methods ?? READ).includes(verb));
+    return ASSISTANT_RULES.some((rule) => matches(rule.path, cleanPath) && (rule.methods ?? READ).includes(verb));
   }
   const access: FinanceAccess = financeAccessFor(role, rawAccess);
+  // Archive previews include actual settlement, so retain patient-ledger authority.
+  if (!access.viewPatientLedger && (matches("/api/invoices/archive", cleanPath) || matches("/api/invoices/[id]/archive", cleanPath))) return false;
   // Financial references follow patient-ledger authority, including normalized trailing slashes.
-  if (!access.viewPatientLedger && matches("/api/patients/[id]/treatment-financial-context", pathname)) return false;
+  if (!access.viewPatientLedger && matches("/api/patients/[id]/treatment-financial-context", cleanPath)) return false;
+  if (matches("/api/patients/[id]/statement", cleanPath)) return access.viewPatientLedger && READ.includes(verb);
   if (role === "cashier") {
-    if (pathname === "/api/shifts" && (verb === "POST" || verb === "PATCH") && !access.operateShift) return false;
-    if ((pathname === "/api/payments" || pathname === "/api/payments/attempts/retire") && verb === "POST" && !access.collectPayments) return false;
-    if ((pathname === "/api/expenses" || pathname === "/api/expenses/quote"
-      || /^\/api\/expenses\/\d+\/attachments$/.test(pathname)) && verb === "POST" && !access.createExpenses) return false;
-    if ((!access.viewPatientLedger) && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
-      || /^\/api\/patients\/\d+\/(arrival-panel|legacy-balance-arrangement)$/.test(pathname)
-      // (OP-02) كشف الحساب المطبوع (وكشف العائلة) فيه أرصدة المريض واتفاقه — بصلاحية كشف الحساب نفسها.
-      || /^\/print\/(statement|family-statement)\/\d+$/.test(pathname)
-      || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
+    if (cleanPath === "/api/shifts" && (verb === "POST" || verb === "PATCH") && !access.operateShift) return false;
+    if ((cleanPath === "/api/payments" || cleanPath === "/api/payments/attempts/retire") && verb === "POST" && !access.collectPayments) return false;
+    if ((cleanPath === "/api/expenses" || cleanPath === "/api/expenses/quote"
+      || /^\/api\/expenses\/\d+\/attachments$/.test(cleanPath)) && verb === "POST" && !access.createExpenses) return false;
+    if ((!access.viewPatientLedger) && (/^\/api\/patients\/\d+\/ledger$/.test(cleanPath)
+      || /^\/api\/patients\/\d+\/(arrival-panel|legacy-balance-arrangement)$/.test(cleanPath)
+      // (OP-02) كشف الحساب المطبوع والفاتورة بصلاحية كشف الحساب نفسها.
+      || /^\/print\/(statement|family-statement|invoice)\/\d+$/.test(cleanPath)
+      || (cleanPath === "/api/invoices" && verb === "GET")
+      || cleanPath === "/api/finance/debts" || cleanPath === "/api/plans")) return false;
   } else {
-    if (!access.viewPatientLedger && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
-      || /^\/api\/patients\/\d+\/legacy-balance-arrangement$/.test(pathname)
-      || /^\/print\/(statement|family-statement)\/\d+$/.test(pathname)
-      || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
-    if (!access.viewReports && (pathname === "/reports" || pathname.startsWith("/api/reports")
-      || pathname === "/finance/reports" || pathname === "/finance/accounting"
-      || pathname === "/api/accounting" || pathname === "/api/finance/report")) return false;
-    if (!access.viewSuppliers && (pathname.startsWith("/finance/parties") || pathname === "/finance/lab-accounting"
-      || pathname === "/api/parties" || pathname === "/api/payables" || pathname === "/api/finance/lab-accounting")) return false;
-    if (!access.viewCommissions && (pathname === "/finance/commissions" || pathname === "/api/finance/commissions"
-      || /^\/print\/commission-statement\/\d+$/.test(pathname))) return false;
-    if (!access.viewReconciliation && (pathname === "/finance/reconciliation" || pathname === "/api/finance/reconciliation"
-      || pathname === "/api/finance/lab-reconciliation")) return false;
+    if (!access.viewPatientLedger && (/^\/api\/patients\/\d+\/ledger$/.test(cleanPath)
+      || /^\/api\/patients\/\d+\/legacy-balance-arrangement$/.test(cleanPath)
+      || /^\/print\/(statement|family-statement|invoice)\/\d+$/.test(cleanPath)
+      || (cleanPath === "/api/invoices" && verb === "GET")
+      || cleanPath === "/api/finance/debts" || cleanPath === "/api/plans")) return false;
+    if (!access.viewReports && (cleanPath === "/reports" || cleanPath.startsWith("/api/reports")
+      || cleanPath === "/finance/reports" || cleanPath === "/finance/accounting"
+      || cleanPath === "/api/accounting" || cleanPath === "/api/finance/report")) return false;
+    if (!access.viewSuppliers && (cleanPath.startsWith("/finance/parties") || cleanPath === "/finance/lab-accounting"
+      || /^\/print\/party\/\d+$/.test(cleanPath)
+      || cleanPath === "/api/parties" || cleanPath === "/api/payables" || cleanPath === "/api/party-openings"
+      || cleanPath === "/api/finance/lab-accounting")) return false;
+    if (!access.viewCommissions && (cleanPath === "/finance/commissions" || cleanPath === "/api/finance/commissions"
+      || /^\/print\/commission-statement\/\d+$/.test(cleanPath))) return false;
+    if (!access.viewReconciliation && (cleanPath === "/finance/reconciliation" || cleanPath === "/api/finance/reconciliation"
+      || cleanPath === "/api/finance/lab-reconciliation")) return false;
   }
-  return RULES[role].some((rule) => matches(rule.path, pathname) && (rule.methods ?? READ).includes(verb));
+  return RULES[role].some((rule) => matches(rule.path, cleanPath) && (rule.methods ?? READ).includes(verb));
 }
 
 /** للقائمة الجانبية: هل تُعرض هذه الصفحة للدور؟ */

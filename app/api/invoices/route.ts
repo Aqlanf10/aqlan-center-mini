@@ -1,3 +1,5 @@
+import { LabWorkIntentError } from "@/lib/lab-work-intent-db";
+import { hasInvoiceLabWork } from "@/lib/invoice-template";
 import { invoicePricingSettings } from "@/lib/invoice-price-settings-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -15,6 +17,9 @@ import { InvoiceTemplateAuthorityError, InvoiceTemplateBusyError, InvoiceTemplat
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { DebtRepaymentError, invoiceDebtRepaymentReceipt } from "@/lib/debt-installments-db";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { invoicesCreateCanonicalResponse, invoicesListCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +27,16 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return invoicesListCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
+  }
+  if ((session.role === "cashier" || session.role === "accountant") && session.financeAccess?.viewPatientLedger === false) {
+    return NextResponse.json({ message: "عرض الفواتير خارج صلاحياتك المالية." }, { status: 403 });
   }
   const patientId = Number(new URL(request.url).searchParams.get("patientId"));
   if (!Number.isInteger(patientId) || patientId <= 0) {
@@ -39,6 +50,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return invoicesCreateCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role)) {
@@ -50,6 +64,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  if (hasInvoiceLabWork(source) && session.role !== "admin" && session.role !== "doctor") return NextResponse.json({message:"وصفة المختبر السريرية للطبيب والإدارة فقط."},{status:403});
   const templateIntent = source && typeof source === "object" && !Array.isArray(source)
     && source.templateSelection !== null && typeof source.templateSelection === "object" && !Array.isArray(source.templateSelection);
   const catalogIntent = source && typeof source === "object" && !Array.isArray(source) && hasInvoiceCatalogQuote(source);
@@ -66,7 +81,7 @@ export async function POST(request: Request) {
       if (recovered && !recovered.ok) return NextResponse.json({ code: recovered.reason,
         message: recovered.reason === "no_patient" ? "المريض غير موجود." : INVOICE_LINKAGE_MESSAGE[recovered.reason],
       }, { status: recovered.reason === "no_patient" ? 404 : linkageRefusalStatus(recovered.reason) });
-      if (recovered?.ok) return NextResponse.json({ ...recovered.invoice, clinical: { planId: recovered.planId, links: recovered.links },
+      if (recovered?.ok) return NextResponse.json({ ...recovered.invoice, clinical: { planId: recovered.planId, links: recovered.links },...(recovered.labWork ? {labWork:recovered.labWork} : {}),
         ...(typeof source.visitId==="number"?{visitId:recovered.visitId}:{}),
         ...(Object.hasOwn(source,"repaymentTerms") ? {repayment:await invoiceDebtRepaymentReceipt(recovered.invoice.patientId,recovered.invoice.id)} : {}), replayed: true }, { status: 200 });
     } catch (error) {
@@ -100,7 +115,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await createLinkedInvoice({
-      patientId,...(parsed.visitId!==undefined?{visitId:parsed.visitId}:{}), baseCurrency: base, existingPlanId, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
+      patientId,...(parsed.visitId!==undefined?{visitId:parsed.visitId}:{}), baseCurrency: base, existingPlanId, discountMinor, note, createdBy: session.username, actorRole: session.role, items,...(parsed.labRetirements !== undefined ? {labRetirements:parsed.labRetirements} : {}),
       templates: effectiveTemplates(settings["plans.specialty_templates"]).templates,
       idempotencyKey,
       ...(parsed.template ? { templateAuthority: { source, fingerprint: invoiceCommandFingerprint(parsed), session } }
@@ -120,11 +135,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: prefix + INVOICE_LINKAGE_MESSAGE[result.reason] }, { status });
     }
     return NextResponse.json(
-      { ...result.invoice, clinical: { planId: result.planId, links: result.links },...(result.visitId!==undefined?{visitId:result.visitId}:{}),
+      { ...result.invoice, clinical: { planId: result.planId, links: result.links },...(result.labWork ? {labWork:result.labWork} : {}),...(result.visitId!==undefined?{visitId:result.visitId}:{}),
         ...(Object.hasOwn(source,"repaymentTerms") ? {repayment:await invoiceDebtRepaymentReceipt(patientId,result.invoice.id)} : {}), replayed: result.replayed },
       { status: result.replayed ? 200 : 201 },
     );
   } catch (error) {
+    if (error instanceof LabWorkIntentError) return NextResponse.json({code:error.code,message:error.message},{status:error.status});
     if (error instanceof DebtRepaymentError) return NextResponse.json({code:error.code,message:error.message},{status:error.code==="unauthorized"?401:error.code==="invalid"?400:409});
     if (error instanceof InvoiceTemplateAuthorizationError) return NextResponse.json({ code: error.code, message: error.message }, { status: 401 });
     if (error instanceof InvoiceTemplateAuthorityError || error instanceof InvoiceTemplateBusyError) return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });

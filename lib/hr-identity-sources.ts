@@ -1,14 +1,22 @@
-import { sessionCredentialVersion, type SessionPayload } from './auth';
+import { readLegacyStaffSchema, assertLegacyPermissionEnvelope } from "./legacy-staff-boundary";
+import { legacySessionTokenHash, sessionCredentialVersion, type SessionPayload } from './auth';
+import { isLegacyTokenHashRevokedIn } from './legacy-session-token-revocation';
 import { IdentityPreviewError } from './hr-identity-preview';
 import type { IdentityAccount, IdentityContractLink, IdentityParty, IdentityPayrollLink, IdentityStaff, IdentityAccountLink, IdentityPartyLink } from './hr-identity-preview-shared';
 import { readPersonIdentitySchema, type IdentityQuery } from './hr-person-identity-schema-state';
 
 export async function authorizeIdentityAdmin(client: IdentityQuery, session: SessionPayload | null, lock = false) {
   if (!session?.credentialVersion || session.expiresAt <= Date.now()) throw new IdentityPreviewError(401, 'انتهت الجلسة. سجّل الدخول من جديد.');
-  const { rows: [actor] } = await client.query<{ id: number; username: string; role: string; is_active: boolean; password_hash: string }>(
-    `SELECT id,username,role,is_active,password_hash FROM users WHERE id=$1${lock ? ' FOR SHARE' : ''}`, [session.userId]);
+  if(await readLegacyStaffSchema(client)!=="base")throw new IdentityPreviewError(401, "انتهت الجلسة. سجّل الدخول من جديد.");
+  const { rows: [actor] } = await client.query<{ id: number; username: string; role: string; is_active: boolean; password_hash: string; session_version?: number | null; permissions: unknown }>(
+    `SELECT * FROM users WHERE id=$1${lock ? ' FOR SHARE' : ''}`, [session.userId]);
+  if(actor)assertLegacyPermissionEnvelope(actor.permissions);
   if (!actor || !actor.is_active || actor.username !== session.username || actor.role !== session.role
-    || session.expiresAt <= Date.now() || session.credentialVersion !== sessionCredentialVersion(actor.password_hash)) {
+    || session.expiresAt <= Date.now() || session.credentialVersion !== sessionCredentialVersion(actor.password_hash, Number(actor.session_version ?? 0))) {
+    throw new IdentityPreviewError(401, 'انتهت الجلسة. سجّل الدخول من جديد.');
+  }
+  const tokenHash = legacySessionTokenHash(session);
+  if (tokenHash && await isLegacyTokenHashRevokedIn(client, actor.id, tokenHash)) {
     throw new IdentityPreviewError(401, 'انتهت الجلسة. سجّل الدخول من جديد.');
   }
   if (actor.role !== 'admin') throw new IdentityPreviewError(403, 'مراجعة هوية الطاقم للمدير وحده.');

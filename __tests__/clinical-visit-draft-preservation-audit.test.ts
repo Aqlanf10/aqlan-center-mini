@@ -62,7 +62,10 @@ vi.mock("react", async (original) => {
     },
   };
 });
-vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ role: "doctor" }) }));
+vi.mock("../lib/clinical-lab-operation-reference",async original=>({...await original<typeof import("../lib/clinical-lab-operation-reference")>(),readClinicalLabReference:async()=>({revision:0,pending:null})}));
+// This legacy handler harness is single-window; cross-tab arbitration has dedicated hook tests.
+vi.mock("../lib/clinical-visit-browser-lock",()=>({withClinicalVisitBrowserLock:async(_scope:unknown,run:()=>Promise<unknown>)=>run()}));
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ role: "doctor", username:"synthetic-doctor" }) }));
 vi.mock("../components/SettingsProvider", () => ({ useSetting: () => "Synthetic quick phrase" }));
 vi.mock("../components/ToothPicker", () => ({ ToothField: () => null }));
 vi.mock("../components/PrescriptionModal", () => ({ PrescriptionModal: () => null }));
@@ -227,7 +230,7 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     pendingWrite = deferred<MockResponse>();
     noteLabels.forEach((label, index) => enter(label, `Synthetic submitted ${noteKeys[index]}`));
     click("احفظ بلا توقيع");
-    expect(writes()).toHaveLength(1);
+    await vi.waitFor(()=>expect(writes()).toHaveLength(1));
     expectNotesLocked(true);
     expect(JSON.parse(writes()[0][1].body).diagnosis).toBe("Synthetic submitted diagnosis");
     pendingWrite.resolve(response(200, {}));

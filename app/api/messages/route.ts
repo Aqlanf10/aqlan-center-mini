@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  messagesDeleteCanonicalResponse,
+  messagesGetCanonicalResponse,
+  messagesPatchCanonicalResponse,
+  messagesPostCanonicalResponse,
+} from "@/lib/canonical-messages-tasks";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import {
   broadcastMessages,
   deleteStaffMessage,
@@ -20,7 +28,7 @@ import {
   validateOutgoingMessage,
 } from "@/lib/messages";
 import { requireSession } from "@/lib/session";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, canDoctorAccessAllPatients } from "@/lib/patient-access";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES, MESSAGES_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 
@@ -28,6 +36,8 @@ export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 
 /**
  * المراسلة الداخلية للطاقم — قراءة المحادثات وإرسال الرسائل النصية والصوتية.
@@ -37,24 +47,36 @@ const denied = () =>
  * يُجلب عند التشغيل من مساره الخاص بعد تحقق الوصول.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return messagesGetCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   const url = new URL(request.url);
 
   try {
     if (url.searchParams.get("conversations") === "1") {
+      const restrictedDoctor = session.role === "doctor" && !(await canDoctorAccessAllPatients(session));
+      const docScope = restrictedDoctor
+        ? (typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null)
+        : undefined;
       const [list, unread, urgent] = await Promise.all([
-        staffConversationList(session.userId),
-        unreadMessageCount(session.userId),
-        urgentUnreadMessageCount(session.userId),
+        docScope === undefined ? staffConversationList(session.userId) : staffConversationList(session.userId, docScope),
+        docScope === undefined ? unreadMessageCount(session.userId) : unreadMessageCount(session.userId, docScope),
+        docScope === undefined ? urgentUnreadMessageCount(session.userId) : urgentUnreadMessageCount(session.userId, docScope),
       ]);
       return NextResponse.json({ ...list, unread, urgent, meUserId: session.userId });
     }
 
     if (url.searchParams.get("unread") === "1") {
+      const restrictedDoctor = session.role === "doctor" && !(await canDoctorAccessAllPatients(session));
+      const docScope = restrictedDoctor
+        ? (typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null)
+        : undefined;
       const [unread, urgent] = await Promise.all([
-        unreadMessageCount(session.userId),
-        urgentUnreadMessageCount(session.userId),
+        docScope === undefined ? unreadMessageCount(session.userId) : unreadMessageCount(session.userId, docScope),
+        docScope === undefined ? urgentUnreadMessageCount(session.userId) : urgentUnreadMessageCount(session.userId, docScope),
       ]);
       return NextResponse.json({ unread, urgent });
     }
@@ -98,6 +120,10 @@ export async function GET(request: Request) {
  * والردّ يقتبس رسالةً من الخيط نفسه — الاقتباس من محادثة أخرى مرفوض هنا.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return messagesPostCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
 
@@ -178,6 +204,10 @@ export async function POST(request: Request) {
  * زميل أو رسالة صوتية تفشل بnot-allowed لا برسالة غامضة.
  */
 export async function PATCH(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return messagesPatchCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
 
@@ -211,6 +241,10 @@ export async function PATCH(request: Request) {
  * الخيط أن كلامًا قيل فيه، ويبقى اقتباس الردود عليها شاهدًا على مكانها.
  */
 export async function DELETE(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return messagesDeleteCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
 

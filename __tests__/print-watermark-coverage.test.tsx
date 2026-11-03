@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { PrintDocumentWatermark } from "../components/PrintDocument";
@@ -25,7 +26,7 @@ describe("one shared print-document watermark across all paper families", () => 
     function visit(path: string) { for (const entry of readdirSync(path, { withFileTypes: true })) {
       const full = join(path, entry.name); if (entry.isDirectory()) visit(full); else if (entry.name === "page.tsx") pages.push(full);
     } }
-    visit(new URL("../app/print", import.meta.url).pathname);
+    visit(fileURLToPath(new URL("../app/print", import.meta.url)));
     expect(pages).toHaveLength(25);
     for (const page of pages) expect(readFileSync(page, "utf8")).toMatch(/PrintHeader|PrintableReportDocument/);
   });

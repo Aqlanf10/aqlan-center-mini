@@ -1,24 +1,32 @@
 import { cookies, headers } from "next/headers";
-import { SESSION_COOKIE, readSessionToken, sessionCredentialVersion, type SessionPayload } from "./auth";
+import { SESSION_COOKIE, readSessionToken, sessionCredentialVersion, carryLegacySessionEvidence, readSignedSessionEnvelope, hasCanonicalSessionMarker, type SessionPayload } from "./auth";
 import { sessionPermissionVersion } from "./auth";
 import { financeAccessFor } from "./finance-permissions";
-import { findUserByUsername, type DbClient } from "./db";
+import { findUserByUsername, findLegacyUserByUsernameReadOnlySnapshot, type StaffUser, type DbClient } from "./db";
+import { isLegacyPayloadRevoked } from "./legacy-session-token-revocation";
 
 async function currentSession(payload: SessionPayload | null, client?: DbClient): Promise<SessionPayload | null> {
   if (!payload?.credentialVersion) return null;
   const user = client ? await findUserByUsername(payload.username, client) : await findUserByUsername(payload.username);
-  if (client && payload.expiresAt < Date.now()) return null;
+  const resolved = currentSessionForUser(payload, user);
+  if (!resolved || !user) return null;
+  if (await isLegacyPayloadRevoked(payload, user.id, client)) return null;
+  return resolved;
+}
+
+function currentSessionForUser(payload: SessionPayload, user: StaffUser | null): SessionPayload | null {
+  if (payload.expiresAt <= Date.now()) return null;
   if (!user || !user.isActive || user.id !== payload.userId
-    || payload.credentialVersion !== sessionCredentialVersion(user.passwordHash)) return null;
+    || payload.credentialVersion !== sessionCredentialVersion(user.passwordHash, user.sessionVersion)) return null;
   /* (P2-1) تغيير الدور يُبطل الجلسة: الباب (proxy) يحرس الكاشير والمحاسب بالدور
      الموقَّع في التوكن، فلا يجوز أن يبقى توكنٌ بدورٍ غير دوره في القاعدة — موظفٌ
      نُقل من «استقبال» إلى «كاشير» يدخل من جديد فيحمل دوره الجديد. */
   if (payload.role !== user.role) return null;
   if ((user.role === "cashier" || user.role === "accountant")
     && payload.permissionVersion !== sessionPermissionVersion(user.role, user.permissions?.financeAccess)) return null;
-  return { ...payload, role: user.role, partyId: user.partyId,
+  return carryLegacySessionEvidence(payload, { ...payload, role: user.role, partyId: user.partyId,
     financeAccess: user.role === "cashier" || user.role === "accountant"
-      ? financeAccessFor(user.role, user.permissions?.financeAccess) : undefined };
+      ? financeAccessFor(user.role, user.permissions?.financeAccess) : undefined });
 }
 
 /**
@@ -40,7 +48,12 @@ async function currentSession(payload: SessionPayload | null, client?: DbClient)
 export async function readSessionPayload(): Promise<SessionPayload | null> {
   try {
     const store = await cookies();
-    const cookieSession = readSessionToken(store.get(SESSION_COOKIE)?.value);
+    const cookieToken=store.get(SESSION_COOKIE)?.value;
+    const envelope=readSignedSessionEnvelope(cookieToken);
+    // A genuinely signed canonical/obsolete cookie is selected but not eligible
+    // for legacy auth. It must not silently fall through to a legacy Bearer.
+    if(envelope && typeof envelope === "object" && hasCanonicalSessionMarker(envelope))return null;
+    const cookieSession = readSessionToken(cookieToken);
     if (cookieSession) return cookieSession;
   } catch {
     // تجاهل أخطاء قراءة الكوكيز
@@ -88,4 +101,15 @@ export async function revalidateSessionInTransaction(
   payload: SessionPayload, client: DbClient,
 ): Promise<SessionPayload | null> {
   return currentSession(payload, client);
+}
+
+/** SELECT-only revalidation within an owning, lifecycle-fenced READ ONLY
+ * snapshot. Never use this read projection as permission to mutate. */
+export async function revalidateLegacySessionReadOnlySnapshot(payload: SessionPayload, client: DbClient): Promise<SessionPayload | null> {
+  if (!payload?.credentialVersion) return null;
+  const user = await findLegacyUserByUsernameReadOnlySnapshot(payload.username, client);
+  const resolved = currentSessionForUser(payload, user);
+  if (!resolved || !user) return null;
+  if (await isLegacyPayloadRevoked(payload, user.id, client)) return null;
+  return resolved;
 }

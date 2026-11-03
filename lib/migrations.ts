@@ -1,3 +1,4 @@
+import { validatePrescriptionMigrationLineage } from "./prescription-migration-lineage";
 import { createHash } from "node:crypto";
 import { guardOrthoRevisionMigration, validateOrthoRevisionRegistry } from "./ortho-revision-migration-guard";
 import { BASELINE_VERSION, loadMigrationFiles, type MigrationFile } from "./migration-files";
@@ -98,10 +99,12 @@ export const MIGRATION_ADVISORY_LOCK_KEY = parseInt(
  */
 export async function applyRuntimeMigrationFiles(pool: DbPool, files: MigrationFile[]): Promise<string[]> {
   const client = await pool.connect();
+  let destroyClient = false;
   try {
     await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
     try {
       const applied = await listAppliedMigrations(client);
+      await validatePrescriptionMigrationLineage(client, files, applied);
       // Check every supplied contract before making any extension change.
       for (const file of files) {
         if (createHash('sha256').update(file.sql).digest('hex') !== file.checksum) throw new Error(`RUNTIME_MIGRATION_SOURCE_MISMATCH: ${file.version}`);
@@ -114,14 +117,18 @@ export async function applyRuntimeMigrationFiles(pool: DbPool, files: MigrationF
       const appliedNow: string[] = [];
       for (const file of files) {
         if (applied.some(row => row.version === file.version)) continue;
-        await applyMigrationInTransaction(client, file, { adopted: false });
+        await applyMigrationInTransaction(client, file, { adopted: false }, () => { destroyClient = true; });
         appliedNow.push(file.version);
       }
       return appliedNow;
     } finally {
-      await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {});
+      await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {
+        destroyClient = true;
+      });
     }
-  } finally { client.release(); }
+  } finally {
+    (client as { release: (err?: boolean) => void }).release(destroyClient || undefined);
+  }
 }
 
 /** الجداول والأعمدة التي لا يقوم النظام بدونها — قائمة فحص الانحراف الحرج (P1.2). */
@@ -152,6 +159,12 @@ export const CRITICAL_SCHEMA_TABLES = [
 /** أعمدة ما بعد خط الأساس: وجودها دليل أن هجرتها طُبِّقت فعلًا. absence = انحراف فقط
  *  إذا كانت الهجرة المسجَّلة مطبَّقة؛ أما وهي ناقصة (pending) فغيابها متوقَّع لا انحراف. */
 export const CRITICAL_SCHEMA_COLUMNS: Array<{ table: string; column: string; sinceVersion: string }> = [
+  ...[
+    ["lab_work_intents", "revision"], ["lab_work_members", "created_revision"],
+    ["lab_prescription_source_memberships", "member_id"],
+    ["lab_work_commands", "request_hash"], ["lab_work_intent_schema", "version"],
+    ["visit_procedures", "lab_work_member_id"], ["lab_orders", "lab_work_intent_id"],
+  ].map(([table, column]) => ({ table, column, sinceVersion: "0074" })),
   ...[
     ["invoice_corrections","original_currency"],
     ["invoice_settlement_reclassifications","correction_id"],["invoice_settlement_reclassifications","source_invoice_ids"],
@@ -319,20 +332,21 @@ export async function migrate(
   const apply = options.apply === true;
   const files = options.files ?? (await loadMigrationFiles());
   const client = await pool.connect();
+  let destroyClient = false;
   try {
     // (P1-FIX-2) القفل على هذا الاتصال تحديدًا — كل عمل الrun يجري عليه،
-    // ويفكّ في finally حتى مع الخطأ أو التراجع. قفل الجلسة يُفك تلقائيًّا أيضًا
-    // لو مات الاتصال — لا تعليق دائم للمهاجرين.
+    // ويفكّ في finally حتى مع الخطأ أو التراجع. وإذا تعذّر فكّ القفل يُدمَّر
+    // الاتصال من الحوض حتى لا يعود لحوض الاتصالات وهو يحتفظ بقفل الجلسة.
     await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
     try {
-      return await migrateHoldingLock(client, files, apply);
+      return await migrateHoldingLock(client, files, apply, () => { destroyClient = true; });
     } finally {
       await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {
-        /* الاتصال سيُغلق بعد لحظة في كل الأحوال — فكّ القفل هناك تلقائيًّا. */
+        destroyClient = true;
       });
     }
   } finally {
-    client.release();
+    (client as { release: (err?: boolean) => void }).release(destroyClient || undefined);
   }
 }
 
@@ -340,8 +354,10 @@ async function migrateHoldingLock(
   client: DbClient,
   files: MigrationFile[],
   apply: boolean,
+  onPoisonClient?: () => void,
 ): Promise<MigrationRunResult> {
   let applied = await listAppliedMigrations(client);
+  await validatePrescriptionMigrationLineage(client, files, applied);
   // Validate only the two pinned Ortho contracts before skipping applied files.
   for (const file of files) {
     if (file.version === "0051" || file.version === "0052") validateOrthoRevisionRegistry(file, applied.find(row => row.version === file.version));
@@ -361,7 +377,7 @@ async function migrateHoldingLock(
       // قاعدة جديدة فارغة: DDL كاملًا داخل transaction، ثم تسجيل.
       if (apply) {
         await ensureSchemaMigrationsTable(client);
-        await applyMigrationInTransaction(client, baseline, { adopted: false });
+        await applyMigrationInTransaction(client, baseline, { adopted: false }, onPoisonClient);
       }
       appliedNow.push(BASELINE_VERSION);
     } else {
@@ -404,7 +420,7 @@ async function migrateHoldingLock(
     }
     if (apply) {
       await ensureSchemaMigrationsTable(client);
-      await applyMigrationInTransaction(client, file, { adopted: false });
+      await applyMigrationInTransaction(client, file, { adopted: false }, onPoisonClient);
     }
     appliedNow.push(file.version);
   }
@@ -434,6 +450,7 @@ async function applyMigrationInTransaction(
   client: DbClient,
   file: MigrationFile,
   meta: { adopted: boolean },
+  onPoisonClient?: () => void,
 ): Promise<void> {
   await client.query("BEGIN");
   try {
@@ -450,7 +467,9 @@ async function applyMigrationInTransaction(
     );
     await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK").catch(() => {
+      onPoisonClient?.();
+    });
     throw error;
   }
 }

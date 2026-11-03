@@ -54,6 +54,11 @@ export function clientIpFromForwardedFor(forwarded: string | null | undefined): 
   return last;
 }
 
+/** هل يعمل الخادم خلف وسيط عكسي موثوق مضبوط صراحةً (`TRUST_PROXY=true`)؟ */
+export function isTrustedProxy(): boolean {
+  return (process.env.TRUST_PROXY ?? "").trim().toLowerCase() === "true";
+}
+
 /** أول قيمة ترويسة موثوقة الشكل (بلا إدخال سطر أو مسافات). */
 export function firstHeaderEntry(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;

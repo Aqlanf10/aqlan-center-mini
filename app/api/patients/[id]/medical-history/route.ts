@@ -1,3 +1,7 @@
+import { canonicalPatientGet, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalClinicalRecordsFailure, commandCanonicalMedicalHistoryCreate } from "@/lib/canonical-clinical-records";
+import { readCanonicalMedicalHistory } from "@/lib/canonical-patient-reads";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -21,6 +25,9 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
  * وآخر العلامات الحيوية. للطبيب (مرضاه) والاستقبال والمدير — لا للأدوار المالية.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 3): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await context.params).id, readCanonicalMedicalHistory, "تعذّر تحميل التاريخ الطبي.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -48,6 +55,24 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
 /** نسخةٌ جديدة من التاريخ الطبي — لا يُعدَّل ما قبلها. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(
+        await commandCanonicalMedicalHistoryCreate(selected.handle, (await context.params).id, body),
+        { status: 201, headers: NO_STORE },
+      );
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر حفظ التاريخ الطبي.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);

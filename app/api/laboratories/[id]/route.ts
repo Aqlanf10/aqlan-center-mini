@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import {
+  commandCanonicalDeleteLaboratoryResponse,
+  commandCanonicalUpdateLaboratoryResponse,
+  readCanonicalLaboratoryResponse,
+} from "@/lib/canonical-lab";
+import { NO_STORE } from "@/lib/canonical-patient-http";
 import { deleteLaboratory, getLaboratory, recordAudit, updateLaboratory } from "@/lib/db";
 import { isCurrency, type Currency } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { toWhatsAppNumber } from "@/lib/reminders";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +23,18 @@ export async function GET(
   _request: Request,
   props: { params: Promise<{ id: string }> }
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const params = await props.params;
+    const id = Number(params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "معرّف غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return readCanonicalLaboratoryResponse(selected.handle, id);
+  }
   const session = await requireSession();
   if (!session) return denied();
   const params = await props.params;
@@ -40,6 +59,26 @@ export async function PATCH(
   request: Request,
   props: { params: Promise<{ id: string }> }
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const params = await props.params;
+    const id = Number(params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "معرّف غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return commandCanonicalUpdateLaboratoryResponse(selected.handle, id, body);
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {
@@ -168,6 +207,18 @@ export async function DELETE(
   _request: Request,
   props: { params: Promise<{ id: string }> }
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const params = await props.params;
+    const id = Number(params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "معرّف غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return commandCanonicalDeleteLaboratoryResponse(selected.handle, id);
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

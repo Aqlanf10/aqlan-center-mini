@@ -102,7 +102,8 @@ describe("commitPatientImport", () => {
 
   it("re-classifies at commit time: a patient added after the preview is not created twice", async () => {
     const file = "الاسم,الهاتف\nمنى صالح,771555666\n";
-    await q(`INSERT INTO patients (patient_number, full_name, phone) VALUES ('P-90003', 'منى صالح', '967771555666')`);
+    // Use the shared allocator: earlier imports correctly consumed numbers above the legacy maximum.
+    await createPatient({fullName:'منى صالح',phone:'967771555666',altPhone:null,gender:'unknown',birthYear:null,address:null,medicalAlert:null,note:null});
     const result = await importFile(file);
     expect(result.ok && result.created).toEqual([]);
     expect(await q(`SELECT id FROM patients WHERE full_name = 'منى صالح'`)).toHaveLength(1);

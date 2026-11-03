@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const boundary = vi.hoisted(() => ({
   createLabOrder: vi.fn(), getSettings: vi.fn(), listParties: vi.fn(), recordAudit: vi.fn(), requireSession: vi.fn(), listLabServices: vi.fn(),
+  doctorOwnsPatient: vi.fn(), findUserByUsername: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
-vi.mock("@/lib/db", () => ({ ...boundary, findUserByUsername: vi.fn(), labCounts: vi.fn(),
-  listLabNames: vi.fn(), listLabOrders: vi.fn() }));
+vi.mock("@/lib/db", () => ({ ...boundary, labCounts: vi.fn(),
+  listLabNames: vi.fn(), listLabOrders: vi.fn(), doctorOwnedPatientIds: vi.fn(), patientHasVisitToday: vi.fn() }));
 import { POST } from "../app/api/lab/route";
 import { LabOrderPricingConflict } from "../lib/lab-order-pricing";
 import { withDefaults } from "../lib/settings";
@@ -24,6 +25,8 @@ beforeEach(() => {
   boundary.listParties.mockImplementation(async kind => kind === "doctor" ? [{ id: 601, kind: "doctor", isActive: true }] : [{ id: 301 }]);
   boundary.listLabServices.mockResolvedValue([{ id: 401, name: "Synthetic crown", code: "CRN_TEST", isActive: true }]);
   boundary.createLabOrder.mockResolvedValue(created);
+  boundary.doctorOwnsPatient.mockResolvedValue(true);
+  boundary.findUserByUsername.mockResolvedValue({ isActive: true, partyId: 601, permissions: { canViewAllPatients: false } });
 });
 
 describe("actual lab POST automatic pricing error boundary (synthetic writer stub)", () => {

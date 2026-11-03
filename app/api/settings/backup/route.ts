@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/roles";
 import { getBackupSettingsReadOnly, requireBackupAdminReadOnly } from "@/lib/backupReadOnly";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { admitCanonicalBackupOwner } from "@/lib/canonical-backup-readonly";
 import { storageStatus } from "@/lib/files";
 import { resolveBackupRunConfig, mergeBackupRunConfig, type BackupRunConfig } from "@/lib/backupConfig";
 import { readVolumeBackupConfig } from "@/lib/backupRuntimeConfig";
@@ -31,17 +33,28 @@ const noStore = (body: unknown, status: number): NextResponse =>
   NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 export async function GET() {
-  const auth = await requireBackupAdminReadOnly();
-  if (!auth.ok) {
-    // الجلسة الغائبة أو الحساب المُبدَّل رفضٌ مصادقة عادي (401 كما كان) —
-    // أما جدول users غير المقروء ففشلٌ مغلق (503): لا جلسة ولا إصلاح ضمني.
-    return noStore(
-      { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن — يلزم تدخّل يدوي." : "سجّل الدخول من جديد." },
-      auth.reason === "users-unreadable" ? 503 : 401,
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") {
+    const admitted = await admitCanonicalBackupOwner(
+      selected.handle,
+      "حالة النسخ الاحتياطي للمدير وحده.",
+      "المصادقة غير متاحة الآن — يلزم تدخّل يدوي.",
     );
-  }
-  if (!isAdmin(auth.session.role)) {
-    return noStore({ message: "حالة النسخ الاحتياطي للمدير وحده." }, 403);
+    if ("response" in admitted) return admitted.response;
+  } else {
+    const auth = await requireBackupAdminReadOnly();
+    if (!auth.ok) {
+      // الجلسة الغائبة أو الحساب المُبدَّل رفضٌ مصادقة عادي (401 كما كان) —
+      // أما جدول users غير المقروء ففشلٌ مغلق (503): لا جلسة ولا إصلاح ضمني.
+      return noStore(
+        { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن — يلزم تدخّل يدوي." : "سجّل الدخول من جديد." },
+        auth.reason === "users-unreadable" ? 503 : 401,
+      );
+    }
+    if (!isAdmin(auth.session.role)) {
+      return noStore({ message: "حالة النسخ الاحتياطي للمدير وحده." }, 403);
+    }
   }
 
   // الإعدادات قراءة مباشرة بلا ensureSchema: إن فشلت تبقى الشاشة صادقة —

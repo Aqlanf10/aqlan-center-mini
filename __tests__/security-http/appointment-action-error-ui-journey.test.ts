@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { Client } from "pg";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
@@ -32,6 +33,8 @@ let today = "";
 let tomorrow = "";
 let afterTomorrow = "";
 let slot = 0;
+let scenarioPatients: Partial<Record<"A" | "B", number>> = {};
+beforeEach(() => { scenarioPatients = {}; });
 
 const CONFLICT_MESSAGE = "تغيّرت حالة الموعد — حدّث القائمة.";
 const ARRIVE_CONFLICT_MESSAGE = "سُجّل وصوله بالفعل أو تغيّرت حالة الموعد.";
@@ -41,15 +44,23 @@ function sessionCookie(raw: string): { name: string; value: string } {
   return { name, value: rest.join("=") };
 }
 
-/** موعدٌ اصطناعيّ بوقتٍ فريد في كلّ اختبار — لا يتصادم مع غيره. */
+/** Each test owns its A/B patients: unique initial slots do not isolate later reschedule destinations. */
 async function seedAppointment(date: string, patient: "A" | "B" = "A"): Promise<number> {
+  if (scenarioPatients[patient] === undefined) {
+    const seededId = patient === "A" ? h.seeded.patientAId : h.seeded.patientBId;
+    const created = await db.query<{ id: number }>(`INSERT INTO patients (patient_number, full_name, primary_doctor_id)
+      SELECT $1, $2, primary_doctor_id FROM patients WHERE id=$3 RETURNING id`,
+    [`ACTION-ERROR-${randomUUID()}`, `مريض إجراء موعد اصطناعي ${patient}`, seededId]);
+    expect(created.rowCount).toBe(1);
+    scenarioPatients[patient] = created.rows[0].id;
+  }
   slot += 1;
   const minutes = 7 * 60 + slot * 7;
   const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
   const { rows: [row] } = await db.query<{ id: number }>(
     `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, status, note)
      VALUES ($1, $2::date, $3, 15, 'booked', $4) RETURNING id`,
-    [patient === "A" ? h.seeded.patientAId : h.seeded.patientBId, date, time, NOTE],
+    [scenarioPatients[patient], date, time, NOTE],
   );
   return row.id;
 }

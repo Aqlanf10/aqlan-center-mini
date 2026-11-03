@@ -44,12 +44,47 @@ export const DEFAULT_CLINIC: ClinicIdentity = {
 
 const WEEKDAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 
+import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
+
+function parseClinicDateParts(raw: string): { year: number; month: number; day: number; weekday: number } | null {
+  const trimmed = (raw ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const parsed = new Date(`${trimmed}T12:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== trimmed) return null;
+    return {
+      year: parsed.getUTCFullYear(),
+      month: parsed.getUTCMonth() + 1,
+      day: parsed.getUTCDate(),
+      weekday: parsed.getUTCDay(),
+    };
+  }
+  const instant = new Date(trimmed);
+  if (Number.isNaN(instant.getTime())) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: CLINIC_ZONE_FALLBACK,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(instant).map((p) => [p.type, p.value]),
+  );
+  const isoDay = `${parts.year}-${parts.month}-${parts.day}`;
+  const noonUtc = new Date(`${isoDay}T12:00:00Z`);
+  if (Number.isNaN(noonUtc.getTime())) return null;
+  return {
+    year: noonUtc.getUTCFullYear(),
+    month: noonUtc.getUTCMonth() + 1,
+    day: noonUtc.getUTCDate(),
+    weekday: noonUtc.getUTCDay(),
+  };
+}
+
 /** «الخميس 27/08» — يوم الأسبوع أولًا لأنه ما يتذكره المريض، لا رقم التاريخ. */
 export function friendlyDate(date: string): string {
-  const parsed = new Date(`${date}T12:00:00`);
-  if (Number.isNaN(parsed.getTime())) return date;
-  const day = WEEKDAYS[parsed.getDay()];
-  return `${day} ${String(parsed.getDate()).padStart(2, "0")}/${String(parsed.getMonth() + 1).padStart(2, "0")}`;
+  const parts = parseClinicDateParts(date);
+  if (!parts) return date;
+  const day = WEEKDAYS[parts.weekday];
+  return `${day} ${String(parts.day).padStart(2, "0")}/${String(parts.month).padStart(2, "0")}`;
 }
 
 /** «10:00» → «10:00 صباحًا» — الصيغة التي يقرأها المريض بلا حساب. */
@@ -69,9 +104,9 @@ export function friendlyTime(time: string): string {
  * عامين ففيه زيارات من سنتين، و«27/08» وحدها لا تقول أيّهما.
  */
 export function friendlyDateLong(date: string): string {
-  const parsed = new Date(`${date}T12:00:00`);
-  if (Number.isNaN(parsed.getTime())) return date;
-  return `${friendlyDate(date)}/${parsed.getFullYear()}`;
+  const parts = parseClinicDateParts(date);
+  if (!parts) return date;
+  return `${WEEKDAYS[parts.weekday]} ${String(parts.day).padStart(2, "0")}/${String(parts.month).padStart(2, "0")}/${parts.year}`;
 }
 
 const MONTHS_NAMED = [
@@ -88,9 +123,9 @@ const MONTHS_NAMED = [
  * الحقول نفسها، والجملة عربيةٌ خالصة فلا تتشابك اتجاهاتها.
  */
 export function friendlyDateNamed(date: string): string {
-  const parsed = new Date(`${date}T12:00:00`);
-  if (Number.isNaN(parsed.getTime())) return date;
-  return `${WEEKDAYS[parsed.getDay()]} ${parsed.getDate()} ${MONTHS_NAMED[parsed.getMonth()]} ${parsed.getFullYear()}`;
+  const parts = parseClinicDateParts(date);
+  if (!parts) return date;
+  return `${WEEKDAYS[parts.weekday]} ${parts.day} ${MONTHS_NAMED[parts.month - 1]} ${parts.year}`;
 }
 
 export type ReminderKind = "upcoming" | "missed";

@@ -1,8 +1,10 @@
+import { readLegacyStaffSchema, assertLegacyPermissionEnvelope } from "./legacy-staff-boundary";
 import { getPool } from "./db";
 import { isAdmin } from "./roles";
 import { withDefaults, type SettingsMap } from "./settings";
 import { readSessionPayload } from "./session";
-import { sessionCredentialVersion } from "./auth";
+import { legacySessionTokenHash, sessionCredentialVersion } from "./auth";
+import { isLegacyTokenHashRevokedIn } from "./legacy-session-token-revocation";
 
 /**
  * الطبقة القرائية الحصرية لنظام النسخ الاحتياطي — هنا سبب أن «لا كتابة في
@@ -18,7 +20,7 @@ import { sessionCredentialVersion } from "./auth";
  * بالكود.
  *
  * فكل ما يلمسه مسار النسخ من القاعدة يمر من هنا: SELECT مباشر عبر
- * `getPool().query()` حصرًا — بلا ensureSchema، بلا saveSettings، بلا أي دالة
+ * SELECT مباشر (وجلسة النسخ بمعاملة READ ONLY محكومة) — بلا ensureSchema، بلا saveSettings، بلا أي دالة
  * كتبت يومًا. والنقص أو الخطأ يخرج فشلًا مغلقًا صريحًا لا تخمينًا بصمت.
  */
 
@@ -88,34 +90,53 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
     id: number;
     username: string;
     password_hash: string;
+    session_version?: number | null;
     role: string;
     is_active: boolean;
     party_id: number | null;
+    permissions: unknown;
   } | null = null;
+  let tokenRevoked = false;
+  let client: Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>> | null = null;
+  let discard=false;
   try {
-    const { rows } = await getPool().query<{
+    client=await getPool().connect();
+    await client.query("BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED READ ONLY");
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",["aqlan.canonical.identity.substrate.v1:public"]);
+    if(await readLegacyStaffSchema(client)!=="base")throw new Error("LEGACY_STAFF_BASE_SCHEMA_UNREADABLE");
+    const { rows } = await client.query<{
       id: number;
       username: string;
       password_hash: string;
+      session_version?: number | null;
       role: string;
       is_active: boolean;
       party_id: number | null;
+      permissions: unknown;
     }>(
-      `SELECT id, username, password_hash, role, is_active, party_id
+      `SELECT *
          FROM users
         WHERE LOWER(username) = LOWER($1)
         LIMIT 1`,
       [payload.username],
     );
     userRow = rows[0] ?? null;
+    if(userRow)assertLegacyPermissionEnvelope(userRow.permissions);
+    const tokenHash = legacySessionTokenHash(payload);
+    if (userRow && tokenHash) {
+      tokenRevoked = await isLegacyTokenHashRevokedIn(client, userRow.id, tokenHash);
+    }
+    await client.query("COMMIT");
   } catch {
+    if(client)await client.query("ROLLBACK").catch(()=>{discard=true;});
     return { ok: false, reason: "users-unreadable" };
-  }
+  } finally { client?.release(discard); }
 
   if (!userRow) return { ok: false, reason: "user-gone" };
+  if(payload.expiresAt<=Date.now())return {ok:false,reason:"no-session"};
   if (!userRow.is_active) return { ok: false, reason: "inactive" };
-  if (userRow.id !== payload.userId) return { ok: false, reason: "user-gone" };
-  if (payload.credentialVersion !== sessionCredentialVersion(userRow.password_hash)) {
+  if (userRow.id !== payload.userId || userRow.username !== payload.username || userRow.role !== payload.role) return { ok: false, reason: "user-gone" };
+  if (tokenRevoked || payload.credentialVersion !== sessionCredentialVersion(userRow.password_hash, Number(userRow.session_version ?? 0))) {
     return { ok: false, reason: "credential-changed" };
   }
 

@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, getPool } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalExecutivePulseGet } from "@/lib/canonical-admin-reports-settings";
 import { canReadLeadershipPulse, parsePulseQuery } from "@/lib/leadership-pulse";
 import { readLeadershipPulse } from "@/lib/leadership-pulse-db";
 export const dynamic = "force-dynamic";
 const json = (body: unknown,status=200) => NextResponse.json(body,{status,headers:{"Cache-Control":"private, no-store"}});
 export async function GET(request:Request) {
+ const selected=await selectRequestStaffEnvelope();
+ if (selected.kind==="denied") return json({message:"انتهت الجلسة. سجّل الدخول من جديد."},401);
+ if (selected.kind==="canonical") return canonicalExecutivePulseGet(selected.handle,request);
  const session=await requireSession();
  if (!session) return json({message:"انتهت الجلسة. سجّل الدخول من جديد."},401);
  if (!canReadLeadershipPulse(session.role)) return json({message:"مراجعة القيادة للإدارة فقط."},403);

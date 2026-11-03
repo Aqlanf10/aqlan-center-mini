@@ -1,7 +1,7 @@
 vi.mock("server-only", () => ({}));
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
+import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 import type { DbClient } from "../../lib/db";
 import { withTransaction } from "../../lib/transactions";
 import type { InventoryActor } from "../../lib/inventory-domain/procurement-store";
@@ -22,6 +22,8 @@ let locationId: string;
 
 beforeAll(async () => {
   vi.stubEnv("INVENTORY_INTEGRATION_ENABLED", "true");
+  // Isolate global valuation from previous suites; target guard remains mandatory.
+  await dropPublicSchema(process.env.DATABASE_URL!);
   await db.ensureSchema();
   // Explicit opt-in fixture only. Never register/apply the proposal at runtime.
   await db.getPool().query(INVENTORY_PROCUREMENT_SQL);

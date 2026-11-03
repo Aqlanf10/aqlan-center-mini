@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
 import { CHANNEL_LABEL, SECRET_FIELDS, type Channel } from "@/lib/messaging-channels";
 
 /**
@@ -73,9 +74,18 @@ function ChannelCard({ initial, onSaved }: { initial: ChannelView; onSaved: (vie
   const [config, setConfig] = useState<Record<string, string | number>>(initial.config);
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [testTo, setTestTo] = useState("");
+  const [testAttemptKey, setTestAttemptKey] = useState(() =>
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const nextAttemptKey = () =>
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   async function save(removeKey: string | null = null) {
     setBusy(true); setNote(null);
@@ -103,11 +113,24 @@ function ChannelCard({ initial, onSaved }: { initial: ChannelView; onSaved: (vie
     try {
       const response = await fetch("/api/settings/messaging/test", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channel: initial.channel, to: testTo }),
+        headers: {
+          "content-type": "application/json",
+          "Idempotency-Key": testAttemptKey,
+        },
+        body: JSON.stringify({ channel: initial.channel, to: testTo, clientRequestId: testAttemptKey }),
       });
       const payload = await readJson(response);
-      setNote(response.ok ? { ok: true, text: "أُرسلت رسالة الاختبار." } : { ok: false, text: String(payload.message ?? "فشل الاختبار.") });
+      if (response.ok) {
+        setTestAttemptKey(nextAttemptKey());
+        setNote({ ok: true, text: String(payload.message ?? "أُرسلت رسالة الاختبار.") });
+      } else {
+        if (response.status === 400 || response.status === 502) {
+          setTestAttemptKey(nextAttemptKey());
+        }
+        setNote({ ok: false, text: String(payload.message ?? "فشل الاختبار.") });
+      }
+    } catch {
+      setNote({ ok: false, text: "تعذّر الجزم بحالة الإرسال — أعد المحاولة بنفس المفتاح للتحقق دون إرسال مكرر." });
     } finally {
       setBusy(false);
     }
@@ -179,7 +202,7 @@ function ChannelCard({ initial, onSaved }: { initial: ChannelView; onSaved: (vie
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button type="button" disabled={busy} onClick={() => void save()}
           className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-extrabold text-white disabled:opacity-40">حفظ</button>
-        <input value={testTo} onChange={(event) => setTestTo(event.target.value)} dir="ltr"
+        <input value={testTo} onChange={(event) => { setTestTo(event.target.value); setTestAttemptKey(nextAttemptKey()); }} dir="ltr"
           placeholder={initial.channel === "email" ? "بريد للاختبار" : "رقم جوال للاختبار"}
           className="min-w-40 flex-1 rounded-xl border border-slate-300 px-2 py-1.5 text-sm" />
         <button type="button" disabled={busy || !testTo.trim()} onClick={() => void test()}
@@ -201,25 +224,24 @@ export default function MessagingSettingsPage() {
 
   useEffect(() => {
     void (async () => {
-      const response = await fetch("/api/settings/messaging", { cache: "no-store" });
-      const payload = await readJson(response);
-      if (!response.ok) { setError(String(payload.message ?? "تعذّر التحميل.")); return; }
-      setChannels(payload.channels as ChannelView[]);
+      try {
+        const response = await fetch("/api/settings/messaging", { cache: "no-store" });
+        const payload = await readJson(response);
+        if (!response.ok) { setError(String(payload.message ?? "تعذّر التحميل.")); return; }
+        setChannels(payload.channels as ChannelView[]);
+      } catch {
+        setError("تعذّر الاتصال بالخادم لتحميل قنوات الرسائل.");
+      }
     })();
   }, []);
 
   return (
-    <main className="mx-auto max-w-4xl space-y-4 p-4 pb-24">
-      <header>
-        <h1 className="text-xl font-extrabold text-navy-900">قنوات الرسائل</h1>
-        <p className="text-xs text-slate-500">
-          واتساب للأعمال والرسائل النصية والبريد — لكل قناةٍ رقمها أو عنوانها وسرّها. السرّ يُحفظ مشفّرًا ولا يظهر بعد الحفظ.
-          والرسائل الداخلية بين الطاقم تبقى كما هي في صفحة الرسائل.
-        </p>
-        <div className="mt-2">
-          <a href="/settings" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">‹ الإعدادات</a>
-        </div>
-      </header>
+    <main className="mx-auto max-w-4xl space-y-4 p-4 pb-24" dir="rtl">
+      <PageHeader
+        title="قنوات الرسائل"
+        subtitle="واتساب للأعمال والرسائل النصية والبريد — لكل قناةٍ رقمها أو عنوانها وسرّها المشفّر، والرسائل الداخلية بين الطاقم تبقى في صفحة الرسائل"
+        back={{ href: "/settings", label: "الإعدادات المركزية" }}
+      />
       {error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-700">{error}</p> : null}
       {channels ? channels.map((channel) => (
         <ChannelCard key={`${channel.channel}-${channel.secretKeys.join(",")}-${channel.updatedAt}-${channel.lastTestAt}`} initial={channel}

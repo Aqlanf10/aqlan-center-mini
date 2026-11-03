@@ -18,6 +18,14 @@ import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { expenseCatalogueAccess, projectExpenseCategories } from "@/lib/expense-catalogue-visibility";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  expenseCategoriesDeleteCanonicalResponse,
+  expenseCategoriesGetCanonicalResponse,
+  expenseCategoriesPatchCanonicalResponse,
+  expenseCategoriesPostCanonicalResponse,
+} from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +33,9 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: NextRequest) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expenseCategoriesGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   const user = session.role === "doctor"
@@ -61,6 +72,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expenseCategoriesPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role) && session.role !== "accountant") {
@@ -157,6 +171,9 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expenseCategoriesPatchCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role) && session.role !== "accountant") {
@@ -240,6 +257,9 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expenseCategoriesDeleteCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role) && session.role !== "accountant") {

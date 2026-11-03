@@ -38,6 +38,7 @@ function sourceFor(value?: string) {
     calls.push(sql);
     if (sql.startsWith("SELECT to_regclass")) return { rows: [{ present: true }] };
     if (sql.startsWith("SELECT 'doc-'")) return { rows: [] };
+    if (sql.includes("FROM pg_catalog.pg_class")) return { rows: [] };
     if (sql === "SELECT value FROM settings WHERE key = $1") {
       expect(values).toEqual(["clinic.login_photo_asset"]);
       // No visibility predicate: an approved-but-hidden photo must survive.

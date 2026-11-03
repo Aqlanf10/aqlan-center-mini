@@ -45,3 +45,15 @@ export async function canViewPatientMoney(session: SessionPayload, patientId: nu
   if (session.role === "doctor") return canAccessPatient(session, patientId, "canViewPatientPayments");
   return canViewMoney(session.role);
 }
+
+/** يتحقّق إن كان الطبيب يملك صلاحية الوصول لجميع مرضى المركز أم محصورًا بمرضاه وإحالاته. */
+export async function canDoctorAccessAllPatients(session: SessionPayload): Promise<boolean> {
+  if (session.role === "admin" || session.role === "reception") return true;
+  if (session.role !== "doctor") return false;
+  try {
+    const user = await findUserByUsername(session.username);
+    return Boolean(user && user.isActive && user.permissions?.canViewAllPatients === true);
+  } catch {
+    return false;
+  }
+}

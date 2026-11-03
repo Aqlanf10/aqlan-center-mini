@@ -1,12 +1,11 @@
-import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { portalLogin, portalLoginFailures, recordAudit } from "@/lib/db";
+import { getSettings, portalLogin, recordAudit } from "@/lib/db";
 import { consumeLoginAttemptFor } from "@/lib/loginLimit";
+import { consumeSecurityLimit } from "@/lib/security-rate-limit";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { FORM_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import {
   LOGIN_MAX_FAILURES,
-  LOGIN_WINDOW_MS,
   PORTAL_COOKIE,
   PORTAL_DURATION_MS,
   createPortalToken,
@@ -18,9 +17,8 @@ export const dynamic = "force-dynamic";
 /**
  * دخول البوابة: هاتف + رقم ملف.
  *
- * الحد هنا حمايةُ هوية لا راحةُ خادم: من يحاول رقمَ هاتفٍ غريب مرارًا يبحث عن
- * ملفٍ لا يملكه. المحاولات تُعدّ من سجل التدقيق نفسه — فالهاتف لا يُخزَّن
- * مرة ثانية ولا يظهر كاملًا في أي سطر، ويُقاس ببصمة sha256 لآخر تسع خاناته.
+ * (SEC-05) محاولات الدخول الخاطئة تُحدّ في `login_limits` على كلٍّ من الهاتف ورقم
+ * الملف والمصدر — بلا كتابة في `audit_log` لغير الموثّقين كي لا يُغرق سجل التدقيق.
  */
 export async function POST(request: Request) {
   let body: unknown;
@@ -35,14 +33,15 @@ export async function POST(request: Request) {
   }
   const { phone, patientNumber } = validation.value;
 
-  const phoneHash = createHash("sha256")
-    .update(phone.replace(/\D/g, "").slice(-9))
-    .digest("hex");
-
   try {
-    /* الحدّ المشترك الجديد (من مستودع الوكيل الآخر) فوق حدّ البصمة القائم:
-       مفتاح HMAC على الهاتف بين النسخ ومع إعادة التشغيل — فتدوير IP أو إقلاع
-       الخادم لا يصفّر العدّاد، وحدُّ المصدر خلف وسيطٍ موثّق فقط. */
+    const settings = await getSettings();
+    if (settings["portal.enabled"] === "false") {
+      return NextResponse.json(
+        { message: "بوابة المريض متوقفة حاليًا بقرار إدارة المركز. يرجى التواصل مع الاستقبال." },
+        { status: 403 },
+      );
+    }
+
     const sharedLimit = await consumeLoginAttemptFor("portal", phone, request.headers);
     if (!sharedLimit.allowed) {
       return NextResponse.json(
@@ -50,28 +49,22 @@ export async function POST(request: Request) {
         { status: 429, headers: { "Retry-After": String(sharedLimit.retryAfterSeconds) } },
       );
     }
-    const now = Date.now();
-    const failures = await portalLoginFailures(
-      phoneHash,
-      new Date(now - LOGIN_WINDOW_MS).toISOString(),
-    );
-    if (failures.count >= LOGIN_MAX_FAILURES && failures.oldestIso) {
-      const remaining = Math.ceil(
-        ((Date.parse(failures.oldestIso) + LOGIN_WINDOW_MS - now) / 60_000),
-      );
+    const fileLimit = await consumeSecurityLimit({
+      scope: "portal-file",
+      identifier: patientNumber.trim().toUpperCase(),
+      maximum: LOGIN_MAX_FAILURES * 2,
+      windowMinutes: 15,
+      headers: request.headers,
+    });
+    if (!fileLimit.allowed) {
       return NextResponse.json(
-        { message: `محاولات كثيرة على هذا الرقم. أعد المحاولة بعد ${Math.max(1, remaining)} دقيقة.` },
-        { status: 429 },
+        { message: `محاولات كثيرة على هذا الملف. أعد المحاولة بعد ${Math.ceil(fileLimit.retryAfterSeconds / 60)} دقيقة.` },
+        { status: 429, headers: { "Retry-After": String(fileLimit.retryAfterSeconds) } },
       );
     }
 
     const result = await portalLogin(phone, patientNumber);
     if (!result) {
-      await recordAudit({
-        action: "portal.login",
-        details: { ok: false, phone_fingerprint: phoneHash },
-        actor: "بوابة المريض",
-      });
       return NextResponse.json(
         { message: "لم نطابق هاتفًا مع رقم ملف. تأكد منهما أو اتصل بالاستقبال." },
         { status: 401 },
@@ -91,6 +84,7 @@ export async function POST(request: Request) {
       patientNumber: result.patient.patientNumber,
       fullName: result.patient.fullName,
       expiresAt: Date.now() + PORTAL_DURATION_MS,
+      secretVersion: result.patient.portalSecretVersion ?? 0,
     });
     const response = NextResponse.json({
       patientNumber: result.patient.patientNumber,

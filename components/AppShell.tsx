@@ -7,6 +7,7 @@ import { useSessionActions } from "./SessionProvider";
 import { canHandleMoney, canUseAiChat, isAdmin, ROLE_LABEL, type Role } from "@/lib/roles";
 import { Icon, Logo, type IconName } from "./Icon";
 import LoginPage from "@/app/login/page";
+import { CanonicalShell } from "./CanonicalShell";
 import { GlobalSearchModal } from "./GlobalSearchModal";
 import { QuickAppointmentModal } from "./QuickAppointmentModal";
 import { QuickPatientModal } from "./QuickPatientModal";
@@ -67,6 +68,8 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   const { session, logout } = useSessionActions();
 
   const restricted = isGatedRole(session?.role);
+  /* جلسة الهوية الموحّدة لها قشرتها: لا عدّادات ولا اختصارات تطرق مسارات قديمة. */
+  const canonical = session?.canonical === true;
   const nav = NAV.filter((item) => {
     // (P2-1) الكاشير والمحاسب: القائمة هي قائمة السماح نفسها التي يحرسها الباب.
     if (restricted && !pageVisibleToRole(session?.role, item.href)) return false;
@@ -165,7 +168,7 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   // مستمع اختصارات لوحة المفاتيح السريعة العالمية
   useEffect(() => {
     // (P2-1) الكاشير والمحاسب بلا مواعيد ولا ملفات مرضى — فلا اختصارات إليها.
-    if (bare || !session || restricted) return;
+    if (bare || !session || restricted || canonical) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.querySelector("dialog[open]")) return;
@@ -198,15 +201,15 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [bare, session, restricted]);
+  }, [bare, session, restricted, canonical]);
 
   useEffect(() => {
     // (P2-1) عدّادات الطلبات والمختبر والرسائل خارج حدود الكاشير والمحاسب.
-    if (bare || !session || restricted) return;
+    if (bare || !session || restricted || canonical) return;
     void loadBadges();
     const timer = setInterval(() => { void loadBadges(); }, 60_000);
     return () => clearInterval(timer);
-  }, [bare, session, restricted, loadBadges]);
+  }, [bare, session, restricted, canonical, loadBadges]);
 
   // عودة سلاح البانر: نزول العاجلة إلى الصفر يعني أن أحدهم فتحها وقرأها.
   useEffect(() => {
@@ -220,6 +223,8 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   if (!session) {
     return <LoginPage />;
   }
+
+  if (canonical) return <CanonicalShell>{children}</CanonicalShell>;
 
   const signOut = async () => {
     await logout();
@@ -283,14 +288,23 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
                   {ROLE_LABEL[session.role as Role] ?? session.role}
                 </p>
               </div>
+              <a href="/hr/me" aria-label="ملفي الوظيفي"
+                className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700" title="ملفي الوظيفي — العقد والدوام والإجازات">
+                <Icon name="clock" className="h-4 w-4" />
+              </a>
               <a href="/account" aria-label="حسابي — تغيير كلمة المرور"
                 className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700" title="حسابي — تغيير كلمة المرور">
                 <Icon name="user" className="h-4 w-4" />
               </a>
-              <a href="/login" aria-label="شاشة الدخول"
-                className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700" title="تبديل الحساب / تسجيل الدخول">
+              <button
+                type="button"
+                onClick={() => { void signOut(); }}
+                aria-label="تسجيل الخروج"
+                className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700"
+                title="تسجيل الخروج"
+              >
                 <Icon name="logout" className="h-4 w-4" />
-              </a>
+              </button>
             </div>
           </div>
         ) : null}
@@ -575,6 +589,10 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
               className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-500">
               <Icon name="link" className="h-[18px] w-[18px] shrink-0" /> صفحة حجز المرضى
             </a>
+            <a href="/hr/me"
+              className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-500">
+              <Icon name="clock" className="h-[18px] w-[18px] shrink-0" /> ملفي الوظيفي والدوام
+            </a>
             <a href="/account"
               className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-500">
               <Icon name="user" className="h-[18px] w-[18px] shrink-0" /> حسابي وكلمة المرور
@@ -598,21 +616,33 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
               <Badge item={item} badges={badges} floating />
             </a>
           ))}
-          <button
-            onClick={() => setMoreOpen((open) => !open)}
-            aria-expanded={moreOpen}
-            className={`relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold ${
-              moreOpen || restActive ? "text-navy-900" : "text-slate-600"
-            }`}
-          >
-            <Icon name="menu" className="h-5 w-5" />
-            المزيد
-            {!moreOpen && badges.requests > 0 ? (
-              <span className="absolute -top-0.5 left-1/4 rounded-full bg-accent-500 px-1.5 py-0.5 text-[10px] font-extrabold text-navy-950">
-                {badges.requests}
-              </span>
-            ) : null}
-          </button>
+          {(() => {
+            const moreItems = nav.slice(4);
+            const moreBadgeCount = moreItems.reduce(
+              (sum, item) => sum + (item.badge ? badges[item.badge] : 0),
+              0,
+            );
+            const moreUrgent = moreItems.some((item) => item.badge === "messages") && badges.urgentMessages > 0;
+            return (
+              <button
+                onClick={() => setMoreOpen((open) => !open)}
+                aria-expanded={moreOpen}
+                className={`relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold ${
+                  moreOpen || restActive ? "text-navy-900" : "text-slate-600"
+                }`}
+              >
+                <Icon name="menu" className="h-5 w-5" />
+                المزيد
+                {!moreOpen && moreBadgeCount > 0 ? (
+                  <span className={`absolute -top-0.5 left-1/4 rounded-full px-1.5 py-0.5 text-[10px] font-extrabold ${
+                    moreUrgent ? "animate-pulse bg-danger-600 text-white" : "bg-accent-500 text-navy-950"
+                  }`}>
+                    {moreBadgeCount}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })()}
         </div>
       </nav>
     </div>

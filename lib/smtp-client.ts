@@ -178,6 +178,9 @@ export async function sendMail(
       await expect([235], "رفض خادم البريد اسم المستخدم أو كلمة المرور (في Gmail استعمل «كلمة مرور التطبيق»).");
     }
 
+    if (/[\r\n<>]/.test(message.fromAddress) || /[\r\n<>]/.test(message.to)) {
+      throw new SmtpError("عنوان البريد يحتوي محارف غير صالحة.");
+    }
     send(`MAIL FROM:<${message.fromAddress}>`);
     await expect([250], "رفض خادم البريد عنوان المرسل.");
     send(`RCPT TO:<${message.to}>`);

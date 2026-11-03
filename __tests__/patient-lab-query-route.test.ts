@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const boundary = vi.hoisted(() => ({
   requireSession: vi.fn(), findUserByUsername: vi.fn(), listLabOrders: vi.fn(),
   listLabNames: vi.fn(), listLabServices: vi.fn(), labCounts: vi.fn(),
+  doctorOwnsPatient: vi.fn(), doctorOwnedPatientIds: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
 vi.mock("@/lib/db", () => ({
-  ...boundary, createLabOrder: vi.fn(), getSettings: vi.fn(), listParties: vi.fn(), recordAudit: vi.fn(),
+  ...boundary, createLabOrder: vi.fn(), getSettings: vi.fn(), listParties: vi.fn(), recordAudit: vi.fn(), patientHasVisitToday: vi.fn(),
 }));
 import { GET } from "../app/api/lab/route";
 
@@ -24,6 +25,8 @@ beforeEach(() => {
   boundary.listLabNames.mockResolvedValue([{ labName: "Synthetic lab", labPhone: null }]);
   boundary.listLabServices.mockResolvedValue([{ id: 701, name: "Synthetic service" }]);
   boundary.labCounts.mockResolvedValue({ outstanding: 3 });
+  boundary.doctorOwnsPatient.mockResolvedValue(true);
+  boundary.doctorOwnedPatientIds.mockResolvedValue(new Set([101]));
 });
 
 describe("patient lab GET canonical query boundary", () => {
@@ -88,21 +91,28 @@ describe("patient lab GET canonical query boundary", () => {
   });
 
   it.each([false, true])("preserves doctor cost visibility = %s", async (canViewCostPrices) => {
-    boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor" });
+    boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor", partyId: 7 });
     boundary.findUserByUsername.mockResolvedValue({ permissions: { canViewCostPrices } });
     const response = await GET(request("?patientId=101"));
     expect(boundary.listLabOrders).toHaveBeenCalledExactlyOnceWith({ patientId: 101 });
     expect((await response.json()).orders).toEqual(canViewCostPrices
-      ? orders : orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })));
-    // This bounded fix preserves the existing two-field mask; it does not redesign financial DTOs.
+      ? orders : orders.map((order) => ({ ...order, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null, payableId: null })));
     expect(orders.map((order) => order.costCurrency)).toEqual(["USD", "SAR", "YER"]);
   });
 
   it("keeps doctor costs masked when the user lookup fails", async () => {
-    boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor" });
+    boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor", partyId: 7 });
     boundary.findUserByUsername.mockRejectedValue(new Error("Synthetic lookup failure"));
     expect((await (await GET(request("?patientId=101"))).json()).orders)
-      .toEqual(orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })));
+      .toEqual(orders.map((order) => ({ ...order, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null, payableId: null })));
+  });
+
+  it("blocks restricted doctor from querying unowned patient lab orders", async () => {
+    boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor", partyId: 7 });
+    boundary.findUserByUsername.mockResolvedValue({ permissions: { canViewCostPrices: false, canViewAllPatients: false } });
+    boundary.doctorOwnsPatient.mockResolvedValue(false);
+    expect((await GET(request("?patientId=101"))).status).toBe(403);
+    expect(boundary.listLabOrders).not.toHaveBeenCalled();
   });
 
   it("retains unauthenticated admission without reads", async () => {

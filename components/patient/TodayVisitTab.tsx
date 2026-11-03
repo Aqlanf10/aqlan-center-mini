@@ -5,6 +5,8 @@ import {
   CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency,
 } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { ClinicalVisit } from "../ClinicalVisit";
 import { CollectPaymentModal } from "../CollectPaymentModal";
 import { CheckoutExtras, isCheckoutWalkout } from "./CheckoutExtras";
@@ -88,7 +90,7 @@ function OwnedTodayVisitTab({
     dueRecommendation: CheckoutDueRecommendation | null;
     financialSummary: CheckoutCurrencyLine[] | null;
     sessionsCompleted: number;
-    nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number; suggestedDate?: string | null; afterDays?: number | null } | null;
+    nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number; suggestedDate?: string | null; afterDays?: number | null; remainingWork?: string | null; durationWarning?: string | null } | null;
     labOrdersCreated: number;
     materialsDeducted: number;
   } | null>(null);
@@ -412,7 +414,7 @@ function OwnedTodayVisitTab({
           <p className="text-sm font-bold text-slate-600">{summary ? "لا زيارة قائمة اليوم" : "تعذّر التحقق من الزيارة القائمة"}</p>
           {summary && summary.plannedVisits.length > 0 ? (
             <p className="mt-1 text-xs text-slate-500">
-              ابدأ الجلسة المخطَّطة «{summary.plannedVisits[0].title}» من تبويب الملخص —
+              ابدأ الجلسة المخطَّطة «{summary.plannedVisits[0].remainingWork ?? summary.plannedVisits[0].title}» من تبويب الملخص —
               أو ابدأ زيارةً حرّة:
             </p>
           ) : (
@@ -579,17 +581,20 @@ function OwnedTodayVisitTab({
             collected={collected}
             suggestedDate={checkout.nextPlannedVisit?.suggestedDate ?? null}
             durationMinutes={checkout.nextPlannedVisit?.durationMinutes ?? null}
+            durationWarning={checkout.nextPlannedVisit?.durationWarning ?? null}
             onChanged={() => { onChanged(); void loadCurrentBalances(); }}
           />
 
           {checkout.nextPlannedVisit ? (
             <div className="mt-3 rounded-xl border border-navy-200 bg-white px-3 py-2.5">
               <p className="text-xs font-extrabold text-navy-900">
-                الجلسة القادمة المقترحة: {checkout.nextPlannedVisit.title}
+                العمل المتبقي المقترح: {checkout.nextPlannedVisit.remainingWork ?? checkout.nextPlannedVisit.title}
                 <span className="mr-2 font-normal text-slate-500">
-                  · {checkout.nextPlannedVisit.durationMinutes} دقيقة
+                  · {checkout.nextPlannedVisit.durationWarning ? "المدة الأصلية: " : ""}{checkout.nextPlannedVisit.durationMinutes} دقيقة
                 </span>
               </p>
+              {checkout.nextPlannedVisit.remainingWork ? <p className="mt-1 text-[11px] text-slate-500">العنوان الأصلي: {checkout.nextPlannedVisit.title}</p> : null}
+              {checkout.nextPlannedVisit.durationWarning ? <p className="mt-1 text-xs font-bold text-amber-800">{checkout.nextPlannedVisit.durationWarning}</p> : null}
               {checkout.nextPlannedVisit.suggestedDate ? (
                 <p className="mt-1 text-xs font-bold text-emerald-800">
                   الموعد المقترح: {friendlyDateLong(checkout.nextPlannedVisit.suggestedDate)}
@@ -634,7 +639,7 @@ function OwnedTodayVisitTab({
             {previousVisits.map((visit) => (
               <li key={visit.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 px-3 py-2">
                 <span className="text-xs font-bold text-navy-900">
-                  {friendlyDateLong(visit.arrivedAt.slice(0, 10))}
+                  {friendlyDateLong(clinicDateString(new Date(visit.arrivedAt), summary?.timeZone ?? CLINIC_ZONE_FALLBACK))}
                 </span>
                 {/* (LIVE-1) سجل الزيارة (ولو قديمة) في صفحتها السريرية — لوحة اليوم لا تعرض إلا زيارات اليوم. */}
                 <a

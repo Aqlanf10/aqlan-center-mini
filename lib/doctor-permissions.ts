@@ -14,6 +14,8 @@ import { financeAccessFor, type FinanceAccess } from "@/lib/finance-permissions"
 
 export interface DoctorPermissions {
   financeAccess?: FinanceAccess;
+  /** Explicit reception-only grant: stored active prescriptions, never prescribing. */
+  canPrintSavedPrescriptions?: boolean;
   /** عرض جميع المرضى (افتراضياً: خطأ ❌ — يرى مرضاه وحالاته فقط) */
   canViewAllPatients: boolean;
   /** إضافة مريض جديد */
@@ -40,6 +42,10 @@ export interface DoctorPermissions {
    * يُعيد الزحمة التي بُني المحرّك لمنعها.
    */
   canOverrideCapacity: boolean;
+  /** رؤية الطبيب المسؤول عن الحالة واقتراح النظام له (للقراءة فقط؛ ضمن الوصول إلى ملف المريض) */
+  canViewResponsibilitySuggestion: boolean;
+  /** اعتماد الطبيب المسؤول عن الحالة أو تغييره (افتراضياً: ❌ إلا للمدير — يُمنح صراحةً من الإعدادات) */
+  canConfirmCaseResponsibility: boolean;
 
   /* ================== ميزة المالية المخفية (Hidden Finance) ================== */
   /**
@@ -79,6 +85,7 @@ export interface DoctorPermissions {
 }
 
 export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
+  canPrintSavedPrescriptions: false,
   canViewAllPatients: false,
   canAddPatient: true,
   canEditPatient: true,
@@ -89,6 +96,8 @@ export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
   canUploadXrays: true,
   canViewAllAppointments: false,
   canOverrideCapacity: false,
+  canViewResponsibilitySuggestion: false,
+  canConfirmCaseResponsibility: false,
 
   // ميزة المالية المخفية — مستحقاته الشخصية فقط، وإخفاء أسعار التكلفة والمصروفات والأرباح العامة وإيرادات المركز
   financialScope: "own_commissions_only",
@@ -109,6 +118,7 @@ export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
 };
 
 export const ADMIN_PERMISSIONS: DoctorPermissions = {
+  canPrintSavedPrescriptions: true,
   canViewAllPatients: true,
   canAddPatient: true,
   canEditPatient: true,
@@ -119,6 +129,8 @@ export const ADMIN_PERMISSIONS: DoctorPermissions = {
   canUploadXrays: true,
   canViewAllAppointments: true,
   canOverrideCapacity: true,
+  canViewResponsibilitySuggestion: true,
+  canConfirmCaseResponsibility: true,
 
   financialScope: "clinic_and_own",
   canViewOwnCommissions: true,
@@ -138,6 +150,7 @@ export const ADMIN_PERMISSIONS: DoctorPermissions = {
 };
 
 export const RECEPTION_PERMISSIONS: DoctorPermissions = {
+  canPrintSavedPrescriptions: false,
   canViewAllPatients: true,
   canAddPatient: true,
   canEditPatient: true,
@@ -148,6 +161,8 @@ export const RECEPTION_PERMISSIONS: DoctorPermissions = {
   canUploadXrays: true,
   canViewAllAppointments: true,
   canOverrideCapacity: false,
+  canViewResponsibilitySuggestion: true,
+  canConfirmCaseResponsibility: false,
 
   financialScope: "own_commissions_only",
   canViewOwnCommissions: false,

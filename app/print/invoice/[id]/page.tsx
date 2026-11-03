@@ -16,7 +16,13 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   // الطبيب لا يرى السندات والفواتير: صفحة الطباعة بابٌ خلفي إلى المال لو تُركت
   // مفتوحة لكل من يملك جلسة.
   const session = await requireSession();
-  if (!session || !canViewMoney(session.role)) notFound();
+  if (
+    !session ||
+    !canViewMoney(session.role) ||
+    ((session.role === "cashier" || session.role === "accountant") && !session.financeAccess?.viewPatientLedger)
+  ) {
+    notFound();
+  }
 
   const { id: rawId } = await params;
   const id = Number(rawId);
@@ -99,7 +105,9 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <tbody>
             {invoice.items.map((item) => (
               <tr key={item.id}>
-                <td>{item.description}</td>
+                <td>{item.description}{item.toothCode != null ? <div className="invoice-tooth-site">
+                  سن {item.toothCode}{item.surfaces ? <> — أسطح <bdi>{item.surfaces}</bdi></> : null}
+                </div> : null}</td>
                 <td className="num" dir="ltr">{item.quantity}</td>
                 <td className="num">{formatMoney(item.unitPriceMinor, base)}</td>
                 <td className="num">{formatMoney(item.totalMinor, base)}</td>

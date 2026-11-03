@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getSettings } from "@/lib/db";
 import { openingBalanceAccess } from "@/lib/opening-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalOpeningBalancesAccessGet } from "@/lib/canonical-users-self";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,14 @@ export const dynamic = "force-dynamic";
  * فيُخفي الحقل حين يُطفئ المدير الإعداد، بدل أن يُرفض التسجيل كله بعد تعبئته.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalOpeningBalancesAccessGet(selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const settings = await getSettings().catch(() => null);

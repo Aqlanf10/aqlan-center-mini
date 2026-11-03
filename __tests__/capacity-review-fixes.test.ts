@@ -163,6 +163,20 @@ describe("حدّ المرضى الجدد يمنع فعلًا", () => {
  * تُهمله وتكتب. فمديرٌ يتجاوز طاقة اليوم من تأكيد طلب مريض لا يترك أثرًا —
  * والسجلّ يبدو نظيفًا، وهو أسوأ من تجاوزٍ ظاهر.
  */
+/* Since M2 slices 21–22 two doors share their engine call with the canonical branch
+   through one module (scheduling-single-door): the route must import that module, and
+   the guard reads both, so the call cannot leave the door unseen. */
+const SHARED_DOOR_MODULES: Record<string, string> = {
+  [join("app", "api", "booking-requests", "[id]", "route.ts")]: "booking-request-confirm",
+  [join("app", "api", "planned-visits", "[id]", "schedule", "route.ts")]: "planned-visit-schedule",
+};
+function doorSource(door: string): string {
+  const route = readFileSync(join(root, door), "utf8");
+  const shared = SHARED_DOOR_MODULES[door];
+  if (!shared) return route;
+  expect(route).toContain(`from "@/lib/${shared}"`);
+  return `${route}\n${readFileSync(join(root, "lib", `${shared}.ts`), "utf8")}`;
+}
 describe("كلُّ بابٍ يسجّل تجاوزه", () => {
   const doors = [
     join("app", "api", "appointments", "route.ts"),
@@ -173,12 +187,22 @@ describe("كلُّ بابٍ يسجّل تجاوزه", () => {
 
   for (const door of doors) {
     it(`${door} يترك أثرًا للتجاوز`, () => {
-      const source = readFileSync(join(root, door), "utf8");
+      const source = doorSource(door);
       /* مسار المواعيد يسجّل عبر `bookAppointment`؛ والبقيّة تستدعي المسجِّل
-         المشترك مباشرةً. وأيُّ بابٍ لا يفعل أيًّا منهما يتجاوز بلا أثر. */
-      expect(source).toMatch(/recordCapacityOverride|bookAppointment\(/);
+         المشترك مباشرةً أو عبر محوّلي المحرّك الموحّدين. */
+      expect(source).toMatch(/recordCapacityOverride|bookAppointment\(|confirmBookingRequestThroughEngine|schedulePlannedVisitThroughEngine/);
     });
   }
+
+  it("ومحولّا التأكيد والزيارة المخطّطة يسجّلان التجاوز عبر recordCapacityOverride", () => {
+    for (const helper of [
+      join("lib", "booking-request-confirm.ts"),
+      join("lib", "planned-visit-schedule.ts"),
+    ]) {
+      const source = readFileSync(join(root, helper), "utf8");
+      expect(source).toContain("recordCapacityOverride(");
+    }
+  });
 
   it("والمسجِّل مشتركٌ لا منسوخ — نسخةٌ ثانية تنحرف عن الأولى", () => {
     const source = readFileSync(join(root, "lib", "book-appointment.ts"), "utf8");

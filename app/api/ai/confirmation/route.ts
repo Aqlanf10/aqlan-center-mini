@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { AI_CHAT_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
-import { findUserByUsername, recordAudit } from "@/lib/db";
+import { CLINIC_TIME_ZONE, findUserByUsername, recordAudit } from "@/lib/db";
+import { clinicDateString } from "@/lib/schedule";
 import { type Role, canUseAiChat } from "@/lib/roles";
 import { verifyToolConfirmation } from "@/lib/ai-confirmation";
 import { executeAiTool } from "@/lib/ai-tools/registry";
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));
+  const todayISO = await dbTodayISO().catch(() => clinicDateString(new Date(), CLINIC_TIME_ZONE));
   const databaseUrl = (
     process.env.DATABASE_URL ||
     process.env.POSTGRES_URL ||

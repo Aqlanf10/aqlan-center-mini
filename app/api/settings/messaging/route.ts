@@ -5,6 +5,11 @@ import { listMessagingChannels, saveMessagingChannel } from "@/lib/db";
 import { SECRET_FIELDS, isChannel, missingSecretForEnable, normalizeChannelConfig } from "@/lib/messaging-channels";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalMessagingSettingsGet,
+  canonicalMessagingSettingsPut,
+} from "@/lib/canonical-admin-reports-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +32,10 @@ async function admin() {
 }
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") return canonicalMessagingSettingsGet(selected.handle);
+
   const auth = await admin();
   if ("error" in auth) return auth.error;
   try {
@@ -37,6 +46,10 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") return canonicalMessagingSettingsPut(selected.handle, request);
+
   const auth = await admin();
   if ("error" in auth) return auth.error;
   let body: Record<string, unknown>;

@@ -1,5 +1,6 @@
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
+import * as db from "@/lib/db";
 import { getPatient, getSettingsSafe } from "@/lib/db";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
@@ -43,10 +44,20 @@ export default async function PostOpPrintPage({
 
   const sParams = await searchParams;
 
-  const [patient, settings] = await Promise.all([
+  const [patient, settings, doctorUser] = await Promise.all([
     getPatient(patientId),
     getSettingsSafe(),
+    (async () => {
+      try {
+        return session.username && typeof db.findUserByUsername === "function"
+          ? await db.findUserByUsername(session.username)
+          : null;
+      } catch {
+        return null;
+      }
+    })(),
   ]);
+  const doctorLabel = (doctorUser?.displayName || session.username || "").replace(/^د\.\s*/, "");
 
   if (!patient) notFound();
   /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
@@ -253,7 +264,7 @@ export default async function PostOpPrintPage({
         >
           <div>
             <span>الطبيب المعالج: </span>
-            <strong style={{ color: "#0f172a" }}>د. {session.username}</strong>
+            <strong style={{ color: "#0f172a" }}>د. {doctorLabel}</strong>
           </div>
           <div>
             <span>طوارئ واستفسارات المركز: </span>

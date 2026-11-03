@@ -11,12 +11,13 @@
  * 5. التقارير والشهادات الطبية الرسمية (draft_medical_report_form)
  */
 
-import { getPatient, searchPatients, getSettings } from "../db";
+import { CLINIC_TIME_ZONE, getPatient, listLabOrders, searchPatients } from "../db";
 import { CONSENT_TEMPLATES, getConsentTemplate, type ConsentTemplate } from "../consent-templates";
 import { buildInstallmentPlanAgreement, STANDARD_PLAN_TERMS, type Installment } from "../plans";
 import { parseMedicalAlerts } from "../patient";
 import { formatMoney, type Currency, isCurrency } from "../money";
 import { toWhatsAppNumber } from "../reminders";
+import { addDays, clinicDateString } from "../schedule";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, StructuredTable } from "./types";
 
 // ─── 1. صياغة وتعبئة إقرار الموافقة الطبية المستنيرة ─────────────────────────
@@ -79,7 +80,7 @@ export async function draftConsentFormAction(
   }
 
   const toothStr = params.toothNumber ? ` (السن / المنطقة: ${params.toothNumber})` : "";
-  const dateStr = context.todayISO || new Date().toISOString().slice(0, 10);
+  const dateStr = context.todayISO || clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
   const documentText =
     `📄 **${template.icon} ${template.title} — مركز د. عقلان الكامل**\n\n` +
@@ -378,6 +379,7 @@ export async function draftLabOrderFormAction(
   params: {
     patientName?: string;
     patientId?: number;
+    orderId?: number;
     toothCode?: string;
     restorationType?: string;
     shade?: string;
@@ -389,6 +391,7 @@ export async function draftLabOrderFormAction(
 ): Promise<ToolExecutionResult> {
   let patientName = params.patientName || context.currentPatientName || "المريض";
   let patientId = params.patientId;
+  let savedOrderId: number | null = typeof params.orderId === "number" && params.orderId > 0 ? params.orderId : null;
 
   if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
     let p = null;
@@ -402,6 +405,12 @@ export async function draftLabOrderFormAction(
     if (p) {
       patientName = p.fullName;
       patientId = p.id;
+      if (!savedOrderId) {
+        const patientOrders = await listLabOrders({ patientId: p.id, limit: 1 }).catch(() => []);
+        if (patientOrders[0]?.id) {
+          savedOrderId = patientOrders[0].id;
+        }
+      }
     }
   }
 
@@ -409,7 +418,7 @@ export async function draftLabOrderFormAction(
   const restorationType = params.restorationType || "تاج زركونيا كامل التشريح (Full Contour Zirconia)";
   const shade = params.shade || "A2";
   const labName = params.labName || "مختبر النخبة السني الرقمي";
-  const targetDate = params.targetDate || new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const targetDate = params.targetDate || addDays(context.todayISO || clinicDateString(new Date(), CLINIC_TIME_ZONE), 5);
   const instructions = params.specialInstructions || "إغلاق نقاط الاتصال المجاورة بدقة مع مراعاة الإطباق وعدم رفع العضة السنية.";
 
   const labText =
@@ -449,10 +458,16 @@ export async function draftLabOrderFormAction(
     { title: "المختبر", value: labName, tone: "info" },
   ];
 
-  const actions: ActionButton[] = [
-    { label: "🖨️ طباعة أمر عمل المعمل", href: `/print/lab/${patientId || 0}`, actionType: "print" },
-    { label: "فتح شاشة المعمل", href: "/lab", actionType: "navigate" },
-  ];
+  // (CLIN-03) /print/lab/[id] يستقبل معرّف طلب المختبر (orderId) لا معرّف المريض (patientId).
+  const actions: ActionButton[] = savedOrderId
+    ? [
+        { label: "🖨️ طباعة أمر عمل المعمل", href: `/print/lab/${savedOrderId}`, actionType: "print" },
+        { label: "فتح شاشة المعمل", href: "/lab", actionType: "navigate" },
+      ]
+    : [
+        ...(patientId ? [{ label: `فتح ملف ${patientName} لإرسال الأمر للمعمل`, href: `/patients/${patientId}`, actionType: "navigate" as const }] : []),
+        { label: "فتح شاشة المعمل", href: "/lab", actionType: "navigate" },
+      ];
 
   return {
     success: true,
@@ -566,7 +581,7 @@ export async function draftMedicalReportFormAction(
   const treatment = params.treatmentProvided || "إجراء معالجة لبية كاملة مع استئصال العصب وتطهير القنوات وحشوها نهائياً مع حشوة بناء تجميلية";
   const sickLeave = params.sickLeaveDays ? `يُمنح المريض راحة مرضية لمدة (${params.sickLeaveDays}) أيام ابتداءً من تاريخه للتعافي والراحة.` : "";
   const recommendations = params.recommendations || "المواظبة على العناية الفموية، تجنب الإجهاد والضغوط على السن المعالج، وتناول الأدوية الموصوفة بانتظام.";
-  const reportDate = context.todayISO || new Date().toISOString().slice(0, 10);
+  const reportDate = context.todayISO || clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
   const reportText =
     `🏥 **تقرير طبي سني رسمي (Official Dental Medical Report)**\n` +
@@ -592,8 +607,9 @@ export async function draftMedicalReportFormAction(
     { title: "حالة التقرير", value: "جاهز للطباعة والختم 🖨️", tone: "good" },
   ];
 
+  // (CLIN-03) المسار الفعلي لطباعة التقرير السريري للمريض هو /print/dossier/[patientId] (لا /print/report المالي).
   const actions: ActionButton[] = [
-    { label: "🖨️ طباعة التقرير الطبي", href: `/print/report?patientId=${patientId || 0}`, actionType: "print" },
+    { label: "🖨️ طباعة التقرير الطبي", href: `/print/dossier/${patientId || 0}`, actionType: "print" },
   ];
 
   if (patientId) {

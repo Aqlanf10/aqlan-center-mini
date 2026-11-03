@@ -96,8 +96,14 @@ function verifyContractStaff(row:Record<string,any>|undefined,staffId:number){
   if(row.staff_id!==staffId)throw new HrContractMutationError("تغير ارتباط العقد؛ أعد تحميله.",409);
 }
 
+export interface HrActorIdentity {
+  userId: number;
+  username: string;
+  role: string;
+}
+
 /** Keep the profile a current projection of the governing contract, with an atomic change history. */
-async function synchronizeContractPayTerms(client: DbClient, staffId: number, session: SessionPayload) {
+async function synchronizeContractPayTerms(client: DbClient, staffId: number, session: { username: string; role: string }) {
   const staff = await client.query(`SELECT * FROM hr_staff WHERE id=$1 FOR UPDATE`, [staffId]);
   const governing = await governingContractToday(client,staffId,CLINIC_TIME_ZONE);
   if (!governing || !staff.rows[0]) return;
@@ -126,7 +132,7 @@ async function synchronizeContractPayTerms(client: DbClient, staffId: number, se
 async function auditWithClient(
   client: DbClient,
   action: AuditAction,
-  session: SessionPayload,
+  session: { username: string; role: string },
   entity: string,
   entityId: string | number,
   entityLabel: string,
@@ -194,12 +200,14 @@ export interface CreateAddendumInput {
   salaryPeriod?: string | null;
 }
 
-export async function listContracts(options?: {
-  staffId?: number | string;
-  status?: HrContractStatus;
-  templateKind?: HrContractTemplateKind;
-}): Promise<HrContractView[]> {
-  const pool = getPool();
+export async function listContractsWith(
+  q: Pick<DbClient, "query">,
+  options?: {
+    staffId?: number | string;
+    status?: HrContractStatus;
+    templateKind?: HrContractTemplateKind;
+  },
+): Promise<HrContractView[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
@@ -226,14 +234,24 @@ export async function listContracts(options?: {
     ORDER BY c.created_at DESC
   `;
 
-  const { rows } = await pool.query(query, params);
+  const { rows } = await q.query(query, params);
   return rows.map(mapContractRow);
 }
 
-export async function getContract(id: number | string): Promise<HrContractView | null> {
+export async function listContracts(options?: {
+  staffId?: number | string;
+  status?: HrContractStatus;
+  templateKind?: HrContractTemplateKind;
+}): Promise<HrContractView[]> {
+  return listContractsWith(getPool(), options);
+}
+
+export async function getContractByIdWith(
+  q: Pick<DbClient, "query">,
+  id: number | string,
+): Promise<HrContractView | null> {
   const contractId = Number(id);
-  const pool = getPool();
-  const { rows } = await pool.query(
+  const { rows } = await q.query(
     `SELECT c.*, s.full_name as staff_name, s.department as staff_department
      FROM hr_contracts c
      JOIN hr_staff s ON s.id = c.staff_id
@@ -244,70 +262,172 @@ export async function getContract(id: number | string): Promise<HrContractView |
   return mapContractRow(rows[0]);
 }
 
+export async function getContract(id: number | string): Promise<HrContractView | null> {
+  return getContractByIdWith(getPool(), id);
+}
+
 export const getContractById = getContract;
+
+export async function createContractInTx(
+  client: DbClient,
+  input: CreateContractInput,
+  actor: { username: string; role: string },
+  afterStaffLock?: () => void,
+): Promise<HrContractView> {
+  const staffId = contractIdOf(input.staffId);
+  if (!HR_CANONICAL_CONTRACT_KINDS.some(kind => kind === input.templateKind)) {
+    throw new HrContractMutationError("نوع قالب العقد غير صالح.", 400);
+  }
+  const staff = await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE", [staffId]);
+  if (!staff.rows[0]) throw new HrContractMutationError("الموظف غير موجود.", 404);
+  afterStaffLock?.();
+  // Existing SERIAL is a concurrency-safe allocator, including after deletion.
+  // Allocation gaps after rollback are intentional; approved numbers are never renumbered.
+  const allocated = (await client.query<{ id: number }>("SELECT nextval(pg_get_serial_sequence('hr_contracts','id'))::int AS id")).rows[0].id;
+  const nextSeq = allocated.toString().padStart(4, "0");
+  const datePrefix = new Date().toISOString().slice(0, 7).replace("-", "");
+  const contractNumber = `CTR-${datePrefix}-${nextSeq}`;
+
+  const { rows } = await client.query(
+    `INSERT INTO hr_contracts (
+      id, staff_id, contract_number, template_kind, title, status, start_date, end_date,
+      probation_end_date, notice_period_days, terms_payload, compensation_kind,
+      base_salary_minor, salary_currency, salary_period, commission_rate_percent,
+      doctor_party_id, notes, created_by
+    ) VALUES ($18, $1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+    RETURNING *`,
+    [
+      staffId,
+      contractNumber,
+      input.templateKind,
+      input.title.trim(),
+      input.startDate,
+      input.endDate ?? null,
+      input.probationEndDate ?? null,
+      input.noticePeriodDays ?? 30,
+      JSON.stringify(input.termsPayload ?? {}),
+      input.compensationKind,
+      input.baseSalaryMinor ?? null,
+      input.salaryCurrency ?? null,
+      input.salaryPeriod ?? null,
+      input.commissionRatePercent ?? null,
+      input.doctorPartyId ?? null,
+      input.notes ?? null,
+      actor.username,
+      allocated,
+    ],
+  );
+
+  const contract = mapContractRow(rows[0]);
+  await auditWithClient(
+    client,
+    "hr.contract.create",
+    actor,
+    "hr_contract",
+    contract.id,
+    `${contract.contractNumber} (${contract.title})`,
+    { staffId, templateKind: input.templateKind },
+  );
+
+  return contract;
+}
 
 export async function createContract(
   input: CreateContractInput,
   session: SessionPayload,
 ): Promise<HrContractView> {
-  const staffId = contractIdOf(input.staffId);
+  contractIdOf(input.staffId);
   return withTransaction(getPool(), async (client) => {
-    session=await authorizeContractMutation(client,session);
-    if(!HR_CANONICAL_CONTRACT_KINDS.some(kind=>kind===input.templateKind))throw new HrContractMutationError("نوع قالب العقد غير صالح.",400);
-    const staff=await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
-    if(!staff.rows[0])throw new HrContractMutationError("الموظف غير موجود.",404);
-    assertContractSessionCurrent(session);
-    // Existing SERIAL is a concurrency-safe allocator, including after deletion.
-    // Allocation gaps after rollback are intentional; approved numbers are never renumbered.
-    const allocated=(await client.query<{id:number}>("SELECT nextval(pg_get_serial_sequence('hr_contracts','id'))::int AS id")).rows[0].id;
-    const nextSeq = allocated.toString().padStart(4, "0");
-    const datePrefix = new Date().toISOString().slice(0, 7).replace("-", "");
-    const contractNumber = `CTR-${datePrefix}-${nextSeq}`;
-
-    const { rows } = await client.query(
-      `INSERT INTO hr_contracts (
-        id, staff_id, contract_number, template_kind, title, status, start_date, end_date,
-        probation_end_date, notice_period_days, terms_payload, compensation_kind,
-        base_salary_minor, salary_currency, salary_period, commission_rate_percent,
-        doctor_party_id, notes, created_by
-      ) VALUES ($18, $1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-      RETURNING *`,
-      [
-        staffId,
-        contractNumber,
-        input.templateKind,
-        input.title.trim(),
-        input.startDate,
-        input.endDate ?? null,
-        input.probationEndDate ?? null,
-        input.noticePeriodDays ?? 30,
-        JSON.stringify(input.termsPayload ?? {}),
-        input.compensationKind,
-        input.baseSalaryMinor ?? null,
-        input.salaryCurrency ?? null,
-        input.salaryPeriod ?? null,
-        input.commissionRatePercent ?? null,
-        input.doctorPartyId ?? null,
-        input.notes ?? null,
-        session.username,
-        allocated,
-      ],
-    );
-
-    const contract = mapContractRow(rows[0]);
-    await auditWithClient(
-      client,
-      "hr.contract.create",
-      session,
-      "hr_contract",
-      contract.id,
-      `${contract.contractNumber} (${contract.title})`,
-      { staffId, templateKind: input.templateKind },
-    );
-
+    session = await authorizeContractMutation(client, session);
+    const contract = await createContractInTx(client, input, session, () => assertContractSessionCurrent(session));
     assertContractSessionCurrent(session);
     return contract;
   });
+}
+
+export async function updateContractInTx(
+  client: DbClient,
+  id: number | string,
+  input: UpdateContractInput,
+  actor: { username: string; role: string },
+  afterLock?: () => void,
+): Promise<HrContractView> {
+  const contractId = contractIdOf(id);
+  const staffId = await lockContractStaff(client, contractId);
+  const { rows: currentRows } = await client.query(
+    `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
+    [contractId],
+  );
+  if (!currentRows[0]) throw new Error("العقد غير موجود.");
+  const current = currentRows[0];
+  verifyContractStaff(current, staffId);
+  afterLock?.();
+  if (!hrContractEditable(lifecycleOf(current))) {
+    throw new Error("لا يمكن تعديل بنود عقد معتمد أو نشط مباشرة؛ استخدم إنشاء ملحق عقد.");
+  }
+
+  if (input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== new Date(current.updated_at).toISOString()) {
+    throw new HrContractMutationError("تغيّرت المسودة منذ فتحها. أعد فتحها لمراجعة القيم الحالية قبل الحفظ.", 409);
+  }
+
+  const { rows } = await client.query(
+    `UPDATE hr_contracts
+     SET title = COALESCE($1, title),
+         start_date = COALESCE($2, start_date),
+         end_date = CASE WHEN $16::boolean THEN $3 ELSE end_date END,
+         probation_end_date = CASE WHEN $17::boolean THEN $4 ELSE probation_end_date END,
+         notice_period_days = COALESCE($5, notice_period_days),
+         terms_payload = CASE WHEN $6::jsonb IS NOT NULL THEN $6::jsonb ELSE terms_payload END,
+         base_salary_minor = CASE WHEN $18::boolean THEN $7 ELSE base_salary_minor END,
+         salary_currency = CASE WHEN $19::boolean THEN $8 ELSE salary_currency END,
+         salary_period = CASE WHEN $20::boolean THEN $9 ELSE salary_period END,
+         commission_rate_percent = CASE WHEN $21::boolean THEN $10 ELSE commission_rate_percent END,
+         doctor_party_id = CASE WHEN $22::boolean THEN $11 ELSE doctor_party_id END,
+         notes = CASE WHEN $23::boolean THEN $12 ELSE notes END,
+         signed_by_staff = COALESCE($13, signed_by_staff),
+         signed_by_center = COALESCE($14, signed_by_center),
+         updated_at = NOW()
+     WHERE id = $15
+     RETURNING *`,
+    [
+      input.title?.trim() ?? null,
+      input.startDate ?? null,
+      input.endDate ?? null,
+      input.probationEndDate ?? null,
+      input.noticePeriodDays ?? null,
+      input.termsPayload ? JSON.stringify(input.termsPayload) : null,
+      input.baseSalaryMinor ?? null,
+      input.salaryCurrency ?? null,
+      input.salaryPeriod ?? null,
+      input.commissionRatePercent ?? null,
+      input.doctorPartyId ?? null,
+      input.notes ?? null,
+      input.signedByStaff ?? null,
+      input.signedByCenter ?? null,
+      contractId,
+      Object.prototype.hasOwnProperty.call(input, "endDate"),
+      Object.prototype.hasOwnProperty.call(input, "probationEndDate"),
+      Object.prototype.hasOwnProperty.call(input, "baseSalaryMinor"),
+      Object.prototype.hasOwnProperty.call(input, "salaryCurrency"),
+      Object.prototype.hasOwnProperty.call(input, "salaryPeriod"),
+      Object.prototype.hasOwnProperty.call(input, "commissionRatePercent"),
+      Object.prototype.hasOwnProperty.call(input, "doctorPartyId"),
+      Object.prototype.hasOwnProperty.call(input, "notes"),
+    ],
+  );
+
+  const contract = mapContractRow(rows[0]);
+  await auditWithClient(
+    client,
+    "hr.contract.update",
+    actor,
+    "hr_contract",
+    contract.id,
+    `${contract.contractNumber} (${contract.title})`,
+    { contractId },
+  );
+
+  return contract;
 }
 
 export async function updateContract(
@@ -317,78 +437,8 @@ export async function updateContract(
 ): Promise<HrContractView> {
   const contractId = contractIdOf(id);
   return withTransaction(getPool(), async (client) => {
-    session=await authorizeContractMutation(client,session);
-    const staffId=await lockContractStaff(client,contractId);
-    const { rows: currentRows } = await client.query(
-      `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
-      [contractId],
-    );
-    if (!currentRows[0]) throw new Error("العقد غير موجود.");
-    const current = currentRows[0];
-    verifyContractStaff(current,staffId);assertContractSessionCurrent(session);
-    if (!hrContractEditable(lifecycleOf(current))) {
-      throw new Error("لا يمكن تعديل بنود عقد معتمد أو نشط مباشرة؛ استخدم إنشاء ملحق عقد.");
-    }
-
-    if(input.expectedUpdatedAt!==undefined && input.expectedUpdatedAt!==new Date(current.updated_at).toISOString())throw new HrContractMutationError("تغيّرت المسودة منذ فتحها. أعد فتحها لمراجعة القيم الحالية قبل الحفظ.",409);
-
-    const { rows } = await client.query(
-      `UPDATE hr_contracts
-       SET title = COALESCE($1, title),
-           start_date = COALESCE($2, start_date),
-           end_date = CASE WHEN $16::boolean THEN $3 ELSE end_date END,
-           probation_end_date = CASE WHEN $17::boolean THEN $4 ELSE probation_end_date END,
-           notice_period_days = COALESCE($5, notice_period_days),
-           terms_payload = CASE WHEN $6::jsonb IS NOT NULL THEN $6::jsonb ELSE terms_payload END,
-           base_salary_minor = CASE WHEN $18::boolean THEN $7 ELSE base_salary_minor END,
-           salary_currency = CASE WHEN $19::boolean THEN $8 ELSE salary_currency END,
-           salary_period = CASE WHEN $20::boolean THEN $9 ELSE salary_period END,
-           commission_rate_percent = CASE WHEN $21::boolean THEN $10 ELSE commission_rate_percent END,
-           doctor_party_id = CASE WHEN $22::boolean THEN $11 ELSE doctor_party_id END,
-           notes = CASE WHEN $23::boolean THEN $12 ELSE notes END,
-           signed_by_staff = COALESCE($13, signed_by_staff),
-           signed_by_center = COALESCE($14, signed_by_center),
-           updated_at = NOW()
-       WHERE id = $15
-       RETURNING *`,
-      [
-        input.title?.trim() ?? null,
-        input.startDate ?? null,
-        input.endDate ?? null,
-        input.probationEndDate ?? null,
-        input.noticePeriodDays ?? null,
-        input.termsPayload ? JSON.stringify(input.termsPayload) : null,
-        input.baseSalaryMinor ?? null,
-        input.salaryCurrency ?? null,
-        input.salaryPeriod ?? null,
-        input.commissionRatePercent ?? null,
-        input.doctorPartyId ?? null,
-        input.notes ?? null,
-        input.signedByStaff ?? null,
-        input.signedByCenter ?? null,
-        contractId,
-        Object.prototype.hasOwnProperty.call(input,"endDate"),
-        Object.prototype.hasOwnProperty.call(input,"probationEndDate"),
-        Object.prototype.hasOwnProperty.call(input,"baseSalaryMinor"),
-        Object.prototype.hasOwnProperty.call(input,"salaryCurrency"),
-        Object.prototype.hasOwnProperty.call(input,"salaryPeriod"),
-        Object.prototype.hasOwnProperty.call(input,"commissionRatePercent"),
-        Object.prototype.hasOwnProperty.call(input,"doctorPartyId"),
-        Object.prototype.hasOwnProperty.call(input,"notes"),
-      ],
-    );
-
-    const contract = mapContractRow(rows[0]);
-    await auditWithClient(
-      client,
-      "hr.contract.update",
-      session,
-      "hr_contract",
-      contract.id,
-      `${contract.contractNumber} (${contract.title})`,
-      { contractId },
-    );
-
+    session = await authorizeContractMutation(client, session);
+    const contract = await updateContractInTx(client, contractId, input, session, () => assertContractSessionCurrent(session));
     assertContractSessionCurrent(session);
     return contract;
   });
@@ -399,49 +449,172 @@ function assertContractPayComplete(current:Record<string,any>):void{
     if(missing.length)throw new HrContractMutationError(`شروط الأجر غير مكتملة: ${missing.join("، ")}. أكمل المسودة قبل الاعتماد.`,409);
 }
 
+async function isPrincipalOwnerAdmin(client: DbClient, userId: number): Promise<boolean> {
+  const res = await client.query<{ is_principal: boolean }>(
+    `SELECT (u.role = 'admin' AND u.is_active = TRUE AND u.is_owner = TRUE) AS is_principal
+     FROM users u
+     WHERE u.id = $1`,
+    [userId],
+  );
+  return Boolean(res.rows[0]?.is_principal);
+}
+
+/**
+ * (HR-02) استثناء العيادة الفردية: إن كان المالك الرئيسي هو المدير النشط الوحيد في النظام
+ * فلا يُقفل عليه تصحيح حضوره أو اعتماده؛ أما إن وُجد مدير نشط ثانٍ فيستمر الفصل الثنائي للصلاحيات.
+ */
+async function isSoleActiveOwnerAdmin(client: DbClient, userId: number): Promise<boolean> {
+  if (!(await isPrincipalOwnerAdmin(client, userId))) return false;
+  const { rows } = await client.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM users WHERE role = 'admin' AND is_active = TRUE`,
+  );
+  return Number(rows[0]?.n ?? 0) === 1;
+}
+
+export async function approveContractInTx(
+  client: DbClient,
+  contractId: number | string,
+  actor: HrActorIdentity & { isOwner: boolean },
+  afterLock?: () => void,
+): Promise<HrContractView> {
+  const cId = contractIdOf(contractId);
+  const staffId = await lockContractStaff(client, cId);
+  const { rows: currentRows } = await client.query(
+    `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
+    [cId],
+  );
+  if (!currentRows[0]) throw new Error("العقد غير موجود.");
+  const current = currentRows[0];
+  verifyContractStaff(current, staffId);
+  afterLock?.();
+  if (current.status === "approved") {
+    return mapContractRow(current);
+  }
+  if (!hrContractNextStatuses(lifecycleOf(current)).includes("approved")) {
+    throw new HrContractMutationError("لا يمكن اعتماد العقد من حالته الحالية؛ العقد المعتمد يُعدّل بملحق.", 409);
+  }
+
+  if (!actor.isOwner) {
+    const { rows: staffRows } = await client.query<{ user_id: number | null }>(
+      `SELECT user_id FROM hr_staff WHERE id = $1`,
+      [staffId],
+    );
+    if (staffRows[0]?.user_id != null && Number(staffRows[0].user_id) === actor.userId) {
+      throw new HrContractMutationError("لا يجوز للموظف أو المدير غير المالك اعتماد عقده الشخصي بنفسه.", 403);
+    }
+    if (current.created_by && current.created_by === actor.username) {
+      throw new HrContractMutationError("لا يجوز لغير المالك الأساسي اعتماد عقد أنشأه بنفسه؛ يتطلب الاعتماد مراجعة المالك أو مدير آخر.", 403);
+    }
+  }
+
+  assertContractPayComplete(current);
+
+  const { rows } = await client.query(
+    `UPDATE hr_contracts
+     SET status = 'approved', approved_by = $1, approved_at = NOW(), updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [actor.username, cId],
+  );
+
+  await synchronizeContractPayTerms(client, Number(rows[0].staff_id), actor);
+  // (HR-02) تهيئة رصيد الإجازة السنوية للسنة التعاقدية عند اعتماد العقد الرسمي إن لم يكن مخصّصًا بعد.
+  const startYear = Number(postgresDateOnly(rows[0].start_date).slice(0, 4));
+  if (Number.isInteger(startYear) && startYear >= 2000 && startYear <= 9999) {
+    const payloadAnnual = Number((rows[0].terms_payload as Record<string, unknown> | null)?.annualLeaveDays);
+    const customAnnual = Number.isFinite(payloadAnnual) && payloadAnnual >= 0 && payloadAnnual <= 366
+      ? payloadAnnual : null;
+    await client.query(
+      `INSERT INTO hr_leave_balances (
+         staff_id, leave_type_code, year, allocated_days, effective_from, effective_to
+       )
+       SELECT $1::int, 'annual', $2::int, COALESCE($3::numeric, lt.default_days_per_year, 21),
+              ($2::int::text || '-01-01')::date, ($2::int::text || '-12-31')::date
+         FROM hr_leave_types lt
+        WHERE lt.code = 'annual'
+       ON CONFLICT (staff_id, leave_type_code, year) DO NOTHING`,
+      [Number(rows[0].staff_id), startYear, customAnnual],
+    );
+  }
+  const contract = mapContractRow(rows[0]);
+  await auditWithClient(
+    client,
+    "hr.contract.approve",
+    actor,
+    "hr_contract",
+    contract.id,
+    contract.contractNumber,
+  );
+  return contract;
+}
+
 export async function approveContract(
   contractId: number | string,
   session: SessionPayload,
 ): Promise<HrContractView> {
   const cId = contractIdOf(contractId);
   return withTransaction(getPool(), async (client) => {
-    session=await authorizeContractMutation(client,session);
-    const staffId=await lockContractStaff(client,cId);
-    const { rows: currentRows } = await client.query(
-      `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
-      [cId],
-    );
-    if (!currentRows[0]) throw new Error("العقد غير موجود.");
-    const current = currentRows[0];
-    verifyContractStaff(current,staffId);assertContractSessionCurrent(session);
-    if (current.status === "approved") {
-      return mapContractRow(current);
-    }
-    if(!hrContractNextStatuses(lifecycleOf(current)).includes("approved"))throw new HrContractMutationError("لا يمكن اعتماد العقد من حالته الحالية؛ العقد المعتمد يُعدّل بملحق.",409);
-
-    assertContractPayComplete(current);
-
-    const { rows } = await client.query(
-      `UPDATE hr_contracts
-       SET status = 'approved', approved_by = $1, approved_at = NOW(), updated_at = NOW()
-       WHERE id = $2
-       RETURNING *`,
-      [session.username, cId],
-    );
-
-    await synchronizeContractPayTerms(client,Number(rows[0].staff_id),session);
-    const contract = mapContractRow(rows[0]);
-    await auditWithClient(
+    session = await authorizeContractMutation(client, session);
+    const isOwner = await isPrincipalOwnerAdmin(client, session.userId);
+    const contract = await approveContractInTx(
       client,
-      "hr.contract.approve",
-      session,
-      "hr_contract",
-      contract.id,
-      contract.contractNumber,
+      cId,
+      { userId: session.userId, username: session.username, role: session.role, isOwner },
+      () => assertContractSessionCurrent(session),
     );
     assertContractSessionCurrent(session);
     return contract;
   });
+}
+
+export async function transitionContractStatusInTx(
+  client: DbClient,
+  id: number | string,
+  newStatus: HrContractStatus,
+  reason: string,
+  actor: HrActorIdentity & { isOwner: boolean },
+  afterLock?: () => void,
+): Promise<HrContractView> {
+  const cId = contractIdOf(id);
+  if (newStatus === "approved") {
+    return approveContractInTx(client, cId, actor, afterLock);
+  }
+
+  const staffId = await lockContractStaff(client, cId);
+  const { rows: currentRows } = await client.query(
+    `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
+    [cId],
+  );
+  if (!currentRows[0]) throw new Error("العقد غير موجود.");
+  verifyContractStaff(currentRows[0], staffId);
+  afterLock?.();
+  if (currentRows[0].status === newStatus) return mapContractRow(currentRows[0]);
+  if (!hrContractNextStatuses(lifecycleOf(currentRows[0])).includes(newStatus)) {
+    throw new HrContractMutationError("انتقال الحالة غير مسموح. لا يُعاد العقد المعتمد إلى مسودة؛ استخدم ملحقًا لتعديل بنوده.", 409);
+  }
+  if (newStatus === "active") assertContractPayComplete(currentRows[0]);
+
+  const { rows } = await client.query(
+    `UPDATE hr_contracts
+     SET status = $1, updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [newStatus, cId],
+  );
+
+  if (newStatus === "active") await synchronizeContractPayTerms(client, Number(rows[0].staff_id), actor);
+  const contract = mapContractRow(rows[0]);
+  const action = newStatus === "active" ? "hr.contract.approve" : newStatus === "terminated" ? "hr.contract.terminate" : "hr.contract.update";
+  await auditWithClient(
+    client,
+    action,
+    actor,
+    "hr_contract",
+    contract.id,
+    `${contract.contractNumber} -> ${newStatus}`,
+    { oldStatus: currentRows[0].status, newStatus, reason: reason.trim() },
+  );
+  return contract;
 }
 
 export async function transitionContractStatus(
@@ -456,41 +629,95 @@ export async function transitionContractStatus(
   }
 
   return withTransaction(getPool(), async (client) => {
-    session=await authorizeContractMutation(client,session);
-    const staffId=await lockContractStaff(client,cId);
-    const { rows: currentRows } = await client.query(
-      `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
-      [cId],
-    );
-    if (!currentRows[0]) throw new Error("العقد غير موجود.");
-    verifyContractStaff(currentRows[0],staffId);assertContractSessionCurrent(session);
-    if(currentRows[0].status===newStatus)return mapContractRow(currentRows[0]);
-    if(!hrContractNextStatuses(lifecycleOf(currentRows[0])).includes(newStatus))throw new HrContractMutationError("انتقال الحالة غير مسموح. لا يُعاد العقد المعتمد إلى مسودة؛ استخدم ملحقًا لتعديل بنوده.",409);
-    if(newStatus==="active")assertContractPayComplete(currentRows[0]);
-
-    const { rows } = await client.query(
-      `UPDATE hr_contracts
-       SET status = $1, updated_at = NOW()
-       WHERE id = $2
-       RETURNING *`,
-      [newStatus, cId],
-    );
-
-    if (newStatus === "active") await synchronizeContractPayTerms(client,Number(rows[0].staff_id),session);
-    const contract = mapContractRow(rows[0]);
-    const action = newStatus === "active" ? "hr.contract.approve" : newStatus === "terminated" ? "hr.contract.terminate" : "hr.contract.update";
-    await auditWithClient(
+    session = await authorizeContractMutation(client, session);
+    const contract = await transitionContractStatusInTx(
       client,
-      action,
-      session,
-      "hr_contract",
-      contract.id,
-      `${contract.contractNumber} -> ${newStatus}`,
-      { oldStatus: currentRows[0].status, newStatus, reason: reason.trim() },
+      cId,
+      newStatus,
+      reason,
+      { userId: session.userId, username: session.username, role: session.role, isOwner: false },
+      () => assertContractSessionCurrent(session),
     );
     assertContractSessionCurrent(session);
     return contract;
   });
+}
+
+export async function createContractAddendumInTx(
+  client: DbClient,
+  parentContractId: number | string,
+  input: CreateAddendumInput,
+  actor: { username: string; role: string },
+  afterLock?: () => void,
+): Promise<HrContractView> {
+  const pId = contractIdOf(parentContractId);
+  const staffId = await lockContractStaff(client, pId);
+  const { rows: parentRows } = await client.query(
+    `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
+    [pId],
+  );
+  if (!parentRows[0]) throw new Error("العقد الأصلي غير موجود.");
+  const parent = parentRows[0];
+  verifyContractStaff(parent, staffId);
+  afterLock?.();
+  if (!hrContractHasApproval(lifecycleOf(parent))) {
+    throw new HrContractMutationError("الملحق يرتبط بعقد معتمد؛ يمكن تعديل المسودة مباشرة.", 409);
+  }
+  if (typeof input.addendumReason !== "string" || !input.addendumReason.trim()) {
+    throw new HrContractMutationError("اكتب سبب الملحق.", 400);
+  }
+  // Staff then parent lock is shared by every contract writer. Existing sibling
+  // addenda contribute to allocation; no second child reuses parent.version+1.
+  const latest = (await client.query<{ version: number }>("SELECT MAX(version_number)::int AS version FROM hr_contracts WHERE id=$1 OR parent_contract_id=$1", [pId])).rows[0].version;
+  const newVersion = latest + 1;
+  if (!Number.isSafeInteger(newVersion) || newVersion < 2 || newVersion > 2147483647) {
+    throw new HrContractMutationError("تجاوز تسلسل الملحقات الحد المسموح.", 409);
+  }
+  const addendumNumber = `${parent.contract_number}-A${newVersion}`;
+
+  const { rows } = await client.query(
+    `INSERT INTO hr_contracts (
+      staff_id, contract_number, template_kind, title, status, start_date, end_date,
+      probation_end_date, notice_period_days, terms_payload, compensation_kind,
+      base_salary_minor, salary_currency, salary_period, commission_rate_percent,
+      doctor_party_id, parent_contract_id, version_number, addendum_reason, notes, created_by
+    ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+    RETURNING *`,
+    [
+      parent.staff_id,
+      addendumNumber,
+      parent.template_kind,
+      input.title.trim(),
+      input.startDate,
+      input.endDate ?? parent.end_date,
+      parent.probation_end_date,
+      parent.notice_period_days,
+      JSON.stringify(input.termsPayload ?? parent.terms_payload),
+      parent.compensation_kind,
+      input.baseSalaryMinor !== undefined ? input.baseSalaryMinor : parent.base_salary_minor,
+      input.salaryCurrency ?? parent.salary_currency,
+      input.salaryPeriod ?? parent.salary_period,
+      input.commissionRatePercent !== undefined ? input.commissionRatePercent : parent.commission_rate_percent,
+      parent.doctor_party_id,
+      pId,
+      newVersion,
+      input.addendumReason.trim(),
+      input.notes ?? null,
+      actor.username,
+    ],
+  );
+
+  const contract = mapContractRow(rows[0]);
+  await auditWithClient(
+    client,
+    "hr.contract.addendum",
+    actor,
+    "hr_contract",
+    contract.id,
+    `${contract.contractNumber} (ملحق للإصدار ${parent.version_number})`,
+    { parentContractId: pId, reason: input.addendumReason },
+  );
+  return contract;
 }
 
 export async function createContractAddendum(
@@ -500,77 +727,19 @@ export async function createContractAddendum(
 ): Promise<HrContractView> {
   const pId = contractIdOf(parentContractId);
   return withTransaction(getPool(), async (client) => {
-    session=await authorizeContractMutation(client,session);
-    const staffId=await lockContractStaff(client,pId);
-    const { rows: parentRows } = await client.query(
-      `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
-      [pId],
-    );
-    if (!parentRows[0]) throw new Error("العقد الأصلي غير موجود.");
-    const parent = parentRows[0];
-    verifyContractStaff(parent,staffId);assertContractSessionCurrent(session);
-    if(!hrContractHasApproval(lifecycleOf(parent)))throw new HrContractMutationError("الملحق يرتبط بعقد معتمد؛ يمكن تعديل المسودة مباشرة.",409);
-    if(typeof input.addendumReason!=="string"||!input.addendumReason.trim())throw new HrContractMutationError("اكتب سبب الملحق.",400);
-    // Staff then parent lock is shared by every contract writer. Existing sibling
-    // addenda contribute to allocation; no second child reuses parent.version+1.
-    const latest=(await client.query<{version:number}>("SELECT MAX(version_number)::int AS version FROM hr_contracts WHERE id=$1 OR parent_contract_id=$1",[pId])).rows[0].version;
-    const newVersion = latest + 1;
-    if(!Number.isSafeInteger(newVersion)||newVersion<2||newVersion>2147483647)throw new HrContractMutationError("تجاوز تسلسل الملحقات الحد المسموح.",409);
-    const addendumNumber = `${parent.contract_number}-A${newVersion}`;
-
-    const { rows } = await client.query(
-      `INSERT INTO hr_contracts (
-        staff_id, contract_number, template_kind, title, status, start_date, end_date,
-        probation_end_date, notice_period_days, terms_payload, compensation_kind,
-        base_salary_minor, salary_currency, salary_period, commission_rate_percent,
-        doctor_party_id, parent_contract_id, version_number, addendum_reason, notes, created_by
-      ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-      RETURNING *`,
-      [
-        parent.staff_id,
-        addendumNumber,
-        parent.template_kind,
-        input.title.trim(),
-        input.startDate,
-        input.endDate ?? parent.end_date,
-        parent.probation_end_date,
-        parent.notice_period_days,
-        JSON.stringify(input.termsPayload ?? parent.terms_payload),
-        parent.compensation_kind,
-        input.baseSalaryMinor !== undefined ? input.baseSalaryMinor : parent.base_salary_minor,
-        input.salaryCurrency ?? parent.salary_currency,
-        input.salaryPeriod ?? parent.salary_period,
-        input.commissionRatePercent !== undefined ? input.commissionRatePercent : parent.commission_rate_percent,
-        parent.doctor_party_id,
-        pId,
-        newVersion,
-        input.addendumReason.trim(),
-        input.notes ?? null,
-        session.username,
-      ],
-    );
-
-    const contract = mapContractRow(rows[0]);
-    await auditWithClient(
-      client,
-      "hr.contract.addendum",
-      session,
-      "hr_contract",
-      contract.id,
-      `${contract.contractNumber} (ملحق للإصدار ${parent.version_number})`,
-      { parentContractId: pId, reason: input.addendumReason },
-    );
+    session = await authorizeContractMutation(client, session);
+    const contract = await createContractAddendumInTx(client, pId, input, session, () => assertContractSessionCurrent(session));
     assertContractSessionCurrent(session);
     return contract;
   });
 }
 
-export async function listContractAddenda(
+export async function listContractAddendaWith(
+  q: Pick<DbClient, "query">,
   parentContractId: number | string,
 ): Promise<HrContractView[]> {
   const pId = Number(parentContractId);
-  const pool = getPool();
-  const { rows } = await pool.query(
+  const { rows } = await q.query(
     `SELECT c.*, s.full_name as staff_name, s.department as staff_department
      FROM hr_contracts c
      JOIN hr_staff s ON s.id = c.staff_id
@@ -579,6 +748,12 @@ export async function listContractAddenda(
     [pId],
   );
   return rows.map(mapContractRow);
+}
+
+export async function listContractAddenda(
+  parentContractId: number | string,
+): Promise<HrContractView[]> {
+  return listContractAddendaWith(getPool(), parentContractId);
 }
 
 function mapContractRow(row: Record<string, unknown>): HrContractView {
@@ -657,13 +832,15 @@ function validateSchedule(input: CreateScheduleInput): void {
   }
 }
 
-export async function listSchedules(options?: {
-  staffId?: number | string;
-  department?: string;
-  isActive?: boolean;
-  isDefault?: boolean;
-}): Promise<HrWorkScheduleView[]> {
-  const pool = getPool();
+export async function listWorkSchedulesWith(
+  q: Pick<DbClient, "query">,
+  options?: {
+    staffId?: number | string;
+    department?: string;
+    isActive?: boolean;
+    isDefault?: boolean;
+  },
+): Promise<HrWorkScheduleView[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
@@ -694,16 +871,27 @@ export async function listSchedules(options?: {
     ORDER BY ws.is_active DESC, ws.effective_from DESC
   `;
 
-  const { rows } = await pool.query(query, params);
+  const { rows } = await q.query(query, params);
   return rows.map(mapScheduleRow);
+}
+
+export async function listSchedules(options?: {
+  staffId?: number | string;
+  department?: string;
+  isActive?: boolean;
+  isDefault?: boolean;
+}): Promise<HrWorkScheduleView[]> {
+  return listWorkSchedulesWith(getPool(), options);
 }
 
 export const listWorkSchedules = listSchedules;
 
-export async function getWorkScheduleById(id: number | string): Promise<HrWorkScheduleView | null> {
+export async function getWorkScheduleByIdWith(
+  q: Pick<DbClient, "query">,
+  id: number | string,
+): Promise<HrWorkScheduleView | null> {
   const schedId = Number(id);
-  const pool = getPool();
-  const { rows } = await pool.query(
+  const { rows } = await q.query(
     `SELECT ws.*, s.full_name as staff_name
      FROM hr_work_schedules ws
      LEFT JOIN hr_staff s ON s.id = ws.staff_id
@@ -714,54 +902,65 @@ export async function getWorkScheduleById(id: number | string): Promise<HrWorkSc
   return mapScheduleRow(rows[0]);
 }
 
+export async function getWorkScheduleById(id: number | string): Promise<HrWorkScheduleView | null> {
+  return getWorkScheduleByIdWith(getPool(), id);
+}
+
+export async function createWorkScheduleInTx(
+  client: DbClient,
+  input: CreateScheduleInput,
+  actor: { username: string; role: string },
+): Promise<HrWorkScheduleView> {
+  const staffId = input.staffId !== undefined && input.staffId !== null ? Number(input.staffId) : null;
+  await lockPersonIdentityForOperation(client);
+  if (staffId !== null) await assertDocumentedStaffForOperation(client, staffId);
+  const policy = await client.query("SELECT value FROM hr_settings WHERE key='attendance_policy' FOR SHARE");
+  const grace = input.gracePeriodMins ?? (policy.rows[0] ? normalizeHrPolicy("attendance_policy", policy.rows[0].value).lateGraceMins as number : 0);
+  validateSchedule({ ...input, gracePeriodMins: grace });
+  const { rows } = await client.query(
+    `INSERT INTO hr_work_schedules (
+      staff_id, department, name, schedule_type, effective_from, effective_to,
+      working_days, shift_start_time, shift_end_time, second_shift_start, second_shift_end,
+      grace_period_mins, expected_daily_hours, crosses_midnight, created_by
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    RETURNING *`,
+    [
+      staffId,
+      input.department ?? null,
+      input.name.trim(),
+      input.scheduleType,
+      input.effectiveFrom,
+      input.effectiveTo ?? null,
+      JSON.stringify(input.workingDays),
+      input.shiftStartTime,
+      input.shiftEndTime,
+      input.secondShiftStart ?? null,
+      input.secondShiftEnd ?? null,
+      grace,
+      input.expectedDailyHours ?? 8.00,
+      input.crossesMidnight ?? false,
+      actor.username,
+    ],
+  );
+
+  const schedule = mapScheduleRow(rows[0]);
+  await auditWithClient(
+    client,
+    "hr.schedule.create",
+    actor,
+    "hr_work_schedule",
+    schedule.id,
+    schedule.name,
+    { scheduleType: input.scheduleType, staffId },
+  );
+  return schedule;
+}
+
 export async function createSchedule(
   input: CreateScheduleInput,
   session: SessionPayload,
 ): Promise<HrWorkScheduleView> {
-  const staffId = input.staffId !== undefined && input.staffId !== null ? Number(input.staffId) : null;
-  return withWorkforceTransaction(session, ["admin"], async (client) => {
-    if (staffId !== null) await assertDocumentedStaffForOperation(client, staffId);
-    const policy = await client.query("SELECT value FROM hr_settings WHERE key='attendance_policy' FOR SHARE");
-    const grace = input.gracePeriodMins ?? (policy.rows[0] ? normalizeHrPolicy("attendance_policy", policy.rows[0].value).lateGraceMins as number : 0);
-    validateSchedule({...input, gracePeriodMins: grace});
-    const { rows } = await client.query(
-      `INSERT INTO hr_work_schedules (
-        staff_id, department, name, schedule_type, effective_from, effective_to,
-        working_days, shift_start_time, shift_end_time, second_shift_start, second_shift_end,
-        grace_period_mins, expected_daily_hours, crosses_midnight, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-      RETURNING *`,
-      [
-        staffId,
-        input.department ?? null,
-        input.name.trim(),
-        input.scheduleType,
-        input.effectiveFrom,
-        input.effectiveTo ?? null,
-        JSON.stringify(input.workingDays),
-        input.shiftStartTime,
-        input.shiftEndTime,
-        input.secondShiftStart ?? null,
-        input.secondShiftEnd ?? null,
-        grace,
-        input.expectedDailyHours ?? 8.00,
-        input.crossesMidnight ?? false,
-        session.username,
-      ],
-    );
-
-    const schedule = mapScheduleRow(rows[0]);
-    await auditWithClient(
-      client,
-      "hr.schedule.create",
-      session,
-      "hr_work_schedule",
-      schedule.id,
-      schedule.name,
-      { scheduleType: input.scheduleType, staffId },
-    );
-    return schedule;
-  });
+  return withWorkforceTransaction(session, ["admin"], async (client) => createWorkScheduleInTx(client, input, session));
 }
 
 export async function createWorkSchedule(
@@ -771,80 +970,90 @@ export async function createWorkSchedule(
   return createSchedule(input, session);
 }
 
+export async function updateWorkScheduleInTx(
+  client: DbClient,
+  id: number | string,
+  input: UpdateScheduleInput,
+  actor: { username: string; role: string },
+): Promise<HrWorkScheduleView> {
+  const schedId = Number(id);
+  await lockPersonIdentityForOperation(client);
+  const { rows: currentRows } = await client.query(
+    `SELECT * FROM hr_work_schedules WHERE id = $1 FOR UPDATE`,
+    [schedId],
+  );
+  if (!currentRows[0]) throw new Error("جدول الدوام غير موجود.");
+  if ((await client.query("SELECT id FROM hr_attendance_records WHERE schedule_id=$1 LIMIT 1", [schedId])).rows.length) {
+    throw new Error("الجدول مستخدم في سجل حضور؛ أنشئ جدولًا جديدًا بتاريخ سريان بدل تعديل التاريخ.");
+  }
+  const current = mapScheduleRow(currentRows[0]);
+  // Resolve omitted endpoints from the locked row; explicit null clears them.
+  // Validate and persist the same pair, rather than losing null in COALESCE.
+  const secondShiftStart = input.secondShiftStart === undefined ? current.secondShiftStart : input.secondShiftStart;
+  const secondShiftEnd = input.secondShiftEnd === undefined ? current.secondShiftEnd : input.secondShiftEnd;
+  validateSchedule({ ...current, ...input, secondShiftStart, secondShiftEnd });
+
+  const staffId = input.staffId !== undefined ? (input.staffId ? Number(input.staffId) : null) : undefined;
+
+  const { rows } = await client.query(
+    `UPDATE hr_work_schedules
+     SET staff_id = COALESCE($1, staff_id),
+         department = COALESCE($2, department),
+         name = COALESCE($3, name),
+         schedule_type = COALESCE($4, schedule_type),
+         effective_from = COALESCE($5, effective_from),
+         effective_to = COALESCE($6, effective_to),
+         working_days = CASE WHEN $7::jsonb IS NOT NULL THEN $7::jsonb ELSE working_days END,
+         shift_start_time = COALESCE($8, shift_start_time),
+         shift_end_time = COALESCE($9, shift_end_time),
+         second_shift_start = $10,
+         second_shift_end = $11,
+         grace_period_mins = COALESCE($12, grace_period_mins),
+         expected_daily_hours = COALESCE($13, expected_daily_hours),
+         crosses_midnight = COALESCE($14, crosses_midnight),
+         is_active = COALESCE($15, is_active),
+         updated_at = NOW()
+     WHERE id = $16
+     RETURNING *`,
+    [
+      staffId ?? null,
+      input.department ?? null,
+      input.name?.trim() ?? null,
+      input.scheduleType ?? null,
+      input.effectiveFrom ?? null,
+      input.effectiveTo ?? null,
+      input.workingDays ? JSON.stringify(input.workingDays) : null,
+      input.shiftStartTime ?? null,
+      input.shiftEndTime ?? null,
+      secondShiftStart,
+      secondShiftEnd,
+      input.gracePeriodMins ?? null,
+      input.expectedDailyHours ?? null,
+      input.crossesMidnight ?? null,
+      input.isActive ?? null,
+      schedId,
+    ],
+  );
+
+  const schedule = mapScheduleRow(rows[0]);
+  await auditWithClient(
+    client,
+    "hr.schedule.update",
+    actor,
+    "hr_work_schedule",
+    schedule.id,
+    schedule.name,
+    { scheduleId: schedId },
+  );
+  return schedule;
+}
+
 export async function updateWorkSchedule(
   id: number | string,
   input: UpdateScheduleInput,
   session: SessionPayload,
 ): Promise<HrWorkScheduleView> {
-  const schedId = Number(id);
-  return withWorkforceTransaction(session, ["admin"], async (client) => {
-    const { rows: currentRows } = await client.query(
-      `SELECT * FROM hr_work_schedules WHERE id = $1 FOR UPDATE`,
-      [schedId],
-    );
-    if (!currentRows[0]) throw new Error("جدول الدوام غير موجود.");
-    if ((await client.query("SELECT id FROM hr_attendance_records WHERE schedule_id=$1 LIMIT 1", [schedId])).rows.length) throw new Error("الجدول مستخدم في سجل حضور؛ أنشئ جدولًا جديدًا بتاريخ سريان بدل تعديل التاريخ.");
-    const current = mapScheduleRow(currentRows[0]);
-    // Resolve omitted endpoints from the locked row; explicit null clears them.
-    // Validate and persist the same pair, rather than losing null in COALESCE.
-    const secondShiftStart = input.secondShiftStart === undefined ? current.secondShiftStart : input.secondShiftStart;
-    const secondShiftEnd = input.secondShiftEnd === undefined ? current.secondShiftEnd : input.secondShiftEnd;
-    validateSchedule({...current, ...input, secondShiftStart, secondShiftEnd});
-
-    const staffId = input.staffId !== undefined ? (input.staffId ? Number(input.staffId) : null) : undefined;
-
-    const { rows } = await client.query(
-      `UPDATE hr_work_schedules
-       SET staff_id = COALESCE($1, staff_id),
-           department = COALESCE($2, department),
-           name = COALESCE($3, name),
-           schedule_type = COALESCE($4, schedule_type),
-           effective_from = COALESCE($5, effective_from),
-           effective_to = COALESCE($6, effective_to),
-           working_days = CASE WHEN $7::jsonb IS NOT NULL THEN $7::jsonb ELSE working_days END,
-           shift_start_time = COALESCE($8, shift_start_time),
-           shift_end_time = COALESCE($9, shift_end_time),
-           second_shift_start = $10,
-           second_shift_end = $11,
-           grace_period_mins = COALESCE($12, grace_period_mins),
-           expected_daily_hours = COALESCE($13, expected_daily_hours),
-           crosses_midnight = COALESCE($14, crosses_midnight),
-           is_active = COALESCE($15, is_active),
-           updated_at = NOW()
-       WHERE id = $16
-       RETURNING *`,
-      [
-        staffId ?? null,
-        input.department ?? null,
-        input.name?.trim() ?? null,
-        input.scheduleType ?? null,
-        input.effectiveFrom ?? null,
-        input.effectiveTo ?? null,
-        input.workingDays ? JSON.stringify(input.workingDays) : null,
-        input.shiftStartTime ?? null,
-        input.shiftEndTime ?? null,
-        secondShiftStart,
-        secondShiftEnd,
-        input.gracePeriodMins ?? null,
-        input.expectedDailyHours ?? null,
-        input.crossesMidnight ?? null,
-        input.isActive ?? null,
-        schedId,
-      ],
-    );
-
-    const schedule = mapScheduleRow(rows[0]);
-    await auditWithClient(
-      client,
-      "hr.schedule.update",
-      session,
-      "hr_work_schedule",
-      schedule.id,
-      schedule.name,
-      { scheduleId: schedId },
-    );
-    return schedule;
-  });
+  return withWorkforceTransaction(session, ["admin"], async (client) => updateWorkScheduleInTx(client, id, input, session));
 }
 
 function mapScheduleRow(row: Record<string, unknown>): HrWorkScheduleView {
@@ -892,15 +1101,17 @@ export interface RequestCorrectionInput {
   reason: string;
 }
 
-export async function listAttendanceRecords(options: {
-  date?: string;
-  startDate?: string;
-  endDate?: string;
-  staffId?: number | string;
-  department?: string;
-  status?: HrAttendanceStatus;
-}): Promise<HrAttendanceRecordView[]> {
-  const pool = getPool();
+export async function listAttendanceRecordsWith(
+  q: Pick<DbClient, "query">,
+  options: {
+    date?: string;
+    startDate?: string;
+    endDate?: string;
+    staffId?: number | string;
+    department?: string;
+    status?: HrAttendanceStatus;
+  },
+): Promise<HrAttendanceRecordView[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
@@ -938,8 +1149,19 @@ export async function listAttendanceRecords(options: {
     ORDER BY ar.attendance_date DESC, s.full_name ASC
   `;
 
-  const { rows } = await pool.query(query, params);
+  const { rows } = await q.query(query, params);
   return rows.map(mapAttendanceRow);
+}
+
+export async function listAttendanceRecords(options: {
+  date?: string;
+  startDate?: string;
+  endDate?: string;
+  staffId?: number | string;
+  department?: string;
+  status?: HrAttendanceStatus;
+}): Promise<HrAttendanceRecordView[]> {
+  return listAttendanceRecordsWith(getPool(), options);
 }
 
 export async function recordAttendance(
@@ -956,7 +1178,7 @@ export async function recordAttendance(
   return withWorkforceTransaction(session, ["admin", "reception"], client => recordAttendanceInTx(client, input, session));
 }
 
-async function recordAttendanceInTx(client: DbClient, input: {staffId: number | string; attendanceDate: string; checkIn?: string | null; checkOut?: string | null; status?: HrAttendanceStatus; notes?: string | null}, session: SessionPayload, rawPunch?: {type: "check_in" | "check_out"; time: string}): Promise<HrAttendanceRecordView> {
+async function recordAttendanceInTx(client: DbClient, input: {staffId: number | string; attendanceDate: string; checkIn?: string | null; checkOut?: string | null; status?: HrAttendanceStatus; notes?: string | null}, session: { username: string; role: string }, rawPunch?: {type: "check_in" | "check_out"; time: string}): Promise<HrAttendanceRecordView> {
     const staffId = Number(input.staffId);
     await assertDocumentedStaffForOperation(client, staffId);
     const schedule = await attendanceSchedule(client, staffId, input.attendanceDate);
@@ -1067,7 +1289,7 @@ async function attendanceView(client: DbClient, id: number) {
     FROM hr_attendance_records ar JOIN hr_staff s ON s.id=ar.staff_id WHERE ar.id=$1`,[id]);
   return mapAttendanceRow(rows[0]);
 }
-async function calculateSplitPunches(client: DbClient, record: HrAttendanceRecordView, schedule: Record<string, any>, session: SessionPayload) {
+async function calculateSplitPunches(client: DbClient, record: HrAttendanceRecordView, schedule: Record<string, any>, session: { username: string; role: string }) {
   // At a shared boundary, close the first pair before opening the next one.
   // Both typed events must exist; ordering never supplies a missing punch.
   const {rows} = await client.query(`SELECT DISTINCT punch_type,punched_at FROM hr_attendance_punch_events
@@ -1113,6 +1335,52 @@ async function calculateSplitPunches(client: DbClient, record: HrAttendanceRecor
   return attendanceView(client,record.id);
 }
 
+export async function recordAttendancePunchInTx(
+  client: DbClient,
+  input: AttendancePunchInput,
+  actor: { username: string; role: string },
+): Promise<HrAttendanceRecordView> {
+  if (input.punchType !== "check_in" && input.punchType !== "check_out") throw new Error("نوع البصمة غير صالح.");
+  const staffId = Number(input.staffId);
+  const instant = new Date(input.punchTime || new Date().toISOString());
+  if (!Number.isFinite(instant.getTime()) || !Number.isSafeInteger(staffId) || staffId < 1) throw new Error("بصمة غير صالحة.");
+  const punchIso = instant.toISOString();
+  let dateStr = clinicDateString(instant, CLINIC_TIME_ZONE);
+  await lockPersonIdentityForOperation(client);
+  const staff = await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE", [staffId]);
+  if (!staff.rows[0]) throw new Error("الموظف غير موجود.");
+  // Select the previous overnight window even when its first entry is missing.
+  const previousDate = new Date(Date.parse(`${dateStr}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const previousSchedule = await attendanceSchedule(client, staffId, previousDate);
+  const clock = new Intl.DateTimeFormat('en-GB', { timeZone: CLINIC_TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(instant);
+  if (previousSchedule?.crosses_midnight && clock <= String(previousSchedule.shift_end_time).slice(0, 5)
+    && previousSchedule.working_days.includes(new Date(`${previousDate}T00:00:00Z`).getUTCDay())) dateStr = previousDate;
+  // A checkout can complete a scheduled night shift from the prior clinic date.
+  const prior = await client.query(`SELECT ar.* FROM hr_attendance_records ar LEFT JOIN hr_work_schedules ws ON ws.id=ar.schedule_id
+    WHERE ar.staff_id=$1 AND (ar.attendance_date=$2::date OR
+      EXISTS (SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=ar.id AND e.punch_type=$3 AND e.punched_at=$4::timestamptz) OR
+      ($3='check_out' AND ws.crosses_midnight AND ar.attendance_date=$2::date-1 AND ar.check_in_actual IS NOT NULL AND (ar.check_out_actual IS NULL OR ar.check_out_raw IS NULL OR ar.check_out_raw=$4::timestamptz)))
+    ORDER BY (EXISTS (SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=ar.id AND e.punch_type=$3 AND e.punched_at=$4::timestamptz)
+        OR ($3='check_out' AND COALESCE(ar.check_out_raw=$4::timestamptz,false))) DESC,
+      (ar.attendance_date=$2::date AND ar.check_in_actual IS NOT NULL AND ar.check_in_actual<=$4::timestamptz) DESC,
+      ar.attendance_date ASC LIMIT 1 FOR UPDATE OF ar`, [staffId, dateStr, input.punchType, punchIso]);
+  const row = prior.rows[0];
+  if (row?.status === 'on_leave') throw new Error("يوجد طلب إجازة معتمد؛ راجعه قبل تسجيل حضور.");
+  const attendanceDate = row?.attendance_date == null ? dateStr : postgresDateOnly(row.attendance_date);
+  const checkIn = row?.check_in_actual ? new Date(row.check_in_actual).toISOString() : input.punchType === 'check_in' ? punchIso : null;
+  const checkOut = row?.check_out_actual ? new Date(row.check_out_actual).toISOString() : input.punchType === 'check_out' ? punchIso : null;
+  if (checkIn && checkOut && Date.parse(checkOut) < Date.parse(checkIn)) throw new Error("وقت الخروج يسبق الدخول.");
+  const duplicate = row && (await client.query("SELECT id FROM hr_attendance_punch_events WHERE attendance_id=$1 AND punch_type=$2 AND punched_at=$3::timestamptz LIMIT 1", [row.id, input.punchType, punchIso])).rows.length;
+  const schedule = await attendanceSchedule(client, staffId, attendanceDate);
+  const correctedSplit = row && schedule?.second_shift_start && (await client.query("SELECT id FROM hr_attendance_corrections WHERE attendance_id=$1 AND status='approved' LIMIT 1", [row.id])).rows.length;
+  if (correctedSplit) await client.query(`UPDATE hr_attendance_records SET check_in_raw=COALESCE(check_in_raw,$2),check_out_raw=COALESCE(check_out_raw,$3) WHERE id=$1`, [row.id, input.punchType === 'check_in' ? punchIso : null, input.punchType === 'check_out' ? punchIso : null]);
+  const record = duplicate || correctedSplit ? await attendanceView(client, row.id) : await recordAttendanceInTx(client, { staffId, attendanceDate, checkIn, checkOut, notes: input.note }, actor, { type: input.punchType, time: punchIso });
+  await client.query(`INSERT INTO hr_attendance_punch_events(attendance_id,staff_id,punch_type,punched_at,source,note,recorded_by)
+    VALUES($1,$2,$3,$4,$5,$6,$7)`, [record.id, staffId, input.punchType, punchIso, input.source || 'manual', input.note ?? null, actor.username]);
+  if (duplicate) return record;
+  return schedule?.second_shift_start && schedule?.second_shift_end ? calculateSplitPunches(client, record, schedule, actor) : record;
+}
+
 export async function recordAttendancePunch(
   input: AttendancePunchInput,
   session: SessionPayload,
@@ -1121,42 +1389,7 @@ export async function recordAttendancePunch(
   const staffId = Number(input.staffId);
   const instant = new Date(input.punchTime || new Date().toISOString());
   if (!Number.isFinite(instant.getTime()) || !Number.isSafeInteger(staffId) || staffId<1) throw new Error("بصمة غير صالحة.");
-  const punchIso = instant.toISOString();
-  let dateStr = clinicDateString(instant, CLINIC_TIME_ZONE);
-  return withWorkforceTransaction(session, ["admin", "reception"], async client => {
-    const staff = await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
-    if (!staff.rows[0]) throw new Error("الموظف غير موجود.");
-    // Select the previous overnight window even when its first entry is missing.
-    const previousDate=new Date(Date.parse(`${dateStr}T00:00:00Z`)-86400000).toISOString().slice(0,10);
-    const previousSchedule=await attendanceSchedule(client,staffId,previousDate);
-    const clock=new Intl.DateTimeFormat('en-GB',{timeZone:CLINIC_TIME_ZONE,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(instant);
-    if(previousSchedule?.crosses_midnight && clock<=String(previousSchedule.shift_end_time).slice(0,5)
-       && previousSchedule.working_days.includes(new Date(`${previousDate}T00:00:00Z`).getUTCDay())) dateStr=previousDate;
-    // A checkout can complete a scheduled night shift from the prior clinic date.
-    const prior = await client.query(`SELECT ar.* FROM hr_attendance_records ar LEFT JOIN hr_work_schedules ws ON ws.id=ar.schedule_id
-      WHERE ar.staff_id=$1 AND (ar.attendance_date=$2::date OR
-        EXISTS (SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=ar.id AND e.punch_type=$3 AND e.punched_at=$4::timestamptz) OR
-        ($3='check_out' AND ws.crosses_midnight AND ar.attendance_date=$2::date-1 AND ar.check_in_actual IS NOT NULL AND (ar.check_out_actual IS NULL OR ar.check_out_raw IS NULL OR ar.check_out_raw=$4::timestamptz)))
-      ORDER BY (EXISTS (SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=ar.id AND e.punch_type=$3 AND e.punched_at=$4::timestamptz)
-          OR ($3='check_out' AND COALESCE(ar.check_out_raw=$4::timestamptz,false))) DESC,
-        (ar.attendance_date=$2::date AND ar.check_in_actual IS NOT NULL AND ar.check_in_actual<=$4::timestamptz) DESC,
-        ar.attendance_date ASC LIMIT 1 FOR UPDATE OF ar`,[staffId,dateStr,input.punchType,punchIso]);
-    const row = prior.rows[0];
-    if (row?.status === 'on_leave') throw new Error("يوجد طلب إجازة معتمد؛ راجعه قبل تسجيل حضور.");
-    const attendanceDate = row?.attendance_date == null ? dateStr : postgresDateOnly(row.attendance_date);
-    const checkIn = row?.check_in_actual ? new Date(row.check_in_actual).toISOString() : input.punchType==='check_in' ? punchIso : null;
-    const checkOut = row?.check_out_actual ? new Date(row.check_out_actual).toISOString() : input.punchType==='check_out' ? punchIso : null;
-    if (checkIn && checkOut && Date.parse(checkOut)<Date.parse(checkIn)) throw new Error("وقت الخروج يسبق الدخول.");
-    const duplicate=row && (await client.query("SELECT id FROM hr_attendance_punch_events WHERE attendance_id=$1 AND punch_type=$2 AND punched_at=$3::timestamptz LIMIT 1",[row.id,input.punchType,punchIso])).rows.length;
-    const schedule=await attendanceSchedule(client,staffId,attendanceDate);
-    const correctedSplit=row && schedule?.second_shift_start && (await client.query("SELECT id FROM hr_attendance_corrections WHERE attendance_id=$1 AND status='approved' LIMIT 1",[row.id])).rows.length;
-    if(correctedSplit) await client.query(`UPDATE hr_attendance_records SET check_in_raw=COALESCE(check_in_raw,$2),check_out_raw=COALESCE(check_out_raw,$3) WHERE id=$1`,[row.id,input.punchType==='check_in'?punchIso:null,input.punchType==='check_out'?punchIso:null]);
-    const record = duplicate || correctedSplit ? await attendanceView(client,row.id) : await recordAttendanceInTx(client,{staffId,attendanceDate,checkIn,checkOut,notes:input.note},session,{type:input.punchType,time:punchIso});
-    await client.query(`INSERT INTO hr_attendance_punch_events(attendance_id,staff_id,punch_type,punched_at,source,note,recorded_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7)`,[record.id,staffId,input.punchType,punchIso,input.source || 'manual',input.note ?? null,session.username]);
-    if(duplicate) return record;
-    return schedule?.second_shift_start && schedule?.second_shift_end ? calculateSplitPunches(client,record,schedule,session) : record;
-  });
+  return withWorkforceTransaction(session, ["admin", "reception"], async client => recordAttendancePunchInTx(client, input, session));
 }
 
 async function assertSinglePairCorrection(client: DbClient, scheduleId: number | null) {
@@ -1189,15 +1422,34 @@ export async function correctAttendanceRecord(
     const curr = currRows[0];
     await assertSinglePairCorrection(client,curr.schedule_id);
 
-    await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: curr.staff_id, hasRequest: false });
-    // منع الموافقة الذاتية على تصحيح الحضور
-    if (curr.staff_user_id === session.userId) {
-      throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
+    const soleOwner = await isSoleActiveOwnerAdmin(client, session.userId);
+    if (!soleOwner) {
+      await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: curr.staff_id, hasRequest: false });
+      // منع الموافقة الذاتية على تصحيح الحضور
+      if (curr.staff_user_id === session.userId) {
+        throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
+      }
     }
 
-    const newIn = input.newCheckIn !== undefined ? (input.newCheckIn ? new Date(input.newCheckIn) : null) : curr.check_in_actual;
-    const newOut = input.newCheckOut !== undefined ? (input.newCheckOut ? new Date(input.newCheckOut) : null) : curr.check_out_actual;
-    const newStatus = input.newStatus ?? curr.status;
+    const newIn = input.newCheckIn !== undefined ? (input.newCheckIn ? new Date(input.newCheckIn) : null) : (curr.check_in_actual ? new Date(curr.check_in_actual) : null);
+    const newOut = input.newCheckOut !== undefined ? (input.newCheckOut ? new Date(input.newCheckOut) : null) : (curr.check_out_actual ? new Date(curr.check_out_actual) : null);
+    if (newIn && newOut && newOut.getTime() < newIn.getTime()) {
+      throw new Error("وقت الخروج يسبق الدخول.");
+    }
+    const { rows: [schedule] } = await client.query(
+      `SELECT * FROM hr_work_schedules WHERE id = $1`,
+      [curr.schedule_id],
+    );
+    const calculated = calculateShiftAttendance({
+      checkIn: newIn,
+      checkOut: newOut,
+      scheduledStart: schedule?.shift_start_time ?? "00:00",
+      scheduledEnd: schedule?.shift_end_time ?? "23:59",
+      graceMins: schedule?.grace_period_mins ?? 0,
+      crossesMidnight: schedule?.crosses_midnight ?? false,
+      timeZone: CLINIC_TIME_ZONE,
+    });
+    const newStatus = input.newStatus ?? calculated.status;
 
     const identityEvidence = await captureRequestIdentity(client, curr.staff_id, session.userId);
     // تسجيل التصحيح في سجل التصحيحات append-only
@@ -1224,13 +1476,31 @@ export async function correctAttendanceRecord(
       ],
     );
 
-    // تطبيق التصحيح على السجل الفعلي مع بقاء raw دون تغيير
+    // (HR-02) تطبيق التصحيح مع إعادة حساب دقائق العمل والتأخير والانصراف المبكر والإضافي
     const { rows: updatedRows } = await client.query(
       `UPDATE hr_attendance_records
-       SET check_in_actual = $1, check_out_actual = $2, status = $3, is_incomplete = $4, updated_at = NOW()
-       WHERE id = $5
+       SET check_in_actual = $1,
+           check_out_actual = $2,
+           status = $3,
+           work_minutes = $4,
+           late_minutes = $5,
+           early_exit_minutes = $6,
+           overtime_minutes = $7,
+           is_incomplete = $8,
+           updated_at = NOW()
+       WHERE id = $9
        RETURNING *`,
-      [newIn, newOut, newStatus, Boolean(newIn && !newOut), attId],
+      [
+        newIn,
+        newOut,
+        newStatus,
+        calculated.workMinutes,
+        schedule ? calculated.lateMinutes : 0,
+        schedule ? calculated.earlyExitMinutes : 0,
+        schedule ? calculated.overtimeMinutes : 0,
+        calculated.isIncomplete,
+        attId,
+      ],
     );
 
     const updated = mapAttendanceRow({ ...curr, ...updatedRows[0] });
@@ -1247,71 +1517,83 @@ export async function correctAttendanceRecord(
   });
 }
 
+export async function requestAttendanceCorrectionInTx(
+  client: DbClient,
+  input: RequestCorrectionInput,
+  actor: HrActorIdentity,
+): Promise<HrAttendanceCorrectionView> {
+  if (!input.reason?.trim() || input.reason.length > 500 || !["check_in", "check_out", "all", "status", "overtime"].includes(input.fieldCorrected)) {
+    throw new Error("طلب تصحيح غير صالح.");
+  }
+  const attId = Number(input.attendanceRecordId);
+  await lockPersonIdentityForOperation(client);
+  const { rows: currRows } = await client.query(
+    `SELECT ar.*, s.full_name as staff_name, s.user_id as staff_user_id
+     FROM hr_attendance_records ar
+     JOIN hr_staff s ON s.id = ar.staff_id
+     WHERE ar.id = $1 FOR UPDATE`,
+    [attId],
+  );
+  if (!currRows[0]) throw new Error("سجل الحضور غير موجود.");
+  const curr = currRows[0];
+  await assertSinglePairCorrection(client, curr.schedule_id);
+
+  const newIn = input.newCheckIn ? new Date(input.newCheckIn) : null;
+  const newOut = input.newCheckOut ? new Date(input.newCheckOut) : null;
+
+  const identityEvidence = await captureRequestIdentity(client, curr.staff_id, actor.userId);
+  const { rows } = await client.query(
+    `INSERT INTO hr_attendance_corrections (
+      attendance_id, staff_id, field_corrected, old_check_in, new_check_in,
+      old_check_out, new_check_out, old_status, new_status, reason,
+      requested_by, approved_by, approved_at, status${identityEvidence ? ",requester_user_id,identity_evidence" : ""}
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, 'pending'${identityEvidence ? " ,$12,$13::jsonb" : ""})
+    RETURNING *`,
+    [
+      attId,
+      curr.staff_id,
+      input.fieldCorrected,
+      curr.check_in_actual,
+      newIn,
+      curr.check_out_actual,
+      newOut,
+      curr.status,
+      input.newStatus ?? curr.status,
+      input.reason.trim(),
+      actor.username,
+      ...(identityEvidence ? [actor.userId, JSON.stringify(identityEvidence)] : []),
+    ],
+  );
+
+  const corr = mapCorrectionRow({ ...rows[0], staff_name: curr.staff_name });
+  await auditWithClient(
+    client,
+    "hr.attendance.correct",
+    actor,
+    "hr_attendance_correction",
+    corr.id,
+    `${curr.staff_name} (${input.fieldCorrected})`,
+    { attendanceId: attId, reason: input.reason },
+  );
+  return corr;
+}
+
 export async function requestAttendanceCorrection(
   input: RequestCorrectionInput,
   session: SessionPayload,
 ): Promise<HrAttendanceCorrectionView> {
   if (session.role !== "admin") throw new Error("طلب التصحيح للمدير وحده.");
   if (!input.reason?.trim() || input.reason.length>500 || !["check_in","check_out","all","status","overtime"].includes(input.fieldCorrected)) throw new Error("طلب تصحيح غير صالح.");
-  const attId = Number(input.attendanceRecordId);
-  return withWorkforceTransaction(session, ["admin"], async (client) => {
-    const { rows: currRows } = await client.query(
-      `SELECT ar.*, s.full_name as staff_name, s.user_id as staff_user_id
-       FROM hr_attendance_records ar
-       JOIN hr_staff s ON s.id = ar.staff_id
-       WHERE ar.id = $1 FOR UPDATE`,
-      [attId],
-    );
-    if (!currRows[0]) throw new Error("سجل الحضور غير موجود.");
-    const curr = currRows[0];
-    await assertSinglePairCorrection(client,curr.schedule_id);
-
-    const newIn = input.newCheckIn ? new Date(input.newCheckIn) : null;
-    const newOut = input.newCheckOut ? new Date(input.newCheckOut) : null;
-
-    const identityEvidence = await captureRequestIdentity(client, curr.staff_id, session.userId);
-    const { rows } = await client.query(
-      `INSERT INTO hr_attendance_corrections (
-        attendance_id, staff_id, field_corrected, old_check_in, new_check_in,
-        old_check_out, new_check_out, old_status, new_status, reason,
-        requested_by, approved_by, approved_at, status${identityEvidence ? ",requester_user_id,identity_evidence" : ""}
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, 'pending'${identityEvidence ? " ,$12,$13::jsonb" : ""})
-      RETURNING *`,
-      [
-        attId,
-        curr.staff_id,
-        input.fieldCorrected,
-        curr.check_in_actual,
-        newIn,
-        curr.check_out_actual,
-        newOut,
-        curr.status,
-        input.newStatus ?? curr.status,
-        input.reason.trim(),
-        session.username,
-        ...(identityEvidence ? [session.userId,JSON.stringify(identityEvidence)] : []),
-      ],
-    );
-
-    const corr = mapCorrectionRow({ ...rows[0], staff_name: curr.staff_name });
-    await auditWithClient(
-      client,
-      "hr.attendance.correct",
-      session,
-      "hr_attendance_correction",
-      corr.id,
-      `${curr.staff_name} (${input.fieldCorrected})`,
-      { attendanceId: attId, reason: input.reason },
-    );
-    return corr;
-  });
+  return withWorkforceTransaction(session, ["admin"], async (client) => requestAttendanceCorrectionInTx(client, input, session));
 }
 
-export async function listAttendanceCorrections(options?: {
-  staffId?: number | string;
-  status?: string;
-}): Promise<HrAttendanceCorrectionView[]> {
-  const pool = getPool();
+export async function listAttendanceCorrectionsWith(
+  q: Pick<DbClient, "query">,
+  options?: {
+    staffId?: number | string;
+    status?: string;
+  },
+): Promise<HrAttendanceCorrectionView[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
@@ -1322,7 +1604,7 @@ export async function listAttendanceCorrections(options?: {
 
   if (options?.status) { params.push(options.status); conditions.push(`c.status = $${params.length}`); }
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const { rows } = await pool.query(
+  const { rows } = await q.query(
     `SELECT c.*, s.full_name as staff_name
      FROM hr_attendance_corrections c
      JOIN hr_staff s ON s.id = c.staff_id
@@ -1333,6 +1615,82 @@ export async function listAttendanceCorrections(options?: {
   return rows.map(mapCorrectionRow);
 }
 
+export async function listAttendanceCorrections(options?: {
+  staffId?: number | string;
+  status?: string;
+}): Promise<HrAttendanceCorrectionView[]> {
+  return listAttendanceCorrectionsWith(getPool(), options);
+}
+
+export async function decideAttendanceCorrectionInTx(
+  client: DbClient,
+  id: number | string,
+  decision: "approved" | "rejected",
+  reason: string | null,
+  actor: HrActorIdentity & { soleOwner: boolean },
+): Promise<HrAttendanceCorrectionView> {
+  if (decision !== "approved" && decision !== "rejected") throw new Error("قرار غير صالح.");
+  const corrId = Number(id);
+  await lockPersonIdentityForOperation(client);
+  const { rows: corrRows } = await client.query(
+    `SELECT c.*, s.full_name as staff_name, s.user_id as staff_user_id
+     FROM hr_attendance_corrections c
+     JOIN hr_staff s ON s.id = c.staff_id
+     WHERE c.id = $1 FOR UPDATE`,
+    [corrId],
+  );
+  if (!corrRows[0]) throw new Error("طلب تصحيح الحضور غير موجود.");
+  const corr = corrRows[0];
+
+  if (decision === "approved" && !actor.soleOwner) {
+    await assertPersonMayApprove(client, { actorUserId: actor.userId, subjectStaffId: corr.staff_id, requesterUserId: corr.requester_user_id, evidence: corr.identity_evidence, hasRequest: true });
+    // منع الموافقة الذاتية
+    if (corr.requested_by === actor.username || corr.staff_user_id === actor.userId) {
+      throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
+    }
+  }
+  if (corr.status !== "pending") {
+    if (corr.status === decision) return mapCorrectionRow(corr);
+    throw new Error("حُسم طلب التصحيح سابقًا.");
+  }
+
+  if (decision === "approved") {
+    const { rows: [attendance] } = await client.query("SELECT * FROM hr_attendance_records WHERE id=$1 FOR UPDATE", [corr.attendance_id]);
+    await assertSinglePairCorrection(client, attendance.schedule_id);
+    const iso = (value: unknown) => value ? new Date(value as string).toISOString() : null;
+    if (iso(attendance.check_in_actual) !== iso(corr.old_check_in) || iso(attendance.check_out_actual) !== iso(corr.old_check_out) || attendance.status !== corr.old_status) {
+      throw new Error("تغيّر سجل الحضور؛ اطلب تصحيحًا جديدًا.");
+    }
+    const checkIn = corr.new_check_in ?? attendance.check_in_actual, checkOut = corr.new_check_out ?? attendance.check_out_actual;
+    if (checkIn && checkOut && new Date(checkOut).getTime() < new Date(checkIn).getTime()) throw new Error("وقت الخروج يسبق الدخول.");
+    const { rows: [schedule] } = await client.query("SELECT * FROM hr_work_schedules WHERE id=$1", [attendance.schedule_id]);
+    const calculated = calculateShiftAttendance({ checkIn: checkIn ? new Date(checkIn) : null, checkOut: checkOut ? new Date(checkOut) : null, scheduledStart: schedule?.shift_start_time ?? "00:00", scheduledEnd: schedule?.shift_end_time ?? "23:59", graceMins: schedule?.grace_period_mins ?? 0, crossesMidnight: schedule?.crosses_midnight ?? false, timeZone: CLINIC_TIME_ZONE });
+    await client.query(`UPDATE hr_attendance_records SET check_in_actual=$1,check_out_actual=$2,status=$3,
+      work_minutes=$4,late_minutes=$5,early_exit_minutes=$6,overtime_minutes=$7,is_incomplete=$8,updated_at=NOW() WHERE id=$9`,
+      [checkIn, checkOut, corr.new_status !== corr.old_status ? corr.new_status : calculated.status, calculated.workMinutes, schedule ? calculated.lateMinutes : 0, schedule ? calculated.earlyExitMinutes : 0, schedule ? calculated.overtimeMinutes : 0, calculated.isIncomplete, corr.attendance_id]);
+  }
+
+  const { rows } = await client.query(
+    `UPDATE hr_attendance_corrections
+     SET approved_by = $1, approved_at = NOW(), status=$3, decision_reason=$4
+     WHERE id = $2
+     RETURNING *`,
+    [actor.username, corrId, decision, reason],
+  );
+
+  const result = mapCorrectionRow({ ...rows[0], staff_name: corr.staff_name });
+  await auditWithClient(
+    client,
+    "hr.attendance.correct",
+    actor,
+    "hr_attendance_correction",
+    corrId,
+    `${corr.staff_name} (${decision})`,
+    { decision, reason },
+  );
+  return result;
+}
+
 export async function decideAttendanceCorrection(
   id: number | string,
   decision: "approved" | "rejected",
@@ -1341,58 +1699,14 @@ export async function decideAttendanceCorrection(
 ): Promise<HrAttendanceCorrectionView> {
   if (session.role !== "admin") throw new Error("اعتماد التصحيح للمدير وحده.");
   if (decision !== "approved" && decision !== "rejected") throw new Error("قرار غير صالح.");
-  const corrId = Number(id);
   return withWorkforceTransaction(session, ["admin"], async (client) => {
-    const { rows: corrRows } = await client.query(
-      `SELECT c.*, s.full_name as staff_name, s.user_id as staff_user_id
-       FROM hr_attendance_corrections c
-       JOIN hr_staff s ON s.id = c.staff_id
-       WHERE c.id = $1 FOR UPDATE`,
-      [corrId],
-    );
-    if (!corrRows[0]) throw new Error("طلب تصحيح الحضور غير موجود.");
-    const corr = corrRows[0];
-
-    if (decision === "approved") await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: corr.staff_id, requesterUserId: corr.requester_user_id, evidence: corr.identity_evidence, hasRequest: true });
-    // منع الموافقة الذاتية
-    if (decision === "approved" && (corr.requested_by === session.username || corr.staff_user_id === session.userId)) {
-      throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
-    }
-    if (corr.status !== "pending") { if (corr.status === decision) return mapCorrectionRow(corr); throw new Error("حُسم طلب التصحيح سابقًا."); }
-
-    if (decision === "approved") {
-      const {rows:[attendance]} = await client.query("SELECT * FROM hr_attendance_records WHERE id=$1 FOR UPDATE",[corr.attendance_id]);
-      await assertSinglePairCorrection(client,attendance.schedule_id);
-      const iso = (value: unknown) => value ? new Date(value as string).toISOString() : null;
-      if (iso(attendance.check_in_actual)!==iso(corr.old_check_in) || iso(attendance.check_out_actual)!==iso(corr.old_check_out) || attendance.status!==corr.old_status) throw new Error("تغيّر سجل الحضور؛ اطلب تصحيحًا جديدًا.");
-      const checkIn = corr.new_check_in ?? attendance.check_in_actual, checkOut = corr.new_check_out ?? attendance.check_out_actual;
-      if (checkIn && checkOut && new Date(checkOut).getTime()<new Date(checkIn).getTime()) throw new Error("وقت الخروج يسبق الدخول.");
-      const {rows:[schedule]} = await client.query("SELECT * FROM hr_work_schedules WHERE id=$1",[attendance.schedule_id]);
-      const calculated = calculateShiftAttendance({checkIn:checkIn?new Date(checkIn):null,checkOut:checkOut?new Date(checkOut):null,scheduledStart:schedule?.shift_start_time ?? "00:00",scheduledEnd:schedule?.shift_end_time ?? "23:59",graceMins:schedule?.grace_period_mins ?? 0,crossesMidnight:schedule?.crosses_midnight ?? false,timeZone:CLINIC_TIME_ZONE});
-      await client.query(`UPDATE hr_attendance_records SET check_in_actual=$1,check_out_actual=$2,status=$3,
-        work_minutes=$4,late_minutes=$5,early_exit_minutes=$6,overtime_minutes=$7,is_incomplete=$8,updated_at=NOW() WHERE id=$9`,
-        [checkIn,checkOut,corr.new_status!==corr.old_status?corr.new_status:calculated.status,calculated.workMinutes,schedule?calculated.lateMinutes:0,schedule?calculated.earlyExitMinutes:0,schedule?calculated.overtimeMinutes:0,calculated.isIncomplete,corr.attendance_id]);
-    }
-
-    const { rows } = await client.query(
-      `UPDATE hr_attendance_corrections
-       SET approved_by = $1, approved_at = NOW(), status=$3, decision_reason=$4
-       WHERE id = $2
-       RETURNING *`,
-      [session.username, corrId, decision, reason],
-    );
-
-    const result = mapCorrectionRow({ ...rows[0], staff_name: corr.staff_name });
-    await auditWithClient(
-      client,
-      "hr.attendance.correct",
-      session,
-      "hr_attendance_correction",
-      corrId,
-      `${corr.staff_name} (${decision})`,
-      { decision, reason },
-    );
-    return result;
+    const soleOwner = decision === "approved" ? await isSoleActiveOwnerAdmin(client, session.userId) : false;
+    return decideAttendanceCorrectionInTx(client, id, decision, reason, {
+      userId: session.userId,
+      username: session.username,
+      role: session.role,
+      soleOwner,
+    });
   });
 }
 
@@ -1451,7 +1765,7 @@ function mapAttendanceRow(row: Record<string, unknown>): HrAttendanceRecordView 
 
 /* ── ٤. الإجازات والأرصدة والطلبات ────────────────────────────────────────── */
 
-export async function listLeaveTypes(): Promise<Array<{
+export async function listLeaveTypesWith(q: Pick<DbClient, "query">): Promise<Array<{
   id: number;
   code: HrLeaveTypeCode;
   nameAr: string;
@@ -1460,8 +1774,7 @@ export async function listLeaveTypes(): Promise<Array<{
   allowNegative: boolean;
   requiresAttachment: boolean;
 }>> {
-  const pool = getPool();
-  const { rows } = await pool.query(`SELECT * FROM hr_leave_types ORDER BY id ASC`);
+  const { rows } = await q.query(`SELECT * FROM hr_leave_types ORDER BY id ASC`);
   return rows.map((r) => ({
     id: Number(r.id),
     code: r.code as HrLeaveTypeCode,
@@ -1473,15 +1786,61 @@ export async function listLeaveTypes(): Promise<Array<{
   }));
 }
 
+export async function listLeaveTypes(): Promise<Array<{
+  id: number;
+  code: HrLeaveTypeCode;
+  nameAr: string;
+  isPaid: boolean;
+  defaultDaysPerYear: number | null;
+  allowNegative: boolean;
+  requiresAttachment: boolean;
+}>> {
+  return listLeaveTypesWith(getPool());
+}
+
+export async function listLeaveBalancesWith(
+  q: Pick<DbClient, "query">,
+  options: {
+    staffId?: number | string;
+    year?: number;
+    restrictToUserId?: number | null;
+  },
+): Promise<HrLeaveBalanceView[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options.staffId !== undefined) {
+    params.push(Number(options.staffId));
+    conditions.push(`lb.staff_id = $${params.length}`);
+  }
+  if (options.year !== undefined) {
+    params.push(Number(options.year));
+    conditions.push(`lb.year = $${params.length}`);
+  }
+  if (options.restrictToUserId !== undefined && options.restrictToUserId !== null) {
+    params.push(options.restrictToUserId);
+    conditions.push(`s.user_id = $${params.length}`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const query = `
+    SELECT lb.*, s.full_name as staff_name, lt.name_ar as leave_type_name
+    FROM hr_leave_balances lb
+    JOIN hr_staff s ON s.id = lb.staff_id
+    JOIN hr_leave_types lt ON lt.code = lb.leave_type_code
+    ${whereClause}
+    ORDER BY lb.year DESC, s.full_name ASC
+  `;
+
+  const { rows } = await q.query(query, params);
+  return rows.map(mapLeaveBalanceRow);
+}
+
 export async function listLeaveBalances(
   optionsOrStaffId?: number | string | { staffId?: number | string; year?: number },
   maybeYear?: number,
   session?: SessionPayload,
 ): Promise<HrLeaveBalanceView[]> {
-  const pool = getPool();
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-
   let staffId: number | undefined;
   let year: number | undefined;
 
@@ -1493,28 +1852,72 @@ export async function listLeaveBalances(
     if (maybeYear !== undefined) year = Number(maybeYear);
   }
 
-  if (staffId !== undefined) {
-    params.push(staffId);
-    conditions.push(`lb.staff_id = $${params.length}`);
-  }
-  if (year !== undefined) {
-    params.push(year);
-    conditions.push(`lb.year = $${params.length}`);
-  }
+  return listLeaveBalancesWith(getPool(), {
+    staffId,
+    year,
+    restrictToUserId: session && session.role !== "admin" ? session.userId : null,
+  });
+}
 
-  if (session && session.role !== "admin") { params.push(session.userId); conditions.push(`s.user_id = $${params.length}`); }
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `
-    SELECT lb.*, s.full_name as staff_name, lt.name_ar as leave_type_name
-    FROM hr_leave_balances lb
-    JOIN hr_staff s ON s.id = lb.staff_id
-    JOIN hr_leave_types lt ON lt.code = lb.leave_type_code
-    ${whereClause}
-    ORDER BY lb.year DESC, s.full_name ASC
-  `;
+export async function adjustLeaveBalanceInTx(
+  client: DbClient,
+  input: {
+    staffId: number | string;
+    leaveTypeCode: string;
+    year: number;
+    allocatedDays: number;
+    reason?: string;
+  },
+  actor: { username: string; role: string },
+): Promise<HrLeaveBalanceView> {
+  const sId = Number(input.staffId);
+  const code = String(input.leaveTypeCode);
+  const yr = Number(input.year);
+  const days = Number(input.allocatedDays);
+  if (!Number.isSafeInteger(sId) || sId < 1 || !Number.isInteger(yr) || yr < 2000 || yr > 9999 || !Number.isFinite(days) || days < 0 || days > 366) {
+    throw new Error("تخصيص رصيد غير صالح أو غير مصرح به.");
+  }
+  await lockPersonIdentityForOperation(client);
+  await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE", [sId]);
+  await assertDocumentedStaffForOperation(client, sId);
+  const existing = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE", [sId, code, yr]);
+  const pending = Number((await client.query("SELECT COALESCE(SUM(days_count),0) AS days FROM hr_leave_requests WHERE staff_id=$1 AND leave_type_code=$2 AND EXTRACT(YEAR FROM start_date)=$3 AND status IN ('pending','under_review')", [sId, code, yr])).rows[0].days);
+  if (days + Number(existing.rows[0]?.carried_over_days ?? 0) < Number(existing.rows[0]?.used_days ?? 0) + pending) {
+    throw new Error("الرصيد المخصص أقل من الأيام المستخدمة والمعلقة.");
+  }
+  const effFrom = `${yr}-01-01`;
+  const effTo = `${yr}-12-31`;
 
-  const { rows } = await pool.query(query, params);
-  return rows.map(mapLeaveBalanceRow);
+  const { rows } = await client.query(
+    `INSERT INTO hr_leave_balances (
+      staff_id, leave_type_code, year, allocated_days, effective_from, effective_to, pending_days
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON CONFLICT (staff_id, leave_type_code, year) DO UPDATE
+    SET allocated_days = EXCLUDED.allocated_days, pending_days = EXCLUDED.pending_days, updated_at = NOW()
+    RETURNING *`,
+    [sId, code, yr, days, effFrom, effTo, pending],
+  );
+
+  const balanceRes = await client.query(
+    `SELECT lb.*, s.full_name as staff_name, lt.name_ar as leave_type_name
+     FROM hr_leave_balances lb
+     JOIN hr_staff s ON s.id = lb.staff_id
+     JOIN hr_leave_types lt ON lt.code = lb.leave_type_code
+     WHERE lb.id = $1`,
+    [rows[0].id],
+  );
+
+  const balance = mapLeaveBalanceRow(balanceRes.rows[0]);
+  await auditWithClient(
+    client,
+    "hr.leave.balance_adjust",
+    actor,
+    "hr_leave_balance",
+    balance.id,
+    `${balance.staffName} (${balance.leaveTypeName} ${yr}: ${days} يوم)`,
+    { staffId: sId, leaveTypeCode: code, year: yr, allocatedDays: days, reason: input.reason },
+  );
+  return balance;
 }
 
 export async function adjustLeaveBalance(
@@ -1553,56 +1956,24 @@ export async function adjustLeaveBalance(
     sess = session!;
   }
 
-  if (sess.role!=="admin" || !Number.isSafeInteger(sId) || sId<1 || !Number.isInteger(yr) || yr<2000 || yr>9999 || !Number.isFinite(days) || days<0 || days>366) throw new Error("تخصيص رصيد غير صالح أو غير مصرح به.");
-  return withWorkforceTransaction(sess, ["admin"], async (client) => {
-    await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[sId]);
-    await assertDocumentedStaffForOperation(client, sId);
-    const existing = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE",[sId,code,yr]);
-    const pending = Number((await client.query("SELECT COALESCE(SUM(days_count),0) AS days FROM hr_leave_requests WHERE staff_id=$1 AND leave_type_code=$2 AND EXTRACT(YEAR FROM start_date)=$3 AND status IN ('pending','under_review')",[sId,code,yr])).rows[0].days);
-    if (days+Number(existing.rows[0]?.carried_over_days ?? 0)<Number(existing.rows[0]?.used_days ?? 0)+pending) throw new Error("الرصيد المخصص أقل من الأيام المستخدمة والمعلقة.");
-    const effFrom = `${yr}-01-01`;
-    const effTo = `${yr}-12-31`;
-
-    const { rows } = await client.query(
-      `INSERT INTO hr_leave_balances (
-        staff_id, leave_type_code, year, allocated_days, effective_from, effective_to, pending_days
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (staff_id, leave_type_code, year) DO UPDATE
-      SET allocated_days = EXCLUDED.allocated_days, pending_days = EXCLUDED.pending_days, updated_at = NOW()
-      RETURNING *`,
-      [sId, code, yr, days, effFrom, effTo, pending],
-    );
-
-    const balanceRes = await client.query(
-      `SELECT lb.*, s.full_name as staff_name, lt.name_ar as leave_type_name
-       FROM hr_leave_balances lb
-       JOIN hr_staff s ON s.id = lb.staff_id
-       JOIN hr_leave_types lt ON lt.code = lb.leave_type_code
-       WHERE lb.id = $1`,
-      [rows[0].id],
-    );
-
-    const balance = mapLeaveBalanceRow(balanceRes.rows[0]);
-    await auditWithClient(
-      client,
-      "hr.leave.balance_adjust",
-      sess,
-      "hr_leave_balance",
-      balance.id,
-      `${balance.staffName} (${balance.leaveTypeName} ${yr}: ${days} يوم)`,
-      { staffId: sId, leaveTypeCode: code, year: yr, allocatedDays: days, reason },
-    );
-    return balance;
-  });
+  if (sess.role !== "admin" || !Number.isSafeInteger(sId) || sId < 1 || !Number.isInteger(yr) || yr < 2000 || yr > 9999 || !Number.isFinite(days) || days < 0 || days > 366) {
+    throw new Error("تخصيص رصيد غير صالح أو غير مصرح به.");
+  }
+  return withWorkforceTransaction(sess, ["admin"], async (client) =>
+    adjustLeaveBalanceInTx(client, { staffId: sId, leaveTypeCode: code, year: yr, allocatedDays: days, reason }, sess),
+  );
 }
 
-export async function listLeaveRequests(options?: {
-  staffId?: number | string;
-  status?: HrLeaveRequestStatus;
-  startDate?: string;
-  endDate?: string;
-}, session?: SessionPayload): Promise<HrLeaveRequestView[]> {
-  const pool = getPool();
+export async function listLeaveRequestsWith(
+  q: Pick<DbClient, "query">,
+  options?: {
+    staffId?: number | string;
+    status?: HrLeaveRequestStatus;
+    startDate?: string;
+    endDate?: string;
+    restrictToUserId?: number | null;
+  },
+): Promise<HrLeaveRequestView[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
@@ -1622,8 +1993,11 @@ export async function listLeaveRequests(options?: {
     params.push(options.endDate);
     conditions.push(`lr.start_date <= $${params.length}`);
   }
+  if (options?.restrictToUserId !== undefined && options.restrictToUserId !== null) {
+    params.push(options.restrictToUserId);
+    conditions.push(`s.user_id = $${params.length}`);
+  }
 
-  if (session && session.role !== "admin") { params.push(session.userId); conditions.push(`s.user_id = $${params.length}`); }
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `
     SELECT lr.*, s.full_name as staff_name, s.job_title as staff_job_title, s.department,
@@ -1635,8 +2009,20 @@ export async function listLeaveRequests(options?: {
     ORDER BY lr.created_at DESC
   `;
 
-  const { rows } = await pool.query(query, params);
+  const { rows } = await q.query(query, params);
   return rows.map(mapLeaveRequestRow);
+}
+
+export async function listLeaveRequests(options?: {
+  staffId?: number | string;
+  status?: HrLeaveRequestStatus;
+  startDate?: string;
+  endDate?: string;
+}, session?: SessionPayload): Promise<HrLeaveRequestView[]> {
+  return listLeaveRequestsWith(getPool(), {
+    ...options,
+    restrictToUserId: session && session.role !== "admin" ? session.userId : null,
+  });
 }
 
 export interface CreateLeaveRequestInput {
@@ -1659,81 +2045,109 @@ function validLeaveAttachmentRef(value: unknown): value is {id:string;name:strin
     && (ref.url===undefined || (typeof ref.url==='string' && ref.url.length<=2048));
 }
 
+export async function createLeaveRequestInTx(
+  client: DbClient,
+  input: CreateLeaveRequestInput,
+  actor: HrActorIdentity & { canManageAllLeaves: boolean },
+  afterStaffLock?: () => Promise<void> | void,
+): Promise<HrLeaveRequestView> {
+  const staffId = Number(input.staffId);
+  if (input.attachmentRefs !== undefined && (!Array.isArray(input.attachmentRefs) || input.attachmentRefs.length > 20 || !input.attachmentRefs.every(validLeaveAttachmentRef))) {
+    throw new Error("مرجع المرفق يحتاج معرفًا واسمًا صالحين.");
+  }
+  const days = (Date.parse(input.endDate) - Date.parse(input.startDate)) / 86400000 + 1;
+  if (!Number.isInteger(days) || days < 1 || input.startDate.slice(0, 4) !== input.endDate.slice(0, 4) || !input.reason.trim() || input.isPartialDay || input.daysCount !== days) {
+    throw new Error("حدد أيام إجازة كاملة ضمن سنة واحدة؛ سياسة الإجازة الجزئية لم تُعتمد.");
+  }
+  await lockPersonIdentityForOperation(client);
+  const staff = await client.query("SELECT user_id FROM hr_staff WHERE id=$1 FOR UPDATE", [staffId]);
+  if (!staff.rows[0] || (!actor.canManageAllLeaves && staff.rows[0].user_id !== actor.userId)) {
+    throw new Error("الموظف غير موجود.");
+  }
+  await afterStaffLock?.();
+  await assertDocumentedStaffForOperation(client, staffId);
+  const identityEvidence = await captureRequestIdentity(client, staffId, actor.userId);
+  // ١) منع التداخل مع إجازات أخرى معتمدة أو قيد المراجعة
+  const overlapRes = await client.query(
+    `SELECT id FROM hr_leave_requests
+     WHERE staff_id = $1
+       AND status IN ('approved', 'pending', 'under_review')
+       AND start_date <= $3 AND end_date >= $2`,
+    [staffId, input.startDate, input.endDate],
+  );
+  if (overlapRes.rows.length > 0) {
+    throw new Error("يوجد طلب إجازة آخر متداخل في نفس الفترة الزمنية.");
+  }
+
+  const { rows } = await client.query(
+    `INSERT INTO hr_leave_requests (
+      staff_id, leave_type_code, start_date, end_date, days_count,
+      is_partial_day, partial_hours, reason, attachment_refs, created_by${identityEvidence ? ',requester_user_id,identity_evidence' : ''}
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${identityEvidence ? ',$11,$12::jsonb' : ''})
+    RETURNING *`,
+    [
+      staffId,
+      input.leaveTypeCode,
+      input.startDate,
+      input.endDate,
+      input.daysCount,
+      input.isPartialDay ?? false,
+      input.partialHours ?? null,
+      input.reason.trim(),
+      JSON.stringify(input.attachmentRefs ?? []),
+      actor.username,
+      ...(identityEvidence ? [actor.userId, JSON.stringify(identityEvidence)] : []),
+    ],
+  );
+
+  // حجز الأيام في الرصيد المعلق (pending_days)
+  const year = new Date(input.startDate).getFullYear();
+  await client.query(
+    `UPDATE hr_leave_balances
+     SET pending_days = pending_days + $1, updated_at = NOW()
+     WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
+    [input.daysCount, staffId, input.leaveTypeCode, year],
+  );
+
+  const reqRes = await client.query(
+    `SELECT lr.*, s.full_name as staff_name, s.job_title as staff_job_title, s.department,
+            lt.name_ar as leave_type_name
+     FROM hr_leave_requests lr
+     JOIN hr_staff s ON s.id = lr.staff_id
+     JOIN hr_leave_types lt ON lt.code = lr.leave_type_code
+     WHERE lr.id = $1`,
+    [rows[0].id],
+  );
+
+  const req = mapLeaveRequestRow(reqRes.rows[0]);
+  await auditWithClient(
+    client,
+    "hr.leave.request",
+    actor,
+    "hr_leave_request",
+    req.id,
+    `${req.staffName} (${req.leaveTypeName} ${req.daysCount} يوم)`,
+  );
+  return req;
+}
+
 export async function createLeaveRequest(
   input: CreateLeaveRequestInput,
   session: SessionPayload,
 ): Promise<HrLeaveRequestView> {
-  const staffId = Number(input.staffId);
-  if(input.attachmentRefs !== undefined && (!Array.isArray(input.attachmentRefs) || input.attachmentRefs.length>20 || !input.attachmentRefs.every(validLeaveAttachmentRef))) throw new Error("مرجع المرفق يحتاج معرفًا واسمًا صالحين.");
-  const days = (Date.parse(input.endDate)-Date.parse(input.startDate))/86400000+1;
-  if (!Number.isInteger(days) || days<1 || input.startDate.slice(0,4)!==input.endDate.slice(0,4) || !input.reason.trim() || input.isPartialDay || input.daysCount!==days) throw new Error("حدد أيام إجازة كاملة ضمن سنة واحدة؛ سياسة الإجازة الجزئية لم تُعتمد.");
+  if (input.attachmentRefs !== undefined && (!Array.isArray(input.attachmentRefs) || input.attachmentRefs.length > 20 || !input.attachmentRefs.every(validLeaveAttachmentRef))) {
+    throw new Error("مرجع المرفق يحتاج معرفًا واسمًا صالحين.");
+  }
+  const days = (Date.parse(input.endDate) - Date.parse(input.startDate)) / 86400000 + 1;
+  if (!Number.isInteger(days) || days < 1 || input.startDate.slice(0, 4) !== input.endDate.slice(0, 4) || !input.reason.trim() || input.isPartialDay || input.daysCount !== days) {
+    throw new Error("حدد أيام إجازة كاملة ضمن سنة واحدة؛ سياسة الإجازة الجزئية لم تُعتمد.");
+  }
   return withTransaction(getPool(), async (client) => {
-    await lockPersonIdentityForOperation(client);
-    const staff = await client.query("SELECT user_id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
-    if (!staff.rows[0] || (session.role!=="admin" && staff.rows[0].user_id!==session.userId)) throw new Error("الموظف غير موجود.");
-    await authorizeWorkforceMutation(client, session);
-    await assertDocumentedStaffForOperation(client, staffId);
-    const identityEvidence = await captureRequestIdentity(client, staffId, session.userId);
-    // ١) منع التداخل مع إجازات أخرى معتمدة أو قيد المراجعة
-    const overlapRes = await client.query(
-      `SELECT id FROM hr_leave_requests
-       WHERE staff_id = $1
-         AND status IN ('approved', 'pending', 'under_review')
-         AND start_date <= $3 AND end_date >= $2`,
-      [staffId, input.startDate, input.endDate],
-    );
-    if (overlapRes.rows.length > 0) {
-      throw new Error("يوجد طلب إجازة آخر متداخل في نفس الفترة الزمنية.");
-    }
-
-    const { rows } = await client.query(
-      `INSERT INTO hr_leave_requests (
-        staff_id, leave_type_code, start_date, end_date, days_count,
-        is_partial_day, partial_hours, reason, attachment_refs, created_by${identityEvidence ? ',requester_user_id,identity_evidence' : ''}
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${identityEvidence ? ',$11,$12::jsonb' : ''})
-      RETURNING *`,
-      [
-        staffId,
-        input.leaveTypeCode,
-        input.startDate,
-        input.endDate,
-        input.daysCount,
-        input.isPartialDay ?? false,
-        input.partialHours ?? null,
-        input.reason.trim(),
-        JSON.stringify(input.attachmentRefs ?? []),
-        session.username,
-        ...(identityEvidence ? [session.userId,JSON.stringify(identityEvidence)] : []),
-      ],
-    );
-
-    // حجز الأيام في الرصيد المعلق (pending_days)
-    const year = new Date(input.startDate).getFullYear();
-    await client.query(
-      `UPDATE hr_leave_balances
-       SET pending_days = pending_days + $1, updated_at = NOW()
-       WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
-      [input.daysCount, staffId, input.leaveTypeCode, year],
-    );
-
-    const reqRes = await client.query(
-      `SELECT lr.*, s.full_name as staff_name, s.job_title as staff_job_title, s.department,
-              lt.name_ar as leave_type_name
-       FROM hr_leave_requests lr
-       JOIN hr_staff s ON s.id = lr.staff_id
-       JOIN hr_leave_types lt ON lt.code = lr.leave_type_code
-       WHERE lr.id = $1`,
-      [rows[0].id],
-    );
-
-    const req = mapLeaveRequestRow(reqRes.rows[0]);
-    await auditWithClient(
+    const req = await createLeaveRequestInTx(
       client,
-      "hr.leave.request",
-      session,
-      "hr_leave_request",
-      req.id,
-      `${req.staffName} (${req.leaveTypeName} ${req.daysCount} يوم)`,
+      input,
+      { userId: session.userId, username: session.username, role: session.role, canManageAllLeaves: session.role === "admin" },
+      () => authorizeWorkforceMutation(client, session),
     );
     assertWorkforceSessionCurrent(session);
     return req;
@@ -1742,163 +2156,197 @@ export async function createLeaveRequest(
 
 export const requestLeave = createLeaveRequest;
 
+export async function decideLeaveRequestInTx(
+  client: DbClient,
+  requestId: number | string,
+  decision: "approved" | "rejected" | "cancelled",
+  reason: string,
+  actor: HrActorIdentity & { soleOwner: boolean },
+  afterStaffLock?: () => Promise<void> | void,
+): Promise<HrLeaveRequestView> {
+  if (!["approved", "rejected", "cancelled"].includes(decision)) throw new Error("قرار إجازة غير صالح.");
+  const reqId = Number(requestId);
+  await lockPersonIdentityForOperation(client);
+  const { rows: currRows } = await client.query(
+    `SELECT lr.*, s.full_name as staff_name, s.user_id as staff_user_id
+     FROM hr_leave_requests lr
+     JOIN hr_staff s ON s.id = lr.staff_id
+     WHERE lr.id = $1 FOR UPDATE`,
+    [reqId],
+  );
+  if (!currRows[0]) throw new Error("طلب الإجازة غير موجود.");
+  const curr = currRows[0];
+
+  // Serialize balance, overlap and decisions on the same staff row.
+  await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE", [curr.staff_id]);
+  if (decision === "approved" && !actor.soleOwner) {
+    await assertPersonMayApprove(client, { actorUserId: actor.userId, subjectStaffId: curr.staff_id, requesterUserId: curr.requester_user_id, evidence: curr.identity_evidence, hasRequest: true });
+    // منع الموافقة الذاتية: لا يجوز لأي مستخدم (حتى المدير) اعتماد طلبه الخاص
+    if (curr.staff_user_id === actor.userId) {
+      throw new Error("لا يجوز اعتماد طلب الإجازة ذاتيًا.");
+    }
+  }
+
+  await afterStaffLock?.();
+  // إن كانت الحالة هي نفسها تمامًا، فالعملية idempotent تعيد السجل فورًا دون تكرار أي أثر مالي أو زمني
+  if (curr.status === decision) {
+    return mapLeaveRequestRow(curr);
+  }
+
+  const year = Number(postgresDateOnly(curr.start_date).slice(0, 4));
+
+  if (decision === "approved") {
+    const overlap = await client.query(`SELECT id FROM hr_leave_requests WHERE staff_id=$1 AND id<>$2
+      AND status IN ('pending','under_review','approved') AND start_date<=$4 AND end_date>=$3`, [curr.staff_id, reqId, curr.start_date, curr.end_date]);
+    if (overlap.rows.length) throw new Error("يوجد طلب إجازة متداخل؛ راجعه قبل الاعتماد.");
+    const type = await client.query("SELECT is_paid, requires_attachment FROM hr_leave_types WHERE code=$1 FOR SHARE", [curr.leave_type_code]);
+    if (type.rows[0]?.requires_attachment && (!Array.isArray(curr.attachment_refs) || !curr.attachment_refs.some(validLeaveAttachmentRef))) {
+      throw new Error("نوع الإجازة يتطلب مرفقًا قبل الاعتماد.");
+    }
+    const balance = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE", [curr.staff_id, curr.leave_type_code, year]);
+    const b = balance.rows[0];
+    if (type.rows[0]?.is_paid && (!b || Number(b.allocated_days) + Number(b.carried_over_days) - Number(b.used_days) - Number(b.pending_days) + (["pending", "under_review"].includes(curr.status) ? Number(curr.days_count) : 0) < Number(curr.days_count))) {
+      throw new Error("رصيد الإجازة المدفوعة يحتاج تخصيصًا معتمدًا وكافيًا.");
+    }
+    const attendance = await client.query("SELECT id FROM hr_attendance_records WHERE staff_id=$1 AND attendance_date BETWEEN $2 AND $3", [curr.staff_id, curr.start_date, curr.end_date]);
+    if (attendance.rows.length) throw new Error("يوجد سجل حضور في فترة الإجازة؛ راجعه قبل الاعتماد.");
+    // نقل الأيام من المعلقة إلى المستعملة
+    if (curr.status === "pending" || curr.status === "under_review") {
+      await client.query(
+        `UPDATE hr_leave_balances
+         SET pending_days = GREATEST(0, pending_days - $1),
+             used_days = used_days + $1,
+             updated_at = NOW()
+         WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
+        [curr.days_count, curr.staff_id, curr.leave_type_code, year],
+      );
+    } else {
+      // إعادة اعتماد بعد إلغاء أو رفض
+      await client.query(
+        `UPDATE hr_leave_balances
+         SET used_days = used_days + $1,
+             updated_at = NOW()
+         WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
+        [curr.days_count, curr.staff_id, curr.leave_type_code, year],
+      );
+    }
+
+    // ربط الحضور بالجدول: تثبيت حالة on_leave في سجل الحضور لكل يوم من فترة الإجازة
+    const start = new Date(`${postgresDateOnly(curr.start_date)}T00:00:00.000Z`);
+    const end = new Date(`${postgresDateOnly(curr.end_date)}T00:00:00.000Z`);
+    const cur = new Date(start);
+    while (cur <= end) {
+      const dStr = cur.toISOString().slice(0, 10);
+      await client.query(
+        `INSERT INTO hr_attendance_records (
+          staff_id, attendance_date, status, notes, created_by
+        ) VALUES ($1, $2, 'on_leave', $3, $4)
+        ON CONFLICT (staff_id, attendance_date) DO UPDATE
+        SET status = 'on_leave', notes = EXCLUDED.notes, updated_at = NOW()`,
+        [curr.staff_id, dStr, `إجازة معتمدة رقم #${reqId}`, actor.username],
+      );
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+  } else {
+    // قرار الرفض أو الإلغاء
+    if (curr.status === "approved") {
+      // كانت الإجازة معتمدة: استرجاع رصيد الأيام المستخدمة وعكس الحضور
+      await client.query(
+        `UPDATE hr_leave_balances
+         SET used_days = GREATEST(0, used_days - $1),
+             updated_at = NOW()
+         WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
+        [curr.days_count, curr.staff_id, curr.leave_type_code, year],
+      );
+
+      // حذف قيود on_leave المنشأة لهذا الطلب
+      await client.query(
+        `DELETE FROM hr_attendance_records
+         WHERE staff_id = $1
+           AND attendance_date BETWEEN $2 AND $3
+           AND status = 'on_leave'
+           AND notes = $4 AND check_in_raw IS NULL AND check_out_raw IS NULL
+           AND NOT EXISTS(SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=hr_attendance_records.id)
+           AND NOT EXISTS(SELECT 1 FROM hr_attendance_corrections c WHERE c.attendance_id=hr_attendance_records.id)`,
+        [curr.staff_id, curr.start_date, curr.end_date, `إجازة معتمدة رقم #${reqId}`],
+      );
+      // Retained rows carry evidence/history and must survive cancellation.
+      // Their operational status must no longer inherit the cancelled leave.
+      await client.query(`UPDATE hr_attendance_records
+        SET status=CASE WHEN check_in_actual IS NOT NULL AND check_out_actual IS NOT NULL THEN 'present'
+                        WHEN check_in_actual IS NOT NULL OR check_out_actual IS NOT NULL THEN 'incomplete'
+                        ELSE 'absent' END,
+            is_incomplete=(check_in_actual IS NULL) <> (check_out_actual IS NULL), updated_at=NOW()
+        WHERE staff_id=$1 AND attendance_date BETWEEN $2 AND $3 AND status='on_leave'`,
+        [curr.staff_id, curr.start_date, curr.end_date]);
+    } else if (curr.status === "pending" || curr.status === "under_review") {
+      // كانت قيد الانتظار: استرجاع الأيام المعلقة فقط
+      await client.query(
+        `UPDATE hr_leave_balances
+         SET pending_days = GREATEST(0, pending_days - $1),
+             updated_at = NOW()
+         WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
+        [curr.days_count, curr.staff_id, curr.leave_type_code, year],
+      );
+    }
+  }
+
+  await client.query(
+    `UPDATE hr_leave_requests
+     SET status = $1, decision_by = $2, decision_at = NOW(), decision_reason = $3, updated_at = NOW()
+     WHERE id = $4
+     RETURNING *`,
+    [decision, actor.username, reason.trim(), reqId],
+  );
+
+  const reqRes = await client.query(
+    `SELECT lr.*, s.full_name as staff_name, s.job_title as staff_job_title, s.department,
+            lt.name_ar as leave_type_name
+     FROM hr_leave_requests lr
+     JOIN hr_staff s ON s.id = lr.staff_id
+     JOIN hr_leave_types lt ON lt.code = lr.leave_type_code
+     WHERE lr.id = $1`,
+    [reqId],
+  );
+
+  const req = mapLeaveRequestRow(reqRes.rows[0]);
+  await auditWithClient(
+    client,
+    "hr.leave.decision",
+    actor,
+    "hr_leave_request",
+    req.id,
+    `${req.staffName} (${decision === "approved" ? "قبول" : "رفض"} ${req.leaveTypeName})`,
+    { decision, reason },
+  );
+  return req;
+}
+
 export async function decideLeaveRequest(
   requestId: number | string,
   decision: "approved" | "rejected" | "cancelled",
   reason: string,
   session: SessionPayload,
 ): Promise<HrLeaveRequestView> {
-  if (!["approved","rejected","cancelled"].includes(decision)) throw new Error("قرار إجازة غير صالح.");
+  if (!["approved", "rejected", "cancelled"].includes(decision)) throw new Error("قرار إجازة غير صالح.");
   const reqId = Number(requestId);
   return withTransaction(getPool(), async (client) => {
-    await lockPersonIdentityForOperation(client);
-    const { rows: currRows } = await client.query(
-      `SELECT lr.*, s.full_name as staff_name, s.user_id as staff_user_id
-       FROM hr_leave_requests lr
-       JOIN hr_staff s ON s.id = lr.staff_id
-       WHERE lr.id = $1 AND ($2::boolean OR s.user_id=$3) FOR UPDATE`,
-      [reqId,session.role==="admin",session.userId],
-    );
-    if (!currRows[0]) throw new Error(session.role==="admin"?"طلب الإجازة غير موجود.":"قرار الإجازة للمدير وحده.");
-    const curr = currRows[0];
-
-    // Serialize balance, overlap and decisions on the same staff row.
-    await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[curr.staff_id]);
-    if (decision === "approved") await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: curr.staff_id, requesterUserId: curr.requester_user_id, evidence: curr.identity_evidence, hasRequest: true });
-    // منع الموافقة الذاتية: لا يجوز لأي مستخدم (حتى المدير) اعتماد طلبه الخاص
-    if (decision === "approved" && curr.staff_user_id === session.userId) {
-      throw new Error("لا يجوز اعتماد طلب الإجازة ذاتيًا.");
+    if (session.role !== "admin") {
+      await lockPersonIdentityForOperation(client);
+      const { rows } = await client.query(
+        `SELECT lr.id FROM hr_leave_requests lr JOIN hr_staff s ON s.id = lr.staff_id WHERE lr.id = $1 AND s.user_id = $2 FOR UPDATE`,
+        [reqId, session.userId],
+      );
+      throw new Error(rows[0] ? "قرار الإجازة للمدير وحده." : "قرار الإجازة للمدير وحده.");
     }
-
-    if (session.role !== "admin") throw new Error("قرار الإجازة للمدير وحده.");
-    await authorizeWorkforceMutation(client, session);
-    // إن كانت الحالة هي نفسها تمامًا، فالعملية idempotent تعيد السجل فورًا دون تكرار أي أثر مالي أو زمني
-    if (curr.status === decision) {
-      return mapLeaveRequestRow(curr);
-    }
-
-
-    const year = Number(postgresDateOnly(curr.start_date).slice(0,4));
-
-    if (decision === "approved") {
-      const overlap = await client.query(`SELECT id FROM hr_leave_requests WHERE staff_id=$1 AND id<>$2
-        AND status IN ('pending','under_review','approved') AND start_date<=$4 AND end_date>=$3`,[curr.staff_id,reqId,curr.start_date,curr.end_date]);
-      if (overlap.rows.length) throw new Error("يوجد طلب إجازة متداخل؛ راجعه قبل الاعتماد.");
-      const type = await client.query("SELECT is_paid, requires_attachment FROM hr_leave_types WHERE code=$1 FOR SHARE",[curr.leave_type_code]);
-      if (type.rows[0]?.requires_attachment && (!Array.isArray(curr.attachment_refs) || !curr.attachment_refs.some(validLeaveAttachmentRef))) throw new Error("نوع الإجازة يتطلب مرفقًا قبل الاعتماد.");
-      const balance = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE",[curr.staff_id,curr.leave_type_code,year]);
-      const b = balance.rows[0];
-      if (type.rows[0]?.is_paid && (!b || Number(b.allocated_days)+Number(b.carried_over_days)-Number(b.used_days)-Number(b.pending_days)+(["pending","under_review"].includes(curr.status)?Number(curr.days_count):0)<Number(curr.days_count))) throw new Error("رصيد الإجازة المدفوعة يحتاج تخصيصًا معتمدًا وكافيًا.");
-      const attendance = await client.query("SELECT id FROM hr_attendance_records WHERE staff_id=$1 AND attendance_date BETWEEN $2 AND $3",[curr.staff_id,curr.start_date,curr.end_date]);
-      if (attendance.rows.length) throw new Error("يوجد سجل حضور في فترة الإجازة؛ راجعه قبل الاعتماد.");
-      // نقل الأيام من المعلقة إلى المستعملة
-      if (curr.status === "pending" || curr.status === "under_review") {
-        await client.query(
-          `UPDATE hr_leave_balances
-           SET pending_days = GREATEST(0, pending_days - $1),
-               used_days = used_days + $1,
-               updated_at = NOW()
-           WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
-          [curr.days_count, curr.staff_id, curr.leave_type_code, year],
-        );
-      } else {
-        // إعادة اعتماد بعد إلغاء أو رفض
-        await client.query(
-          `UPDATE hr_leave_balances
-           SET used_days = used_days + $1,
-               updated_at = NOW()
-           WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
-          [curr.days_count, curr.staff_id, curr.leave_type_code, year],
-        );
-      }
-
-      // ربط الحضور بالجدول: تثبيت حالة on_leave في سجل الحضور لكل يوم من فترة الإجازة
-      const start = new Date(`${postgresDateOnly(curr.start_date)}T00:00:00.000Z`);
-      const end = new Date(`${postgresDateOnly(curr.end_date)}T00:00:00.000Z`);
-      const cur = new Date(start);
-      while (cur <= end) {
-        const dStr = cur.toISOString().slice(0, 10);
-        await client.query(
-          `INSERT INTO hr_attendance_records (
-            staff_id, attendance_date, status, notes, created_by
-          ) VALUES ($1, $2, 'on_leave', $3, $4)
-          ON CONFLICT (staff_id, attendance_date) DO UPDATE
-          SET status = 'on_leave', notes = EXCLUDED.notes, updated_at = NOW()`,
-          [curr.staff_id, dStr, `إجازة معتمدة رقم #${reqId}`, session.username],
-        );
-        cur.setUTCDate(cur.getUTCDate() + 1);
-      }
-    } else {
-      // قرار الرفض أو الإلغاء
-      if (curr.status === "approved") {
-        // كانت الإجازة معتمدة: استرجاع رصيد الأيام المستخدمة وعكس الحضور
-        await client.query(
-          `UPDATE hr_leave_balances
-           SET used_days = GREATEST(0, used_days - $1),
-               updated_at = NOW()
-           WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
-          [curr.days_count, curr.staff_id, curr.leave_type_code, year],
-        );
-
-        // حذف قيود on_leave المنشأة لهذا الطلب
-        await client.query(
-          `DELETE FROM hr_attendance_records
-           WHERE staff_id = $1
-             AND attendance_date BETWEEN $2 AND $3
-             AND status = 'on_leave'
-             AND notes = $4 AND check_in_raw IS NULL AND check_out_raw IS NULL
-             AND NOT EXISTS(SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=hr_attendance_records.id)
-             AND NOT EXISTS(SELECT 1 FROM hr_attendance_corrections c WHERE c.attendance_id=hr_attendance_records.id)`,
-          [curr.staff_id, curr.start_date, curr.end_date, `إجازة معتمدة رقم #${reqId}`],
-        );
-        // Retained rows carry evidence/history and must survive cancellation.
-        // Their operational status must no longer inherit the cancelled leave.
-        await client.query(`UPDATE hr_attendance_records
-          SET status=CASE WHEN check_in_actual IS NOT NULL AND check_out_actual IS NOT NULL THEN 'present'
-                          WHEN check_in_actual IS NOT NULL OR check_out_actual IS NOT NULL THEN 'incomplete'
-                          ELSE 'absent' END,
-              is_incomplete=(check_in_actual IS NULL) <> (check_out_actual IS NULL), updated_at=NOW()
-          WHERE staff_id=$1 AND attendance_date BETWEEN $2 AND $3 AND status='on_leave'`,
-          [curr.staff_id,curr.start_date,curr.end_date]);
-      } else if (curr.status === "pending" || curr.status === "under_review") {
-        // كانت قيد الانتظار: استرجاع الأيام المعلقة فقط
-        await client.query(
-          `UPDATE hr_leave_balances
-           SET pending_days = GREATEST(0, pending_days - $1),
-               updated_at = NOW()
-           WHERE staff_id = $2 AND leave_type_code = $3 AND year = $4`,
-          [curr.days_count, curr.staff_id, curr.leave_type_code, year],
-        );
-      }
-    }
-
-    await client.query(
-      `UPDATE hr_leave_requests
-       SET status = $1, decision_by = $2, decision_at = NOW(), decision_reason = $3, updated_at = NOW()
-       WHERE id = $4
-       RETURNING *`,
-      [decision, session.username, reason.trim(), reqId],
-    );
-
-    const reqRes = await client.query(
-      `SELECT lr.*, s.full_name as staff_name, s.job_title as staff_job_title, s.department,
-              lt.name_ar as leave_type_name
-       FROM hr_leave_requests lr
-       JOIN hr_staff s ON s.id = lr.staff_id
-       JOIN hr_leave_types lt ON lt.code = lr.leave_type_code
-       WHERE lr.id = $1`,
-      [reqId],
-    );
-
-    const req = mapLeaveRequestRow(reqRes.rows[0]);
-    await auditWithClient(
+    const soleOwner = decision === "approved" ? await isSoleActiveOwnerAdmin(client, session.userId) : false;
+    const req = await decideLeaveRequestInTx(
       client,
-      "hr.leave.decision",
-      session,
-      "hr_leave_request",
-      req.id,
-      `${req.staffName} (${decision === "approved" ? "قبول" : "رفض"} ${req.leaveTypeName})`,
-      { decision, reason },
+      reqId,
+      decision,
+      reason,
+      { userId: session.userId, username: session.username, role: session.role, soleOwner },
+      () => authorizeWorkforceMutation(client, session),
     );
     assertWorkforceSessionCurrent(session);
     return req;
@@ -1955,7 +2403,17 @@ function mapLeaveRequestRow(row: Record<string, unknown>): HrLeaveRequestView {
 }
 
 /** Leave pickers expose only identity fields of staff whose leave the session may read. */
+export async function leaveStaffOptionsWith(
+  q: Pick<DbClient, "query">,
+  scope: { canViewAll: boolean; userId: number },
+) {
+  const { rows } = await q.query(
+    'SELECT id,full_name AS "fullName",job_title AS "jobTitle" FROM hr_staff WHERE ($1 OR user_id=$2) ORDER BY full_name',
+    [scope.canViewAll, scope.userId],
+  );
+  return rows as Array<{ id: number; fullName: string; jobTitle: string }>;
+}
+
 export async function leaveStaffOptions(session: SessionPayload) {
- const {rows}=await getPool().query('SELECT id,full_name AS "fullName",job_title AS "jobTitle" FROM hr_staff WHERE ($1 OR user_id=$2) ORDER BY full_name',[session.role==="admin",session.userId]);
- return rows as Array<{id:number;fullName:string;jobTitle:string}>;
+  return leaveStaffOptionsWith(getPool(), { canViewAll: session.role === "admin", userId: session.userId });
 }

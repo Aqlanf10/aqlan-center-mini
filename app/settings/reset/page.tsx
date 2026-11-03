@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
 
 /**
  * إعادة الضبط — مسح البيانات التجريبية وبدء العمل الحقيقي من الصفر.
@@ -12,6 +13,7 @@ import { useEffect, useState } from "react";
 interface Group { label: string; count: number }
 
 const KEPT = [
+  "ترقيم ملفات المرضى وحدّه الأدنى (لا يعود للخلف)",
   "المستخدمون وكلمات المرور",
   "إعدادات المركز والشعار",
   "الخدمات والأسعار",
@@ -66,14 +68,12 @@ export default function ResetPage() {
   const total = (groups ?? []).reduce((sum, group) => sum + group.count, 0);
 
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
-      <header className="mb-4">
-        <h1 className="text-xl font-extrabold leading-tight text-rose-800">إعادة الضبط — مسح البيانات التجريبية</h1>
-        <p className="text-xs text-slate-500">للبدء من الصفر بعد التجربة. يبقى الإعداد، وتُمسح البيانات.</p>
-        <div className="mt-2">
-          <a href="/settings" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">‹ الإعدادات</a>
-        </div>
-      </header>
+    <main className="mx-auto max-w-3xl p-4 pb-24" dir="rtl">
+      <PageHeader
+        title="إعادة الضبط — مسح البيانات التجريبية"
+        subtitle="لبيانات تجريبية لا تتضمن ملفات مرضى أو سجلًا محميًا — يبقى الإعداد وترقيم المرضى وسجل التدقيق"
+        back={{ href: "/settings", label: "الإعدادات المركزية" }}
+      />
 
       {done ? (
         <section className="rounded-2xl border-2 border-emerald-600/40 bg-emerald-50/60 p-4" aria-label="تمت إعادة الضبط">
@@ -89,6 +89,7 @@ export default function ResetPage() {
         </section>
       ) : (
         <>
+          <p role="note" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">تُرفض إعادة الضبط عند وجود أي ملف مريض أو رقم ملف سابق محفوظ، وكذلك عند وجود سجلات مالية محمية. لا تحذف ملفات المرضى لتجاوز هذا المنع؛ الأرقام السابقة تبقى محفوظة ولا يُعاد استخدامها.</p>
           <section className="mb-4 rounded-2xl border-2 border-rose-300 bg-rose-50/60 p-4" aria-label="ما سيُمسح">
             <h2 className="text-sm font-extrabold text-rose-900">ما سيُمسح نهائيًّا ({total})</h2>
             {groups ? (
@@ -96,7 +97,7 @@ export default function ResetPage() {
                 {groups.map((group) => <li key={group.label}>{group.label}: {group.count}</li>)}
               </ul>
             ) : <p className="mt-2 text-xs text-slate-500">جارٍ الحساب…</p>}
-            <p className="mt-2 text-[11px] font-bold text-rose-800">ومعها كل ما يتبعها: بنود الفواتير، الخطط، الوصفات، الإحالات، تتبع المختبر، قائمة الانتظار وطلبات الحجز. والترقيم يعود إلى ١.</p>
+            <p className="mt-2 text-[11px] font-bold text-rose-800">ومعها كل ما يتبعها: بنود الفواتير، الخطط، الوصفات، الإحالات، تتبع المختبر، قائمة الانتظار وطلبات الحجز. تعود عدادات المستندات الأخرى إلى ١، ولا يعود عداد ملفات المرضى للخلف.</p>
           </section>
 
           <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4" aria-label="ما يبقى">

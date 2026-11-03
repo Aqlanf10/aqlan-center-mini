@@ -1,4 +1,4 @@
-import { CLINIC_TIME_ZONE, ensureSchema, getPool, insertAuditRow, visitWalkout, type VisitActor, type VisitWalkout } from "./db";
+import { CLINIC_TIME_ZONE, ensureSchema, getPool, insertAuditRow, visitWalkout, type DbClient, type VisitActor, type VisitWalkout } from "./db";
 import { onClinicDaysSql } from "./clinic-day-sql";
 import { clinicDateString } from "./schedule";
 import { canReadReceptionHandoff, isHandoffDate, type ReceptionHandoff } from "./reception-handoff";
@@ -66,7 +66,16 @@ async function toHandoff(row: HandoffRow, walkout?: VisitWalkout | null): Promis
 /** Also serves the exact-visit checkout, including signatures outside today's window. */
 export async function readReceptionHandoff(visitId: number, walkout: VisitWalkout): Promise<ReceptionHandoff | null> {
   await ensureSchema();
-  const { rows: [row] } = await getPool().query<HandoffRow>(
+  return readReceptionHandoffWith(getPool(), visitId, walkout);
+}
+
+/** Snapshot-safe variant over a caller-owned query facade (no ensureSchema, no extra pool lease). */
+export async function readReceptionHandoffWith(
+  q: Pick<DbClient, "query">,
+  visitId: number,
+  walkout: VisitWalkout,
+): Promise<ReceptionHandoff | null> {
+  const { rows: [row] } = await q.query<HandoffRow>(
     `${HANDOFF_SELECT} WHERE v.id = $1 AND v.signed_at IS NOT NULL`, [visitId]);
   // A concurrent change cannot attach a different patient's/signature's decision
   // to a walkout payload already read by the caller.
@@ -113,6 +122,40 @@ export function isHandoffSignature(value: unknown): value is string {
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 }
 
+export async function completeReceptionHandoffInTransaction(
+  client: DbClient,
+  input: CompleteReceptionHandoffInput,
+  actor: VisitActor,
+): Promise<CompleteReceptionHandoffResult> {
+  if (!actor.actor.trim()) return { ok: false, reason: "forbidden" };
+  if (!Number.isSafeInteger(input.visitId) || input.visitId <= 0
+    || !Number.isSafeInteger(input.patientId) || input.patientId <= 0
+    || !isHandoffSignature(input.signedAt) || typeof input.reason !== "string"
+    || input.reason.trim().length < 3 || input.reason.trim().length > 300) return { ok: false, reason: "invalid" };
+  const { rows: [visit] } = await client.query<{
+    patient_id: number | null; signed_at: Date | null; signature_version: string | null;
+  }>(`SELECT v.patient_id, v.signed_at, ${SIGNATURE_VERSION_SQL} AS signature_version
+        FROM visits v WHERE v.id = $1 FOR UPDATE OF v`, [input.visitId]);
+  if (!visit) return { ok: false, reason: "not_found" };
+  if (visit.patient_id !== input.patientId) return { ok: false, reason: "stale" };
+  if (!visit.signed_at) return { ok: false, reason: "not_signed" };
+  if (visit.signed_at.toISOString() !== input.signedAt) return { ok: false, reason: "stale" };
+  const { rows: completed } = await client.query<{ id: string; handled_reason: string }>(
+    `SELECT id, details->>'reason' AS handled_reason FROM audit_log WHERE entity = 'visit' AND entity_id = $1
+       AND action = $2 AND details->>'patientId' = $3
+       AND details->>'signatureVersion' = $4 AND length(btrim(details->>'reason')) > 0 ORDER BY id LIMIT 1`,
+    [String(input.visitId), COMPLETED_ACTION, String(input.patientId), visit.signature_version],
+  );
+  if (!completed.length) {
+    await insertAuditRow(client, { action: COMPLETED_ACTION, entity: "visit", entityId: input.visitId,
+      details: { patientId: input.patientId, signedAt: input.signedAt,
+        signatureVersion: visit.signature_version, reason: input.reason.trim() },
+      actor: actor.actor, actorRole: actor.actorRole });
+  }
+  return { ok: true, visitId: input.visitId, patientId: input.patientId, signedAt: input.signedAt,
+    status: "handled", handledReason: completed[0]?.handled_reason ?? input.reason.trim() };
+}
+
 /** The audit IS the durable completion. It is never best-effort recordAudit.
  * The visit lock serializes retries and signature/owner changes. A retry returns
  * the first decision without replacing its reason or inserting another row.
@@ -127,34 +170,9 @@ export async function completeReceptionHandoff(input: CompleteReceptionHandoffIn
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [visit] } = await client.query<{
-      patient_id: number | null; signed_at: Date | null; signature_version: string | null;
-    }>(`SELECT v.patient_id, v.signed_at, ${SIGNATURE_VERSION_SQL} AS signature_version
-          FROM visits v WHERE v.id = $1 FOR UPDATE OF v`, [input.visitId]);
-    let failure: CompleteReceptionHandoffResult | null = null;
-    if (!visit) failure = { ok: false, reason: "not_found" };
-    else if (visit.patient_id !== input.patientId) failure = { ok: false, reason: "stale" };
-    else if (!visit.signed_at) failure = { ok: false, reason: "not_signed" };
-    else if (visit.signed_at.toISOString() !== input.signedAt) failure = { ok: false, reason: "stale" };
-    if (failure) {
-      await client.query("ROLLBACK");
-      return failure;
-    }
-    const { rows: completed } = await client.query<{ id: string; handled_reason: string }>(
-      `SELECT id, details->>'reason' AS handled_reason FROM audit_log WHERE entity = 'visit' AND entity_id = $1
-         AND action = $2 AND details->>'patientId' = $3
-         AND details->>'signatureVersion' = $4 AND length(btrim(details->>'reason')) > 0 ORDER BY id LIMIT 1`,
-      [String(input.visitId), COMPLETED_ACTION, String(input.patientId), visit.signature_version],
-    );
-    if (!completed.length) {
-      await insertAuditRow(client, { action: COMPLETED_ACTION, entity: "visit", entityId: input.visitId,
-        details: { patientId: input.patientId, signedAt: input.signedAt,
-          signatureVersion: visit.signature_version, reason: input.reason.trim() },
-        actor: actor.actor, actorRole: actor.actorRole });
-    }
-    await client.query("COMMIT");
-    return { ok: true, visitId: input.visitId, patientId: input.patientId, signedAt: input.signedAt,
-      status: "handled", handledReason: completed[0]?.handled_reason ?? input.reason.trim() };
+    const result = await completeReceptionHandoffInTransaction(client, input, actor);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

@@ -1,3 +1,4 @@
+import { parseReturnBookingSource } from "@/lib/return-booking-source";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -13,6 +14,10 @@ import {
   type WaitingUrgency,
 } from "@/lib/waiting-list";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalWaitingMove, parseCanonicalWaitingMove, readCanonicalWaitingEntry } from "@/lib/canonical-waiting-list";
+import { CanonicalAppointmentRefusal, CanonicalBookingConflict, commandCanonicalWaitingBook, parseCanonicalWaitingBook } from "@/lib/canonical-appointments";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +31,15 @@ const TIME_PATTERN = /^\d{1,2}:\d{2}$/;
  * الاتصال به ولا ملاحظاتها.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalWaitingEntry(selected.handle, Number((await context.params).id)), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر تحميل سجلّ الاتصال.");
+    }
+  }
   const guard = await authorize(context);
   if ("response" in guard) return guard.response;
 
@@ -49,6 +63,36 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
  * صفَّه ولو نادى المسار مباشرةً. **إخفاءُ الزر في الشاشة ليس تفويضًا.**
  */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 14): offer, contact, preferences, cancel and expire on
+    // appointments.edit; book (slice 20) adds appointments.create in one transaction.
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_waiting_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    if ((canonicalBody as Record<string, unknown> | null)?.action === "book") {
+      try {
+        const booked = await commandCanonicalWaitingBook(selected.handle, Number((await context.params).id), parseCanonicalWaitingBook(canonicalBody));
+        return NextResponse.json({ ok: true, appointment: booked.appointment, entry: booked.entry, warning: booked.warning, alreadyBooked: booked.alreadyBooked }, { headers: NO_STORE });
+      } catch (error) {
+        // The legacy route's shapes: a capacity conflict with its reasons; an engine code.
+        if (error instanceof CanonicalBookingConflict) return NextResponse.json({ message: error.conflict.message, conflict: error.conflict }, { status: 409, headers: NO_STORE });
+        if (error instanceof CanonicalAppointmentRefusal && error.engineCode) return NextResponse.json({ code: error.engineCode, message: error.message }, { status: error.status, headers: NO_STORE });
+        return canonicalWaitingFailure(error, "تعذّر الحجز. أعد المحاولة.");
+      }
+    }
+    try {
+      const result = await commandCanonicalWaitingMove(selected.handle, Number((await context.params).id), parseCanonicalWaitingMove(canonicalBody));
+      const payload = result.kind === "entry" ? result.entry : result.kind === "contact" ? { ok: true, event: result.event } : { ok: true };
+      return NextResponse.json(payload, { headers: NO_STORE });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+    }
+  }
   const guard = await authorize(context);
   if ("response" in guard) return guard.response;
   const { id, session } = guard;
@@ -170,15 +214,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         return NextResponse.json({ message: "حدّد تاريخ الموعد ووقته." }, { status: 400 });
       }
       const user = await findUserByUsername(session.username).catch(() => null);
+      const returnBookingSource = body.returnBookingSource === undefined ? null : parseReturnBookingSource(body.returnBookingSource);
+      if (body.returnBookingSource !== undefined && !returnBookingSource) return NextResponse.json({ message: "اختر حالة صحيحة للحجز." }, { status: 400 });
       const result = await convertWaitingToAppointment({
         waitingId: id, date, time,
+        nearbyAppointmentConfirmation: typeof body.nearbyAppointmentConfirmation === "string" ? body.nearbyAppointmentConfirmation.slice(0, 4096) : null,
+        returnBookingSource,
+        returnBookingFingerprint: typeof body.returnBookingFingerprint === "string" ? body.returnBookingFingerprint.slice(0, 128) : null,
         durationMinutes: body.durationMinutes == null ? null : Number(body.durationMinutes),
         serviceId: body.serviceId == null ? null : Number(body.serviceId),
         doctorId: body.doctorId == null ? null : Number(body.doctorId),
         chairNo: body.chairNo == null ? null : Number(body.chairNo),
         overrideReason: typeof body.overrideReason === "string" ? body.overrideReason : null,
       }, {
-        username: session.username,
+        username: session.username, userId: session.userId,
         role: session.role,
         doctorPartyId: user?.partyId ?? null,
         /* صلاحيةُ التجاوز تُقرأ من المستخدم في الخادم — لا من الطلب. */
@@ -196,7 +245,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         });
       }
       return NextResponse.json(
-        { message: result.message, conflict: result.conflict ?? null },
+        { message: result.message, conflict: result.conflict ?? null, ...(result.code ? { code: result.code } : {}) },
         { status: result.status },
       );
     }

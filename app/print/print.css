@@ -69,6 +69,7 @@ table.items td.num, table.items th.num { text-align: left; white-space: nowrap; 
 @media print {
   .print-actions,
   .print-root .no-print { display: none !important; }
+  table tfoot { display: table-row-group; }
   .sheet { box-shadow: none; margin: 0; padding: 0; width: auto; min-height: 0; }
   /* هوامش المستند فقط. عنوان الصفحة ورابطها وتاريخها من خيار «الرؤوس والتذييلات»
      في نافذة طباعة المتصفّح؛ هذا الهامش لا يعطّل ذلك الخيار. */
@@ -159,7 +160,7 @@ html[data-reprint="true"] .reprint-mark {
   font-size: 7.5pt !important;
 }
 .report-table thead { display: table-header-group; }
-.report-table tfoot { display: table-footer-group; }
+.report-table tfoot { display: table-row-group; }
 .report-table tr { break-inside: avoid; page-break-inside: avoid; }
 .report-table th,
 .report-table td {

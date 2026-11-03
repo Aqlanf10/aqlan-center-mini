@@ -1,3 +1,4 @@
+import { signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -53,6 +54,8 @@ beforeAll(async () => {
   admin = { userId: actorId, username: "performer-admin", role: "admin", expiresAt: Date.now() + 3600000,
     credentialVersion: sessionCredentialVersion("synthetic-performer-hash") };
   await id("INSERT INTO cashier_shifts(opened_by) VALUES($1) RETURNING id", [admin.username]);
+  await q(`INSERT INTO settings(key,value) VALUES('finance.rate.USD','500'),('finance.rate.SAR','140')
+    ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`);
 });
 afterAll(async () => { await db.resetPoolForTesting(); });
 
@@ -84,7 +87,7 @@ describe("performer commission and settlement reconciliation", () => {
     const a = await doctor(30), b = await doctor(40), p = await patient();
     const creator = await doctor(50);
     const creatorName = `synthetic-invoice-creator-${++seq}`;
-    await db.createStaffUser({ username: creatorName, displayName: "SYNTHETIC signing doctor", passwordHash: "synthetic-creator-hash", role: "doctor", partyId: creator.id });
+    await db.createStaffUser({ username: creatorName, displayName: "SYNTHETIC signing doctor", passwordHash: "synthetic-creator-hash", role: "doctor", partyId: creator.id }, undefined, signedLegacyStaffProof(admin));
     const serviceId = await id(`INSERT INTO services(name,category,price_minor,price_configured,is_active)
       VALUES('SYNTHETIC performed service','endo',10000,TRUE,TRUE) RETURNING id`);
     const visit = await db.addVisit({ patientId: p, patientName: "SYNTHETIC commission patient", patientPhone: null, note: null });
@@ -167,7 +170,7 @@ describe("doctor report versus payroll settlement", () => {
       const cashEntry = entries.find(entry => entry.reference === settlement.voucher_number)!;
       expect(isBalanced(cashEntry)).toBe(true);
       expect(cashEntry.lines).toEqual(expect.arrayContaining([
-        { accountCode: "2101", currency, amountMinor: 1200, side: "debit" },
+        { accountCode: "2106", currency, amountMinor: 1200, side: "debit" },
         { accountCode: currency === "YER" ? "1101" : "1103", currency, amountMinor: 1200, side: "credit" },
       ]));
       const before = await q("SELECT id FROM expenses WHERE party_id=$1", [d.id]);

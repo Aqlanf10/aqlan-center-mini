@@ -1,0 +1,113 @@
+
+ RUN  v4.1.12 <checkout>
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/return-booking-current-responsibility.test.ts (22 tests | 8 failed) 2596ms
+   × endodontics follows current responsibility after admin reassignment without rewriting financial or booked history 37ms
+   × orthodontics follows current responsibility after admin reassignment without rewriting financial or booked history 13ms
+   × next route persists current owner rather than historical visit/planned doctor 9ms
+   × planned route persists current owner rather than historical visit/planned doctor 4ms
+   × settings rejects nonadmin and stale reassignment, preserving owner and audit count 4ms
+   × planned rebooking preserves terminal history and assigns its replacement to current responsibility 37ms
+   × uses a unique same-patient bridge only while canonical ortho owner is NULL, with protected ownership locks 19ms
+   × rejects ABA responsibility fingerprints after an audited owner A to B to A cycle 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/return-booking-current-responsibility.test.ts > endodontics follows current responsibility after admin reassignment without rewriting financial or booked history
+ FAIL  __tests__/postgres/return-booking-current-responsibility.test.ts > orthodontics follows current responsibility after admin reassignment without rewriting financial or booked history
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sessionCredentialVersion lib/auth.ts:76:31
+ ❯ session __tests__/postgres/return-booking-current-responsibility.test.ts:41:83
+ ❯ __tests__/postgres/return-booking-current-responsibility.test.ts:66:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  __tests__/postgres/return-booking-current-responsibility.test.ts > next route persists current owner rather than historical visit/planned doctor
+ FAIL  __tests__/postgres/return-booking-current-responsibility.test.ts > planned route persists current owner rather than historical visit/planned doctor
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sessionCredentialVersion lib/auth.ts:76:31
+ ❯ session __tests__/postgres/return-booking-current-responsibility.test.ts:41:83
+ ❯ __tests__/postgres/return-booking-current-responsibility.test.ts:137:56
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  __tests__/postgres/return-booking-current-responsibility.test.ts > settings rejects nonadmin and stale reassignment, preserving owner and audit count
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sessionCredentialVersion lib/auth.ts:76:31
+ ❯ session __tests__/postgres/return-booking-current-responsibility.test.ts:41:83
+ ❯ __tests__/postgres/return-booking-current-responsibility.test.ts:161:98
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  __tests__/postgres/return-booking-current-responsibility.test.ts > planned rebooking preserves terminal history and assigns its replacement to current responsibility
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sessionCredentialVersion lib/auth.ts:76:31
+ ❯ session __tests__/postgres/return-booking-current-responsibility.test.ts:41:83
+ ❯ __tests__/postgres/return-booking-current-responsibility.test.ts:192:283
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  __tests__/postgres/return-booking-current-responsibility.test.ts > uses a unique same-patient bridge only while canonical ortho owner is NULL, with protected ownership locks
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sessionCredentialVersion lib/auth.ts:76:31
+ ❯ session __tests__/postgres/return-booking-current-responsibility.test.ts:41:83
+ ❯ __tests__/postgres/return-booking-current-responsibility.test.ts:205:100
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  __tests__/postgres/return-booking-current-responsibility.test.ts > rejects ABA responsibility fingerprints after an audited owner A to B to A cycle
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sessionCredentialVersion lib/auth.ts:76:31
+ ❯ session __tests__/postgres/return-booking-current-responsibility.test.ts:41:83
+ ❯ __tests__/postgres/return-booking-current-responsibility.test.ts:245:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+
+ Test Files  1 failed | 9 passed (10)
+      Tests  8 failed | 91 passed (99)
+   Start at  16:53:40
+   Duration  35.97s (transform 3.19s, setup 0ms, import 8.11s, tests 25.71s, environment 1ms)

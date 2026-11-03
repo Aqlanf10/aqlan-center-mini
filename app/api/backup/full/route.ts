@@ -5,6 +5,8 @@ import { recordAudit } from "@/lib/db";
 import { fullBackupBlocks } from "@/lib/fullBackup";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalBackupFullGet } from "@/lib/canonical-owner-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,10 @@ export const dynamic = "force-dynamic";
  * `manifest.json` أخيرًا — فالتنزيل المقطوع لا يتنكّر كنسخةٍ كاملة.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "سجّل الدخول من جديد." }, { status: 401 });
+  if (selected.kind === "canonical") return canonicalBackupFullGet(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "سجّل الدخول من جديد." }, { status: 401 });
   if (!isAdmin(session.role)) return NextResponse.json({ message: "النسخة الكاملة للمدير وحده." }, { status: 403 });

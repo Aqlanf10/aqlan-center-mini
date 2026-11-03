@@ -1,7 +1,7 @@
 import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import {
-  getCephReferenceSet, getCephStudy, getPatient, getSettingsSafe,
+  findUserByUsername, getCephReferenceSet, getCephStudy, getPatient, getSettingsSafe,
 } from "@/lib/db";
 import {
   computeAll, enrichWithRefs, getClinicalInterpretation, getSeverityStars, interpret, MEASUREMENTS, projectOnLine,
@@ -187,7 +187,9 @@ export default async function CephPrintReportPage({
           </div>
           <div>
             <span style={{ color: "#64748b" }}>رقم الملف / File #: </span>
-            <span className="num" style={{ fontWeight: 600 }}>{study.analysis.patientId}</span>
+            <span className="num" style={{ fontWeight: 600 }}>
+              <bdi dir="ltr">{patient?.patientNumber ?? study.analysis.patientId}</bdi>
+            </span>
           </div>
           <div>
             <span style={{ color: "#64748b" }}>الجنس / Gender: </span>
@@ -381,10 +383,10 @@ export default async function CephPrintReportPage({
                               )}
                             </td>
                             <td className="num" style={{ fontWeight: 700, color: statusColor }}>
-                              {r.value != null ? `${r.value}${r.unit}` : "—"}
+                              <bdi dir="ltr">{r.value != null ? `${r.value}${r.unit}` : "—"}</bdi>
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
-                              {refNorm} {r.unit}
+                              <bdi dir="ltr">{refNorm} {r.unit}</bdi>
                             </td>
                             <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
                               {r.severityStars || "—"}
@@ -457,10 +459,10 @@ export default async function CephPrintReportPage({
                               )}
                             </td>
                             <td className="num" style={{ fontWeight: 700, color: statusColor }}>
-                              {r.value != null ? `${r.value}${r.unit}` : "—"}
+                              <bdi dir="ltr">{r.value != null ? `${r.value}${r.unit}` : "—"}</bdi>
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
-                              {refNorm} {r.unit}
+                              <bdi dir="ltr">{refNorm} {r.unit}</bdi>
                             </td>
                             <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
                               {r.severityStars || "—"}
@@ -536,21 +538,28 @@ export default async function CephPrintReportPage({
         </div>
 
         {/* سطر التوقيع والاعتماد */}
-        <div className="sign-row" style={{ marginTop: "6mm" }}>
-          <div>
-            <p><b>حرر واعُتمد بواسطة: </b>{study.analysis.completedBy || study.diagnosis?.createdBy || session.username}</p>
-            <p style={{ color: "#64748b", fontSize: "7pt" }}>
-              تاريخ الاعتماد: {study.analysis.completedAt ? friendlyDateLong(study.analysis.completedAt.split("T")[0]) : "مسودة قيد المراجعة"}
-            </p>
-          </div>
-          <div style={{ textAlign: "center", minWidth: "50mm" }}>
-            <p><b>توقيع وخاتم الطبيب المعالج</b></p>
-            <div style={{ height: "14mm", borderBottom: "1px solid #000", marginTop: "2mm" }} />
-            <p style={{ fontSize: "7pt", color: "#64748b", marginTop: "1mm" }}>
-              {settings["clinic.lead_doctor"]} — {settings["clinic.lead_doctor_title"]}
-            </p>
-          </div>
-        </div>
+        {await (async () => {
+          const authorUsername = study.analysis.completedBy || study.diagnosis?.createdBy || session.username;
+          const authorUser = await findUserByUsername(authorUsername).catch(() => null);
+          const authorLabel = authorUser?.displayName || authorUsername;
+          return (
+            <div className="sign-row" style={{ marginTop: "6mm" }}>
+              <div>
+                <p><b>حرر واعُتمد بواسطة: </b>{authorLabel}</p>
+                <p style={{ color: "#64748b", fontSize: "7pt" }}>
+                  تاريخ الاعتماد: {study.analysis.completedAt ? friendlyDateLong(study.analysis.completedAt.split("T")[0]) : "مسودة قيد المراجعة"}
+                </p>
+              </div>
+              <div style={{ textAlign: "center", minWidth: "50mm" }}>
+                <p><b>توقيع وخاتم الطبيب المعالج</b></p>
+                <div style={{ height: "14mm", borderBottom: "1px solid #000", marginTop: "2mm" }} />
+                <p style={{ fontSize: "7pt", color: "#64748b", marginTop: "1mm" }}>
+                  {settings["clinic.lead_doctor"]} — {settings["clinic.lead_doctor_title"]}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
 
         <div style={{ marginTop: "4mm" }}>
           <PrintFooter settings={settings} />

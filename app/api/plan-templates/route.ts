@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalPlanCaseFailure, readCanonicalPlanTemplates } from "@/lib/canonical-plans-and-cases";
 import { findUserByUsername, getSettings, listServices } from "@/lib/db";
 import { canViewMoney, isAdmin } from "@/lib/roles";
 import { effectiveTemplates } from "@/lib/specialty-templates";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +19,17 @@ export const dynamic = "force-dynamic";
  * صامتًا إلى أول خدمةٍ في الفئة (عصب سنٍّ أمامي لطاحونة). الآن يختار الخدمة الصحيحة دائمًا.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalPlanTemplates(selected.handle), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر تحميل قوالب الخطط.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

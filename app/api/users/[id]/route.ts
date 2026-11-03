@@ -1,16 +1,27 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { countActiveAdmins, linkUserDoctor, listUsers, recordAudit, updateUser } from "@/lib/db";
-import { hashPassword } from "@/lib/auth";
+import { UserGovernanceError, countActiveAdmins, linkUserDoctor, listUsers, recordAudit, updateUser } from "@/lib/db";
+import { MAX_PASSWORD_LENGTH, hashPassword, legacySessionEvidence } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalUsersPatch } from "@/lib/canonical-users-self";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
 import { validateDoctorCommissionConfigInput } from "@/lib/doctor-permissions";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return canonicalUsersPatch(selected.handle, request, rawId);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -18,6 +29,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!isAdmin(session.role)) {
     return NextResponse.json({ message: "إدارة المستخدمين للمدير وحده." }, { status: 403 });
   }
+
+  const evidence=legacySessionEvidence(session);
+  if(!evidence)return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401});
 
   const { id: rawId } = await context.params;
   const id = Number(rawId);
@@ -33,14 +47,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   /*
    * ربط حساب الطبيب بجهته (§٣٥/٣٧): به يعرف الخادم مرضى هذا الحساب فيحجب ما ليس
-   * لهم. والفكّ (null) يعيده إلى السلوك القديم — يرى الكل — حتى يُربط من جديد.
+   * لهم. والفكّ (null) يُغلق نطاق الطبيب المقيّد بأمان (Fail-Closed) حتى يُربط من جديد.
    */
   if (source.action === "link_doctor") {
     const rawParty = Number(source.partyId);
     const partyId = Number.isInteger(rawParty) && rawParty > 0 ? rawParty : null;
     const updated = await linkUserDoctor(id, partyId, {
       actor: session.username, actorRole: session.role, reason: "ربط حساب الطبيب بجهته",
-    });
+    }, {evidence});
     if (!updated) {
       return NextResponse.json(
         { message: "الجهة ليست طبيبًا فاعلًا، أو المستخدم غير موجود." },
@@ -76,8 +90,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
   if (typeof source.isActive === "boolean") patch.isActive = source.isActive;
   if (typeof source.password === "string" && source.password) {
-    if (source.password.length < 8) {
-      return NextResponse.json({ message: "كلمة المرور يجب ألا تقل عن 8 أحرف." }, { status: 400 });
+    if (source.password.length < 8 || source.password.length > MAX_PASSWORD_LENGTH) {
+      return NextResponse.json({ message: `كلمة المرور يجب أن تكون بين 8 و${MAX_PASSWORD_LENGTH} حرفًا.` }, { status: 400 });
     }
     patch.passwordHash = await hashPassword(source.password);
   }
@@ -124,7 +138,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       : null;
     const updated = await updateUser(id, patch, {
       actor: session.username, actorRole: session.role, reason: commissionReason,
-    });
+    }, {evidence});
     if (!updated) return NextResponse.json({ message: "المستخدم غير موجود." }, { status: 404 });
 
     /* تعديل الصلاحيات أو العمولة يُدوَّن بتدقيقٍ خاص به (صلاحيات الوكيل المساعد):
@@ -157,8 +171,36 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actor: session.username, actorRole: session.role,
       }).catch(() => {});
     }
+    if (
+      patch.displayName !== undefined ||
+      patch.role !== undefined ||
+      patch.isActive !== undefined ||
+      patch.passwordHash !== undefined ||
+      patch.specialty !== undefined ||
+      patch.branch !== undefined
+    ) {
+      await recordAudit({
+        action: "user.update",
+        entity: "user",
+        entityId: id,
+        entityLabel: updated.username,
+        details: {
+          ...(patch.displayName !== undefined ? { الاسم: updated.displayName } : {}),
+          ...(patch.role !== undefined ? { الدور: updated.role } : {}),
+          ...(patch.isActive !== undefined ? { الحالة: updated.isActive ? "مفعّل" : "موقوف" } : {}),
+          ...(patch.passwordHash !== undefined ? { كلمة_المرور: "تغيير" } : {}),
+          ...(patch.specialty !== undefined ? { التخصص: updated.specialty ?? "" } : {}),
+          ...(patch.branch !== undefined ? { الفرع: updated.branch ?? "" } : {}),
+        },
+        actor: session.username,
+        actorRole: session.role,
+      }).catch(() => {});
+    }
     return NextResponse.json(updated);
-  } catch {
+  } catch (error) {
+    if (error instanceof UserGovernanceError) {
+      return NextResponse.json({ message: error.message }, { status: error.status });
+    }
     return NextResponse.json({ message: "تعذّر حفظ التعديل." }, { status: 500 });
   }
 }

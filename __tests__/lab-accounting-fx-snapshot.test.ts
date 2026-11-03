@@ -33,7 +33,11 @@ beforeEach(async () => {
   vi.stubEnv("SKIP_SEED", "true");
   boundary.end.mockResolvedValue(undefined);
   await resetPoolForTesting();
-  boundary.poolQuery.mockResolvedValue({ rows: [] });
+  boundary.poolQuery.mockImplementation(async (sql: string) =>
+    sql.includes("pg_catalog.pg_class")
+      ? { rows: [{ markers: "0", users_kind: "r", parties_kind: "r" }], rowCount: 1 }
+      : { rows: [], rowCount: 0 },
+  );
   boundary.query.mockImplementation(async(sql:string)=>({rows:sql.includes("AS present")?[{present:false}]:[]}));
   boundary.connect.mockResolvedValue({ query: boundary.query, release: boundary.release });
   await ensureSchema();
@@ -103,24 +107,26 @@ describe("actual lab accounting writer money snapshot bindings", () => {
       expect(p.sql).toMatch(new RegExp(`${column} = CASE WHEN \\$9::boolean[\\s\\S]*?ELSE ${column} END`));
     }
   });
-  it("carries the same snapshot through missing-payable insertion and conflict update", async () => {
+  it("carries the same snapshot through missing-payable insertion without overwriting conflicts", async () => {
     order!.payable_id = null as unknown as number;
     await updateLabOrderAccounting(11, { costMinor: 7500, costCurrency: "SAR", exchangeRate: 141.25 });
     const insert = statement(/INSERT INTO payables/);
     expect(insert.values.slice(2, 6)).toEqual([7500, "SAR", 141.25, 10594]);
-    expect(insert.sql).toContain("exchange_rate = CASE WHEN $14::boolean THEN EXCLUDED.exchange_rate ELSE payables.exchange_rate END");
-    expect(insert.values[13]).toBe(true);
+    expect(insert.sql).toContain("ON CONFLICT (lab_order_id) WHERE lab_order_id IS NOT NULL DO NOTHING");
+    expect(insert.values[12]).toBe(true);
     const o = statement(/UPDATE lab_orders\s+SET expense_category_id/);
     expect(o.values.slice(7)).toEqual([true, 10594, 141.25]);
   });
-  it("preserves a conflicting payable snapshot when only relinking accounting metadata", async () => {
+  it("refuses a conflicting payable row rather than overwriting its historical snapshot", async () => {
     order!.payable_id = null as unknown as number;
-    await updateLabOrderAccounting(11, { isPosted: false });
-    const insert = statement(/INSERT INTO payables/);
-    expect(insert.values[13]).toBe(false);
-    for (const column of ["amount_minor", "currency", "exchange_rate", "base_amount_minor"]) {
-      expect(insert.sql).toContain(`${column} = CASE WHEN $14::boolean THEN EXCLUDED.${column} ELSE payables.${column} END`);
-    }
+    boundary.query.mockImplementation(async (sql: string) => {
+      if (/FROM lab_orders WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: order ? [order] : [] };
+      if (/FROM payables.*FOR UPDATE NOWAIT/s.test(sql)) return { rows: [] };
+      if (/INSERT INTO payables/.test(sql)) return { rows: [] };
+      return { rows: [] };
+    });
+    await expect(updateLabOrderAccounting(11, { isPosted: false })).rejects.toMatchObject({ code: "lab_payable_link_review" });
+    expect(boundary.query.mock.calls.at(-1)).toEqual(["ROLLBACK"]);
   });
   it.each([
     { costMinor: 100, exchangeRate: 0.49999999, error: "lab_order_exchange_rate_invalid" },

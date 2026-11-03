@@ -24,7 +24,7 @@ const scopeOf=(input:AssessmentOwnerInput,owner:OwnerSnapshot):AssessmentScope=>
   if(owner.clinicalCaseId===null)assessmentFail(409,"bridge_missing","اربط الحالة سريريًا بالإجراء الصريح أولًا.");
   return {patientId:input.patientId,orthoCaseId:input.orthoCaseId,clinicalCaseId:owner.clinicalCaseId};
 };
-async function history(client:DbClient,scope:AssessmentScope):Promise<{rows:AssessmentStoredRow[];revisions:AnyAssessmentRevision[]}>{
+async function history(client:Pick<DbClient,"query">,scope:AssessmentScope):Promise<{rows:AssessmentStoredRow[];revisions:AnyAssessmentRevision[]}>{
   // Admit only aggregate metadata before transferring or decoding any content.
   // Both read snapshot and write patient lock keep this admission stable through
   // the bounded fetch; canonical writers for the case use the same patient lock.
@@ -113,3 +113,7 @@ export async function appendOrthoAssessment(input:AssessmentOwnerInput&{command:
     assertAssessmentAuthorityCurrent(authority);return {ok:true as const,revision,replayed:false};
   });
 }
+
+/** SELECT-only history/lineage decoder for the owning canonical read snapshot.
+ * The legacy reader and writer keep the same function and resource limits. */
+export const readOrthoAssessmentHistoryWith = history;

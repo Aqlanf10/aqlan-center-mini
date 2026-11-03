@@ -1,4 +1,10 @@
 import { IdentityPreviewError } from "@/lib/hr-identity-preview";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  hrLeaveBalancesGetCanonicalResponse,
+  hrLeaveBalancesPostCanonicalResponse,
+} from "@/lib/canonical-hr";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { HrWorkforceMutationError } from "@/lib/hr-contracts-attendance";
 import { NextResponse } from "next/server";
 import { clinicDateString } from "@/lib/schedule";
@@ -17,8 +23,14 @@ const currentClinicYear = () => Number(clinicDateString(new Date(), resolveClini
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrLeaveBalancesGetCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
 
@@ -41,6 +53,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrLeaveBalancesPostCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) {

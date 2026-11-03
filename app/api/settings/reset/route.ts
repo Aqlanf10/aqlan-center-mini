@@ -3,11 +3,17 @@ import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { clinicResetPreview, findUserByUsername, resetClinicData } from "@/lib/db";
 import { verifyPassword } from "@/lib/auth";
-import { ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE, RESET_PREVIEW_GROUPS, isResetPhrase } from "@/lib/clinic-reset";
+import { ProtectedLabHistoryError, ProtectedOrthoFollowupHistoryError, ProtectedInvoiceActionHistoryError, ProtectedPatientNumberHistoryError, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE, RESET_PREVIEW_GROUPS, isResetPhrase } from "@/lib/clinic-reset";
+import { ProtectedInventoryHistoryError } from "@/lib/inventory-domain/reset-protection";
 import { removeFileByKey } from "@/lib/files";
 import { runVerifiedManualBackup } from "@/lib/manual-backup";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalClinicResetGet,
+  canonicalClinicResetPost,
+} from "@/lib/canonical-owner-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +37,10 @@ async function adminSession() {
 }
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") return canonicalClinicResetGet(selected.handle);
+
   const auth = await adminSession();
   if ("error" in auth) return auth.error;
   try {
@@ -45,6 +55,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") return canonicalClinicResetPost(selected.handle, request);
+
   const auth = await adminSession();
   if ("error" in auth) return auth.error;
   let body: Record<string, unknown>;
@@ -52,6 +66,7 @@ export async function POST(request: Request) {
     const raw = await readJsonBody(request, SETTINGS_BODY_LIMIT_BYTES);
     body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   } catch (error) {
+    if (error instanceof ProtectedLabHistoryError) return noStore({ message: error.message, code: "protected-lab-history" }, 409);
     const bounded = bodyErrorResponse(error);
     if (bounded) return bounded;
     return noStore({ message: "طلب غير صالح." }, 400);
@@ -77,9 +92,14 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
+    if (error instanceof ProtectedLabHistoryError) return noStore({ message: error.message, code: "protected-lab-history" }, 409);
     if (error instanceof ProtectedPurchaseHistoryError) return noStore({ message: error.message, code: "protected-purchase-history" }, 409);
+    if (error instanceof ProtectedOrthoFollowupHistoryError) return noStore({ message: error.message, code: "protected-ortho-followup-history" }, 409);
+    if (error instanceof ProtectedInvoiceActionHistoryError) return noStore({ message: error.message, code: "protected-invoice-action-history" }, 409);
     if (error instanceof ProtectedAgreementHistoryError) return noStore({ message: error.message, code: "protected-agreement-history" }, 409);
+    if (error instanceof ProtectedPatientNumberHistoryError) return noStore({ message: error.message, code: "protected-patient-number-history" }, 409);
     if (error instanceof ProtectedCollectionAttemptHistoryError) return noStore({ message: error.message, code: "protected-collection-attempt-history" }, 409);
+    if (error instanceof ProtectedInventoryHistoryError) return noStore({ message: error.message, code: "protected-inventory-history" }, 409);
     return noStore({ message: "تعذّرت إعادة الضبط ولم يُمسح شيء. أعد المحاولة بعد قليل (قد يكون أحدٌ يُدخل بيانات الآن)." }, 500);
   }
   if (!result.ok) {

@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { canonicalCephFailure, readCanonicalCephCompare } from "@/lib/canonical-ceph";
+import { NO_STORE } from "@/lib/canonical-patient-http";
 import { getCephAnalysisForCompare } from "@/lib/db";
 import { compareAnalyses, comparisonSummary, chronologicalOrder } from "@/lib/cephCompare";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,18 @@ export const dynamic = "force-dynamic";
  * منهما بعد ذلك صراحةً.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalCephCompare(selected.handle, new URL(request.url).searchParams), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalCephFailure(error, "تعذّرت المقارنة.");
+    }
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

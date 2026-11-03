@@ -235,9 +235,9 @@ export function ExpenseBudgetReportModal({
               <div className="line"><span>فترة التقرير</span><strong>شهر <bdi>{month}</bdi></strong></div>
               <div className="line"><span>العملة المحاسبية</span><strong>{baseCurrency}</strong></div>
               <div className="line"><span>إجمالي البنود</span><strong>{filteredRows.length}</strong></div>
-              <div className="line"><span>تقرير تدقيق معتمد</span><strong>{overBudgetCount > 0 ? `تجاوز الميزانية: ${overBudgetCount}` : "ضمن الميزانية تماماً"}</strong></div>
+              <div className="line"><span>حالة الموازنة</span><strong>{overBudgetCount > 0 ? `تجاوز الميزانية: ${overBudgetCount}` : "ضمن الميزانية تماماً"}</strong></div>
             </PrintMetadata>
-            {qrCodeDataUrl ? <img src={qrCodeDataUrl} alt="QR Code للتثبت الرقمي" className="print-watermark-protected h-16 w-16 shrink-0" /> : null}
+            {qrCodeDataUrl ? <img src={qrCodeDataUrl} alt="رمز مرجعي داخلي للتقرير" className="print-watermark-protected h-16 w-16 shrink-0" /> : null}
           </div>
 
           {/* KPI Cards */}

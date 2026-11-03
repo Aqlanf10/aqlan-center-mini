@@ -13,6 +13,7 @@ vi.mock("@/lib/db", () => ({
   deleteLabOrder: boundary.deleteLabOrder, getLabOrderById: boundary.getLabOrderById,
   labOrderEvents: boundary.labOrderEvents, recordAudit: boundary.recordAudit,
   setLabOrderDueDate: boundary.setLabOrderDueDate, setLabOrderStatus: boundary.setLabOrderStatus,
+  createLabOrderRemake: vi.fn(), findUserByUsername: vi.fn(), doctorOwnsPatient: vi.fn(), patientHasVisitToday: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
 import { PATCH } from "../app/api/lab/[id]/route";
@@ -32,7 +33,10 @@ function patch(body: unknown) {
 function writerInput() {
   expect(boundary.updateLabOrderAccounting).toHaveBeenCalledTimes(1);
   expect(boundary.updateLabOrderAccounting.mock.calls[0][0]).toBe(91001);
-  return boundary.updateLabOrderAccounting.mock.calls[0][1];
+  const { session, ...input } = boundary.updateLabOrderAccounting.mock.calls[0][1];
+  expect(session).toMatchObject({ username: "synthetic-finance" });
+  expect(typeof session.role).toBe("string");
+  return input;
 }
 
 beforeEach(() => {
@@ -179,6 +183,20 @@ describe("optional expected-rate fence never authorizes a caller-owned rate", ()
   });
 });
 
+
+describe("lab currency and FX are not guessed", () => {
+  it.each([undefined, null, "invalid"])("refuses positive cost without a valid currency %s", async costCurrency => {
+    const response = await patch({ action: "update_accounting", cost: "25", costCurrency });
+    expect(response.status).toBe(400);
+    expect(boundary.updateLabOrderAccounting).not.toHaveBeenCalled();
+  });
+  it("refuses missing current FX even without a preview fence", async () => {
+    boundary.getSettings.mockResolvedValue({});
+    const response = await patch({ action: "update_accounting", cost: "25", costCurrency: "USD" });
+    expect(response.status).toBe(409);
+    expect(boundary.updateLabOrderAccounting).not.toHaveBeenCalled();
+  });
+});
 
 describe("lab accounting protected evidence conflicts", () => {
   it.each(["settled", "period_locked", "busy", "link_invalid"])("maps %s to a specific conflict without success", async suffix => {

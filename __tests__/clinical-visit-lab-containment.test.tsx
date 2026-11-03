@@ -9,6 +9,8 @@ import { ClinicalVisit } from "../components/ClinicalVisit";
 // This release does not import or claim local-rebuild decoder, owner-generation,
 // linked-parent, suspension, or ambiguous-write guards.
 const hooks = vi.hoisted(() => ({
+  acknowledgments:0,
+  labJournal: {revision:0,pending:null} as import("../lib/clinical-lab-operation-reference").ClinicalLabJournal,
   values: [] as unknown[], cursor: 0, changed: false, username: "synthetic-doctor", role: "doctor",
   effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void; phase: "layout" | "passive" }>(),
   memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
@@ -63,6 +65,11 @@ vi.mock("react", async (original) => {
     },
   };
 });
+// Ordinary-visit fixtures explicitly prove an empty synthetic command journal.
+// Actual reference/replay ownership is exercised in clinical-lab-command-hook.test.ts.
+vi.mock("../lib/clinical-lab-operation-reference",async original=>({...await original<typeof import("../lib/clinical-lab-operation-reference")>(),readClinicalLabReference:async()=>hooks.labJournal,acknowledgeClinicalLabReference:async()=>{hooks.acknowledgments++;hooks.labJournal={revision:hooks.labJournal.revision+1,pending:null};return hooks.labJournal;}}));
+// This legacy handler harness is single-window; cross-tab arbitration has dedicated hook tests.
+vi.mock("../lib/clinical-visit-browser-lock",()=>({withClinicalVisitBrowserLock:async(_scope:unknown,run:()=>Promise<unknown>)=>run()}));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ role: hooks.role, username: hooks.username }) }));
 vi.mock("../components/SettingsProvider", () => ({ useSetting: () => "Synthetic quick phrase" }));
 vi.mock("../components/ToothPicker", () => ({ ToothField: () => null }));
@@ -204,7 +211,7 @@ function resetHooks() {
 }
 
 beforeEach(() => {
-  resetHooks(); vi.clearAllMocks(); hooks.username = "operator-A"; hooks.role = "doctor";
+  resetHooks(); hooks.acknowledgments=0; hooks.labJournal={revision:0,pending:null}; vi.clearAllMocks(); hooks.username = "operator-A"; hooks.role = "doctor";
   catalog = [crown, bridge, veneer, misleading]; catalogStatus = 200;
   nextRead = null; nextPost = null; signedOrders = [];
   props = { visitId: 91001 };
@@ -410,4 +417,43 @@ describe("ordinary explicit clinical save and sign keep published contracts", ()
     expect(elements(render().tree).some((node) => node.props.role === "dialog")).toBe(false);
     expect(stored.status).toBe("open"); expect(stored.labOrders).toEqual([]); assertPassiveLabUi();
   });
+});
+
+describe("lab pending discovery independent of deployment capability",()=>{
+ it("blocks ordinary write and sign when capability fetch fails and server has no intent yet",async()=>{
+  hooks.labJournal={revision:0,pending:{requestKey:"uncertain-operation",requestHash:"a".repeat(64)}};
+  stored.labWorkIntentRequired=false;stored.labWorkIntentSupported=false;
+  await mount();
+  expect(fetchMock.mock.calls.some(([url])=>url==="/api/lab/work-intents/capability")).toBe(true);
+  expect(render().find(node=>node.type==="fieldset"&&node.props["aria-label"]==="بيانات الزيارة").props.disabled).toBe(true);
+  expect(contents(render().tree)).toContain("نتيجة حفظ المختبر السابق تحتاج تأكيدًا");
+  await invoke(button("احفظ بلا توقيع"));await flush();
+  await invoke(button("مراجعة وإنهاء الزيارة"));await flush();
+  expect(writes()).toHaveLength(0);
+ });
+ it("role downgrade to assistant cannot bypass same-actor pending hold",async()=>{
+  hooks.role="assistant";hooks.labJournal={revision:0,pending:{requestKey:"old-clinician-operation",requestHash:"c".repeat(64)}};
+  await mount();await invoke(button("احفظ بلا توقيع"));await flush();
+  expect(writes()).toHaveLength(0);expect(button("التحقق من نتيجة الحفظ").props.disabled).toBe(true);
+  expect(contents(render().tree)).toContain("تحتاج جلسة طبيب أو مدير");
+ });
+ it("assistant note-only save does not submit clinical lab or source edits",async()=>{
+  hooks.role="assistant";stored.labWorkIntentRequired=true;stored.procedures=[line()];
+  await mount();await invoke(button("احفظ بلا توقيع"));await flush();
+  expect(writes()).toHaveLength(1);const body=JSON.parse(String(writes()[0][1].body));
+  expect(body).toEqual(savedNotes);expect(body).not.toHaveProperty("procedures");expect(body).not.toHaveProperty("labRequestKey");
+ });
+});
+
+describe("terminal rejected visit reconciliation",()=>{
+ it("retains pending when authoritative refresh fails; only ACKs after successful refresh",async()=>{
+  const reference={requestKey:"rejected-operation",requestHash:"b".repeat(64)};hooks.labJournal={revision:0,pending:reference};
+  const original=fetchMock.getMockImplementation()!;fetchMock.mockImplementation((url:string,options?:RequestInit)=>url.startsWith("/api/visits/91001/lab-work-command?")?response(200,{found:true,receipt:{...reference,actor:"operator-A",patientId:92001,visitId:91001},result:{outcome:"rejected",code:"stale_intent",labWork:[]}}):original(url,options));
+  await mount();nextRead=async()=>response(500,{message:"synthetic refresh failure"});
+  await invoke(button("التحقق من نتيجة الحفظ"));await flush();
+  expect(hooks.acknowledgments).toBe(0);expect(hooks.labJournal.pending).toEqual(reference);
+  nextRead=null;await invoke(button("أعد تحميل الزيارة"));await flush();
+  await invoke(button("التحقق من نتيجة الحفظ"));await flush();
+  expect(hooks.acknowledgments).toBe(1);expect(hooks.labJournal.pending).toBeNull();expect(writes()).toHaveLength(0);
+ });
 });

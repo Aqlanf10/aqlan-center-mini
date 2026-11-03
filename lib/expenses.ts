@@ -66,21 +66,42 @@ export function isExpenseCategory(value: unknown): value is ExpenseCategory {
   return /^[a-zA-Z0-9_-]{2,64}$/.test(trimmed);
 }
 
-export type PartyKind = "lab" | "supplier" | "doctor";
+export type PartyKind = "lab" | "supplier" | "doctor" | "employee";
 
 export const PARTY_KIND_LABEL: Record<PartyKind, string> = {
   lab: "مختبر",
   supplier: "مورّد",
   doctor: "طبيب",
+  employee: "موظف",
 };
 
 export function isPartyKind(value: unknown): value is PartyKind {
-  return value === "lab" || value === "supplier" || value === "doctor";
+  return value === "lab" || value === "supplier" || value === "doctor" || value === "employee";
 }
 
 /** التصنيف الذي يناسب جهةً من نوع معيّن — يُستعمل لاقتراح التصنيف عند اختيار الجهة. */
 export function categoryForParty(kind: PartyKind): ExpenseCategory {
-  return kind === "lab" ? "lab" : kind === "doctor" ? "commission" : "supplier";
+  if (kind === "lab") return "lab";
+  if (kind === "doctor") return "commission";
+  if (kind === "employee") return "salary";
+  return "supplier";
+}
+
+/** الحسابات المحاسبية الافتراضية لكل نوع جهة وفق شجرة الحسابات الرسمية (FIN-02). */
+export function defaultAccountsForPartyKind(kind: PartyKind): {
+  expenseAccountCode: string;
+  payableAccountCode: string;
+} {
+  switch (kind) {
+    case "lab":
+      return { expenseAccountCode: "5101", payableAccountCode: "2101" };
+    case "supplier":
+      return { expenseAccountCode: "5201", payableAccountCode: "2105" };
+    case "doctor":
+      return { expenseAccountCode: "5301", payableAccountCode: "2106" };
+    case "employee":
+      return { expenseAccountCode: "5401", payableAccountCode: "2107" };
+  }
 }
 
 export interface ExpenseLike {

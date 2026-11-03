@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { createFamilyCanonicalResponse, familiesSearchCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { createPatientFamily, findFamiliesByPhone, searchPatientFamilies } from "@/lib/db";
 import { json, readBody } from "@/lib/case-route";
 import { familyFailure, familyResponse, familyWriter } from "@/lib/family-route";
 import { validateFamilyDraft } from "@/lib/patient-families";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +14,9 @@ export const dynamic = "force-dynamic";
  * (`?phone=`) — للاستقبال والإدارة (من يربط).
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return familiesSearchCanonicalResponse(selected.handle, request);
   const guard = await familyWriter();
   if (!guard.ok) return guard.response;
   const url = new URL(request.url);
@@ -27,6 +33,9 @@ export async function GET(request: Request) {
 
 /** إنشاء عائلة باسمها وضامنها الاختياري وأفرادها الأوّلين. */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return createFamilyCanonicalResponse(selected.handle, request);
   const guard = await familyWriter();
   if (!guard.ok) return guard.response;
   const read = await readBody(request);

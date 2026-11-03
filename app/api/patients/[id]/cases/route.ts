@@ -1,12 +1,31 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalPlanCaseFailure,
+  commandCanonicalCreateCase,
+  readCanonicalPatientCases,
+} from "@/lib/canonical-plans-and-cases";
 import { createClinicalCase, listCasePlanItems, listPatientCases, listPatientProblems } from "@/lib/db";
 import { checkCaseDraft } from "@/lib/cases";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
 /** (CASE-MODEL-1) الحالات التخصصية للمريض وقائمة مشاكله وبنود خطته مرتّبةً باعتمادياتها — قراءة واحدة. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      const { id } = await params;
+      return NextResponse.json(await readCanonicalPatientCases(selected.handle, id), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر تحميل الحالات التخصصية.");
+    }
+  }
   const patientId = idOf((await params).id);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, false);
@@ -25,6 +44,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 /** فتح حالة تخصصية (أو ربط حالة تقويمٍ قائمة بالميزات العامة عبر orthoCaseId). */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) return read.response;
+    try {
+      const { id } = await params;
+      return NextResponse.json(await commandCanonicalCreateCase(selected.handle, id, read.body), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر حفظ الحالة. أعد المحاولة.");
+    }
+  }
   const patientId = idOf((await params).id);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, true);
@@ -35,7 +68,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!draft.ok) return json(draft.message, 400);
   try {
     const result = await createClinicalCase({
-      ...draft.value, patientId, actor: guard.session.username, actorRole: guard.session.role,
+      ...draft.value, patientId, admittedSession: guard.session, actor: guard.session.username, actorRole: guard.session.role,
     });
     if (!result.ok) {
       const messages = {

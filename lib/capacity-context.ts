@@ -9,11 +9,11 @@
  * للمحرّك. ولا يبني أيُّ مسارٍ حكمَه بنفسه.
  */
 import {
-  CLINIC_TIME_ZONE, getSettings, listAppointmentServices, listProviderBlocks,
-  resolveServiceByLegacyType, type DbClient,
+  CLINIC_TIME_ZONE, getSettings, getSettingsWith, listAppointmentServices, listAppointmentServicesWith,
+  listProviderBlocks, resolveServiceByLegacyType, resolveServiceByLegacyTypeWith, type DbClient,
 } from "./db";
 import { clinicDayStart } from "./clinicZone";
-import { chairCount } from "./settings";
+import { chairCount, type SettingsMap } from "./settings";
 import { judgeFullCapacity, type CapacityVerdict, type ProviderBlockWindow, type Shift } from "./capacity";
 import type { AppointmentService } from "./appointment-services";
 import type { Appointment } from "./schedule";
@@ -24,11 +24,41 @@ export interface CapacityContext {
   nearCapacityPercent: number;
   emergencyReserveMinutes: number;
   newPatientDailyLimit: number;
+  strictHours?: boolean;
+  closedWeekdays?: number[];
 }
 
 /** يقرأ سياسة السعة من الإعدادات — مصدرٌ واحد لساعات المركز وطاقته. */
 export async function loadCapacityContext(): Promise<CapacityContext> {
-  const settings = await getSettings();
+  return capacityContextFrom(await getSettings());
+}
+
+/** The same context read on the caller's client (canonical snapshots, M2 slice 19). */
+export async function loadCapacityContextWith(q: Pick<DbClient, "query">): Promise<CapacityContext> {
+  return capacityContextFrom(await getSettingsWith(q));
+}
+
+const WEEKDAY_TOKEN: Record<string, number> = {
+  "0": 0, sun: 0, sunday: 0, "الأحد": 0, "الاحد": 0,
+  "1": 1, mon: 1, monday: 1, "الاثنين": 1, "الإثنين": 1,
+  "2": 2, tue: 2, tuesday: 2, "الثلاثاء": 2,
+  "3": 3, wed: 3, wednesday: 3, "الأربعاء": 3, "الاربعاء": 3,
+  "4": 4, thu: 4, thursday: 4, "الخميس": 4,
+  "5": 5, fri: 5, friday: 5, "الجمعة": 5, "الجمعه": 5,
+  "6": 6, sat: 6, saturday: 6, "السبت": 6,
+};
+
+function parseClosedWeekdays(raw: string | undefined): number[] {
+  if (!raw || !raw.trim()) return [];
+  const days = new Set<number>();
+  for (const token of raw.split(/[,\u060C;]+/)) {
+    const key = token.trim().toLowerCase();
+    if (key in WEEKDAY_TOKEN) days.add(WEEKDAY_TOKEN[key]);
+  }
+  return [...days].sort((a, b) => a - b);
+}
+
+function capacityContextFrom(settings: SettingsMap): CapacityContext {
   const shifts: Shift[] = [
     { start: settings["clinic.day_start"], end: settings["clinic.day_end"] },
   ];
@@ -43,12 +73,15 @@ export async function loadCapacityContext(): Promise<CapacityContext> {
     const parsed = Number(settings[key as keyof typeof settings]);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
   };
+  const strictRaw = (settings["scheduling.strict_hours"] ?? "").trim().toLowerCase();
   return {
     shifts,
     chairs: chairCount(settings),
     nearCapacityPercent: number("scheduling.near_capacity_percent", 80),
     emergencyReserveMinutes: number("scheduling.emergency_reserve_minutes", 0),
     newPatientDailyLimit: number("scheduling.new_patient_daily_limit", 0),
+    strictHours: strictRaw === "true" || strictRaw === "on" || strictRaw === "1",
+    closedWeekdays: parseClosedWeekdays(settings["clinic.closed_weekdays"]),
   };
 }
 
@@ -71,6 +104,19 @@ export async function resolveService(input: {
   return null;
 }
 
+/** Same lookup inside a caller-owned snapshot/transaction (no ensureSchema). */
+export async function resolveServiceWith(
+  q: Pick<DbClient, "query">,
+  input: { serviceId?: number | null; appointmentType?: string | null },
+): Promise<AppointmentService | null> {
+  if (input.serviceId) {
+    const all = await listAppointmentServicesWith(q, { includeInactive: true });
+    return all.find((service) => service.id === input.serviceId) ?? null;
+  }
+  if (input.appointmentType) return await resolveServiceByLegacyTypeWith(q, input.appointmentType);
+  return null;
+}
+
 /** الخدمة الافتراضية حين لا تُحدَّد — لا تُعطّل الحجز ولا تفرض متطلّباتٍ وهمية. */
 export const FALLBACK_SERVICE = {
   requiresProvider: false,
@@ -83,7 +129,7 @@ export const FALLBACK_SERVICE = {
 
 /** نوافذ حجب الطبيب بالدقائق من بداية يوم المركز؛ تُقرأ مرة واحدة عند عرض اليوم. */
 export async function loadProviderBlockWindows(
-  providerId: number, date: string, client?: DbClient,
+  providerId: number, date: string, client?: Pick<DbClient, "query">,
 ): Promise<ProviderBlockWindow[]> {
   const raw = await listProviderBlocks(providerId, date, client);
   const dayStart = clinicDayStart(date, CLINIC_TIME_ZONE);
@@ -116,19 +162,23 @@ export interface CapacityEvaluationInput {
   service: AppointmentService | null;
   context: CapacityContext;
   providerId?: number | null;
+  /** A sourced clinical return consumes its clinician even without a catalogue service. */
+  requireAssignedProvider?: boolean;
   chairNo?: number | null;
   isNewPatient?: boolean;
   newPatientsBookedToday?: number;
   excludeId?: number;
   /** اتصال المعاملة حين يُقيَّم داخل قفل اليوم — فلا اتصالَ ثانٍ ولا لقطةٌ أقدم. */
-  client?: DbClient;
+  client?: Pick<DbClient, "query">;
 }
 
 /** Freeze verified block windows once for the decision and its alternatives. */
 export async function prepareCapacityEvaluator(input: CapacityEvaluationInput): Promise<(time: string) => CapacityVerdict> {
   const { service, context } = input;
+  const capacityService = service ?? ((input.requireAssignedProvider ?? Boolean(input.providerId))
+    ? { ...FALLBACK_SERVICE, requiresProvider: true } : FALLBACK_SERVICE);
   const blocks: ProviderBlockWindow[] = [];
-  if (service?.requiresProvider && input.providerId) {
+  if (capacityService.requiresProvider && input.providerId) {
     /* **يفشل مغلقًا.** كان `.catch(() => [])` يبتلع فشل القراءة فيصير الطبيب
        «متاحًا دائمًا» — فيُحجز فوق إجازته أو عمليّته بلا أن يشكو شيء. وحارسٌ
        يفشل مفتوحًا ليس حارسًا: ما لا يُتحقَّق منه يُردّ برسالةٍ صريحة، ولصاحب
@@ -154,7 +204,7 @@ export async function prepareCapacityEvaluator(input: CapacityEvaluationInput): 
     chairs: context.chairs,
     shifts: context.shifts,
     nearCapacityPercent: context.nearCapacityPercent,
-    service: service ?? FALLBACK_SERVICE,
+    service: capacityService,
     providerId: input.providerId ?? null,
     chairNo: input.chairNo ?? null,
     providerBlocks: blocks,

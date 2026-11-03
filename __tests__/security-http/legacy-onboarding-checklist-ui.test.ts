@@ -15,8 +15,8 @@ let patientId = 0;
 let caseId = 0;
 let planId = 0;
 const stamp = Date.now();
-const included = "الشدّة اليوم مشمولة باتفاق الأقساط — بلا فاتورة مستقلة.";
-const outside = "الشدّة اليوم تحتاج قرار فوترة (خارج العقد أو تُفوتر كل جلسة).";
+const included = "الشدّة اليوم مشمولة بالاتفاق — بلا فاتورة مستقلة.";
+const reviewRequired = "شمول الشدّة ضمن الاتفاق غير محدد؛ راجع نطاق المتابعات دون فاتورة بديلة.";
 const unavailable = "تعذّر تحديث تهيئة الحالة السابقة؛ لا يمكن تأكيد تغطية الشدّة من هذه القراءة.";
 const retry = "أعد تحميل تهيئة الحالة السابقة";
 const checklistPath = () => `/api/patients/${patientId}/legacy-onboarding`;
@@ -120,7 +120,9 @@ async function open(width: number, failPlans: boolean) {
       if (mode === "hold") {
         const response = await route.fetch(); expect(response.status()).toBe(200);
         const body = await response.text();
-        expect(JSON.parse(body)).toMatchObject({ onboarding: { caseId, adjustmentClass: "OUTSIDE_CONTRACT" } });
+        // Missing compatibility funding needs review; it is not evidence of an
+        // explicit per-session/outside-contract billing decision.
+        expect(JSON.parse(body)).toMatchObject({ onboarding: { caseId, complete: false, adjustmentClass: "REVIEW_REQUIRED" } });
         held.push({ route, body }); return;
       }
     }
@@ -180,7 +182,7 @@ describe("legacy checklist confirmed-context refresh in the real parent", () => 
       for (const old of f.held) await old.route.fulfill({ status: 200, contentType: "application/json", body: old.body }).catch(() => {});
       await f.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       expect(await f.checklist.innerText()).toContain(included);
-      expect(await f.checklist.innerText()).not.toContain(outside);
+      expect(await f.checklist.innerText()).not.toContain(reviewRequired);
       expect(f.writes).toEqual([{ planId: null }]); f.isolated();
       expect((await db.query("SELECT plan_id FROM ortho_cases WHERE id = $1 AND patient_id = $2", [caseId, patientId])).rows).toEqual([{ plan_id: planId }]);
       expect(await moneySnapshot()).toEqual(before);

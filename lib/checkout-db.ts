@@ -34,6 +34,20 @@ export async function visitCheckoutSummary(walkout: VisitWalkout, client?: DbCli
   });
 }
 
+/** Snapshot-safe checkout reader over an owning canonical REPEATABLE READ READ ONLY facade. */
+export async function readVisitCheckoutInSnapshot(q: Pick<DbClient, "query">, visitId: number) {
+  const client = q as DbClient;
+  const today = (await client.query<{ today: string }>(`SELECT ${clinicTodaySql("$1")}::text AS today`, [CLINIC_TIME_ZONE])).rows[0]?.today;
+  if (typeof today !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error("Missing checkout clinic date");
+  const walkout = await visitWalkout(visitId, client);
+  if (!walkout) return null;
+  const summary = await visitCheckoutSummary(walkout, client, today);
+  const dueRecommendation = walkout.patientId === null ? null : await readCheckoutDueRecommendationInSnapshot(client, {
+    patientId: walkout.patientId, visitInvoiceId: walkout.invoice?.id ?? null, today,
+  });
+  return { walkout, summary, dueRecommendation, today };
+}
+
 /** One transaction owns every financial fact returned to checkout. Standalone
  * legacy summary callers retain their existing contract; its old suggestion
  * fields are not the source-qualified recommendation or a collection target. */
@@ -43,16 +57,9 @@ export async function readVisitCheckout(visitId: number) {
   let destroy = false;
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const today = (await client.query<{ today: string }>(`SELECT ${clinicTodaySql("$1")}::text AS today`, [CLINIC_TIME_ZONE])).rows[0]?.today;
-    if (typeof today !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error("Missing checkout clinic date");
-    const walkout = await visitWalkout(visitId, client);
-    if (!walkout) { await client.query("COMMIT"); return null; }
-    const summary = await visitCheckoutSummary(walkout, client, today);
-    const dueRecommendation = walkout.patientId === null ? null : await readCheckoutDueRecommendationInSnapshot(client, {
-      patientId: walkout.patientId, visitInvoiceId: walkout.invoice?.id ?? null, today,
-    });
+    const result = await readVisitCheckoutInSnapshot(client, visitId);
     await client.query("COMMIT");
-    return { walkout, summary, dueRecommendation, today };
+    return result;
   } catch (error) {
     try { await client.query("ROLLBACK"); } catch { destroy = true; }
     throw error;

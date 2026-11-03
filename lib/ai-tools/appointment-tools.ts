@@ -2,8 +2,8 @@
  * أدوات المواعيد والجدول والزيارات (Appointment AI Tools)
  */
 
-import { listAppointmentsByDate } from "../db";
-import { getAppointmentTypeLabel } from "../schedule";
+import { CLINIC_TIME_ZONE, listAppointmentsByDate } from "../db";
+import { clinicDateString, getAppointmentTypeLabel } from "../schedule";
 import type { AiToolContext, ToolExecutionResult, KpiCard, StructuredTable, ActionButton } from "./types";
 
 /**
@@ -13,7 +13,7 @@ export async function getTodayAppointments(
   params: { date?: string; doctorId?: number },
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
-  const date = params.date || context.todayISO || new Date().toISOString().slice(0, 10);
+  const date = params.date || context.todayISO || clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
   if (!context.isDbConnected) {
     return {

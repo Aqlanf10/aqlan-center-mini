@@ -16,7 +16,7 @@
 
 import { createHmac } from "node:crypto";
 import { consumeLoginAttempt } from "./db";
-import { clientIpFromForwardedFor } from "./net";
+import { clientIpFromForwardedFor, isTrustedProxy } from "./net";
 
 export interface SecurityLimitResult {
   allowed: boolean;
@@ -51,7 +51,7 @@ export async function consumeSecurityLimit(spec: SecurityLimitSpec): Promise<Sec
   const limits: { key: string; maximum: number }[] = [
     { key: hmac(`sec:${spec.scope}:id:${spec.identifier}`), maximum: spec.maximum },
   ];
-  if (process.env.TRUST_PROXY === "true") {
+  if (isTrustedProxy()) {
     const address = clientIpFromForwardedFor(spec.headers.get("x-forwarded-for"));
     if (address) {
       limits.push({ key: hmac(`sec:${spec.scope}:source:${address}`), maximum: spec.maximum });

@@ -1,7 +1,8 @@
 /** Inert future policy catalogue. Nothing in this module grants access to live routes. */
-export const STAFF_CAPABILITY_SCHEMA_VERSION = 1 as const;
+/** 2: the document carries `confirmation` (owner decision on initial grants, Dot 6494187100). */
+export const STAFF_CAPABILITY_SCHEMA_VERSION = 2 as const;
 /** Bump when authorization semantics change, even if the document schema does not. */
-export const STAFF_AUTHORIZATION_POLICY_VERSION = 1 as const;
+export const STAFF_AUTHORIZATION_POLICY_VERSION = 6 as const;
 
 export const STAFF_CAPABILITIES = Object.freeze([
   "patients.create", "patients.edit", "patients.delete", "patients.export",
@@ -17,8 +18,30 @@ export const STAFF_CAPABILITIES = Object.freeze([
   "finance.commissions.view-own", "finance.commissions.view-all", "finance.commissions.manage-rates",
   "finance.revenue.view", "finance.profits.view", "finance.suppliers.view", "finance.reconciliation.view",
   "finance.export", "reports.operational.view", "reports.financial.view", "reports.clinical.view", "reports.export",
+  "inventory.references.view", "inventory.items.create", "inventory.units.revise", "inventory.locations.create",
+  // Inventory & procurement operations (M3a, docs/inventory/CENTRAL-PERMISSION-BINDINGS-20261027.md).
+  "inventory.approval-policy.manage",
+  "inventory.requests.view", "inventory.requests.create", "inventory.requests.approve",
+  "inventory.orders.view", "inventory.orders.manage", "inventory.receipts.post", "inventory.quarantine.resolve",
+  "inventory.supplier-invoices.record", "inventory.supplier-invoices.cancel",
+  "inventory.custody.view", "inventory.custody.dispatch", "inventory.custody.acknowledge", "inventory.custody.use",
+  "inventory.custody.stocktake", "inventory.custody.approve-waste",
+  "inventory.custody.settlement.propose", "inventory.custody.settlement.object",
+  "inventory.reconcile", "inventory.costs.view",
   "staff.view", "staff.profile.edit", "staff.accounts.create", "staff.accounts.disable", "staff.permissions.edit",
   "settings.view", "settings.operational.edit", "settings.finance.edit", "audit.view", "audit.export",
+  // Clinic operations approved by the owner (Dot 6484846432): the M2 map's 41 names and
+  // the reception operational summary. Catalogue presence grants nothing.
+  "appointments.schedule.manage", "visits.manage", "visits.delete", "clinical.ortho.view", "clinical.ortho.edit",
+  "clinical.ceph.analyze", "clinical.prescriptions.write", "clinical.referrals.manage", "clinical.lab.view",
+  "clinical.lab.order", "clinical.lab.cancel", "clinical.laboratories.manage", "finance.lab-prices.edit",
+  "patients.merge", "patients.number.manage", "patients.documents.delete", "patients.history.record",
+  "patients.history.correct", "finance.patient-ledger.manage", "finance.legacy.record", "finance.legacy.void",
+  "finance.agreements.manage", "finance.invoices.correct", "finance.payables.record", "finance.parties.manage",
+  "finance.opening-balances.manage", "finance.fx.manage", "finance.journal.post", "finance.reconciliation.manage",
+  "hr.directory.view", "hr.attendance.record", "hr.attendance.correct", "hr.staff.manage", "hr.leaves.request",
+  "hr.leaves.approve", "hr.schedules.manage", "hr.payroll.manage", "hr.reports.view", "hr.settings.edit",
+  "tasks.use", "messages.use", "patients.operational-summary.view",
 ] as const);
 export type StaffCapability = typeof STAFF_CAPABILITIES[number];
 
@@ -26,16 +49,27 @@ export type StaffCapability = typeof STAFF_CAPABILITIES[number];
 export const OWNER_ONLY_OPERATIONS = Object.freeze([
   "staff.credentials.reset", "staff.clinician-link.change", "staff.role.change",
   "settings.security.change", "settings.integrations.change",
+  // Owner decision (Dot 6484846432): whole-clinic import/export, backup and reset.
+  // A limited, delegable report export stays reports.export / finance.export.
+  "clinic.data.import", "clinic.data.export", "clinic.backup.manage", "clinic.reset",
 ] as const);
 export type OwnerOnlyOperation = typeof OWNER_ONLY_OPERATIONS[number];
 
 export const STAFF_RECORD_SCOPES = Object.freeze(["none", "own", "all"] as const);
 export type StaffRecordScope = typeof STAFF_RECORD_SCOPES[number];
 
+/** Initial grants of every account are confirmed by the protected owner. A `pending`
+ * document (imported, converted or prepared from a template) grants nothing and gives
+ * no record scope until the owner saves it; a delegated editor can neither confirm nor
+ * edit a pending account. */
+export const STAFF_CAPABILITY_CONFIRMATIONS = Object.freeze(["pending", "owner"] as const);
+export type StaffCapabilityConfirmation = typeof STAFF_CAPABILITY_CONFIRMATIONS[number];
+
 export interface StaffCapabilityDocument {
   readonly schemaVersion: typeof STAFF_CAPABILITY_SCHEMA_VERSION;
   /** Monotonic server-managed revision; schemaVersion is not a revocation counter. */
   readonly revision: number;
+  readonly confirmation: StaffCapabilityConfirmation;
   readonly patientScope: StaffRecordScope;
   readonly appointmentScope: StaffRecordScope;
   readonly grants: Readonly<Partial<Record<StaffCapability, boolean>>>;
@@ -48,6 +82,26 @@ export function isStaffCapability(value: unknown): value is StaffCapability {
 
 /** Explicit action prerequisites. Reads never imply writes, refunds, exports or delegation. */
 export const STAFF_CAPABILITY_PREREQUISITES: Readonly<Partial<Record<StaffCapability, readonly StaffCapability[]>>> = Object.freeze({
+  "inventory.items.create": Object.freeze(["inventory.references.view"] as const),
+  "inventory.units.revise": Object.freeze(["inventory.references.view"] as const),
+  "inventory.locations.create": Object.freeze(["inventory.references.view"] as const),
+  "inventory.approval-policy.manage": Object.freeze(["inventory.references.view"] as const),
+  "inventory.requests.create": Object.freeze(["inventory.requests.view", "inventory.references.view"] as const),
+  "inventory.requests.approve": Object.freeze(["inventory.requests.view"] as const),
+  "inventory.orders.manage": Object.freeze(["inventory.orders.view", "inventory.requests.view"] as const),
+  "inventory.receipts.post": Object.freeze(["inventory.orders.view"] as const),
+  "inventory.quarantine.resolve": Object.freeze(["inventory.orders.view"] as const),
+  "inventory.supplier-invoices.record": Object.freeze(["inventory.orders.view", "finance.suppliers.view"] as const),
+  "inventory.supplier-invoices.cancel": Object.freeze(["inventory.supplier-invoices.record"] as const),
+  "inventory.custody.dispatch": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.acknowledge": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.use": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.stocktake": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.approve-waste": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.settlement.propose": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.settlement.object": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.reconcile": Object.freeze(["inventory.references.view"] as const),
+  "inventory.costs.view": Object.freeze(["finance.cost-prices.view"] as const),
   "clinical.plans.edit": Object.freeze(["clinical.plans.view"] as const),
   "clinical.xrays.upload": Object.freeze(["clinical.xrays.view"] as const),
   "finance.invoices.cancel": Object.freeze(["finance.invoices.view"] as const),
@@ -65,4 +119,27 @@ export const STAFF_CAPABILITY_PREREQUISITES: Readonly<Partial<Record<StaffCapabi
   "settings.operational.edit": Object.freeze(["settings.view"] as const),
   "settings.finance.edit": Object.freeze(["settings.view"] as const),
   "audit.export": Object.freeze(["audit.view"] as const),
+  "visits.delete": Object.freeze(["visits.manage"] as const),
+  "clinical.ortho.edit": Object.freeze(["clinical.ortho.view"] as const),
+  "clinical.ceph.analyze": Object.freeze(["clinical.xrays.view"] as const),
+  "clinical.lab.order": Object.freeze(["clinical.lab.view"] as const),
+  "clinical.lab.cancel": Object.freeze(["clinical.lab.view"] as const),
+  "clinical.laboratories.manage": Object.freeze(["clinical.lab.view"] as const),
+  "finance.lab-prices.edit": Object.freeze(["clinical.lab.view"] as const),
+  "patients.merge": Object.freeze(["patients.edit"] as const),
+  "patients.number.manage": Object.freeze(["patients.edit"] as const),
+  "patients.history.correct": Object.freeze(["patients.history.record"] as const),
+  "finance.patient-ledger.manage": Object.freeze(["finance.patient-ledger.view"] as const),
+  "finance.legacy.void": Object.freeze(["finance.legacy.record"] as const),
+  "finance.agreements.manage": Object.freeze(["finance.patient-ledger.view"] as const),
+  "finance.invoices.correct": Object.freeze(["finance.invoices.view"] as const),
+  "finance.reconciliation.manage": Object.freeze(["finance.reconciliation.view"] as const),
+  "finance.opening-balances.manage": Object.freeze(["finance.patient-ledger.view"] as const),
+  "hr.attendance.correct": Object.freeze(["hr.attendance.record"] as const),
+  "hr.leaves.approve": Object.freeze(["hr.leaves.request"] as const),
+  "hr.staff.manage": Object.freeze(["hr.directory.view"] as const),
+  "hr.schedules.manage": Object.freeze(["hr.directory.view"] as const),
+  "hr.payroll.manage": Object.freeze(["hr.directory.view"] as const),
+  "hr.reports.view": Object.freeze(["hr.directory.view"] as const),
+  "hr.settings.edit": Object.freeze(["hr.directory.view"] as const),
 });

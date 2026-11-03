@@ -73,3 +73,64 @@ describe("withTransaction", () => {
     })).rejects.toThrow("فشل معزول");
   });
 });
+
+/** (Dot R1) Scripted client: each failure path decides reuse vs destruction exactly. */
+describe("transaction cleanup on uncertain outcomes", () => {
+  type Step = "BEGIN" | "COMMIT" | "ROLLBACK" | "WORK";
+  function scripted(fail: Partial<Record<Step, Error>>) {
+    const sql: string[] = [];
+    const release = vi.fn();
+    const client = {
+      release,
+      query: vi.fn(async (text: string) => {
+        sql.push(text);
+        const step: Step = text.startsWith("BEGIN") ? "BEGIN" : text === "COMMIT" ? "COMMIT" : text === "ROLLBACK" ? "ROLLBACK" : "WORK";
+        if (fail[step]) throw fail[step];
+        return { rows: [], rowCount: 0 };
+      }),
+    };
+    const pool = { connect: vi.fn(async () => client), query: vi.fn() };
+    return { pool: pool as never, sql, release };
+  }
+  const run = (pool: never, level?: "SERIALIZABLE") => level
+    ? withIsolation(pool, level, async c => { await c.query("SELECT 1"); return "ok"; })
+    : withTransaction(pool, async c => { await c.query("SELECT 1"); return "ok"; });
+
+  it("clean COMMIT returns the result and recycles the client", async () => {
+    const s = scripted({});
+    await expect(run(s.pool)).resolves.toBe("ok");
+    expect(s.sql).toEqual(["BEGIN", "SELECT 1", "COMMIT"]);
+    expect(s.release).toHaveBeenCalledTimes(1);
+    expect(s.release).toHaveBeenCalledWith();
+  });
+  it("work failure with a confirmed ROLLBACK recycles; the original error propagates", async () => {
+    const s = scripted({ WORK: new Error("work failed") });
+    await expect(run(s.pool)).rejects.toThrow("work failed");
+    expect(s.sql).toEqual(["BEGIN", "SELECT 1", "ROLLBACK"]);
+    expect(s.release).toHaveBeenCalledWith();
+  });
+  it("work failure plus failed ROLLBACK destroys the client and keeps the original error", async () => {
+    const s = scripted({ WORK: new Error("work failed"), ROLLBACK: new Error("socket closed") });
+    await expect(run(s.pool)).rejects.toThrow("work failed");
+    expect(s.release).toHaveBeenCalledTimes(1);
+    expect(s.release).toHaveBeenCalledWith(true);
+  });
+  for (const level of [undefined, "SERIALIZABLE"] as const) {
+    it(`COMMIT failure never yields a result${level ? " (withIsolation)" : ""}; destroyed when cleanup is uncertain`, async () => {
+      const lost = scripted({ COMMIT: new Error("connection lost during COMMIT"), ROLLBACK: new Error("connection lost") });
+      await expect(run(lost.pool, level)).rejects.toThrow("connection lost during COMMIT");
+      expect(lost.release).toHaveBeenCalledWith(true);
+      const refused = scripted({ COMMIT: new Error("could not serialize access") });
+      await expect(run(refused.pool, level)).rejects.toThrow("could not serialize access");
+      // A confirmed ROLLBACK proves the CONNECTION is clean, not that nothing committed.
+      expect(refused.release).toHaveBeenCalledWith();
+    });
+  }
+  it("BEGIN failure never runs work and destroys the client", async () => {
+    const s = scripted({ BEGIN: new Error("connection reset") });
+    const work = vi.fn();
+    await expect(withTransaction(s.pool, work)).rejects.toThrow("connection reset");
+    expect(work).not.toHaveBeenCalled();
+    expect(s.release).toHaveBeenCalledWith(true);
+  });
+});

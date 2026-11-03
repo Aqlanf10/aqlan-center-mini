@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { patientLegacyOnboardingCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { patientLegacyOnboarding } from "@/lib/legacy-onboarding-db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { doctorOwnsPatient, findUserByUsername } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 /** (P1-A) قائمة تهيئة مريض التقويم السابق — قراءةٌ فقط، بلا مبالغ. */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return patientLegacyOnboardingCanonicalResponse(selected.handle, request, (await context.params).id);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const patientId = Number((await context.params).id);

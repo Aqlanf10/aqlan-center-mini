@@ -48,7 +48,7 @@ function diagnosisVersions() {
 function note(page: Page, label: string) {
   return page.locator(`#visit-notes label:has(> span:has-text("${label}")) > textarea`);
 }
-async function fixture(width: number, ortho = true, regimen: "ordinary" | "baseline" | "ongoing" | "recorded-none" = "ordinary") {
+async function fixture(width: number, ortho = true, regimen: "ordinary" | "baseline" | "ongoing" | "recorded-none" = "ordinary", returningPatient = true) {
   const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block" });
   const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
@@ -58,6 +58,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
   const diagnosisReads: string[] = [];
   let diagnosisResponse: { body: unknown; status: number } = { body: { diagnoses: diagnosisVersions() }, status: 200 };
   let stored: Record<string, unknown> = clinicalVisit(ortho);
+  if (!returningPatient) stored.previousVisit = null;
   if (regimen === "baseline") stored.ortho = { ...(stored.ortho as object), lastAdjustment: null,
     daysSinceLast: null, lastDone: null, elastics: null, elasticNote: "صنف ثانٍ 3/16 — ليلًا" };
   if (regimen === "ongoing") stored.ortho = { ...(stored.ortho as object), elastics: "class_ii",
@@ -97,6 +98,9 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
     else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId });
     else if (path === `/api/patients/${patientId}`) await json(route, { id: patientId, medicalAlert: null, phone: null });
     else if (path === `/api/patients/${patientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [] });
+    // This unrelated clinical fixture models capability availability, not lab commands.
+    // Keep the exact read local; every unlisted request still fails the fixture.
+    else if (method === "GET" && path === "/api/lab/work-intents/capability" && !url.search) await json(route, { supported: true });
     else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties") await json(route, [{ id: doctorId, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);
@@ -196,7 +200,8 @@ describe("orthodontic session-first chairside entry in the built page", () => {
       const session = f.page.locator("#visit-ortho-session");
       const position = await f.page.locator("#visit-ortho-session, #visit-notes, #visit-procedures").evaluateAll((nodes) => nodes.map((node) => node.id));
       expect(position).toEqual(["visit-ortho-session", "visit-notes", "visit-procedures"]);
-      expect(await note(f.page, "① الشكوى الرئيسية").inputValue()).toBe("سبب الموعد المخطّط");
+      // A prior visit is reference, not a new complaint copied into today's record.
+      expect(await note(f.page, "شكوى جديدة أو تغيّر اليوم (إن وجد)").inputValue()).toBe("");
       await start(f.page).click();
       expect(await note(f.page, "شكوى جديدة أو تغيّر اليوم (إن وجد)").inputValue()).toBe("");
       expect(await note(f.page, "فحص اليوم (إن أُجري)").inputValue()).toBe("");
@@ -275,8 +280,22 @@ describe("orthodontic session-first chairside entry in the built page", () => {
     } finally { await f.context.close(); }
   });
 
-  it.each([false, true])("leaves ordinary entry unchanged even with an active orthodontic case=%s", async (activeOrthoCase) => {
+  it.each([false, true])("uses contextual notes for a returning patient with active orthodontic case=%s", async (activeOrthoCase) => {
     const f = await fixture(1280, activeOrthoCase);
+    try {
+      expect(await f.page.locator("#visit-notes textarea").count()).toBe(5);
+      expect(await note(f.page, "① الشكوى الرئيسية").count()).toBe(0);
+      expect(await note(f.page, "شكوى جديدة أو تغيّر اليوم (إن وجد)").inputValue()).toBe("");
+      expect(await note(f.page, "فحص اليوم (إن أُجري)").inputValue()).toBe("");
+      expect(await note(f.page, "تشخيص جديد أو محدّث (إن وجد)").inputValue()).toBe("");
+      expect(await f.page.locator("#visit-notes details").getAttribute("open")).toBeNull();
+      expect(await done(f.page).count()).toBe(0);
+      expect(f.writes).toEqual([]); assertSafe(f);
+    } finally { await f.context.close(); }
+  });
+
+  it.each([false, true])("keeps first-visit ordinary entry when previousVisit is null even with an active orthodontic case=%s", async (activeOrthoCase) => {
+    const f = await fixture(1280, activeOrthoCase, "ordinary", false);
     try {
       expect(await f.page.locator("#visit-notes textarea").count()).toBe(5);
       expect(await note(f.page, "① الشكوى الرئيسية").inputValue()).toBe("سبب الموعد المخطّط");
@@ -376,13 +395,17 @@ describe("Today baseline elastic confirmation in the built RTL page", () => {
       await expect.poll(() => elasticClass.isEnabled()).toBe(true);
       expect(f.writes[0]).not.toHaveProperty("orthoSession"); expect(await elasticClass.inputValue()).toBe("");
       await elasticClass.selectOption(width === 1280 ? "class_ii" : "none");
+      await review(f.page).click();
+      await f.page.getByRole("alert").filter({ hasText: "وثّق ما تم في جلسة التقويم" }).waitFor();
+      expect(await dialog(f.page).count()).toBe(0); expect(f.writes).toHaveLength(1);
+      await done(f.page).fill("مراجعة اليوم دون تغيير");
       await review(f.page).click(); await dialog(f.page).waitFor();
       expect(await dialog(f.page).getByTestId("ortho-session-review").textContent()).toContain(width === 1280 ? "صنف ثانٍ" : "بلا مطاطات");
       await dialog(f.page).getByRole("button", { name: /وقّع الزيارة/ }).click();
       await expect.poll(() => f.writes.filter((body) => body.action === "sign").length).toBe(1);
       expect(f.writes.find((body) => body.action === "sign")?.orthoSession).toMatchObject(width === 1280
-        ? { elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", done: "" }
-        : { elastics: "none", elasticNote: "", done: "" });
+        ? { elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", done: "مراجعة اليوم دون تغيير" }
+        : { elastics: "none", elasticNote: "", done: "مراجعة اليوم دون تغيير" });
       assertSafe(f);
     } finally { await f.context.close(); }
   });
@@ -394,6 +417,10 @@ describe("Today baseline elastic confirmation in the built RTL page", () => {
       expect(await f.page.getByLabel("مطاطات هذه الشدّة", { exact: true }).inputValue()).toBe("none");
       expect(await f.page.getByLabel("أسابيع حتى الشدّة القادمة", { exact: true }).inputValue()).toBe("8");
       expect(await f.page.getByTestId("visit-baseline-elastics").count()).toBe(0);
+      await review(f.page).click();
+      await f.page.getByRole("alert").filter({ hasText: "وثّق ما تم في جلسة التقويم" }).waitFor();
+      expect(await dialog(f.page).count()).toBe(0); expect(f.writes).toEqual([]);
+      await done(f.page).fill("مراجعة اليوم دون تغيير");
       await review(f.page).click(); await dialog(f.page).waitFor(); assertSafe(f);
     } finally { await f.context.close(); }
   });

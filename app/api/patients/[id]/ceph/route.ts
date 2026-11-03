@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import {
+  canonicalCephFailure,
+  commandCanonicalCephCreate,
+  readCanonicalPatientCephAnalyses,
+} from "@/lib/canonical-ceph";
+import { canonicalPatientGet, NO_STORE } from "@/lib/canonical-patient-http";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
@@ -7,6 +13,7 @@ import {
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +35,13 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const { id: rawId } = await context.params;
+  const canonical = await canonicalPatientGet(rawId, readCanonicalPatientCephAnalyses, "تعذّر تحميل تحليلات السيفالو.");
+  if (canonical) return canonical;
+
   const session = await requireSession();
   if (!session) return denied();
-  const patientId = await patientIdFrom(context);
+  const patientId = Number.isInteger(Number(rawId)) && Number(rawId) > 0 ? Number(rawId) : null;
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
   if (!(await canAccessPatient(session, patientId, "canViewXrays"))) {
     return NextResponse.json({ message: "غير مصرّح لك بالوصول لتحليلات هذا المريض." }, { status: 403 });
@@ -59,6 +70,28 @@ const textOrNull = (v: unknown, cap: number): string | null => {
 };
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const patientId = await patientIdFrom(context);
+    if (!patientId) return NextResponse.json({ code: "invalid_ceph_input", message: "رقم الملف غير صالح." }, { status: 400, headers: NO_STORE });
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_ceph_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(await commandCanonicalCephCreate(selected.handle, patientId, body), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalCephFailure(error, "تعذّر فتح التحليل. تأكد من المستند.");
+    }
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Logo } from "@/components/Icon";
+import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import {
   ChatComposer,
   daySeparatorLabel,
@@ -50,6 +51,9 @@ interface PortalAppointmentView {
 type StatementFeed = PortalStatement;
 
 export default function PortalPage() {
+  const portalEnabled = useSetting("portal.enabled");
+  const clinicName = useClinicName();
+  const clinicPhone = useSetting("clinic.phone");
   const [session, setSession] = useState<{ fullName: string; patientNumber: string } | null>(null);
   const [checking, setChecking] = useState(true);
   const [tab, setTab] = useState<Tab>("appointments");
@@ -72,6 +76,25 @@ export default function PortalPage() {
       window.location.replace("/checkin");
     }
   }, [session]);
+
+  if (portalEnabled === "false") {
+    return (
+      <main className="mx-auto max-w-lg p-6">
+        <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-card">
+          <Logo className="mx-auto h-14 w-14" />
+          <h1 className="mt-4 text-lg font-bold text-navy-900">{clinicName}</h1>
+          <p className="mt-3 text-sm leading-relaxed text-slate-600">
+            بوابة المريض متوقفة حاليًا بقرار إدارة المركز. يرجى التواصل مع الاستقبال مباشرةً.
+          </p>
+          {clinicPhone ? (
+            <p className="mt-4 text-xs font-semibold text-slate-500">
+              هاتف المركز: <span className="ltr-nums">{clinicPhone}</span>
+            </p>
+          ) : null}
+        </div>
+      </main>
+    );
+  }
 
   if (checking) {
     return <main className="flex min-h-screen items-center justify-center p-6 text-sm text-slate-500">…</main>;

@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  previewLegacyVoidCanonicalResponse,
+  voidLegacyTreatmentCanonicalResponse,
+} from "@/lib/canonical-patient-finance-history";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getLegacyVoidPreview, voidLegacyTreatment } from "@/lib/legacy-treatment-db";
@@ -6,6 +10,7 @@ import { LEGACY_TREATMENT_MESSAGE, LEGACY_TREATMENT_STATUS, type LegacyVoidRefus
 import { isLegacyVoidMode, parseLegacyVoidRequest } from "@/lib/legacy-treatment-void";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string; agreementId: string }> };
@@ -21,6 +26,12 @@ const idsFrom = (params: { id: string; agreementId: string }) => {
 
 /** Read-only financial preview; no role expansion and no guessed agreement-to-receipt allocation. */
 export async function GET(request: Request, context: Context) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });
+  if (selected.kind === "canonical") {
+    const raw = await context.params;
+    return previewLegacyVoidCanonicalResponse(selected.handle, request, raw.id, raw.agreementId);
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });
   if (!isAdmin(session.role)) return refused("void_forbidden");
@@ -40,6 +51,12 @@ export async function GET(request: Request, context: Context) {
 
 /** Both modes retain existing isAdmin authority; only explicit manager_authorized can use the reviewed exception. */
 export async function POST(request: Request, context: Context) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });
+  if (selected.kind === "canonical") {
+    const raw = await context.params;
+    return voidLegacyTreatmentCanonicalResponse(selected.handle, request, raw.id, raw.agreementId);
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });
   if (!isAdmin(session.role)) return refused("void_forbidden");

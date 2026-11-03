@@ -5,6 +5,7 @@
  */
 
 import {
+  CLINIC_TIME_ZONE,
   getPatientFile,
   searchPatients,
   patientLedger,
@@ -14,6 +15,7 @@ import {
   type PatientSummary,
 } from "../db";
 import { canAccessPatient } from "../patient-access";
+import { clinicDateString } from "../schedule";
 import type { SessionPayload } from "../auth";
 import { patientBalancesByCurrency, toCurrencyPaymentLikes, balancesText, formatMoney, CLINIC_BASE_CURRENCY } from "../money";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton } from "./types";
@@ -149,7 +151,7 @@ export async function getPatientSummary(
     const [file, ledger, plans] = await Promise.all([
       getPatientFile(patientId).catch(() => null),
       patientLedger(patientId).catch(() => ({ invoices: [], payments: [], openings: [] })),
-      listPatientPlans(patientId, context.todayISO || new Date().toISOString().slice(0, 10)).catch(() => []),
+      listPatientPlans(patientId, context.todayISO || clinicDateString(new Date(), CLINIC_TIME_ZONE)).catch(() => []),
     ]);
 
     if (!file) {

@@ -340,3 +340,12 @@ export async function assertApprovedReceiptLimit(client:DbClient,a:ApprovedAgree
   const settlement=settlePaymentMinor({amountMinor,currency,baseAmountMinor},a.currency);
   if(!positive(settlement)||settlement>position.remainingMinor||settlement>(await debtAccountDue(client,a.patient_id,a.currency)).due)fail("المبلغ يتجاوز متبقي المصدر أو الحساب.");
 }
+
+/** @internal Shared non-`server-only` primitives for `lib/canonical-approved-agreements.ts`. */
+export const approvedAgreementsInternal = Object.freeze({
+  fail,
+  validKey,
+  positive,
+  approvedSourceMatches,
+  target,
+});

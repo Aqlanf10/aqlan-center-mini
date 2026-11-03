@@ -1,10 +1,12 @@
+import { MAX_PASSWORD_LENGTH, hashPassword, legacySessionEvidence } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createStaffUser, findUserByUsername, listUsers, recordAudit } from "@/lib/db";
-import { hashPassword } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalUsersGet, canonicalUsersPost } from "@/lib/canonical-users-self";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
 import { validateDoctorCommissionConfigInput } from "@/lib/doctor-permissions";
 
@@ -16,6 +18,10 @@ const forbidden = () =>
   NextResponse.json({ message: "إدارة المستخدمين للمدير وحده." }, { status: 403 });
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalUsersGet(selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return forbidden();
@@ -27,6 +33,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalUsersPost(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return forbidden();
@@ -51,8 +61,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اكتب الاسم الظاهر." }, { status: 400 });
   }
   const password = typeof source.password === "string" ? source.password : "";
-  if (password.length < 8) {
-    return NextResponse.json({ message: "كلمة المرور يجب ألا تقل عن 8 أحرف." }, { status: 400 });
+  if (password.length < 8 || password.length > MAX_PASSWORD_LENGTH) {
+    return NextResponse.json({ message: `كلمة المرور يجب أن تكون بين 8 و${MAX_PASSWORD_LENGTH} حرفًا.` }, { status: 400 });
   }
   if (!isRole(source.role)) {
     return NextResponse.json({ message: "اختر الدور." }, { status: 400 });
@@ -79,11 +89,13 @@ export async function POST(request: Request) {
     if (await findUserByUsername(username)) {
       return NextResponse.json({ message: "اسم الدخول مستخدم بالفعل." }, { status: 409 });
     }
+    const evidence=legacySessionEvidence(session);
+    if(!evidence)return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401});
     const created = await createStaffUser({
       username, displayName, role: source.role,
       passwordHash: await hashPassword(password),
       specialty, branch, permissions, commissionConfig,
-    }, { actor: session.username, actorRole: session.role, reason: "إنشاء مستخدم" });
+    }, { actor: session.username, actorRole: session.role, reason: "إنشاء مستخدم" }, {evidence});
     await recordAudit({
       action: "user.create", entity: "user", entityId: created.id,
       entityLabel: created.username,

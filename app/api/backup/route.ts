@@ -4,6 +4,8 @@ import { backupFileName } from "@/lib/backup";
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalBackupSqlGet } from "@/lib/canonical-owner-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,14 @@ export const dynamic = "force-dynamic";
  * دفعةً واحدة يُسقط الخدمة عند أول نسخة كبيرة — وأسوأ وقت لسقوطها هو لحظة أخذ نسخة.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalBackupSqlGet(selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

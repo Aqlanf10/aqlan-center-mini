@@ -326,7 +326,7 @@ describe("Reconciliation — journal = patient ledgers = party statements = Exec
       const canonicalAr = kpis.receivableByCurrency.find((row) => row.currency === currency)?.dueMinor ?? 0;
       expect({ currency, ar: ledgerAr }).toEqual({ currency, ar: canonicalAr });
 
-      const ledgerAp = ["2101", "2102", "2103", "2104", "2105"].reduce((sum, code) =>
+      const ledgerAp = ["2101", "2102", "2103", "2104", "2105", "2106", "2107"].reduce((sum, code) =>
         sum + (rows.find((row) => row.code === code && (row as { currency?: string }).currency === currency)?.balanceMinor ?? 0), 0);
       const canonicalAp = (await payablesByCurrency()).find((row) => row.currency === currency)?.dueMinor ?? 0;
       expect({ currency, ap: ledgerAp }).toEqual({ currency, ap: canonicalAp });

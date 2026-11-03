@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { baseUrl, harness, authedMutation } from "./_server";
+import { baseUrl, harness, authedGet, authedMutation, loginStaff, TEST_USERS } from "./_server";
 
 /**
  * سياسة الأصل الدقيق على HTTP حقيقي (P2-FIX-4):
@@ -30,8 +30,10 @@ function cookieMutationWithOrigin(origin: string, extraHeaders: Record<string, s
 
 describe("(P2-FIX-4) المطابقة الحرفية للأصل على طلبات الكوكي", () => {
   it("نفس الأصل الكانوني حرفياً (APP_ORIGIN) ⇒ يعبر الحارس", async () => {
-    const response = await authedMutation("/api/auth/logout", h.sessions.admin, "POST");
+    const disposable = await loginStaff(TEST_USERS.admin.username, TEST_USERS.admin.password);
+    const response = await authedMutation("/api/auth/logout", disposable, "POST");
     expect([200, 204]).toContain(response.status);
+    expect((await authedGet("/api/auth/me", disposable)).status).toBe(401);
   });
 
   it("نفس المضيف ببروتوكول آخر (https بدل http) ⇒ 403", async () => {

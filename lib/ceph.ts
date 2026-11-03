@@ -297,7 +297,7 @@ export const MEASUREMENTS: MeasurementDef[] = [
   { code: "A_NPERP", ar: "بُعد A عن عمود N", en: "A to N-perpendicular", group: "sagittal", schools: ["mcnamara", "webceph"], unit: "mm", needs: ["N", "Or", "Po", "A"], mean: 0.5, tol: 0.5, source: "McNamara / WebCeph", note: "الأمام موجب — والمنشور (McNamara): من ٠ إلى +١ مم أمام العمود للبالغين" },
   { code: "POG_NPERP", ar: "بُعد Pog عن عمود N", en: "Pog to N-perpendicular", group: "sagittal", schools: ["mcnamara", "webceph"], unit: "mm", needs: ["N", "Or", "Po", "Pog"], mean: -2, tol: 2, source: "McNamara / WebCeph", note: "الأمام موجب — والمنشور (McNamara): من −٤ إلى ٠ مم خلف العمود للبالغين، والإناث −٤ إلى −٢" },
   { code: "FMA", ar: "FMA — FH مع مستوى الفك السفلي", en: "FMA", group: "vertical", schools: ["tweed", "downs", "webceph"], unit: "°", needs: ["Or", "Po", "Me", "Go"], mean: 25, tol: 3, source: "Tweed / WebCeph", note: "الأعلى: نموٌّ مائل للأفقي؛ الأدنى: للعمقي" },
-  { code: "SNGOGN", ar: "SN-GoGn — انحدار الفك", en: "SN-GoGn", group: "vertical", schools: ["steiner", "webceph"], unit: "°", needs: ["S", "N", "Me", "Go"], mean: 32, tol: 5, source: "Steiner" },
+  { code: "SNGOGN", ar: "SN-GoGn — انحدار الفك", en: "SN-GoGn", group: "vertical", schools: ["steiner", "webceph"], unit: "°", needs: ["S", "N", "Me", "Go"], mean: 32, tol: 5, source: "Steiner", note: "يُحسب على مستوى الفك السفلي Go–Me توافقًا مع FMA/WebCeph وثبات السجلات المختومة؛ ولقياس شتاينر الصريح على مستوى Go–Gn انظر دالة measureSteinerSnGoGn" },
   { code: "JARABAK", ar: "نسبة Jarabak — (S-Go)/(N-Me)", en: "Jarabak ratio", group: "vertical", schools: ["jarabak", "webceph"], unit: "%", needs: ["S", "N", "Me", "Go"], mean: 65, tol: 5, source: "Jarabak", note: "الأدنى من ٦٢: اتجاه عمودي؛ الأعلى من ٦٨: اتجاه أفقي تقريبًا" },
   { code: "SADDLE", ar: "زاوية السرج N-S-Ar", en: "Saddle angle (N-S-Ar)", group: "vertical", schools: ["jarabak", "steiner", "webceph"], unit: "°", needs: ["N", "S", "Ar"], mean: 123, tol: 5, source: "Bjork / Jarabak", note: "زاوية قاعدة الجمجمة الخلفية (123°±5°): الزاوية الكبيرة (>128°) ترجع المفصل الفكي للخلف وتزيد من ميل الصنف الثاني" },
   { code: "ARTICULAR", ar: "زاوية الارتكاز المفصلي S-Ar-Go", en: "Articular angle (S-Ar-Go)", group: "vertical", schools: ["jarabak", "webceph"], unit: "°", needs: ["S", "Ar", "Go"], mean: 143, tol: 6, source: "Bjork / Jarabak", note: "زاوية المفصل الفكي (143°±6°): الأكبر تزيد من الطول العمودي للوجه وتدير الفك للأسفل والخلف" },
@@ -346,6 +346,16 @@ export type LandmarkMap = Partial<Record<LandmarkCode, Pt>>;
  * المقياس (NaN) يجعلها غير متاحة بينما الزوايا تعمل — فالطبيب يرى الأنغام قبل
  * أن تكتمل المعايرة.
  */
+/**
+ * زاوية شتاينر الصريحة بين قاعدة الجمجمة الأمامية (S–N) ومستوى Go–Gn (وليس Go–Me).
+ * مفصولة كدالة مرجعية مستقلة حتى لا تتغير القيم المختومة أو المرجعية القائمة تلقائيًا
+ * قبل اعتماد أخصائي التقويم للمستوى المفضل (S25 / R31).
+ */
+export function measureSteinerSnGoGn(L: LandmarkMap): number {
+  if (L.S == null || L.N == null || L.Go == null || L.Gn == null) return NaN;
+  return angleBetween(vec(L.S, L.N), vec(L.Go, L.Gn));
+}
+
 export function measure(code: string, L: LandmarkMap, mmPerPixel: number): number {
   const p = (c: LandmarkCode): Pt => L[c] as Pt;
   const has = (...cs: LandmarkCode[]): boolean => cs.every((c) => L[c] != null);

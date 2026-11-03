@@ -160,6 +160,22 @@ export default function LoginPage() {
         return;
       }
 
+      /* الهوية الموحّدة: لا تُبنى الجلسة من رد الدخول. تحميلٌ كامل يجعل التخطيط على الخادم
+         يقبل الكوكي الجديدة بإثبات القاعدة الحالي ويمرّر إسقاط قدراتها الحالي. */
+      if (payload?.canonical === true) {
+        try {
+          if (rememberUsername) {
+            localStorage.setItem(SAVED_USERNAME_KEY, trimmedUsername);
+          } else {
+            localStorage.removeItem(SAVED_USERNAME_KEY);
+          }
+        } catch {
+          // ignore storage errors
+        }
+        window.location.assign("/");
+        return;
+      }
+
       // A 200 response alone is not a usable login result.
       if (typeof payload?.username !== "string" || !payload.username.trim()
         || typeof payload?.role !== "string" || !payload.role.trim()) {
@@ -179,7 +195,6 @@ export default function LoginPage() {
       } catch {
         // ignore storage errors
       }
-
       // (P2-FIX-1) تحديث حالة الجلسة في سياق التطبيق — الجلسة كوكي HttpOnly
       // ضبطها الخادم في الرد نفسه، والعرض هنا بياناتٍ غير حساسة فقط.
       // لا توكن يُستلم ولا يُخزَّن في JavaScript إطلاقاً.

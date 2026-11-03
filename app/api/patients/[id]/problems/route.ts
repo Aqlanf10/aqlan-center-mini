@@ -1,3 +1,7 @@
+import { canonicalPatientGet, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalClinicalRecordsFailure, commandCanonicalProblemCreate } from "@/lib/canonical-clinical-records";
+import { readCanonicalProblems } from "@/lib/canonical-patient-reads";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NextResponse } from "next/server";
 import { createPatientProblem, listPatientProblems } from "@/lib/db";
 import { checkProblemDraft } from "@/lib/cases";
@@ -7,6 +11,9 @@ export const dynamic = "force-dynamic";
 
 /** (CASE-MODEL-1) قائمة مشاكل المريض. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 3): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await params).id, readCanonicalProblems, "تعذّر تحميل قائمة المشاكل.");
+  if (canonical) return canonical;
   const patientId = idOf((await params).id);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, false);
@@ -19,6 +26,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) return read.response;
+    try {
+      return NextResponse.json(
+        await commandCanonicalProblemCreate(selected.handle, (await params).id, read.body),
+        { status: 201, headers: NO_STORE },
+      );
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر حفظ المشكلة. أعد المحاولة.");
+    }
+  }
   const patientId = idOf((await params).id);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, true);

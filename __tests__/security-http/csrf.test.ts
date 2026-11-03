@@ -5,6 +5,7 @@ import {
   harness,
   authedGet,
   authedMutation,
+  loginStaff,
   TEST_USERS,
   TEST_PATIENTS,
 } from "./_server";
@@ -163,9 +164,11 @@ describe("حارس الـmutations — الطلبات المعتمدة بالك�
   });
 
   it("same-origin (Origin مطابق + Sec-Fetch-Site نفس الموقع) ⇒ يعبر الحارس", async () => {
-    const response = await authedMutation("/api/auth/logout", h.sessions.admin, "POST");
-    // نجاح الحارس: الطلب يصل المسار — logout يرد 200 بجسم ok
+    const disposable = await loginStaff(TEST_USERS.admin.username, TEST_USERS.admin.password);
+    const response = await authedMutation("/api/auth/logout", disposable, "POST");
+    // نجاح الحارس: الطلب يصل المسار — logout يرد 200 بجسم ok ويبطل الجلسة على الخادم
     expect([200, 204]).toContain(response.status);
+    expect((await authedGet("/api/auth/me", disposable)).status).toBe(401);
   });
 
   it("حارس الخروج نفسه: خروج بكوكي عبر cross-site ⇒ 403", async () => {

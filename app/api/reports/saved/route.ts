@@ -17,6 +17,13 @@ import {
   type ReportSectionId,
 } from "@/lib/saved-reports";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalSavedReportsDelete,
+  canonicalSavedReportsGet,
+  canonicalSavedReportsPatch,
+  canonicalSavedReportsPost,
+} from "@/lib/canonical-saved-reports";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +35,10 @@ function positiveId(value: unknown): number | null {
 }
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return bad("انتهت الجلسة. سجّل الدخول من جديد.", 401);
+  if (selected.kind === "canonical") return canonicalSavedReportsGet(selected.handle);
+
   const session = await requireSession();
   if (!session) return bad("انتهت الجلسة. سجّل الدخول من جديد.", 401);
   try {
@@ -44,6 +55,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return bad("انتهت الجلسة. سجّل الدخول من جديد.", 401);
+  if (selected.kind === "canonical") return canonicalSavedReportsPost(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return bad("انتهت الجلسة. سجّل الدخول من جديد.", 401);
 
@@ -105,6 +120,10 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return bad("انتهت الجلسة. سجّل الدخول من جديد.", 401);
+  if (selected.kind === "canonical") return canonicalSavedReportsPatch(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return bad("انتهت الجلسة. سجّل الدخول من جديد.", 401);
 
@@ -149,6 +168,10 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return bad("انتهت الجلسة. سجّل الدخول من جديد.", 401);
+  if (selected.kind === "canonical") return canonicalSavedReportsDelete(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return bad("انتهت الجلسة. سجّل الدخول من جديد.", 401);
   const id = positiveId(new URL(request.url).searchParams.get("id"));

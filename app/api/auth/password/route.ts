@@ -4,11 +4,13 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { consumeStaffLoginAttempt, findUserByUsername, recordAudit, updateUser } from "@/lib/db";
 import {
-  SESSION_COOKIE, SESSION_DURATION_MS, createSessionToken, hashPassword,
+  SESSION_COOKIE, SESSION_DURATION_MS, createSessionToken, hashPassword, legacySessionEvidence,
   sessionCredentialVersion, sessionPermissionVersion, verifyPassword,
 } from "@/lib/auth";
 import { staffSessionCookieSecure } from "@/lib/sessionCookie";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalAuthPasswordPost } from "@/lib/canonical-users-self";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,14 @@ const MAX_PASSWORD_LENGTH = 200;
  * جلسةً جديدة فلا يُطرد من يغيّر كلمته.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalAuthPasswordPost(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -71,7 +81,9 @@ export async function POST(request: Request) {
     }
 
     const passwordHash = await hashPassword(newPassword);
-    const updated = await updateUser(user.id, { passwordHash });
+    const evidence=legacySessionEvidence(session);
+    if(!evidence)return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401});
+    const updated = await updateUser(user.id, { passwordHash }, {actor:session.username,actorRole:session.role,reason:"تغيير كلمة المرور ذاتياً"}, {evidence,selfPassword:true});
     if (!updated) {
       return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
     }
@@ -87,7 +99,7 @@ export async function POST(request: Request) {
       role: updated.role,
       expiresAt: Date.now() + SESSION_DURATION_MS,
       partyId: updated.partyId,
-      credentialVersion: sessionCredentialVersion(passwordHash),
+      credentialVersion: sessionCredentialVersion(passwordHash, updated.sessionVersion ?? user.sessionVersion ?? 0),
       // Match login issuance, using the current permissions returned by the update.
       ...(updated.role === "cashier" || updated.role === "accountant" ? {
         financeAccess: updated.permissions?.financeAccess,

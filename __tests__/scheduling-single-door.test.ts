@@ -57,18 +57,20 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
   });
 
   it("كاتبو اليوم المقفل (createNextSession / confirmBookingRequest / schedulePlannedVisit) لا يُستدعون إلا من مسارٍ يحكم", () => {
-    const writers = ["createNextSession", "confirmBookingRequest", "schedulePlannedVisit"];
+    const writers = ["createNextSession", "createNextSessionWith", "confirmBookingRequest", "schedulePlannedVisit"];
     const callers = production
       .filter(({ code }) => writers.some((name) => calls(code, name)))
       .map(({ file }) => file).sort();
     // db.ts: أغلفته الداخلية تحت القفل نفسه؛ والبقية مساراتٌ تُثبَت أدناه — ملفٌّ جديد يستدعيهم يسقط هنا.
-    expect(callers).toEqual([
-      "app/api/booking-requests/[id]/route.ts",
-      "app/api/planned-visits/[id]/schedule/route.ts",
-      "app/api/visits/[id]/next/route.ts",
-      "lib/db.ts",
-    ]);
-    for (const { file, code } of production.filter(({ file }) => file.startsWith("app/api/") && callers.includes(file))) {
+    // The booking-request confirmation (M2 slice 21) and planned-visit scheduling (slice 22)
+    // doors are lib files shared by the legacy and canonical branches of their routes.
+    const doors = ["lib/booking-request-confirm.ts", "lib/planned-visit-schedule.ts", "lib/canonical-next-session.ts"];
+    expect(callers).toEqual(["app/api/visits/[id]/next/route.ts", ...doors, "lib/db.ts"].sort());
+    const bookingRoute = production.find(({ file }) => file === "app/api/booking-requests/[id]/route.ts")!;
+    expect(calls(bookingRoute.code, "confirmThroughEngine")).toBe(true);
+    const scheduleRoute = production.find(({ file }) => file === "app/api/planned-visits/[id]/schedule/route.ts")!;
+    expect(calls(scheduleRoute.code, "schedulePlannedVisitThroughEngine")).toBe(true);
+    for (const { file, code } of production.filter(({ file }) => (file.startsWith("app/api/") || doors.includes(file)) && callers.includes(file))) {
       for (const required of ["judgeBookingInDay", "actorCanOverride", "recordCapacityOverride"]) {
         // استدعاءٌ تنفيذي لا اسمٌ مستورد أو مذكور في تعليق.
         expect({ file, required, called: calls(code, required) }).toEqual({ file, required, called: true });
@@ -83,9 +85,15 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
     expect(callers("bookAppointment")).toEqual([
       "app/api/appointments/route.ts",
       "lib/ai-tools/action-tools.ts",
+      // The canonical booking (M2 slice 16) is the same door on the admitted transaction.
+      "lib/canonical-appointments.ts",
       "lib/waiting-list-booking.ts",
     ]);
-    expect(callers("rescheduleAppointment")).toEqual(["app/api/appointments/[id]/route.ts"]);
+    expect(callers("rescheduleAppointment")).toEqual([
+      "app/api/appointments/[id]/route.ts",
+      // The canonical reschedule (M2 slice 18) is the same door on the admitted transaction.
+      "lib/canonical-appointments.ts",
+    ]);
   });
 
   it("إدراجات appointments الخام: في lib/db.ts وحده، وفي كتّاب اليوم المقفل المعروفين فقط", () => {
@@ -103,7 +111,7 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
     expect(writers.sort()).toEqual([
       "confirmBookingRequest",     // يُحكم عليه في مسار طلبات الحجز تحت القفل
       "createAppointment",        // خام — للسكربتات فقط (حارس أعلاه)
-      "createNextSession",        // يُحكم عليه في مسار الزيارة التالية تحت القفل
+      "createNextSessionWith",    // يُحكم عليه في مسار الزيارة التالية تحت القفل
       "insertAppointmentOnClient", // قلب bookAppointment
       "schedulePlannedVisit",     // يُحكم عليه عبر judge في مسار الجلسة المخطَّطة
     ]);

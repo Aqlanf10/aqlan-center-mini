@@ -1436,6 +1436,34 @@ export default function UsersAndDoctorsPage() {
                       </div>
                     </div>
 
+                    {/* Case responsibility: viewing the suggestion and confirming it are separate grants. */}
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                      <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-navy-900">
+                        <span>🩺</span>
+                        <span>الطبيب المسؤول عن الحالات</span>
+                      </h4>
+                      <div className="space-y-2.5">
+                        {([
+                          ["canViewResponsibilitySuggestion", "رؤية الطبيب المسؤول والطبيب المقترح", "عرض فقط ضمن ملفات المرضى المسموحة؛ لا يعتمد ولا يغيّر شيئًا."],
+                          ["canConfirmCaseResponsibility", "اعتماد الطبيب المسؤول أو تغييره", "يحفظ المسؤولية بسبب مكتوب ويُسجَّل في التدقيق؛ يُسحب أثره فورًا عند إلغاء الصلاحية."],
+                        ] as const).map(([key, label, hint]) => (
+                          <button key={key} type="button" role="switch" aria-checked={editForm.permissions[key] === true} aria-label={label}
+                            onClick={() => setEditForm((c) => ({ ...c, permissions: { ...c.permissions, [key]: !c.permissions[key] } }))}
+                            className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-right transition-all ${
+                              editForm.permissions[key] ? "border-blue-300 bg-blue-50/50" : "border-slate-200 bg-slate-50/40 hover:bg-slate-50"
+                            }`}>
+                            <span>
+                              <span className="block text-xs font-black text-slate-900">{label}</span>
+                              <span className="mt-0.5 block text-[11px] leading-relaxed text-slate-500">{hint}</span>
+                            </span>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
+                              editForm.permissions[key] ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"
+                            }`}>{editForm.permissions[key] ? "✓ مسموح" : "✕ معطّل"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Section 2: Clinical Plans & Radiographs */}
                     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
                       <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-navy-900">
@@ -2322,6 +2350,11 @@ export default function UsersAndDoctorsPage() {
                       </div>
                     </div>
 
+                    {editForm.role === "reception" && <label className="flex gap-3 rounded-xl border p-4">
+                      <input type="checkbox" checked={editForm.permissions.canPrintSavedPrescriptions === true}
+                        onChange={event => setEditForm(current => ({ ...current, permissions: { ...current.permissions, canPrintSavedPrescriptions: event.target.checked } }))} />
+                      <span>إعادة طباعة الوصفات المحفوظة الفاعلة فقط — دون إنشاء أو تعديل أو إبطال</span>
+                    </label>}
                     {/* Section: AI Chatbot Permissions */}
                     <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 shadow-xs">
                       <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-indigo-950">

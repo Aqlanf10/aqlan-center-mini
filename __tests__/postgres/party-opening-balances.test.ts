@@ -32,8 +32,8 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
 }
 
 async function party(name: string, kind: "lab" | "supplier"): Promise<number> {
-  const [row] = await q<{ id: number }>(`INSERT INTO parties (name, kind) VALUES ($1, $2) RETURNING id`, [name, kind]);
-  return row.id;
+  const created = await db.createParty({ name, kind, phone: null, commissionPercent: 0, note: null });
+  return created.id;
 }
 
 async function opening(partyId: number, amountMinor: number, currency: Currency, reference: string | null = null) {
@@ -128,11 +128,11 @@ describe("(FIA-1) Scenario C — legacy lab/supplier debts before go-live", () =
     for (const currency of ["YER", "SAR", "USD"] as const) {
       expect(incomeStatement(openingBalances, currency).totalExpensesMinor).toBe(0);
     }
-    // (TD-REG-028) كل دَين سابق بعملته في الذمم: 1,000.00 ر.س و500.00 $ بعملتيهما لا بمكافئ.
+    // (TD-REG-028 / FIN-02) كل دَين سابق بعملته في الذمم وعلى حساب ذمم الموردين 2105: 1,000.00 ر.س و500.00 $ بعملتيهما لا بمكافئ.
     const sar = openingEntries.find((entry) => entry.reference === `OP-${supplierBPayable}`)!;
     expect(sar.lines).toEqual([
       { accountCode: "3101", currency: "SAR", amountMinor: 100_000, side: "debit" },
-      { accountCode: "2101", currency: "SAR", amountMinor: 100_000, side: "credit" },
+      { accountCode: "2105", currency: "SAR", amountMinor: 100_000, side: "credit" },
     ]);
   });
 
@@ -221,8 +221,8 @@ describe("(FIA-1) Scenario C — legacy lab/supplier debts before go-live", () =
     expect((await totalsOf(supplierB)).find((row) => row.currency === "SAR")).toMatchObject({ openingAdvanceMinor: 20_000 });
     const entry = (await journalEntries(AS_OF, AS_OF)).find((row) => row.reference === `OA-${advance.value.id}`)!;
     expect(entry.lines).toEqual([
-      // (TD-REG-028) بعملة الرصيد المقدَّم نفسها — 200.00 ر.س لا مكافئها اليمني.
-      { accountCode: "2101", currency: "SAR", amountMinor: 20_000, side: "debit" },
+      // (TD-REG-028 / FIN-02) بعملة الرصيد المقدَّم نفسها وعلى حساب ذمم الموردين 2105.
+      { accountCode: "2105", currency: "SAR", amountMinor: 20_000, side: "debit" },
       { accountCode: "3101", currency: "SAR", amountMinor: 20_000, side: "credit" },
     ]);
 
