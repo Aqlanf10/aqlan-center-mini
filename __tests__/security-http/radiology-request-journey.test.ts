@@ -192,7 +192,10 @@ it('refuses a clinician draft after a real cookie switch and issues the same com
   await page.getByRole('button',{name:'فتح طلبات الأشعة',exact:true}).click();
   await page.getByRole('button',{name:'عرض / تحديث السجل',exact:true}).click();
   await page.getByRole('button',{name:'طلب أشعة جديد',exact:true}).click();
-  await page.getByLabel('مركز الأشعة',{exact:true}).selectOption(center.id);
+  // The wrapping label includes option text for getByLabel; match the select's
+  // exact accessible name and role instead, without weakening the owner checks.
+  const centerPicker=page.getByRole('combobox',{name:'مركز الأشعة',exact:true});
+  expect(await centerPicker.selectOption(center.id)).toEqual([center.id]);
   await page.getByLabel('نوع الأشعة المطلوبة',{exact:true}).fill(examination);
   await page.getByLabel('المنطقة / الأسنان المطلوبة',{exact:true}).fill('SYN-DRAFT-OWNER-REGION');
   await cookie(h.sessions.doctorB.cookie);
