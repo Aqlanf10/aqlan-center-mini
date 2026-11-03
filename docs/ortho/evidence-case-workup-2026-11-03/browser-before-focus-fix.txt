@@ -1,0 +1,50 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-followup-reminder-built-page.test.ts __tests__/security-http/ortho-records-case-ui.test.ts __tests__/security-http/patient-ceph-post-built-page.test.ts __tests__/security-http/patient-diagnosis-ui.test.ts __tests__/security-http/hr-temporal-history-ui.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-workup-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-followup-reminder-built-page.test.ts (2 tests | 1 failed) 3690ms
+     × distinguishes an invitation from a real booking without navigating to WhatsApp at 390px 1535ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-followup-reminder-built-page.test.ts > truthful unbooked follow-up on the real built orthodontic board > distinguishes an invitation from a real booking without navigating to WhatsApp at 390px
+AssertionError: expected [ false, false, false, false, false ] to deeply equal [ true, true, true, true, true ]
+
+- Expected
++ Received
+
+  [
+-   true,
+-   true,
+-   true,
+-   true,
+-   true,
++   false,
++   false,
++   false,
++   false,
++   false,
+  ]
+
+ ❯ capture __tests__/security-http/ortho-followup-reminder-built-page.test.ts:176:26
+    174|     }
+    175|     expect(control.noHorizontalOverflow).toBe(true); expect(control.fo…
+    176|     expect(control.hits).toEqual([true, true, true, true, true]);
+       |                          ^
+    177|   }
+    178| }
+ ❯ __tests__/security-http/ortho-followup-reminder-built-page.test.ts:211:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 21 passed (22)
+   Start at  20:34:06
+   Duration  52.26s (transform 329ms, setup 0ms, import 852ms, tests 46.24s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

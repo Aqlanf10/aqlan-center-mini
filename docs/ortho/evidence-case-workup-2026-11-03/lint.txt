@@ -1,0 +1,74 @@
+
+/workspace/ortho-workup-flow/app/ortho/page.tsx
+  72:26  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-workup-flow/app/ortho/page.tsx:72:26
+  70 |   }, []);
+  71 |
+> 72 |   useEffect(() => { void load(); }, [load]);
+     |                          ^^^^ Avoid calling setState() directly within an effect
+  73 |
+  74 |   const buckets = feed?.buckets ?? [];
+  75 |   const activeBucket = buckets.find((bucket) => bucket.bucket === active) ?? null;  react-hooks/set-state-in-effect
+
+/workspace/ortho-workup-flow/components/PatientOrtho.tsx
+   334:51  warning  React Hook useMemo has unnecessary dependencies: 'authority', 'caseId', and 'patientId'. Either exclude them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 react-hooks/exhaustive-deps
+   337:48  warning  React Hook useMemo has unnecessary dependencies: 'draft' and 'owner'. Either exclude them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    react-hooks/exhaustive-deps
+   536:44  warning  React Hook useMemo has unnecessary dependencies: 'authority' and 'patientId'. Either exclude them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            react-hooks/exhaustive-deps
+   668:21  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-workup-flow/components/PatientOrtho.tsx:668:21
+  666 |   }, [owner, patientId, readUsername, readRole, deny]);
+  667 |
+> 668 |   useEffect(() => { load(); }, [load]);
+      |                     ^^^^ Avoid calling setState() directly within an effect
+  669 |
+  670 |   const refreshAfterConfirmedChange = () => {
+  671 |     if (!owner.active || owner.denied) return;                                                                                                                                                                                                                                                                                                                         react-hooks/set-state-in-effect
+  1463:54  warning  React Hook useMemo has unnecessary dependencies: 'booking' and 'form.draft'. Either exclude them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             react-hooks/exhaustive-deps
+  2066:26  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-workup-flow/components/PatientOrtho.tsx:2066:26
+  2064 |   }, [patientId, orthoCaseId]);
+  2065 |
+> 2066 |   useEffect(() => { void load(); }, [load]);
+       |                          ^^^^ Avoid calling setState() directly within an effect
+  2067 |
+  2068 |   const columns = useMemo(() => buildComparison(photos), [photos]);
+  2069 |   const withPhotos = columns.filter((column) => column.count > 0);                                                                                                                                                                                                                                                                                     react-hooks/set-state-in-effect
+  2409:60  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-workup-flow/components/PatientOrtho.tsx:2409:60
+  2407 |     if (kind === "study") {
+  2408 |       const owner = parent.studies.get(caseId) ?? makeStudyMountOwner({ ...shared, recovery: parent.studyRecovery });
+> 2409 |       parent.studies.set(caseId, owner); owner.activate(); setBinding(owner);
+       |                                                            ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  2410 |     } else {
+  2411 |       const owner = parent.retentions.get(caseId) ?? makeRetentionMountOwner({ ...shared, recovery: parent.retentionRecovery });
+  2412 |       parent.retentions.set(caseId, owner); owner.activate(); setBinding(owner);  react-hooks/set-state-in-effect
+
+✖ 8 problems (0 errors, 8 warnings)

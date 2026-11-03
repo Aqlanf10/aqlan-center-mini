@@ -1,0 +1,223 @@
+{
+  "viewport": {
+    "width": 1280,
+    "height": 1000
+  },
+  "page": "/ortho",
+  "messages": {
+    "unbooked": {
+      "href": "https://wa.me/967770111001?text=%D8%A7%D9%84%D8%B3%D9%84%D8%A7%D9%85%20%D8%B9%D9%84%D9%8A%D9%83%D9%85%20%D9%85%D8%B1%D9%8A%D8%B6%20%D9%85%D8%AA%D8%A7%D8%A8%D8%B9%D8%A9%20%D8%A7%D8%B5%D8%B7%D9%86%D8%A7%D8%B9%D9%8A%20%D8%A8%D9%84%D8%A7%20%D8%AD%D8%AC%D8%B2%D8%8C%0A%0A%D9%86%D9%88%D8%AF%D9%91%20%D8%AA%D8%B1%D8%AA%D9%8A%D8%A8%20%D9%85%D9%88%D8%B9%D8%AF%20%D9%85%D8%AA%D8%A7%D8%A8%D8%B9%D8%A9%20%D9%84%D9%83%D9%85%20%D9%81%D9%8A%20%D9%85%D8%B1%D9%83%D8%B2%20%D8%A7%D9%84%D8%AF%D9%83%D8%AA%D9%88%D8%B1%20%D8%B9%D9%82%D9%84%D8%A7%D9%86%20%D8%A7%D9%84%D9%83%D8%A7%D9%85%D9%84%20%D9%84%D8%AA%D9%82%D9%88%D9%8A%D9%85%20%D9%88%D8%B2%D8%B1%D8%A7%D8%B9%D8%A9%20%D9%88%D8%AA%D8%AC%D9%85%D9%8A%D9%84%20%D8%A7%D9%84%D8%A3%D8%B3%D9%86%D8%A7%D9%86.%0A%D9%8A%D8%B1%D8%AC%D9%89%20%D8%A7%D9%84%D8%AA%D9%88%D8%A7%D8%B5%D9%84%20%D9%85%D8%B9%D9%86%D8%A7%20%D9%84%D8%A7%D8%AE%D8%AA%D9%8A%D8%A7%D8%B1%20%D9%85%D9%88%D8%B9%D8%AF%20%D9%8A%D9%86%D8%A7%D8%B3%D8%A8%D9%83%D9%85.%0A%0A%D9%84%D9%84%D8%AA%D9%88%D8%A7%D8%B5%D9%84%3A%2004-253028",
+      "text": "السلام عليكم مريض متابعة اصطناعي بلا حجز،\n\nنودّ ترتيب موعد متابعة لكم في مركز الدكتور عقلان الكامل لتقويم وزراعة وتجميل الأسنان.\nيرجى التواصل معنا لاختيار موعد يناسبكم.\n\nللتواصل: 04-253028"
+    },
+    "booked": {
+      "href": "https://wa.me/967770111002?text=%D8%A7%D9%84%D8%B3%D9%84%D8%A7%D9%85%20%D8%B9%D9%84%D9%8A%D9%83%D9%85%20%D9%85%D8%B1%D9%8A%D8%B6%20%D9%85%D8%AA%D8%A7%D8%A8%D8%B9%D8%A9%20%D8%A7%D8%B5%D8%B7%D9%86%D8%A7%D8%B9%D9%8A%20%D8%A8%D9%85%D9%88%D8%B9%D8%AF%20%D9%85%D8%AD%D8%AC%D9%88%D8%B2%D8%8C%0A%0A%D9%86%D8%B0%D9%83%D9%91%D8%B1%D9%83%D9%85%20%D8%A8%D9%85%D9%88%D8%B9%D8%AF%D9%83%D9%85%20%D9%81%D9%8A%20%D9%85%D8%B1%D9%83%D8%B2%20%D8%A7%D9%84%D8%AF%D9%83%D8%AA%D9%88%D8%B1%20%D8%B9%D9%82%D9%84%D8%A7%D9%86%20%D8%A7%D9%84%D9%83%D8%A7%D9%85%D9%84%20%D9%84%D8%AA%D9%82%D9%88%D9%8A%D9%85%20%D9%88%D8%B2%D8%B1%D8%A7%D8%B9%D8%A9%20%D9%88%D8%AA%D8%AC%D9%85%D9%8A%D9%84%20%D8%A7%D9%84%D8%A3%D8%B3%D9%86%D8%A7%D9%86%3A%0A%D8%A7%D9%84%D8%AE%D9%85%D9%8A%D8%B3%2008%2F10%20%D8%A7%D9%84%D8%B3%D8%A7%D8%B9%D8%A9%2010%3A30%20%D8%B5%D8%A8%D8%A7%D8%AD%D9%8B%D8%A7%0A%0A%D8%A5%D9%86%20%D9%83%D8%A7%D9%86%20%D8%A7%D9%84%D9%85%D9%88%D8%B9%D8%AF%20%D9%84%D8%A7%20%D9%8A%D9%86%D8%A7%D8%B3%D8%A8%D9%83%D9%85%D8%8C%20%D8%A3%D8%AE%D8%A8%D8%B1%D9%88%D9%86%D8%A7%20%D9%84%D9%86%D8%A4%D8%AC%D9%84%D9%87%20%E2%80%94%20%D9%85%D9%83%D8%A7%D9%86%D9%83%D9%85%20%D9%85%D8%AD%D9%81%D9%88%D8%B8.%0A%D9%84%D9%84%D8%AA%D9%88%D8%A7%D8%B5%D9%84%3A%2004-253028",
+      "text": "السلام عليكم مريض متابعة اصطناعي بموعد محجوز،\n\nنذكّركم بموعدكم في مركز الدكتور عقلان الكامل لتقويم وزراعة وتجميل الأسنان:\nالخميس 08/10 الساعة 10:30 صباحًا\n\nإن كان الموعد لا يناسبكم، أخبرونا لنؤجله — مكانكم محفوظ.\nللتواصل: 04-253028"
+    }
+  },
+  "controls": [
+    {
+      "label": "واتساب لترتيب متابعة",
+      "width": 127.546875,
+      "height": 44,
+      "left": 621.875,
+      "right": 749.421875,
+      "top": 690,
+      "bottom": 734,
+      "row": {
+        "left": 8,
+        "right": 1032,
+        "top": 434.5,
+        "bottom": 747
+      },
+      "text": [
+        {
+          "left": 634.875,
+          "right": 736.421875,
+          "top": 703,
+          "bottom": 721
+        }
+      ],
+      "viewportWidth": 1280,
+      "viewportHeight": 1000,
+      "noHorizontalOverflow": true,
+      "focused": true,
+      "hits": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "label": "واتساب تذكير",
+      "width": 88.078125,
+      "height": 44,
+      "left": 113.03125,
+      "right": 201.109375,
+      "top": 777.5,
+      "bottom": 821.5,
+      "row": {
+        "left": 8,
+        "right": 1032,
+        "top": 755,
+        "bottom": 844
+      },
+      "text": [
+        {
+          "left": 126.03125,
+          "right": 188.109375,
+          "top": 790.5,
+          "bottom": 808.5
+        }
+      ],
+      "viewportWidth": 1280,
+      "viewportHeight": 1000,
+      "noHorizontalOverflow": true,
+      "focused": true,
+      "hits": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "label": "فتح يوم المواعيد",
+      "width": 90,
+      "height": 44,
+      "left": 920,
+      "right": 1010,
+      "top": 562.5,
+      "bottom": 606.5,
+      "row": {
+        "left": 8,
+        "right": 1032,
+        "top": 434.5,
+        "bottom": 747
+      },
+      "text": [
+        {
+          "left": 928,
+          "right": 1002,
+          "top": 575.25,
+          "bottom": 592.25
+        }
+      ],
+      "viewportWidth": 1280,
+      "viewportHeight": 1000,
+      "noHorizontalOverflow": true,
+      "focused": true,
+      "hits": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "label": "فتح يوم المواعيد",
+      "width": 90,
+      "height": 44,
+      "left": 920,
+      "right": 1010,
+      "top": 627,
+      "bottom": 671,
+      "row": {
+        "left": 8,
+        "right": 1032,
+        "top": 434.5,
+        "bottom": 747
+      },
+      "text": [
+        {
+          "left": 928,
+          "right": 1002,
+          "top": 639.75,
+          "bottom": 656.75
+        }
+      ],
+      "viewportWidth": 1280,
+      "viewportHeight": 1000,
+      "noHorizontalOverflow": true,
+      "focused": true,
+      "hits": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "label": "راجع يوم المواعيد أولًا",
+      "width": 127.046875,
+      "height": 44,
+      "left": 891.953125,
+      "right": 1019,
+      "top": 690,
+      "bottom": 734,
+      "row": {
+        "left": 8,
+        "right": 1032,
+        "top": 434.5,
+        "bottom": 747
+      },
+      "text": [
+        {
+          "left": 903.953125,
+          "right": 1007,
+          "top": 703,
+          "bottom": 721
+        }
+      ],
+      "viewportWidth": 1280,
+      "viewportHeight": 1000,
+      "noHorizontalOverflow": true,
+      "focused": true,
+      "hits": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "label": "افتح ملف المريض للمراجعة",
+      "width": 158.6875,
+      "height": 44,
+      "left": 113.03125,
+      "right": 271.71875,
+      "top": 360,
+      "bottom": 404,
+      "row": {
+        "left": 8,
+        "right": 1032,
+        "top": 337.5,
+        "bottom": 426.5
+      },
+      "text": [
+        {
+          "left": 126.03125,
+          "right": 258.71875,
+          "top": 373,
+          "bottom": 391
+        }
+      ],
+      "viewportWidth": 1280,
+      "viewportHeight": 1000,
+      "noHorizontalOverflow": true,
+      "focused": true,
+      "hits": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    }
+  ]
+}

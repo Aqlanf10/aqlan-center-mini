@@ -1,0 +1,15 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-followup-reminder-built-page.test.ts __tests__/security-http/ortho-records-case-ui.test.ts __tests__/security-http/patient-ceph-post-built-page.test.ts __tests__/security-http/patient-diagnosis-ui.test.ts __tests__/security-http/hr-temporal-history-ui.test.ts __tests__/security-http/ortho-workup-browser.test.ts __tests__/security-http/ortho-record-upload-browser.test.ts __tests__/security-http/ortho-guided-assessment-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-workup-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  8 passed (8)
+      Tests  29 passed (29)
+   Start at  20:38:57
+   Duration  82.62s (transform 531ms, setup 0ms, import 1.10s, tests 76.12s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

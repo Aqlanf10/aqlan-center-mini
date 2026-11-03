@@ -1,0 +1,267 @@
+{
+  "scope": "تحديث جزئي لتنقل رحلة الملف الأساسية؛ لا قبول سريري للخطوات الثلاث عشرة أو السيناريوهات الـ52",
+  "source": {
+    "library_file_id": "libfile_3264db5ea3248191b1703154440d7912",
+    "sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+    "hash_verified": true
+  },
+  "parent_commit": "75f9671b0c5877875fb86546206ff3183ca7b735",
+  "application_commit": "b6084eff40e5ac805eac43ac5d210c6b5789251e",
+  "branch": "feat/ortho-case-workup-20261103",
+  "build_id": "1xyDfmW3N5JE_1eCg_EXT",
+  "full_plan_accepted": false,
+  "requirements": [
+    {
+      "id": "V2R086",
+      "source_line": 86,
+      "requirement": "| 1 | الوصول وبيانات التعريف | استدعاء المريض والحالة والموعد والطبيب والفرع دون تسجيل المريض مرة ثانية؛ تحديد حالة جديدة/قديمة/محولة |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "عرض الهوية وسياق البداية المعروف؛ الموعد والفرع وتصنيف التحويل لم يكتمل.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R087",
+      "source_line": 87,
+      "requirement": "| 2 | المقابلة والشكوى | الشكوى الرئيسية بكلام المريض، التوقعات، التاريخ الطبي والسني والعائلي والتقويمي والعادات؛ اقتراح حقول منظمة دون اختراع إجابات |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "وصول موحد للمقابلة وحفظ الشكوى ثم استعادتها؛ تفاصيل المقابلة الأخرى ليست جميعها مكتملة.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R088",
+      "source_line": 88,
+      "requirement": "| 3 | الفحص خارج الفم | الصور والفحص الأمامي والجانبي والابتسامة والتناسق والنسب والأنسجة الرخوة والوظائف، مع حقول القياس والملاحظات |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الوصول إلى فحص الوجه وأداة القياس الحالية؛ لا قبول لكل التحليلات المطلوبة.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R089",
+      "source_line": 89,
+      "requirement": "| 4 | الفحص داخل الفم | الأسنان والعلاقات الإطباقية لكل جانب، overjet/overbite، الخطوط الوسطية، التزاحم/التباعد، curve of Spee، والصور والنتائج الأخرى |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الوصول إلى فحص الفم الموجود؛ لا قبول مستقل لكل حقل أو علاقة إطباقية هنا.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R090",
+      "source_line": 90,
+      "requirement": "| 5 | القياسات وتحليل الموديلات | إدخال أحجام الأسنان وقياسات القوس مرة واحدة على نموذج واضح للفكين؛ اختيار تحليل أو عدة تحليلات وتشغيلها تلقائيًا من هذه البيانات |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الوصول إلى المدخلات المشتركة الحالية؛ بعض طرق التحليل ومراجعها ما زالت ناقصة.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R091",
+      "source_line": 91,
+      "requirement": "| 6 | البانوراما | ربط الصورة الأصلية وتاريخها، وفحص الطبيب ونتائجه وتعليقاته المرتبطة بالأسنان؛ لا تُستنتج نتيجة شعاعية من اسم الملف |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الصورة ومصدرها في الحالة؛ قراءة البانوراما بحسب السن ما زالت ناقصة.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R092",
+      "source_line": 92,
+      "requirement": "| 7 | السيفالو | الصورة والتاريخ والمرحلة والمعايرة والمعالم ثم الحساب والتفسير والمراجعة والاعتماد، في سياق الحالة نفسها |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الوصول إلى أداة السيفالو الحالية؛ لا قبول جميع T1–T4 أو طرق المقارنة هنا.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R093",
+      "source_line": 93,
+      "requirement": "| 8 | خلاصة التشخيص وقائمة المشكلات | تجميع الملاحظات والقياسات والتحليلات والصور مع مصادرها، ثم مراجعة الطبيب وصياغة التشخيص واعتماده |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الوصول إلى التشخيص الموجود؛ تجميع جميع المشاكل والمصادر غير مكتمل.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R094",
+      "source_line": 94,
+      "requirement": "| 9 | الأهداف وخطة العلاج والميكانيكا | أهداف وبدائل وإجراءات واستراتيجيات وإرساء وخطة مسافات وموافقات مرتبطة بالمشكلات |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الوصول إلى سجل الاستراتيجية الموجود؛ لا قبول تفصيلي لكل ميكانيكا أو موافقة.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R095",
+      "source_line": 95,
+      "requirement": "| 10 | الاتفاق المالي والموافقة | تحديد نطاق الاتفاق والمبلغ والعملة والخصم والدفعة والأقساط وربط الفاتورة؛ توثيق ما سُدد سابقًا للحالة القديمة وإصدار نسخة الاتفاق |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "عرض الاتفاق الحالي في خطوته بحسب الصلاحية؛ لا قبول مالي شامل جديد.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R096",
+      "source_line": 96,
+      "requirement": "| 11 | التركيب والزيارات والتحصيل | تسجيل ما نُفذ وصوره ومتابعته، وربط كل عمل بتغطية الاتفاق أو قرار مالي مستقل؛ تحصيل المستحق عبر الحساب القائم دون إعادة المقابلة كل مرة |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الوصول إلى الزيارات دون إعادة المقابلة؛ اكتمال تغطية كل إجراء وربطه المالي غير مقبول هنا.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R097",
+      "source_line": 97,
+      "requirement": "| 12 | النتيجة والإنهاء والتثبيت | تقييم الأهداف، فك الجهاز والمثبتات لكل فك والتعليمات وزيارات الاستبقاء؛ عرض الوضع المالي النهائي مستقلًا عن القرار السريري |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الوصول إلى سجل التثبيت الموجود؛ لا قبول كامل لتقييم النتائج وإنهاء كل فك.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R098",
+      "source_line": 98,
+      "requirement": "| 13 | دراسة الحالة الموثقة داخل البرنامج | عرض متكامل باسم المركز والمريض يُحفظ ويُراجع داخل الحالة، مع تعبئة محتواه من السجل؛ تصدير PPTX أو PDF اختياري عند الطلب |",
+      "priority": "P1",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الوصول إلى الدراسة المحفوظة؛ العرض المصور والتصدير المصور لم يكتمل.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R102",
+      "source_line": 102,
+      "requirement": "- أزرار «السابق» و«حفظ والمتابعة» ومؤشر خطوات واضح؛ يمكن الرجوع لأي جزء وتسجيل مسودة أو تخطي جزء غير متاح مع إظهار النقص. لا تحبس الطبيب في معالج خطي يمنع تقديم الرعاية.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الرجوع الحر وحفظ التقييم والمتابعة مؤكدة محلياً؛ حالة كل خطوة وتخطيها مع أسباب النقص ما زالت ناقصة.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R103",
+      "source_line": 103,
+      "requirement": "- المرحلة التالية تستفيد من بيانات السابقة تلقائيًا. لكل قيمة وصورة ونتيجة مالك واحد، ويُفتح مصدرها للتعديل من الملخص أو العرض.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "الخطوات تستخدم نفس مالكي البيانات؛ لم تكتمل إعادة استخدام كل قيمة في العرض.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R104",
+      "source_line": 104,
+      "requirement": "- الحالة الجديدة تبدأ بالمقابلة، والحالة القديمة تبدأ بتحديد الوضع الحالي وما توفر من الأرشيف، والزيارة الدورية تفتح نموذج الزيارة المختصر. لا يُجبر العائد على إعادة إعداد الحالة.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "وضع اختياري للتقييم والاستكمال؛ المدخل من الوصول والزيارة الدورية يحتاج قبولاً متكاملاً.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R105",
+      "source_line": 105,
+      "requirement": "- أظهر حالة كل خطوة: لم تبدأ / مسودة / مكتملة المدخلات / تحتاج مراجعة / معتمدة حيث ينطبق الاعتماد. اكتمال الحقول ليس اعتمادًا سريريًا.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "زيارة خطوة لا تعتمدها؛ حالات اكتمال ومراجعة كل خطوة ما زالت ناقصة.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    },
+    {
+      "id": "V2R106",
+      "source_line": 106,
+      "requirement": "- ترتيب إدخال البيانات هو الترتيب أعلاه حسب طلب المالك؛ قالب دراسة الحالة الخاص بالمركز يحتفظ بتوزيع وترتيب شرائحه المرجعية المحددين في القسم «ل». اختلاف موضع إدخال القياس عن موضع شريحته لا يسبب إعادة الإدخال أو إعادة ترتيب يدوي.",
+      "priority": "P0",
+      "status": "موجود لكنه غير مترابط",
+      "assessment": "ترتيب الخطوات مطابق للنص؛ قالب عرض الحالة المصور لم يكتمل.",
+      "evidence": [
+        "lib/ortho-workup-navigation.ts",
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "full_requirement_accepted": false
+    }
+  ]
+}
