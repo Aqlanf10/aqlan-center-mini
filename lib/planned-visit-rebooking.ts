@@ -35,6 +35,7 @@ interface LockedPlan {
 }
 interface LockedAppointment {
   id: number; patient_id: number; referral_id: number | null; planned_visit_id: number | null;
+  clinical_category?: import("./appointment-category").AppointmentCategory | null;
   doctor_id: number | null; service_id: number | null; appointment_type: string | null;
   chair_no: number | null; is_new_patient: boolean; snapshot: Record<string, unknown>;
 }
@@ -86,7 +87,7 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
       judge: async (day, client) => {
         const { rows: locked } = await client.query<LockedAppointment>(
           `SELECT a.id, a.patient_id, a.referral_id, a.planned_visit_id, a.doctor_id,
-             a.service_id, a.appointment_type, a.chair_no, a.is_new_patient, to_jsonb(a) AS snapshot
+             a.service_id, a.appointment_type, a.clinical_category, a.chair_no, a.is_new_patient, to_jsonb(a) AS snapshot
            FROM appointments a WHERE a.id = $2 OR a.planned_visit_id = $1
              OR a.id = (SELECT appointment_id FROM planned_visits WHERE id = $1)
              OR ($3::int IS NOT NULL AND a.referral_id = $3)
@@ -186,6 +187,7 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
           patientId: plan.patient_id, date: input.date, time: input.time, durationMinutes: plan.duration_minutes,
           note: `من خطة العلاج: ${plan.title}`, doctorId, serviceId: service?.id ?? null,
           appointmentType: old.appointment_type ?? service?.legacyType ?? null,
+          clinicalCategory: old.clinical_category,
           bufferBeforeMinutes: service?.bufferBeforeMinutes ?? 0, bufferAfterMinutes: service?.bufferAfterMinutes ?? 0,
           occupiesChair: service?.requiresChair ?? true, chairNo: old.chair_no, isNewPatient: old.is_new_patient,
         });

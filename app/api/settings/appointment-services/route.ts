@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createAppointmentService, getSettings, listAppointmentServices } from "@/lib/db";
+import { CLINIC_TIME_ZONE, createAppointmentService, getSettings, listAppointmentServices } from "@/lib/db";
 import { chairCount } from "@/lib/settings";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     const [services, settings] = await Promise.all([
       listAppointmentServices({ includeInactive }), getSettings(),
     ]);
-    return NextResponse.json({ services, chairs: chairCount(settings) });
+    return NextResponse.json({ services, chairs: chairCount(settings), clinicTimeZone:CLINIC_TIME_ZONE });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الخدمات." }, { status: 500 });
   }

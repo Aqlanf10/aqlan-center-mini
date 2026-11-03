@@ -1,6 +1,7 @@
 /** A classified direct booking is a durable command, not an optional label on
  * the legacy booking path. The receipt is checked before any mutable service or
  * capacity reads, and no writer side effect runs on replay. */
+import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from './ortho-booking-intent';
 import type { SessionPayload } from './auth';
 import type { Appointment } from './schedule';
 import type { CapacityVerdict } from './capacity';
@@ -67,7 +68,7 @@ export async function recoverDirectPurposeAppointment(commandId:string,session:S
     if (receipt.actorUserId!==fresh.user.id || receipt.recordedBy!==fresh.current.username) {
       await client.query('ROLLBACK');return {kind:'denied_actor'};
     }
-    if (!await canAccessPatient(fresh.current,receipt.patientId,'canViewPlans',client,'nowait')) {
+    if (!await canAccessPatient(fresh.current,receipt.patientId,receipt.planScope ? 'canViewPlans' : undefined,client,'nowait')) {
       await client.query('ROLLBACK');return {kind:'denied_scope'};
     }
     if (fresh.current.role==='doctor' &&
@@ -100,6 +101,9 @@ export async function bookDirectPurposeAppointment(input:DirectAppointmentIntent
   } catch {
     return {ok:false,status:400,message:'بيانات أمر الحجز غير صالحة.'};
   }
+  if (intent.expectedActor && (intent.expectedActor.userId !== actor.session?.userId
+    || intent.expectedActor.username !== actor.session?.username))
+    return {ok:false,status:409,message:'هذا الطلب محفوظ لحساب آخر. سجّل الدخول بالحساب الذي بدأ الحجز.'};
   // The route must pass the signed admitted session. This guard also protects
   // any future server caller that attempts direct booking without one.
   if (!actor.session || actor.session.username!==actor.username)
@@ -130,7 +134,7 @@ export async function bookDirectPurposeAppointment(input:DirectAppointmentIntent
       if (receipt.actorUserId!==fresh.user.id || receipt.recordedBy!==fresh.current.username
         || receipt.commandHash!==commandHash)
         return {kind:'rejected' as const,conflict:reject(409,DENIED_COMMAND)};
-      if (!await canAccessPatient(fresh.current,receipt.patientId,'canViewPlans',client,'nowait'))
+      if (!await canAccessPatient(fresh.current,receipt.patientId,receipt.planScope ? 'canViewPlans' : undefined,client,'nowait'))
         return {kind:'rejected' as const,conflict:reject(403,DENIED_PLAN)};
       if (fresh.current.role==='doctor' &&
         (!fresh.user.partyId || !await lockBookableAppointmentDoctor(client,fresh.user.partyId,true)))
@@ -145,7 +149,7 @@ export async function bookDirectPurposeAppointment(input:DirectAppointmentIntent
     judge:async (sameDay,client)=>{
       fresh=await freshDirectPurposeActor(client,actor.session);
       if (!fresh) return reject(401,DENIED_SESSION);
-      if (!await canAccessPatient(fresh.current,intent.patientId,'canViewPlans',client,'nowait'))
+      if (!await canAccessPatient(fresh.current,intent.patientId,intent.appointmentPurpose ? 'canViewPlans' : undefined,client,'nowait'))
         return reject(403,DENIED_PLAN);
       context=await loadCapacityContext(client);
       service=await resolveService({serviceId:intent.serviceId,appointmentType:intent.appointmentType},client);
@@ -155,6 +159,8 @@ export async function bookDirectPurposeAppointment(input:DirectAppointmentIntent
         service=await lockAppointmentServiceForBooking(client,service.id);
         if (!service?.isActive) return reject(400,'تغيّرت خدمة الموعد؛ حدّث قائمة الخدمات وأعد الحجز.');
       }
+      if (intent.bookingIntent === 'ortho_follow_up' && (!intent.serviceId || intent.appointmentType !== 'follow_up'
+        || !isPeriodicFollowupService(service))) return reject(400,FOLLOWUP_SERVICE_REVIEW_MESSAGE);
       durationMinutes=intent.durationMinutes??service?.defaultDurationMinutes??30;
       if (durationMinutes<MIN_DURATION || durationMinutes>MAX_DURATION)
         return reject(400,`المدّة يجب أن تكون بين ${MIN_DURATION} و${MAX_DURATION} دقيقة.`);
@@ -184,9 +190,10 @@ export async function bookDirectPurposeAppointment(input:DirectAppointmentIntent
         bufferBeforeMinutes:service?.bufferBeforeMinutes??0,
         bufferAfterMinutes:service?.bufferAfterMinutes??0,
         chairNo:intent.chairNo,occupiesChair:service?.requiresChair??true,
-        isNewPatient:intent.isNewPatient,waitingListId:null,
+        isNewPatient:intent.isNewPatient,waitingListId:null,clinicalCategory:intent.clinicalCategory,
       });
       if (!appointment) throw new Error('APPOINTMENT_PURPOSE_APPOINTMENT_MISSING');
+      if (intent.appointmentPurpose) {
       await insertAppointmentPurposeProvenance(client,{appointmentId:appointment.id,
         purpose:intent.appointmentPurpose,sourcePlanId:null,sourcePlannedVisitId:null,
         recordedBy:fresh.current.username,commandId:input.commandId,
@@ -195,6 +202,12 @@ export async function bookDirectPurposeAppointment(input:DirectAppointmentIntent
         entityId:appointment.id,actor:fresh.current.username,actorRole:fresh.current.role,
         details:{purpose:intent.appointmentPurpose,patientId:intent.patientId,
           sourcePlanId:null,sourcePlannedVisitId:null,commandId:input.commandId}});
+      } else {
+        await client.query(`INSERT INTO appointment_booking_commands
+          (command_id,appointment_id,patient_id,actor_user_id,recorded_by,command_hash)
+          VALUES ($1,$2,$3,$4,$5,$6)`,[input.commandId,appointment.id,intent.patientId,
+          fresh.user.id,fresh.current.username,commandHash]);
+      }
       if (overridden) await insertAuditRow(client,{action:'appointment.capacity_override',entity:'appointment',
         entityId:appointment.id,actor:fresh.current.username,actorRole:fresh.current.role,
         details:{date:intent.date,time:intent.time,reason:intent.overrideReason,
@@ -209,6 +222,6 @@ export async function bookDirectPurposeAppointment(input:DirectAppointmentIntent
   if (result.replayed) return {ok:true,replayed:true,appointmentId:result.value.id,status:result.value.status};
   if (!verdict) throw new Error('APPOINTMENT_PURPOSE_JUDGE_MISSING');
   return {ok:true,replayed:false,appointment:result.value,verdict,overridden,
-    warning:verdict.outsideHours?'هذا الوقت خارج ورديات المركز — تأكّد قبل أن تَعِد المريض.':
-      verdict.state==='NEAR_CAPACITY'?verdict.message:null};
+    warning:(verdict as CapacityVerdict).outsideHours?'هذا الوقت خارج ورديات المركز — تأكّد قبل أن تَعِد المريض.':
+      (verdict as CapacityVerdict).state==='NEAR_CAPACITY'?(verdict as CapacityVerdict).message:null};
 }

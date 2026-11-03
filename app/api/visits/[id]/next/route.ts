@@ -6,7 +6,7 @@ import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
 import type { CapacityVerdict } from "@/lib/capacity";
 import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
 import { toWhatsAppNumber } from "@/lib/reminders";
-import { requireSession } from "@/lib/session";
+import { revalidateSessionInTransaction, requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
@@ -83,10 +83,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const result = await writeAppointmentInDay({
       date,
       judge: async (sameDay, client) => {
+        const freshSession = await revalidateSessionInTransaction(session, client);
+        if (!freshSession) return {ok:false as const,conflict:{message:"انتهت الجلسة؛ حدّث الصفحة."}};
+        if (visit.patientId !== null && !await canAccessPatient(freshSession,visit.patientId,undefined,client,"nowait"))
+          return {ok:false as const,conflict:{message:"تغيّرت صلاحية ملف المريض؛ حدّث الصفحة."}};
+        // Read the actual source under the same transaction used for admission
+        // and insertion. Never attribute the next appointment from a stale visit.
+        const {rows: sources} = await client.query<{patient_id:number|null;doctor_id:number|null}>(
+          'SELECT patient_id,doctor_id FROM visits WHERE id=$1 FOR UPDATE NOWAIT',[visitId]);
+        const source = sources[0];
+        if (!source || source.patient_id !== visit.patientId)
+          return {ok:false as const,conflict:{message:"تغيّرت الزيارة أو صلاحية ملف المريض؛ حدّث الصفحة."}};
         const judged = await judgeBookingInDay({
           sameDay, client, date, time, durationMinutes, service,
           context: capacityContext, canOverride, overrideReason,
-          patientId: visit.patientId,
+          patientId: source.patient_id, providerId:source.doctor_id,
         });
         if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
         if (judged.overridden) overrideState.verdict = judged.verdict;
@@ -112,7 +123,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       });
     }
     return NextResponse.json(created, { status: 201 });
-  } catch {
+  } catch (error) {
+    if ((error as {code?:string}).code === "55P03") return NextResponse.json({message:"يجري تحديث الزيارة أو جدول الطبيب؛ أعد المحاولة."},{status:409});
     return NextResponse.json({ message: "تعذّر حجز الجلسة. أعد المحاولة." }, { status: 500 });
   }
 }

@@ -3,11 +3,12 @@ import { chromium, type Browser, type BrowserContext } from "playwright";
 import { Client } from "pg";
 import { authedGet, authedMutation, baseUrl, harness } from "./_server";
 import { formatAmount } from "../../lib/money";
+import { seedAdvisoryDuty } from "../helpers/advisory-duty-fixture";
 
 /** Three independent journeys on the existing built-app/isolated PG harness.
  * Invoice tooth selection, clinical plan staging and collection use real browser controls.
  * Queue, specialty records, signing and scheduling use the real authenticated HTTP APIs.
- * SQL seeds only synthetic patients/services/shift and reads persisted evidence; it never
+ * SQL seeds only synthetic patients/services/shift/doctor duty and reads persisted evidence; it never
  * manufactures a visit, consent, invoice, signed record, completed session or appointment.
  */
 type Category = "ortho" | "rct" | "crown";
@@ -27,6 +28,7 @@ let h: Awaited<ReturnType<typeof harness>>;
 let browser: Browser;
 let db: Client;
 let doctorId = 0;
+let duty: Awaited<ReturnType<typeof seedAdvisoryDuty>> | undefined;
 const stamp = Date.now();
 const services: Record<Category, number> = { ortho: 0, rct: 0, crown: 0 };
 const prices: Record<Category, number> = { ortho: 30000000, rct: 6000000, crown: 9000000 };
@@ -38,6 +40,8 @@ beforeAll(async () => {
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
   ({ rows: [{ party_id: doctorId }] } = await db.query<{ party_id: number }>(`SELECT party_id FROM users WHERE username = 'secdoctora'`));
+  duty = await seedAdvisoryDuty(db, doctorId, "2000-01-01", "2099-12-31");
+  await db.query("UPDATE hr_work_schedules SET shift_end_time='19:00' WHERE id=$1 AND staff_id=$2", [duty.scheduleId, duty.staffId]);
   for (const category of Object.keys(services) as Category[]) {
     ({ rows: [{ id: services[category] }] } = await db.query<{ id: number }>(`INSERT INTO services
       (name, price_minor, is_active, price_configured, category) VALUES ($1, $2, TRUE, TRUE, $3) RETURNING id`,
@@ -50,6 +54,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all([...contexts].map((context) => context.close()));
   await browser?.close();
+  await duty?.cleanup();
   await db?.end();
 });
 

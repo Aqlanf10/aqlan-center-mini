@@ -25,7 +25,7 @@ let db: Client;
 let h: Awaited<ReturnType<typeof harness>>;
 
 const FROM_TIME = "11:00";
-const TO_TIME = "13:30";
+const TO_TIME = "15:30";
 const NEXT_DAY_TIME = "09:30";
 const NOTE = "رحلة نقل الموعد";
 let appointmentId = 0;

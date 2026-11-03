@@ -155,6 +155,7 @@ export class ProtectedAppointmentPurposeHistoryError extends Error {
 
 export const RESET_KEEP_TABLES = [
   "appointment_purpose_provenance",
+  "appointment_booking_commands",
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,

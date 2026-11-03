@@ -243,3 +243,22 @@ describe("GET patient listing parameter contracts", () => {
     expect(await response.json()).toMatchObject({ page: 0, pageSize: 25, filter: "all", sort: "recent", flag: "x".repeat(30) });
   });
 });
+
+describe("explicit appointment-category patient filtering", () => {
+  it.each(listingModes)("composes %s category with current doctor scope", async mode => {
+    const url = new URL(request(mode).url);
+    url.searchParams.set("appointmentCategory", "endodontics");
+    expect((await GET(new Request(url))).status).toBe(200);
+    if (mode === "search") expect(mocks.search).toHaveBeenCalledExactlyOnceWith("synthetic", 20, 7, "endodontics");
+    else expect(mocks.browse).toHaveBeenCalledWith(expect.objectContaining({ doctorPartyId: 7, appointmentCategory: "endodontics" }));
+  });
+  it.each(["cashier", "accountant", "assistant"])("denies category membership to %s before any listing read", async role => {
+    mocks.session.mockResolvedValue({ ...session, role });
+    expect((await GET(new Request("http://test.invalid/api/patients?appointmentCategory=filling"))).status).toBe(403);
+    expectNoListingReads();
+  });
+  it.each(["", "unknown", "filling' OR true--"])("rejects invalid explicit category %j instead of broadening", async value => {
+    expect((await GET(new Request(`http://test.invalid/api/patients?appointmentCategory=${encodeURIComponent(value)}`))).status).toBe(400);
+    expectNoListingReads();
+  });
+});

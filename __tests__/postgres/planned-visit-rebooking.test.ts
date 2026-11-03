@@ -140,6 +140,10 @@ it("rejects a different-patient doctor and expired/revoked accounts including re
 });
 async function referralFixture() {
   const f=await fixture(); const [doctor]=await q("INSERT INTO parties(kind,name) VALUES ('doctor','Synthetic receiver') RETURNING id");
+  const rosterUser = await actor("doctor", doctor.id);
+  const [staff] = await q("INSERT INTO hr_staff(full_name,department,user_id,created_by) VALUES ('Synthetic rebooking roster','doctors',$1,'synthetic') RETURNING id", [rosterUser.userId]);
+  await q(`INSERT INTO hr_work_schedules(staff_id,name,schedule_type,effective_from,working_days,shift_start_time,shift_end_time,created_by)
+    VALUES ($1,'Synthetic all-day roster','morning','2000-01-01','[0,1,2,3,4,5,6]','08:00','20:00','synthetic')`, [staff.id]);
   await q("UPDATE planned_visits SET doctor_id=$2 WHERE id=$1",[f.planned,doctor.id]);
   const [r]=await q(`INSERT INTO patient_referrals(patient_id,to_name,to_specialty,reason,created_by,kind,to_party_id,workflow_state)
     VALUES ($1,'Synthetic receiver','endodontics','Synthetic request','synthetic','internal',$2,'accepted') RETURNING id`,[f.patient,doctor.id]);

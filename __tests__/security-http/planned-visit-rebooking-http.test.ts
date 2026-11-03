@@ -1,3 +1,4 @@
+import { seedAdvisoryDuty } from "../helpers/advisory-duty-fixture";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
@@ -8,6 +9,7 @@ import { authedGet, authedMutation, harness, type Session } from "./_server";
  * No browser, production connection, status reopening, or financial mutation. */
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
+const duties:Awaited<ReturnType<typeof seedAdvisoryDuty>>[]=[];
 let doctorA = 0;
 let doctorB = 0;
 let shiftId = 0;
@@ -23,6 +25,7 @@ beforeAll(async () => {
     "SELECT username, party_id FROM users WHERE username IN ('secdoctora', 'secdoctorb')")).rows;
   doctorA = users.find(user => user.username === "secdoctora")!.party_id;
   doctorB = users.find(user => user.username === "secdoctorb")!.party_id;
+  for(const doctorId of [doctorA,doctorB]) duties.push(await seedAdvisoryDuty(db,doctorId,"2000-01-01","2099-12-31"));
   const workflow = await authedGet(`/api/patients/${h.seeded.patientAId}/workflow`, h.sessions.admin);
   expect(workflow.status).toBe(200);
   const calendar = await workflow.json() as { timeZone: string; today: string };
@@ -32,7 +35,7 @@ beforeAll(async () => {
     (opened_by, closed_by, status, closed_at) VALUES ('synthetic-rebook', 'synthetic-rebook', 'closed', NOW()) RETURNING id`)).rows[0].id;
 }, 120_000);
 
-afterAll(async () => { await db?.end(); });
+afterAll(async () => { for(const duty of duties) await duty.cleanup(); await db?.end(); });
 
 async function fixture(status: "no_show" | "cancelled" = "no_show", referral = false) {
   const unique = `${stamp}-${++serial}`;

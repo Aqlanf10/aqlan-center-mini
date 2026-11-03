@@ -23,7 +23,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   if (db) {
-    if (bookedIds.length) await db.query("DELETE FROM appointments WHERE id=ANY($1::int[])", [bookedIds]);
+    // Durable booking receipts retain appointment identity; release occupancy
+    // without deleting their protected history. The harness drops the database.
+    if (bookedIds.length) await db.query("UPDATE appointments SET status='cancelled' WHERE id=ANY($1::int[])", [bookedIds]);
     await duty?.cleanup();
     if (unknownDoctorId) await db.query("DELETE FROM parties WHERE id=$1 AND name='Synthetic doctor without roster'", [unknownDoctorId]);
     await db.end();
@@ -37,6 +39,7 @@ async function open(timezoneId = "UTC", day = date): Promise<{ context: BrowserC
   await page.goto(`${baseUrl}/appointments?date=${day}`, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: /حجز موعد جديد/ }).click();
   const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("التصنيف السريري للموعد",{exact:true}).selectOption("other");
   await dialog.locator('input[type="date"]').fill(day);
   await expect.poll(() => dialog.locator('select[id$="-doctor"] option').count()).toBeGreaterThan(1);
   return { context, page };

@@ -17,6 +17,7 @@ export interface DirectAppointmentCommandReceipt {
   actorUserId: number;
   recordedBy: string;
   commandHash: string;
+  planScope: boolean;
 }
 
 /** Immutable receipt lookup on the caller's transaction, after UUID fencing.
@@ -26,13 +27,16 @@ export async function findDirectAppointmentCommandReceipt(
 ): Promise<DirectAppointmentCommandReceipt | null> {
   const { rows } = await client.query<{
     appointment_id: number; patient_id: number; actor_user_id: number;
-    recorded_by: string; command_hash: string;
-  }>(`SELECT appointment_id,patient_id,actor_user_id,recorded_by,command_hash
-      FROM appointment_purpose_provenance WHERE command_id=$1::uuid`, [commandId]);
+    recorded_by: string; command_hash: string; plan_scope: boolean;
+  }>(`SELECT appointment_id,patient_id,actor_user_id,recorded_by,command_hash,true AS plan_scope
+      FROM appointment_purpose_provenance WHERE command_id=$1::uuid
+      UNION ALL
+      SELECT appointment_id,patient_id,actor_user_id,recorded_by,command_hash,false AS plan_scope
+      FROM appointment_booking_commands WHERE command_id=$1::uuid`, [commandId]);
   const row = rows[0];
   return row ? { appointmentId: row.appointment_id, patientId: row.patient_id,
     actorUserId: row.actor_user_id, recordedBy: row.recorded_by,
-    commandHash: row.command_hash } : null;
+    commandHash: row.command_hash, planScope: row.plan_scope } : null;
 }
 
 /** Caller passes only an already locked, server-derived origin; SQL verifies the
