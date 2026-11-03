@@ -1,0 +1,101 @@
+{
+  "phase": 11,
+  "base": "b436c244f3e31f208733f6523ae764453c7886b7",
+  "rows": [
+    {
+      "requirement": "المشكلة ومصدرها ومراجعة الطبيب داخل دراسة الحالة",
+      "previous": "مراجعة المصدر مرتبطة بالمشكلة والاستراتيجية فقط",
+      "current": "implemented_tested_focused",
+      "evidence": [
+        "lib/ortho-study-problem-review-store.ts",
+        "lib/ortho-case-study-capture.ts",
+        "__tests__/postgres/ortho-problem-sources.test.ts",
+        "__tests__/security-http/ortho-problem-sources-browser.test.ts"
+      ],
+      "limits": [
+        "عرض نصي للمصدر",
+        "لا اعتماد سريري جديد",
+        "الحزمة الكاملة لم تنته بعد"
+      ]
+    },
+    {
+      "requirement": "اللقطة التاريخية مع صلاحية المصدر الحالية",
+      "previous": "موجود لبقية أنواع مصادر الدراسة",
+      "current": "extended_tested_postgres",
+      "evidence": [
+        "lib/ortho-case-study-access.ts",
+        "lib/ortho-case-study-source-union.ts",
+        "__tests__/postgres/ortho-problem-sources.test.ts"
+      ],
+      "limits": [
+        "إزالة المصدر تمنع الوصول",
+        "تغير النص لا يعيد كتابة اللقطة"
+      ]
+    },
+    {
+      "requirement": "إظهار ملاحظات جهاز التقويم ومدخل الملف على الهاتف",
+      "previous": "فشل محلي بسبب تجاوز البطاقة ثم تغطية شريط التنقل",
+      "current": "implemented_tested_visual_and_browser",
+      "evidence": [
+        "components/PatientOrtho.tsx",
+        "__tests__/security-http/ortho-prescription-truth-built-page.test.ts"
+      ],
+      "limits": [
+        "عند عرض قسم خطة الجهاز",
+        "لا تعديل للروشتات الدوائية"
+      ]
+    },
+    {
+      "requirement": "اختبار قمرة المريض بالرد الحقيقي",
+      "previous": "أعيد إنتاج فشل قراءة جسم الرد200 بعد التنقل",
+      "current": "fixed_tested_focused",
+      "evidence": [
+        "__tests__/security-http/patient-cockpit-real-contract-ui.test.ts"
+      ],
+      "limits": [
+        "الحزمة الكاملة وCI مطلوبان منفصلين",
+        "لا تغيير في API أو قواعد المالية"
+      ]
+    },
+    {
+      "requirement": "مراجعة أصل محاضرتي الكاست وطرق المسافة",
+      "previous": "نسخLibrary القديمة لم تنزل بايتاتها",
+      "current": "originals_opened_all_slides_visually_reviewed",
+      "evidence": [
+        "2026-11-03-cast-space-reference-review.md"
+      ],
+      "limits": [
+        "المرفقان المباشران78و56شريحة",
+        "الفيديو المشار إليه بالشرائح لم يشغل",
+        "القراءة ليست اعتماداً علمياً لكل معلومة أو دليلاً على تنفيذها"
+      ]
+    },
+    {
+      "requirement": "تفعيل بقية تحاليل الأسنان المختلطة والعرض",
+      "previous": "أسماء معطلة أو غير منفذة",
+      "current": "not_implemented",
+      "evidence": [
+        "lib/ortho-assessment-measurement-set-v2.ts",
+        "lib/ortho-assessment-engine-2_1_0.ts"
+      ],
+      "limits": [
+        "المرجع والمدخلات والإصدار والاختبارات أولاً",
+        "عدم إعادة حساب التاريخ بمحرك معدل"
+      ]
+    },
+    {
+      "requirement": "ميزانية المسافات وIPR والطرق السبع وإغلاق المسافة",
+      "previous": "استراتيجية عامة وتوثيق زيارات دون سجل كمي متكامل",
+      "current": "not_implemented_structured",
+      "evidence": [
+        "2026-11-03-cast-space-reference-review.md"
+      ],
+      "limits": [
+        "لا أوامر علاج تلقائية",
+        "لا التزام مالي تلقائي",
+        "المخطط مختلف عن المنفذ"
+      ]
+    }
+  ],
+  "all52AcceptanceScenariosAccepted": false
+}

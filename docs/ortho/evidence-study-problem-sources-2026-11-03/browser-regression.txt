@@ -1,0 +1,52 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-problem-sources-browser.test.ts __tests__/security-http/ortho-journey-integration-browser.test.ts __tests__/security-http/ortho-case-navigation-browser.test.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/patient-cockpit-real-contract-ui.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-problem-sources-browser.test.ts (3 tests | 2 failed) 131326ms
+     × keeps one problem and plan reference through lost replies, stale tabs and corrected source at 390px 64468ms
+     × keeps one problem and plan reference through lost replies, stale tabs and corrected source at 1280px 64733ms
+ ❯ __tests__/security-http/ortho-prescription-truth-built-page.test.ts (2 tests | 1 failed) 5470ms
+     × retains unrecorded and closed legacy custom prescriptions at 390px without browser writes 2283ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-prescription-truth-built-page.test.ts > built orthodontic prescription truth > retains unrecorded and closed legacy custom prescriptions at 390px without browser writes
+AssertionError: expected 848.5 to be less than or equal to 845
+ ❯ capture __tests__/security-http/ortho-prescription-truth-built-page.test.ts:113:24
+    111|   });
+    112|   expect(frame.top).toBeGreaterThanOrEqual(79);
+    113|   expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
+       |                        ^
+    114|   expect(frame.identityExposed).toBe(true);
+    115|   const visibleContent = await card.evaluate(element => {
+ ❯ __tests__/security-http/ortho-prescription-truth-built-page.test.ts:229:91
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/security-http/ortho-problem-sources-browser.test.ts > source review on the built unified orthodontic patient workflow > keeps one problem and plan reference through lost replies, stale tabs and corrected source at 390px
+ FAIL  __tests__/security-http/ortho-problem-sources-browser.test.ts > source review on the built unified orthodontic patient workflow > keeps one problem and plan reference through lost replies, stale tabs and corrected source at 1280px
+TimeoutError: locator.click: Timeout 20000ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: 'التشخيص وقائمة المشاكل', exact: true })
+
+ ❯ __tests__/security-http/ortho-problem-sources-browser.test.ts:118:87
+    116|       try {
+    117|         expect((await printed.goto(`${baseUrl}${printHref}`))?.status(…
+    118|         expect(await printed.locator("main").innerText()).toContain("ت…
+       |                                                                                       ^
+    119|         await printed.pdf({ path: `.settings-ui-artifacts/ortho-study-…
+    120|       } finally { await printed.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  2 failed | 3 passed (5)
+      Tests  3 failed | 8 passed (11)
+   Start at  22:26:04
+   Duration  164.17s (transform 153ms, setup 0ms, import 699ms, tests 158.16s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

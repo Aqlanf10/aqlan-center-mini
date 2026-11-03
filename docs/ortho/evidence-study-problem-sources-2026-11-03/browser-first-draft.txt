@@ -1,0 +1,37 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-problem-sources-browser.test.ts __tests__/security-http/ortho-journey-integration-browser.test.ts __tests__/security-http/ortho-case-navigation-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-problem-sources-browser.test.ts (3 tests | 2 failed) 128689ms
+     × keeps one problem and plan reference through lost replies, stale tabs and corrected source at 390px 63622ms
+     × keeps one problem and plan reference through lost replies, stale tabs and corrected source at 1280px 63070ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-problem-sources-browser.test.ts > source review on the built unified orthodontic patient workflow > keeps one problem and plan reference through lost replies, stale tabs and corrected source at 390px
+ FAIL  __tests__/security-http/ortho-problem-sources-browser.test.ts > source review on the built unified orthodontic patient workflow > keeps one problem and plan reference through lost replies, stale tabs and corrected source at 1280px
+TimeoutError: locator.selectOption: Timeout 20000ms exceeded.
+Call log:
+  - waiting for getByRole('region', { name: 'دراسة حالة التقويم', exact: true }).getByRole('region', { name: 'مراجعة الدراسة المحفوظة', exact: true }).getByLabel('القسم المحفوظ المعروض', { exact: true })
+
+ ❯ __tests__/security-http/ortho-problem-sources-browser.test.ts:96:78
+     94|       await study.getByRole("button", { name: "حفظ مسودة الدراسة", exa…
+     95|       const reviewPanel = study.getByRole("region", { name: "مراجعة ال…
+     96|       await reviewPanel.getByLabel("القسم المحفوظ المعروض", { exact: t…
+       |                                                                              ^
+     97|       await reviewPanel.getByText("تصحيح موثق للمصدر الاصطناعي", { exa…
+     98|       expect(await reviewPanel.innerText()).toContain("هدف اصطناعي مرت…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 5 passed (7)
+   Start at  22:17:17
+   Duration  156.86s (transform 98ms, setup 0ms, import 663ms, tests 150.54s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

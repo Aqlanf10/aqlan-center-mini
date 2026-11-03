@@ -1,0 +1,34 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-problem-sources-browser.test.ts __tests__/security-http/ortho-journey-integration-browser.test.ts __tests__/security-http/ortho-case-navigation-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-problem-sources-browser.test.ts (3 tests | 2 failed) 131519ms
+     × keeps one problem and plan reference through lost replies, stale tabs and corrected source at 390px 65292ms
+     × keeps one problem and plan reference through lost replies, stale tabs and corrected source at 1280px 63965ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-problem-sources-browser.test.ts > source review on the built unified orthodontic patient workflow > keeps one problem and plan reference through lost replies, stale tabs and corrected source at 390px
+ FAIL  __tests__/security-http/ortho-problem-sources-browser.test.ts > source review on the built unified orthodontic patient workflow > keeps one problem and plan reference through lost replies, stale tabs and corrected source at 1280px
+TimeoutError: page.waitForResponse: Timeout 20000ms exceeded while waiting for event "response"
+ ❯ __tests__/security-http/ortho-problem-sources-browser.test.ts:101:31
+     99|       await reviewPanel.evaluate(el => el.scrollIntoView({ block: "sta…
+    100|       await page.screenshot({ path: `.settings-ui-artifacts/ortho-stud…
+    101|       const documented = page.waitForResponse(r => r.url().includes(`/…
+       |                               ^
+    102|       await study.getByRole("button", { name: "توثيق النسخة المحفوظة ن…
+    103|       const pptxHref = await study.getByRole("link", { name: "PowerPoi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 5 passed (7)
+   Start at  22:22:55
+   Duration  154.71s (transform 110ms, setup 0ms, import 750ms, tests 147.17s, environment 1ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

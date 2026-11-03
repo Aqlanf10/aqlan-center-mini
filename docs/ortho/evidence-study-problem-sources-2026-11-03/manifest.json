@@ -1,0 +1,297 @@
+{
+  "scope": "Phase11 immutable clinician problem-source reviews in saved studies and fixes for reproduced mobile/cockpit regressions; partial module acceptance only.",
+  "codeCommit": "b9e7a5d97563b8d28fa4d747c25fbf4471a9f1c3",
+  "parentCommit": "b436c244f3e31f208733f6523ae764453c7886b7",
+  "branch": "feat/ortho-study-problem-sources-20261103",
+  "buildId": "Ls7QlqANPVz2371d9cRKM",
+  "generatedAtUtc": "2026-11-03T23:00:43.213633+00:00",
+  "tests": {
+    "unit": {
+      "passed": 13996,
+      "files": 820
+    },
+    "postgresFocused": {
+      "passed": 14,
+      "files": 3
+    },
+    "httpBrowserFocused": {
+      "passed": 11,
+      "files": 5
+    },
+    "typecheck": "passed",
+    "lint": {
+      "errors": 0,
+      "warnings": 8
+    },
+    "httpWhole": {
+      "status": "running",
+      "notAccepted": true,
+      "observedLocalFailures": [
+        "daily-clinic-report-ui.test.ts: PDF font top bound",
+        "report-page-design-ui.test.ts: actual PDF acceptance, exact error pending suite completion",
+        "lab-dispatch-privacy-ui.test.ts: CI/GITHUB_ACTIONS-only beforeAll in local environment"
+      ],
+      "note": "Do not infer a browser-version cause or application regression without confirming evidence. No guard bypass."
+    },
+    "hostedCi": "not_yet_started_for_this_branch",
+    "runtimeBraces": {
+      "files": 9455,
+      "traces": 373,
+      "passed": true
+    },
+    "runtimeTooling": {
+      "traces": 743,
+      "manifests": 86,
+      "passed": true
+    }
+  },
+  "environments": {
+    "node": "22.23.3",
+    "npm": "11.21.1",
+    "postgres": "18.6",
+    "playwright": "1.63.0",
+    "localChromium": "151.0.7922.173",
+    "ciRequiredChromium": "153.0.8010.12",
+    "exactBrowserInstall": "blocked_by_network_403_Domain_forbidden"
+  },
+  "all52AcceptanceScenariosAccepted": false,
+  "files": [
+    {
+      "path": "unit-acceptance.txt",
+      "sha256": "d8e5bd7d4fdae6347afaeef2854059cbaa5238111da98063b6192b5e4f209511",
+      "rawSha256": "c46f8a5b9002c711c8dae1c3b537f83493dcee9c628840e3842545a5044ccbe7",
+      "bytes": 438
+    },
+    {
+      "path": "unit-focused.txt",
+      "sha256": "b915265e3dc7f0caa6f3a754275d0b2a88bcb24a3b02c3a9a2e6497a4254254b",
+      "rawSha256": "6721b3b0f2c5933f0a9e03135dd03195d1ebaad3f7461953f8b41bda9ab7c6ab",
+      "bytes": 490
+    },
+    {
+      "path": "unit-earlier-complete.txt",
+      "sha256": "a0d3a96e8cf992f6d43eb545c70f87eeb458b69c1ad34ed1a7c8041ba9e6135e",
+      "rawSha256": "970d74306e3c9c934108563174fdbc0faa1f577473ae264bc51b764cd8812c42",
+      "bytes": 437
+    },
+    {
+      "path": "unit-interrupted.txt",
+      "sha256": "d376fcdcb1f3da0ac5773aa5084eff6de7738f0bd48ad8e2d6af0d7e6876dce5",
+      "rawSha256": "d376fcdcb1f3da0ac5773aa5084eff6de7738f0bd48ad8e2d6af0d7e6876dce5",
+      "bytes": 276
+    },
+    {
+      "path": "postgres-acceptance.txt",
+      "sha256": "784bf7a93814cf3b68281eba581822c68fb904a60796c306fc20c94de339d4a6",
+      "rawSha256": "b33fd8057e484be9d486378353180ecce9c7c4eab30dcde70f46020f8ef542fa",
+      "bytes": 573
+    },
+    {
+      "path": "browser-acceptance.txt",
+      "sha256": "192810480e06e4df692b05d4f860a2765b7aa3421474e161b609547b84a39167",
+      "rawSha256": "192810480e06e4df692b05d4f860a2765b7aa3421474e161b609547b84a39167",
+      "bytes": 832
+    },
+    {
+      "path": "browser-before-fixes.txt",
+      "sha256": "9f9897a69f05ba55bf20f1098c6ca56f3685ea2044438c2218477a33c6ed1ebd",
+      "rawSha256": "9f9897a69f05ba55bf20f1098c6ca56f3685ea2044438c2218477a33c6ed1ebd",
+      "bytes": 3766
+    },
+    {
+      "path": "browser-first-draft.txt",
+      "sha256": "e83571119fde7fb05912af038fde06b06a8e3347d072e896cdd162ee407c036b",
+      "rawSha256": "e08261f0652615af068b163d551a82194acc30d437969d92166468888b93bd31",
+      "bytes": 2655
+    },
+    {
+      "path": "browser-second-draft.txt",
+      "sha256": "0e57cd7abf58b12b160885a70708194b6da41f31b2fb224fcfcf587e7c006524",
+      "rawSha256": "0e57cd7abf58b12b160885a70708194b6da41f31b2fb224fcfcf587e7c006524",
+      "bytes": 2314
+    },
+    {
+      "path": "browser-regression.txt",
+      "sha256": "a63c6848f4ac26c4c3d8db3db6ea8248cd903f0b4c5b04dd13925def0508dd3c",
+      "rawSha256": "80ace44d818152519c808225e8bdcb00804b0310520cca2d9b0152b620ed55fb",
+      "bytes": 3498
+    },
+    {
+      "path": "typecheck.txt",
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "rawSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    {
+      "path": "lint-targeted.txt",
+      "sha256": "dfdfafc303e6a8b6fa6c88c3ab50cd2f193061393b33a397bb1e8d4d89a0d675",
+      "rawSha256": "dfdfafc303e6a8b6fa6c88c3ab50cd2f193061393b33a397bb1e8d4d89a0d675",
+      "bytes": 11922
+    },
+    {
+      "path": "build.txt",
+      "sha256": "3460b387980f175f63c0bb174edd7298465a1c842459b915e42854ac5c0a5abc",
+      "rawSha256": "caba1dbfa17a78266656fb7f5c3b086b9d560f0ef8baf2f70e0a81bbedd2714d",
+      "bytes": 13293
+    },
+    {
+      "path": "preflight.txt",
+      "sha256": "0bdb72dfdbd0e512a222ed98eeb7115c8b01c8de09fd69b1b7bf8b9d74b3b416",
+      "rawSha256": "0bdb72dfdbd0e512a222ed98eeb7115c8b01c8de09fd69b1b7bf8b9d74b3b416",
+      "bytes": 998
+    },
+    {
+      "path": "browser-install-block.txt",
+      "sha256": "b6d8e9ed01fa37bd798dbd47ae18db12ac7c0fb06cbcfc4013607ff955b21016",
+      "rawSha256": "63a8a8759cf11349baad5efccd6c7300d58e77855f5e1c561a91dd40d2f67898",
+      "bytes": 3819
+    },
+    {
+      "path": "parent-http-failure-index.txt",
+      "sha256": "bb25c905391a83dda1c635b4162dc44728938abf3328e8cc2a0fde20e470efe4",
+      "rawSha256": "bb25c905391a83dda1c635b4162dc44728938abf3328e8cc2a0fde20e470efe4",
+      "bytes": 832
+    },
+    {
+      "path": "ortho-study-problems-390.png",
+      "sha256": "0ad5e33c9fc4fa3ce35cd3a0089c607fbdfa83cf6e2c3bc72991e33aaa5e1545",
+      "bytes": 82536,
+      "note": "Synthetic fixture; visually inspected."
+    },
+    {
+      "path": "ortho-study-problems-1280.png",
+      "sha256": "382c12c69091f0dfc0674c0e06e0edd32dab98b8a6770d3d914ad3670f3c4db5",
+      "bytes": 114557,
+      "note": "Synthetic fixture; visually inspected."
+    },
+    {
+      "path": "ortho-prescription-closed-custom-390.png",
+      "sha256": "f178c5438e33da1872bcb7f224b607260a3df83d641fdc7f64eae5a51bb7e398",
+      "bytes": 77005,
+      "note": "Synthetic fixture; visually inspected."
+    },
+    {
+      "path": "runtime-braces.txt",
+      "sha256": "11c18d28f558b5eb9144232adf1c3e79f9ea51f6019c3083e3540a2521d6bbab",
+      "bytes": 108
+    },
+    {
+      "path": "runtime-tooling.txt",
+      "sha256": "d951308cd3a11e9805b7dc1ca60557520f4dad4b29984c205bb3f8980feeb006",
+      "bytes": 137
+    }
+  ],
+  "sources": [
+    {
+      "path": "__tests__/ortho-study-problem-review.test.ts",
+      "sha256": "a96474aa48faa6c3b110806c23a24759a7ff09cbd5613c09ca53fcf8f507db3d"
+    },
+    {
+      "path": "__tests__/postgres/ortho-problem-sources.test.ts",
+      "sha256": "e9f25c6d95124823196b2556c42ac24072fec29ab79f92d9d39686f5ff21fee0"
+    },
+    {
+      "path": "__tests__/security-http/ortho-prescription-truth-built-page.test.ts",
+      "sha256": "8e1f60a39b99cd7188d523702620a1d2610c32c45d1477829fc97c2385ff3d3f"
+    },
+    {
+      "path": "__tests__/security-http/ortho-problem-sources-browser.test.ts",
+      "sha256": "825b12e6c5c7f32309375941107dfff5a8082efa9d1e740c60213e4cf666b85c"
+    },
+    {
+      "path": "__tests__/security-http/patient-cockpit-real-contract-ui.test.ts",
+      "sha256": "37ba5aea1f8c4ddaf02d0738d9851432270ee1b5128c7d79d7a40141b6fd1831"
+    },
+    {
+      "path": "components/OrthoSavedStudyReview.tsx",
+      "sha256": "19cda1ece32b35a801ee96c7d1cefab69be6e6f0e77ccaa54fffa6b69ab538e3"
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "sha256": "062de9463be205fb33d9d77bb80c8092ef6bffd4be9386d86c56ff8df7f36e84"
+    },
+    {
+      "path": "lib/ortho-case-presentation-i18n.ts",
+      "sha256": "ac4e260327437e3d3457c35b0670c87243e3693f59d2255ae11e9bc04074a6ad"
+    },
+    {
+      "path": "lib/ortho-case-study-access.ts",
+      "sha256": "dec8bc122503a9b9f67d48080acb391c150f4c2dc97d2018b20bbcb532096e16"
+    },
+    {
+      "path": "lib/ortho-case-study-capture.ts",
+      "sha256": "e4f825f6a598cf8fc1323a9f4c22068a7b230b7b6c30079751978c897d049761"
+    },
+    {
+      "path": "lib/ortho-case-study-inventory.ts",
+      "sha256": "e2dcf66b39ec477655d5ddd5d8a1243563753d894fd0c4ee023e884e4361cd2e"
+    },
+    {
+      "path": "lib/ortho-case-study-recorded-facts.ts",
+      "sha256": "f5b341937fcabd2f5ad152821e6120413ca744512f19be078a13569366f69334"
+    },
+    {
+      "path": "lib/ortho-case-study-source-union.ts",
+      "sha256": "53bdd07d896f25ae2503b49830319d8195fde3359306152cf19f4ef18f301630"
+    },
+    {
+      "path": "lib/ortho-case-study-sources.ts",
+      "sha256": "ddf2e25c9f6b7fca4752b016b0e77cf276fceee5f53b632f12c612d791e6c79a"
+    },
+    {
+      "path": "lib/ortho-case-study.ts",
+      "sha256": "009d57a25e3bba8290a8fd1db3feb22eb3a04ecfdc3eb4ae9b9750542c2f5511"
+    },
+    {
+      "path": "lib/ortho-study-problem-review-store.ts",
+      "sha256": "91eb88323c4a7697b7059cc9239fd74892d7403d8caf7db8d79ac0cc2422b3d1"
+    },
+    {
+      "path": "lib/ortho-study-problem-review.ts",
+      "sha256": "849f3a131cd8c4023a4bd1b4351fe5fbe4eea1d22c73d6da1394ed5639ac4581"
+    }
+  ],
+  "referenceSources": {
+    "cast": {
+      "sha256": "37404ffc8fb740524bd7eb1945d0679e1a8ea380307bea9c33317bbcb50983b8",
+      "bytes": 14498726,
+      "slidesVisuallyInspected": 78
+    },
+    "spaceCreationClosure": {
+      "sha256": "f6b77960239d2a7cbb8d5ec24622c64d41b7ec6cf866b712fddf15fde8ccbe4c",
+      "bytes": 20757382,
+      "slidesVisuallyInspected": 56
+    },
+    "allysa": {
+      "sha256": "9f71c119fd4fd0cfe12a8e65284900687293863910379a606b64eba9b626febd",
+      "slidesVisuallyInspected": 43
+    },
+    "approvedPlan": {
+      "sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+      "acceptanceScenarios": 52
+    }
+  },
+  "evidenceNotes": [
+    "Application sources were built and tested unchanged before the application commit; source hashes bind the checks.",
+    "Full unit suite completed without source edits or concurrent heavy runtime scans. Earlier interrupted run is retained separately, not accepted as a full pass.",
+    "Historical source witnesses remain in their original hash-addressed assessment; new study review metadata is not a fresh clinical approval.",
+    "Current source/image authority is checked on saved study reads.",
+    "Only synthetic screenshots are copied. Reference presentations and clinical photos remain outside the repository.",
+    "Text logs normalize ANSI colors and trailing whitespace. Raw hashes identify original workspace logs.",
+    "Full hosted HTTP remains required; local system browser is not the pinned CI browser. No test gate or assertion was weakened."
+  ],
+  "parentCiInvestigation": {
+    "runId": 41719471769,
+    "head": "3b539c9cbbc403f012262c1f6edc291ff9a8b0cd",
+    "failureIndexArtifactId": 13275014771,
+    "failureIndexArchiveSha256": "6d3e448a2486bac6c8977deb1d162672e838334ffa1c7dbde9e735ca95a98efd",
+    "applianceUiArtifactId": 13275529277,
+    "applianceUiArchiveSha256": "2c4504bc5cbfd6658a2eeef6682dc0054e6a9a13795aa5a538a31129d0955a95",
+    "httpCounts": {
+      "failed": 4,
+      "passed": 1927,
+      "total": 1931
+    },
+    "fullHostedLog": "unavailable via connector and redirect; local reproduction is reported separately"
+  }
+}

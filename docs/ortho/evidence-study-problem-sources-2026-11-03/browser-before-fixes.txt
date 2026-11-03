@@ -1,0 +1,55 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-problem-sources-browser.test.ts __tests__/security-http/ortho-journey-integration-browser.test.ts __tests__/security-http/ortho-case-navigation-browser.test.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/patient-cockpit-real-contract-ui.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-prescription-truth-built-page.test.ts (2 tests | 1 failed) 7908ms
+     × retains unrecorded and closed legacy custom prescriptions at 390px without browser writes 3503ms
+ ❯ __tests__/security-http/patient-cockpit-real-contract-ui.test.ts (2 tests | 1 failed) 8907ms
+     × accepts the real shared chair list for a waiting patient without any command 1320ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-prescription-truth-built-page.test.ts > built orthodontic prescription truth > retains unrecorded and closed legacy custom prescriptions at 390px without browser writes
+AssertionError: {"kind":"closed-custom","viewportWidth":390,"text":"ملاحظات خطة العلاج والميكانيكا:","fontSize":12,"visible":"visible","display":"block","left":193.84375,"right":351,"top":792.5,"bottom":810.5,"exposed":false,"element":{"tag":"SPAN","className":"block font-bold text-slate-500 sm:mb-1","left":39,"right":351,"top":793.5,"bottom":809.5},"hit":{"tag":"svg","className":"h-5 w-5","role":null,"inNavigation":true,"inCard":false},"isButton":false,"width":312,"height":16}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ capture __tests__/security-http/ortho-prescription-truth-built-page.test.ts:146:85
+    144|     expect(entry.left).toBeGreaterThanOrEqual(-1); expect(entry.right)…
+    145|     expect(entry.top).toBeGreaterThanOrEqual(79); expect(entry.bottom)…
+    146|     expect(entry.exposed, JSON.stringify({ kind, viewportWidth: width,…
+       |                                                                                     ^
+    147|     if (entry.isButton) { expect(entry.width).toBeGreaterThanOrEqual(4…
+    148|   }
+ ❯ __tests__/security-http/ortho-prescription-truth-built-page.test.ts:229:91
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/patient-cockpit-real-contract-ui.test.ts > actual visit API contract reaches the cockpit > accepts the real shared chair list for a waiting patient without any command
+Error: response.json: Protocol error (Network.getResponseBody): No data found for resource with given identifier
+Response body is not available for a response that was navigated away from. Read response.body() before triggering any navigation.
+ ❯ __tests__/security-http/patient-cockpit-real-contract-ui.test.ts:98:39
+     96|       ]);
+     97|       expect(listResponse.status()).toBe(200); expect(readyResponse.st…
+     98|       const rows = await listResponse.json() as ChairRow[];
+       |                                       ^
+     99|       expect(Array.isArray(rows)).toBe(true);
+    100|       // Only status counts enter failure diagnostics; no patient name…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 3 passed (5)
+      Tests  2 failed | 9 passed (11)
+   Start at  22:31:54
+   Duration  146.32s (transform 229ms, setup 0ms, import 1.09s, tests 139.48s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

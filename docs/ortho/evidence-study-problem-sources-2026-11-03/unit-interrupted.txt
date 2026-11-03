@@ -1,0 +1,9 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+ ❯ __tests__/development-runtime-tracing.test.ts (5 tests | 1 failed) 5602ms
+     × does not let runtime app, component or library imports depend on excluded development tooling 5512ms
