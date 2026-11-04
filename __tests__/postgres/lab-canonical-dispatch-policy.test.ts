@@ -1,9 +1,8 @@
-/** M2 slices 67–68 policy evidence (PENDING OWNER DECISION, see
- * docs/review/lab-post-dispatch-policy-20261103.md): which lab-order moves after
- * dispatch each grant set may make on the canonical runtime, beside the legacy role
- * behaviour, on real PostgreSQL with synthetic data. The current rule keeps the legacy
- * behaviour: only CANCEL after dispatch needs clinical.lab.cancel; receipt, fitting,
- * remake and return stay with clinical.lab.order. */
+/** M2 slices 67–68 policy evidence, OWNER DECISION 6616155745 (see
+ * docs/review/lab-post-dispatch-policy-20261103.md): after dispatch, receipt, fitting,
+ * remake and return stay with the explicit lab-update grant (clinical.lab.order); cancel
+ * keeps its own separate grant (clinical.lab.cancel); viewing the module
+ * (clinical.lab.view) alone moves nothing. Real PostgreSQL, synthetic data. */
 vi.mock("server-only", () => ({}));
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
@@ -48,7 +47,7 @@ const MOVES: readonly (readonly [string, string])[] = [
   ["sent", "cancelled"], ["in_progress", "cancelled"], ["received", "cancelled"], ["needed", "cancelled"],
 ];
 const EXPECTED: Record<Exclude<Key, "owner">, (from: string, to: string) => string> = {
-  // The current rule: only cancel after dispatch is guarded by clinical.lab.cancel.
+  // The approved rule: only cancel after dispatch is guarded by clinical.lab.cancel.
   orderOnly: (from, to) => to === "cancelled" && from !== "needed" ? "refused:capability" : "allowed",
   orderCancel: () => "allowed",
   // Every PATCH move needs clinical.lab.order first; clinical.lab.cancel alone moves nothing.
@@ -63,8 +62,8 @@ beforeAll(async () => {
 }, 180_000);
 afterAll(async () => { await fx?.close(); });
 
-describe("post-dispatch moves by grant set (current rule)", () => {
-  it("the guarded list is exactly the cancel (pending the owner's decision)", () => {
+describe("post-dispatch moves by grant set (owner decision 6616155745)", () => {
+  it("the guarded list is exactly the cancel (approved rule)", () => {
     expect(lab.LAB_POST_DISPATCH_CANCEL_GUARDED).toEqual(["cancelled"]);
   });
   for (const key of ["orderOnly", "orderCancel", "cancelOnly", "viewOnly"] as const) {
@@ -80,6 +79,19 @@ describe("post-dispatch moves by grant set (current rule)", () => {
     expect((await q("SELECT status FROM lab_orders WHERE id=$1", [id]))[0].status).toBe("received");
     expect(await q("SELECT 1 FROM lab_order_tracking WHERE lab_order_id=$1", [id])).toEqual([]);
     expect(await q("SELECT 1 FROM audit_log WHERE action='lab_order.cancel' AND entity_id=$1", [String(id)])).toEqual([]);
+  });
+  it("update and cancel are separate grants: revoking the cancel grant keeps receipt and fitting, refuses cancel; revoking the update grant refuses every move", async () => {
+    const both = { "clinical.lab.view": true, "clinical.lab.order": true, "clinical.lab.cancel": true };
+    try {
+      await fx.setGrants("orderCancel", { "clinical.lab.view": true, "clinical.lab.order": true }, { patientScope: "all" });
+      expect([await outcome("orderCancel", "sent", "received"), await outcome("orderCancel", "received", "delivered"), await outcome("orderCancel", "sent", "cancelled")])
+        .toEqual(["allowed", "allowed", "refused:capability"]);
+      await fx.setGrants("orderCancel", { "clinical.lab.view": true, "clinical.lab.cancel": true }, { patientScope: "all" });
+      expect([await outcome("orderCancel", "sent", "received"), await outcome("orderCancel", "sent", "cancelled")])
+        .toEqual(["refused:capability", "refused:capability"]);
+      await fx.setGrants("orderCancel", both, { patientScope: "all" });
+      expect([await outcome("orderCancel", "sent", "received"), await outcome("orderCancel", "sent", "cancelled")]).toEqual(["allowed", "allowed"]);
+    } finally { await fx.setGrants("orderCancel", both, { patientScope: "all" }); }
   });
 });
 

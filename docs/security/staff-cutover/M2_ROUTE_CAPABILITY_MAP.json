@@ -2279,11 +2279,11 @@
    },
    "fields": [
     {
-     "field": "any change after dispatch (status other than needed)",
+     "field": "cancel after dispatch (status other than needed)",
      "need": [
       "clinical.lab.cancel"
      ],
-     "note": "Today admin-only. PENDING OWNER DECISION (docs/review/lab-post-dispatch-policy-20261103.md). The canonical branch keeps the legacy rule this note describes: CANCELLING work past needed needs clinical.lab.cancel in addition to clinical.lab.order (the legacy admin-only check is on cancel alone; receipt, fitting, remake and return stay under clinical.lab.order). One constant (LAB_POST_DISPATCH_CANCEL_GUARDED) holds the rule; a matrix test pins it."
+     "note": "OWNER DECISION 6616155745 (docs/review/lab-post-dispatch-policy-20261103.md): cancelling work past needed needs clinical.lab.cancel in addition to clinical.lab.order (the legacy admin-only check was on cancel alone). Receipt, fitting, remake and return stay with the explicit lab-update grant clinical.lab.order; clinical.lab.view alone moves nothing. One constant (LAB_POST_DISPATCH_CANCEL_GUARDED) holds the rule; a matrix and a revocation test pin it. No grant is given to any account by this decision."
     }
    ]
   }

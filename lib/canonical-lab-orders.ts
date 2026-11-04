@@ -54,12 +54,10 @@ const STATUSES: readonly LabOrderStatus[] = ["needed", "sent", "in_progress", "r
 
 /**
  * Post-dispatch moves (from any status past `needed`) that need `clinical.lab.cancel` in
- * addition to `clinical.lab.order`. PENDING OWNER DECISION — see
- * docs/review/lab-post-dispatch-policy-20261103.md. The map's field text reads "any
- * change after dispatch"; the legacy rule it describes ("Today admin-only") guards the
- * CANCEL alone (receipt, fitting, remake and return stay with every lab role). This list
- * keeps the legacy behaviour until the owner decides; the literal reading would list
- * every target status here.
+ * addition to `clinical.lab.order`. OWNER DECISION 6616155745 (see
+ * docs/review/lab-post-dispatch-policy-20261103.md): receipt, fitting, remake and return
+ * stay with the explicit lab-update grant `clinical.lab.order`; cancel keeps its own
+ * separate grant; viewing the module alone moves nothing. A matrix test pins this list.
  */
 export const LAB_POST_DISPATCH_CANCEL_GUARDED: readonly LabOrderStatus[] = Object.freeze(["cancelled"] as const);
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
