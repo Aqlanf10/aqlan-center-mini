@@ -10535,7 +10535,11 @@ export async function listPatientPayments(patientId: number, client?: DbClient |
 
 export async function getPayment(id: number): Promise<Payment | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.id = $1`, [id]);
+  return getPaymentWith(getPool(), id);
+}
+/** The same read on a given client (inside a caller's transaction). */
+export async function getPaymentWith(q: Pick<DbClient, "query">, id: number): Promise<Payment | null> {
+  const { rows } = await q.query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.id = $1`, [id]);
   return rows[0] ? toPayment(rows[0]) : null;
 }
 
@@ -10788,7 +10792,7 @@ export type CorrectionTarget =
   | { kind: "original" }
   | { kind: "explicit"; invoiceId: number | null; planId: number | null; openingCurrency: Currency | null };
 
-export async function correctPayment(input: {
+export interface CorrectPaymentInput {
   paymentId: number;
   reason: string;
   actor: string;
@@ -10799,22 +10803,37 @@ export async function correctPayment(input: {
     amountMinor: number; currency: Currency; exchangeRate: number; method: string;
     target: CorrectionTarget;
   };
-}, acknowledgment?: { observedExchangeRate: number | null }): Promise<
+}
+export type CorrectPaymentOutcome =
   | { reason: CorrectPaymentRefusal }
-  | { reason: null; replayed: boolean; reversal: Payment | null; replacement: Payment | null; original: { id: number; receiptNumber: string; patientId: number }; acknowledgmentEvidence?: AcknowledgmentEvidence }
-> {
+  | { reason: null; replayed: boolean; reversal: Payment | null; replacement: Payment | null; original: { id: number; receiptNumber: string; patientId: number }; acknowledgmentEvidence?: AcknowledgmentEvidence };
+
+export async function correctPayment(input: CorrectPaymentInput, acknowledgment?: { observedExchangeRate: number | null }): Promise<CorrectPaymentOutcome> {
   await ensureSchema();
+  if (input.reason.trim().length < 3) return { reason: "missing_reason" };
+  const client = await getPool().connect();
+  try { return await correctPaymentOn(client, input, acknowledgment, true); } finally { client.release(); }
+}
+
+/**
+ * The correction body on a given client (M2 slice 91). `own`: this call owns the
+ * transaction (the legacy wrapper above). Otherwise the caller already holds an open
+ * transaction (the canonical operation, whose authority locks come first) and MUST roll
+ * it back on any refusal outcome: here BEGIN/COMMIT/ROLLBACK are no-ops.
+ */
+export async function correctPaymentOn(client: DbClient, input: CorrectPaymentInput,
+  acknowledgment: { observedExchangeRate: number | null } | undefined, own: boolean): Promise<CorrectPaymentOutcome> {
+  const tx = (statement: "BEGIN" | "COMMIT" | "ROLLBACK") => own ? client.query(statement) : Promise.resolve();
   const why = input.reason.trim();
   if (why.length < 3) return { reason: "missing_reason" };
   const key = input.idempotencyKey ?? null;
-  const client = await getPool().connect();
   let reversalId: number | null = null;
   let replacementId: number | null = null;
   let replayed = false;
   let acknowledgmentEvidence: AcknowledgmentEvidence | undefined;
   let original: { id: number; receiptNumber: string; patientId: number } | null = null;
   try {
-    await client.query("BEGIN");
+    await tx("BEGIN");
     const { rows } = await client.query<{
       id: number; patient_id: number; kind: string; amount_minor: string; currency: string;
       method: string | null; receipt_number: string;
@@ -10824,8 +10843,8 @@ export async function correctPayment(input: {
          FROM payments WHERE id = $1 FOR UPDATE`, [input.paymentId],
     );
     const origin = rows[0];
-    if (!origin) { await client.query("ROLLBACK"); return { reason: "not_found" }; }
-    if (origin.kind !== "payment") { await client.query("ROLLBACK"); return { reason: "not_a_receipt" }; }
+    if (!origin) { await tx("ROLLBACK"); return { reason: "not_found" }; }
+    if (origin.kind !== "payment") { await tx("ROLLBACK"); return { reason: "not_a_receipt" }; }
     original = { id: origin.id, receiptNumber: origin.receipt_number, patientId: origin.patient_id };
     const reversalNote = `تصحيح السند ${origin.receipt_number}: ${why}`.slice(0, 300);
     const replacementNote = `بدل السند ${origin.receipt_number}`.slice(0, 300);
@@ -10851,7 +10870,7 @@ export async function correctPayment(input: {
           SELECT i.id,i.status FROM invoices i JOIN descendants d ON d.id=i.id WHERE i.patient_id=$2 AND i.base_currency='SAR' ORDER BY i.id`,[proof.correctionId,origin.patient_id]);
         reclassifiedTargetIds=descendants.map(row=>row.id);
         const active=descendants.filter(row=>row.status!=="cancelled");
-        if(active.length!==1){await client.query("ROLLBACK");return {reason:"invalid_invoice"};}
+        if(active.length!==1){await tx("ROLLBACK");return {reason:"invalid_invoice"};}
         target.invoiceId=active[0].id;
       }
     }
@@ -10901,7 +10920,7 @@ export async function correctPayment(input: {
         const { rows: recoveryAudit } = await client.query(
           `SELECT id FROM audit_log WHERE action = 'payment.recover_installment'
              AND entity = 'payment' AND entity_id = $1 LIMIT 1`, [String(hit.id)]);
-        if (recoveryAudit.length) { await client.query("ROLLBACK"); return { reason: "idempotency_conflict" }; }
+        if (recoveryAudit.length) { await tx("ROLLBACK"); return { reason: "idempotency_conflict" }; }
         /* المطابقة على الطلب كاملًا كما خُزِّن — لا على المبلغ والعملة وحدهما. */
         let same = false;
         if (next === null) {
@@ -10921,9 +10940,9 @@ export async function correctPayment(input: {
             if (same) { reversalId = pair[0].id; replacementId = hit.id; }
           }
         }
-        if (!same) { await client.query("ROLLBACK"); return { reason: "idempotency_conflict" }; }
+        if (!same) { await tx("ROLLBACK"); return { reason: "idempotency_conflict" }; }
         acknowledgmentEvidence = await proveAcknowledgment(false);
-        await client.query("COMMIT");
+        await tx("COMMIT");
         replayed = true;
       }
     }
@@ -10932,9 +10951,9 @@ export async function correctPayment(input: {
       const currency = requireCurrency(origin.currency, "سند قبض", origin.id);
       // الردود ترث عملة أصلها — فالمتبقي بعملة السند نفسه (دلوٌ واحد صريح).
       const budget = await readRefundBaseBudget(client, origin.id);
-      if (!budget) { await client.query("ROLLBACK"); return { reason: "refund_snapshot_review_required" }; }
+      if (!budget) { await tx("ROLLBACK"); return { reason: "refund_snapshot_review_required" }; }
       const remaining = budget.originalAmountMinor - budget.refundedAmountMinor;
-      if (remaining <= 0) { await client.query("ROLLBACK"); return { reason: "already_reversed" }; }
+      if (remaining <= 0) { await tx("ROLLBACK"); return { reason: "already_reversed" }; }
 
       // ١) عكس المتبقي من السند الخطأ — بعملته وسعره وهدفه الموروثة من أصله تحت قفله.
       //    في الإبطال يحمل العكسُ مفتاحَ الإعادة (لا بديل يحمله).
@@ -10943,9 +10962,9 @@ export async function correctPayment(input: {
         kind: "refund", amountMinor: remaining, currency, baseCurrency: CLINIC_BASE_CURRENCY, exchangeRate: 1,
         method: origin.method ?? "cash", note: reversalNote, createdBy: input.actor,
       }, { idempotencyKey: next === null ? key : null, reversalOfId: origin.id }, client);
-      if (reversal.kind === "reason") { await client.query("ROLLBACK"); return { reason: reversal.reason }; }
+      if (reversal.kind === "reason") { await tx("ROLLBACK"); return { reason: reversal.reason }; }
       // المفتاح فُحص أعلاه تحت قفل الأصل — إعادةٌ هنا تعني مفتاحًا لسندٍ آخر.
-      if (reversal.kind === "replay") { await client.query("ROLLBACK"); return { reason: "idempotency_conflict" }; }
+      if (reversal.kind === "replay") { await tx("ROLLBACK"); return { reason: "idempotency_conflict" }; }
       reversalId = reversal.paymentId;
 
       // ٢) السند الصحيح — بالقواعد نفسها لأي سند قبض (الوردية، الهدف، العملة، مفتاح الإعادة).
@@ -10955,8 +10974,8 @@ export async function correctPayment(input: {
           kind: "payment", amountMinor: next.amountMinor, currency: next.currency, baseCurrency: CLINIC_BASE_CURRENCY,
           exchangeRate: next.exchangeRate, method: next.method, note: replacementNote, createdBy: input.actor,
         }, { idempotencyKey: key, reversalOfId: null, inheritedTarget: target.inherited }, client);
-        if (issued.kind === "reason") { await client.query("ROLLBACK"); return { reason: issued.reason }; }
-        if (issued.kind === "replay") { await client.query("ROLLBACK"); return { reason: "idempotency_conflict" }; }
+        if (issued.kind === "reason") { await tx("ROLLBACK"); return { reason: issued.reason }; }
+        if (issued.kind === "replay") { await tx("ROLLBACK"); return { reason: "idempotency_conflict" }; }
         replacementId = issued.paymentId;
       }
 
@@ -10984,21 +11003,19 @@ export async function correctPayment(input: {
         actor: input.actor, actorRole: input.actorRole ?? null,
       });
       acknowledgmentEvidence = await proveAcknowledgment(true);
-      await client.query("COMMIT");
+      await tx("COMMIT");
     }
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await tx("ROLLBACK").catch(() => {});
     if (error instanceof ReclassificationProofError) return { reason: "refund_snapshot_review_required" };
     throw error;
-  } finally {
-    client.release();
   }
   return {
     reason: null,
     replayed,
     original,
-    reversal: reversalId === null ? null : await getPayment(reversalId),
-    replacement: replacementId === null ? null : await getPayment(replacementId),
+    reversal: reversalId === null ? null : await getPaymentWith(client, reversalId),
+    replacement: replacementId === null ? null : await getPaymentWith(client, replacementId),
     ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}),
   };
 }

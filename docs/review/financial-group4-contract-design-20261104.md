@@ -99,7 +99,7 @@ Nothing here changes behaviour until the slices land.
 | 88b | Responsibility (the case's responsible doctor) | G4-7 |
 | 89 | Visit money reads (billing preview, financial context, walkout) | G4-4 |
 | 90 | Payment reads and collection (payments, attempts retire, defer) with the shift rule and request keys | G4-4 |
-| 91 | Payment correction/void; debt repayment arrangements and collection | — |
+| 91 | Payment correction/void; debt repayment arrangements and collection — **done** | — |
 | 92 | Invoice reads and archive | — |
 | 93 | Invoice writes (create, patch, add-service, clinical preview), cancel, correct | — |
 | 94 | Plan money reads and writes, financial approval, amendment, reconcile | G4-1 |

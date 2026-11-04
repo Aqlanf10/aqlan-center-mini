@@ -14,7 +14,30 @@ export class DebtRepaymentError extends Error {
 }
 const safe = (value: string | number) => { const number = Number(value); if (!Number.isSafeInteger(number)) throw new DebtRepaymentError("invalid","المبلغ خارج النطاق الآمن."); return number; };
 
-export async function assertDebtSession(client: DbClient, session: SessionPayload): Promise<void> {
+/**
+ * The canonical actor of a debt write (M2 slice 91). Minted only by the canonical
+ * operation (lib/canonical-debt-repayments.ts) after it proved `finance.payments.collect`
+ * and the patient scope; branded by a module-private symbol, so no JSON body or object
+ * built elsewhere passes as one. `recheck` re-asserts the live operation and its grant on
+ * the same transaction client, wherever the legacy writer revalidated its session.
+ */
+const CANONICAL_DEBT_ACTOR = Symbol("canonical-debt-actor");
+export interface CanonicalDebtActor {
+  readonly [CANONICAL_DEBT_ACTOR]: true; readonly userId: number; readonly username: string; readonly role: string;
+  readonly recheck: (client: DbClient) => Promise<boolean>;
+}
+export type DebtActorSource = SessionPayload | CanonicalDebtActor;
+export function canonicalDebtActor(identity: { userId: number; username: string; role: string }, recheck: (client: DbClient) => Promise<boolean>): CanonicalDebtActor {
+  return Object.freeze({ [CANONICAL_DEBT_ACTOR]: true as const, userId: identity.userId, username: identity.username, role: identity.role, recheck });
+}
+const isCanonicalDebtActor = (source: DebtActorSource): source is CanonicalDebtActor =>
+  typeof source === "object" && source !== null && (source as Partial<CanonicalDebtActor>)[CANONICAL_DEBT_ACTOR] === true;
+
+export async function assertDebtSession(client: DbClient, session: DebtActorSource): Promise<void> {
+  if (isCanonicalDebtActor(session)) {
+    if (!await session.recheck(client)) throw new DebtRepaymentError("unauthorized","انتهت الجلسة أو سُحبت صلاحية التحصيل؛ سجّل الدخول من جديد.");
+    return;
+  }
   const current = await revalidateSessionInTransaction(session,client);
   if (!current || !["admin","reception"].includes(current.role)) throw new DebtRepaymentError("unauthorized","انتهت الجلسة أو تغيّرت صلاحية إدارة الاتفاق؛ سجّل الدخول من جديد.");
 }
@@ -59,7 +82,7 @@ const latestRevision = async (client: DbClient, id: number) => (await client.que
   "SELECT * FROM debt_repayment_revisions WHERE arrangement_id=$1 ORDER BY version DESC LIMIT 1",[id])).rows[0];
 
 export type DebtRepaymentWrite = { target: DebtTarget; terms: unknown; expectedVersion: number; expectedRemainingMinor: number;
-  expectedSourceHash?: string; reason: string; idempotencyKey: string; cancel?: boolean; session: SessionPayload };
+  expectedSourceHash?: string; reason: string; idempotencyKey: string; cancel?: boolean; session: DebtActorSource };
 
 /** Caller owns BEGIN/COMMIT. Target lock precedes arrangement/version locks.
  * New invoice/historical composition may omit expectedSourceHash because it owns
@@ -117,12 +140,16 @@ export async function saveDebtRepayment(input: DebtRepaymentWrite) {
   await ensureSchema(); const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // Serializes creation of an absent target reference and follows invoice management order.
-    await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[input.target.patientId]);
-    await lockDebtAccountForSchedule(client,input.target.patientId);
-    const result = await writeDebtRepaymentInTransaction(client,input); await client.query("COMMIT"); return result;
+    const result = await saveDebtRepaymentOn(client,input); await client.query("COMMIT"); return result;
   } catch(error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
   finally { client.release(); }
+}
+/** The same write inside a caller's open transaction (the canonical operation, M2 slice 91). */
+export async function saveDebtRepaymentOn(client: DbClient, input: DebtRepaymentWrite) {
+  // Serializes creation of an absent target reference and follows invoice management order.
+  await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[input.target.patientId]);
+  await lockDebtAccountForSchedule(client,input.target.patientId);
+  return writeDebtRepaymentInTransaction(client,input);
 }
 
 export async function readDebtRepayments(client: DbClient, patientId: number, today: string) {

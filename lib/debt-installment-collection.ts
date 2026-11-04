@@ -1,24 +1,31 @@
-import { ensureSchema, getPool, getPayment, getSettingsInTransaction, insertAuditRow, writeDebtCollectionReceipt } from "./db";
-import type { SessionPayload } from "./auth";
+import { ensureSchema, getPool, getPaymentWith, getSettingsInTransaction, insertAuditRow, writeDebtCollectionReceipt, type DbClient } from "./db";
 import { CLINIC_BASE_CURRENCY, isCurrency, settlePaymentMinor, toBaseAmount, type Currency } from "./money";
 import { rateFromSettings } from "./settings";
-import { assertDebtSession, DebtRepaymentError, debtRequestHash, readDebtPosition, type DebtTarget } from "./debt-installments-db";
+import { assertDebtSession, DebtRepaymentError, debtRequestHash, readDebtPosition, type DebtActorSource, type DebtTarget } from "./debt-installments-db";
 
 import { debtAccountDue } from "./debt-account-position";
 import {debtRevisionSourceMatches} from "./debt-source-proof";
 import {assertSimilarCollectionReviewed,type SimilarCollectionReview} from "./similar-collection";
-export async function collectDebtInstallment(input: {
+export type DebtCollectionInput={
   patientId:number;arrangementId:number;expectedVersion:number;amountMinor:number;currency:Currency;
-  method:"cash"|"transfer";note:string|null;idempotencyKey:string;session:SessionPayload;
-},options:{similarityReview?:SimilarCollectionReview}={}) {
+  method:"cash"|"transfer";note:string|null;idempotencyKey:string;session:DebtActorSource;
+};
+export async function collectDebtInstallment(input:DebtCollectionInput,options:{similarityReview?:SimilarCollectionReview}={}) {
+  await ensureSchema();const client=await getPool().connect();
+  try{return await collectDebtInstallmentOn(client,input,options,true);}finally{client.release();}
+}
+/** The collection body on a given client (M2 slice 91). `own`: this call owns the
+ * transaction (the legacy wrapper). Otherwise the caller holds an open transaction (the
+ * canonical operation) and rolls it back on any throw: BEGIN/COMMIT/ROLLBACK are no-ops. */
+export async function collectDebtInstallmentOn(client:DbClient,input:DebtCollectionInput,options:{similarityReview?:SimilarCollectionReview},own:boolean) {
+  const tx=(statement:"BEGIN"|"COMMIT"|"ROLLBACK")=>own?client.query(statement):Promise.resolve();
   if(![input.patientId,input.arrangementId,input.expectedVersion,input.amountMinor].every(value=>Number.isSafeInteger(value)&&value>0)
     ||!isCurrency(input.currency)||!["cash","transfer"].includes(input.method)||!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey))
     throw new DebtRepaymentError("invalid","بيانات التحصيل غير صالحة.");
   const hash=debtRequestHash({purpose:"debt-collection-v1",...input,session:{id:input.session.userId,username:input.session.username,role:input.session.role}});
-  await ensureSchema();const client=await getPool().connect();
   let paymentId=0;let replayed=false;
   try{
-    await client.query("BEGIN");await assertDebtSession(client,input.session);
+    await tx("BEGIN");await assertDebtSession(client,input.session);
     const replay=async()=>{
       const {rows:[prior]}=await client.query<{id:number;patient_id:number;created_by:string;idempotency_request_hash:string}>("SELECT id,patient_id,created_by,idempotency_request_hash FROM payments WHERE idempotency_key=$1",[input.idempotencyKey]);
       if(!prior)return null;
@@ -27,7 +34,7 @@ export async function collectDebtInstallment(input: {
       await assertDebtSession(client,input.session);return prior.id;
     };
     const early=await replay();
-    if(early){paymentId=early;replayed=true;await client.query("COMMIT");}
+    if(early){paymentId=early;replayed=true;await tx("COMMIT");}
     else{
       // Same financial order as canonical recovery: patient FK fence -> shift ->
       // linked visits -> opening-table fence -> sorted invoices -> sorted plans -> arrangement.
@@ -35,7 +42,7 @@ export async function collectDebtInstallment(input: {
       await client.query("SELECT id FROM patients WHERE id=$1 FOR KEY SHARE",[input.patientId]);
       const {rows:shifts}=await client.query("SELECT id FROM cashier_shifts WHERE status='open' FOR UPDATE");
       const waited=await replay();
-      if(waited){paymentId=waited;replayed=true;await client.query("COMMIT");}
+      if(waited){paymentId=waited;replayed=true;await tx("COMMIT");}
       else{
         if(!shifts.length)throw new DebtRepaymentError("stale","لا توجد وردية مفتوحة؛ افتح الوردية قبل التحصيل.");
         await client.query("SELECT id FROM visits WHERE patient_id=$1 AND invoice_id IS NOT NULL ORDER BY id FOR UPDATE",[input.patientId]);
@@ -73,9 +80,9 @@ export async function collectDebtInstallment(input: {
         if(!replayed)await insertAuditRow(client,{action:"debt_repayment.collect",entity:"payment",entityId:paymentId,actor:input.session.username,actorRole:input.session.role,
           details:{arrangementId:arrangement.id,version:revision.version,target,settlementMinor:settlement,priorRemainingMinor:position.remainingMinor,newRemainingMinor:position.remainingMinor-settlement,
             currency:input.currency,amountMinor:input.amountMinor,exchangeRate:Number(stored.exchange_rate),baseAmountMinor:baseAmount,priorAccountDueMinor:account.due}});
-        await assertDebtSession(client,input.session);await client.query("COMMIT");
+        await assertDebtSession(client,input.session);await tx("COMMIT");
       }
     }
-  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
-  return {payment:await getPayment(paymentId),replayed};
+  }catch(error){await tx("ROLLBACK").catch(()=>undefined);throw error;}
+  return {payment:await getPaymentWith(client,paymentId),replayed};
 }
