@@ -1,3 +1,4 @@
+import { validateRadiologyRequestMigration } from "./radiology-request-migration";
 import { validatePrescriptionIssuanceMigration } from "./prescription-issuance-migration";
 import { validatePrescriptionMigrationLineage } from "./prescription-migration-lineage";
 import { createHash } from "node:crypto";
@@ -106,6 +107,7 @@ export async function applyRuntimeMigrationFiles(pool: DbPool, files: MigrationF
       const applied = await listAppliedMigrations(client);
       await validatePrescriptionMigrationLineage(client, files, applied);
       await validatePrescriptionIssuanceMigration(client, files, applied);
+      await validateRadiologyRequestMigration(client, files, applied);
       // Check every supplied contract before making any extension change.
       for (const file of files) {
         if (createHash('sha256').update(file.sql).digest('hex') !== file.checksum) throw new Error(`RUNTIME_MIGRATION_SOURCE_MISMATCH: ${file.version}`);
@@ -348,6 +350,7 @@ async function migrateHoldingLock(
   let applied = await listAppliedMigrations(client);
   await validatePrescriptionMigrationLineage(client, files, applied);
   await validatePrescriptionIssuanceMigration(client, files, applied);
+  await validateRadiologyRequestMigration(client, files, applied);
   // Validate only the two pinned Ortho contracts before skipping applied files.
   for (const file of files) {
     if (file.version === "0051" || file.version === "0052") validateOrthoRevisionRegistry(file, applied.find(row => row.version === file.version));

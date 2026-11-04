@@ -1,3 +1,4 @@
+import { RADIOLOGY_REQUEST_MIGRATIONS as radiology } from '../../lib/radiology-request-migration';
 import {PRESCRIPTION_ISSUANCE_MIGRATIONS as issuance} from "../../lib/prescription-issuance-migration";
 import { afterEach,beforeEach,expect,it,vi } from 'vitest';
 import { mkdtemp,writeFile,rm } from 'node:fs/promises';
@@ -29,7 +30,7 @@ it.each([false,true])('SQL and full archive restore known0090 with populated boo
  const result=await stagedRestore({archivePath:join(directory,'backup.tar.gz'),targetUrl:fixture.archiveTarget.options.connectionString!,stagingDir:join(directory,'documents')});expect(result.errors).toEqual([]);expect(result.readyForCutover).toBe(true);
  for(const target of [fixture.sqlTarget,fixture.archiveTarget]){
   expect((await target.query('SELECT to_jsonb(b)::text AS row FROM booking_requests b ORDER BY id')).rows).toEqual(expected);
-  expect((await target.query("SELECT version,name,checksum,adopted FROM schema_migrations WHERE version>='0090' ORDER BY version")).rows).toEqual([...lineage,...issuance].map(({version,name,checksum})=>({version,name,checksum,adopted:false})));
+  expect((await target.query("SELECT version,name,checksum,adopted FROM schema_migrations WHERE version>='0090' ORDER BY version")).rows).toEqual([...lineage,...issuance,...radiology].map(({version,name,checksum})=>({version,name,checksum,adopted:false})));
   expect((await target.query('SELECT items,created_by,prescribing_doctor_name,prescribing_doctor_party_id FROM prescriptions')).rows).toEqual([{items:[{name:'SyntheticLegacyRx'}],created_by:'synthetic-original-actor',prescribing_doctor_name:null,prescribing_doctor_party_id:null}]);
   expect(await applyRuntimeMigrationFiles(target,lineage)).toEqual([]);
  }

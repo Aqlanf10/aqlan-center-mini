@@ -1,4 +1,6 @@
 import { MEDICATION_CATALOG_KEY, EMPTY_MEDICATION_CATALOG, parseMedicationCatalog, catalogTransitionProblem } from "./medication-catalog";
+import { RADIOLOGY_CENTERS_KEY, parseRadiologyCenters } from "./radiology-centers";
+import { RADIOLOGY_REQUEST_MIGRATIONS } from "./radiology-request-migration";
 import { PRESCRIPTION_ISSUANCE_MIGRATIONS } from "./prescription-issuance-migration";
 import { querySavedPrescriptionHistory } from "./prescription-history";
 import { encodePrescriptionPrintCursor, type PrescriptionPrintCursor } from "./prescription-print-pagination";
@@ -114,7 +116,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { assertNoPrescriptionIssuanceHistory, AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { assertNoRadiologyRequestHistory, assertNoPrescriptionIssuanceHistory, AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -2115,6 +2117,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_LINEAGE_MIGRATIONS);
     await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_ISSUANCE_MIGRATIONS);
+    await applyRuntimeMigrationFiles(getPool(), RADIOLOGY_REQUEST_MIGRATIONS);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -2691,6 +2694,12 @@ export async function linkVisitToPatient(visitId: number, patientId: number): Pr
         await client.query("ROLLBACK");
         return { ok: false, message: "الزيارة مرتبطة بوصفات صادرة بمفاتيح محفوظة؛ لا يمكن نقلها إلى ملف آخر أو تغيير ارتباطها الأصلي." };
       }
+      const { rows: radiologyHistory } = await client.query(
+        "SELECT 1 FROM radiology_requests WHERE visit_id=$1 LIMIT 1", [visitId]);
+      if (radiologyHistory[0]) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "الزيارة مرتبطة بطلبات أشعة صادرة؛ لا يمكن نقلها إلى ملف آخر أو تغيير ارتباطها الأصلي. لم يُغيَّر شيء." };
+      }
       const { rows: chartRecords } = await client.query(
         `SELECT 1 FROM tooth_conditions WHERE visit_id = $1 LIMIT 1`, [visitId],
       );
@@ -2824,7 +2833,7 @@ export async function finishVisit(id: number, actor?: VisitActor): Promise<Visit
 export async function deleteVisit(
   id: number,
   context: { actor: string; actorRole?: string | null; reason?: string | null },
-): Promise<{ ok: boolean; reason?: "not_found" | "signed" | "invoiced" | "has_prescription_history" }> {
+): Promise<{ ok: boolean; reason?: "not_found" | "signed" | "invoiced" | "has_prescription_history" | "has_radiology_history" }> {
   await ensureSchema();
   const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
@@ -2863,6 +2872,12 @@ export async function deleteVisit(
     if (commands[0]) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "has_prescription_history" };
+    }
+    const { rows: radiologyHistory } = await client.query(
+      "SELECT 1 FROM radiology_requests WHERE visit_id=$1 LIMIT 1", [id]);
+    if (radiologyHistory[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "has_radiology_history" };
     }
     /* الروابط اللينة تشير إلى الزيارة فتُفرَّغ قبل حذفها (المفاتيح بلا تتالٍ). */
     await client.query(`UPDATE plan_items SET visit_id = NULL WHERE visit_id = $1`, [id]);
@@ -5267,7 +5282,7 @@ export async function findPatientIdByNumber(patientNumber: string): Promise<numb
 
 export type PatientMergeResult =
   | { ok: true; moved: Record<string, number>; target: Patient }
-  | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "source_has_prescription_history" | "conflict"; counts?: Record<string, number> };
+  | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "source_has_prescription_history" | "source_has_radiology_history" | "conflict"; counts?: Record<string, number> };
 
 /**
  * (P2-7) دمج ملفٍّ مكرَّر (المصدر) في الملف الأصلي (الهدف) — معاملةٌ واحدة.
@@ -5309,6 +5324,13 @@ export async function mergeDuplicatePatient(
     if (prescriptionHistory.count > 0) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "source_has_prescription_history", counts: { prescriptionCommands: prescriptionHistory.count } };
+    }
+
+    const { rows: [radiologyHistory] } = await client.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM radiology_requests WHERE patient_id=$1", [sourceId]);
+    if (radiologyHistory.count > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "source_has_radiology_history", counts: { radiologyRequests: radiologyHistory.count } };
     }
 
     const { rows: [footprint] } = await client.query<{
@@ -7998,6 +8020,7 @@ export async function getSettingsSafe(): Promise<SettingsMap> {
 export async function saveSettings(values: Partial<Record<SettingKey, string>>): Promise<SettingsMap> {
   if (MEDICATION_CATALOG_KEY in values) throw new Error("MEDICATION_CATALOG_AUDITED_WRITE_REQUIRED");
   await ensureSchema();
+  if (RADIOLOGY_CENTERS_KEY in values) throw new Error("RADIOLOGY_CENTERS_AUDITED_WRITE_REQUIRED");
   const entries = ALL_SETTING_KEYS
     .filter((key) => values[key] !== undefined)
     .map((key) => [key, String(values[key] ?? SETTING_DEFAULTS[key]).trim()] as const);
@@ -8114,10 +8137,11 @@ export async function saveSettingsAudited(input: {
 }): Promise<SettingsWriteResult> {
   await ensureSchema();
   const keys = Object.keys(input.values);
+  const centersWrite = keys.includes(RADIOLOGY_CENTERS_KEY);
   if (keys.length === 0) return { ok: true, settings: await getSettings(), changed: [] };
 
   const catalogWrite = keys.includes(MEDICATION_CATALOG_KEY);
-  const atomicAudit = input.transactionalAudit || catalogWrite;
+  const atomicAudit = input.transactionalAudit || catalogWrite || centersWrite;
   const audits: { key: string; details: Record<string, unknown> }[] = [];
   const client = await getPool().connect();
   try {
@@ -8145,6 +8169,15 @@ export async function saveSettingsAudited(input: {
       const after = parseMedicationCatalog(input.values[MEDICATION_CATALOG_KEY]);
       const problem = !before.ok || !after.ok ? "دليل الأدوية غير صالح." : catalogTransitionProblem(before.value, after.value);
       if (problem) { await client.query("ROLLBACK"); return { ok: false, problem }; }
+    }
+    if (centersWrite) {
+      // Same protected-key architecture as the reviewed medication catalogue:
+      // authority is fresh after the exact settings locks, not only at HTTP entry.
+      const current = input.session ? await (await import("./session")).revalidateSessionInTransaction(input.session, client) : null;
+      if (!current || current.role !== "admin" || current.username !== input.actor || current.role !== input.actorRole
+        || !input.expected || !(RADIOLOGY_CENTERS_KEY in input.expected)) throw new Error("RADIOLOGY_CENTERS_AUTHORITY_REQUIRED");
+      const parsed = parseRadiologyCenters(input.values[RADIOLOGY_CENTERS_KEY]);
+      if (!parsed.ok) { await client.query("ROLLBACK"); return { ok: false, problem: parsed.message }; }
     }
 
 
@@ -8202,6 +8235,7 @@ export async function saveSettingsAudited(input: {
       }
     }
     if (catalogWrite && (!input.session || !await (await import("./session")).revalidateSessionInTransaction(input.session, client))) throw new Error("MEDICATION_CATALOG_SESSION_EXPIRED");
+    if (centersWrite && (!input.session || !await (await import("./session")).revalidateSessionInTransaction(input.session, client))) throw new Error("RADIOLOGY_CENTERS_SESSION_EXPIRED");
     await client.query("COMMIT");
 
     invalidateSettingsCache();
@@ -27493,6 +27527,7 @@ export async function resetClinicData<F>(
         `SELECT ${COLLECTION_ATTEMPT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (attemptHistory.exists) throw new ProtectedCollectionAttemptHistoryError();
       await assertNoPrescriptionIssuanceHistory(client);
+      await assertNoRadiologyRequestHistory(client);
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
@@ -27510,7 +27545,7 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, prescription_issuance_commands, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, prescription_issuance_commands, radiology_requests, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }
