@@ -97,12 +97,13 @@ beforeAll(async () => {
     seedDoctor("طبيب الرد السعودي فوق تحصيل"),
     seedDoctor("طبيب الرد الدولاري"),
   ]);
-  [patA, patB, patC, patD] = await Promise.all([
-    seedPatient("P01-FR-A", "مريض الفاتورة الملغاة"),
-    seedPatient("P01-FR-B", "مريض الرد السعودي الحر"),
-    seedPatient("P01-FR-C", "مريض الرد السعودي فوق تحصيل"),
-    seedPatient("P01-FR-D", "مريض الرد الدولاري"),
-  ]);
+  // Raw historical-number fixtures are sequential; allocator concurrency is tested separately.
+  [patA, patB, patC, patD] = [
+    await seedPatient("P01-FR-A", "مريض الفاتورة الملغاة"),
+    await seedPatient("P01-FR-B", "مريض الرد السعودي الحر"),
+    await seedPatient("P01-FR-C", "مريض الرد السعودي فوق تحصيل"),
+    await seedPatient("P01-FR-D", "مريض الرد الدولاري"),
+  ];
 
   /* أ: فاتورة YER مفتوحة + فاتورة SAR تُدفع كاملة ثم تُلغى لاحقًا. */
   await seedInvoice("P01-FR-INV-A-YER", patA, "YER", 100000, docA);

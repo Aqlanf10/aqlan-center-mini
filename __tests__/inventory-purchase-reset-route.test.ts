@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE } from "../lib/clinic-reset";
+import { ProtectedCollectionAttemptHistoryError, ProtectedInvoiceActionHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE } from "../lib/clinic-reset";
 
 const state = vi.hoisted(() => ({
   session: { username: "synthetic-owner", role: "admin" } as { username: string; role: string } | null,
@@ -39,6 +39,15 @@ describe("purchase history reset refusal preserves existing reset admission", ()
     if (!response) throw new Error("Reset POST did not return a response");
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ message: new ProtectedCollectionAttemptHistoryError().message, code: "protected-collection-attempt-history" });
+    expect(state.backup).not.toHaveBeenCalled(); expect(state.remove).not.toHaveBeenCalled();
+  });
+  it("retains invoice action keys with their dedicated 409 before backup or file deletion", async () => {
+    const error = new ProtectedInvoiceActionHistoryError();
+    state.reset.mockRejectedValue(error);
+    const response = await POST(request());
+    if (!response) throw new Error("Reset POST did not return a response");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ message: error.message, code: "protected-invoice-action-history" });
     expect(state.backup).not.toHaveBeenCalled(); expect(state.remove).not.toHaveBeenCalled();
   });
   it("keeps the existing preview response and confirmation phrase unchanged", async () => {

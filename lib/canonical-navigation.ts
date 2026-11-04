@@ -1,0 +1,78 @@
+/** Browser-safe projection of the canonical workspace. A page appears here only when
+ * its whole UI→HTTP→domain path admits canonical sessions (proved by the built
+ * application journeys in __tests__/security-http/canonical-*.test.ts). Navigation
+ * never grants: every route re-proves the exact capability server-side. */
+import type { StaffCapability } from "./staff-capability-catalogue";
+
+export type CanonicalRecordScopeView = "none" | "own" | "all";
+export interface CanonicalPage {
+ readonly href: string;
+ readonly label: string;
+ /** Any one of these grants shows the entry (owner sees all). Empty: no capability
+  * gate beyond `record`. */
+ readonly anyOf: readonly StaffCapability[];
+ /** The page lists records: shown only when that record scope is not `none`. */
+ readonly record?: "patient" | "appointment";
+ /** The page needs the WHOLE record scope (`all`), not `own` (for example the online
+  * booking queue, whose people are not anyone's patients yet). */
+ readonly wholeScope?: boolean;
+ /** Only this exact path: nested paths (for example a patient profile) are separate
+  * pages that are registered only once their own routes are canonical. */
+ readonly exact?: boolean;
+ /** A parameterised page (for example one patient's file): matched by this pattern
+  * instead of `href`, and never listed in the navigation. */
+ readonly pattern?: RegExp;
+ readonly description: string;
+}
+export interface CanonicalRecordScopes {
+ readonly patientScope?: CanonicalRecordScopeView;
+ readonly appointmentScope?: CanonicalRecordScopeView;
+}
+export const CANONICAL_PAGES: readonly CanonicalPage[] = Object.freeze([
+ { href: "/visits", label: "قائمة اليوم", anyOf: [], record: "patient", exact: true, description: "المنتظرون والكراسي وتسجيل الوصول لمرضى نطاقك اليوم." },
+ { href: "/appointments", label: "المواعيد", anyOf: [], record: "appointment", exact: true, description: "مواعيد اليوم ضمن نطاق مواعيدك، وجاهزية أعمال المختبر، وجدولك الشخصي." },
+ { href: "/requests", label: "طلبات الحجز", anyOf: ["appointments.create"], record: "appointment", wholeScope: true, exact: true, description: "طلبات الحجز الإلكتروني: تأكيدها عبر محرّك السعة أو رفضها، الأقدم أولًا." },
+ { href: "/waiting-list", label: "قائمة الانتظار", anyOf: [], record: "appointment", exact: true, description: "من لم يجد موعدًا: المكالمات وتفضيلات الموعد والإغلاق ضمن مواعيد نطاقك." },
+ { href: "/recall", label: "المتابعة", anyOf: [], record: "patient", exact: true, description: "مواعيد مضت بلا إغلاق، ومن لم يحضر، ومن انقطع عن المتابعة — ضمن نطاق مرضاك." },
+ { href: "/patients", label: "المرضى", anyOf: [], record: "patient", exact: true, description: "البحث عن المرضى وتصفّح قائمتهم ضمن نطاق مرضاك المسموح." },
+ { href: "/ortho", label: "متابعة التقويم", anyOf: ["clinical.ortho.view"], record: "patient", exact: true, description: "حالات المتابعة ضمن نطاق مرضاك؛ تفاصيل المواعيد حسب نطاق مواعيدك المستقل." },
+ { href: "/lab", label: "المختبر", anyOf: ["clinical.lab.view"], record: "patient", exact: true, description: "أعمال المختبر ضمن نطاق مرضاك: المتأخر والمستحق اليوم وما وصل ولم يُركّب؛ والمتابعة الشاملة لمن نطاقه كل المرضى." },
+ { href: "/my-work", label: "عملي السريري", anyOf: ["clinical.referrals.manage"], record: "patient", exact: true, description: "الإحالات إليك ومنك وما عاد إليك ضمن نطاق مرضاك، وجدول مواعيدك اليوم؛ لحساب مرتبط بطبيب." },
+ { href: "/finance", label: "الصندوق والورديات", anyOf: ["finance.shifts.view"], exact: true, description: "إجماليات الصندوق، تفاصيل الحركات المسموحة، وفتح الوردية وإقفالها بحسب صلاحياتك." },
+ { href: "/patients/[id]", label: "ملف المريض", anyOf: [], record: "patient", pattern: /^\/patients\/[1-9][0-9]{0,9}$/, description: "ملف مريضٍ ضمن نطاق مرضاك." },
+ { href: "/staff-access", label: "صلاحيات الطاقم", anyOf: ["staff.view"], description: "دليل الطاقم وتعديل صلاحيات كل موظف بمراجعة وتدقيق." },
+ { href: "/settings/laboratories", label: "دليل المختبرات", anyOf: ["clinical.laboratories.manage"], exact: true, description: "المختبرات وبيانات التواصل ومدة التسليم؛ الحسابات والعملة من شاشة الحسابات." },
+ { href: "/settings/lab-pricing", label: "أسعار المختبرات", anyOf: ["finance.cost-prices.view", "finance.lab-prices.edit"], exact: true, description: "أسعار خدمات كل مختبر وتواريخ سريانها؛ الأسعار لمن يملك رؤية التكلفة فقط، والتعديل لمن يملك تعديل الأسعار." },
+ { href: "/settings/lab-services", label: "خدمات المختبر", anyOf: ["clinical.lab.view"], exact: true, description: "دليل خدمات المختبر ومددها؛ الإضافة والتعديل لمن يملك تعديل أسعار المختبر. لا أسعار هنا." },
+ { href: "/settings", label: "الإعدادات", anyOf: ["settings.view"], exact: true, description: "إعدادات العيادة والتشغيل والمالية؛ تعدّل ما تسمح به صلاحيتك فقط، وما للمالك يبقى للمالك." },
+ { href: "/inventory/procurement", label: "طلبات الشراء", anyOf: ["inventory.requests.view"], description: "طلب مواد جديدة ومتابعة طلباتك أو طلبات المركز بحسب صلاحيتك." },
+ { href: "/inventory/procurement/review", label: "اعتماد طلبات الشراء", anyOf: ["inventory.requests.approve"], description: "مراجعة قيم الطلبات واعتمادها أو رفضها باعتماد مستقل." },
+ { href: "/inventory/procurement/operations", label: "أوامر الشراء والاستلام", anyOf: ["inventory.orders.view"], description: "إصدار أوامر الموردين، الاستلام والفحص، الحجر، ومطابقة فواتير الموردين." },
+ { href: "/inventory/custody", label: "عهدة الأطباء", anyOf: ["inventory.custody.view"], description: "صرف المواد للعهدة، الاستلام، الاستهلاك، الجرد، التالف، والتسوية السنوية." },
+ { href: "/inventory/procurement/setup", label: "تهيئة المواد والمواقع", anyOf: ["inventory.references.view"], description: "المواد ووحدات العبوات ومواقع التخزين وحدود اعتماد المشتريات." },
+]);
+/** Whether the current grants and record scopes show this page (owner: every page). */
+export function canonicalPageAllowed(page: CanonicalPage, capabilities: readonly string[] | undefined, isOwner: boolean | undefined, scopes: CanonicalRecordScopes = {}): boolean {
+ if (isOwner) return true;
+ const granted = new Set(capabilities ?? []);
+ if (page.anyOf.length > 0 && !page.anyOf.some(capability => granted.has(capability))) return false;
+ if (page.record === "patient") return scopes.patientScope === "all" || (!page.wholeScope && scopes.patientScope === "own");
+ if (page.record === "appointment") return scopes.appointmentScope === "all" || (!page.wholeScope && scopes.appointmentScope === "own");
+ return page.anyOf.length > 0;
+}
+/** Navigation entries: allowed pages that are not parameterised. */
+export function canonicalPagesFor(capabilities: readonly string[] | undefined, isOwner: boolean | undefined, scopes: CanonicalRecordScopes = {}): CanonicalPage[] {
+ return CANONICAL_PAGES.filter(page => !page.pattern && canonicalPageAllowed(page, capabilities, isOwner, scopes));
+}
+/** The most specific registered page for a path (nested pages never inherit a parent's grant). */
+export function canonicalPageFor(pathname: string): CanonicalPage | null {
+ let best: CanonicalPage | null = null;
+ for (const page of CANONICAL_PAGES) {
+  if (page.pattern) { if (page.pattern.test(pathname)) return page; continue; }
+  if ((pathname === page.href || (!page.exact && pathname.startsWith(`${page.href}/`))) && (!best || page.href.length > best.href.length)) best = page;
+ }
+ return best;
+}
+export function isCanonicalPage(pathname: string): boolean {
+ return canonicalPageFor(pathname) !== null;
+}

@@ -29,7 +29,8 @@ vi.mock("@/lib/db", async original => ({ ...await original<typeof import("../../
   getPatient: async () => ({ id: 17, fullName: "مريض اصطناعي", patientNumber: "SYN-17" }),
   getPayment: async () => fixture.payment, getInvoice: async () => fixture.invoice,
   patientStatementSnapshot: async () => ({ ledger: { invoices: [fixture.invoice], payments: [fixture.payment], openings: [] },
-    planCurrencies: new Map(), plans: [], historicalAgreements: [] }),
+    planCurrencies: new Map(), plans: [], historicalAgreements: [],
+    statementEvidence: { invoiceCorrections: [], invoiceCancellations: [], paymentCorrections: [], openingHistory: [], allocationEffectiveAt: {} } }),
 }));
 import StatementPage from "../../app/print/statement/[id]/page";
 import InvoicePage from "../../app/print/invoice/[id]/page";

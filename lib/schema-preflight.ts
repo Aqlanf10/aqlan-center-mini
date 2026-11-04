@@ -1,3 +1,4 @@
+import { patientNumberingReadiness } from "./patient-numbering-readiness";
 import { createHash } from "node:crypto";
 import { projectDetailedSchemaReadOnly, type ReadOnlyCatalogClient, type DetailedSchemaCatalog } from "./schema-manifest";
 import type { MigrationFile } from "./migration-files";
@@ -87,6 +88,7 @@ export interface SchemaPreflightReport {
   schemaEquivalence: "NOT_ASSESSED";
   fingerprintDrilldown?: SchemaFingerprintDrilldown;
   purchaseReceiptsReadiness?: PurchaseSchemaReadiness;
+  patientNumberingReadiness?: Awaited<ReturnType<typeof patientNumberingReadiness>>;
 }
 
 export type PreflightErrorCode =
@@ -127,7 +129,7 @@ function summarizeCatalog(catalog: DetailedSchemaCatalog): SchemaPreflightReport
 export async function inspectSchemaReadOnly(
   client: ReadOnlyCatalogClient,
   files: Pick<MigrationFile, "version" | "name" | "checksum">[],
-  options: { fingerprintDrilldown?: boolean; purchaseReceiptsReadiness?: boolean } = {},
+  options: { fingerprintDrilldown?: boolean; purchaseReceiptsReadiness?: boolean; patientNumberingReadiness?: boolean } = {},
 ): Promise<SchemaPreflightReport> {
   if (!files.length || new Set(files.map((file) => file.version)).size !== files.length) {
     throw new SchemaPreflightError("PROVENANCE_INVALID", "Invalid migration provenance.");
@@ -207,6 +209,7 @@ export async function inspectSchemaReadOnly(
       },
       adoptionAssessment: "NOT_PERFORMED", schemaEquivalence: "NOT_ASSESSED",
     };
+    if (options.patientNumberingReadiness) report.patientNumberingReadiness = await patientNumberingReadiness(client);
     if (options.fingerprintDrilldown) report.fingerprintDrilldown = fingerprintCatalog(catalog, Number(rows[0].version));
     if (options.purchaseReceiptsReadiness) {
       // The general projector intentionally omits views/foreign relations. A

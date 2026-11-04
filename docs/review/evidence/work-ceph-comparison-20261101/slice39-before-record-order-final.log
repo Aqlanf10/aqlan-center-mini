@@ -1,0 +1,82 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ceph-comparison-record-order.test.ts --exclude .next/**
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+ ❯ __tests__/ceph-comparison-record-order.test.ts (3 tests | 3 failed) 11ms
+   × orders the persisted xrayDate before registration time ({"id":7,"xrayDate":"2024-01-15","createdAt":"2025-01-01T12:00:00Z"} then {"id":8,"xrayDate":"2025-01-15","createdAt":"2024-01-01T12:00:00Z"}) 8ms
+   × orders the persisted xrayDate before registration time ({"id":8,"xrayDate":"2025-01-15","createdAt":"2024-01-01T12:00:00Z"} then {"id":7,"xrayDate":"2024-01-15","createdAt":"2025-01-01T12:00:00Z"}) 2ms
+   × uses numeric ID order for PostgreSQL BIGINT strings when dates tie 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ceph-comparison-record-order.test.ts > orders the persisted xrayDate before registration time ({"id":7,"xrayDate":"2024-01-15","createdAt":"2025-01-01T12:00:00Z"} then {"id":8,"xrayDate":"2025-01-15","createdAt":"2024-01-01T12:00:00Z"})
+ FAIL  __tests__/ceph-comparison-record-order.test.ts > orders the persisted xrayDate before registration time ({"id":8,"xrayDate":"2025-01-15","createdAt":"2024-01-01T12:00:00Z"} then {"id":7,"xrayDate":"2024-01-15","createdAt":"2025-01-01T12:00:00Z"})
+AssertionError: expected [ { id: 8, …(2) }, { id: 7, …(2) } ] to deeply equal [ { id: 7, …(2) }, { id: 8, …(2) } ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "createdAt": "2025-01-01T12:00:00Z",
+-     "id": 7,
+-     "xrayDate": "2024-01-15",
+-   },
+-   {
+      "createdAt": "2024-01-01T12:00:00Z",
+      "id": 8,
+      "xrayDate": "2025-01-15",
++   },
++   {
++     "createdAt": "2025-01-01T12:00:00Z",
++     "id": 7,
++     "xrayDate": "2024-01-15",
+    },
+  ]
+
+ ❯ __tests__/ceph-comparison-record-order.test.ts:9:45
+      7| const laterImage = { id: 8, xrayDate: "2025-01-15", createdAt: "2024-0…
+      8| it.each([[earlierImage, laterImage], [laterImage, earlierImage]])("ord…
+      9|   expect(chronologicalOrder(first, second)).toEqual([earlierImage, lat…
+       |                                             ^
+     10| });
+     11| it("uses numeric ID order for PostgreSQL BIGINT strings when dates tie…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/ceph-comparison-record-order.test.ts > uses numeric ID order for PostgreSQL BIGINT strings when dates tie
+AssertionError: expected [ '10', '2' ] to deeply equal [ '2', '10' ]
+
+- Expected
++ Received
+
+  [
+-   "2",
+    "10",
++   "2",
+  ]
+
+ ❯ __tests__/ceph-comparison-record-order.test.ts:16:127
+     14|   const a = { id: "10", xrayDate: null, createdAt: "2025-01-01T12:00:0…
+     15|   const b = { ...a, id: "2" };
+     16|   expect(chronologicalOrder(a as unknown as typeof earlierImage, b as …
+       |                                                                                                                               ^
+     17| });
+     18|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed (3)
+   Start at  03:32:39
+   Duration  247ms (transform 37ms, setup 0ms, import 56ms, tests 11ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,3 +1,4 @@
+import {withLegacyStaffReadOnlySnapshot} from "./legacy-staff-readonly-snapshot";
 /** Atomic same-currency positive amendment of one explicitly approved, single-item plan.
  * Original clinical/financial identities are never updated. New debt is ONLY
  * the price difference, documented as a dated invoice and immutable event.
@@ -114,13 +115,14 @@ async function snapshot(client:DbClient,planId:number){
 }
 export async function readAgreementAmendment(planId:number,session:SessionPayload){
  if(!positive(planId))fail("معرف الخطة غير صالح.","invalid");
- await ensureSchema();const client=await getPool().connect();let destroy=false;
- try{await authorize(client,session);await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+ return withLegacyStaffReadOnlySnapshot(session,{
+  allows:current=>current.role==="admin",
+  unauthorized:()=>new DebtRepaymentError("unauthorized","يتطلب تعديل اتفاق العلاج جلسة مدير سارية."),
+ },async client=>{
   const result=await snapshot(client,planId);
   const services=(await client.query<ServiceRow>("SELECT id,name,category,is_active FROM services WHERE is_active=TRUE ORDER BY name,id")).rows;
-  await client.query("COMMIT");
   return {...result,services};
- }catch(e){try{await client.query("ROLLBACK");}catch{destroy=true;}throw e;}finally{client.release(destroy);}
+ });
 }
 
 /** Canonical event-time doctor policy and case override. No client rates. */

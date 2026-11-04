@@ -1,0 +1,115 @@
+{
+  "base": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+  "status": "implemented and locally verified; exact-head CI and independent parent review pending",
+  "buildId": "ouXJpSUDJjVPIbVcFFy0v",
+  "results": {
+    "baselineHttp": {
+      "expectedFailed": 1,
+      "actualStatus": 401,
+      "expectedStatus": 200
+    },
+    "postgres": {
+      "passed": 43,
+      "files": 2,
+      "new": 30
+    },
+    "focusedUnit": {
+      "passed": 198,
+      "files": 6
+    },
+    "httpBrowser": {
+      "passed": 8,
+      "files": 1,
+      "ddl": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "legacyProof": {
+      "unchanged": 25
+    }
+  },
+  "notRun": [
+    "full unit suite for slice32",
+    "full PostgreSQL suite locally for slice32",
+    "full HTTP suite locally for slice32",
+    "WORK Docker image: inherited Alpine index HTTP 403 blocker"
+  ],
+  "sourceSha256": {
+    "lib/canonical-ortho-strategy.ts": "b2de121b1109a672925822b13d5528f2cdcf7640cf196eea5c903483dc5e334f",
+    "lib/ortho-treatment-strategy-store.ts": "de5336cc03a0c1ac4e8af0603cb2d05c8e4fc3f2920f10fb3237c5da863d038d",
+    "lib/canonical-record-reads.ts": "91786e7f77b0d12fdaa23e5ffc32dfbfafaf5035254638df7ce9ec6391576395",
+    "app/api/ortho/[id]/strategy/route.ts": "73c48cf35dbb88649b99706e61cb0ce2c51bb51f12404e3a99f0c83c2fe69241",
+    "components/patient/CanonicalOrthoStrategy.tsx": "ec8c9e66b3228c4db684a2cf354008edc0ac79a900a5b8d8d74507d8c1b8ca4e",
+    "components/patient/CanonicalOrthoDetail.tsx": "3b78b16302fef4fa2ba8aa1d4918e339153528c1316fd0ce87eed861854528c5",
+    "__tests__/fixtures/canonical-ortho-strategy.ts": "d6df4dddafef589added5748e053303fcd0236c5bd175ef5ac144a5a536a9e2d",
+    "__tests__/postgres/ortho-canonical-strategy.test.ts": "78ac762e9e3b78a8494daa026f1c36fb6fe3ac17e6a6e6b26580453128fe56f9",
+    "__tests__/security-http/canonical-ortho-strategy-journey.test.ts": "623dca36b3a472509ea2b381e193eff0f739001199d4950c32091c9e6bf1969c",
+    "__tests__/ortho-treatment-strategy-route.test.ts": "51009293b493dee07748a243ea55104bd9ecf763ea358652e5ccc79144030022",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "accb615161c1f85f527f3ae146aa82ace1a4bb2b69a4fb74b1057149d028b743",
+    "docs/security/staff-cutover/M2_PROJECTION_INVENTORY.json": "5cb4cfde1cf9a1f389f12e2bd9e076b4cffb1062f6b3497a4b16e82783b07524",
+    "docs/security/staff-cutover/inventory.json": "7071bf800d0d4c22a066deac58aaf2187cab4a4cb0bb1d351e0871b54ecb4181"
+  },
+  "evidence": {
+    "slice32-baseline-http.log": {
+      "rawSha256": "15134b635f3ac71e71135d2a6359d2f78b3ca21a684eb708b1c5e9bf5b79e37d",
+      "publishedSha256": "15134b635f3ac71e71135d2a6359d2f78b3ca21a684eb708b1c5e9bf5b79e37d",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice32-pg-first.log": {
+      "rawSha256": "85451128aa9be2d9352bd7f8878aeb0b89964c6b5ca808211e790158c92736ed",
+      "publishedSha256": "85451128aa9be2d9352bd7f8878aeb0b89964c6b5ca808211e790158c92736ed",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice32-pg-verified.log": {
+      "rawSha256": "4d770ca10ccc982648ad3b2e4647ad4339886f162e624324b3e7e7ea60da020a",
+      "publishedSha256": "4d770ca10ccc982648ad3b2e4647ad4339886f162e624324b3e7e7ea60da020a",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice32-focused-final.log": {
+      "rawSha256": "23043f7aa5e2572fb61bd3b195f204eca261417083720e40a0f64b401d65ed5a",
+      "publishedSha256": "23043f7aa5e2572fb61bd3b195f204eca261417083720e40a0f64b401d65ed5a",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice32-http-first.log": {
+      "rawSha256": "c0c33c840f3de949434488ff4a0b999a6293e42f297161a298974556bc6fc39d",
+      "publishedSha256": "c0c33c840f3de949434488ff4a0b999a6293e42f297161a298974556bc6fc39d",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice32-build.log": {
+      "rawSha256": "c1841cb1d976841778ff6702662c79de124f761588aee7f99dc2ad2db7973a49",
+      "publishedSha256": "a5615ba9f4abb2a51b4a3680be42bcb5b7f3829e90e1e9e5ac1a9f122274b125",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice32-typecheck-final.log": {
+      "rawSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "publishedSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice32-lint.log": {
+      "rawSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "publishedSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice32-inventory.log": {
+      "rawSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "publishedSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice32-legacy-proof.json": {
+      "rawSha256": "08dee11eb879f3038bd9be0b8252640f25d56b5d035f7d3e2fd829578fdd3d59",
+      "publishedSha256": "08dee11eb879f3038bd9be0b8252640f25d56b5d035f7d3e2fd829578fdd3d59",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "ortho-strategy-390.png": {
+      "sha256": "81192061da6196ed4276af0d811e1b8d1da13ffe181eb0d810d0b65bed8ceebb",
+      "synthetic": true,
+      "visuallyInspected": true
+    }
+  },
+  "sourceRevision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+  "sourceWitnessScope": "Historical delivery at sourceRevision; later slices can change these files and have their own evidence."
+}

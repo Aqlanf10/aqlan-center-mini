@@ -6,6 +6,10 @@ import { callVisitAgain, callVisitGated, clearVisit, deferVisitPayment, deleteVi
 import { normalizeEmergencyReason } from "@/lib/chair-readiness";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalVisitFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalVisitMove, parseCanonicalVisitMove } from "@/lib/canonical-visits";
+import { canonicalVisitFileFailure, commandCanonicalVisitDelete, commandCanonicalVisitLink, commandCanonicalVisitOpenFile } from "@/lib/canonical-visit-file";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +28,37 @@ function gatedResponse(result: GatedMoveResult, conflictMessage: string) {
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 12): queue moves on visits.manage, visit inside the scope.
+    const visitId = Number((await context.params).id);
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_visit_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    // M2 slice 81: linking a walk-in to a file and opening a file from the visit.
+    const fileAction = canonicalBody && typeof canonicalBody === "object" && !Array.isArray(canonicalBody) ? (canonicalBody as Record<string, unknown>).action : undefined;
+    if (fileAction === "link" || fileAction === "open_file") {
+      try {
+        const rawVisitId = (await context.params).id;
+        return NextResponse.json(fileAction === "link"
+          ? await commandCanonicalVisitLink(selected.handle, rawVisitId, (canonicalBody as Record<string, unknown>).patientId)
+          : await commandCanonicalVisitOpenFile(selected.handle, rawVisitId), { headers: NO_STORE });
+      } catch (error) {
+        return canonicalVisitFileFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+      }
+    }
+    try {
+      const moved = await commandCanonicalVisitMove(selected.handle, visitId, parseCanonicalVisitMove(canonicalBody));
+      if (moved.kind === "cleared") return NextResponse.json({ ok: true, clearedAt: moved.clearedAt, clearedBy: moved.clearedBy, already: moved.already }, { headers: NO_STORE });
+      return NextResponse.json(moved.warning ? { ...moved.visit, warning: moved.warning } : moved.visit, { headers: NO_STORE });
+    } catch (error) {
+      return canonicalVisitFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -192,6 +227,22 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
 /* حذف زيارة — المدير وحده، وللتشغيلية غير الموقّعة وغير المفوترة فقط. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 81: one admitted visits.delete transaction, the visit inside the scope; the
+     legacy guards (signed, invoiced, lab-linked) and the audit in the same transaction. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let canonicalReason: string | null = null;
+    try {
+      const raw = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES);
+      if (typeof raw?.reason === "string" && raw.reason.trim()) canonicalReason = raw.reason.trim().slice(0, 300);
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; /* no reason — optional */ }
+    try {
+      return NextResponse.json(await commandCanonicalVisitDelete(selected.handle, (await context.params).id, canonicalReason), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalVisitFileFailure(error, "تعذّر حذف الزيارة. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -220,6 +271,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const result = await deleteVisit(id, { actor: session.username, actorRole: session.role, reason });
     if (!result.ok) {
+      if (result.reason === "lab_linked") return NextResponse.json({message:"هذه الزيارة مرتبطة بهوية مختبر دائمة؛ لا تُحذف دون معالجة سريرية صريحة للروابط."},{status:409});
       if (result.reason === "signed") {
         return NextResponse.json(
           { message: "الزيارة موقّعة سريريًا — وثّقت عمل الطبيب ولا تُمحى." },

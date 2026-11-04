@@ -1,0 +1,42 @@
+RUN  v4.1.12 /tmp/aqlan-display-baseline-20261030
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/display-public-snapshot.test.ts (2 tests | 1 failed | 1 skipped) 1098ms
+   × public response excludes production statistics, chair occupancy and upcoming patient lists 25ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/display-public-snapshot.test.ts > public response excludes production statistics, chair occupancy and upcoming patient lists
+AssertionError: expected [ 'announcements', 'called', …(8) ] to deeply equal [ 'announcements', 'called', …(5) ]
+
+- Expected
++ Received
+
+  [
+    "announcements",
+    "called",
++   "chairs",
+    "delayNotice",
+    "now",
++   "queue",
++   "stats",
+    "tagline",
+    "voice",
+    "welcomeText",
+  ]
+
+ ❯ __tests__/postgres/display-public-snapshot.test.ts:35:39
+     33|   expect(response.status).toBe(200);
+     34|   const payload = await response.json();
+     35|   expect(Object.keys(payload).sort()).toEqual(["now", "called", "delay…
+       |                                       ^
+     36| });
+     37|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  18:29:10
+   Duration  5.71s (transform 3.21s, setup 0ms, import 3.80s, tests 1.10s, environment 0ms)

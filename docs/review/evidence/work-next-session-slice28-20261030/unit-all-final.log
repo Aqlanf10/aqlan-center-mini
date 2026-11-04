@@ -1,0 +1,15 @@
+
+> aqlan-center@0.1.0 test
+> vitest run --exclude .next/**
+
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+
+ Test Files  798 passed (798)
+      Tests  13398 passed (13398)
+   Start at  20:45:40
+   Duration  415.73s (transform 17.30s, setup 0ms, import 84.95s, tests 238.96s, environment 70ms)

@@ -1,5 +1,6 @@
 /** Transaction-owned authority for template invoices. No process settings cache or second connection. */
 import { getSettingsInTransaction, type DbClient, type Service } from "./db";
+import type { LabWorkRetirement } from "./lab-work-intent-contract";
 import type { LinkedInvoiceLineInput } from "./invoice-linkage-db";
 import { invoiceCommandFingerprint, invoiceTemplateRequestFingerprint, parseInvoiceCommand, hasInvoiceCatalogQuote, invoiceCatalogRequestFingerprint } from "./invoice-template";
 import { checkInvoiceAuthority } from "./invoice-pricing";
@@ -37,16 +38,18 @@ function itemsFingerprint(items: readonly LinkedInvoiceLineInput[]): string {
     item.templatePlan ? [item.templatePlan.templateId, item.templatePlan.version, item.templatePlan.stepKey,
       item.templatePlan.billingRule, item.templatePlan.sessionPlan.map((session) =>
         [session.title, session.minutes, session.afterDays, session.visitKey, session.visitTitle])] : null,
+    ...(item.labWork ? [{ labWork: item.labWork }] : []),
   ]));
 }
 
 /** Call after patient/replay handling, before any invoice/plan writes; caller owns transaction lifetime. */
 export async function validateInvoiceTemplateInTransaction(client: DbClient, input: {
   templateAuthority?: InvoiceTemplateAuthority; catalogueAuthority?: InvoiceTemplateAuthority; items: LinkedInvoiceLineInput[]; actorRole: string | null;
-  idempotencyKey: string | null; requestHash: string | null;
+  idempotencyKey: string | null; requestHash: string | null; labRetirements?: LabWorkRetirement[];
   patientId: number;visitId?:number; baseCurrency: string; existingPlanId?: number | null; discountMinor: number; note: string | null;
   createdBy: string; auditDetails?: Record<string, unknown>;
 }): Promise<void> {
+  if ((input.items.some(item=>item.labWork) || input.labRetirements !== undefined) && !input.templateAuthority && !input.catalogueAuthority) throw new InvoiceTemplateAuthorizationError();
   const usesTemplate = input.items.some((item) => item.templatePlan !== undefined);
   if (!usesTemplate && !input.catalogueAuthority) {
     if (input.templateAuthority) throw new InvoiceTemplateAuthorityError();
@@ -82,6 +85,7 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     throw error;
   }
   await assertInvoiceTemplateSession(client, authority.session, input);
+  if ((input.items.some(item=>item.labWork) || input.labRetirements !== undefined) && authority.session.role !== "admin" && authority.session.role !== "doctor") throw new InvoiceTemplateAuthorizationError();
   const minor = (value: string): number => {
     const number = Number(value);
     if (!Number.isSafeInteger(number) || number < 0) throw new InvoiceTemplateAuthorityError();
@@ -99,6 +103,7 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     || current.patientId !== input.patientId || current.baseCurrency !== input.baseCurrency
     || current.existingPlanId !== (input.existingPlanId ?? null) || (current.visitId??null)!==(input.visitId??null) || current.discountMinor !== input.discountMinor
     || current.note !== input.note || current.idempotencyKey !== input.idempotencyKey
+    || JSON.stringify(current.labRetirements) !== JSON.stringify(input.labRetirements)
     || itemsFingerprint(current.items) !== itemsFingerprint(input.items)) throw new InvoiceTemplateAuthorityError();
   const pricing = checkInvoiceAuthority({ requireInvoiceManualReason:true,
     lines: current.authorityLines, currency: current.baseCurrency, rates: foreignRatesFromSettings(settings),

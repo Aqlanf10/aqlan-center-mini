@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { countActiveAdmins, linkUserDoctor, listUsers, recordAudit, updateUser } from "@/lib/db";
-import { hashPassword } from "@/lib/auth";
+import { hashPassword, legacySessionEvidence } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
@@ -18,6 +18,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!isAdmin(session.role)) {
     return NextResponse.json({ message: "إدارة المستخدمين للمدير وحده." }, { status: 403 });
   }
+
+  const evidence=legacySessionEvidence(session);
+  if(!evidence)return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401});
 
   const { id: rawId } = await context.params;
   const id = Number(rawId);
@@ -40,7 +43,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const partyId = Number.isInteger(rawParty) && rawParty > 0 ? rawParty : null;
     const updated = await linkUserDoctor(id, partyId, {
       actor: session.username, actorRole: session.role, reason: "ربط حساب الطبيب بجهته",
-    });
+    }, {evidence});
     if (!updated) {
       return NextResponse.json(
         { message: "الجهة ليست طبيبًا فاعلًا، أو المستخدم غير موجود." },
@@ -124,7 +127,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       : null;
     const updated = await updateUser(id, patch, {
       actor: session.username, actorRole: session.role, reason: commissionReason,
-    });
+    }, {evidence});
     if (!updated) return NextResponse.json({ message: "المستخدم غير موجود." }, { status: 404 });
 
     /* تعديل الصلاحيات أو العمولة يُدوَّن بتدقيقٍ خاص به (صلاحيات الوكيل المساعد):

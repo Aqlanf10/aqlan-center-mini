@@ -1,0 +1,35 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/invoice-add-service.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-center-mini
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/invoice-add-service.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/invoice-add-service.test.ts [ __tests__/postgres/invoice-add-service.test.ts ]
+Error: Cannot find module '/lib/invoice-add-service-db' imported from /workspace/aqlan-center-mini/__tests__/postgres/invoice-add-service.test.ts
+ ❯ __tests__/postgres/invoice-add-service.test.ts:8:16
+      6| assertRealPostgresUrl(); stubPostgresEnv();
+      7| const db=await import("../../lib/db"), auth=await import("../../lib/au…
+      8| const addition=await import("../../lib/invoice-add-service-db");
+       |                ^
+      9| const q=async(sql:string,values:unknown[]=[]) => (await db.getPool().q…
+     10| let session:SessionPayload,serviceId:number,clinicalServiceId:number,d…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  00:24:44
+   Duration  3.82s (transform 2.93s, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,3 +1,8 @@
+import { canonicalCephCreateQuery, readCanonicalCephCreateContext } from "@/lib/canonical-ceph-create-context";
+import { CanonicalCephCreateRefusal, commandCanonicalCephCreate } from "@/lib/canonical-ceph-create-command";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE,canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalCephReadRefusal,canonicalCephReadId,readCanonicalCephList } from "@/lib/canonical-ceph-reads";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -28,6 +33,22 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected=await selectRequestStaffEnvelope();
+  if(selected.kind==="denied")return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});
+  if(selected.kind==="canonical") {
+    try {
+      const params = new URL(_request.url).searchParams;
+      if (params.has("create")) {
+        const input = canonicalCephCreateQuery((await context.params).id, params);
+        return NextResponse.json(await readCanonicalCephCreateContext(selected.handle, input.patientId, input.imagesBefore), { headers: NO_STORE });
+      }
+      const patientId=canonicalCephReadId((await context.params).id,new URL(_request.url).searchParams,true);
+      return NextResponse.json(await readCanonicalCephList(selected.handle,patientId),{headers:NO_STORE});
+    } catch(error) {
+      if(error instanceof CanonicalCephReadRefusal)return NextResponse.json({code:error.code,message:error.message},{status:409,headers:NO_STORE});
+      return canonicalPatientReadFailure(error,"تعذّر قراءة دراسات السيفالومتري؛ لم يُعتبر السجل فارغًا.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -59,6 +80,20 @@ const textOrNull = (v: unknown, cap: number): string | null => {
 };
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const body: unknown = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalCephCreateRefusal("invalid_ceph_create", 400, "فتح المسودة لا يقبل مرشحات إضافية.");
+      return NextResponse.json(await commandCanonicalCephCreate(selected.handle, (await context.params).id, body), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
+      if (error instanceof CanonicalCephCreateRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد فتح المسودة. راجع الدراسات قبل أي طلب جديد.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);

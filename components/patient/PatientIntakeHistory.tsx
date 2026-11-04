@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { newRequestKey } from "@/lib/request-key";
 import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
 import { friendlyDateLong } from "@/lib/reminders";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -50,6 +51,7 @@ function IntakeUpdateForm({ patientId, from, onSaved }: {
       ? current.conditions.filter((one) => one !== key)
       : [...current.conditions, key],
   }));
+  const requestKey = useRef(newRequestKey());
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
@@ -59,13 +61,14 @@ function IntakeUpdateForm({ patientId, from, onSaved }: {
       const response = await fetch(`/api/patients/${patientId}/intake-history`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ ...draft, requestKey: requestKey.current }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         setError(payload?.message ?? "تعذّر حفظ الاستمارة.");
         return;
       }
+      requestKey.current = newRequestKey();
       onSaved();
     } catch {
       setError("تعذّر الاتصال بالخادم.");

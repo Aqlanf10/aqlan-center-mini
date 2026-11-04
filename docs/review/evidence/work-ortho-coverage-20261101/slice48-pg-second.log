@@ -1,0 +1,125 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts (24 tests | 11 failed) 2529ms
+   × missing, foreign and mismatched patient/case references reveal the same missing record 139ms
+   × no saved decision remains distinct from an excluded decision 3ms
+   × changed invoice source never silently changes the immutable decision 2ms
+   × changed plan source never silently changes the immutable decision 7ms
+   × changed lineage source never silently changes the immutable decision 6ms
+   × changed site source never silently changes the immutable decision 8ms
+   × changed origin source never silently changes the immutable decision 7ms
+   × payment and treatment progress do not alter the original commercial applicability rule 6ms
+   × same RR connection preserves the prior source when an independent writer changes it 7ms
+   × scope removal is snapshot-consistent and denied on the next read 101ms
+   × rejects a source envelope over 2 MiB without hiding or rewriting it 2ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > missing, foreign and mismatched patient/case references reveal the same missing record
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts:52:100
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > no saved decision remains distinct from an excluded decision
+error: duplicate key value violates unique constraint "ortho_cases_one_open"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ Module.seedCanonicalCoverage __tests__/fixtures/canonical-ortho-coverage.ts:8:34
+
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts:54:109
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > changed invoice source never silently changes the immutable decision
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > changed plan source never silently changes the immutable decision
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > changed lineage source never silently changes the immutable decision
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > changed site source never silently changes the immutable decision
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > changed origin source never silently changes the immutable decision
+error: duplicate key value violates unique constraint "ortho_cases_one_open"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ Module.seedCanonicalCoverage __tests__/fixtures/canonical-ortho-coverage.ts:8:34
+
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts:66:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > payment and treatment progress do not alter the original commercial applicability rule
+error: duplicate key value violates unique constraint "ortho_cases_one_open"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ Module.seedCanonicalCoverage __tests__/fixtures/canonical-ortho-coverage.ts:8:34
+
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts:76:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/11]⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > same RR connection preserves the prior source when an independent writer changes it
+error: duplicate key value violates unique constraint "ortho_cases_one_open"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ Module.seedCanonicalCoverage __tests__/fixtures/canonical-ortho-coverage.ts:8:34
+
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts:82:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/11]⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > scope removal is snapshot-consistent and denied on the next read
+AssertionError: promise resolved "{ …(7) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "applicable": true,
++   "current": {
++     "createdAt": "2026-11-01T09:35:05.748Z",
++     "createdBy": "SYN actor",
++     "decision": "included",
++     "id": "1",
++     "reason": "SYN سبب الاتفاق المحفوظ",
++     "version": 1,
++   },
++   "enabled": true,
++   "invoiceSources": {
++     "state": "restricted",
++   },
++   "orthoCaseId": 1,
++   "patientId": 1,
++   "projection": "ortho-followup-coverage",
+  }
+
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts:94:114
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/11]⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > rejects a source envelope over 2 MiB without hiding or rewriting it
+error: duplicate key value violates unique constraint "ortho_cases_one_open"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ Module.seedCanonicalCoverage __tests__/fixtures/canonical-ortho-coverage.ts:8:34
+
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts:129:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/11]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  11 failed | 13 passed (24)
+   Start at  09:35:01
+   Duration  5.25s (transform 1.80s, setup 0ms, import 2.23s, tests 2.53s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -9,11 +9,11 @@
  * للمحرّك. ولا يبني أيُّ مسارٍ حكمَه بنفسه.
  */
 import {
-  CLINIC_TIME_ZONE, getSettings, listAppointmentServices, listProviderBlocks,
+  CLINIC_TIME_ZONE, getSettings, getSettingsWith, listAppointmentServices, listProviderBlocks,
   resolveServiceByLegacyType, type DbClient,
 } from "./db";
 import { clinicDayStart } from "./clinicZone";
-import { chairCount } from "./settings";
+import { chairCount, type SettingsMap } from "./settings";
 import { judgeFullCapacity, type CapacityVerdict, type ProviderBlockWindow, type Shift } from "./capacity";
 import type { AppointmentService } from "./appointment-services";
 import type { Appointment } from "./schedule";
@@ -28,7 +28,15 @@ export interface CapacityContext {
 
 /** يقرأ سياسة السعة من الإعدادات — مصدرٌ واحد لساعات المركز وطاقته. */
 export async function loadCapacityContext(): Promise<CapacityContext> {
-  const settings = await getSettings();
+  return capacityContextFrom(await getSettings());
+}
+
+/** The same context read on the caller's client (canonical snapshots, M2 slice 19). */
+export async function loadCapacityContextWith(q: Pick<DbClient, "query">): Promise<CapacityContext> {
+  return capacityContextFrom(await getSettingsWith(q));
+}
+
+function capacityContextFrom(settings: SettingsMap): CapacityContext {
   const shifts: Shift[] = [
     { start: settings["clinic.day_start"], end: settings["clinic.day_end"] },
   ];
@@ -116,6 +124,8 @@ export interface CapacityEvaluationInput {
   service: AppointmentService | null;
   context: CapacityContext;
   providerId?: number | null;
+  /** A sourced clinical return consumes its clinician even without a catalogue service. */
+  requireAssignedProvider?: boolean;
   chairNo?: number | null;
   isNewPatient?: boolean;
   newPatientsBookedToday?: number;
@@ -127,8 +137,10 @@ export interface CapacityEvaluationInput {
 /** Freeze verified block windows once for the decision and its alternatives. */
 export async function prepareCapacityEvaluator(input: CapacityEvaluationInput): Promise<(time: string) => CapacityVerdict> {
   const { service, context } = input;
+  const capacityService = service ?? (input.requireAssignedProvider
+    ? { ...FALLBACK_SERVICE, requiresProvider: true } : FALLBACK_SERVICE);
   const blocks: ProviderBlockWindow[] = [];
-  if (service?.requiresProvider && input.providerId) {
+  if (capacityService.requiresProvider && input.providerId) {
     /* **يفشل مغلقًا.** كان `.catch(() => [])` يبتلع فشل القراءة فيصير الطبيب
        «متاحًا دائمًا» — فيُحجز فوق إجازته أو عمليّته بلا أن يشكو شيء. وحارسٌ
        يفشل مفتوحًا ليس حارسًا: ما لا يُتحقَّق منه يُردّ برسالةٍ صريحة، ولصاحب
@@ -154,7 +166,7 @@ export async function prepareCapacityEvaluator(input: CapacityEvaluationInput): 
     chairs: context.chairs,
     shifts: context.shifts,
     nearCapacityPercent: context.nearCapacityPercent,
-    service: service ?? FALLBACK_SERVICE,
+    service: capacityService,
     providerId: input.providerId ?? null,
     chairNo: input.chairNo ?? null,
     providerBlocks: blocks,

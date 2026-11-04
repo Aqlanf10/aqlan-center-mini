@@ -1,0 +1,19 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/plans-canonical-template-catalog.test.ts __tests__/postgres/staff-operation-runtime.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  2 passed (2)
+      Tests  46 passed (46)
+   Start at  03:05:16
+   Duration  10.12s (transform 2.94s, setup 0ms, import 3.56s, tests 5.90s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

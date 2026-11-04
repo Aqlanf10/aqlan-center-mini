@@ -1,0 +1,9 @@
+import { expect, it, vi } from "vitest";
+vi.mock("server-only", () => ({}));
+import { CanonicalCephCreateRefusal, parseCanonicalCephCreate } from "../lib/canonical-ceph-create-command";
+it("keeps native defaults, valid calendar dates and explicit optional fields without coercion", () => {
+  expect(parseCanonicalCephCreate("1", { documentId: 2 })).toEqual({ patientId: 1, documentId: 2, orthoCaseId: null, phase: "pretreatment", xrayDate: null, device: null, refSet: null });
+  expect(parseCanonicalCephCreate("2147483647", { documentId: 2, orthoCaseId: 3, phase: "during", xrayDate: "2024-02-29", device: " SYN ", refSet: " historical " })).toMatchObject({ orthoCaseId: 3, phase: "during", xrayDate: "2024-02-29", device: "SYN", refSet: "historical" });
+});
+it.each(["0", "01", "-1", "1.2", "1e2", " 1", "2147483648"])("rejects invalid patient identity %s", id => expect(() => parseCanonicalCephCreate(id, { documentId: 2 })).toThrow(CanonicalCephCreateRefusal));
+it.each([null, [], "", {}, { documentId: "2" }, { documentId: [2] }, { documentId: 0 }, { documentId: 2, phase: ["during"] }, { documentId: 2, phase: "bogus" }, { documentId: 2, orthoCaseId: "3" }, { documentId: 2, orthoCaseId: {} }, { documentId: 2, xrayDate: "2025-02-29" }, { documentId: 2, xrayDate: "2026-02-30" }, { documentId: 2, xrayDate: "2026-11-01T00:00:00Z" }, { documentId: 2, xrayDate: "0000-01-01" }, { documentId: 2, device: [] }, { documentId: 2, device: "x".repeat(121) }, { documentId: 2, refSet: {} }, { documentId: 2, refSet: "x".repeat(61) }, { documentId: 2, actor: "owner" }, { documentId: 2, patientId: 3 }, { documentId: 2, status: "completed" }, { documentId: 2, measurements: [] }])("refuses malformed or authority-bearing request %#", body => expect(() => parseCanonicalCephCreate("1", body)).toThrow(CanonicalCephCreateRefusal));

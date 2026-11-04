@@ -1,0 +1,169 @@
+{
+  "schema": "work-shifts-slice26-complete-evidence-v1",
+  "synthetic": true,
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "branch": "feat/work-recovery-followup-20261027",
+  "baseCommit": "780448b962ba75ac4cc8ea5c8481060fd98eef1c",
+  "readiness": "NOT_READY",
+  "inventorySourceDigest": "4a38b6e0f7470f5296d29328101fcf61e8e85e5a8d87b47b69b014a3d424c5d3",
+  "environment": {
+    "node": "22.23.3",
+    "postgres": "18.4",
+    "chromium": "151.0.7922.173"
+  },
+  "sources": [
+    {
+      "path": "app/api/shifts/route.ts",
+      "sha256": "27d9731815ef6d1db5a9a13e4d774d3da195239df380d18d231ec6e152cd62ea"
+    },
+    {
+      "path": "app/finance/layout.tsx",
+      "sha256": "391201ad8a4912371e0a02a8036c3df96911cfc9e61d6ab3a924096974b4f994"
+    },
+    {
+      "path": "app/finance/page.tsx",
+      "sha256": "da4ca36cdcab7b523124253538aeedc729f4d8a6024af97b1bf1cd78dc98bf24"
+    },
+    {
+      "path": "components/finance/CanonicalShifts.tsx",
+      "sha256": "1121e11497a8701b39022c16645d43360a7d840b4a473cd53c5d7dd9984d2195"
+    },
+    {
+      "path": "lib/canonical-shifts.ts",
+      "sha256": "e6214eda0e61fd4992ca8b4ea79f1e8152d4c28584d83f87c83ad84bc206bc08"
+    },
+    {
+      "path": "lib/db.ts",
+      "sha256": "56242b757fddcba9d5240dd0ef9ee8f8735e41eed93ec8cd62aebe7771a214bd"
+    },
+    {
+      "path": "lib/canonical-navigation.ts",
+      "sha256": "07f22d4ebf7d862ba1de2faad949cc74c4b55ecd7211a2f2bd44fee22da31e00"
+    },
+    {
+      "path": "lib/receipt-provenance-db.ts",
+      "sha256": "88d5a290b4297d803240c1e060cad8e9a3b7dd3bac1a5e6d078d0612dc1f5c10"
+    },
+    {
+      "path": "lib/receipt-provenance.ts",
+      "sha256": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b"
+    },
+    {
+      "path": "__tests__/postgres/shifts-canonical-read.test.ts",
+      "sha256": "5a522bc8d46d77a6cedad69a44ed534ced0e016b509cbb3bf054fd999436ca79"
+    },
+    {
+      "path": "__tests__/postgres/shifts-canonical.test.ts",
+      "sha256": "9a6da3dfb948be9f1d8b234571f20cbe61f5e4593430bdf018055a5f0ab59e2e"
+    },
+    {
+      "path": "__tests__/security-http/canonical-shifts-journey.test.ts",
+      "sha256": "d8fb37d550ea7c1d421de0af582031b9fd047c7304a241a7148943a06a7b127a"
+    },
+    {
+      "path": "__tests__/staff-session-selection.test.ts",
+      "sha256": "1bb443efe1eb207da39c96f36c474a89743153505bd70c5ab443e7681f515c2f"
+    },
+    {
+      "path": "docs/security/staff-cutover/HANDOFF.md",
+      "sha256": "745d4a86ae1d2f711e06041904395f0d837ad11762bace5bb08622e393bb0aef"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "96c53443c30d92bd7460cd8d17d630a4b8e2f7370324e37af3c382ff34cbd516"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md",
+      "sha256": "46efa7ff3e59ea8e586664d3674c1cde132c67294e080c9a0235e485bd1f0da7"
+    },
+    {
+      "path": "docs/security/staff-cutover/inventory.json",
+      "sha256": "849ebe6bb3dafcf03304bd311482e89c51a162690e087e0ba2b1ab8314b43691"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "body-scan.log",
+      "bytes": 120,
+      "sha256": "040707324ed7862b350bebb81c657cf17272a9d5115d01cf0a7f059eb332c8c4"
+    },
+    {
+      "path": "build.log",
+      "bytes": 13585,
+      "sha256": "85004af04ccce3d89469e84371f20b483b9455152bc78b694fb66f19f282bca5"
+    },
+    {
+      "path": "canonical-shifts-own-1280.png",
+      "bytes": 118221,
+      "sha256": "3353699ac4e377da701a3fd60634b3dd5834354df6026466ec59974550f231dc"
+    },
+    {
+      "path": "canonical-shifts-own-390.png",
+      "bytes": 100366,
+      "sha256": "cb194f54d540cc24241a1a14e4877dad24d6c2a37c54c98c91c3a2fcefb5be1d"
+    },
+    {
+      "path": "environment.log",
+      "bytes": 525,
+      "sha256": "cd37c50a20b3c7da11fcd6fee87ccbc3d154ad84a6ecd78d5380afb329e2e949"
+    },
+    {
+      "path": "http-shifts-final.log",
+      "bytes": 396,
+      "sha256": "93414d9d4b15dac153867b71bc8017691f225fec64207e3da00120b71bb53400"
+    },
+    {
+      "path": "lint.log",
+      "bytes": 1330,
+      "sha256": "d2cbd236f8dd7b4af9d6f779b1f1f6b90bc3edc4a5cd033df319b04e395282b9"
+    },
+    {
+      "path": "money-scan.log",
+      "bytes": 1546,
+      "sha256": "2a14c1371c477c2374587b38bd6e20765fafd9ce7ae90cd0babb03b6d50e702b"
+    },
+    {
+      "path": "postgres-shift-read.log",
+      "bytes": 304,
+      "sha256": "91081bd32064a6e62bdc16515dd8f3fe58beafb5138f5426bfd1a0c77d6e2528"
+    },
+    {
+      "path": "postgres-shifts.log",
+      "bytes": 307,
+      "sha256": "ab60fcf4ba434d67b826f54a8e81592247a7e1b985f198d1b93aeab4e4084bef"
+    },
+    {
+      "path": "receipt-performance.log",
+      "bytes": 305,
+      "sha256": "82ca6fa575b042c675c176a4ab92b0c8d8090715e98a13a0eac950535339a813"
+    },
+    {
+      "path": "receipt-query-plan.pg18.json",
+      "bytes": 107695,
+      "sha256": "af01156ffc07d4d49ccd928776f140314e5fbbb3a1a48444006fbc4e7ead7bea"
+    },
+    {
+      "path": "source-guards.log",
+      "bytes": 196,
+      "sha256": "e86dc0b9c5715d49dc61b9c6d5feb8cac59a81eb8c05239c71a795cc07ad4bb2"
+    },
+    {
+      "path": "unit-all-final.log",
+      "bytes": 335,
+      "sha256": "c6d643bfd412560e3c972c398f62ea0176d45612d184096adb074031745eaeaf"
+    },
+    {
+      "path": "unit-all.log",
+      "bytes": 10238,
+      "sha256": "fbbc9d3ac300903f18a69c657b69f7bf607a17aaf7b69ab46f3f17531f36d447"
+    },
+    {
+      "path": "unit-regression.log",
+      "bytes": 198,
+      "sha256": "b8f3563d5576bfc5a8a338ca7ab0151dcc5c48ebbacfcf801fb512db893ab7cb"
+    }
+  ],
+  "scopeCaveat": "Inherited DOCTOR_PATIENT_CONDITION includes appointment relationships. No stronger no-booking-expansion invariant or production activation is claimed.",
+  "ci": "Must verify final published head separately; local evidence is not CI acceptance.",
+  "logNormalization": "Checkout paths replaced with <checkout>; trailing whitespace and final empty lines removed. Test outcomes unchanged."
+}

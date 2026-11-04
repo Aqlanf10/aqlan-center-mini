@@ -7,6 +7,7 @@ import { useSessionActions } from "./SessionProvider";
 import { canHandleMoney, canUseAiChat, isAdmin, ROLE_LABEL, type Role } from "@/lib/roles";
 import { Icon, Logo, type IconName } from "./Icon";
 import LoginPage from "@/app/login/page";
+import { CanonicalShell } from "./CanonicalShell";
 import { GlobalSearchModal } from "./GlobalSearchModal";
 import { QuickAppointmentModal } from "./QuickAppointmentModal";
 import { QuickPatientModal } from "./QuickPatientModal";
@@ -67,6 +68,8 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   const { session, logout } = useSessionActions();
 
   const restricted = isGatedRole(session?.role);
+  /* جلسة الهوية الموحّدة لها قشرتها: لا عدّادات ولا اختصارات تطرق مسارات قديمة. */
+  const canonical = session?.canonical === true;
   const nav = NAV.filter((item) => {
     // (P2-1) الكاشير والمحاسب: القائمة هي قائمة السماح نفسها التي يحرسها الباب.
     if (restricted && !pageVisibleToRole(session?.role, item.href)) return false;
@@ -165,7 +168,7 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   // مستمع اختصارات لوحة المفاتيح السريعة العالمية
   useEffect(() => {
     // (P2-1) الكاشير والمحاسب بلا مواعيد ولا ملفات مرضى — فلا اختصارات إليها.
-    if (bare || !session || restricted) return;
+    if (bare || !session || restricted || canonical) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.querySelector("dialog[open]")) return;
@@ -198,15 +201,15 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [bare, session, restricted]);
+  }, [bare, session, restricted, canonical]);
 
   useEffect(() => {
     // (P2-1) عدّادات الطلبات والمختبر والرسائل خارج حدود الكاشير والمحاسب.
-    if (bare || !session || restricted) return;
+    if (bare || !session || restricted || canonical) return;
     void loadBadges();
     const timer = setInterval(() => { void loadBadges(); }, 60_000);
     return () => clearInterval(timer);
-  }, [bare, session, restricted, loadBadges]);
+  }, [bare, session, restricted, canonical, loadBadges]);
 
   // عودة سلاح البانر: نزول العاجلة إلى الصفر يعني أن أحدهم فتحها وقرأها.
   useEffect(() => {
@@ -220,6 +223,8 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   if (!session) {
     return <LoginPage />;
   }
+
+  if (canonical) return <CanonicalShell>{children}</CanonicalShell>;
 
   const signOut = async () => {
     await logout();

@@ -1,0 +1,15 @@
+{
+  "baseRevision": "a3812c1127e41ab60a57754c0e3912f8dbff9316",
+  "state": "uncommitted source after readable-budget fix; final build and HTTP pending",
+  "files": {
+    "lib/db.ts": "7946a1b18d5d172215e781366edce7cd3089467bfbc721b1a55c638a04df1614",
+    "lib/canonical-ceph-edit-command.ts": "fecb5845c8f0636ab2755a664bc86b3ced7db7d691043c9ce78aea2db360adda",
+    "app/api/ceph/[id]/route.ts": "c60a715d1a0cd52e1d05f965cf8aff7c770d654b1c56fb5d5047bb11f2fc1930",
+    "components/patient/CanonicalCephStudy.tsx": "bf0fd599873cc227744817b18e01cacd6df0017c9e97371bea6e103f0b503f3d",
+    "components/patient/CanonicalCephDraftDiagnosis.tsx": "b8812771ca761db7c0ea2b253e8efe5404ba5c6a857cd22dfd514f22efbea081",
+    "__tests__/canonical-ceph-edit-command.test.ts": "a7be31c93f8f1b139d0485aa3fc0b864f89011e96c4e1ed549ac87864f76edbf",
+    "__tests__/postgres/ceph-edit-canonical-command.test.ts": "9f507bad2316d350b1ddf3f098203ce7318ce3b501a339ebabdedda01319ed8c",
+    "__tests__/security-http/canonical-ceph-edit-journey.test.ts": "ee92c6e80b4e9acaf45297586ae6bacda35549dfeed34b566b1abf933d777753",
+    "__tests__/security-http/canonical-ceph-study-journey.test.ts": "b872ca3917c35c43a38f08d5849f3b9d36e4a3a2acc3700b7e2a92ca4504a827"
+  }
+}

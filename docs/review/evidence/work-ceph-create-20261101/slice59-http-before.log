@@ -1,0 +1,40 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+[security-http] الخادم جاهز على http://127.0.0.1:9917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ceph-create-journey.test.ts (1 test | 1 failed) 5498ms
+   × HTTP: a scoped uploader opens a draft on an existing owned image without legacy identity 369ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-create-journey.test.ts > HTTP: a scoped uploader opens a draft on an existing owned image without legacy identity
+AssertionError: expected 401 to be 201 // Object.is equality
+
+- Expected
++ Received
+
+- 201
++ 401
+
+ ❯ __tests__/security-http/canonical-ceph-create-journey.test.ts:23:74
+     21|   const session = await journey.login("own"); expect(session.status).t…
+     22|   expect((await journey.api(`/api/patients/${patientId}/ceph`, session…
+     23|   const response = await create(session.cookie); expect(response.statu…
+       |                                                                          ^
+     24|   const result = await response.json(); expect(result).toEqual({ id: e…
+     25|   expect(await journey.ddlLog()).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  15:58:38
+   Duration  10.46s (transform 133ms, setup 0ms, import 559ms, tests 5.50s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,112 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/patient-cases-canonical-read.test.ts (28 tests | 1 failed) 4246ms
+   × case text, dependency status and patient scope remain in one snapshot across a concurrent commit 85ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/patient-cases-canonical-read.test.ts > case text, dependency status and patient scope remain in one snapshot across a concurrent commit
+AssertionError: promise resolved "{ …(8) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "cases": [
++     {
++       "completedAt": null,
++       "id": 1,
++       "kind": "specialty",
++       "orthoCaseId": null,
++       "outcome": null,
++       "problem": "SYN recorded problem",
++       "responsibleName": "SYN SYN-CASE-OWN",
++       "site": "26",
++       "specialty": "endodontics",
++       "startedOn": "2026-11-01",
++       "status": "active",
++       "title": "SYN changed case",
++     },
++   ],
++   "dependencies": [
++     {
++       "createdBy": "SYN clinician",
++       "itemId": 1,
++       "met": false,
++       "note": "SYN dependency note",
++       "requirement": "completed",
++       "requiresItemId": 2,
++     },
++   ],
++   "items": [
++     {
++       "caseId": 1,
++       "category": "SYN saved category",
++       "doctorName": "SYN SYN-CASE-OWN",
++       "id": 1,
++       "planId": 1,
++       "planStatus": "active",
++       "planTitle": "SYN clinical treatment plan",
++       "priority": 3,
++       "serviceName": "SYN recorded service",
++       "sortOrder": 100,
++       "status": "planned",
++       "surfaces": "MO",
++       "toothCode": 26,
++     },
++     {
++       "caseId": null,
++       "category": null,
++       "doctorName": null,
++       "id": 2,
++       "planId": 1,
++       "planStatus": "active",
++       "planTitle": "SYN clinical treatment plan",
++       "priority": null,
++       "serviceName": "SYN prerequisite",
++       "sortOrder": 100,
++       "status": "planned",
++       "surfaces": null,
++       "toothCode": null,
++     },
++   ],
++   "orthoVisible": false,
++   "patientId": 1,
++   "planVisible": true,
++   "problems": [
++     {
++       "caseId": 1,
++       "id": 1,
++       "label": "SYN case problem",
++       "notedAt": "2026-11-01 05:38:11.175453+00",
++       "notedBy": "SYN clinician",
++       "resolvedAt": null,
++       "resolvedBy": null,
++       "site": "26",
++       "specialty": "endodontics",
++       "status": "active",
++     },
++   ],
++   "projection": "patient-cases-clinical",
+  }
+
+ ❯ __tests__/postgres/patient-cases-canonical-read.test.ts:137:50
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 27 passed (28)
+   Start at  05:38:07
+   Duration  6.78s (transform 1.66s, setup 0ms, import 2.08s, tests 4.25s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

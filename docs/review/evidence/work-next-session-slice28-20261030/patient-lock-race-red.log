@@ -1,0 +1,26 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/visits-canonical-next-session.test.ts (31 tests | 1 failed | 30 skipped) 2313ms
+   × concurrent different-day returns filling a blank phone cannot deadlock by upgrading shared patient locks 1299ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/visits-canonical-next-session.test.ts > concurrent different-day returns filling a blank phone cannot deadlock by upgrading shared patient locks
+AssertionError: expected '40P01' not to be '40P01' // Object.is equality
+ ❯ __tests__/postgres/visits-canonical-next-session.test.ts:218:86
+    216|     }
+    217|     await lock.query("COMMIT");const results=await Promise.all(attempt…
+    218|     for(const result of results)expect("ok" in result ? result.ok : re…
+       |                                                                                      ^
+    219|     for(const result of results)expect("ok" in result ? result.ok : re…
+    220|     // A conflict is safe to retry only after the failed results have …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 30 skipped (31)
+   Start at  20:44:08
+   Duration  5.15s (transform 1.89s, setup 0ms, import 2.32s, tests 2.31s, environment 0ms)

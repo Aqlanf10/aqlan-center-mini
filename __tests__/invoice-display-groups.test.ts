@@ -16,6 +16,51 @@ const row = (patch: Partial<Row> = {}): Row => ({
 const selection = (...teeth: number[]) => ({ teeth, surfaces: "", scope: null });
 const rct = (...teeth: number[]) => applyGroupedToothSelection([row()], 0, "per_tooth_episode", selection(...teeth), key);
 const bridge = (...teeth: number[]) => applyGroupedToothSelection([row({ serviceId: "bridge-service" })], 0, "multi_tooth_episode", selection(...teeth), key);
+const fillingContext = { modeOf: () => "tooth_surfaces" as const };
+
+describe("independent filling surface batches", () => {
+  it("retains per-tooth surfaces in one display batch and canonical one-tooth payloads", () => {
+    const children = applyGroupedToothSelection([row({ quantity: "4" })], 0, "tooth_surfaces",
+      { ...selection(26, 16, 26), surfacesByTooth: { 16: "OM", 26: "BL" } }, key, fillingContext);
+    expect(children.map(one => [one.toothCode, one.surfaces, one.quantity, one.groupId, one.episodeTeeth])).toEqual([
+      [16, "MO", "1", null, null], [26, "BL", "1", null, null],
+    ]);
+    const groups = buildInvoiceDisplayGroups(children, fillingContext);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ quantity: 2, total: 200 });
+    expect(selectionOfDisplayGroup(groups[0]).surfacesByTooth).toEqual({ 16: "MO", 26: "BL" });
+    expect(children.map(one => toothPayload("tooth_surfaces", one))).toEqual([
+      { toothCode: 16, surfaces: "MO" }, { toothCode: 26, surfaces: "BL" },
+    ]);
+  });
+
+  it("keeps retained tooth identities, clears changed-surface links, and never copies links onto a new tooth", () => {
+    let children = applyGroupedToothSelection([row()], 0, "tooth_surfaces",
+      { ...selection(16, 26), surfacesByTooth: { 16: "MO", 26: "BL" } }, key, fillingContext);
+    children = children.map(one => ({ ...one, caseId: `case-${one.toothCode}`, planItemId: one.toothCode! + 100 }));
+    const edited = applyGroupedToothSelection(children, 0, "tooth_surfaces",
+      { ...selection(16, 26, 36), surfacesByTooth: { 16: "D", 26: "BL", 36: "O" } }, key, fillingContext);
+    expect(edited.map(one => [one.toothCode, one.surfaces, one.caseId, one.planItemId])).toEqual([
+      [16, "D", "", null], [26, "BL", "case-26", 126], [36, "O", "", null],
+    ]);
+    expect(edited.slice(0, 2).map(one => one.key)).toEqual(children.map(one => one.key));
+    expect(new Set(edited.map(one => one.key)).size).toBe(3);
+    const replaced = applyGroupedToothSelection(edited, 0, "tooth_surfaces", selection(16, 46), key, fillingContext);
+    expect(replaced.map(one => [one.toothCode, one.surfaces, one.caseId, one.planItemId])).toEqual([
+      [16, "", "", null], [46, "", "", null],
+    ]);
+  });
+
+  it("resets the entire visible filling batch on service change and refuses stealing a split tooth", () => {
+    const children = applyGroupedToothSelection([row()], 0, "tooth_surfaces",
+      { ...selection(16, 26), surfacesByTooth: { 16: "MO", 26: "BL" } }, key, fillingContext);
+    const split = splitDisplayGroupRow(children, children[1].key);
+    expect(applyGroupedToothSelection(split, 0, "tooth_surfaces", selection(16, 26, 36), key, fillingContext)).toEqual(split);
+    const changed = replaceDisplayGroupService(children, children.map(one => one.key), { serviceId: "new", price: "90" }, "per_tooth_episode", fillingContext);
+    expect(changed).toHaveLength(1);
+    expect(changed[0]).toMatchObject({ serviceId: "new", price: "90", toothCode: null, surfaces: "", caseId: "", displayGroupId: null, groupId: null });
+  });
+});
 
 describe("editor-only invoice display projection", () => {
   it("groups an explicit four-tooth batch into quantity 4 and summed 400, retaining canonical children", () => {

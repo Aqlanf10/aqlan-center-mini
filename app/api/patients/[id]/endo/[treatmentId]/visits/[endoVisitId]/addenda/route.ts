@@ -1,6 +1,7 @@
 import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 import { visibleEndoTreatment } from "@/lib/endodontics-response";
 import { NextResponse } from "next/server";
+import { canonicalEndoRoute, commandCanonicalEndoAddendum } from "@/lib/canonical-endo";
 import { checkEndoAddendum } from "@/lib/endodontics";
 import { addEndoAddendum, ENDO_ADDENDUM_MESSAGE } from "@/lib/endodontics-db";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
@@ -9,6 +10,9 @@ export const dynamic = "force-dynamic";
 
 /** (ENDO-2) ملحق على سجل علاج جذورٍ موقَّع — يُضاف ولا يمحو؛ يحمل كاتبه ووقته ويُدقَّق. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string; treatmentId: string; endoVisitId: string }> }) {
+  /* M2 slice 77: clinical.visits.document and clinical.visits.sign inside the scope, the clinician link or the owner. */
+  const canonical = await canonicalEndoRoute(request, async (handle, body) => { const { id, treatmentId, endoVisitId } = await params; return commandCanonicalEndoAddendum(handle, id, treatmentId, endoVisitId, body); }, "تعذّر حفظ الملحق. أعد المحاولة.");
+  if (canonical) return canonical;
   const { id, treatmentId: rawTreatment, endoVisitId: rawVisit } = await params;
   const patientId = idOf(id);
   const treatmentId = idOf(rawTreatment);

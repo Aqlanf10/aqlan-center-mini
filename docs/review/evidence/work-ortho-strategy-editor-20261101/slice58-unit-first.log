@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-lifecycle
+
+
+ Test Files  4 passed (4)
+      Tests  155 passed (155)
+   Start at  15:15:07
+   Duration  4.88s (transform 1.18s, setup 0ms, import 1.62s, tests 2.64s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

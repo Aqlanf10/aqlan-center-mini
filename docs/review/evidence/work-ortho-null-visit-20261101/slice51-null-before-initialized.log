@@ -1,0 +1,54 @@
+
+ RUN  v4.1.12 /workspace/aqlan-null-visit-repro
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-null-visit-witness.test.ts (1 test | 1 failed) 2172ms
+   × an adjustment pointing to a legacy visit without a patient must fail closed 59ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-null-visit-witness.test.ts > an adjustment pointing to a legacy visit without a patient must fail closed
+AssertionError: promise resolved "{ …(4) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "hasMore": false,
++   "limit": 300,
++   "pending": [
++     {
++       "adjustmentId": 1,
++       "doctorName": "SYN SYN-NULL-OTHER",
++       "doneOn": "2026-11-01",
++       "legacy": false,
++       "patientId": 1,
++       "patientName": "SYN own patient",
++     },
++   ],
++   "projection": "ortho-pending-decisions",
+  }
+
+ ❯ __tests__/postgres/ortho-null-visit-witness.test.ts:15:75
+     13|   const visit = (await fx.pool.query("INSERT INTO visits(patient_name,…
+     14|   await fx.pool.query("INSERT INTO ortho_adjustments(case_id,visit_id,…
+     15|   await expect(reads.readCanonicalOrthoDecisions(await fx.session("own…
+       |                                                                           ^
+     16| });
+     17|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  10:52:51
+   Duration  5.45s (transform 2.22s, setup 0ms, import 2.69s, tests 2.17s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,83 @@
+{
+  "format": "work-problem-status-evidence-v1",
+  "baseRevision": "f28cc7ce69f887b6b75e7848a64086090b70bd40",
+  "sourceRevision": "520a895b57ae3f66baab1e3d588c6cddbb7268a8",
+  "buildId": "mauR3Fy9PaqVr2c6JI6zx",
+  "results": {
+    "postgres": {
+      "passed": 137,
+      "files": 6,
+      "newTests": 19
+    },
+    "httpBrowser": {
+      "passed": 60,
+      "files": 5,
+      "commands": [
+        47,
+        13
+      ],
+      "newTests": 11
+    },
+    "unitAndGuards": {
+      "passed": 56,
+      "files": 5,
+      "unit": 46,
+      "guards": 10
+    },
+    "build": "pass",
+    "typecheck": "pass",
+    "lint": {
+      "errors": 0,
+      "warnings": 1,
+      "warningReason": "guard .mjs is ignored by existing lint configuration, tested separately"
+    },
+    "preservationChecks": 16,
+    "historicalSourceHashes": 507,
+    "fullUnit": "running; separate batch43-44 log",
+    "fullPostgres": "not run for this head",
+    "exactHeadCI": "not yet run",
+    "independentReview": "pending"
+  },
+  "sourceSha256": {
+    "lib/canonical-problem-status-command.ts": "4d6ce6eae55504d05e9acbb84450eed6536aebc1e2f6f3e7d561352bf2368fbd",
+    "lib/canonical-problem-status-version.ts": "f59e80946729a8ebed20707a713020acfe8cfbdff56d42406523038902ef741b",
+    "lib/canonical-case-reads.ts": "1027c464e0cff1513eb11e877d69f9c6a4b4045b8210c124f1453eb66b33d510",
+    "lib/canonical-case-projection.ts": "9edc5227a9ef33f93342a78fee0a52d91c68d9e6bdf92fbfb0c80617bd599c17",
+    "lib/staff-operation-runtime.ts": "3d273977f870e9263e6571e6b656d14bb2e6822dfb8fc7b07197fed12b48c7f9",
+    "lib/db.ts": "7edefe9bbf957334d7c1616cf0ef56cde2f8ca90812c13a1c06d898b22d243e6",
+    "app/api/problems/[id]/route.ts": "03b341029d173c6c6eace06164c61d41711c487b0dadba7e4d98e94b5b4a3c81",
+    "components/patient/CanonicalProblemStatusEditor.tsx": "fc8e35a715680638b8b84f25a51631024aeb7a002fc4f622cfb9ccfa81ea503f",
+    "components/patient/CanonicalPatientCases.tsx": "a59f05072b67188125c6b1bcdd8d307504160a008ce1927cec6994077f39fbdd",
+    "components/patient/CanonicalPatientProfile.tsx": "08cf9c4a57a462b2cec1228c915db26726f19b88be048336b65e6f24fb6ea7ca",
+    "__tests__/canonical-problem-status-command.test.ts": "345d232b7101523e8941ca1a507622b3e44b0e81a8c52721afac61ea3d92c1c4",
+    "__tests__/canonical-case-projection.test.ts": "80933d7900efdf47aab687e99ffdb0d4796d196f9811fb0a73673d9f800f0b17",
+    "__tests__/postgres/problem-status-canonical-command.test.ts": "7eba3710e8c131e876377a293fe8dedb9ce56e44b15bb6b9d5d5b05fd1b3c7fd",
+    "__tests__/security-http/canonical-problem-status-journey.test.ts": "5722f60fbe515616ef67f796ad31654dd1a6b7f2f3bae3f47f075c4d126f849b",
+    "scripts/audits/staff-cutover-readiness.test.mjs": "c675c3ba3da1d44d6baac93c82a42a0dd35a9b4e67cea8739ac51895bac54b3e",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "cabe3f4c8daf744d3314f92a925556899deeaa81e096de89288ee55c516f941e",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "8beb590968d396bc403d08b9f8ef6eb3e4aa9e52c929e9b0e03a5c71a045c410",
+    "docs/security/staff-cutover/inventory.json": "2ab86eb3c4a69d71d0a4ce27e4a9462d4b6f91438413ed0a21f20139d047ff5c",
+    "docs/security/staff-cutover/HANDOFF.md": "074f0adc501d387d6732f8f4b9ac1f112e6b5630cc2fe3cf7dfb98068c425588",
+    "docs/review/work-problem-status-slice44-20261101.md": "0d8186a2987af8b330220e130fdff50e4bdaab17bcf6cba429ff91c48c7d2688"
+  },
+  "artifacts": {
+    "problem-status-editor-390.png": "68be04a99c20b3d42a1205f61c965406c2e02f275d8ab970325dafe645aea3c0",
+    "slice44-before-http.log": "e3b9074b1c350bbc68b3c8dade20beed0de9a3144e7ecc67cae1d9d582545375",
+    "slice44-build.log": "b28a0837af30bc463fbc1cfca4d0657e307fa092620a0b2a402eda434e738cce",
+    "slice44-http-first.log": "c7023e63ab6d8a69ce973f8758f5cb561a6fd54d3c0fa06f30747eb475296b43",
+    "slice44-http-plan-case.log": "4c9ba0428458d8a8dd8d8eef9a5a2e88be0618ec272ecb98b06b71a5b4f4aa03",
+    "slice44-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice44-lint-final.log": "c60f82be99bb97516569fe419e8f55334fa4e1e7cc3ed297d5d54c421b446977",
+    "slice44-lint-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice44-pg-final.log": "2bafac947aafd5a6f4c47e9d69ce73a065b448fb5b4776d689964425be346813",
+    "slice44-pg-first.log": "77b2489974c10e5f7532f3f674f69b41d6fe40f714a4b9e213c954dcb244567e",
+    "slice44-source-proof.json": "78167f4242406595669864842ec07779075903325f1f25fe2fa5c4cf4c770477",
+    "slice44-types-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice44-types-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice44-types-ui.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice44-unit-guards-clean.log": "139c051b502bdb109ee0311f7396ae13104e17d61431aa94b0f854f83fa07f1d",
+    "slice44-unit-guards-final.log": "3119dc1f63f39d0e3e6830e6067ec466095382d25f40d8e6f40c675d62ae48ea",
+    "slice44-unit.log": "66a03c1c22b087bc71b2aa7f64a30c890b47b7d80c8e7e6249bc6ad86d21ecd6",
+    "verify-slice44.py": "02c7c0e95f86aede0e9d4bfc595addffff5facfda23a49206ecd04265f871083"
+  }
+}

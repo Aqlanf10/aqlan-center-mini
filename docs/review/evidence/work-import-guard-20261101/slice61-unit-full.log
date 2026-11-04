@@ -1,0 +1,35 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+ ❯ __tests__/development-runtime-tracing.test.ts (5 tests | 1 failed) 8155ms
+     × does not let runtime app, component or library imports depend on excluded development tooling 8042ms
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/development-runtime-tracing.test.ts > temporary development-only runtime tracing boundary > does not let runtime app, component or library imports depend on excluded development tooling
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/development-runtime-tracing.test.ts:135:3
+    133|   });
+    134|
+    135|   it("does not let runtime app, component or library imports depend on…
+       |   ^
+    136|     expect(runtimeSources.length).toBeGreaterThan(600);
+    137|     const violations: string[] = [];
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 871 passed (872)
+      Tests  1 failed | 14782 passed (14783)
+   Start at  17:15:15
+   Duration  670.49s (transform 38.18s, setup 0ms, import 151.45s, tests 371.85s, environment 113ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -43,7 +43,7 @@ jobs:
       # vulnerability at all. npm v11 uses the replacement bulk advisory
       # endpoint, so the audit keeps guarding dependencies as before.
       - name: Upgrade npm to bulk advisory endpoint
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.1
 
       - name: Install locked dependencies
         run: npm ci
@@ -121,11 +121,16 @@ jobs:
       - name: Verify braces absence in actual runtime artifacts
         run: node scripts/verify-braces-runtime.mjs
 
+      - name: Verify lint tooling absence in actual runtime artifacts
+        run: node scripts/dependency-security/verify-lint-tooling-runtime.mjs
+
       - name: Upload exact runtime dependency proof
         uses: actions/upload-artifact@v4
         with:
           name: braces-runtime-absence
-          path: .dependency-audit/runtime-proof.json
+          path: |
+            .dependency-audit/runtime-proof.json
+            .dependency-audit/lint-tooling-runtime-proof.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -174,7 +179,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Upgrade npm to bulk advisory endpoint
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.1
       - name: Install locked dependencies
         run: npm ci
       - name: Verify environment contract
@@ -288,10 +293,14 @@ jobs:
   # It still rebuilds in its own runner with its own disposable PostgreSQL service.
   # Nothing from the serial security suite is omitted or marked continue-on-error.
   security_http:
-    name: Built-app HTTP security and hosted browser
+    name: Built-app HTTP security and hosted browser (${{ matrix.shard }}/2)
     needs: [quality]
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     services:
       postgres:
         image: postgres:18-alpine
@@ -322,13 +331,22 @@ jobs:
           node-version: 22
           cache: npm
       - name: Upgrade npm to bulk advisory endpoint
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.1
       - name: Install locked dependencies
         run: npm ci
       - name: Verify environment contract
         run: npm run verify:environment
+      - name: Assign test and evidence ownership for this HTTP shard
+        id: http_evidence_owners
+        run: node scripts/dependency-security/http-evidence-ownership.mjs --assign ${{ matrix.shard }}
       - name: Production build for built-app HTTP tests
         run: npm run build
+      - name: Build read-only preflight artifact for HTTP runtime verification
+        run: npm run build:preflight
+      - name: Verify built-app runtime dependency boundaries
+        run: |
+          node scripts/verify-braces-runtime.mjs
+          node scripts/dependency-security/verify-lint-tooling-runtime.mjs
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
       # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
@@ -342,25 +360,53 @@ jobs:
       - name: HTTP security integration tests
         env:
           HR_EVIDENCE_DIR: /tmp/hr-evidence
-        run: npm run test:security-http
+        # Raw JSON stays runner-local. Preserve Vitest's original exit status.
+        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-security-raw.json --includeTaskLocation --shard=${{ matrix.shard }}/2
+
+      - name: Sanitize security HTTP test locations
+        if: always()
+        run: node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-security-raw.json" "${{ runner.temp }}/http-security-locations.json"
+
+      - name: Upload security HTTP test locations only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-security-test-locations-${{ matrix.shard }}
+          path: ${{ runner.temp }}/http-security-locations.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Isolated inventory proposal HTTP tests (explicit opt-in)
         env:
           INVENTORY_SCHEMA_TEST: "1"
-        run: npm run test:security-http
+        # Raw JSON stays runner-local. Preserve Vitest's original exit status.
+        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-inventory-raw.json --includeTaskLocation
+
+      - name: Sanitize inventory HTTP test locations
+        if: always()
+        run: node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-inventory-raw.json" "${{ runner.temp }}/http-inventory-locations.json"
+
+      - name: Upload inventory HTTP test locations only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-inventory-test-locations-${{ matrix.shard }}
+          path: ${{ runner.temp }}/http-inventory-locations.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Require every evidence path owned by this HTTP shard
+        if: always() && steps.http_evidence_owners.outcome == 'success'
+        run: node scripts/dependency-security/http-evidence-ownership.mjs --verify ${{ matrix.shard }}
 
       # Four pristine unauthenticated login views only, before any credentials.
       # Never upload cookies, browser storage, traces, videos, or broad directories.
       - name: Upload official-identity login screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_login_reference_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: login-reference-ui
-          path: |
-            .settings-ui-artifacts/login-reference/login-1280.png
-            .settings-ui-artifacts/login-reference/login-390.png
-            .settings-ui-artifacts/login-reference/login-photo-1280.png
-            .settings-ui-artifacts/login-reference/login-photo-390.png
+          name: login-reference-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_login_reference_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -368,113 +414,54 @@ jobs:
       # Five exact real-app synthetic invoice views and bounded geometry only.
       # No browser state, cookies, traces, databases, or broad directory upload.
       - name: Upload grouped invoice entry evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_invoice_grouped_entry_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: invoice-grouped-entry-ui
-          path: |
-            .settings-ui-artifacts/invoice-grouped-entry/grouped-1280.png
-            .settings-ui-artifacts/invoice-grouped-entry/grouped-1280.json
-            .settings-ui-artifacts/invoice-grouped-entry/grouped-390.png
-            .settings-ui-artifacts/invoice-grouped-entry/grouped-390.json
-            .settings-ui-artifacts/invoice-grouped-entry/split-1280.png
-            .settings-ui-artifacts/invoice-grouped-entry/split-1280.json
-            .settings-ui-artifacts/invoice-grouped-entry/split-390.png
-            .settings-ui-artifacts/invoice-grouped-entry/split-390.json
-            .settings-ui-artifacts/invoice-grouped-entry/split-tooth-390.png
-            .settings-ui-artifacts/invoice-grouped-entry/split-tooth-390.json
+          name: invoice-grouped-entry-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_invoice_grouped_entry_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       - name: Upload leadership hub synthetic visual and loading evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_leadership_hub_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: leadership-hub-ui
-          path: |
-            /tmp/leadership-hub-evidence/leadership-hub-populated-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-populated-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-day-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-day-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-lab-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-lab-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-tasks-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-tasks-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-empty-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-empty-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-error-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-error-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-finance-cash-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-finance-cash-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-finance-billing-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-finance-billing-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-finance-debts-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-finance-debts-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-finance-period-1440.png
-            /tmp/leadership-hub-evidence/leadership-hub-finance-period-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-finance-period-zoom-390.png
-            /tmp/leadership-hub-evidence/leadership-hub-performance.json
+          name: leadership-hub-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_leadership_hub_ui_paths }}
           if-no-files-found: error
           retention-days: 7
 
       # Exactly four actual-viewport screenshots from the owned synthetic fixture.
       # No cookies, browser state, traces, database dumps, or clinic records.
       - name: Upload laboratory backlog desktop and mobile evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_lab_open_backlog_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: lab-open-backlog-ui
-          path: |
-            /tmp/lab-backlog-evidence/lab-backlog-summary-1280.png
-            /tmp/lab-backlog-evidence/lab-backlog-summary-390.png
-            /tmp/lab-backlog-evidence/lab-backlog-received-1280.png
-            /tmp/lab-backlog-evidence/lab-backlog-received-390.png
+          name: lab-open-backlog-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_lab_open_backlog_ui_paths }}
           if-no-files-found: error
           retention-days: 7
 
       # Explicit synthetic HR viewports/PDFs only; no browser state, cookies,
       # traces, database dumps or employee data from an external environment.
       - name: Upload employee workflow evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_hr_workflow_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: hr-workflow-ui
-          path: |
-            /tmp/hr-evidence/hr-workforce-390.png
-            /tmp/hr-evidence/hr-profile-390.png
-            /tmp/hr-evidence/hr-profile-1280.png
-            /tmp/hr-evidence/hr-profile-attendance-390.png
-            /tmp/hr-evidence/hr-profile-attendance-1280.png
-            /tmp/hr-evidence/hr-profile-result-390.json
-            /tmp/hr-evidence/hr-profile-result-1280.json
-            /tmp/hr-evidence/hr-profile-wage-sources.pdf
-            /tmp/hr-evidence/hr-workforce-1280.png
-            /tmp/hr-evidence/hr-phone-390.png
-            /tmp/hr-evidence/hr-tasks-desktop-1280.png
-            /tmp/hr-evidence/future-approved-390.png
-            /tmp/hr-evidence/future-approved-1280.png
-            /tmp/hr-evidence/terminal-blocked-390.png
-            /tmp/hr-evidence/terminal-blocked-1280.png
-            /tmp/hr-evidence/hr-nextday-approved-390.png
-            /tmp/hr-evidence/hr-nextday-approved-1280.png
-            /tmp/hr-evidence/hr-payroll-multipage-390.pdf
-            /tmp/hr-evidence/hr-staff-report.pdf
-            /tmp/hr-evidence/hr-tasks-report.pdf
+          name: hr-workflow-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_hr_workflow_ui_paths }}
           if-no-files-found: error
           retention-days: 7
 
       # Exactly three intercepted synthetic report screenshots; no live clinic data,
       # traces, browser storage, or broad artifact directory uploads.
       - name: Upload daily report selected-date screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_daily_report_selected_date_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: daily-report-selected-date-ui
-          path: |
-            .settings-ui-artifacts/daily-report-selected-day-1280.png
-            .settings-ui-artifacts/daily-report-selected-day-390.png
-            .settings-ui-artifacts/daily-report-selected-day-print-1280.png
+          name: daily-report-selected-date-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_daily_report_selected_date_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -483,34 +470,22 @@ jobs:
       # 1280/390 with a 320 boundary check, the four state screens, and the real
       # paginated A4 PDF. No live clinic data, traces, or broad directory uploads.
       - name: Upload daily report design evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_daily_report_design_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: daily-report-design-ui
-          path: |
-            .settings-ui-artifacts/daily-report-design-1280.png
-            .settings-ui-artifacts/daily-report-design-390.png
-            .settings-ui-artifacts/daily-report-design-320.png
-            .settings-ui-artifacts/daily-report-loading-390.png
-            .settings-ui-artifacts/daily-report-error-390.png
-            .settings-ui-artifacts/daily-report-empty-day-390.png
-            .settings-ui-artifacts/daily-report-invalid-date-390.png
-            .settings-ui-artifacts/daily-report-print-a4.pdf
-            .settings-ui-artifacts/daily-report-high-occupancy-320.png
-            .settings-ui-artifacts/daily-report-design-proof.json
+          name: daily-report-design-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_daily_report_design_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic statement fixtures only; never upload real patient ledgers.
       - name: Upload patient statement cutoff screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_statement_cutoff_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-statement-cutoff-ui
-          path: |
-            .settings-ui-artifacts/patient-statement-cutoff-screen.png
-            .settings-ui-artifacts/patient-statement-cutoff-print.png
+          name: patient-statement-cutoff-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_statement_cutoff_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -518,26 +493,22 @@ jobs:
       # Only these two synthetic fixture screenshots are allowed from the hidden
       # directory; never upload the directory broadly or include environment files.
       - name: Upload lab pricing UI screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_lab_pricing_ui_screenshots == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: lab-pricing-ui-screenshots
-          path: |
-            .settings-ui-artifacts/lab-pricing-scope.png
-            .settings-ui-artifacts/lab-pricing-scope-mobile.png
+          name: lab-pricing-ui-screenshots-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_lab_pricing_ui_screenshots_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Allowlist only the synthetic pending-booking panels; no real patient data.
       - name: Upload pending booking UI screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_quick_booking_frozen_ui_screenshots == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: quick-booking-frozen-ui-screenshots
-          path: |
-            .settings-ui-artifacts/quick-booking-frozen-desktop.png
-            .settings-ui-artifacts/quick-booking-frozen-mobile.png
+          name: quick-booking-frozen-ui-screenshots-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_quick_booking_frozen_ui_screenshots_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -545,116 +516,99 @@ jobs:
       # Exact synthetic prescription-context viewport captures and native bounds only.
       # No real patients, traces, HAR, cookies, browser state, or broad uploads.
       - name: Upload prescription patient context evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_prescription_patient_context_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: prescription-patient-context-ui
-          path: |
-            .settings-ui-artifacts/prescription-patient-context-warning-1280.png
-            .settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json
-            .settings-ui-artifacts/prescription-patient-context-unavailable-1280.png
-            .settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json
-            .settings-ui-artifacts/prescription-patient-context-warning-390.png
-            .settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json
-            .settings-ui-artifacts/prescription-patient-context-unavailable-390.png
-            .settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json
+          name: prescription-patient-context-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_prescription_patient_context_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only the synthetic prescription draft, never real clinical data.
       - name: Upload prescription diagnosis UI screenshot
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_prescription_diagnosis_ui_screenshot == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: prescription-diagnosis-ui-screenshot
-          path: .settings-ui-artifacts/prescription-diagnosis-pinned.png
+          name: prescription-diagnosis-ui-screenshot-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_prescription_diagnosis_ui_screenshot_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Real built-route reads from owned ephemeral synthetic fixtures only.
       - name: Upload positive print route evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_positive_print_routes_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: positive-print-routes-ui
-          path: |
-            .settings-ui-artifacts/positive-print-routes/*.png
-            .settings-ui-artifacts/positive-print-routes/*.pdf
-            .settings-ui-artifacts/positive-print-routes/*.json
+          name: positive-print-routes-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_positive_print_routes_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Allowlist only the synthetic projected financial report, never live data.
       - name: Upload finance report visibility screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_finance_report_visibility_ui_screenshots == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: finance-report-visibility-ui-screenshots
-          path: |
-            .settings-ui-artifacts/finance-report-revenue-only-1280.png
-            .settings-ui-artifacts/finance-report-revenue-only-390.png
+          name: finance-report-visibility-ui-screenshots-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_finance_report_visibility_ui_screenshots_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only synthetic shift read/draft screenshots; no real financial data.
       - name: Upload finance shift read UI screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_finance_shift_read_ui_screenshots == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: finance-shift-read-ui-screenshots
-          path: |
-            .settings-ui-artifacts/finance-shift-unavailable.png
-            .settings-ui-artifacts/finance-shift-draft-restored.png
+          name: finance-shift-read-ui-screenshots-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_finance_shift_read_ui_screenshots_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only these three synthetic catalogue/report-containment panels are allowed.
       - name: Upload expense catalogue visibility screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_expense_catalogue_visibility_ui_screenshots == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: expense-catalogue-visibility-ui-screenshots
-          path: |
-            .settings-ui-artifacts/expense-catalogue-restricted-1280.png
-            .settings-ui-artifacts/expense-catalogue-restricted-390.png
-            .settings-ui-artifacts/expense-catalogue-revoked-open-report.png
+          name: expense-catalogue-visibility-ui-screenshots-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_expense_catalogue_visibility_ui_screenshots_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic dossier fixtures only; no real clinical records or broad uploads.
       - name: Upload patient dossier ENDO print artifacts
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_dossier_endo_print_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-dossier-endo-print-ui
-          path: |
-            .settings-ui-artifacts/patient-dossier-endo-screen.png
-            .settings-ui-artifacts/patient-dossier-endo-mobile-390.png
-            .settings-ui-artifacts/patient-dossier-endo-print.png
-            .settings-ui-artifacts/patient-dossier-endo-a4.pdf
+          name: patient-dossier-endo-print-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_dossier_endo_print_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic current-statement browser/PDF evidence only.
       - name: Upload current patient statement print artifacts
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_statement_current_print_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-statement-current-print-ui
-          path: |
-            .settings-ui-artifacts/patient-statement-current/screen.png
-            .settings-ui-artifacts/patient-statement-current/print.png
-            .settings-ui-artifacts/patient-statement-current/statement-a4.pdf
-            .settings-ui-artifacts/patient-statement-current/layout.json
-            .settings-ui-artifacts/patient-statement-current/pdf-layout.json
-            .settings-ui-artifacts/patient-statement-current/page-*.png
+          name: patient-statement-current-print-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_statement_current_print_ui_paths }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Synthetic fixtures from the statement workflow only; no session state or live patient files.
+      - name: Upload patient statement preview and local export evidence
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_statement_workflow_ui == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-statement-workflow-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_statement_workflow_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -662,29 +616,22 @@ jobs:
       # Exact synthetic portal fallback and SAR PDF evidence only. No session state,
       # cookies, traces, database dump, or broad directory upload.
       - name: Upload portal historical statement evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_portal_historical_details_evidence == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: portal-historical-details-evidence
-          path: |
-            .settings-ui-artifacts/portal-historical-evidence/corrupt-history-390.png
-            .settings-ui-artifacts/portal-historical-evidence/corrupt-history-1280.png
-            .settings-ui-artifacts/portal-historical-evidence/database-error-response.json
-            .settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4.pdf
-            .settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4.txt
-            .settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4-rendered.png
-            .settings-ui-artifacts/portal-historical-evidence/sar-pdf-evidence.json
+          name: portal-historical-details-evidence-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_portal_historical_details_evidence_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only the synthetic clinical-note containment fixture is allowlisted.
       - name: Upload pending clinical notes UI screenshot
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_clinical_visit_pending_notes_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-pending-notes-ui
-          path: .settings-ui-artifacts/clinical-visit-pending-notes.png
+          name: clinical-visit-pending-notes-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_clinical_visit_pending_notes_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -692,17 +639,11 @@ jobs:
       # Exact synthetic patient/Today owner fixtures only. Never upload the
       # directory, real patient records, traces, HAR, cookies or browser state.
       - name: Upload clinical visit owner UI screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_clinical_visit_owner_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-owner-ui
-          path: |
-            .settings-ui-artifacts/clinical-visit-owner-pending-1280.png
-            .settings-ui-artifacts/clinical-visit-owner-pending-390.png
-            .settings-ui-artifacts/clinical-visit-owner-ready-1280.png
-            .settings-ui-artifacts/clinical-visit-owner-ready-390.png
-            .settings-ui-artifacts/clinical-visit-owner-stay-1280.png
-            .settings-ui-artifacts/clinical-visit-owner-stay-390.png
+          name: clinical-visit-owner-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_clinical_visit_owner_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -710,15 +651,11 @@ jobs:
       # Only standalone orthodontic wire fixtures and geometry; no real records,
       # traces, HAR, cookies, browser state, or artifact-directory uploads.
       - name: Upload standalone orthodontic wire screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_adjustment_wire_defaults_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-adjustment-wire-defaults-ui
-          path: |
-            .settings-ui-artifacts/ortho-adjustment-current-wires-1280.png
-            .settings-ui-artifacts/ortho-adjustment-current-wires-390.png
-            .settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json
-            .settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json
+          name: ortho-adjustment-wire-defaults-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_adjustment_wire_defaults_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -726,40 +663,22 @@ jobs:
       # Only synthetic orthodontic regimen fixtures and control geometry; never
       # real records, traces, HAR, cookies, browser state, or whole directories.
       - name: Upload orthodontic regimen screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_regimen_defaults_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-regimen-defaults-ui
-          path: |
-            .settings-ui-artifacts/ortho-regimen-ongoing-1280.png
-            .settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json
-            .settings-ui-artifacts/ortho-regimen-ongoing-390.png
-            .settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json
-            .settings-ui-artifacts/ortho-regimen-baseline-1280.png
-            .settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json
-            .settings-ui-artifacts/ortho-regimen-baseline-390.png
-            .settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json
-            .settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png
-            .settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json
-            .settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png
-            .settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json
-            .settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png
-            .settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json
-            .settings-ui-artifacts/clinical-visit-regimen-baseline-390.png
-            .settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json
+          name: ortho-regimen-defaults-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_regimen_defaults_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exactly two synthetic saved-alert scenes; no clinical logs or browser state.
       - name: Upload patient alert freshness screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_alert_freshness_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-alert-freshness-ui
-          path: |
-            .settings-ui-artifacts/patient-alert-freshness-1280.png
-            .settings-ui-artifacts/patient-alert-freshness-390.png
+          name: patient-alert-freshness-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_alert_freshness_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -767,180 +686,132 @@ jobs:
       # Synthetic case diagnosis reference only; no real patient data, traces,
       # HAR, authentication state, browser storage, or whole-directory uploads.
       - name: Upload case diagnosis reference screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_clinical_visit_diagnosis_reference_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-diagnosis-reference-ui
-          path: |
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390.png
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390-bounds.json
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280.png
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280-bounds.json
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390.png
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390-bounds.json
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280.png
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280-bounds.json
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390.png
-            .settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390-bounds.json
+          name: clinical-visit-diagnosis-reference-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_clinical_visit_diagnosis_reference_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only synthetic orthodontic visit entry fixtures, never live patient data.
       - name: Upload orthodontic chairside entry screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_clinical_visit_ortho_entry_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-ortho-entry-ui
-          path: |
-            .settings-ui-artifacts/clinical-visit-ortho-entry-1280.png
-            .settings-ui-artifacts/clinical-visit-ortho-entry-390.png
+          name: clinical-visit-ortho-entry-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_clinical_visit_ortho_entry_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only the synthetic read-only carry-forward screens, never real ledger data.
       - name: Upload accounting carry-forward UI screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_accounting_carry_forward_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: accounting-carry-forward-ui
-          path: |
-            .settings-ui-artifacts/accounting-carry-forward.png
-            .settings-ui-artifacts/accounting-carry-forward-mobile.png
+          name: accounting-carry-forward-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_accounting_carry_forward_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only these two synthetic manual-journal drafts, never real ledger data.
       - name: Upload manual cash containment UI screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_manual_cash_containment_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: manual-cash-containment-ui
-          path: |
-            .settings-ui-artifacts/manual_cash_requires_linked_movement.png
-            .settings-ui-artifacts/manual_cash_shift_busy.png
+          name: manual-cash-containment-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_manual_cash_containment_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only the two synthetic patient-navigation draft fixtures are allowlisted.
       - name: Upload patient navigation draft screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_navigation_draft_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-navigation-draft-ui
-          path: |
-            .settings-ui-artifacts/patient-navigation-draft-1280.png
-            .settings-ui-artifacts/patient-navigation-draft-390.png
+          name: patient-navigation-draft-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_navigation_draft_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only synthetic compact patient context fixtures; never real patient data.
       - name: Upload compact patient context screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_compact_context_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-compact-context-ui
-          path: |
-            .settings-ui-artifacts/patient-compact-today-ordinary-1280.png
-            .settings-ui-artifacts/patient-compact-today-ordinary-390.png
-            .settings-ui-artifacts/patient-compact-today-long-1280.png
-            .settings-ui-artifacts/patient-compact-today-long-390.png
-            .settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png
-            .settings-ui-artifacts/patient-compact-treatment-ordinary-390.png
-            .settings-ui-artifacts/patient-compact-treatment-long-1280.png
-            .settings-ui-artifacts/patient-compact-treatment-long-390.png
+          name: patient-compact-context-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_compact_context_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only synthetic endodontic fixtures; never upload real patient records.
       - name: Upload endodontics cockpit screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_endodontics_cockpit_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: endodontics-cockpit-ui
-          path: |
-            .settings-ui-artifacts/endodontics-cockpit-1280.png
-            .settings-ui-artifacts/endodontics-cockpit-390.png
+          name: endodontics-cockpit-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_endodontics_cockpit_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Bounded synthetic denial panel and retry-control geometry only.
       - name: Upload endodontics reference read safety evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_endodontics_reference_read_safety_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: endodontics-reference-read-safety-ui
-          path: |
-            .settings-ui-artifacts/endodontics-read-denied-1280.png
-            .settings-ui-artifacts/endodontics-read-denied-390.png
-            .settings-ui-artifacts/endodontics-read-denied-1280-bounds.json
-            .settings-ui-artifacts/endodontics-read-denied-390-bounds.json
+          name: endodontics-reference-read-safety-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_endodontics_reference_read_safety_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic UI fixtures only; never upload real patient information.
       - name: Upload cockpit UI screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_cockpit_readiness_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-cockpit-readiness-ui
-          path: |
-            .settings-ui-artifacts/patient-cockpit-readiness-1280.png
-            .settings-ui-artifacts/patient-cockpit-readiness-390.png
-            .settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png
-            .settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png
+          name: patient-cockpit-readiness-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_cockpit_readiness_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic UI fixtures only; never upload real patient information.
       - name: Upload legacy UI screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_legacy_patient_guidance_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-patient-guidance-ui
-          path: |
-            .settings-ui-artifacts/legacy-patient-plan-1280.png
-            .settings-ui-artifacts/legacy-patient-plan-390.png
-            .settings-ui-artifacts/legacy-opening-guidance-1280.png
-            .settings-ui-artifacts/legacy-opening-guidance-390.png
-            .settings-ui-artifacts/legacy-current-collection-1280.png
-            .settings-ui-artifacts/legacy-current-collection-390.png
+          name: legacy-patient-guidance-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_legacy_patient_guidance_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic diagnosis-case panels only; no broad directory upload.
       - name: Upload orthodontic diagnosis case screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_diagnosis_case_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-diagnosis-case-ui
-          path: |
-            .settings-ui-artifacts/ortho-diagnosis-case-1280.png
-            .settings-ui-artifacts/ortho-diagnosis-case-390.png
+          name: ortho-diagnosis-case-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_diagnosis_case_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only the two synthetic archive reader panels; never upload the directory.
       - name: Upload legacy archive reader screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_legacy_archive_reader_screenshots == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-archive-reader-screenshots
-          path: |
-            .settings-ui-artifacts/legacy-archive-reader-1280.png
-            .settings-ui-artifacts/legacy-archive-reader-390.png
+          name: legacy-archive-reader-screenshots-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_legacy_archive_reader_screenshots_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -948,78 +819,55 @@ jobs:
       # Exact synthetic agreement read-state fixtures only. Append to the
       # existing job after real HTTP UI tests; preserve concurrent upload steps.
       - name: Upload orthodontic agreement read-state screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_package_read_state_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-package-read-state-ui
-          path: |
-            .settings-ui-artifacts/ortho-package-unavailable-1280.png
-            .settings-ui-artifacts/ortho-package-unavailable-390.png
-            .settings-ui-artifacts/ortho-package-funded-1280.png
-            .settings-ui-artifacts/ortho-package-funded-390.png
+          name: ortho-package-read-state-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_package_read_state_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic plan projections only; no real patient or receipt data.
       - name: Upload plan payment visibility screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_plan_payment_visibility_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: plan-payment-visibility-ui
-          path: |
-            .settings-ui-artifacts/plan-payment-hidden-1280.png
-            .settings-ui-artifacts/plan-payment-hidden-390.png
-            .settings-ui-artifacts/plan-payment-denied-1280.png
-            .settings-ui-artifacts/plan-payment-denied-390.png
+          name: plan-payment-visibility-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_plan_payment_visibility_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Allowlist only synthetic unchanged-UI records viewport captures and bounds.
       - name: Upload orthodontic record case screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_records_case_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-records-case-ui
-          path: |
-            .settings-ui-artifacts/ortho-records-case-1280.png
-            .settings-ui-artifacts/ortho-records-references-1280.png
-            .settings-ui-artifacts/ortho-records-case-390.png
-            .settings-ui-artifacts/ortho-records-profile-390.png
-            .settings-ui-artifacts/ortho-records-references-390.png
-            .settings-ui-artifacts/ortho-records-unavailable-390.png
-            .settings-ui-artifacts/ortho-records-ceph-summary-1280.png
-            .settings-ui-artifacts/ortho-records-ceph-summary-390.png
-            .settings-ui-artifacts/ortho-records-capture-bounds.json
+          name: ortho-records-case-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_records_case_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic checklist panels; canonical classifier success and unavailable reads.
       - name: Upload legacy checklist refresh screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_legacy_checklist_refresh_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-checklist-refresh-ui
-          path: |
-            .settings-ui-artifacts/legacy-checklist-independent-1280.png
-            .settings-ui-artifacts/legacy-checklist-independent-390.png
-            .settings-ui-artifacts/legacy-checklist-unavailable-1280.png
-            .settings-ui-artifacts/legacy-checklist-unavailable-390.png
+          name: legacy-checklist-refresh-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_legacy_checklist_refresh_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic category editor panels; no real account or financial data.
       - name: Upload commission category editor screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_commission_category_editor_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: commission-category-editor-ui
-          path: |
-            .settings-ui-artifacts/commission-category-editor-1280.png
-            .settings-ui-artifacts/commission-category-editor-390.png
+          name: commission-category-editor-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_commission_category_editor_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1027,13 +875,11 @@ jobs:
       # Exactly two synthetic long-doctor phone captures. Native bounds are
       # logged by the test; no broad directory, trace, HAR, or state uploads.
       - name: Upload long doctor phone filter screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_phone_doctor_filter_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: phone-doctor-filter-ui
-          path: |
-            .settings-ui-artifacts/phone-doctor-filter-home-390.png
-            .settings-ui-artifacts/phone-doctor-filter-appointments-390.png
+          name: phone-doctor-filter-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_phone_doctor_filter_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1041,14 +887,11 @@ jobs:
       # Exact synthetic appointment cards only; no patient uploads, browser
       # state, network traces, cookies, or broad artifact-directory additions.
       - name: Upload compact appointment reminder screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_appointment_reminder_compact_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: appointment-reminder-compact-ui
-          path: |
-            .settings-ui-artifacts/appointment-reminder-compact-1280.png
-            .settings-ui-artifacts/appointment-reminder-compact-390.png
-            .settings-ui-artifacts/appointment-reminder-compact-320.png
+          name: appointment-reminder-compact-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_appointment_reminder_compact_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1057,7 +900,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: settings-ui-screenshots
+          name: settings-ui-screenshots-${{ matrix.shard }}
           path: .settings-ui-artifacts/
           if-no-files-found: ignore
           retention-days: 7
@@ -1065,32 +908,22 @@ jobs:
       # Exact synthetic invoice-status rows and geometry only. No real records,
       # traces, HAR, cookies, browser state or artifact-directory uploads.
       - name: Upload reversed installment invoice label evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_invoice_recovery_labels_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-invoice-recovery-labels-ui
-          path: |
-            .settings-ui-artifacts/invoice-recovery-partial-1280.png
-            .settings-ui-artifacts/invoice-recovery-credit-1280.png
-            .settings-ui-artifacts/invoice-recovery-partial-390.png
-            .settings-ui-artifacts/invoice-recovery-credit-390.png
-            .settings-ui-artifacts/invoice-recovery-1280-bounds.json
-            .settings-ui-artifacts/invoice-recovery-390-bounds.json
+          name: patient-invoice-recovery-labels-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_invoice_recovery_labels_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
 
       - name: Upload orthodontic parent read safety acceptance
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_ortho_parent_read_safety_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-ortho-parent-read-safety-ui
-          path: |
-            .settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png
-            .settings-ui-artifacts/patient-ortho-parent-read-safety-390.png
-            .settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json
-            .settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json
+          name: patient-ortho-parent-read-safety-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_ortho_parent_read_safety_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1098,13 +931,11 @@ jobs:
       # Exactly two synthetic built-page Ceph warnings; no real patients,
       # traces, HAR, authentication state, or broad artifact uploads.
       - name: Upload ceph pending-write uncertainty screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_ceph_post_uncertainty_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-ceph-post-uncertainty-ui
-          path: |
-            .settings-ui-artifacts/patient-ceph-post-uncertain-1280.png
-            .settings-ui-artifacts/patient-ceph-post-uncertain-390.png
+          name: patient-ceph-post-uncertainty-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_ceph_post_uncertainty_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1113,13 +944,11 @@ jobs:
       # Exactly two synthetic built-page scenes with unknown saved history and
       # queued preview text. No real records, traces, HAR or authentication state.
       - name: Upload orthodontic photo completeness screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_photo_completeness_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-photo-completeness-ui
-          path: |
-            .settings-ui-artifacts/ortho-photo-completeness-1280.png
-            .settings-ui-artifacts/ortho-photo-completeness-390.png
+          name: ortho-photo-completeness-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_photo_completeness_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1127,38 +956,33 @@ jobs:
       # Exact synthetic /ortho board captures and decoded-link/geometry evidence.
       # Never upload cookies, browser state, traces, HAR or a whole directory.
       - name: Upload truthful orthodontic follow-up invitation evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_unbooked_followup_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-unbooked-followup-ui
-          path: |
-            .settings-ui-artifacts/ortho-unbooked-followup-390.png
-            .settings-ui-artifacts/ortho-unbooked-followup-1280.png
-            .settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json
-            .settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json
+          name: ortho-unbooked-followup-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_unbooked_followup_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Exact synthetic read-only planned case links and review cards only.
       - name: Upload planned orthodontic case follow-up evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_planned_case_followup_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-planned-case-followup-ui
-          path: |
-            .settings-ui-artifacts/ortho-planned-followup-exact-390.png
-            .settings-ui-artifacts/ortho-planned-followup-exact-1280.png
-            .settings-ui-artifacts/ortho-planned-followup-review-390.png
-            .settings-ui-artifacts/ortho-planned-followup-review-1280.png
-            .settings-ui-artifacts/ortho-planned-followup-conflict-390.png
-            .settings-ui-artifacts/ortho-planned-followup-conflict-1280.png
-            .settings-ui-artifacts/ortho-planned-followup-exact-390.json
-            .settings-ui-artifacts/ortho-planned-followup-exact-1280.json
-            .settings-ui-artifacts/ortho-planned-followup-review-390.json
-            .settings-ui-artifacts/ortho-planned-followup-review-1280.json
-            .settings-ui-artifacts/ortho-planned-followup-conflict-390.json
-            .settings-ui-artifacts/ortho-planned-followup-conflict-1280.json
+          name: ortho-planned-case-followup-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_planned_case_followup_ui_paths }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # One synthetic public call; no traces, cookies or real records.
+      - name: Upload synthetic public display screenshot
+        if: always() && steps.http_evidence_owners.outputs.evidence_display_public_synthetic_ui == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: display-public-synthetic-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_display_public_synthetic_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1166,27 +990,21 @@ jobs:
       # Exactly two synthetic built Today screenshots and target/occlusion bounds.
       # No traces, HAR, cookies, browser state, real records or broad uploads.
       - name: Upload Today readiness read lifetime evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_today_readiness_read_lifetime_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: today-readiness-read-lifetime-ui
-          path: |
-            .settings-ui-artifacts/today-readiness-1280.png
-            .settings-ui-artifacts/today-readiness-390.png
-            .settings-ui-artifacts/today-readiness-1280-bounds.json
-            .settings-ui-artifacts/today-readiness-390-bounds.json
+          name: today-readiness-read-lifetime-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_today_readiness_read_lifetime_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       - name: Upload raw service category display screenshots
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_service_raw_category_display_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: service-raw-category-display-ui
-          path: |
-            .settings-ui-artifacts/service-raw-category-1280.png
-            .settings-ui-artifacts/service-raw-category-390.png
+          name: service-raw-category-display-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_service_raw_category_display_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1194,17 +1012,11 @@ jobs:
       # Exact synthetic read-only Account comparison: no cookies, storage values,
       # traces, HAR, broad directories or historical financial writes.
       - name: Upload legacy reconciliation preview evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_legacy_reconciliation_preview_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-reconciliation-preview-ui
-          path: |
-            .settings-ui-artifacts/legacy-reconciliation-preview-390.png
-            .settings-ui-artifacts/legacy-reconciliation-preview-1280.png
-            .settings-ui-artifacts/legacy-reconciliation-preview-390-bounds.json
-            .settings-ui-artifacts/legacy-reconciliation-preview-1280-bounds.json
-            .settings-ui-artifacts/legacy-reconciliation-preview-390-upper-viewport.png
-            .settings-ui-artifacts/legacy-reconciliation-preview-390-lower-viewport.png
+          name: legacy-reconciliation-preview-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_legacy_reconciliation_preview_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1212,15 +1024,11 @@ jobs:
       # Exactly two synthetic Cases navigation screenshots and target/occlusion bounds.
       # No traces, HAR, cookies, browser state, real records or broad uploads.
       - name: Upload Cases orthodontic section navigation evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_cases_navigation_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-cases-navigation-ui
-          path: |
-            .settings-ui-artifacts/patient-cases-navigation-1280.png
-            .settings-ui-artifacts/patient-cases-navigation-390.png
-            .settings-ui-artifacts/patient-cases-navigation-1280-bounds.json
-            .settings-ui-artifacts/patient-cases-navigation-390-bounds.json
+          name: patient-cases-navigation-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_cases_navigation_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1228,19 +1036,11 @@ jobs:
       # Exact synthetic chart-ready/error regions and Retry bounds only.
       # No traces, HAR, cookies, storage, broad directories or clinical writes.
       - name: Upload dental chart read and retry evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_dental_chart_read_retry_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: dental-chart-read-retry-ui
-          path: |
-            .settings-ui-artifacts/dental-chart-ready-390.png
-            .settings-ui-artifacts/dental-chart-ready-1280.png
-            .settings-ui-artifacts/dental-chart-ready-390-bounds.json
-            .settings-ui-artifacts/dental-chart-ready-1280-bounds.json
-            .settings-ui-artifacts/dental-chart-error-390.png
-            .settings-ui-artifacts/dental-chart-error-1280.png
-            .settings-ui-artifacts/dental-chart-error-390-bounds.json
-            .settings-ui-artifacts/dental-chart-error-1280-bounds.json
+          name: dental-chart-read-retry-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_dental_chart_read_retry_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1248,51 +1048,33 @@ jobs:
       # Exact synthetic prescription cards and text bounds only. No traces, HAR,
       # cookies, browser state, real records, or broad artifact directories.
       - name: Upload orthodontic prescription truth evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_prescription_truth_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-prescription-truth-ui
-          path: |
-            .settings-ui-artifacts/ortho-prescription-unrecorded-390.png
-            .settings-ui-artifacts/ortho-prescription-unrecorded-1280.png
-            .settings-ui-artifacts/ortho-prescription-closed-custom-390.png
-            .settings-ui-artifacts/ortho-prescription-closed-custom-1280.png
-            .settings-ui-artifacts/ortho-prescription-390-bounds.json
-            .settings-ui-artifacts/ortho-prescription-1280-bounds.json
+          name: ortho-prescription-truth-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_prescription_truth_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only synthetic default-service/duration controls and their geometry.
       - name: Upload orthodontic booking default evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_booking_default_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-booking-default-ui
-          path: |
-            .settings-ui-artifacts/ortho-booking-service-390.png
-            .settings-ui-artifacts/ortho-booking-service-1280.png
-            .settings-ui-artifacts/ortho-booking-duration-390.png
-            .settings-ui-artifacts/ortho-booking-duration-1280.png
-            .settings-ui-artifacts/ortho-booking-390-bounds.json
-            .settings-ui-artifacts/ortho-booking-1280-bounds.json
+          name: ortho-booking-default-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_booking_default_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
       # Only synthetic recall refusal/retry panels and their native bounds.
       - name: Upload recall mutation refusal evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_recall_mutation_refusal_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: recall-mutation-refusal-ui
-          path: |
-            .settings-ui-artifacts/recall-refusal-390.png
-            .settings-ui-artifacts/recall-refusal-1280.png
-            .settings-ui-artifacts/recall-retry-390.png
-            .settings-ui-artifacts/recall-retry-1280.png
-            .settings-ui-artifacts/recall-refusal-390-bounds.json
-            .settings-ui-artifacts/recall-refusal-1280-bounds.json
+          name: recall-mutation-refusal-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_recall_mutation_refusal_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1301,17 +1083,11 @@ jobs:
       # Only synthetic patient lab refusal/retry viewports and measured bounds.
       # No cookies, storage, HAR, traces, real patients or broad directories.
       - name: Upload patient lab status refusal evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_patient_lab_status_refusal_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patient-lab-status-refusal-ui
-          path: |
-            .settings-ui-artifacts/lab-status-refusal-390.png
-            .settings-ui-artifacts/lab-status-refusal-1280.png
-            .settings-ui-artifacts/lab-status-retry-390.png
-            .settings-ui-artifacts/lab-status-retry-1280.png
-            .settings-ui-artifacts/lab-status-refusal-390-bounds.json
-            .settings-ui-artifacts/lab-status-refusal-1280-bounds.json
+          name: patient-lab-status-refusal-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_patient_lab_status_refusal_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

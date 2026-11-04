@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/invoice-maintenance-ui.test.tsx __tests__/invoice-maintenance-view.test.ts __tests__/invoice-command-recovery.test.ts __tests__/invoice-grouped-editor.test.tsx __tests__/patient-invoice-recovery-labels.test.tsx
+
+
+ RUN  v4.1.12 /workspace/aqlan-center-mini
+
+
+ Test Files  5 passed (5)
+      Tests  156 passed (156)
+   Start at  00:34:13
+   Duration  5.64s (transform 1.80s, setup 0ms, import 2.64s, tests 2.13s, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

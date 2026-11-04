@@ -1,0 +1,18 @@
+{
+  "baseRevision": "15bacdb7a0b4de242b928545b72eb480b0212c39",
+  "checks": {
+    "db_prefix_unchanged": true,
+    "db_suffix_unchanged": true,
+    "writer_body_preserved_without_transaction_envelope": true,
+    "legacy_route_tail_identical": true,
+    "lib/commission.ts": true,
+    "lib/cases.ts": true,
+    "components/PatientCases.tsx": true,
+    "lib/canonical-case-reads.ts": true,
+    "lib/canonical-case-projection.ts": true,
+    "app/api/patients/[id]/cases/route.ts": true,
+    "no_migration_changes": true
+  },
+  "passed": 11,
+  "historicalSourceHashes": 455
+}

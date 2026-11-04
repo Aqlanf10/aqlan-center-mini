@@ -70,8 +70,9 @@ describe("legacy compatibility link versus canonical financial source over HTTP"
     expect(response.status).toBe(200);
     const read = await authedGet(path(), h.sessions.admin);
     expect(read.status).toBe(200);
+    // An unlinked installments case is uncertain, not an explicit per-session charge.
     expect(await read.json()).toMatchObject({ onboarding: {
-      caseId, complete: false, adjustmentClass: "OUTSIDE_CONTRACT", financialReference: missingSource,
+      caseId, complete: false, adjustmentClass: "REVIEW_REQUIRED", financialReference: missingSource,
     } });
     expect(await state()).toEqual(before);
     expect((await db.query("SELECT plan_id FROM ortho_cases WHERE id=$1", [caseId])).rows).toEqual([{ plan_id: null }]);

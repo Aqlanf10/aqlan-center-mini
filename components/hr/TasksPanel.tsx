@@ -139,10 +139,10 @@ function OwnerTaskPanel({session,pending,onPending}:{session:SessionInfo|null;pe
   const [priorityFilter, setPriorityFilter] = useState<"" | TaskPriority>("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [search, setSearch] = useState("");
-  const [listRead,setListRead]=useState<{query:string;epoch:number;value:TaskListPayload}|null>(null);
+  const [listRead,setListRead]=useState<{scope:object;value:TaskListPayload}|null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [detailRead,setDetailRead]=useState<{epoch:number;value:TaskDetail}|null>(null);
+  const [detailRead,setDetailRead]=useState<{scope:object;value:TaskDetail}|null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const owner = session ? `${session.username}\u0000${session.role}` : "";
   const live=useRef(true),listEpoch=useRef(0),detailEpoch=useRef(0);
@@ -158,39 +158,44 @@ function OwnerTaskPanel({session,pending,onPending}:{session:SessionInfo|null;pe
     return params.toString();
   }, [scope, statusFilter, priorityFilter, overdueOnly, search]);
 
-  const currentQuery=useRef(query);
-  if(currentQuery.current!==query){currentQuery.current=query;listEpoch.current++;detailEpoch.current++;}
-  const payload=listRead?.query===query&&listRead.epoch===listEpoch.current?listRead.value:emptyTaskList();
-  const detail=detailRead?.epoch===detailEpoch.current?detailRead.value:null;
+  const queryScope=useMemo(()=>({query}),[query]);
+  const currentQuery=useRef<typeof queryScope|null>(null);
+  useLayoutEffect(()=>{
+    currentQuery.current=queryScope;
+    listEpoch.current++;detailEpoch.current++;
+    return ()=>{if(currentQuery.current===queryScope)currentQuery.current=null;listEpoch.current++;detailEpoch.current++;};
+  },[queryScope]);
+  const payload=listRead?.scope===queryScope?listRead.value:emptyTaskList();
+  const detail=detailRead?.scope===queryScope?detailRead.value:null;
   const load = useCallback(async () => {
-    if(!live.current||currentQuery.current!==query)return;
+    if(!live.current||currentQuery.current!==queryScope)return;
     const epoch=++listEpoch.current;
-    const current=()=>live.current&&currentQuery.current===query&&listEpoch.current===epoch;
-    setLoading(true);
+    const current=()=>live.current&&currentQuery.current===queryScope&&listEpoch.current===epoch;
+    setLoading(true);setListRead(null);
     try {
       const response=await fetch(`/api/tasks?${query}`,{cache:"no-store"});
       const value=await response.json();
       if(!current())return;
       if(!response.ok)throw new Error(value?.message??"تعذّر تحميل المهام.");
-      setListRead({query,epoch,value:value as TaskListPayload});setError(null);
+      setListRead({scope:queryScope,value:value as TaskListPayload});setError(null);
     } catch(readError){
       if(current()){setListRead(null);setError(readError instanceof Error?readError.message:"تعذّر تحميل المهام.");}
     } finally {if(current())setLoading(false);}
-  },[query]);
+  },[query,queryScope]);
   useEffect(()=>{if(allowed)void load();},[allowed,load]);
 
   const openDetail=useCallback(async(taskId:number)=>{
-    if(!live.current||currentQuery.current!==query)return;
+    if(!live.current||currentQuery.current!==queryScope)return;
     const epoch=++detailEpoch.current;
-    const current=()=>live.current&&currentQuery.current===query&&detailEpoch.current===epoch;
+    const current=()=>live.current&&currentQuery.current===queryScope&&detailEpoch.current===epoch;
     setDetailRead(null);
     try{
       const response=await fetch(`/api/tasks/${taskId}`,{cache:"no-store"});const value=await response.json();
       if(!current())return;
       if(!response.ok){setError("تعذّر فتح المهمة — قد تكون خاصةً لغيرك.");return;}
-      setDetailRead({epoch,value:value as TaskDetail});
+      setDetailRead({scope:queryScope,value:value as TaskDetail});
     }catch{if(current())setError("تعذّر فتح المهمة.");}
-  },[query]);
+  },[query,queryScope]);
 
   if (!allowed) {
     return <p className="rounded-xl bg-white p-4 text-sm text-navy-700 shadow-card">المهام خارج صلاحيات دورك.</p>;
@@ -384,7 +389,8 @@ function CreateTaskModal({ timeZone, session, oversight, pending, onPending, onC
   const submitting = useRef(false);
   const mounted = useRef(true);
   const activeRequest = useRef(pending);
-  const pendingChange=useRef(onPending);pendingChange.current=onPending;
+  const pendingChange=useRef(onPending);
+  useLayoutEffect(()=>{pendingChange.current=onPending;},[onPending]);
   useEffect(() => { activeRequest.current = pending; }, [pending]);
   useLayoutEffect(() => { mounted.current = true; return () => {
     mounted.current = false;

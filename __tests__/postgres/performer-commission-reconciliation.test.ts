@@ -1,3 +1,4 @@
+import { signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -84,7 +85,7 @@ describe("performer commission and settlement reconciliation", () => {
     const a = await doctor(30), b = await doctor(40), p = await patient();
     const creator = await doctor(50);
     const creatorName = `synthetic-invoice-creator-${++seq}`;
-    await db.createStaffUser({ username: creatorName, displayName: "SYNTHETIC signing doctor", passwordHash: "synthetic-creator-hash", role: "doctor", partyId: creator.id });
+    await db.createStaffUser({ username: creatorName, displayName: "SYNTHETIC signing doctor", passwordHash: "synthetic-creator-hash", role: "doctor", partyId: creator.id }, undefined, signedLegacyStaffProof(admin));
     const serviceId = await id(`INSERT INTO services(name,category,price_minor,price_configured,is_active)
       VALUES('SYNTHETIC performed service','endo',10000,TRUE,TRUE) RETURNING id`);
     const visit = await db.addVisit({ patientId: p, patientName: "SYNTHETIC commission patient", patientPhone: null, note: null });
@@ -158,13 +159,22 @@ describe("doctor report versus payroll settlement", () => {
       expect(paid.parts[0]).toMatchObject({ component: "commission", amountMinor: 1200, payableId: item.commissionPayableId });
       expect((await report()).find(row => row.doctorId === d.id && row.currency === currency))
         .toMatchObject({ earnedMinor: 1200, paidMinor: 1200, dueMinor: 0 });
-      const [settlement] = await q<{ remaining: string; voucher_number: string; currency: string; party_id: number }>(
-        `SELECT (${db.payableAmountSql("p")}-${db.payableSettledTotalSql("p")})::text AS remaining,e.voucher_number,e.currency,e.party_id
+      const [settlement] = await q<{ remaining: string; voucher_number: string; currency: string; party_id: number; cash_day: string }>(
+        `SELECT (${db.payableAmountSql("p")}-${db.payableSettledTotalSql("p")})::text AS remaining,e.voucher_number,e.currency,e.party_id,
+         (e.created_at AT TIME ZONE $3)::date::text AS cash_day
          FROM payables p JOIN expenses e ON e.payable_id=p.id WHERE p.id=$1 AND e.id=$2`,
-        [item.commissionPayableId, paid.parts[0].expenseId]);
+        [item.commissionPayableId, paid.parts[0].expenseId, db.CLINIC_TIME_ZONE]);
       expect(settlement).toMatchObject({ remaining: "0", currency, party_id: d.id });
-      const entries = await db.journalEntries(FROM, TO);
+      // Payroll belongs to October, but its cash settlement occurs on the
+      // persisted expense day. Do not backdate the actual payout or widen the
+      // ledger query to hide a missing journal entry.
+      expect(settlement.cash_day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      const entries = await db.journalEntries(settlement.cash_day, settlement.cash_day);
+      if (settlement.cash_day < FROM || settlement.cash_day > TO) {
+        expect((await db.journalEntries(FROM, TO)).some(entry => entry.reference === settlement.voucher_number)).toBe(false);
+      }
       const cashEntry = entries.find(entry => entry.reference === settlement.voucher_number)!;
+      expect(cashEntry).toBeDefined();
       expect(isBalanced(cashEntry)).toBe(true);
       expect(cashEntry.lines).toEqual(expect.arrayContaining([
         { accountCode: "2101", currency, amountMinor: 1200, side: "debit" },
@@ -281,19 +291,19 @@ describe("explicit reservation and currency-boundary ordering", () => {
         FROM cashier_shifts WHERE status='open' LIMIT 1 RETURNING id`, [`PERFORMER-RESERVED-${++seq}`, p, yerOrigin, admin.username]);
       const key = `performer-reservation-${++seq}`;
       const { rows: [correction] } = await client.query<{ id: number }>(`INSERT INTO invoice_corrections
-        (patient_id,currency,original_currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by)
-        VALUES($1,'SAR','YER',$2,$3,$4,$5,'SYNTHETIC existing currency evidence',$6) RETURNING id`,
+        (patient_id,currency,original_currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by,created_at)
+        VALUES($1,'SAR','YER',$2,$3,$4,$5,'SYNTHETIC existing currency evidence',$6,'2026-10-12T07:00:00Z') RETURNING id`,
         [p, yerOrigin, targetSar, key, "a".repeat(64), admin.username]);
       await client.query("INSERT INTO invoice_correction_receipts(correction_id,receipt) VALUES($1,$2::jsonb)", [correction.id,
         JSON.stringify({ patientId: p, currency: "SAR", idempotencyKey: key, createdBy: admin.username,
           original: { id: yerOrigin, patientId: p, baseCurrency: "YER" },
           corrected: { id: targetSar, patientId: p, baseCurrency: "SAR" } })]);
       const { rows: [document] } = await client.query<{ id: number }>(`INSERT INTO invoice_settlement_reclassifications
-        (correction_id,patient_id,source_currency,target_currency,source_invoice_ids) VALUES($1,$2,'YER','SAR',$3) RETURNING id`,
+        (correction_id,patient_id,source_currency,target_currency,source_invoice_ids,created_at) VALUES($1,$2,'YER','SAR',$3,'2026-10-12T07:00:00Z') RETURNING id`,
         [correction.id, p, [yerOrigin]]);
       await client.query(`INSERT INTO invoice_settlement_reclassification_events
-        (reclassification_id,payment_id,direction,source_minor,target_minor,payment_snapshot)
-        SELECT $1,id,1,base_amount_minor,amount_minor,to_jsonb(p) FROM payments p WHERE id=$2`, [document.id, payment.id]);
+        (reclassification_id,payment_id,direction,source_minor,target_minor,payment_snapshot,created_at)
+        SELECT $1,id,1,base_amount_minor,amount_minor,to_jsonb(p),'2026-10-12T07:00:00Z' FROM payments p WHERE id=$2`, [document.id, payment.id]);
       await client.query("SET CONSTRAINTS ALL IMMEDIATE");
       expect(await readCurrencyReclassificationEvidence(client, p)).toMatchObject([
         { paymentId: payment.id, targetInvoiceId: targetSar, targetMinor: 4000 }]);
@@ -303,6 +313,14 @@ describe("explicit reservation and currency-boundary ordering", () => {
     // Ordinary linked receipt still enters the pre-existing pooled FIFO path.
     await receipt(p, earlierSar, 2000, "SAR");
     const cashBefore = await q("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1 ORDER BY id", [p]);
+    // October 12 is the persisted reclassification day. A report ending before
+    // it must still show the original YER settlement, even after the correction.
+    const beforeReclassification = await db.commissionDetailReport(FROM, "2026-10-11");
+    expect(beforeReclassification.lines.filter(line => line.patientId === p).map(line => ({ invoice: line.invoiceId,
+      doctor: line.doctorId, currency: line.currency, covered: line.invoiceCoveredMinor, earned: line.earnedMinor })).sort((left, right) => left.invoice - right.invoice))
+      .toEqual([{ invoice: yerOrigin, doctor: b.id, currency: "YER", covered: 8000, earned: 3200 },
+        { invoice: earlierSar, doctor: a.id, currency: "SAR", covered: 2000, earned: 600 },
+        { invoice: targetSar, doctor: b.id, currency: "SAR", covered: 0, earned: 0 }]);
     const check = async (target: number) => {
       const detail = await db.commissionDetailReport(FROM, TO);
       expect(detail.lines.filter(line => line.patientId === p).map(line => ({ invoice: line.invoiceId,

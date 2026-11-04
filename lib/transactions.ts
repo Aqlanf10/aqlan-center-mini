@@ -8,8 +8,9 @@ import type { DbClient, DbPool } from "./db";
  *     عبر ROLLBACK قبل إعادة الرمي — فلا تظل معاملة معلّقة تُمسك أقفالًا
  *     (FOR UPDATE) وتُفسد التزامن التالي.
  *
- *  ٢) لا تسريب اتصال: `release()` في finally دائمًا، حتى لو فشل ROLLBACK
- *     نفسه — الاتصال يعود إلى الـpool في كل الأحوال.
+ *  ٢) لا تسريب اتصال ولا إعادة اتصال ملوّث: يُحرَّر الاتصال في finally دائمًا؛
+ *     يعود إلى الـpool فقط بعد COMMIT أو ROLLBACK ناجح، وإلا يُدمَّر
+ *     (`release(true)`) — فلا تُورَّث معاملة مفتوحة أو حالة مجهولة لمستعير لاحق.
  *
  * لا إعادة محاولة تلقائية هنا عمدًا: الكتابات المالية لا تُعاد محاولة تنفيذها
  * تلقائيًا (قد تُنفَّذ مرتين إذا كان الخطأ بعد COMMIT — unbounded retry ممنوع
@@ -20,24 +21,59 @@ export async function withTransaction<T>(
   pool: DbPool,
   work: (client: DbClient) => Promise<T>,
 ): Promise<T> {
+  return runOwnedTransaction(pool, "BEGIN", work);
+}
+
+/**
+ * النواة المشتركة لـwithTransaction وwithIsolation (مراجعة Dot R1):
+ *  - يُعاد الاتصال إلى الـpool فقط إذا ثبت أنه نظيف: COMMIT نجح، أو ROLLBACK نجح.
+ *  - فشل BEGIN أو ROLLBACK ⇒ حالة الاتصال غير مؤكدة ⇒ `release(true)` يدمّره.
+ *  - فشل COMMIT لا يثبت التراجع: قد يكون الاتصال انقطع بعد أن ثبتت المعاملة. لذلك
+ *    يُرمى الخطأ دائمًا (لا نتيجة ولا كوكي ولا قرار بعد COMMIT غير مؤكد)، ثم يُحاول
+ *    ROLLBACK للتنظيف فقط؛ ونجاحه يعني أن الاتصال صالح، لا أن الكتابة لم تحدث.
+ *  - الخطأ الأصلي يبقى هو المرمي؛ فشل التنظيف لا يحجبه.
+ */
+async function runOwnedTransaction<T>(
+  pool: DbPool,
+  begin: string,
+  work: (client: DbClient) => Promise<T>,
+): Promise<T> {
   const client = await pool.connect();
-  let began = false;
+  let reusable = false;
   try {
-    await client.query("BEGIN");
-    began = true;
-    const result = await work(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    if (began) {
-      await client.query("ROLLBACK").catch(() => {
-        /* الاتصال سيُرجَع للـpool تالفًا أحيانًا — pg يدمّره عند release بعد فشل
-           المعاملة؛ تجاهُل فشل ROLLBACK نفسه أفضل من تسريب الاتصال. */
-      });
+    // A failed BEGIN may still have reached the server: `reusable` stays false.
+    await client.query(begin);
+    let result: T;
+    try {
+      result = await work(client);
+    } catch (error) {
+      reusable = await rollbackQuietly(client);
+      throw error;
     }
-    throw error;
+    try {
+      await client.query("COMMIT");
+    } catch (error) {
+      // Outcome unknown to the caller: the error propagates; cleanup only decides reuse.
+      reusable = await rollbackQuietly(client);
+      throw error;
+    }
+    reusable = true;
+    return result;
   } finally {
-    client.release();
+    try {
+      if (reusable) client.release();
+      else client.release(true);
+    } catch {
+      /* release failure never masks the original outcome */
+    }
+  }
+}
+async function rollbackQuietly(client: DbClient): Promise<boolean> {
+  try {
+    await client.query("ROLLBACK");
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -61,18 +97,5 @@ export async function withIsolation<T>(
   level: "READ COMMITTED" | "REPEATABLE READ" | "SERIALIZABLE",
   work: (client: DbClient) => Promise<T>,
 ): Promise<T> {
-  const client = await pool.connect();
-  let began = false;
-  try {
-    await client.query(`BEGIN ISOLATION LEVEL ${level}`);
-    began = true;
-    const result = await work(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    if (began) await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+  return runOwnedTransaction(pool, `BEGIN ISOLATION LEVEL ${level}`, work);
 }

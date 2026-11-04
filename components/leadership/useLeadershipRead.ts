@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export const LeadershipReadAccessContext = createContext<(() => void) | null>(null);
 
@@ -10,7 +10,7 @@ export function useLeadershipRead<T>(url: string, decode: (value: unknown) => T 
   const [read, setRead] = useState<{ key: string; value: T | null; error: string | null; receivedAt: string | null }>({ key: "", value: null, error: null, receivedAt: null });
   const [stale, setStale] = useState(false);
   const sequence = useRef(0), decodeRef = useRef(decode);
-  decodeRef.current = decode;
+  useLayoutEffect(() => { decodeRef.current = decode; }, [decode]);
   const key = JSON.stringify([url, revision]);
   const current = read.key === key;
   useEffect(() => {

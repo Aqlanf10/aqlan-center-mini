@@ -221,3 +221,14 @@ describe("reception handoff registration matches its existing authority boundary
     expect(matchApiRoute(`${path}/extra`)).toBeNull();
   });
 });
+
+
+describe("inherited exact clinical capability and coverage routes", () => {
+  it("restricts lab capability and operation reconciliation to existing clinical roles", () => {
+    expect(HTTP_PERMISSIONS["/api/lab/work-intents/capability"]).toEqual({ GET: ["admin", "doctor"] });
+    expect(HTTP_PERMISSIONS["/api/visits/[id]/lab-work-command"]).toEqual({ GET: ["admin", "doctor"] });
+  });
+  it("keeps every followup coverage action admin-only", () => {
+    expect(HTTP_PERMISSIONS["/api/ortho/[id]/followup-coverage"]).toEqual({ GET: ["admin"], POST: ["admin"], PUT: ["admin"] });
+  });
+});

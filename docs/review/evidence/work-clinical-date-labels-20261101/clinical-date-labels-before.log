@@ -1,0 +1,121 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-lifecycle
+
+ ❯ __tests__/canonical-clinical-date-labels.test.tsx (7 tests | 7 failed) 41ms
+   × orthodontic closure at 01:30 Aden uses Nov1, while retainer and adjustment calendar dates stay literal 20ms
+   × plan creation, consent and item completion use the clinic day without moving the planned start date 5ms
+   × specialty completion and problem registration use the clinic day without moving the clinical start date 2ms
+   × cephalometric registration and approval use the clinic day without moving the xray calendar date 2ms
+   × the saved cephalometric diagnosis timestamp uses the clinic day 7ms
+   × the explicit draft discard confirmation uses the clinic day of the observed study 2ms
+   × comparison selection falls back to the clinic day when the xray date is absent 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/canonical-clinical-date-labels.test.tsx > orthodontic closure at 01:30 Aden uses Nov1, while retainer and adjustment calendar dates stay literal
+AssertionError: expected '<div class="mt-3 border-t border-slat…' to contain 'الأحد 01/11/2026'
+
+Expected: "الأحد 01/11/2026"
+Received: "<div class="mt-3 border-t border-slate-200 pt-3"><button type="button" aria-expanded="true" aria-controls="SYN-clock" class="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">إغلاق تفاصيل الحالة</button><div id="SYN-clock" data-testid="canonical-ortho-detail" class="mt-3 space-y-3"><div class="flex flex-wrap items-center justify-between gap-2"><h4 class="font-bold text-navy-900">السجل السريري للتقويم</h4><button type="button" class="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-bold text-navy-800">تحديث التفاصيل</button></div><dl class="grid gap-2 sm:grid-cols-2"><div><dt class="text-xs text-slate-500">نظام الحاصرات</dt><dd>غير مسجل</dd></div><div><dt class="text-xs text-slate-500">المثبت</dt><dd>شفّاف حراري — 2026-10-31</dd></div><div><dt class="text-xs text-slate-500">المطاطات المسجلة</dt><dd>غير مسجلة</dd></div><div><dt class="text-xs text-slate-500">عدد الشدّات المسجلة</dt><dd>1</dd></div><div class="sm:col-span-2"><dt class="text-xs text-slate-500">الأهداف المتبقية</dt><dd class="whitespace-pre-wrap">غير مسجلة</dd></div><div class="sm:col-span-2"><dt class="text-xs text-slate-500">ملاحظة الحالة</dt><dd class="whitespace-pre-wrap">لا توجد ملاحظة</dd></div><div class="sm:col-span-2"><dt class="text-xs text-slate-500">إقفال الحالة</dt><dd>2026-10-31</dd><dd class="whitespace-pre-wrap">SYN</dd></div></dl><h5 class="font-bold text-navy-900">الشدّات المسجلة</h5><ol class="space-y-3"><li class="rounded-xl bg-slate-50 p-3 [overflow-wrap:anywhere]"><p class="font-bold"><time>2026-10-31</time></p><dl class="mt-2 grid gap-2 sm:grid-cols-2"><div><dt class="text-xs text-slate-500">السلك العلوي</dt><dd dir="ltr">—</dd></div><div><dt class="text-xs text-slate-500">السلك السفلي</dt><dd dir="ltr">—</dd></div><div class="sm:col-span-2"><dt class="text-xs text-slate-500">ما أُنجز</dt><dd class="whitespace-pre-wrap">غير مسجل</dd></div><div class="sm:col-span-2"><dt class="text-xs text-slate-500">ملاحظة الشدّة</dt><dd class="whitespace-pre-wrap">لا توجد ملاحظة</dd></div><div><dt class="text-xs text-slate-500">المراجعة المقترحة</dt><dd> أسابيع</dd></div><div><dt class="text-xs text-slate-500">سجّلها</dt><dd></dd></div></dl></li></ol></div></div>"
+
+ ❯ __tests__/canonical-clinical-date-labels.test.tsx:25:16
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  __tests__/canonical-clinical-date-labels.test.tsx > plan creation, consent and item completion use the clinic day without moving the planned start date
+AssertionError: expected [ Array(1) ] to have a length of 4 but got 1
+
+- Expected
++ Received
+
+- 4
++ 1
+
+ ❯ __tests__/canonical-clinical-date-labels.test.tsx:30:32
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  __tests__/canonical-clinical-date-labels.test.tsx > specialty completion and problem registration use the clinic day without moving the clinical start date
+AssertionError: expected [ Array(1) ] to have a length of 3 but got 1
+
+- Expected
++ Received
+
+- 3
++ 1
+
+ ❯ __tests__/canonical-clinical-date-labels.test.tsx:35:32
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  __tests__/canonical-clinical-date-labels.test.tsx > cephalometric registration and approval use the clinic day without moving the xray calendar date
+AssertionError: expected [ Array(1) ] to have a length of 3 but got 1
+
+- Expected
++ Received
+
+- 3
++ 1
+
+ ❯ __tests__/canonical-clinical-date-labels.test.tsx:40:32
+     38|   const feed = { clinicTimeZone: zone, analyses: [{ ...summary, xrayDa…
+     39|   const html = markup([true, 0, feed, null, null], () => CanonicalCeph…
+     40|   expect(html.split(expected)).toHaveLength(3); expect(html).toContain…
+       |                                ^
+     41| });
+     42| it("the saved cephalometric diagnosis timestamp uses the clinic day", …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  __tests__/canonical-clinical-date-labels.test.tsx > the saved cephalometric diagnosis timestamp uses the clinic day
+AssertionError: expected '<div class="mt-3 border-t border-slat…' to contain 'الأحد 01/11/2026'
+
+Expected: "الأحد 01/11/2026"
+Received: "<div class="mt-3 border-t border-slate-200 pt-3"><button type="button" aria-expanded="true" aria-controls="SYN-clock" class="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">إغلاق الدراسة المحفوظة</button><section id="SYN-clock" data-testid="canonical-ceph-study" aria-label="الدراسة المحفوظة" class="mt-3 space-y-3 [overflow-wrap:anywhere]"><div class="flex flex-wrap items-center justify-between gap-2"><h4 class="font-bold text-navy-900">السجل المحفوظ للسيفالومتري</h4><button type="button" class="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-bold text-navy-800">تحديث الدراسة</button></div><p class="text-xs text-slate-600">عرض البيانات المسجلة كما حُفظت؛ يبقى الأصل المعتمد دون تغيير.</p><div data-testid="canonical-ceph-saved" class="space-y-3"><p class="text-navy-800">حالة السجل: دراسة معتمدة</p><dl class="grid gap-2 sm:grid-cols-2"><div><dt class="text-xs text-slate-500">الجهاز المسجل</dt><dd>غير مسجل</dd></div><div><dt class="text-xs text-slate-500">المجموعة المرجعية المسجلة</dt><dd dir="ltr">SYN</dd></div><div><dt class="text-xs text-slate-500">سجلها</dt><dd>SYN</dd></div><div><dt class="text-xs text-slate-500">اعتمدها</dt><dd>غير مسجل</dd></div><div class="sm:col-span-2"><dt class="text-xs text-slate-500">ملاحظة الدراسة</dt><dd class="whitespace-pre-wrap">لا توجد ملاحظة</dd></div></dl><h5 class="font-bold">المعايرة المسجلة</h5><p class="text-xs text-slate-600">لا توجد معايرة مكتملة محفوظة؛ لم تُحسب معايرة بديلة.</p><h5 class="font-bold">القياسات المحفوظة برموزها الأصلية</h5><p class="text-xs">لا توجد قياسات محفوظة؛ لم تُحسب نتائج بديلة.</p><h5 class="font-bold">المعالم المسجلة</h5><p class="text-xs">لا توجد معالم محفوظة.</p><h5 class="font-bold">التشخيص المسجل</h5><dl class="space-y-2 text-xs"><div><dt class="text-slate-500">هيكلي</dt><dd class="whitespace-pre-wrap">غير مسجل</dd></div><div><dt class="text-slate-500">سني</dt><dd class="whitespace-pre-wrap">غير مسجل</dd></div><div><dt class="text-slate-500">الأنسجة الرخوة</dt><dd class="whitespace-pre-wrap">غير مسجل</dd></div><div><dt class="text-slate-500">ملاحظة التشخيص</dt><dd class="whitespace-pre-wrap">لا توجد ملاحظة</dd></div><div><dt class="text-slate-500">الاستنتاج المحفوظ</dt><dd class="whitespace-pre-wrap font-bold">SYN</dd></div><div><dt class="text-slate-500">سجله</dt><dd>SYN — 2026-10-31</dd></div></dl></div></section></div>"
+
+ ❯ __tests__/canonical-clinical-date-labels.test.tsx:44:74
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  __tests__/canonical-clinical-date-labels.test.tsx > the explicit draft discard confirmation uses the clinic day of the observed study
+AssertionError: expected '<div data-testid="canonical-ceph-disc…' to contain 'الأحد 01/11/2026'
+
+Expected: "الأحد 01/11/2026"
+Received: "<div data-testid="canonical-ceph-discard" class="space-y-2 rounded-xl border border-slate-200 p-3 text-sm"><form class="space-y-3"><p>سيُسجّل رفض المسودة باسمك وتبقى بياناتها محفوظة. الدراسة المعتمدة لا تتغيّر. راجع تفاصيل الدراسة قبل التأكيد.</p><p class="text-xs text-slate-600">تاريخ المسودة: <span dir="ltr">2026-10-31</span> — سجّلها: SYN</p><label for="SYN-clock" class="block text-xs font-bold">ملاحظة الرفض (اختيارية)</label><textarea id="SYN-clock" maxLength="4000" class="block min-h-24 w-full rounded-lg border border-slate-300 p-2"></textarea><div class="flex flex-wrap gap-2"><button type="submit" class="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800 disabled:opacity-50">تأكيد رفض المسودة</button><button type="button" class="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800 disabled:opacity-50">إلغاء</button></div></form></div>"
+
+ ❯ __tests__/canonical-clinical-date-labels.test.tsx:49:216
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  __tests__/canonical-clinical-date-labels.test.tsx > comparison selection falls back to the clinic day when the xray date is absent
+AssertionError: expected '<section class="rounded-xl border bor…' to contain 'الأحد 01/11/2026'
+
+Expected: "الأحد 01/11/2026"
+Received: "<section class="rounded-xl border border-slate-200 p-3 [overflow-wrap:anywhere]"><button type="button" aria-expanded="true" aria-controls="SYN-clock" class="min-h-11 rounded-xl border border-slate-300 px-3 text-sm font-bold text-navy-800">إغلاق مقارنة الدراسات</button><div id="SYN-clock" data-testid="canonical-ceph-comparison" class="mt-3 space-y-3"><p class="text-xs text-slate-600">اختر دراستين من القائمة المعروضة؛ يرتبهما الخادم بتاريخ التصوير، ثم التسجيل والمعرّف عند التعادل. لا تعدّل المقارنة أي دراسة.</p><div class="grid gap-3 sm:grid-cols-2"><div class="min-w-0 text-xs font-bold"><label for="SYN-clock-first">الدراسة الأولى</label><select id="SYN-clock-first" class="mt-1 min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white p-2"><option value="" selected="">اختر دراسة</option><option value="2">قبل العلاج · 2026-10-31 · معتمدة · #2</option></select></div><div class="min-w-0 text-xs font-bold"><label for="SYN-clock-second">الدراسة الثانية</label><select id="SYN-clock-second" class="mt-1 min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white p-2"><option value="" selected="">اختر دراسة</option><option value="2">قبل العلاج · 2026-10-31 · معتمدة · #2</option></select></div></div><div class="flex flex-wrap gap-2"><button type="button" disabled="" class="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold disabled:opacity-50">مقارنة القيم المحفوظة</button><button type="button" disabled="" class="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold disabled:opacity-50">تراكب المعالم المحفوظة</button></div></div></section>"
+
+ ❯ __tests__/canonical-clinical-date-labels.test.tsx:53:128
+     51| it("comparison selection falls back to the clinic day when the xray da…
+     52|   const render = CanonicalCephComparison as unknown as (p: { patientId…
+     53|   expect(markup([true, "", "", null, null, null], () => render({ patie…
+       |                                                                                                                                ^
+     54| });
+     55|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed (7)
+   Start at  13:09:05
+   Duration  946ms (transform 436ms, setup 0ms, import 565ms, tests 41ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

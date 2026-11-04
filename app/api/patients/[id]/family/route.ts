@@ -4,6 +4,7 @@ import { idOf, json } from "@/lib/case-route";
 import { buildFamilyView, canEditFamilies } from "@/lib/family-view";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { CanonicalFamilyRefusal, canonicalFamilyRoute, readCanonicalPatientFamily } from "@/lib/canonical-families";
 
 export const dynamic = "force-dynamic";
 
@@ -12,9 +13,18 @@ export const dynamic = "force-dynamic";
  * والأرصدة بحسب `buildFamilyView`. `family: null` = بلا عائلة.
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  /* M2 slice 72: the patient inside the scope (404 like missing); family members inside
+     it; money only with finance.patient-ledger.view. */
+  const { id } = await params;
+  const canonical = await canonicalFamilyRoute(null, handle => {
+    const patientId = idOf(id);
+    if (!patientId) return Promise.reject(new CanonicalFamilyRefusal("invalid_family", 400, "رقم المريض غير صالح."));
+    return readCanonicalPatientFamily(handle, patientId);
+  }, "تعذّر تحميل عائلة المريض.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return json("انتهت الجلسة. سجّل الدخول من جديد.", 401);
-  const patientId = idOf((await params).id);
+  const patientId = idOf(id);
   if (!patientId) return json("رقم المريض غير صالح.", 400);
   if (!(await canAccessPatient(session, patientId).catch(() => false))) {
     return json("غير مصرّح لك بملف هذا المريض.", 403);

@@ -1,0 +1,199 @@
+{
+  "base": "52773b4ddac2cbab2e56beb555a7d1a77d15ec5b",
+  "status": "implemented and local verification passed; final exact-head CI and independent review pending",
+  "buildId": "qLre9K2-DWaLBtuhSC013",
+  "results": {
+    "baselineHttp": {
+      "expectedFailed": 1,
+      "actualStatus": 401,
+      "expectedStatus": 200
+    },
+    "postgresBatch": {
+      "passed": 112,
+      "files": 4,
+      "new": 23
+    },
+    "httpBrowserBatch": {
+      "passed": 23,
+      "files": 3,
+      "new": 8,
+      "ddl": 0
+    },
+    "focusedUnitMaps": {
+      "passed": 67,
+      "files": 5,
+      "newProjection": 22,
+      "legacyHandler": 6
+    },
+    "fullLint": {
+      "errors": 0,
+      "warnings": 346
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "preflight": "passed",
+    "moneyGuard": "passed",
+    "bodyGuard": "passed",
+    "inventory": "passed",
+    "legacyWitnesses": 11,
+    "runtime": {
+      "passed": true,
+      "buildId": "qLre9K2-DWaLBtuhSC013",
+      "traces": 737,
+      "manifests": 86,
+      "sourceMaps": 367,
+      "limits": "Only available validated maps are inspected. Empty indexed maps give zero source attribution. Unmapped/minified arbitrary bundled code is not proven absent."
+    },
+    "fullUnit": {
+      "passed": 13562,
+      "files": 806,
+      "excluded": "generated .next/** only",
+      "environment": "same synthetic SESSION_SECRET as CI"
+    }
+  },
+  "failedAttempts": [
+    {
+      "log": "slice35-focused-final.log",
+      "reason": "generated .next/standalone test copies were accidentally selected; rerun excludes generated .next/** only"
+    },
+    {
+      "log": "slice35-lint-full.log",
+      "reason": "preflight removed its temporary directory during ESLint traversal; rerun after preflight passed"
+    },
+    {
+      "log": "slice35-unit-full.log",
+      "reason": "local command omitted synthetic SESSION_SECRET used by CI",
+      "failed": 5,
+      "passed": 13557,
+      "files": 806
+    }
+  ],
+  "pending": [
+    "final exact-head CI",
+    "independent parent review"
+  ],
+  "notRun": [
+    "full PostgreSQL suite locally",
+    "full HTTP suite locally",
+    "WORK Docker image: previously documented Alpine HTTP 403 blocker"
+  ],
+  "sourceSha256": {
+    "lib/canonical-ceph-references.ts": "b6328b385d535590449d6cfca440e7f1e9d13948e1b858e8dad582ec016fd688",
+    "lib/canonical-ceph-reference-projection.ts": "d234a8f0e70a54936bc2f70b17e051b05f05be955e20c9c1a2f9f81b8fc357a0",
+    "lib/staff-operation-runtime.ts": "2a1b2770ab7806498c7a99b0ec71d672c50b58fd776e8a6f3a0019ff461b10c5",
+    "app/api/ceph-reference-sets/route.ts": "de8abac44c20c556e97b355d76b1779f2a543cdc6bae2af88f09437e073ca4b6",
+    "components/patient/CanonicalCephReferences.tsx": "5e6ce1c3e9c38f79d1302f7b3f29e00fa6d97dfe041e9cbb053ef46061d767bb",
+    "components/patient/CanonicalCephStudies.tsx": "f7b8ebad0e22e2dfce8dc50cb39dc0565666d07489ce7fa8c50e5c31609468d8",
+    "__tests__/canonical-ceph-reference-projection.test.ts": "2634bdbbd4db8d04ca0b43377dec773d4067d3585fddf574d96eb16ecd29c6ac",
+    "__tests__/ceph-reference-route-compat.test.ts": "61c321183886df2fe1654b15833fdd5ff43c4e85ddbb84a101b00eb93bc9a1d0",
+    "__tests__/fixtures/canonical-ceph-reference.ts": "94f900433e321b23f7ccd403771f9657795a12f56ab34eccc501b67866a56a9b",
+    "__tests__/postgres/ceph-canonical-references.test.ts": "59c641717e9713ccf9aa024192776182e71c63f49865ee2c366ae2220aa0abc2",
+    "__tests__/security-http/canonical-ceph-reference-journey.test.ts": "10d372b9de4537dd73fb36e09f8cb010036c0691ebae317087edc6170b576989",
+    "scripts/audits/staff-cutover-readiness.test.mjs": "642a1c8ad77b1f9abb04b55549c0bc1a491ddb43871a5ff478484155e651ad1b",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "8c1c18aaf1a05ddf97c8b338ef2b8c13e74765e33490a4ca4c671c0a674149ef",
+    "docs/security/staff-cutover/inventory.json": "9834ca0a813bf095a642f528b57c3988c5b3bc8889f47042cc17e57348bd55ae"
+  },
+  "evidence": {
+    "slice35-baseline-http.log": {
+      "rawSha256": "21a291f547d4f49c7adfb2233fbc56a3c0ba9497394ab1bba9192049145ed141",
+      "publishedSha256": "21a291f547d4f49c7adfb2233fbc56a3c0ba9497394ab1bba9192049145ed141",
+      "bytes": 1842
+    },
+    "slice35-pg-final.log": {
+      "rawSha256": "1052e4163b78ae90ecf902f05ed3f5d3723481049e72ce2f5522aefc928467c9",
+      "publishedSha256": "1052e4163b78ae90ecf902f05ed3f5d3723481049e72ce2f5522aefc928467c9",
+      "bytes": 853
+    },
+    "slice35-http-final.log": {
+      "rawSha256": "d8ad5e385e40e96f3bcc7ad38bdf130769018ad24e06a5c11179b1f76a402899",
+      "publishedSha256": "d8ad5e385e40e96f3bcc7ad38bdf130769018ad24e06a5c11179b1f76a402899",
+      "bytes": 905
+    },
+    "slice35-unit-final.log": {
+      "rawSha256": "48044243f8e04fa3e17aa08e3c47bf54221a4a901b2fd35ac914ca07e0c36cd0",
+      "publishedSha256": "48044243f8e04fa3e17aa08e3c47bf54221a4a901b2fd35ac914ca07e0c36cd0",
+      "bytes": 568
+    },
+    "slice35-focused-final.log": {
+      "rawSha256": "bfa187ed65c233a1729df66388bf099712c18521dae69feec88c960f9cdd9412",
+      "publishedSha256": "bfa187ed65c233a1729df66388bf099712c18521dae69feec88c960f9cdd9412",
+      "bytes": 4393
+    },
+    "slice35-focused-verified.log": {
+      "rawSha256": "eb7ea97e1efa959798e407d4d3a0c706ef4ff7aeab352006f6726eb6ea6b4590",
+      "publishedSha256": "eb7ea97e1efa959798e407d4d3a0c706ef4ff7aeab352006f6726eb6ea6b4590",
+      "bytes": 729
+    },
+    "slice35-build-final.log": {
+      "rawSha256": "ee5b9bae058c1b209db18bdc6b5d99e7bcbe638a8d8e3c7103eab47910bb2ae2",
+      "publishedSha256": "2c7dd6e437e49c6cfe5ac5a0b84f60a677adde1fda852bcc5dc3d74d39da710f",
+      "bytes": 13358,
+      "normalization": "ANSI removal and line-ending/trailing-whitespace cleanup only"
+    },
+    "slice35-typecheck-final.log": {
+      "rawSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "publishedSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "slice35-lint-full.log": {
+      "rawSha256": "84548d15f61f816b6e2ee261d75e2f7deae12360fca80d2f6c8627fb3a549661",
+      "publishedSha256": "84548d15f61f816b6e2ee261d75e2f7deae12360fca80d2f6c8627fb3a549661",
+      "bytes": 1377
+    },
+    "slice35-lint-full-verified.log": {
+      "rawSha256": "0436980a95b60da6cb69412151b9d707e908238083a31792e27b1caf216fa5e4",
+      "publishedSha256": "0436980a95b60da6cb69412151b9d707e908238083a31792e27b1caf216fa5e4",
+      "bytes": 271572
+    },
+    "slice35-unit-full.log": {
+      "rawSha256": "f4972c4633aadb4f9e0aaf56d714b3e7b5ca20b787e35b085312159c809dc502",
+      "publishedSha256": "f4972c4633aadb4f9e0aaf56d714b3e7b5ca20b787e35b085312159c809dc502",
+      "bytes": 5505
+    },
+    "slice35-preflight.log": {
+      "rawSha256": "570c1c01cf116b4beadbf1bed9ae5807b85cd00f6922a7375db69c88d57d3fba",
+      "publishedSha256": "570c1c01cf116b4beadbf1bed9ae5807b85cd00f6922a7375db69c88d57d3fba",
+      "bytes": 1144
+    },
+    "slice35-money.log": {
+      "rawSha256": "5ac6c51e62042fa6da39d12c34f71eeefadf241e1981a459bd4727e5f6f19a15",
+      "publishedSha256": "5ac6c51e62042fa6da39d12c34f71eeefadf241e1981a459bd4727e5f6f19a15",
+      "bytes": 1844
+    },
+    "slice35-body.log": {
+      "rawSha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "publishedSha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "bytes": 197
+    },
+    "slice35-inventory-verified.log": {
+      "rawSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "publishedSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "bytes": 329
+    },
+    "slice35-legacy-proof.json": {
+      "rawSha256": "036880dd6e906f49fd2d91ccf17acbc3914d0f68ecb7d4a4cd5dcbfd16f1e990",
+      "publishedSha256": "036880dd6e906f49fd2d91ccf17acbc3914d0f68ecb7d4a4cd5dcbfd16f1e990",
+      "bytes": 2155
+    },
+    "ceph-references-390.png": {
+      "sha256": "8b9f4174d57dceafc7b1614e3fdb318f143982db9654ec40edd22de38580429d",
+      "synthetic": true,
+      "visuallyInspected": true
+    },
+    "runtime-proof.json": {
+      "sha256": "67f00accb221c521fcade5a0a4f9ca81b6b00dfb5043e25916371e985226a5d4",
+      "bytes": 1418744
+    },
+    "slice35-runtime.log": {
+      "sha256": "f306b886a5a9b03f8614f8c6040ffb4fca4e518273144c40acdc038b1f6200fc",
+      "bytes": 137
+    },
+    "slice35-unit-full-verified.log": {
+      "sha256": "79e4aa5d7cb0fe7c97e45dd8e09f2409f04cdb664675d2cc6da428b9e08ca904",
+      "bytes": 628
+    }
+  },
+  "migrationsAdded": false,
+  "sourceRevision": "55aca0078c2fa5517fc8b752820f961214da833b",
+  "sourceWitnessScope": "Historical delivery at sourceRevision; later slices can change these files and have their own evidence."
+}

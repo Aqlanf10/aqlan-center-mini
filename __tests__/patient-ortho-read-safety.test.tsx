@@ -76,7 +76,7 @@ vi.mock("react", async (original) => {
 type Element = ReactElement<Record<string, unknown>>;
 type Component = (props: Record<string, unknown>) => ReactNode;
 type Case = ComponentProps<typeof AdjustmentForm>["caseRow"];
-type ResponseLike = { ok: boolean; status: number; json: () => Promise<unknown> };
+type ResponseLike = { ok: boolean; status: number; json: () => Promise<unknown>; clone?: () => { json: () => Promise<unknown> } };
 type Pending = { id: number; url: string; method: string; init?: RequestInit; json: ReturnType<typeof vi.fn>;
   headers: (status: number) => void; body: (value: unknown) => void; fail: (message?: string) => void };
 function deferred<T>() {
@@ -102,6 +102,9 @@ const fixture = (id = patientId, changes: Partial<Case> = {}): Case & { patientI
     overdue: false, adjustments: 1, lastAdjustment: "2026-09-04", daysSinceLast: 30 }, ...changes,
 });
 const contact = (id = patientId) => ({ patient: { id, fullName: "Synthetic patient", phone: "700000001" } });
+const providerContext = () => ({ ok: true, patientId: 19, source: { kind: "ortho_adjustment", id: 81 }, orthoCaseId: 41,
+  doctorId: 71, doctorName: "Synthetic source clinician", fingerprint: "a".repeat(64), settingsTarget: { kind: "ortho", id: 41 } });
+let bookingContext: Record<string, unknown> = providerContext();
 let patientId: number; let requests: Pending[]; let unexpected: string[];
 let scopes = new Map<string, Scope>(); let componentIds = new Map<unknown, number>(); let seen = new Set<string>();
 let executed = new Set<string>();
@@ -235,6 +238,7 @@ function addPhoto(name = "synthetic.png") {
 
 beforeEach(() => {
   unmount(); scopes = new Map(); componentIds = new Map(); executed = new Set(); hooks.changed = false; hooks.retiredWrites = 0;
+  bookingContext = providerContext();
   patientId = 19; hooks.session = principalA(); hooks.existingRefresh = null; requests = []; unexpected = []; fetchMock.mockReset(); createURL.mockReset(); revokeURL.mockReset();
   navigationRegistration = null; navigationRegistrations = []; delayNavigationCleanup = false; delayedNavigationCleanup = [];
   confirmLeave.mockReset(); confirmLeave.mockReturnValue(false);
@@ -246,13 +250,14 @@ beforeEach(() => {
   fetchMock.mockImplementation((url, init) => {
     const method = init?.method ?? "GET";
     if (method === "GET" && url === "/api/parties?kind=doctor") return Promise.resolve({ ok: true, status: 200, json: async () => [{ id: 71, name: "Synthetic responsible doctor" }] });
+    if (method === "GET" && /^\/api\/patients\/(19|20)\/return-booking-context\?kind=ortho_adjustment&sourceId=81$/.test(url)) return Promise.resolve({ ok: true, status: 200, json: async () => bookingContext });
     const isRead = method === "GET" && (/^\/api\/ortho\?patientId=(19|20)$/.test(url) || /^\/api\/patients\/(19|20)$/.test(url));
     const isWrite = ["POST", "PATCH"].includes(method) && ["/api/ortho", "/api/ortho/41", "/api/ortho/baseline",
       "/api/appointments", "/api/visits/61/clinical", "/api/patients/19/documents", "/api/patients/20/documents"].includes(url);
     if (!isRead && !isWrite) { unexpected.push(`${method} ${url}`); return Promise.reject(new Error("Unexpected synthetic request")); }
     const head = deferred<ResponseLike>(); const body = deferred<unknown>(); const json = vi.fn(() => body.promise);
     requests.push({ id: requests.length + 1, url, method, init, json,
-      headers: (status) => head.resolve({ ok: status >= 200 && status < 300, status, json }),
+      headers: (status) => head.resolve({ ok: status >= 200 && status < 300, status, json, clone: () => ({ json }) }),
       body: body.resolve, fail: (message = "Synthetic transport failure") => head.reject(new TypeError(message)) });
     // AbortSignal is recorded but intentionally ignored by transport completion.
     return head.promise;
@@ -366,9 +371,10 @@ describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () =>
     expect(confirmLeave).toHaveBeenCalledTimes(1); expect(revokeURL).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks a held save synchronously without confirmation even when its draft has only unedited defaults", async () => {
+  it("blocks a held documented save synchronously without confirmation", async () => {
     await mount(); click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
     const registered = currentNavigation(); expect(registered.guard()).toBe(true);
+    edit("ما نُفّذ في الشدّة", "Explicit synthetic review without change");
     const pending = submit(); expect(writes()).toHaveLength(1);
     // No render between the request and guard: busy ownership must be synchronous.
     expect(registered.guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
@@ -751,7 +757,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     await failClinical(); await retry(true); expect(fields()).toEqual(newDraft); await submit(oldNewForm); expect(writes()).toEqual([]);
     click(button("✕ إغلاق النموذج")); click(button("تسجيل حالة سابقة (قبل النظام)")); await flush();
     edit("النظام المالي السابق", "prepaid_included"); edit("المطاطات الحالية", "private-draft baseline");
-    edit("الطبيب المسؤول", "71"); edit("الأهداف المتبقية", "private-draft objectives");
+    expect(elements(render()).some(node => node.props["aria-label"] === "الطبيب المسؤول")).toBe(false); edit("الأهداف المتبقية", "private-draft objectives");
     const baselineDraft = fields(); const oldBaseline = form(); await failClinical(); await retry(true);
     expect(fields()).toEqual(baselineDraft); await submit(oldBaseline); expect(writes()).toEqual([]);
     expect(executed.has("NewCase")).toBe(true); expect(executed.has("LegacyBaselineForm")).toBe(true);
@@ -923,8 +929,9 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     expect(control("أسابيع حتى الشدّة القادمة").props.value).toBe("2");
     expect(control("ما نُفّذ في الشدّة").props.value).toBe("");
     await submit(oldForm); expect(writes()).toHaveLength(1);
+    edit("ما نُفّذ في الشدّة", "New explicit review");
     const next = submit(); expect(writes()).toHaveLength(2);
-    expect(JSON.parse(String(writes()[1].init!.body))).toMatchObject({ elastics: "vertical", elasticNote: "Updated regimen instructions", nextWeeks: 2, done: "" });
+    expect(JSON.parse(String(writes()[1].init!.body))).toMatchObject({ elastics: "vertical", elasticNote: "Updated regimen instructions", nextWeeks: 2, done: "New explicit review" });
     respond(writes()[1], {}, 409); await next; await flush(); expect(hooks.retiredWrites).toBe(0);
   });
 
@@ -958,5 +965,45 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     old.ortho.body({ cases: [fixture()] }); old.patient.fail("retired patient error"); await submit(oldForm); await drain();
     expect(scopes.size).toBe(0); expect(hooks.retiredWrites).toBe(0); expect(writes()).toEqual([]);
     expect(revokeURL).toHaveBeenCalledExactlyOnceWith("blob:synthetic-ortho-1");
+  });
+});
+
+
+describe("orthodontic suggested booking current clinical responsibility", () => {
+  async function suggestion() {
+    await mount(); adjustment(); const saving = submit(); respond(writes()[0], { id: 81 });
+    await saving; await flush(); await grant();
+    click(button("📅 حجز الموعد المقترح الآن")); await flush();
+  }
+  it("keeps the verified current clinician visible without a one-off doctor picker, and binds the POST and receipt", async () => {
+    await suggestion(); expect(text(render())).toContain("Synthetic source clinician");
+    expect(elements(render()).some(node => node.props["aria-label"] === "طبيب الجلسة القادمة")).toBe(false);
+    const pending = submit();
+    const body = JSON.parse(String(writes()[1].init!.body));
+    expect(body).toMatchObject({ returnBookingSource: { kind: "ortho_adjustment", id: 81 }, returnBookingFingerprint: "a".repeat(64) });
+    expect(body).not.toHaveProperty("doctorId");
+    respond(writes()[1], { doctorId: 71, doctorName: "Synthetic saved clinician" }, 201); await pending; await flush();
+    expect(text(render())).toContain("Synthetic saved clinician");
+  });
+  it.each(["responsibility_missing", "responsibility_inactive"])("blocks %s with a settings link, never a substitute doctor", async code => {
+    bookingContext = { ok: false, code, message: "اضبط المسؤولية الحالية", contexts: [{ source: { kind: "ortho_case", id: 41 },
+      label: "حالة تقويم تجريبية", available: false, doctorId: null, doctorName: null, settingsTarget: { kind: "ortho", id: 41 } }] };
+    await suggestion(); await submit(); expect(writes()).toHaveLength(1);
+    expect(text(render())).toContain("اضبط المسؤولية الحالية");
+    expect(elements(render()).some(node => node.type === "a" && String(node.props.href).includes("orthoCaseId=41"))).toBe(true);
+    expect(elements(render()).some(node => node.props["aria-label"] === "طبيب الجلسة القادمة")).toBe(false);
+  });
+  it("refreshes a stale clinician source without losing booking date/time or silently retrying", async () => {
+    await suggestion(); edit("تاريخ الجلسة القادمة", "2026-12-12"); edit("وقت الجلسة القادمة", "17:45");
+    const first = submit(); bookingContext = { ...providerContext(), doctorId: 72, doctorName: "Synthetic current clinician", fingerprint: "b".repeat(64) };
+    respond(writes()[1], { code: "return_booking_source_changed", message: "تغيّر طبيب الحالة" }, 409); await first; await flush();
+    expect(writes()).toHaveLength(2); expect(control("تاريخ الجلسة القادمة").props.value).toBe("2026-12-12");
+    expect(control("وقت الجلسة القادمة").props.value).toBe("17:45"); expect(text(render())).toContain("Synthetic current clinician");
+    const second = submit(); expect(JSON.parse(String(writes()[2].init!.body))).toMatchObject({ returnBookingFingerprint: "b".repeat(64), date: "2026-12-12", time: "17:45" });
+    respond(writes()[2], { doctorId: 72, doctorName: "Synthetic current clinician" }, 201); await second; await flush();
+  });
+  it("does not show or book another patient's context", async () => {
+    bookingContext = { ...providerContext(), patientId: 20 }; await suggestion();
+    expect(text(render())).not.toContain("Synthetic source clinician"); await submit(); expect(writes()).toHaveLength(1);
   });
 });

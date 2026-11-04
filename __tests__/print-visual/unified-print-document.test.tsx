@@ -26,7 +26,7 @@ describe("unified document shared renderer: hosted browser/PDF", () => {
     </div></div></>);
     const image = logo ? `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}` : "data:image/png;base64,";
     const html = `<!doctype html><html lang="ar" dir="rtl"><style>${reset}${readFileSync(resolve("components/print-document.css"), "utf8")}${readFileSync(resolve("app/print/print.css"), "utf8")}</style><body>${body.replaceAll('src="/logo.png"', `src="${image}"`)}</body></html>`;
-    mkdirSync(output, { recursive: true }); const browser = await chromium.launch();
+    mkdirSync(output, { recursive: true }); const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
     try {
       const context = await browser.newContext({ viewport: { width: 794, height: 1123 }, locale: "ar-YE", serviceWorkers: "block" });
       await context.route("**/*", route => route.abort()); const page = await context.newPage(); await page.setContent(html);

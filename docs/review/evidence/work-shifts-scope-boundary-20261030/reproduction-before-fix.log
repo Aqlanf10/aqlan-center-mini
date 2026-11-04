@@ -1,0 +1,10 @@
+
+ RUN  v4.1.12 <checkout>
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+SYNTHETIC_SHIFT_SCOPE_REPRODUCTION {"sourceHead":"78758658e475a40ff1d3c186177c73ad32017a25","synthetic":true,"patientScope":"own","appointmentScope":"all","outsideReceiptVisibleBefore":false,"bookingAccepted":true,"outsideReceiptVisibleAfter":true,"drawerUnchanged":true}
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  16:40:07
+   Duration  5.91s (transform 2.45s, setup 0ms, import 3.10s, tests 1.92s, environment 0ms)

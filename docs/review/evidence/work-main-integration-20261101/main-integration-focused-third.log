@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/lab-accounting-fx-snapshot.test.ts __tests__/lab-accounting-monetary-intent-route.test.ts __tests__/lab-accounting-safety.test.ts __tests__/periodontal-candidate-chain.test.ts __tests__/patient-appointment-history-schema.test.ts __tests__/schema-preflight-cli.test.ts __tests__/login-photo-backup.test.ts __tests__/login-photo-restore-staging.test.ts __tests__/login-photo-layout-freshness.test.tsx __tests__/lab-dispatch-print-privacy.test.tsx --exclude .next/**
+
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+
+ Test Files  10 passed (10)
+      Tests  147 passed (147)
+   Start at  04:14:09
+   Duration  5.03s (transform 2.09s, setup 0ms, import 3.05s, tests 603ms, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

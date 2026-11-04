@@ -5,6 +5,7 @@ export type BillingClassification =
   | "INCLUDED"
   | "LEGACY_INCLUDED"
   | "NEW_BILLABLE"
+  | "REVIEW_REQUIRED"
   | "OUTSIDE_CONTRACT"
   | "NO_CHARGE";
 
@@ -30,13 +31,13 @@ export function classifyOrthoAdjustment(input: {
 }): BillingClassification {
   if (input.legacyAgreement) return "LEGACY_INCLUDED";
   /* (P1-B) حالة تقويم جديدة باتفاق أقساط (باقة): الأقساط هي الفاتورة، والشدّات — بلا عدد محدد — مشمولة. */
-  if (!input.legacy) return input.fundedPlan ? "INCLUDED" : "OUTSIDE_CONTRACT";
+  if (!input.legacy) return input.fundedPlan ? "INCLUDED" : "REVIEW_REQUIRED";
   if (input.financialMode === "prepaid_included") return "LEGACY_INCLUDED";
   if (input.financialMode === "opening_balance") {
-    return input.openingCurrencies.length === 1 ? "LEGACY_INCLUDED" : "OUTSIDE_CONTRACT";
+    return input.openingCurrencies.length === 1 ? "LEGACY_INCLUDED" : "REVIEW_REQUIRED";
   }
   if (input.financialMode === "installments" && input.fundedPlan) return "INCLUDED";
-  return "OUTSIDE_CONTRACT";
+  return input.financialMode === "per_session" ? "OUTSIDE_CONTRACT" : "REVIEW_REQUIRED";
 }
 
 /**
@@ -47,15 +48,17 @@ export function zeroDueReason(
   lines: readonly { classification: BillingClassification; amountMinor: number; planLinked: boolean }[],
   orthoAdjustment: BillingClassification | null,
 ): string {
+  if (orthoAdjustment === "OUTSIDE_CONTRACT") return "المبالغ تخص الإجراءات المسعّرة فقط؛ إن سُجّلت شدّة خارج العقد فقرارها المالي معلّق، ولا يثبت الصفر شمولها أو إعفاءها.";
+  if (orthoAdjustment === "REVIEW_REQUIRED") return "شمول متابعة التقويم غير محدد — يحتاج مراجعة الاتفاق، بلا فاتورة تلقائية";
   if (lines.length === 0) {
     if (orthoAdjustment === "LEGACY_INCLUDED") return "شدّة تقويم مشمولة بالعلاج السابق";
-    if (orthoAdjustment === "INCLUDED") return "شدّة تقويم مشمولة ضمن اتفاق الأقساط";
+    if (orthoAdjustment === "INCLUDED") return "شدّة تقويم مشمولة بالتغطية المالية المسجّلة";
     return "زيارة توثيق بلا إجراء مفوتر";
   }
-  if (lines.every((line) => line.classification === "INCLUDED")) return "مشمولة ضمن اتفاق الأقساط";
+  if (lines.every((line) => line.classification === "INCLUDED")) return "مشمولة بالتغطية المالية المسجّلة";
   const billable = lines.filter((line) => line.classification === "NEW_BILLABLE");
   if (lines.some((line) => line.classification === "INCLUDED")) {
-    return billable.length === 0 ? "مشمولة ضمن اتفاق الأقساط" : "جلساتٌ مشمولة ضمن اتفاق الأقساط، والباقي بلا قيمة مستحقة";
+    return billable.length === 0 ? "مشمولة بالتغطية المالية المسجّلة" : "جلساتٌ مشمولة بالتغطية المالية المسجّلة، والباقي بلا قيمة مستحقة";
   }
   if (billable.length > 0 && billable.every((line) => line.planLinked)) {
     return "الجلسة الحالية غير مستحقة حسب قاعدة فوترة الخطة";
@@ -78,6 +81,6 @@ export function effectiveAdjustmentClass(
   snapshot: BillingClassification,
   decision: OutsideContractDecision | null,
 ): BillingClassification {
-  if (snapshot !== "OUTSIDE_CONTRACT" || decision === null) return snapshot;
+  if ((snapshot !== "OUTSIDE_CONTRACT" && snapshot !== "REVIEW_REQUIRED") || decision === null) return snapshot;
   return decision === "billed" ? "NEW_BILLABLE" : "NO_CHARGE";
 }

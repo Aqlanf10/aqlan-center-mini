@@ -1,0 +1,10 @@
+{
+  "observationsCurrent": true,
+  "networkPolicyState": "enforced",
+  "networkMode": "restricted",
+  "alpineHost": "dl-cdn.alpinelinux.org",
+  "alpineHostInEffectiveAllowlist": false,
+  "previousDiagnostic": "CONNECT tunnel refused with HTTP403 before TLS",
+  "conclusion": "WORK Docker remains blocked by network destination policy; no package absence conclusion and no retry/bypass",
+  "newRequestsToAlpine": 0
+}

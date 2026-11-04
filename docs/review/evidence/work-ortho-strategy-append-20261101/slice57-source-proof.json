@@ -1,0 +1,12 @@
+{
+  "baseRevision": "177825e508d3d21078dde4798fae791063195db6",
+  "checks": {
+    "native INSERT": true,
+    "fingerprint": true,
+    "binding engine": true,
+    "default canonical reader unchanged": true,
+    "independent plan-link rule unchanged": true,
+    "legacy POST body unchanged": true
+  },
+  "limits": "Bounded preserved clauses; canonical admission/context, locking and shared extraction need tests/review. Legacy resource policy is unchanged."
+}

@@ -107,7 +107,7 @@ describe("official agreement actual browser and PDF print evidence", () => {
       const watermark = renderToStaticMarkup(<PrintDocumentWatermark />).replaceAll('src="/logo.png"', `src="${logo}"`);
       const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${reset}\n${readFileSync(resolve("components/print-document.css"), "utf8")}\n${readFileSync(resolve("app/print/print.css"), "utf8")}</style></head><body>${watermark}<div class="print-root">${markup.replaceAll('src="/logo.png"', `src="${logo}"`)}</div></body></html>`;
       mkdirSync(artifactRoot, { recursive: true });
-      const browser = await chromium.launch();
+      const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
       const requests: string[] = [];
       try {
         const context = await browser.newContext({ viewport: { width: 794, height: 1123 }, deviceScaleFactor: 1, locale: "ar-YE", timezoneId: "UTC", serviceWorkers: "block" });

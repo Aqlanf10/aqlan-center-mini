@@ -1,0 +1,11 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  3 passed (3)
+      Tests  16 passed (16)
+   Start at  20:46:29
+   Duration  46.17s (transform 260ms, setup 0ms, import 876ms, tests 37.61s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

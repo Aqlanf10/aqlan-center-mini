@@ -93,14 +93,14 @@ describe("(P1-B) new orthodontic package", () => {
     expect((await q<{ n: number }>(`SELECT count(*)::int AS n FROM ortho_adjustments WHERE case_id = $1`, [opened.id]))[0].n).toBe(21);
   });
 
-  it("linking afterwards: refused for a cancelled or foreign plan; audited; unlinking returns to OUTSIDE_CONTRACT", async () => {
+  it("linking afterwards: refused for a cancelled or foreign plan; audited; unlinking returns to REVIEW_REQUIRED", async () => {
     const { patientId, planId, name } = await patientWithAgreement();
     const other = await patientWithAgreement();
     const opened = await newCase(patientId, null);
     if (!opened.ok) throw new Error(opened.message);
     const visit = await addVisit({ patientName: name, patientPhone: null, note: null, patientId, doctorId });
     await adjustment(opened.id, today);
-    expect((await getClinicalVisit(visit.id))?.ortho?.adjustmentBillingClass).toBe("OUTSIDE_CONTRACT");
+    expect((await getClinicalVisit(visit.id))?.ortho?.adjustmentBillingClass).toBe("REVIEW_REQUIRED");
 
     expect(await linkOrthoCasePlan({ caseId: opened.id, planId: other.planId, actor: "doctor", actorRole: "doctor" }))
       .toEqual({ ok: false, status: 409, message: "الخطة المختارة ليست لهذا المريض." });
@@ -117,7 +117,7 @@ describe("(P1-B) new orthodontic package", () => {
 
     /* اتفاقٌ أُلغي لا يموّل الحالة — والشدّة تعود تحتاج قرار فوترة. */
     expect(await setPlanStatus(planId, "cancelled", { actor: "admin", actorRole: "admin", reason: "اختبار الإلغاء" })).toBe("ok");
-    expect((await getClinicalVisit(visit.id))?.ortho?.adjustmentBillingClass).toBe("OUTSIDE_CONTRACT");
+    expect((await getClinicalVisit(visit.id))?.ortho?.adjustmentBillingClass).toBe("REVIEW_REQUIRED");
     expect(await linkOrthoCasePlan({ caseId: opened.id, planId, actor: "doctor", actorRole: "doctor" }))
       .toEqual({ ok: false, status: 409, message: "الخطة المختارة ملغاة — اختر خطة سارية." });
 

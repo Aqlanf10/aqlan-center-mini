@@ -1,0 +1,35 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ __tests__/canonical-ortho-coverage-clock.test.tsx (5 tests | 1 failed | 4 skipped) 49ms
+   × Aden midnight: the stored Oct31 22:30Z instant is a Nov1 01:30 clinic decision 47ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/canonical-ortho-coverage-clock.test.tsx > Aden midnight: the stored Oct31 22:30Z instant is a Nov1 01:30 clinic decision
+AssertionError: expected '2026-10-31' to be 'الأحد 01/11/2026' // Object.is equality
+
+Expected: "الأحد 01/11/2026"
+Received: "2026-10-31"
+
+ ❯ __tests__/canonical-ortho-coverage-clock.test.tsx:12:144
+     10|  return renderToStaticMarkup(CanonicalOrthoCoverage({patientId:1,caseI…
+     11| }
+     12| it("Aden midnight: the stored Oct31 22:30Z instant is a Nov1 01:30 cli…
+       |                                                                                                                                                ^
+     13| it.each([
+     14|  ["2026-10-31T20:59:59.000Z","Asia/Aden","السبت 31/10/2026"],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  12:50:46
+   Duration  848ms (transform 140ms, setup 0ms, import 223ms, tests 49ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

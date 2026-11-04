@@ -7,6 +7,7 @@ import { decodeOperationalOverview, type OperationalSection } from "../../lib/le
 assertRealPostgresUrl(); stubPostgresEnv();
 process.env.SESSION_SECRET = "synthetic-leadership-test-secret-not-for-production";
 const db = await import("../../lib/db");
+const { readReturnBookingContext } = await import("../../lib/return-booking-context");
 const { rebookPlannedVisit } = await import("../../lib/planned-visit-rebooking");
 const q = async (sql: string, values: unknown[] = []) => (await db.getPool().query(sql, values)).rows;
 let serial = 0;
@@ -27,11 +28,19 @@ async function fixture(status = "no_show", date = day) {
   const [a] = await q("INSERT INTO appointments(patient_id,scheduled_date,scheduled_time,status) VALUES ($1,$2,'16:00',$3) RETURNING id", [p.id,date,status]);
   const [pv] = await q("INSERT INTO planned_visits(patient_id,sequence,title,status,appointment_id) VALUES ($1,1,'Synthetic session','scheduled',$2) RETURNING id",[p.id,a.id]);
   await q("UPDATE appointments SET planned_visit_id=$2 WHERE id=$1",[a.id,pv.id]);
+  const [doctor] = await q("INSERT INTO parties(kind,name) VALUES ('doctor','Synthetic responsible doctor') RETURNING id");
+  const [clinical] = await q("INSERT INTO clinical_cases(patient_id,specialty,title,responsible_party_id,created_by) VALUES ($1,'general','Synthetic current case',$2,'synthetic') RETURNING id",[p.id,doctor.id]);
+  const [plan] = await q("INSERT INTO treatment_plans(patient_id,title,total_minor) VALUES ($1,'Synthetic current plan',100) RETURNING id",[p.id]);
+  const [item] = await q("INSERT INTO plan_items(plan_id,case_id,service_name,unit_price_minor) VALUES ($1,$2,'Synthetic clinical item',100) RETURNING id",[plan.id,clinical.id]);
+  await q("UPDATE planned_visits SET plan_id=$2 WHERE id=$1",[pv.id,plan.id]);
+  await q("INSERT INTO treatment_sessions(plan_item_id,planned_visit_id,sequence) VALUES ($1,$2,1)",[item.id,pv.id]);
   return {patient:p.id as number, old:a.id as number, planned:pv.id as number};
 }
 async function actualRebook(f: Awaited<ReturnType<typeof fixture>>, old = f.old) {
   const plan = (await db.listPatientPlannedVisits(f.patient))[0];
-  const result = await rebookPlannedVisit({plannedVisitId:f.planned,expectedAppointmentId:old,expectedGeneration:plan.rebookGeneration,
+  const context = await readReturnBookingContext(db.getPool(),f.patient,{kind:"planned_visit",id:f.planned});
+  expect(context.ok).toBe(true);if(!context.ok)throw new Error(context.message);
+  const result = await rebookPlannedVisit({returnBookingSource:context.source,returnBookingFingerprint:context.fingerprint,plannedVisitId:f.planned,expectedAppointmentId:old,expectedGeneration:plan.rebookGeneration,
     date:addDays(clinicDateString(new Date(),db.CLINIC_TIME_ZONE),++serial),time:"16:00",reason:"Synthetic patient requested replacement",requestId:`synthetic-ops-rebook-${serial}`},actor);
   expect(result.ok).toBe(true); if(!result.ok) throw new Error(result.message); return result.appointmentId;
 }
