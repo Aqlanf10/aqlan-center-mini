@@ -1,0 +1,14 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-revision-backup.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  01:15:13
+   Duration  14.94s (transform 2.31s, setup 0ms, import 2.80s, tests 11.47s, environment 0ms)
+

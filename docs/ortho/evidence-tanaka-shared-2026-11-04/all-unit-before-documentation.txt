@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+ ❯ __tests__/docs-drift-guard.test.ts (2 tests | 1 failed) 13ms
+     × كل ملف في migrations/ مذكور باسمه في docs/DATABASE_MIGRATIONS.md 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/docs-drift-guard.test.ts > حارس انحراف الوثائق > كل ملف في migrations/ مذكور باسمه في docs/DATABASE_MIGRATIONS.md
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "0106_ortho_assessment_verifier_2_2.sql",
++ ]
+
+ ❯ __tests__/docs-drift-guard.test.ts:21:21
+     19|     expect(files.length).toBeGreaterThan(0);
+     20|     const missing = files.filter((name) => !doc.includes(name));
+     21|     expect(missing).toEqual([]);
+       |                     ^
+     22|   });
+     23|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 822 passed (823)
+      Tests  1 failed | 14062 passed (14063)
+   Start at  00:57:45
+   Duration  565.11s (transform 22.61s, setup 0ms, import 100.42s, tests 342.78s, environment 103ms)
+

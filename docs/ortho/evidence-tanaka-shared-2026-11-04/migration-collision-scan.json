@@ -1,0 +1,6 @@
+{
+  "heads": 306,
+  "unknown": [],
+  "collisions": [],
+  "scan": "git ls-tree -r --name-only <sha> migrations; filename prefix0106"
+}

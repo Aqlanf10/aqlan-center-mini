@@ -1,0 +1,38 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/schema-ownership.test.ts __tests__/postgres/hr-runtime-registration.test.ts __tests__/postgres/hr-composed-backup.test.ts __tests__/postgres/prescription-lineage-restore.test.ts __tests__/postgres/periodontal-restore.test.ts __tests__/postgres/patient-appointment-history-index.test.ts __tests__/postgres/legacy-doctor-fk-compatibility.test.ts __tests__/postgres/debt-installments-storage.test.ts __tests__/postgres/ortho-revision-backup.test.ts __tests__/postgres/ortho-problem-sources-restore.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/schema-ownership.test.ts (6 tests | 1 failed) 16183ms
+     × builds migrations and ensureSchema independently, compares them, and leaves no generated databases 8086ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/schema-ownership.test.ts > PG18 schema ownership characterization > builds migrations and ensureSchema independently, compares them, and leaves no generated databases
+AssertionError: expected [ { version: '0001', …(3) }, …(76) ] to have a length of 76 but got 77
+
+- Expected
++ Received
+
+- 76
++ 77
+
+ ❯ __tests__/postgres/schema-ownership.test.ts:306:43
+    304|     ]);
+    305|     expect(report.migrationRegistry.present).toBe(true);
+    306|     expect(report.migrationRegistry.rows).toHaveLength(77);
+       |                                           ^
+    307|     expect(report.migrationRegistry.rows.every((row) => row.adopted ==…
+    308|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 9 passed (10)
+      Tests  1 failed | 51 passed (52)
+   Start at  00:50:46
+   Duration  147.32s (transform 4.32s, setup 0ms, import 9.11s, tests 135.31s, environment 1ms)
+

@@ -1,0 +1,7 @@
+# Verification notes
+
+- First full phase14 unit run: 14,062 passed, one documentation-drift guard failed because0106 was not yet named in docs/DATABASE_MIGRATIONS.md. Added complete migration compatibility note; no guard weakened.
+- First study browser run asserted before saved section loaded. Replaced the immediate assertion with condition polling. Second run omitted the required new documentation reason after draft save. Screenshot and component guard confirmed it; test now enters the clinician reason before documenting. Third run passed the complete measured-analysis→reviewed problem→goal→saved/documented study→text PPTX/PDF journey and preserved its snapshot after source correction.
+- Visual inspection at390/1280 found bidirectional mixed-number readability issues. UI now separates measured, predicted and difference values, isolates number/unit direction, rounds presentation only to3 decimals, and collapses provenance details. Calculations and historical witnesses unchanged. New build and complete units started after that edit.
+- Runtime braces proof passed for pre-presentation build LwPZWx_PX0pNaRsTsWkiu. Subsequent lint-tooling proof overlapped the new build and failed an ENOENT while artifacts changed; this is invalid evidence, not final acceptance. Both proofs must run on the frozen final build.
+- Research lookup for Howes1947 located PubMed20255310 metadata in search, but opening returned only HHS footer. Full primary protocol not read or activated; no inference from third-party uploads.

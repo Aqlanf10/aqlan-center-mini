@@ -1,0 +1,371 @@
+{
+  "scope": "Versioned Tanaka1974 mixed dentition estimate using shared measurements, clinician-reviewed source linkage and saved text study",
+  "applicationCommit": "ef2ef078fdce1b51d7da908a0ae76e69e765e32a",
+  "baseCommit": "4171b10b9b266ba4e2d6862cdfb7cfbdf551b5a8",
+  "generatedAtUtc": "2026-11-04T01:19:16.933157+00:00",
+  "buildId": "qxBDwGNDkfh8bVDlGWDa4",
+  "tests": {
+    "allUnit": {
+      "passed": 14063,
+      "files": 823,
+      "seconds": 565.92
+    },
+    "focusedUnit": {
+      "passed": 64,
+      "files": 5,
+      "seconds": 1.29
+    },
+    "postgresLinked": {
+      "passed": 23,
+      "files": 4,
+      "seconds": 15.58
+    },
+    "postgresRegression": {
+      "initialPassed": 51,
+      "initialFailed": 1,
+      "files": 10,
+      "failure": "Old migration-count assertion76 versus77; updated explicitly",
+      "schemaAfterFix": {
+        "passed": 6,
+        "files": 1,
+        "seconds": 19.65
+      },
+      "note": "Nine other files passed before count fix. Modified2.2 SQL/archive backup coverage rerun below."
+    },
+    "postgresBackupFinal": {
+      "passed": 2,
+      "files": 1,
+      "seconds": 14.94
+    },
+    "httpFinalBuild": {
+      "passed": 11,
+      "files": 6,
+      "batches": [
+        {
+          "passed": 7,
+          "files": 4,
+          "seconds": 186.98
+        },
+        {
+          "passed": 4,
+          "files": 2,
+          "seconds": 26.19
+        }
+      ]
+    },
+    "httpBeforePresentation": {
+      "passed": 18,
+      "files": 8,
+      "seconds": 352.26,
+      "notAddedToFinalTotals": true
+    },
+    "hrRegistryBrowser": {
+      "passed": 7,
+      "files": 1,
+      "batchHadIndependentStudyTestFailure": true
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "preflight": {
+      "status": "passed",
+      "migrationAssets": 77
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 8,
+      "presentationAndNewTestsErrors": 0
+    },
+    "runtime": {
+      "bracesFiles": 9533,
+      "bracesTraces": 373,
+      "toolingTraces": 743,
+      "toolingManifests": 86,
+      "status": "passed"
+    },
+    "hostedCurrentHead": "not_pushed_at_evidence_creation"
+  },
+  "visualReview": [
+    "measurements-390.png",
+    "measurements-1280.png",
+    "saved-study.png"
+  ],
+  "limits": [
+    "No production or staging writes, merge, deployment or PR creation",
+    "LocalChromium151 differs from hosted pinned153",
+    "Text-only stored study and PPTX/PDF; selected image export still incomplete",
+    "Clinical applicability unapproved; no automatic diagnosis or treatment decision",
+    "Mixed variant requires actual target incisors and explicitly unerupted target segments; other variants unsupported",
+    "Product predictor domain20.5–27mm is not a biological normal range",
+    "Moyers,Nance,Huckaba,other named methods and structured space/IPR ledger remain incomplete",
+    "No full acceptance of349 requirements or52 scenarios",
+    "Full hosted suite on this exact source remains independent"
+  ],
+  "sourceFiles": [
+    {
+      "path": "__tests__/fixtures/ortho-assessment-tanaka.ts",
+      "sha256": "32b501fd9957f410f173272d8136e838d1387c0d32b63ee8fa559f7a7a444553"
+    },
+    {
+      "path": "__tests__/migrations.test.ts",
+      "sha256": "f4f1df325d21a4b4288fde617b33f50b8868baed0800f7bdf1fa857e31a0715d"
+    },
+    {
+      "path": "__tests__/ortho-assessment-tanaka-1974.test.ts",
+      "sha256": "90584246cb9f548b45cb65c5c4fba4d3c176366da2f9a655bf5b02e8a2b94d16"
+    },
+    {
+      "path": "__tests__/patient-appointment-history-schema.test.ts",
+      "sha256": "4f13d3421ad51bf2f92d453fad94d408d34555073bc330cb12c32b6f95f04b67"
+    },
+    {
+      "path": "__tests__/periodontal-candidate-chain.test.ts",
+      "sha256": "f2b450821d56c28ad96b8327faedfdfd066540b6b65c70dd6f4ef0e39a1666c2"
+    },
+    {
+      "path": "__tests__/periodontal-schema.test.ts",
+      "sha256": "1f8c674582b1fd139048560875bade69d48b1dc40b49a8f3008ed561194ceb32"
+    },
+    {
+      "path": "__tests__/postgres/_periodontal-fixture.ts",
+      "sha256": "d95bd75b918023b0f729d1a80f2f9bb679e34d95ee867396bc01a54f174d0cee"
+    },
+    {
+      "path": "__tests__/postgres/debt-installments-storage.test.ts",
+      "sha256": "8452e8e2d2eabf902914ab4bf49d7eaa146be3236bf4399147b5772d357b63ef"
+    },
+    {
+      "path": "__tests__/postgres/hr-composed-backup.test.ts",
+      "sha256": "7afa3016bee96c12229035cfe88ecdb20f3c1d0102698c10c3f1b229a00a3b4f"
+    },
+    {
+      "path": "__tests__/postgres/hr-runtime-registration.test.ts",
+      "sha256": "bb606969945185a4af943279128b757f7d113457f065eedd001e1423a208aa69"
+    },
+    {
+      "path": "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts",
+      "sha256": "1cddf6db2bdf1b5e38022dc1e3aeff8420b3e25454ec89957ad973a763aea796"
+    },
+    {
+      "path": "__tests__/postgres/ortho-assessment-tanaka.test.ts",
+      "sha256": "f207b55dc508890c3328a0b8231eb20e50443cf98731f015e9b189f8efcb1ea3"
+    },
+    {
+      "path": "__tests__/postgres/ortho-assessment-verifier-migration.test.ts",
+      "sha256": "a528649d8d3f3e8af9403967d833943da0fc94151aff6db821cea05d40d274c0"
+    },
+    {
+      "path": "__tests__/postgres/ortho-revision-backup.test.ts",
+      "sha256": "95ecd932ed05d88ea631b9ef259a24011454e5653d666d45dc2eb6f0956b099b"
+    },
+    {
+      "path": "__tests__/postgres/patient-appointment-history-index.test.ts",
+      "sha256": "36eb36c5ea8995dc9dd4af46dae972fc335003287023dd571d616cdf102b7265"
+    },
+    {
+      "path": "__tests__/postgres/periodontal-restore.test.ts",
+      "sha256": "337a27ed9baf99a39cab84755fc3f38b1d76191a00e26e5655a984f2f42f4942"
+    },
+    {
+      "path": "__tests__/postgres/prescription-lineage-restore.test.ts",
+      "sha256": "51e6620553cd6c21819fed5185ebf5bad57c22b3c500d656a742ff183016eae5"
+    },
+    {
+      "path": "__tests__/postgres/schema-ownership.test.ts",
+      "sha256": "663a8748189d16a8cc46e8997afa4ec15b5946394380ed73a989e1bf10362b17"
+    },
+    {
+      "path": "__tests__/schema-preflight-cli.test.ts",
+      "sha256": "8697df88d6f5eea4b9a18ec40568292e49e524d004975205e833db56993a4668"
+    },
+    {
+      "path": "__tests__/security-http/hr-temporal-history-ui.test.ts",
+      "sha256": "cf9de262a306feaabcbad970e5706f8fdfce96eb173e79a2675dd07adacb7925"
+    },
+    {
+      "path": "__tests__/security-http/ortho-tanaka-measurements-browser.test.ts",
+      "sha256": "4e3198a8efc44a5ce535e58f3e4d7491928ab0597225ea0606b1c8e9dded4bf2"
+    },
+    {
+      "path": "__tests__/security-http/ortho-tanaka-study-browser.test.ts",
+      "sha256": "e53ffcdcdd3066dc06df4410d37b6048c7834c206fb4429013282f55e5dec0e1"
+    },
+    {
+      "path": "components/OrthoAssessmentMeasurementsV2.tsx",
+      "sha256": "43905b66cadce7d7cd7e3f52fc206434761bb7fcbe2fff60f2d5c58a773c2372"
+    },
+    {
+      "path": "docs/DATABASE_MIGRATIONS.md",
+      "sha256": "45f3df9c976d77212a414c5cc95de58723d67a319f5cf7a5cb9393fb8fb8aefc"
+    },
+    {
+      "path": "lib/db.ts",
+      "sha256": "34006eeac2cdfc281b04b4f0e4af1cca1656db1b191eddaba0599bd3f7c8eea6"
+    },
+    {
+      "path": "lib/ortho-assessment-engine-2_2_0.ts",
+      "sha256": "73a57bc24dd721d34e0e396fbd4f0d475052969da56db87cf926a89dfec08539"
+    },
+    {
+      "path": "lib/ortho-assessment-engine-v2.ts",
+      "sha256": "5efabf008625d13a27019990389f1f2e9baa6dd3018696a4e6ad7066bb496e4a"
+    },
+    {
+      "path": "lib/ortho-assessment-measurement-set-v2.ts",
+      "sha256": "e647e16ebb005133245370e15a4e22284ddf6f9a65fe4ef4569f52bad2b7d084"
+    },
+    {
+      "path": "lib/ortho-assessment-persisted-v2.ts",
+      "sha256": "d8a6829acf4bd2a7c6c037ca5929c549bf6b6adcf9243a78470e32d012f694f4"
+    },
+    {
+      "path": "lib/ortho-assessment-read-v2.ts",
+      "sha256": "20408e61adcc87eb2e3a3fc52fc169b9c7929233b9683fed1b84716a022d1333"
+    },
+    {
+      "path": "lib/ortho-assessment-tanaka-1974-v1.ts",
+      "sha256": "97fadfb04e35945cd238b9167a31f940fcca24bb2547ac5e403476dff3f8688a"
+    },
+    {
+      "path": "lib/ortho-assessment-verifier-schema.ts",
+      "sha256": "4283ac2f2161b10bc7a0fc9704bb51460d27ca04605a120512646d986aba073b"
+    },
+    {
+      "path": "lib/ortho-case-study-recorded-facts.ts",
+      "sha256": "a8ee1069f7914aa6e4ee7ed9b4471879cd5d25fd2e5a8f39cfadc96ccf53e679"
+    },
+    {
+      "path": "lib/ortho-problem-source-candidates.ts",
+      "sha256": "c385d9d87229ca74b2b69933694caa331315b20b01a4be75b342b09589d0762a"
+    },
+    {
+      "path": "migrations/0106_ortho_assessment_verifier_2_2.sql",
+      "sha256": "8e0d1ceac614c350363303e2be4be8a0372f1ecb741ebf9a394038f8aaadce79"
+    },
+    {
+      "path": "scripts/verify-schema-ownership.ts",
+      "sha256": "411483bd1ff0ce79de6aeb1be1abd06b7251fdc36edc9e0869d0a650032042e5"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "path": "all-unit-before-documentation.txt",
+      "bytes": 1347,
+      "sha256": "556ff0bdc76dce062ecf58e6d7058d7e06300d9312b2f0e30ff3e898ddeee15b"
+    },
+    {
+      "path": "all-unit-final.txt",
+      "bytes": 439,
+      "sha256": "4e677c2a9062909101d018975b8315d44f91be4805b851eedae0952c97ca839e"
+    },
+    {
+      "path": "browser-final.txt",
+      "bytes": 763,
+      "sha256": "2124c8977dcde82d819021c59c56edefc584da76e12bc7b1dad1adff600bd08c"
+    },
+    {
+      "path": "build-preflight.txt",
+      "bytes": 14311,
+      "sha256": "460ff82c7530917a984a6dc1475009a8ee00cd61e201947927bc5e9d1e84a1a2"
+    },
+    {
+      "path": "lint-application.txt",
+      "bytes": 1298,
+      "sha256": "6ca1e66b19ee018129c56a9630f616d0955053bd965dc387d654bbf1d8d0e76a"
+    },
+    {
+      "path": "lint-backup-test.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "lint-presentation.txt",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "measurements-1280.png",
+      "bytes": 113981,
+      "sha256": "f05e03d014365175d9b30cbbf9c52dfcaae0923bc53f03497a0f867ba119ed97"
+    },
+    {
+      "path": "measurements-390.png",
+      "bytes": 86549,
+      "sha256": "f360732512339916952d914a0e550c5ff850fe5618101d17dfe241bfcf2ad71d"
+    },
+    {
+      "path": "migration-collision-scan.json",
+      "bytes": 134,
+      "sha256": "a5f77e6270506dfe87c855bfe7d0a1ec5ce8a3b26eda088d76186a998a9fc3c2"
+    },
+    {
+      "path": "original-ci-failures-final-build.txt",
+      "bytes": 638,
+      "sha256": "255fcc7f471b2a907c49cc60495e035ce62220d75fac6ad20267b4bb6091c95a"
+    },
+    {
+      "path": "postgres-backup-final.txt",
+      "bytes": 462,
+      "sha256": "37684fc1326a089beaf00ea599716263641bb030bd76682faedb33bcb37e18f0"
+    },
+    {
+      "path": "postgres-linked.txt",
+      "bytes": 637,
+      "sha256": "5c8413bbd9bf2e97b051244b6ccbc881298afdd3a25913db8056dd5a2fda4988"
+    },
+    {
+      "path": "postgres-regression-initial.txt",
+      "bytes": 1979,
+      "sha256": "1a26213bd7159531cb729c778356fe80a4c96208ede2e9015c2455ff48ac8a52"
+    },
+    {
+      "path": "postgres-schema.txt",
+      "bytes": 457,
+      "sha256": "7b272f6bae6f0787847a96084952936204cc92d0e8df79ff2a5181ac96e24d58"
+    },
+    {
+      "path": "remote-head-check.json",
+      "bytes": 244,
+      "sha256": "539a940a4578ea0df29b94dd8f5e6e286fb251f68cae1c90f4bd2632b8c12153"
+    },
+    {
+      "path": "runtime-braces-final.txt",
+      "bytes": 108,
+      "sha256": "012fd7f73366025f05dcb6e577bb10bc5dd3c7194a9ab560a5517e33d301841a"
+    },
+    {
+      "path": "runtime-tooling-final.txt",
+      "bytes": 137,
+      "sha256": "28f1870c67b6438e7c257a239989fc297c1122ffcd6c02f745314cbc88dce3ce"
+    },
+    {
+      "path": "saved-study.png",
+      "bytes": 122704,
+      "sha256": "892ede487740a76617fc0ea2328aee553167dc0ec2fcd426ef1f2a428d6032b9"
+    },
+    {
+      "path": "schema-contract.txt",
+      "bytes": 248,
+      "sha256": "65d4b8b7c4a1e24d95be9c76b40632759cd8d76a17db3d1937a150612fa1e90c"
+    },
+    {
+      "path": "synthetic-study.pdf",
+      "bytes": 324364,
+      "sha256": "96439b860bd39aeb419b9ed0d8ed349f6d575d3abb554914ad7e214a573acdca"
+    },
+    {
+      "path": "typecheck-final.txt",
+      "bytes": 48,
+      "sha256": "494c5900ca50ac372426c03ff676bd53571e0b70b3e4fe8eed6ce84138fd526d"
+    },
+    {
+      "path": "unit-focused.txt",
+      "bytes": 217,
+      "sha256": "7c9945262f928353e3cd90672a542eb994887673bd7202d3e0c072753c7941b2"
+    },
+    {
+      "path": "verification-notes.md",
+      "bytes": 1530,
+      "sha256": "bf6bd99119bccd496bf33a01732ddd875bc7eb9c3e2a516f471bbc60b4617131"
+    }
+  ]
+}

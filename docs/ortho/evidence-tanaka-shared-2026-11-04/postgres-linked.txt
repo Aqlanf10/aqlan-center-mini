@@ -1,0 +1,14 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-assessment-verifier-migration.test.ts __tests__/postgres/ortho-assessment-tanaka.test.ts __tests__/postgres/ortho-assessment-strategy-union.test.ts __tests__/postgres/ortho-problem-sources.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  4 passed (4)
+      Tests  23 passed (23)
+   Start at  00:47:56
+   Duration  15.58s (transform 2.39s, setup 0ms, import 3.76s, tests 10.78s, environment 0ms)
+

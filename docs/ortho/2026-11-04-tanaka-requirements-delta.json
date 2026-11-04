@@ -1,0 +1,104 @@
+{
+  "sourceSha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+  "scope": "Tanaka1974 versioned shared measurement integration; not all349 requirements or52 scenarios",
+  "validation": "Final-source test results and commit hashes are recorded in the phase report/manifest; file presence alone is not acceptance.",
+  "requirements": [
+    {
+      "id": "V2R238",
+      "sourceLine": 238,
+      "requirement": "| الأسنان المختلطة | Moyers بجداول موثقة وإصدار ومستوى احتمال، Tanaka–Johnston، Nance وHuckaba مع تصحيح التكبير ومرجع القياس |",
+      "scopedStatus": "موجود لكنه غير مكتمل",
+      "assessment": "Tanaka للفكين فقط متصل بالقياسات والمراجعة والدراسة؛ Moyers/Nance/Huckaba غير مفعلة.",
+      "evidencePaths": [
+        "__tests__/ortho-assessment-tanaka-1974.test.ts",
+        "__tests__/postgres/ortho-assessment-tanaka.test.ts"
+      ]
+    },
+    {
+      "id": "V2R243",
+      "sourceLine": 243,
+      "requirement": "- لكل تحليل مواصفة: المدخلات المطلوبة، الأسنان الداخلة، الفك، المعادلة والإصدار، الوحدة، اتجاه الإشارة، سياسة التقريب، والقيم التي تمنع الحساب. يُراجع المرجع الأصلي قبل البرمجة، ولا تعتمد الشرائح وحدها لضمان صحة سريرية.",
+      "scopedStatus": "متحقق ضمن نطاق Tanaka الجديد",
+      "assessment": "تعريف المتنبئ والفك والأسنان والوحدة والإشارة والإصدار ومدخلات الرفض، مع مرجع أصلي. لا قبول لجميع الطرق.",
+      "evidencePaths": [
+        "lib/ortho-assessment-engine-2_2_0.ts",
+        "lib/ortho-assessment-tanaka-1974-v1.ts",
+        "__tests__/ortho-assessment-tanaka-1974.test.ts"
+      ]
+    },
+    {
+      "id": "V2R244",
+      "sourceLine": 244,
+      "requirement": "- استخدم في عرض فرق المساحة تعريفًا معلنًا متسقًا؛ مثال المواصفة المطلوبة: المتاح ناقص المطلوب، السالب نقص مساحة والموجب فائض. لا يتبدل المعنى بين شاشة وأخرى.",
+      "scopedStatus": "متحقق ضمن نطاق الإضافة",
+      "assessment": "المتاح المقاس ناقص المطلوب المقدّر، بفك واضح وبالملليمتر؛ العرض معزول الاتجاه والتقريب للعرض فقط.",
+      "evidencePaths": [
+        "components/OrthoAssessmentMeasurementsV2.tsx",
+        "lib/ortho-case-study-recorded-facts.ts"
+      ]
+    },
+    {
+      "id": "V2R245",
+      "sourceLine": 245,
+      "requirement": "- قياسات الأسنان المخزنة تفصيلية؛ لا يُطلب من الطبيب إدخال المجموع يدويًا ثم الأسنان مرة ثانية. الإدخال اليدوي للمجموع القديم جائز لكن يُوسم بأنه إجمالي دون تفصيل.",
+      "scopedStatus": "متحقق جزئياً",
+      "assessment": "التحليل يعيد استعمال الملاحظات الفردية نفسها؛ لا إدخال مجموع ثان. مسار إجمالي تاريخي بلا تفصيل ليس منجزاً بهذه الإضافة.",
+      "evidencePaths": [
+        "__tests__/security-http/ortho-tanaka-measurements-browser.test.ts"
+      ]
+    },
+    {
+      "id": "V2R249",
+      "sourceLine": 249,
+      "requirement": "- تحليل الأسنان المختلطة يفرق بين القواطع المستخدمة للتنبؤ ومجموع الأسنان المطلوب للفك الجاري تقييمه؛ لا ينسخ مجموع الفك السفلي للفك العلوي تلقائيًا.",
+      "scopedStatus": "متحقق ضمن نطاق Tanaka الجديد",
+      "assessment": "اختلاف مجموع قواطع الفكين متعمد في الاختبارات؛ غياب قاطع علوي يمنع العلوي مع بقاء السفلي قابلاً للحساب.",
+      "evidencePaths": [
+        "__tests__/ortho-assessment-tanaka-1974.test.ts",
+        "__tests__/security-http/ortho-tanaka-measurements-browser.test.ts"
+      ]
+    },
+    {
+      "id": "V2R264",
+      "sourceLine": 264,
+      "requirement": "- بناءً على C: خيارات IPR، expansion، distalization، uprighting، derotation، proclination، extraction، وأعمال space closure. يسجل الطبيب الاستطباب الذي اعتمده والبديل وسبب الاختيار؛ لا يحوله النظام تلقائيًا إلى أمر علاج.",
+      "scopedStatus": "موجود نصياً فقط",
+      "assessment": "الخيارات والاستطباب والبدائل والمبرر المنظمة لكل طريقة غير مكتملة؛ لا قرار علاجي آلي.",
+      "evidencePaths": []
+    },
+    {
+      "id": "V2R265",
+      "sourceLine": 265,
+      "requirement": "- ميزانية مساحة لكل فك: النقص المقاس، المقترح الحصول عليه من كل إجراء، الاستخدام المخطط، والمسافة المقاسة لاحقًا. التقديرات تقريبية وليست قياسات، ولا تجمع فوائد متداخلة مرتين.",
+      "scopedStatus": "ناقص",
+      "assessment": "لا ميزانية منظمة للمقاس والمقترح والاستخدام والقياس اللاحق ولا جمع آمن لمكاسب متداخلة بعد.",
+      "evidencePaths": []
+    },
+    {
+      "id": "V2R266",
+      "sourceLine": 266,
+      "requirement": "- IPR: كل تماس محدد بسنّين، المقدار المخطط، المنفذ في كل جلسة، المجموع التراكمي، والتاريخ والطبيب. لا تسجل المقدار مرة لكل سن ثم تضاعفه. تجاوز المخطط أو حد معتمد يُظهر مراجعة واضحة؛ لا تستورد حدًا عامًا من المحاضرة لكل الأسنان.",
+      "scopedStatus": "ناقص",
+      "assessment": "سجل تماس IPR مخطط ومنفذ لكل زيارة وإعادة الطلب والتراكم لم ينفذ في هذه المرحلة.",
+      "evidencePaths": []
+    },
+    {
+      "id": "V2R545",
+      "sourceLine": 545,
+      "requirement": "| O15 | تحليل مختلط للفكين ومقياس شعاعي | لا خلط لمجاميع الفكين؛ جداول/معادلات وإصدارات ومعايرة صحيحة |",
+      "scopedStatus": "غير مقبول بالكامل",
+      "assessment": "نجاح Tanaka وحده لا يقبل O15: Moyers/Nance/Huckaba والمعايرة الشعاعية الخاصة بها لم تكتمل.",
+      "evidencePaths": [
+        "__tests__/security-http/ortho-tanaka-study-browser.test.ts"
+      ]
+    },
+    {
+      "id": "V2R546",
+      "sourceLine": 546,
+      "requirement": "| O16 | IPR لنفس التماس في زيارتين وإعادة إرسال الطلب | المجموع صحيح بلا تضاعف، ومخطط/منفذ متمايزان |",
+      "scopedStatus": "غير متحقق",
+      "assessment": "O16 مرتبط بتنفيذ سجل IPR التراكمي؛ لم ينفذ بعد.",
+      "evidencePaths": []
+    }
+  ]
+}
