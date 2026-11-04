@@ -288,6 +288,8 @@ async function restrictedRoleVerdict(request: NextRequest, bearer: string | null
   // لا يمنعها كوكي كاشيرٍ قائم (القائمة تضيّق ما وراء الجلسة لا ما قبلها).
   if (PUBLIC_PATHS.has(pathname) || PUBLIC_API.has(pathname) || pathname.startsWith("/portal/")) return null;
   const cookieToken = request.cookies.get(SESSION_COOKIE)?.value;
+  // Keep the same signed-envelope eligibility and cookie precedence as lib/session.
+  // A canonical selection has no legacy grants, but must not fall through to Bearer.
   const access = (cookieToken ? await verifiedSessionAccess(cookieToken) : null)
     ?? (bearer ? await verifiedSessionAccess(bearer) : null);
   const role = access?.role;

@@ -1,6 +1,9 @@
 import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { financeAccessFor, type FinanceAccess } from "./finance-permissions";
+import { classifySessionEnvelope, decodeSessionBody, hasCanonicalSessionMarker, splitSessionEnvelope } from "./session-envelope";
+
+export { hasCanonicalSessionMarker } from "./session-envelope";
 
 export { SESSION_COOKIE, SESSION_DURATION_MS } from "./sessionCookie";
 
@@ -83,11 +86,6 @@ export function sessionPermissionVersion(role: string, raw: unknown): string {
     .digest("base64url");
 }
 
-const forbiddenLegacyMarkers = ["authority", "staffAuthority", "durableIdentity"] as const;
-export function hasCanonicalSessionMarker(payload: object): boolean {
-  return forbiddenLegacyMarkers.some(key => Object.hasOwn(payload, key));
-}
-
 /** جلسة موقّعة: البيانات ظاهرة، والتوقيع هو ما يمنع تزويرها. */
 export function createSessionToken(payload: SessionPayload): string {
   if (hasCanonicalSessionMarker(payload)) throw new Error("CANONICAL_SESSION_ISSUANCE_UNSUPPORTED");
@@ -117,15 +115,13 @@ export function signDurableSessionClaims(claims: unknown): string {
 /** Signature envelope only, NOT authentication. Canonical and legacy payloads
  * have separate strict consumers; no caller-provided identity is trusted here. */
 export function readSignedSessionEnvelope(token: string | undefined): unknown | null {
-  if (typeof token !== "string" || token.length > 32768) return null;
-  const segments = token.split(".");
-  if (segments.length !== 2) return null;
-  const [body, signature] = segments;
-  if (!body || !signature || !/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]+$/.test(signature)) return null;
+  const envelope = splitSessionEnvelope(token);
+  if (!envelope) return null;
+  const { body, signature } = envelope;
   const given = Buffer.from(signature);
   const want = Buffer.from(sign(body));
   if (given.length !== want.length || !timingSafeEqual(given, want)) return null;
-  try { return JSON.parse(Buffer.from(body, "base64url").toString()); }
+  try { return decodeSessionBody(body); }
   catch { return null; }
 }
 
@@ -152,11 +148,9 @@ export function carryLegacySessionEvidence(source: SessionPayload, derived: Sess
 }
 
 export function readSessionToken(token: string | undefined): SessionPayload | null {
-  const payload = readSignedSessionEnvelope(token);
-  if (!payload || typeof payload !== "object" || Array.isArray(payload) || hasCanonicalSessionMarker(payload)) return null;
-  const candidate = payload as Partial<SessionPayload>;
-  if (typeof candidate.expiresAt !== "number" || !Number.isFinite(candidate.expiresAt) || candidate.expiresAt <= Date.now()) return null;
-  if (!Number.isSafeInteger(candidate.userId) || (candidate.userId ?? 0) < 1) return null;
-  legacyPayloadSources.set(candidate,token!);
-  return candidate as SessionPayload;
+  const selection = classifySessionEnvelope(readSignedSessionEnvelope(token));
+  if (selection?.kind !== "legacy") return null;
+  const payload = selection.payload as unknown as SessionPayload;
+  legacyPayloadSources.set(payload, token!);
+  return payload;
 }

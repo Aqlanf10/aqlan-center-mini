@@ -1,6 +1,6 @@
 import "server-only";
 import { NextResponse } from "next/server";
-import { deleteVisitOn, getPool, insertAuditRow, linkVisitToPatientOn, openVisitPatientFileOn, patientInDoctorScopeWith, type DbClient } from "./db";
+import { deleteVisitOn, doctorOwnsPatient, getPool, insertAuditRow, linkVisitToPatientOn, openVisitPatientFileOn, type DbClient } from "./db";
 import { NO_STORE, canonicalVisitFailure } from "./canonical-patient-http";
 import type { VerifiedDurableSession } from "./staff-durable-session";
 import {
@@ -34,21 +34,36 @@ export class CanonicalVisitFileRefusal extends Error {
 const VISIT_MISSING = "لا توجد زيارة بهذا الرقم ضمن مرضاك.";
 const refuse = (code: string, status: 400 | 403 | 404 | 409, message: string) => new CanonicalVisitFileRefusal(code, status, message);
 
+/** The visit writer already owns the visit lock. Never wait backwards for a patient
+ * or a relationship held by a patient-first writer. The whole operation rolls back. */
+async function withoutScopeLockWait<T>(work: () => Promise<T>): Promise<T> {
+  try { return await work(); } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "55P03") {
+      throw refuse("visit_scope_conflict", 409, "تعذّر تثبيت نطاق الزيارة والمريض. حدّث الزيارة وراجع النتيجة قبل طلب جديد.");
+    }
+    throw error;
+  }
+}
+
 async function scopeOf(client: DbClient, handle: StaffOperationHandle, action: "visits.manage" | "visits.delete") {
   const scope = await staffOperationPatientScope(client, handle, action);
   if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
   return scope;
 }
 async function requireVisit(client: DbClient, handle: StaffOperationHandle, action: "visits.manage" | "visits.delete", visitId: number) {
+  // This is the writer's first domain lock, not an unlocked preflight. PostgreSQL
+  // returns the current row after any wait; hold it through all effects and audit.
+  const { rows: [visit] } = await client.query<{ patient_id: number | null; doctor_id: number | null }>("SELECT patient_id, doctor_id FROM visits WHERE id = $1 FOR UPDATE", [visitId]);
   const scope = await scopeOf(client, handle, action);
-  const { rows: [visit] } = await client.query<{ patient_id: number | null; doctor_id: number | null }>("SELECT patient_id, doctor_id FROM visits WHERE id = $1", [visitId]);
   const inside = visit !== undefined && (scope.kind === "all" || visit.doctor_id === scope.clinicianPartyId
-    || (visit.patient_id !== null && await patientInDoctorScopeWith(client, scope.clinicianPartyId, visit.patient_id)));
+    || (visit.patient_id !== null && await patientInside(client, scope, visit.patient_id)));
   if (!inside) throw refuse("visit_not_found", 404, VISIT_MISSING);
   return { scope, previousPatientId: visit!.patient_id };
 }
 async function patientInside(client: DbClient, scope: Awaited<ReturnType<typeof scopeOf>>, patientId: number) {
-  return scope.kind === "all" || patientInDoctorScopeWith(client, scope.clinicianPartyId, patientId);
+  // A positive ownership witness, rather than an unlocked EXISTS, must survive
+  // until commit even when scope comes from an appointment, plan or referral.
+  return scope.kind === "all" || withoutScopeLockWait(() => doctorOwnsPatient(scope.clinicianPartyId, patientId, client, "nowait"));
 }
 const visitIdOf = (raw: string) => {
   if (!/^[1-9][0-9]{0,9}$/.test(raw) || Number(raw) > 2147483647) throw refuse("invalid_visit_input", 400, "رقم الزيارة غير صالح.");
@@ -61,7 +76,7 @@ export async function commandCanonicalVisitLink(session: VerifiedDurableSession,
   if (!Number.isSafeInteger(patientId) || patientId <= 0 || patientId > 2147483647) throw refuse("invalid_visit_input", 400, "رقم الملف غير صالح.");
   return withStaffOperation(pool, session, "visits.manage", async (client, handle) => {
     const { scope, previousPatientId } = await requireVisit(client, handle, "visits.manage", visitId);
-    const { rows } = await client.query("SELECT 1 FROM patients WHERE id = $1", [patientId]);
+    const { rows } = await withoutScopeLockWait(() => client.query("SELECT 1 FROM patients WHERE id = $1 FOR SHARE NOWAIT", [patientId]));
     if (rows.length !== 1 || !await patientInside(client, scope, patientId)) throw refuse("patient_not_found", 404, "لا يوجد مريض بهذا الرقم ضمن مرضاك.");
     const linked = await linkVisitToPatientOn(client, visitId, patientId);
     if (!linked.ok) throw refuse("visit_link_refused", 409, linked.message);
@@ -83,8 +98,13 @@ export async function commandCanonicalVisitOpenFile(session: VerifiedDurableSess
     // The matched file is checked before the visit is linked: the link must never be its own
     // scope witness (an assigned visit would otherwise bring the file into a clinician's scope).
     const opened = await openVisitPatientFileOn(client, visitId, async patientId => {
-      if (patientId !== null && !await patientInside(client, scope, patientId)) {
-        throw refuse("visit_open_file_outside_scope", 409, "تعذّر فتح الملف من هذه الزيارة ضمن نطاقك. اطلب من المسؤول ربطها.");
+      if (patientId !== null) {
+        // The resolver may fill an empty phone: acquire its write lock directly,
+        // avoiding a SHARE-to-UPDATE upgrade against another visit's resolver.
+        const { rows } = await withoutScopeLockWait(() => client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE NOWAIT", [patientId]));
+        if (!rows.length || !await patientInside(client, scope, patientId)) {
+          throw refuse("visit_open_file_outside_scope", 409, "تعذّر فتح الملف من هذه الزيارة ضمن نطاقك. اطلب من المسؤول ربطها.");
+        }
       }
     });
     if (!opened.ok) {

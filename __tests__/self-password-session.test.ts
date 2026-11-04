@@ -134,7 +134,7 @@ describe("self-password session renewal", () => {
     expect(payload.financeAccess).toEqual(expectedAccess);
     expect(payload.permissionVersion).toBe(restricted ? sessionPermissionVersion(role, expectedAccess) : undefined);
     const proxy = await verifiedSessionAccess(token);
-    expect(proxy).toEqual({ role, financeAccess: expectedAccess });
+    expect(proxy).toEqual({ kind: "legacy", role, financeAccess: expectedAccess });
     if (restricted) {
       // Exercise the same per-user limits and fixed role ceilings the proxy uses.
       for (const [path, method] of [

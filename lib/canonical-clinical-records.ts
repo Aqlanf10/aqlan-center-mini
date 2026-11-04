@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
-  CLINIC_TIME_ZONE, DiagnosisAssociationError, createIntakeFormOn, getMedicalHistoryWith, getPool, getVitalsWith, insertAuditRow,
+  CLINIC_TIME_ZONE, DiagnosisAssociationError, createIntakeFormOn, doctorOwnsPatient, getMedicalHistoryWith, getPool, getVitalsWith, insertAuditRow,
   patientInDoctorScopeWith, recordPatientDiagnosisOn, recordVitalsOn, saveMedicalHistoryOn, type DbClient,
   ToothVisitConflict, getToothRecordWith, recordToothConditionOn,
 } from "./db";
@@ -31,7 +31,8 @@ import { stableJson } from "./canonical-lab-create";
  *   legacy routes allowed role labels with patient access), inside the patient scope;
  *   outside answers like missing (404). The scope check takes no row lock, so each legacy
  *   body keeps its own lock order (vitals: patient row; diagnosis: per-patient advisory
- *   lock, then the patient FOR KEY SHARE).
+ *   lock, then the patient FOR KEY SHARE). Vitals repeats admission after its patient
+ *   lock and holds a positive ownership witness through the reading, alert and audit.
  * - Diagnosis: the legacy route allowed the doctor and admin labels only; the canonical
  *   path needs the actor's validated clinician link or the protected owner (never wider).
  * - Writer bodies extracted unchanged (`saveMedicalHistoryOn`, `recordVitalsOn`,
@@ -162,7 +163,7 @@ export async function commandCanonicalVitals(session: VerifiedDurableSession, ra
   const parsed = normalizeVitals(body);
   if (!parsed.ok) throw invalid(parsed.message);
   const options = vitalsOptions(body);
-  return clinicalWrite(session, patientId, "patient.vitals", requestKey, fingerprintOf({ patientId, ...parsed.value, ...options }), "القراءة", pool, ({ client, actor }) => ({
+  return clinicalWrite(session, patientId, "patient.vitals", requestKey, fingerprintOf({ patientId, ...parsed.value, ...options }), "القراءة", pool, ({ client, handle, actor }) => ({
     replay: async id => {
       const reading = await getVitalsWith(client, id);
       if (!reading) return null;
@@ -170,7 +171,20 @@ export async function commandCanonicalVitals(session: VerifiedDurableSession, ra
       return { ...reading, ...(options.medicalAlert !== undefined ? { medicalAlert: patient?.medical_alert ?? null } : {}) };
     },
     write: async stamp => {
-      const saved = await recordVitalsOn(client, patientId, parsed.value, actor.actor, options);
+      const saved = await recordVitalsOn(client, patientId, parsed.value, actor.actor, options, async () => {
+        const scope = await staffOperationPatientScope(client, handle, "clinical.visits.document");
+        if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+        // Keep the writer's patient-first lock order. Relationship witnesses may
+        // belong to a visit-first writer, so refuse contention instead of waiting.
+        try {
+          if (scope.kind === "own" && !await doctorOwnsPatient(scope.clinicianPartyId, patientId, client, "nowait")) throw patientMissing();
+        } catch (error) {
+          if (error && typeof error === "object" && "code" in error && error.code === "55P03") {
+            throw new CanonicalClinicalRecordRefusal("clinical_record_scope_conflict", 409, "تعذّر تثبيت نطاق المريض. حدّث الملف وراجع النتيجة قبل طلب جديد.");
+          }
+          throw error;
+        }
+      });
       if (!saved) throw patientMissing();
       await insertAuditRow(client, {
         action: "patient.vitals", entity: "patient", entityId: patientId,

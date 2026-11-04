@@ -101,7 +101,7 @@ describe("verifiedSessionRole (proxy, Web Crypto)", () => {
   const secret = "role-test-secret-0123456789abcdef-xyz";
   async function token(payload: Record<string, unknown>, key = secret): Promise<string> {
     const { createHmac } = await import("node:crypto");
-    const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const body = Buffer.from(JSON.stringify({ userId: 3, ...payload })).toString("base64url");
     return `${body}.${createHmac("sha256", key).update(body).digest("base64url")}`;
   }
 

@@ -2287,7 +2287,7 @@
      "need": [
       "clinical.lab.view"
      ],
-     "note": "Order tracking events. M2 slice 67: record read read:lab.events inside the patient scope."
+     "note": "Order tracking events. M2 slice 67: record read read:lab.events inside the patient scope. Known clinical events and notes remain visible. Accounting and settlement events require finance.cost-prices.view; settlement/reversal notes also require finance.expenses.view and all patient scope because historical notes may carry mixed-patient batch totals, vouchers or arbitrary reversal reasons. Unknown kinds are omitted until classified. Persisted history is unchanged."
     },
     "post": {
      "need": [
