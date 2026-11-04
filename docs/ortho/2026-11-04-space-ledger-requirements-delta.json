@@ -1,0 +1,78 @@
+{
+  "sourceSha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+  "scope": "Phase15 documentary space/IPR; scoped local acceptance, hosted CI separate; no full-module claim",
+  "requirements": [
+    {
+      "id": "V2R264",
+      "sourceLine": 264,
+      "requirement": "- بناءً على C: خيارات IPR، expansion، distalization، uprighting، derotation، proclination، extraction، وأعمال space closure. يسجل الطبيب الاستطباب الذي اعتمده والبديل وسبب الاختيار؛ لا يحوله النظام تلقائيًا إلى أمر علاج.",
+      "scopedStatus": "موجود ومتحقق جزئياً ضمن نطاق المرحلة",
+      "assessment": "خيارات مكاسب موثقة بالمبرر والبديل؛ لا تنفيذ علاجي آلي أو سجل إغلاق مفصل.",
+      "evidencePaths": [
+        "lib/ortho-space-ledger.ts",
+        "lib/ortho-space-store.ts",
+        "__tests__/postgres/ortho-space-ledger.test.ts",
+        "__tests__/security-http/ortho-space-ledger-browser.test.ts"
+      ]
+    },
+    {
+      "id": "V2R265",
+      "sourceLine": 265,
+      "requirement": "- ميزانية مساحة لكل فك: النقص المقاس، المقترح الحصول عليه من كل إجراء، الاستخدام المخطط، والمسافة المقاسة لاحقًا. التقديرات تقريبية وليست قياسات، ولا تجمع فوائد متداخلة مرتين.",
+      "scopedStatus": "موجود ومتحقق جزئياً ضمن نطاق المرحلة",
+      "assessment": "ميزانية من القياس المحفوظ ومكاسب واستخدامات؛ مقارنة المسافة اللاحقة بين الزيارات لم تنجز.",
+      "evidencePaths": [
+        "lib/ortho-space-ledger.ts",
+        "lib/ortho-space-store.ts",
+        "__tests__/postgres/ortho-space-ledger.test.ts",
+        "__tests__/security-http/ortho-space-ledger-browser.test.ts"
+      ]
+    },
+    {
+      "id": "V2R266",
+      "sourceLine": 266,
+      "requirement": "- IPR: كل تماس محدد بسنّين، المقدار المخطط، المنفذ في كل جلسة، المجموع التراكمي، والتاريخ والطبيب. لا تسجل المقدار مرة لكل سن ثم تضاعفه. تجاوز المخطط أو حد معتمد يُظهر مراجعة واضحة؛ لا تستورد حدًا عامًا من المحاضرة لكل الأسنان.",
+      "scopedStatus": "موجود ومتحقق محلياً للتماسات الدائمة والجلسات المسجلة",
+      "assessment": "تماس دائم بسنين، جلسات فعلية، مجموع وتصحيح ومراجعة الطبيب؛ لا رصيد تاريخي غير مسجل.",
+      "evidencePaths": [
+        "lib/ortho-space-ledger.ts",
+        "lib/ortho-space-store.ts",
+        "__tests__/postgres/ortho-space-ledger.test.ts",
+        "__tests__/security-http/ortho-space-ledger-browser.test.ts"
+      ]
+    },
+    {
+      "id": "V2R267",
+      "sourceLine": 267,
+      "requirement": "- التوسيع: الجهاز والفك وتاريخ التركيب وتعليمات الطبيب ونسخها وسجل ما أُبلغ/لوحظ والقياسات. لا تُولد معدلات تفعيل افتراضية من العمر أو من C15.",
+      "scopedStatus": "ناقص في هذه المرحلة",
+      "assessment": "لا سجل تفعيل توسعة متكامل.",
+      "evidencePaths": []
+    },
+    {
+      "id": "V2R268",
+      "sourceLine": 268,
+      "requirement": "- القلع: الأسنان المطلوبة، الموافقة، الإحالة، وتاريخ التنفيذ المؤكد. «مخطط للقلع» يختلف عن «مخلوع» في المخطط السني.",
+      "scopedStatus": "ناقص في هذه المرحلة",
+      "assessment": "لا سير موافقة وإحالة وتنفيذ قلع مترابط في هذه الإضافة.",
+      "evidencePaths": []
+    },
+    {
+      "id": "V2R269",
+      "sourceLine": 269,
+      "requirement": "- الإرساء/TADs: الموضع والتاريخ والإجراء والحالة والتغيير/الإزالة والمضاعفات؛ مصدر واحد مرتبط بالزيارة وخطة الحالة.",
+      "scopedStatus": "ناقص في هذه المرحلة",
+      "assessment": "لا سجل TADs متكامل في هذه الإضافة.",
+      "evidencePaths": []
+    },
+    {
+      "id": "V2R270",
+      "sourceLine": 270,
+      "requirement": "- المسافات والإغلاق: الفك والمقطع/الأسنان والمسافة المقاسة وطريقة الإغلاق والإرساء والتغير بين الزيارات، دون احتساب كل قياس تحسنًا تلقائيًا.",
+      "scopedStatus": "ناقص في هذه المرحلة",
+      "assessment": "مقارنة مقاطع الإغلاق بين الزيارات لم تنجز.",
+      "evidencePaths": []
+    }
+  ],
+  "applicationCommit": "a7e296ab3b29e4b994bcbd18edc776f9343ba869"
+}

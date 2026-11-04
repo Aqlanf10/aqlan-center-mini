@@ -1,0 +1,325 @@
+{
+  "scope": "Phase15 source-linked space budget and actual IPR; local scoped acceptance, not complete orthodontics module",
+  "applicationCommit": "a7e296ab3b29e4b994bcbd18edc776f9343ba869",
+  "baseCommit": "19f75a5ac0a68af3f05f46ff2ec8abcd4bd5f6f7",
+  "generatedAtUtc": "2026-11-04T02:20:50.002158+00:00",
+  "buildId": "LbsfhHgyAk3m3y6YEcMEQ",
+  "tests": {
+    "allUnit": {
+      "passed": 14088,
+      "files": 824,
+      "seconds": 571.59
+    },
+    "focusedUnit": {
+      "passed": 104,
+      "files": 2
+    },
+    "postgresLedgerRestore": {
+      "passed": 7,
+      "files": 2,
+      "seconds": 22.19
+    },
+    "postgresTailRegression": {
+      "passed": 28,
+      "files": 6,
+      "includesLedgerBeforeFixtureEnumCorrection": true
+    },
+    "postgresSchemaRegression": {
+      "passed": 29,
+      "files": 5
+    },
+    "httpFinal": {
+      "passed": 17,
+      "files": 5,
+      "seconds": 65.42
+    },
+    "httpFinalVisual": {
+      "passed": 2,
+      "files": 1,
+      "seconds": 21.36
+    },
+    "build": "passed",
+    "preflight": {
+      "passed": true,
+      "migrationAssets": 78
+    },
+    "lint": {
+      "errors": 0,
+      "preexistingPatientOrthoWarnings": 8
+    },
+    "runtime": {
+      "braces": "passed",
+      "lintTooling": "passed",
+      "buildId": "LbsfhHgyAk3m3y6YEcMEQ"
+    }
+  },
+  "visualReview": [
+    "space-ledger-390.png",
+    "space-ledger-1280.png"
+  ],
+  "limits": [
+    "Counts overlap; do not sum as unique acceptance scenarios",
+    "Hosted CI for predecessor19f75a5a still running when this manifest was prepared; no full hosted acceptance claimed",
+    "No production/staging writes, merge, deployment or PR creation",
+    "Synthetic patients and files only; no reference-patient media in repository",
+    "Permanent FDI contacts only; historical unrecorded IPR not imported",
+    "Incremental budget estimates reset when source or strategy changes; no biological safety dose or automatic treatment decision",
+    "Budget ledger not yet included in saved illustrated case study/export",
+    "Arabic interface; complete English display not verified",
+    "Draft retention is within the mounted patient workspace, not browser-close recovery",
+    "Available runtime metadata/maps only; no claim about arbitrary opaque bundled code",
+    "Local Chromium151 differs from hosted Chromium153"
+  ],
+  "sourceFiles": [
+    {
+      "path": "__tests__/migrations.test.ts",
+      "sha256": "475673b79ac9afd49dce4e72def17b722894360ee1cef1cc91c390e81f788ce8"
+    },
+    {
+      "path": "__tests__/ortho-space-ledger.test.ts",
+      "sha256": "ef0096b894c553fbf3938f7aa6e5439596cbad96603dba87386c06f70d9e0bf7"
+    },
+    {
+      "path": "__tests__/patient-appointment-history-schema.test.ts",
+      "sha256": "d8d5017c90b02c72de07f254a735c8b8d26165e8bbf393ac20ec3c6a6b85a84f"
+    },
+    {
+      "path": "__tests__/periodontal-candidate-chain.test.ts",
+      "sha256": "25fedaba8aac23be9f012cbf46e45c03d836548af9ceda026af0859d6bdd2ef7"
+    },
+    {
+      "path": "__tests__/periodontal-schema.test.ts",
+      "sha256": "f84272f059cadab2fce93d20782a9272cb2709f509ded3aafdf038f36fb05fe6"
+    },
+    {
+      "path": "__tests__/postgres/_periodontal-fixture.ts",
+      "sha256": "2bfa06c0a2da1612e801ce1b3dec3aeaee9a28d576eac10b0fe51822f93c3786"
+    },
+    {
+      "path": "__tests__/postgres/debt-installments-storage.test.ts",
+      "sha256": "140b18654dd69dc8678b6f7da03eb7806d33007c0ef598c03958adccc4cc4a02"
+    },
+    {
+      "path": "__tests__/postgres/hr-composed-backup.test.ts",
+      "sha256": "0e5f37f61f996cca0cff366fa5339f038a7677b4d86aae682b604afc069cdb40"
+    },
+    {
+      "path": "__tests__/postgres/hr-runtime-registration.test.ts",
+      "sha256": "051c5f3ccb5682e4637d52d44ce96e25586440261e6e42e38c3018cef100461e"
+    },
+    {
+      "path": "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts",
+      "sha256": "abe43133b84d67e72ea1fc4c26acf423ee78035dee475e27cd3ff56b6ac24c22"
+    },
+    {
+      "path": "__tests__/postgres/ortho-assessment-verifier-migration.test.ts",
+      "sha256": "8f72dd8853d5ff64bb04584676969b56b2c24c90e09bcb5bfee20d84d715d039"
+    },
+    {
+      "path": "__tests__/postgres/ortho-space-ledger.test.ts",
+      "sha256": "fdc979634e659354211d266420573d4796ec45a5635d7098a8c728d8fecc5c14"
+    },
+    {
+      "path": "__tests__/postgres/ortho-space-restore.test.ts",
+      "sha256": "ebf40e27db9588813182d1a4d9f0413ff9ac1890309677b7f45eb996af7c6a76"
+    },
+    {
+      "path": "__tests__/postgres/patient-appointment-history-index.test.ts",
+      "sha256": "ef2acee9b15c2d7698764a20ac4da3b7297b9cd99f2a980f7a540e39505c4f7c"
+    },
+    {
+      "path": "__tests__/postgres/periodontal-restore.test.ts",
+      "sha256": "765c1c6821ad308a2201fbd6300d349d2debf293287da747dfd38b976dc3d40f"
+    },
+    {
+      "path": "__tests__/postgres/prescription-lineage-restore.test.ts",
+      "sha256": "d6ccb03059010205131ec89e21b26707a60010c97bd7417e9e78b2e1ad11160e"
+    },
+    {
+      "path": "__tests__/postgres/schema-ownership.test.ts",
+      "sha256": "1d636cc25d69736336ebf93d6a12787888e3b110f8c4b43d655df02a9b9c2c55"
+    },
+    {
+      "path": "__tests__/schema-preflight-cli.test.ts",
+      "sha256": "c5008449a636255c484ecf68a912170cb126c3b91cb9a2a7b8048b29758ee286"
+    },
+    {
+      "path": "__tests__/security-http/ortho-space-ledger-browser.test.ts",
+      "sha256": "a2d197c5c406c2e80ce70cecb94b11ef1522c6f844de20538502ac8fed972b37"
+    },
+    {
+      "path": "__tests__/security-http/patient-cockpit-real-contract-ui.test.ts",
+      "sha256": "f92d68cd9abebb46ffe3ca3dd293bf95d5dee366a4103a402791dbf4009118c1"
+    },
+    {
+      "path": "app/api/ortho/[id]/space-ledger/route.ts",
+      "sha256": "00b640e543abce15bef996f1b3b905fa9d5ed95d9e1d5345508a4574b3d8a367"
+    },
+    {
+      "path": "components/OrthoSpaceLedger.tsx",
+      "sha256": "288b6406210e6dc54b3a1ea48cf3629b65e78b152ada46535923e1d052d9ee3f"
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "sha256": "1a1fbc47062ff39e83bdd07a961f20f5ee27f1dc356cf82e9c588675b5894a33"
+    },
+    {
+      "path": "docs/DATABASE_MIGRATIONS.md",
+      "sha256": "314bae9f35f95c0ecfe5d5dc2ff192b282a13110f3d9f0cb88d08900fb6c212d"
+    },
+    {
+      "path": "lib/clinic-reset.ts",
+      "sha256": "85e752382628a99db062ba98649aaffe22d021263cb152793f61e8eca17bb5b3"
+    },
+    {
+      "path": "lib/db.ts",
+      "sha256": "a6a3c18e393a732f04a664151ce8c89c7cb44d93add1600b07d914418ee1daf8"
+    },
+    {
+      "path": "lib/http-permissions.ts",
+      "sha256": "969e747c838b9fcda3a09763438342ca8ea0fd2376a644913a73c0eaac7806c7"
+    },
+    {
+      "path": "lib/ortho-case-journey-history.ts",
+      "sha256": "90364c906f23349403d5cf70948c0dfd638e24a155a99cb4b45608eaed8d1a76"
+    },
+    {
+      "path": "lib/ortho-space-client.ts",
+      "sha256": "9704c9e96ff96ba90ffbf7e4e147af30f58b2e4ab1cf45565f8d9b4321a41908"
+    },
+    {
+      "path": "lib/ortho-space-ledger.ts",
+      "sha256": "7a40626a04127c41f2045165f1ad9189e11c4ce1c0767b914422e56b37c8c1a3"
+    },
+    {
+      "path": "lib/ortho-space-saved.ts",
+      "sha256": "dafd14b2c27d656fc20deb59a13d3795086ac4f6e1315cca9174573469bbdee0"
+    },
+    {
+      "path": "lib/ortho-space-schema.ts",
+      "sha256": "d95a0cda894bc4a0c377be8ccc4ceb0d456b382d54c2b0f1423582726d9d0974"
+    },
+    {
+      "path": "lib/ortho-space-store.ts",
+      "sha256": "8119a3ffd7b848be2d4c24481e138370d84ebe11dee611c1c0f75b473478673a"
+    },
+    {
+      "path": "migrations/0107_ortho_space_ledger.sql",
+      "sha256": "745da49f2a2c51a921c6ddfca39156c80021119e0c68e950e1f6da6d82df9219"
+    },
+    {
+      "path": "schema/current-schema-contract.pg18.json",
+      "sha256": "d5664765c31cdda5d59c26694ac43f0278f41e7d8e3e2a86375c5ef7e46f043b"
+    },
+    {
+      "path": "schema/preflight-disclosure.pg18.json",
+      "sha256": "830b1b87209e87550e808a06f41e0cadbe9559e7f48f8616ab484e61164d7cbf"
+    },
+    {
+      "path": "scripts/verify-schema-ownership.ts",
+      "sha256": "eced6f85e8927bd9d11d0cb0486cd4227012ad3ac2cbd80283de8e9555f0580f"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "path": "all-unit-final.txt",
+      "bytes": 1274,
+      "sha256": "ee12b4556a362735edcc7bdffffaf05056531ec04196beaf62dac480a9342a60"
+    },
+    {
+      "path": "build-final.txt",
+      "bytes": 13767,
+      "sha256": "65ad6c1b5a653bfe551c26bfee30d712573091e6fa650e401fcafe9627664e35"
+    },
+    {
+      "path": "changed-branches.json",
+      "bytes": 1198,
+      "sha256": "8b0c96d716924e9e4b93f0abafd1931dd77d4d1c42a497db47fa3c07b2a4c907"
+    },
+    {
+      "path": "focused-unit.txt",
+      "bytes": 551,
+      "sha256": "085061f79a131cf483d69d663214a558617a182621becd6ba8ccb8505dbeda4b"
+    },
+    {
+      "path": "http-final-build.txt",
+      "bytes": 1025,
+      "sha256": "79411366a1a5272f3c3a56edb56e98908abdc07311231fcf7dc08c435217e64a"
+    },
+    {
+      "path": "http-initial-failures.txt",
+      "bytes": 6053,
+      "sha256": "99dfa83ba19f7f00020f0a282ad7c53e4f71b2c7f181bd6fb49bd87013e6a462"
+    },
+    {
+      "path": "http-intermediate-failures.txt",
+      "bytes": 3821,
+      "sha256": "dc92319312c13d4588e8c2ec2070f4ae109c9ac2586bfcdf0cf7e43c6ead9353"
+    },
+    {
+      "path": "http-ledger-visual.txt",
+      "bytes": 772,
+      "sha256": "64cd13a45209286fdad8ddf7889435e15159f38077c5386a18a314d355d49138"
+    },
+    {
+      "path": "lint-final.txt",
+      "bytes": 11829,
+      "sha256": "45bfa7330a7b3327f412013f1fe5616d2e456bb055c663b94f8f1b1f0a9d26ba"
+    },
+    {
+      "path": "postgres-ledger-restore-final.txt",
+      "bytes": 715,
+      "sha256": "544a65611f776fb2220c31978d479dbcbf0bf26040c9d59e467e6f3678317ac8"
+    },
+    {
+      "path": "postgres-schema-regression.txt",
+      "bytes": 882,
+      "sha256": "151080081db2b5aa648dbcadb677a8d0a349aa3ca0fd1bdd9fd66378eba0e23c"
+    },
+    {
+      "path": "postgres-tail-regression.txt",
+      "bytes": 924,
+      "sha256": "7c7afcb1e69d0b5b22a3aae7a9950f0776cda5f80dff46fae2c4ddc65d722f8b"
+    },
+    {
+      "path": "preflight-final.txt",
+      "bytes": 998,
+      "sha256": "a44b634f03d597f3eff7d51671ee11125dae62fc9d1f57a5c11df56edd21a8b5"
+    },
+    {
+      "path": "runtime-braces.txt",
+      "bytes": 108,
+      "sha256": "16468ae38a6f321b517dcec76e559193b183286209cae36a2c9a66e6306deafe"
+    },
+    {
+      "path": "runtime-proof-identities.json",
+      "bytes": 472,
+      "sha256": "b511d15df798ccc002bd2a0e65c42707fc45ac44b7dbe434bf677b744a1bca51"
+    },
+    {
+      "path": "runtime-tooling.txt",
+      "bytes": 137,
+      "sha256": "43838787cd7c3f76479012a9fc9475124801fef0cf4fa19e32dd500e2ccd4ebd"
+    },
+    {
+      "path": "schema-contract.txt",
+      "bytes": 457,
+      "sha256": "44196f10fb72f8eb2e234ccc00917d20b1db698066e447174ea78b89940ceb48"
+    },
+    {
+      "path": "source-freeze.json",
+      "bytes": 4266,
+      "sha256": "53586be2388ff3cb9d97f9c66e5c14374d0cf175f25fc3c6eeff44e49071ae0c"
+    },
+    {
+      "path": "space-ledger-1280.png",
+      "bytes": 99094,
+      "sha256": "c786fd23a1c098d7319ab208223e2e1d6e8b2f42f90021ee4a8bd23c5a187fe7"
+    },
+    {
+      "path": "space-ledger-390.png",
+      "bytes": 66610,
+      "sha256": "a94eb8b8dd477a2cb35b546838a3bf2757254f79a3e43f3daf0d4a852068e3ac"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-space-ledger.test.ts __tests__/patient-ortho-read-safety.test.tsx
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+
+ Test Files  2 passed (2)
+      Tests  104 passed (104)
+   Start at  02:07:08
+   Duration  3.44s (transform 976ms, setup 0ms, import 1.20s, tests 1.94s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

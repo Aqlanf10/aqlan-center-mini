@@ -1,0 +1,87 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-space-ledger-browser.test.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/patient-cockpit-real-contract-ui.test.ts __tests__/security-http/ortho-case-navigation-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-prescription-truth-built-page.test.ts (2 tests | 2 failed) 5974ms
+     × retains unrecorded and closed legacy custom prescriptions at 390px without browser writes 2692ms
+     × retains unrecorded and closed legacy custom prescriptions at 1280px without browser writes 2377ms
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts (2 tests | 2 failed) 42691ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390 20993ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280 20933ms
+ ❯ __tests__/security-http/patient-cockpit-real-contract-ui.test.ts (2 tests | 1 failed) 8897ms
+     × accepts the real shared chair list for a waiting patient without any command 1401ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-prescription-truth-built-page.test.ts > built orthodontic prescription truth > retains unrecorded and closed legacy custom prescriptions at 390px without browser writes
+AssertionError: expected 891.5 to be less than or equal to 845
+ ❯ capture __tests__/security-http/ortho-prescription-truth-built-page.test.ts:113:24
+    111|   });
+    112|   expect(frame.top).toBeGreaterThanOrEqual(79);
+    113|   expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
+       |                        ^
+    114|   expect(frame.identityExposed).toBe(true);
+    115|   const workup = card.getByRole("button", { name: "استكمال ملف التقويم…
+ ❯ __tests__/security-http/ortho-prescription-truth-built-page.test.ts:236:39
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  __tests__/security-http/ortho-prescription-truth-built-page.test.ts > built orthodontic prescription truth > retains unrecorded and closed legacy custom prescriptions at 1280px without browser writes
+AssertionError: expected 1016.5 to be less than or equal to 1001
+ ❯ capture __tests__/security-http/ortho-prescription-truth-built-page.test.ts:113:24
+    111|   });
+    112|   expect(frame.top).toBeGreaterThanOrEqual(79);
+    113|   expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
+       |                        ^
+    114|   expect(frame.identityExposed).toBe(true);
+    115|   const workup = card.getByRole("button", { name: "استكمال ملف التقويم…
+ ❯ __tests__/security-http/ortho-prescription-truth-built-page.test.ts:236:39
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280
+TimeoutError: locator.click: Timeout 20000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('ortho-space-ledger').getByRole('button', { name: 'مراجعة ميزانية الفك العلوي', exact: true })[22m
+
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts:39:90
+     37|     await page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=…
+     38|     const panel = page.getByTestId('ortho-space-ledger');
+     39|     await panel.getByRole('button', { name: 'مراجعة ميزانية الفك العلو…
+       |                                                                                          ^
+     40|     await panel.getByLabel('سبب الاختيار والاستطباب', { exact: true })…
+     41|     await panel.getByLabel('البدائل التي راجعها الطبيب', { exact: true…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  __tests__/security-http/patient-cockpit-real-contract-ui.test.ts > actual visit API contract reaches the cockpit > accepts the real shared chair list for a waiting patient without any command
+Error: response.json: Protocol error (Network.getResponseBody): No data found for resource with given identifier
+Response body is not available for a response that was navigated away from. Read response.body() before triggering any navigation.
+ ❯ waitForGet __tests__/security-http/patient-cockpit-real-contract-ui.test.ts:67:63
+     65|   // resource identifier after navigation; late response.json() then f…
+     66|   // for a 200. No response is mocked, retried or replaced with an API…
+     67|   return { status: response.status(), payload: await response.json() a…
+       |                                                               ^
+     68| }
+     69|
+ ❯ __tests__/security-http/patient-cockpit-real-contract-ui.test.ts:97:45
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  3 failed | 1 passed (4)
+      Tests  5 failed | 3 passed (8)
+   Start at  01:52:18
+   Duration  76.50s (transform 180ms, setup 0ms, import 737ms, tests 69.94s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

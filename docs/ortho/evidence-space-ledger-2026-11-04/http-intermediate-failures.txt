@@ -1,0 +1,57 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-space-ledger-browser.test.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/patient-cockpit-real-contract-ui.test.ts __tests__/security-http/ortho-case-navigation-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts (2 tests | 2 failed) 46055ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390 22275ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280 21933ms
+ ❯ __tests__/security-http/ortho-prescription-truth-built-page.test.ts (2 tests | 1 failed) 7742ms
+     × retains unrecorded and closed legacy custom prescriptions at 390px without browser writes 3534ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-prescription-truth-built-page.test.ts > built orthodontic prescription truth > retains unrecorded and closed legacy custom prescriptions at 390px without browser writes
+AssertionError: expected 852.5 to be less than or equal to 845
+ ❯ capture __tests__/security-http/ortho-prescription-truth-built-page.test.ts:113:24
+    111|   });
+    112|   expect(frame.top).toBeGreaterThanOrEqual(79);
+    113|   expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
+       |                        ^
+    114|   expect(frame.identityExposed).toBe(true);
+    115|   const workup = card.getByRole("button", { name: "استكمال ملف التقويم…
+ ❯ __tests__/security-http/ortho-prescription-truth-built-page.test.ts:236:91
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280
+TimeoutError: locator.selectOption: Timeout 20000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('ortho-space-ledger').getByLabel('السن 1 للتماس 1', { exact: true })[22m
+
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts:45:64
+     43|     await panel.getByLabel('البدائل التي راجعها الطبيب', { exact: true…
+     44|     await panel.getByRole('button', { name: 'إضافة تماس IPR', exact: t…
+     45|     await panel.getByLabel('السن 1 للتماس 1', { exact: true }).selectO…
+       |                                                                ^
+     46|     await panel.getByLabel('السن 2 للتماس 1', { exact: true }).selectO…
+     47|     await panel.getByLabel('IPR المخطط للتماس 1 (mm)', { exact: true }…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  2 failed | 2 passed (4)
+      Tests  3 failed | 5 passed (8)
+   Start at  02:02:05
+   Duration  80.31s (transform 215ms, setup 0ms, import 741ms, tests 74.16s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

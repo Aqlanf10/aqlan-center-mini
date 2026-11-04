@@ -1,0 +1,35 @@
+[
+  {
+    "branch": "feat/radiology-request-complete-20261103",
+    "head": "a546b9a0d90a5f259db6f47d1f58fd98157abc93",
+    "collision0107": [],
+    "migrationTail": [
+      "migrations/0091_prescribing_doctor_identity.sql",
+      "migrations/0092_prescribing_doctor_snapshot.sql",
+      "migrations/0093_prescription_issuance_commands.sql",
+      "migrations/0094_radiology_requests.sql"
+    ]
+  },
+  {
+    "branch": "feat/radiology-restored-rx-integration-20261104",
+    "head": "ee4e397e21ca5c7e2c2fa2634f513bd48f9f323b",
+    "collision0107": [],
+    "migrationTail": [
+      "migrations/0091_prescribing_doctor_identity.sql",
+      "migrations/0092_prescribing_doctor_snapshot.sql",
+      "migrations/0093_prescription_issuance_commands.sql",
+      "migrations/0094_radiology_requests.sql"
+    ]
+  },
+  {
+    "branch": "feat/work-recovery-followup-20261027",
+    "head": "7c2237619225b8695fdbdb647109eda29cbb3595",
+    "collision0107": [],
+    "migrationTail": [
+      "migrations/0087_agreement_reminder_metadata.sql",
+      "migrations/0089_lab_shade_specification.sql",
+      "migrations/proposals/invoice-archive.sql",
+      "migrations/proposals/invoice-service-additions.sql"
+    ]
+  }
+]

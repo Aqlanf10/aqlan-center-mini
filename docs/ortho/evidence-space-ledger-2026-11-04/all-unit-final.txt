@@ -1,0 +1,36 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+رحلة مصطنعة ساقطة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+
+ Test Files  824 passed (824)
+      Tests  14088 passed (14088)
+   Start at  02:09:06
+   Duration  571.59s (transform 21.46s, setup 0ms, import 99.64s, tests 350.73s, environment 109ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
