@@ -77,8 +77,9 @@ it("browser: reception links a second patient to the family from the canonical f
   const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar", timezoneId: "Asia/Aden" });
   const page = await context.newPage();
   const failures: string[] = [];
-  page.on("response", response => { const path = new URL(response.url()).pathname; if (path.startsWith("/api/") && response.status() >= 400) failures.push(`${response.status()} ${path}`); });
+  // Listen after login: the pre-login session probe answers 401 by design.
   await journey.browserLogin(page, "reception");
+  page.on("response", response => { const path = new URL(response.url()).pathname; if (path.startsWith("/api/") && response.status() >= 400) failures.push(`${response.status()} ${path}`); });
   await page.goto(`${journey.baseUrl}/patients/${ids.child}`);
   const profile = page.getByTestId("canonical-patient-profile");
   await profile.getByRole("heading", { name: "مريم العائلية" }).waitFor();
