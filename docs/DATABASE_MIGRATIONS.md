@@ -812,3 +812,7 @@ must not be rolled back over them without a reviewed compatibility plan. The
 upgrade/replay tests preserve old rows and reject mislabeled new results. The
 structural schema fingerprint alone does not validate the changed function
 body. This remains an unmerged candidate, without deployment authorization.
+
+## 0107_ortho_space_ledger.sql — documentary space and IPR history
+
+Adds `ortho_space_entries` with exact runtime registration. Case-scoped append-only revisions retain source assessment and strategy IDs, planned contact amounts, actual session references, and corrective lineage. Explicit reference columns have exact content-consistency checks and deferred foreign keys; deferred guards reject owner/source reparenting and allow arbitrary restore insertion order. Patient merges retain recorded patient provenance. This migration does not create visits, treatments, invoices, or payments, and does not rewrite earlier assessment or strategy revisions. Integer micrometres are a storage resolution, not clinical accuracy or a recommended amount. No universal IPR limit is supplied.

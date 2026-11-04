@@ -1,3 +1,4 @@
+import { ORTHO_SPACE_SQL } from "../../lib/ortho-space-schema";
 import { ORTHO_ASSESSMENT_VERIFIER_2_2_SQL } from "../../lib/ortho-assessment-verifier-schema";
 import { ORTHO_PROBLEM_SOURCES_SQL } from "../../lib/ortho-problem-sources-schema";
 import { ORTHO_RECORD_UPLOADS_SQL } from "../../lib/ortho-record-uploads-schema";
@@ -67,6 +68,7 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0104", name: "ortho_record_uploads", checksum: createHash("sha256").update(ORTHO_RECORD_UPLOADS_SQL).digest("hex") },
     { version: "0105", name: "ortho_problem_sources", checksum: createHash("sha256").update(ORTHO_PROBLEM_SOURCES_SQL).digest("hex") },
     { version: "0106", name: "ortho_assessment_verifier_2_2", checksum: createHash("sha256").update(ORTHO_ASSESSMENT_VERIFIER_2_2_SQL).digest("hex") },
+    { version: "0107", name: "ortho_space_ledger", checksum: createHash("sha256").update(ORTHO_SPACE_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts', 'prescription_issuance_commands']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);

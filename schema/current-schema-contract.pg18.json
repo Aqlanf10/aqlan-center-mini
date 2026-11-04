@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 144,
-    "columns": 1882,
-    "constraints": 2354,
-    "indexes": 468,
-    "triggers": 137
+    "tables": 145,
+    "columns": 1907,
+    "constraints": 2423,
+    "indexes": 476,
+    "triggers": 145
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -2706,6 +2706,12 @@
           ]
         },
         "ortho_retention_transition_bridge_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
+        "ortho_space_scope_clinical_cases": {
           "timing": "AFTER",
           "events": [
             "UPDATE"
@@ -10557,7 +10563,14 @@
           "unique": false
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ortho_space_scope_ortho_adjustments": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
     },
     "ortho_assessment_revisions": {
       "columns": {
@@ -10770,6 +10783,12 @@
           "timing": "BEFORE",
           "events": [
             "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_space_scope_ortho_assessment_revisions": {
+          "timing": "AFTER",
+          "events": [
             "UPDATE"
           ]
         }
@@ -11865,6 +11884,12 @@
           ]
         },
         "ortho_retention_transition_case_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
+        "ortho_space_scope_ortho_cases": {
           "timing": "AFTER",
           "events": [
             "UPDATE"
@@ -13148,6 +13173,333 @@
         }
       }
     },
+    "ortho_space_entries": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "adjustment_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "arch": {
+          "type": "text",
+          "nullable": false
+        },
+        "assessment_revision_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "case_status_at_capture": {
+          "type": "text",
+          "nullable": false
+        },
+        "clinical_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "command_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "content": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "content_sha256": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "entry_kind": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "ortho_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_entry_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "predecessor_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "recorded_patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "recording_context": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_fingerprint": {
+          "type": "text",
+          "nullable": false
+        },
+        "schema_version": {
+          "type": "int2",
+          "nullable": false
+        },
+        "strategy_revision_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "supersedes_entry_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "version": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "ortho_case_id",
+          "actor_user_id",
+          "command_id"
+        ],
+        [
+          "ortho_case_id",
+          "id"
+        ],
+        [
+          "ortho_case_id",
+          "version"
+        ],
+        [
+          "predecessor_id"
+        ],
+        [
+          "supersedes_entry_id"
+        ]
+      ],
+      "checks": [
+        "ortho_journey_capture_status_check",
+        "ortho_journey_context_status_check",
+        "ortho_journey_recording_context_check",
+        "ortho_space_entries_arch_check",
+        "ortho_space_entries_check",
+        "ortho_space_entries_check1",
+        "ortho_space_entries_check10",
+        "ortho_space_entries_check11",
+        "ortho_space_entries_check12",
+        "ortho_space_entries_check2",
+        "ortho_space_entries_check3",
+        "ortho_space_entries_check4",
+        "ortho_space_entries_check5",
+        "ortho_space_entries_check6",
+        "ortho_space_entries_check7",
+        "ortho_space_entries_check8",
+        "ortho_space_entries_check9",
+        "ortho_space_entries_command_id_check",
+        "ortho_space_entries_content_check",
+        "ortho_space_entries_content_sha256_check",
+        "ortho_space_entries_created_by_check",
+        "ortho_space_entries_entry_kind_check",
+        "ortho_space_entries_reason_check",
+        "ortho_space_entries_recorded_patient_id_check",
+        "ortho_space_entries_request_fingerprint_check",
+        "ortho_space_entries_schema_version_check",
+        "ortho_space_entries_version_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "clinical_case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "adjustment_id"
+          ],
+          "refTable": "ortho_adjustments",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "assessment_revision_id"
+          ],
+          "refTable": "ortho_assessment_revisions",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "ortho_case_id"
+          ],
+          "refTable": "ortho_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "ortho_case_id",
+            "plan_entry_id"
+          ],
+          "refTable": "ortho_space_entries",
+          "refColumns": [
+            "ortho_case_id",
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "ortho_case_id",
+            "predecessor_id"
+          ],
+          "refTable": "ortho_space_entries",
+          "refColumns": [
+            "ortho_case_id",
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "ortho_case_id",
+            "supersedes_entry_id"
+          ],
+          "refTable": "ortho_space_entries",
+          "refColumns": [
+            "ortho_case_id",
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "strategy_revision_id"
+          ],
+          "refTable": "ortho_strategy_revisions",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "ortho_space_adjustment_idx": {
+          "columns": [
+            "adjustment_id"
+          ],
+          "unique": false
+        },
+        "ortho_space_entries_ortho_case_id_actor_user_id_command_id_key": {
+          "columns": [
+            "ortho_case_id",
+            "actor_user_id",
+            "command_id"
+          ],
+          "unique": true
+        },
+        "ortho_space_entries_ortho_case_id_id_key": {
+          "columns": [
+            "ortho_case_id",
+            "id"
+          ],
+          "unique": true
+        },
+        "ortho_space_entries_ortho_case_id_version_key": {
+          "columns": [
+            "ortho_case_id",
+            "version"
+          ],
+          "unique": true
+        },
+        "ortho_space_entries_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "ortho_space_entries_predecessor_id_key": {
+          "columns": [
+            "predecessor_id"
+          ],
+          "unique": true
+        },
+        "ortho_space_entries_supersedes_entry_id_key": {
+          "columns": [
+            "supersedes_entry_id"
+          ],
+          "unique": true
+        },
+        "ortho_space_patient_case_idx": {
+          "columns": [
+            "patient_id",
+            "ortho_case_id",
+            "version"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {
+        "ortho_space_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_space_scope_ortho_space_entries": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        }
+      }
+    },
     "ortho_strategy_revisions": {
       "columns": {
         "actor_user_id": {
@@ -13343,6 +13695,12 @@
         }
       },
       "triggers": {
+        "ortho_space_scope_ortho_strategy_revisions": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
         "ortho_strategy_revision_final_state": {
           "timing": "AFTER",
           "events": [
@@ -17372,7 +17730,14 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ortho_space_scope_visits": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
     },
     "waiting_list": {
       "columns": {

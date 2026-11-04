@@ -1,4 +1,5 @@
 "use client";
+import OrthoSpaceLedger from "./OrthoSpaceLedger";
 
 import { readOpenAssessmentCommand,readStartTreatmentCommand,verifyIntakeReceipt,type OpenAssessmentCommand,type StartTreatmentCommand,type IntakeReceipt } from "@/lib/ortho-assessment-intake";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -665,7 +666,7 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if ([...owner.studies.values(), ...owner.retentions.values(), ...owner.uploads.values()].some(record => record.needsUnloadWarning())
-        || [...owner.drafts.entries()].some(([key, draft]) => (key.startsWith("retention-transition:") || key === "assessment-intake" || key.startsWith("treatment-start:")) && (draft.dirty || draft.busy || draft.uncertain))) {
+        || [...owner.drafts.entries()].some(([key, draft]) => (key.startsWith("space-ledger:") || key.startsWith("retention-transition:") || key === "assessment-intake" || key.startsWith("treatment-start:")) && (draft.dirty || draft.busy || draft.uncertain))) {
         event.preventDefault(); event.returnValue = "";
       }
     };
@@ -1354,7 +1355,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
 
                   {/* ────────────────── الركن الثالث: الخطة والميكانيكا الحيوية ────────────────── */}
                   {currentPillar === "prescription" && workup?.focus !== "financial" && (
-                    <div className="space-y-2 sm:space-y-4">
+                    <div className="space-y-1 sm:space-y-4">
                       <OrthoStrategyPanel patientId={patientId} caseRow={row} />
                       <div className="rounded-2xl border border-slate-200 bg-white px-2 py-1 sm:p-4">
                         <h4 className="mb-1 text-xs sm:mb-3 font-black text-navy-900">
@@ -1396,6 +1397,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                           </div>
                         )}
                       </div>
+                      <OrthoSpaceDisclosure patientId={patientId} caseRow={row} />
                     </div>
                   )}
 
@@ -2432,8 +2434,16 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
 
 
 /** The new planning UI shares the existing case-owner draft and mutation guard. */
-function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow: OrthoCase }) {
-  const life = useOrthoDraft(`strategy:${caseRow.id}`, patientId, caseRow.id);
+function OrthoSpaceDisclosure({ patientId, caseRow }: { patientId: number; caseRow: OrthoCase }) {
+  const [open, setOpen] = useState(false);
+  return <details className="rounded-2xl border border-slate-200 bg-white" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary className="min-h-11 cursor-pointer px-3 py-2 text-sm font-bold text-navy-900">ميزانية المسافات وIPR</summary>
+    {open && <OrthoStrategyPanel patientId={patientId} caseRow={caseRow} spaceLedger />}
+  </details>;
+}
+
+function OrthoStrategyPanel({ patientId, caseRow, spaceLedger = false }: { patientId: number; caseRow: OrthoCase; spaceLedger?: boolean }) {
+  const life = useOrthoDraft(`${spaceLedger ? "space-ledger" : "strategy"}:${caseRow.id}`, patientId, caseRow.id);
   const [, redrawStrategy] = useState(0);
   useLayoutEffect(() => {
     const notify = () => { if (life.viewActive()) redrawStrategy(value => value + 1); };
@@ -2468,6 +2478,7 @@ function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow
         finish: () => { life.finish(operation); notifyStrategy(); } };
     },
   };
+  if (spaceLedger) return <OrthoSpaceLedger patientId={patientId} orthoCaseId={caseRow.id} lifetime={lifetime} />;
   return <OrthoTreatmentStrategy patientId={patientId} orthoCaseId={caseRow.id}
     caseTitle={`تقويم ${(caseRow.appliance === null ? "الجهاز غير مسجل" : APPLIANCE_LABEL[caseRow.appliance])} · ${(caseRow.arches === null ? "نطاق العلاج غير مسجل" : ARCHES_LABEL[caseRow.arches])}`} lifetime={lifetime} />;
 }

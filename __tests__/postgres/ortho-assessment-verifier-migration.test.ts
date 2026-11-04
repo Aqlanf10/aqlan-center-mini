@@ -14,7 +14,7 @@ describe("0106 forward assessment verifier admission", () => {
     expect(await readFile("migrations/0106_ortho_assessment_verifier_2_2.sql", "utf8")).toBe(ORTHO_ASSESSMENT_VERIFIER_2_2_SQL);
     const f = await openPeriodontalFixture(process.env, { pristine: true });
     try {
-      const files = await loadMigrationFiles(); await migrate(f.pool, { apply: true, files: files.filter(file => file.version < "0106") });
+      const files = (await loadMigrationFiles()).filter(file => file.version <= "0106"); await migrate(f.pool, { apply: true, files: files.filter(file => file.version < "0106") });
       const patient = (await f.pool.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-0106','Synthetic verifier upgrade') RETURNING id")).rows[0].id;
       const user = (await f.pool.query("INSERT INTO users(username,display_name,password_hash,role) VALUES('synthetic0106','Synthetic examiner','synthetic hash','admin') RETURNING id")).rows[0].id;
       const ortho = (await f.pool.query("INSERT INTO ortho_cases(patient_id,status,phase,appliance,arches,slot,start_date,planned_months,created_by) VALUES($1,'assessment','assessment',NULL,NULL,NULL,NULL,NULL,'synthetic') RETURNING id", [patient])).rows[0].id;

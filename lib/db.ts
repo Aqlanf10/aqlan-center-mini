@@ -35,6 +35,7 @@ import { HR_STAFF_SQL } from "./hr-schema";
 import HR_TEMPORAL_RUNTIME_MIGRATIONS from './hr-temporal-schema.generated.json';
 import { applyRuntimeMigrationFiles } from './migrations';
 import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
+import { ORTHO_SPACE_SQL } from "./ortho-space-schema";
 import { ORTHO_ASSESSMENT_VERIFIER_2_2_SQL } from "./ortho-assessment-verifier-schema";
 import { ORTHO_CASE_JOURNEY_SQL } from './ortho-case-journey-schema';
 import { ORTHO_RETENTION_TRANSITION_SQL } from './ortho-retention-transition-schema';
@@ -2136,6 +2137,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0104", name: "ortho_record_uploads", filename: "0104_ortho_record_uploads.sql", sql: ORTHO_RECORD_UPLOADS_SQL, checksum: checksumOf(ORTHO_RECORD_UPLOADS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0105", name: "ortho_problem_sources", filename: "0105_ortho_problem_sources.sql", sql: ORTHO_PROBLEM_SOURCES_SQL, checksum: checksumOf(ORTHO_PROBLEM_SOURCES_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0106", name: "ortho_assessment_verifier_2_2", filename: "0106_ortho_assessment_verifier_2_2.sql", sql: ORTHO_ASSESSMENT_VERIFIER_2_2_SQL, checksum: checksumOf(ORTHO_ASSESSMENT_VERIFIER_2_2_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0107", name: "ortho_space_ledger", filename: "0107_ortho_space_ledger.sql", sql: ORTHO_SPACE_SQL, checksum: checksumOf(ORTHO_SPACE_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 

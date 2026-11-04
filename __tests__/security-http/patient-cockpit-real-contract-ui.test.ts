@@ -57,13 +57,16 @@ async function storedState(patientId: number) {
 }
 
 async function waitForGet(page: Page, path: string) {
-  const response = await page.waitForResponse((response) => response.request().method() === "GET"
-    && new URL(response.url()).origin === baseUrl
-    && `${new URL(response.url()).pathname}${new URL(response.url()).search}` === path);
-  // Capture the actual response body as soon as it arrives, before waiting for
-  // the page/navigation or the other GET. Chromium may retire a response's
-  // resource identifier after navigation; late response.json() then fails even
-  // for a 200. No response is mocked, retried or replaced with an API-only GET.
+  // The cockpit cancels its initial reads when the asynchronously loaded
+  // workflow summary changes its ownership scope. Headers alone can therefore
+  // belong to a retired request whose body Chromium has discarded. Observe a
+  // completed browser request, not that earlier header event. This submits no
+  // additional request and does not mock or replace either real GET response.
+  const request = await page.waitForEvent("requestfinished", { predicate: request => request.method() === "GET"
+    && new URL(request.url()).origin === baseUrl
+    && `${new URL(request.url()).pathname}${new URL(request.url()).search}` === path });
+  const response = await request.response();
+  if (!response) throw new Error(`Completed GET has no response: ${path}`);
   return { status: response.status(), payload: await response.json() as unknown };
 }
 

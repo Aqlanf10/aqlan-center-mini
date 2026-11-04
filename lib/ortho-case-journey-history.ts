@@ -1,3 +1,4 @@
+import { readSpaceContent } from "./ortho-space-ledger";
 import { permitsOrthoDocumentation, orthoDocumentationContext } from "./ortho-documentation-context";
 import type { CaseStatus as OrthoLifecycleStatus } from "./ortho";
 import { canonicalJourneyJSON, journeyContentHash } from "./ortho-case-journey-hash";
@@ -6,8 +7,8 @@ import { insertAuditRow, type DbClient } from "./db";
 import { journeyHash, journeyId, type Checked, type JourneyScope } from "./ortho-case-journey-records";
 import type { RetentionEvent, RetentionEventArch } from "./ortho-retention-events";
 import { assertJourneyCurrent, journeyFail, type JourneyAuthority, type JourneyOwner } from "./ortho-case-journey-authority";
-export type JourneyTable = "ortho_decision_revisions" | "ortho_retention_entries";
-const TABLES: readonly JourneyTable[] = ["ortho_decision_revisions", "ortho_retention_entries"];
+export type JourneyTable = "ortho_decision_revisions" | "ortho_retention_entries" | "ortho_space_entries";
+const TABLES: readonly JourneyTable[] = ["ortho_decision_revisions", "ortho_retention_entries", "ortho_space_entries"];
 export interface JourneyRevision<T> extends JourneyScope {
   id: number; recordedPatientId: number; schemaVersion: 1; version: number; predecessorId: number | null;
   createdBy: string; createdAt: string; reason: string; recordingContext: "current" | "retrospective";
@@ -66,6 +67,17 @@ export async function journeyHistory<T>(client: DbClient, table: JourneyTable, s
         || row.expected_device_revision_id !== (device?.expectedDeviceRevisionId ?? replaces?.expectedDeviceRevisionId ?? null)) journeyFail(500, "invalid_retention_columns");
     }
   }
+  if (table === "ortho_space_entries") for (const [index, row] of rows.entries()) {
+    const content = revisions[index].content as { authored?: unknown };
+    const parsed = readSpaceContent(content.authored); if (!parsed.ok) journeyFail(500, parsed.code);
+    const c = parsed.value;
+    if (row.arch !== c.arch || row.entry_kind !== c.kind
+      || row.strategy_revision_id !== (c.kind === "plan" ? c.strategyRevisionId : null)
+      || row.assessment_revision_id !== (c.kind === "plan" ? c.baseline.id : null)
+      || row.plan_entry_id !== (c.kind === "ipr" ? c.planEntryId : null)
+      || row.adjustment_id !== (c.kind === "ipr" ? c.adjustmentId : null)
+      || row.supersedes_entry_id !== (c.kind === "ipr" ? c.supersedesEntryId : null)) journeyFail(500, "invalid_space_columns");
+  }
   const seen = new Set<number>();
   for (let index = 0; index < revisions.length; index++) {
     const revision = revisions[index], previous = revisions[index + 1];
@@ -104,6 +116,15 @@ export async function insertJourneyRevision<T>(client: DbClient, input: {
   if (retention) {
     extraColumns = ",arch,entry_kind,supersedes_entry_id,device_entry_id,replaces_device_id,expected_device_revision_id"; extraValues = ",$16,$17,$18,$19,$20,$21";
     values.push(retention.arch, retention.kind, retention.supersedesEntryId, retention.deviceEntryId, retention.replacesDeviceId, retention.expectedDeviceRevisionId);
+  }
+  if (input.table === "ortho_space_entries") {
+    const content = input.content as { authored?: unknown };
+    const parsed = readSpaceContent(content.authored); if (!parsed.ok) journeyFail(500, parsed.code);
+    const c = parsed.value;
+    extraColumns = ",arch,entry_kind,strategy_revision_id,assessment_revision_id,plan_entry_id,adjustment_id,supersedes_entry_id";
+    extraValues = ",$16,$17,$18,$19,$20,$21,$22";
+    values.push(c.arch,c.kind,c.kind === "plan" ? c.strategyRevisionId : null,c.kind === "plan" ? c.baseline.id : null,
+      c.kind === "ipr" ? c.planEntryId : null,c.kind === "ipr" ? c.adjustmentId : null,c.kind === "ipr" ? c.supersedesEntryId : null);
   }
   assertJourneyCurrent(authority);
   const { rows } = await client.query<JourneyRow>(`INSERT INTO ${tableName(input.table)}

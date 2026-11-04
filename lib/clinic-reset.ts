@@ -44,7 +44,7 @@ export const RESET_WIPE_TABLES = [
   "ortho_case_study_artifact_events",
   "ortho_case_study_export_manifests",
   "ortho_case_study_revisions",
-  "ortho_retention_entries",
+  "ortho_space_entries", "ortho_retention_entries",
   "ortho_retention_transitions",
   "ortho_facial_revisions",
   "ortho_problem_source_reviews", "ortho_case_intake_events", "ortho_record_uploads",

@@ -12,7 +12,7 @@ describe("unregistered periodontal SQL source contract (SQL never executed)", ()
   it("does not register schema, a numbered migration, a route or an editor", () => {
     expect(readFileSync("lib/db.ts", "utf8")).not.toContain("PERIODONTAL_SQL");
     const files = readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name));
-    expect(files).toHaveLength(77);
+    expect(files).toHaveLength(78);
     expect(files).toContain("0093_prescription_issuance_commands.sql");
     expect(files).toContain("0066_agreement_delta_amendments.sql");
     expect(files).toContain("0067_patient_appointment_history_index.sql");
