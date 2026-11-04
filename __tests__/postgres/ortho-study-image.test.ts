@@ -1,0 +1,59 @@
+import {createHash} from 'node:crypto';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import sharp from 'sharp';
+import {afterAll,beforeAll,expect,it,vi} from 'vitest';
+import {createSessionToken,sessionCredentialVersion,type SessionPayload} from '../../lib/auth';
+import {openPeriodontalFixture} from './_periodontal-fixture';
+import {putFile,readFileByKey} from '../../lib/files';
+import {getStudyImageBasis,getStudyImagePreview} from '../../lib/ortho-study-image-store';
+import {defaultOrthoMediaRecipe} from '../../lib/ortho-study-media';
+let directory = '';
+const request = vi.hoisted(() => ({ token: "" }));
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => name === "aqlan_flow_session" ? { value: request.token } : undefined }), headers: async () => new Headers() }));
+let f: Awaited<ReturnType<typeof openPeriodontalFixture>>, n = 0;
+beforeAll(async () => { vi.stubEnv("SESSION_SECRET", "synthetic-study-image-review-secret-at-least32characters"); f = await openPeriodontalFixture(process.env, { pristine: true }); await f.db.ensureSchema(); directory = await mkdtemp(join(tmpdir(),"study-images-synthetic-")); vi.stubEnv("DOCUMENTS_DIR", directory); });
+afterAll(async () => { try { await f?.close(); } finally { if(directory) await rm(directory,{recursive:true,force:true}); vi.unstubAllEnvs(); } });
+async function setup() {
+  const seq = ++n, password = "Synthetic credential";
+  const patientId = (await f.pool.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic mixed analysis') RETURNING id", [`SYN-STUDY-${seq}`])).rows[0].id;
+  const userId = (await f.pool.query("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic examiner',$2,'admin') RETURNING id", [`synthetic-study-image-${seq}`, password])).rows[0].id;
+  const session: SessionPayload = { userId, username: `synthetic-study-image-${seq}`, role: "admin", credentialVersion: sessionCredentialVersion(password), expiresAt: Date.now() + 600000 };
+  request.token = createSessionToken(session);
+  const orthoCaseId = (await f.pool.query("INSERT INTO ortho_cases(patient_id,status,phase,appliance,arches,slot,start_date,planned_months,created_by) VALUES($1,'assessment','assessment',NULL,NULL,NULL,NULL,NULL,'synthetic') RETURNING id", [patientId])).rows[0].id;
+  const clinicalCaseId = (await f.pool.query("INSERT INTO clinical_cases(patient_id,specialty,title,ortho_case_id,created_by) VALUES($1,'orthodontics','Synthetic mixed analysis bridge',$2,'synthetic') RETURNING id", [patientId, orthoCaseId])).rows[0].id;
+  return { patientId, orthoCaseId, clinicalCaseId, session };
+}
+
+async function image() {
+  const scope = await setup(), bytes = await sharp({create:{width:12,height:8,channels:3,background:'#336699'}}).png().toBuffer();
+  const stored = await putFile(bytes,'png');
+  const documentId = (await f.pool.query("INSERT INTO patient_documents(patient_id,ortho_case_id,kind,title,mime_type,size_bytes,sha256,storage_key,uploaded_by) VALUES($1,$2,'photo','Synthetic study image','image/png',$3,$4,$5,'synthetic') RETURNING id",[scope.patientId,scope.orthoCaseId,bytes.length,stored.sha256,stored.key])).rows[0].id;
+  const command = {patientId:scope.patientId,documentId,sha256:stored.sha256,useId:'synthetic_use',purpose:'selected-use' as const,recipe:defaultOrthoMediaRecipe(12,8,1),frame:{width:12,height:8}};
+  return {scope,bytes,stored,documentId,command};
+}
+it('checks real database ownership, renders real private bytes and leaves source/document/clinical records unchanged',async () => {
+  const p=await image(), before=(await f.pool.query('SELECT * FROM patient_documents WHERE id=$1',[p.documentId])).rows;
+  expect(await getStudyImageBasis({...p.scope,documentId:p.documentId,sha256:p.stored.sha256})).toMatchObject({ok:true,clinicalCaseId:p.scope.clinicalCaseId,basis:{orientedWidth:12,orientedHeight:8,exifOrientation:1}});
+  const result=await getStudyImagePreview({...p.scope,command:p.command}); if(!result.ok) throw Error(result.code);
+  expect(result.sourceSha256).toBe(createHash('sha256').update(p.bytes).digest('hex'));
+  expect(await readFileByKey(p.stored.key)).toEqual(p.bytes);
+  expect((await f.pool.query('SELECT * FROM patient_documents WHERE id=$1',[p.documentId])).rows).toEqual(before);
+  expect((await f.pool.query('SELECT count(*)::int n FROM ortho_case_study_revisions WHERE patient_id=$1',[p.scope.patientId])).rows[0].n).toBe(0);
+});
+it('refuses a foreign case, stale digest, false basis and revoked user before exposing image bytes',async () => {
+  const p=await image(), other=await setup(); request.token=createSessionToken(p.scope.session);
+  expect(await getStudyImageBasis({...p.scope,orthoCaseId:other.orthoCaseId,documentId:p.documentId,sha256:p.stored.sha256})).toMatchObject({ok:false,status:404});
+  expect(await getStudyImageBasis({...p.scope,documentId:p.documentId,sha256:'a'.repeat(64)})).toMatchObject({ok:false,status:409});
+  expect(await getStudyImagePreview({...p.scope,command:{...p.command,recipe:defaultOrthoMediaRecipe(8,12,1)}})).toMatchObject({ok:false,status:409});
+  await f.pool.query('UPDATE users SET is_active=false WHERE id=$1',[p.scope.session.userId]);
+  expect(await getStudyImagePreview({...p.scope,command:p.command})).toMatchObject({ok:false,status:401});
+});
+it('refuses removed files and rechecks actual file digest rather than trusting document metadata',async () => {
+  const p=await image();
+  await f.pool.query("UPDATE patient_documents SET removed_at=now(),removed_by='synthetic',removed_note='Synthetic removed' WHERE id=$1",[p.documentId]);
+  expect(await getStudyImagePreview({...p.scope,command:p.command})).toMatchObject({ok:false,status:404});
+  const q=await image(); await f.pool.query('UPDATE patient_documents SET sha256=$1 WHERE id=$2',['b'.repeat(64),q.documentId]);
+  expect(await getStudyImagePreview({...q.scope,command:{...q.command,sha256:'b'.repeat(64)}})).toMatchObject({ok:false,status:409});
+});

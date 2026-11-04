@@ -10,6 +10,9 @@ import type { StudyEditorRead } from "@/lib/ortho-case-study-editor-contract";
 import type { StudyOwner } from "@/lib/ortho-case-study-owner";
 import type { JourneyScope } from "@/lib/ortho-case-journey-records";
 import OrthoSavedStudyReview from "@/components/OrthoSavedStudyReview";
+import OrthoStudyImagePicker from "@/components/OrthoStudyImagePicker";
+import { attachStudyImage, detachStudyImage } from "@/lib/ortho-study-image-selection";
+import { fetchStudyImagePreview } from "@/lib/ortho-study-image-client";
 import OrthoStudyImageEditor from "@/components/OrthoStudyImageEditor";
 import { canonicalOrthoMediaRecipe } from "@/lib/ortho-study-media";
 import type { StudyImageEditRequest, StudyImagePreviewRequest, StudyImagePreviewResult } from "@/lib/ortho-study-image-editor";
@@ -43,6 +46,7 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
   };
   const [, update] = useState(0), [selected, setSelected] = useState<number | null>(null), [view, setView] = useState<View | null>(null);
   const [notice, setNotice] = useState<StudyMessage | null>(null), [layout, setLayout] = useState("interview"), [sourcePanel, setSourcePanel] = useState("");
+  const [selectedImage, setSelectedImage] = useState("");
   const readVersion = owner.readVersion, renderedDocument = owner.document;
   const mounted = useRef(false);
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -181,13 +185,26 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
           <span>{studySourceName(source.kind, locale)} #{source.id}{source.version === null ? "" : ` — ${t("نسخة")} ${source.version}`}</span>
           <button type="button" className={control} disabled={!editable} onClick={() => removeSource(source)}>{t("إزالة المرجع واستخداماته من هذه المسودة")}</button>
         </li>)}</ul>
-        {draft.content.sources.filter(source => source.kind === "document" && !draft!.content.mediaUses.some(use => use.documentId === source.id && use.sourceSha256 === source.contentHash)).map(source => <p key={source.key}>{t("المستند")} #{source.id} {t("مختار. إسناده إلى إطار صورة ينتظر أساس أبعاد واتجاه موثوقًا؛ لا تمنع هذه الخطوة حفظ الدراسة.")}</p>)}
-        {draft.content.mediaUses.map(use => {
+        <OrthoStudyImagePicker key={effectiveSourcePanel} scope={{patientId,orthoCaseId,clinicalCaseId}} content={draft.content} panelId={effectiveSourcePanel} editable={editable}
+          onAttach={(source,panelId,slot,recipe) => {
+            if (!mounted.current || !draft || !editable) return false;
+            try { const useId = `image_${crypto.randomUUID()}`;
+              const changed = change({...draft,content:attachStudyImage(draft.content,source,panelId,slot,recipe,useId)});
+              if (changed) setSelectedImage(useId); return changed;
+            } catch { return false; }
+          }} />
+        {!!draft.content.mediaUses.length && <label>الصورة المعروضة / Image to edit<select className={control} aria-label="الصورة المعروضة / Image to edit" value={draft.content.mediaUses.some(u => u.useId === selectedImage) ? selectedImage : draft.content.mediaUses[0].useId} onChange={e => setSelectedImage(e.currentTarget.value)}>
+          {draft.content.mediaUses.map((use,i) => <option key={use.useId} value={use.useId}>{i+1} — المستند #{use.documentId} — {use.slotId}</option>)}</select></label>}
+        {draft.content.mediaUses.filter(use => use.useId === (draft!.content.mediaUses.some(u => u.useId === selectedImage) ? selectedImage : draft!.content.mediaUses[0]?.useId)).map(use => {
           const panel = draft!.content.panels.find(value => value.images.some(image => image.useId === use.useId));
           const binding = panel?.images.find(image => image.useId === use.useId), slot = panel && binding ? caseLayout(panel.layoutKey)?.images.find(image => image.slotId === binding.slot) : null;
           if (!slot) return <p role="alert" key={use.useId}>{t("إطار الصورة غير متاح؛ لم تُحذف تعديلات الاستخدام.")}</p>;
-          return <OrthoStudyImageEditor key={use.useId} ownerKey={props.ownerKey} use={use} frame={{ width: Math.ceil(slot.w * CASE_PAGE.imageDpi), height: Math.ceil(slot.h * CASE_PAGE.imageDpi) }} editable={editable}
-            onChange={editImage} requestPreview={props.requestImagePreview ?? (async () => ({ ok: false, code: "unavailable" }))} />;
+          return <div key={use.useId} className="space-y-2"><button type="button" className={control} disabled={!editable} onClick={() => change({...draft!,content:detachStudyImage(draft!.content,use.useId)})}>إزالة استخدام الصورة من المسودة / Remove image use</button><OrthoStudyImageEditor ownerKey={props.ownerKey} use={use} frame={{ width: Math.ceil(slot.w * CASE_PAGE.imageDpi), height: Math.ceil(slot.h * CASE_PAGE.imageDpi) }} editable={editable}
+            onChange={editImage} requestPreview={props.requestImagePreview ?? (async request => {
+              if (!owner.active() || owner.readVersion !== readVersion || !mounted.current) return {ok:false,code:"stale"};
+              const result = await fetchStudyImagePreview({patientId,orthoCaseId,clinicalCaseId,ownerKey:props.ownerKey},request);
+              return owner.active() && owner.readVersion === readVersion && mounted.current ? result : {ok:false,code:"stale"};
+            })} /></div>;
         })}
         <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={!editable} onClick={() => void save("draft")}>{t("حفظ مسودة الدراسة")}</button>
           <button type="button" className={control} disabled={!canDocument} onClick={() => void save("documented")}>{t("توثيق النسخة المحفوظة نفسها")}</button></div>

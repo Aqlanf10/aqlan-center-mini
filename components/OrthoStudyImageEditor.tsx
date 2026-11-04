@@ -10,7 +10,7 @@ export interface OrthoStudyImageEditorProps {
   /** Synchronous owner/use/document/source/previous-recipe CAS into local draft.
    * True never means database save, clinical review or source verification. */
   onChange(request: StudyImageEditRequest): boolean;
-  /** Parent owns current source authority, approved isolated processor and
+  /** Parent owns current source authority, bounded server processor and
    * sequential native admission. No external URL is accepted here. */
   requestPreview(request: StudyImagePreviewRequest): Promise<StudyImagePreviewResult>;
 }
@@ -66,8 +66,8 @@ function Editor(props: OrthoStudyImageEditorProps) {
     try { apply(parseOrthoMediaRecipe({ ...recipe, cropPpm: Object.fromEntries(Object.entries(crop).map(([key, value]) => [key, Math.round(Number(value) * 10000)])) })); }
     catch { setNotice("اليسار يجب أن يسبق اليمين والأعلى يجب أن يسبق الأسفل."); }
   };
-  let previewRecipe = recipe, frame = props.frame, geometryError = false;
-  try { planOrthoMediaGeometry(recipe, frame); previewRecipe = view === "editor-canvas" ? canvasRecipe(recipe) : view === "original-comparison" ? originalComparisonRecipe(recipe) : recipe; if (view === "editor-canvas") frame = editorCanvasFrame(recipe); }
+  let previewRecipe = recipe, frame = props.frame, geometryError = false, resolutionWarning = false;
+  try { resolutionWarning = planOrthoMediaGeometry(recipe, frame).resolutionWarning; previewRecipe = view === "editor-canvas" ? canvasRecipe(recipe) : view === "original-comparison" ? originalComparisonRecipe(recipe) : recipe; if (view === "editor-canvas") frame = editorCanvasFrame(recipe); }
   catch { geometryError = true; }
   const previewKey = JSON.stringify([view, canonicalOrthoMediaRecipe(previewRecipe), frame.width, frame.height, retry]);
   const request = captureStudyImagePreviewRequest({ ownerKey: props.ownerKey, useId: props.use.useId, documentId: props.use.documentId, sourceSha256: props.use.sourceSha256,
@@ -75,6 +75,7 @@ function Editor(props: OrthoStudyImageEditorProps) {
   return <section dir="rtl" aria-label="محرر استخدام الصورة" className="min-w-0 space-y-3 rounded border p-3">
     <h3 className="font-semibold">تعديل صورة الدراسة</h3>
     <p className="text-sm">التعديلات تخص هذا الاستخدام فقط؛ الأصل وقياسات السيفالومتري لا تتغير. المعاينة ليست مراجعة سريرية.</p>
+    {resolutionWarning && <p role="status" className="rounded border border-amber-300 bg-amber-50 p-2 text-sm">دقة الأصل أقل من حجم إطار العرض؛ قد تظهر الصورة غير واضحة. راجعها أو اختر أصلاً بدقة أعلى.</p>}
     <div role="group" aria-label="وضع المعاينة" className="flex flex-wrap gap-2">{([['selected-use','إطار العرض'],['editor-canvas','تحديد القص'],['original-comparison','مقارنة بالأصل']] as const).map(([value,label]) => <button key={value} type="button" className={control} aria-pressed={view === value} onClick={() => { setView(value); setZoom(1); }}>{label}</button>)}</div>
     <div className="flex flex-wrap gap-2" aria-label="تكبير وتنقل للمعاينة فقط">
       <button type="button" className={control} disabled={zoom <= 1} onClick={() => setZoom(value => Math.max(1, value - 0.5))}>تصغير</button>
@@ -131,7 +132,7 @@ function Preview(props: PreviewProps) {
   const plan = planOrthoMediaGeometry(canvasRecipe(props.savedRecipe),props.request.frame);
   const crop = drag ? cropFromCanvasPoints(props.savedRecipe,drag.a,drag.b,props.aspect)?.cropPpm : props.savedRecipe.cropPpm;
   const rect = crop ? {x:plan.content.left+crop.left/1e6*plan.rotatedCanvas.width*plan.content.scale,y:plan.content.top+crop.top/1e6*plan.rotatedCanvas.height*plan.content.scale,width:(crop.right-crop.left)/1e6*plan.rotatedCanvas.width*plan.content.scale,height:(crop.bottom-crop.top)/1e6*plan.rotatedCanvas.height*plan.content.scale}:null;
-  return <div aria-busy={busy}>{url&&!error?<div style={{position:"relative",width:`${props.zoom*100}%`}}>
+  return <div aria-busy={busy}>{url&&!error?<div style={{position:"relative",width:`min(${props.zoom*100}%, ${512*props.request.frame.width/props.request.frame.height*props.zoom}px)`,marginInline:props.zoom===1?"auto":0}}>
     {/* eslint-disable-next-line @next/next/no-img-element -- verified local PNG blob; no remote clinical-image loader. */}
     <img src={url} alt={props.request.purpose==="original-comparison"?"مقارنة بالأصل دون تعديلات العرض":"معاينة استخدام الصورة"} width={props.request.frame.width} height={props.request.frame.height} draggable={false}
       style={{display:"block",width:"100%",height:"auto",touchAction:canCrop?"none":"auto"}} onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={event=>{if(!lifetime.current.active||current.current!==props||pointer.current?.id!==event.pointerId)return;pointer.current=null;setDrag(null);}} />
