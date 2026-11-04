@@ -1,0 +1,49 @@
+{
+  "conclusion": "success",
+  "databaseId": 41742055934,
+  "headSha": "bf8377008a9e218a2b0a32c723d233348ef900fd",
+  "jobs": [
+    {
+      "name": "Typecheck, Lint, Unit, Audit, Build",
+      "status": "completed",
+      "conclusion": "success",
+      "databaseId": 126286694833,
+      "startedAt": "2026-11-03T23:51:01Z",
+      "completedAt": "2026-11-04T00:03:44Z"
+    },
+    {
+      "name": "PostgreSQL 18 integration, schema and operational journeys",
+      "status": "completed",
+      "conclusion": "success",
+      "databaseId": 126286695246,
+      "startedAt": "2026-11-03T23:51:01Z",
+      "completedAt": "2026-11-04T00:21:50Z"
+    },
+    {
+      "name": "Synthetic contract print and watermark",
+      "status": "completed",
+      "conclusion": "success",
+      "databaseId": 126286695251,
+      "startedAt": "2026-11-03T23:51:01Z",
+      "completedAt": "2026-11-03T23:52:37Z"
+    },
+    {
+      "name": "Built-app HTTP security and hosted browser",
+      "status": "completed",
+      "conclusion": "success",
+      "databaseId": 126292152746,
+      "startedAt": "2026-11-04T00:03:47Z",
+      "completedAt": "2026-11-04T00:47:20Z"
+    },
+    {
+      "name": "Required CI gates (fail closed)",
+      "status": "completed",
+      "conclusion": "success",
+      "databaseId": 126310524578,
+      "startedAt": "2026-11-04T00:47:22Z",
+      "completedAt": "2026-11-04T00:47:26Z"
+    }
+  ],
+  "status": "completed",
+  "url": "https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/41742055934"
+}

@@ -1,0 +1,179 @@
+{
+  "scope": "Manual ceph tracing and clinical write authorization; no new clinical analysis method",
+  "applicationCommit": "e991de91bfdc4c8adab6e47fb6d126342ba0cbbe",
+  "baseCommit": "80570af6e657ee37a5f10f54ac50b69dda959d2d",
+  "generatedAtUtc": "2026-11-04T01:04:25.580288+00:00",
+  "buildId": "3lmXlKCWYcjpPn8wmT2Mc",
+  "tests": {
+    "focusedUnit": {
+      "passed": 40,
+      "files": 3,
+      "seconds": 1.53
+    },
+    "browserHttp": {
+      "passed": 40,
+      "files": 8,
+      "seconds": 150.88,
+      "exitCode": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 2
+    },
+    "build": "passed",
+    "preflight": "passed",
+    "allUnit": {
+      "passed": 14032,
+      "files": 822,
+      "seconds": 579.28,
+      "exitCode": 0,
+      "sourceCommit": "460847fe98fa86cf792425a4355ec41d1e5749c9",
+      "worktree": "isolated checkout with real local dependency tree"
+    },
+    "hostedCurrentHead": "not_pushed",
+    "auditAndClinicalUnit": {
+      "passed": 56,
+      "files": 4,
+      "seconds": 4.37,
+      "exitCode": 0
+    }
+  },
+  "visualReview": [
+    "ceph-clinician-review-390.png",
+    "ceph-clinician-review-1280.png",
+    "ceph-read-only-390.png",
+    "ceph-read-only-1280.png"
+  ],
+  "sourceFiles": [
+    {
+      "path": "__tests__/ceph-clinical-write-access.test.ts",
+      "sha256": "7c0f5b86ab1de8daf2952202e6d3b201d6ee19ed596105ca5bd0b801e8261ca3"
+    },
+    {
+      "path": "__tests__/ceph-clinician-review.test.ts",
+      "sha256": "2c0e3addeb3a6a1a6f146ec9d999587af134f0eb71275409b1fe20b532e48e61"
+    },
+    {
+      "path": "__tests__/modern-visual-patient-events.test.tsx",
+      "sha256": "fdf6082b8b1a7f9b7d2d34d6f075cddb91fd62421c1f7203093824e074e30a07"
+    },
+    {
+      "path": "__tests__/security-http/ceph-clinician-review-browser.test.ts",
+      "sha256": "894846b42989f3b5287ed99c8a5defef5b8b852c1899a5943679530dfc4c3439"
+    },
+    {
+      "path": "app/api/ceph/[id]/ai-analyze/route.ts",
+      "sha256": "6d8e9677782565ea84a877e90a5d73cfc80a582d45c29cf74a770ecf51f4db18"
+    },
+    {
+      "path": "app/api/ceph/[id]/complete/route.ts",
+      "sha256": "4d2a1ab4ce6c53069097b70c8b5342e09c1324f9ef2355ba5634d869d59ecca1"
+    },
+    {
+      "path": "app/api/ceph/[id]/duplicate/route.ts",
+      "sha256": "9019cfac92ccfe2ee4ca5bca434a6460f99909f9d2feba70fd58d6fe7d2500b7"
+    },
+    {
+      "path": "app/api/ceph/[id]/route.ts",
+      "sha256": "d68c328799e87fb542fce1a573b9299a89bb109bfa5f524e89f116e941364675"
+    },
+    {
+      "path": "app/ceph/[id]/page.tsx",
+      "sha256": "3e820ef540f2c65cef8a46f5f95000343caa2d67919781823dcd8921aca3cd4e"
+    },
+    {
+      "path": "components/CephTracer.tsx",
+      "sha256": "380bdeb7ca0496020001d08c84cd9f77f4cdc05d76d0188a2889a36a28e36fda"
+    },
+    {
+      "path": "lib/ceph.ts",
+      "sha256": "39c389ca3a0f0c81ea35a2c4e7ee5ccd2209ec13e63229bd8e54dd7f7f972aa3"
+    },
+    {
+      "path": "__tests__/audit-coverage.test.ts",
+      "sha256": "9b79d851a9f631885f7c2774ce80056bac8c265422c9c7492f421db83fd8af04"
+    }
+  ],
+  "limits": [
+    "No production, staging, real patient or database migration changes",
+    "Read role does not gain clinical writes; original authorized read policy unchanged",
+    "No new AI/Dot feature and retired coordinate template no longer used by product",
+    "Manual diagnosis revision conflict control and pending point write recovery remain separate work",
+    "Local Chromium151 differs from hosted pinned153; no full hosted acceptance claim",
+    "No acceptance of entire module or all52 scenarios"
+  ],
+  "evidenceFiles": [
+    {
+      "path": "all-unit-final.txt",
+      "bytes": 443,
+      "sha256": "0974afcc3b253fe61cb8fbb03114db0e4f16517c58db37465ec31e7235362680"
+    },
+    {
+      "path": "audit-unit-final.txt",
+      "bytes": 217,
+      "sha256": "1c857bdf4683615519b5160875c97c2d1520987babb62552f8efe264fbf4fea8"
+    },
+    {
+      "path": "browser-final.txt",
+      "bytes": 999,
+      "sha256": "d567749f55b44d15e6f6018430f1a8341f90f41dbf3746c368c06d21bde52c51"
+    },
+    {
+      "path": "build-preflight-final.txt",
+      "bytes": 14312,
+      "sha256": "35d9e819b62c9595ac6314cba3c50dc15a902cb512cf6529d0a8883d30ab4d85"
+    },
+    {
+      "path": "ceph-clinician-review-1280.png",
+      "bytes": 139415,
+      "sha256": "60ed0196d4c87eedc2b5e22550f58a89942fc43efb7a9e781c6dabcf3a9778d6"
+    },
+    {
+      "path": "ceph-clinician-review-390.png",
+      "bytes": 59413,
+      "sha256": "d09fadc35c08ec880b45af3351b140aeded2ace7aa0ce1afb698044e9ff44ec9"
+    },
+    {
+      "path": "ceph-read-only-1280.png",
+      "bytes": 163551,
+      "sha256": "316c7a987ec000e70f2dd2095920d79610ce30d295e092a9ce99d4c7f6ce3225"
+    },
+    {
+      "path": "ceph-read-only-390.png",
+      "bytes": 62118,
+      "sha256": "0f312fa2905e0ef33a8484f58c9d7ccf878d4022d89e98065fb744ce6e73b488"
+    },
+    {
+      "path": "focused-unit-final.txt",
+      "bytes": 217,
+      "sha256": "f9197022d12694b5cb6e19a6d993078530b202f5c358e3abbc65e7c17c88c6a7"
+    },
+    {
+      "path": "image-hydration-reproduction.txt",
+      "bytes": 2136,
+      "sha256": "2067a753bfd7f349766da0a4729593cfa988fb9227358a515964776ac88c1f2b"
+    },
+    {
+      "path": "lint-final.txt",
+      "bytes": 395,
+      "sha256": "591a3c3e365a07ef0b8a3fdd35de85f855e00f629fce138a69218c28deb21828"
+    },
+    {
+      "path": "preflight-unit-environment-final.txt",
+      "bytes": 220,
+      "sha256": "b5625857f7906fab233650c8e2b055bdb37acb7a0c1ec80e3a65b70297dcb9fe"
+    },
+    {
+      "path": "published-baseline-ci.json",
+      "bytes": 1504,
+      "sha256": "e8d3adda38faff997a588bfd3b9b477ebbfbefff1ee3e4d076775098d373f7c9"
+    }
+  ],
+  "applicationGuardCommit": "460847fe98fa86cf792425a4355ec41d1e5749c9",
+  "publishedBaselineCi": {
+    "head": "bf8377008a9e218a2b0a32c723d233348ef900fd",
+    "run": 41742055934,
+    "conclusion": "success",
+    "notValidationOfThisPhase": true
+  }
+}

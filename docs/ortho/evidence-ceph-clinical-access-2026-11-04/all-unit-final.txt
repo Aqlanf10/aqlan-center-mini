@@ -1,0 +1,16 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-ceph-verification
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+
+ Test Files  822 passed (822)
+      Tests  14032 passed (14032)
+   Start at  00:52:30
+   Duration  579.28s (transform 26.75s, setup 0ms, import 113.14s, tests 333.74s, environment 109ms)
+

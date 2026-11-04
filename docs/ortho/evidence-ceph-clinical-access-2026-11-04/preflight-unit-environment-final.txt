@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 /workspace/ortho-ceph-verification
+
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  00:46:35
+   Duration  1.29s (transform 71ms, setup 0ms, import 109ms, tests 1.04s, environment 0ms)
+

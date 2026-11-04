@@ -1,0 +1,15 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ceph-clinician-review-browser.test.ts __tests__/security-http/ceph-versioned-planes-browser.test.ts __tests__/security-http/ceph-page-authorization.test.ts __tests__/security-http/patient-ceph-post-built-page.test.ts __tests__/security-http/ortho-records-case-ui.test.ts __tests__/security-http/ortho-problem-sources-browser.test.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/patient-cockpit-real-contract-ui.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  8 passed (8)
+      Tests  40 passed (40)
+   Start at  00:27:15
+   Duration  150.88s (transform 403ms, setup 0ms, import 1.00s, tests 144.56s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

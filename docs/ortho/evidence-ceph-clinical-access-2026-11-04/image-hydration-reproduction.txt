@@ -1,0 +1,37 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ceph-clinician-review-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ceph-clinician-review-browser.test.ts (2 tests | 2 failed) 33964ms
+     × preserves draft, saved and historical diagnosis through denied generation at 390px 16400ms
+     × preserves draft, saved and historical diagnosis through denied generation at 1280px 16047ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ceph-clinician-review-browser.test.ts > ceph diagnosis remains clinician-authored > preserves draft, saved and historical diagnosis through denied generation at 390px
+ FAIL  __tests__/security-http/ceph-clinician-review-browser.test.ts > ceph diagnosis remains clinician-authored > preserves draft, saved and historical diagnosis through denied generation at 1280px
+TimeoutError: locator.waitFor: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for getByAltText('الشععة السيفالومترية', { exact: true }).locator('..').locator('svg') to be visible[22m
+
+ ❯ __tests__/security-http/ceph-clinician-review-browser.test.ts:60:36
+     58|       // Put an actual point through the built page, not by seeding a …
+     59|       const surface = page.getByAltText("الشععة السيفالومترية", { exac…
+     60|       await surface.locator("svg").waitFor();
+       |                                    ^
+     61|       await page.getByRole("button", { name: "S", exact: true }).click…
+     62|       const pointWrite = page.waitForResponse(r => r.url().endsWith(`/…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  00:24:04
+   Duration  39.42s (transform 20ms, setup 0ms, import 490ms, tests 33.96s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
