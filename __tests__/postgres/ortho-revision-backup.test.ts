@@ -14,6 +14,7 @@ import { appendOrthoAssessment, getOrthoAssessment } from "../../lib/ortho-asses
 import { appendOrthoTreatmentStrategy, getOrthoTreatmentStrategy } from "../../lib/ortho-treatment-strategy-store";
 import type { StrategyCommand } from "../../lib/ortho-treatment-strategy";
 import { assessmentCommandV2 } from "../fixtures/ortho-assessment-schema2";
+import { tanakaCommandV2 } from "../fixtures/ortho-assessment-tanaka";
 
 const request = vi.hoisted(() => ({ token: "" }));
 vi.mock("next/headers", () => ({
@@ -25,6 +26,8 @@ let db: typeof import("../../lib/db"), directory: string, actor: SessionPayload;
 let owner: { patientId: number; orthoCaseId: number; session: SessionPayload };
 let a: ReturnType<typeof assessmentCommandV2>, s: StrategyCommand;
 let originalAssessment: Awaited<ReturnType<typeof appendOrthoAssessment>>;
+let mixedCommand: ReturnType<typeof tanakaCommandV2>;
+let originalMixed: Awaited<ReturnType<typeof appendOrthoAssessment>>;
 let originalStrategy: Awaited<ReturnType<typeof appendOrthoTreatmentStrategy>>;
 const originalUrl = process.env.DATABASE_URL, originalSeed = process.env.SKIP_SEED;
 async function rows(pool: Pool) {
@@ -53,8 +56,9 @@ beforeAll(async () => {
   originalAssessment = await appendOrthoAssessment({ ...owner, command: a });
   originalStrategy = await appendOrthoTreatmentStrategy({ ...owner, command: s });
   if (!originalAssessment.ok || !originalStrategy.ok) throw new Error("Synthetic original revision was refused");
-  const a2 = assessmentCommandV2(); a2.commandId = "synthetic_backup_assessment_0002"; a2.expectedRevisionId = originalAssessment.revision.id;
-  expect(await appendOrthoAssessment({ ...owner, command: a2 })).toMatchObject({ ok: true, revision: { version: 2 } });
+  mixedCommand = tanakaCommandV2(); mixedCommand.commandId = "synthetic_backup_assessment_0002"; mixedCommand.expectedRevisionId = originalAssessment.revision.id;
+  originalMixed = await appendOrthoAssessment({ ...owner, command: mixedCommand });
+  expect(originalMixed).toMatchObject({ ok: true, revision: { version: 2, content: { verifierVersion: "ortho-assessment-payload-2.2.0" } } });
   expect(await appendOrthoTreatmentStrategy({ ...owner, command: { ...s, commandId: "synthetic_backup_strategy_0002", expectedRevisionId: originalStrategy.revision.revisionId } })).toMatchObject({ ok: true, revision: { version: 2 } });
   for (const stem of ["assessment", "strategy"]) {
     // Reverse physical order without disabling constraints or revision guards.
@@ -83,8 +87,13 @@ async function verifyRestored(pool: Pool) {
   // All durable source witnesses, immutable recorder/patient provenance and the
   // original (now non-head) command must remain valid after physical reordering.
   expect(await appendOrthoAssessment({ ...owner, command: a })).toEqual({ ...originalAssessment, replayed: true });
+  expect(await appendOrthoAssessment({ ...owner, command: mixedCommand })).toEqual({ ...originalMixed, replayed: true });
   expect(await appendOrthoTreatmentStrategy({ ...owner, command: s })).toEqual({ ...originalStrategy, replayed: true });
-  expect(await getOrthoAssessment({ ...owner, acceptedSchemas: [2] })).toMatchObject({ ok: true, history: [{ version: 2 }, { version: 1 }] });
+  expect(await getOrthoAssessment({ ...owner, acceptedSchemas: [2] })).toMatchObject({ ok: true,
+    revision: { content: { verifierVersion: "ortho-assessment-payload-2.2.0", results: [
+      { result: { witness: { result: { estimatedRequiredMm: 74 } } } },
+      { result: { witness: { result: { estimatedRequiredMm: 65 } } } },
+    ] } }, history: [{ version: 2 }, { version: 1 }] });
   expect(await getOrthoTreatmentStrategy(owner)).toMatchObject({ ok: true, history: [{ version: 2 }, { version: 1 }] });
   expect(await rows(pool)).toEqual(await rows(fixture.source));
 }

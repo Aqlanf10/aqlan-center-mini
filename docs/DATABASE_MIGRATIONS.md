@@ -795,3 +795,20 @@ or cross-case reassignment, and review history cannot be updated or deleted.
 New reviews, optional problem creation and audit commit atomically. Retrying the
 same command returns its original result. This migration creates no visit,
 invoice or payment. This is an unmerged candidate, not a production rollout.
+
+## 0106_ortho_assessment_verifier_2_2.sql — versioned mixed dentition prediction
+
+Replaces only `check_ortho_assessment_revision_final_state()` to admit payload
+verifier2.2.0 alongside historical2.1.0. The explicitly new
+`tanaka_johnston_1974` method requires2.2.0. Missing/null verifiers remain rejected;
+ownership, bridge, predecessor, result count and identity checks are preserved.
+The published0052 migration and original runtime SQL are unchanged. Numbered
+and new runtime SQL are byte-identical and register under the migration lock.
+
+This migration rewrites no assessment or result and infers no clinical facts.
+Old-method commands retain2.1 payloads; saved results are reconstructed with
+their recorded verifier. A pre2.2 application cannot read new2.2 records and
+must not be rolled back over them without a reviewed compatibility plan. The
+upgrade/replay tests preserve old rows and reject mislabeled new results. The
+structural schema fingerprint alone does not validate the changed function
+body. This remains an unmerged candidate, without deployment authorization.

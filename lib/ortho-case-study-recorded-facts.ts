@@ -83,10 +83,28 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
         }
         if (!observationRows.length) paragraph(key, "لا توجد ملاحظات محفوظة مطابقة لتعريفات هذا القسم؛ لا تُفترض نتائج طبيعية.");
       } else if (panel.layoutKey === "model-measurements") {
-        for (const analysis of projected.analyses) table(key, [["معرف التحليل المختار", analysis.selection.id],
+        for (const analysis of projected.analyses) {
+          const stored = analysis.stored.result;
+          if (stored.state === "ready" && stored.witness.result.state === "calculated"
+            && stored.witness.result.method === "tanaka_johnston_1974_approximation_v1") {
+            const prediction = stored.witness.result, mm = (value: number) => `${Number(value.toFixed(3))} mm`;
+            table(key, [["التحليل", "Tanaka–Johnston1974: تقدير المسافة المختلطة"],
+              ["الفك", prediction.arch === "upper" ? "علوي" : "سفلي"],
+              ["مجموع القواطع السفلية المقاس", mm(prediction.measuredLowerIncisorSumMm)],
+              ["مجموع قواطع الفك المطلوب المقاس", mm(prediction.measuredTargetIncisorSumMm)],
+              ["الناب والضاحكان لكل جهة — تقدير", mm(prediction.predictedCaninePremolarPerQuadrantMm)],
+              ["الناب والضاحكان في الجهتين — تقدير", mm(prediction.predictedBothQuadrantsMm)],
+              ["المساحة المتاحة المقاسة", mm(prediction.measuredAvailableMm)], ["المساحة المطلوبة المقدّرة", mm(prediction.estimatedRequiredMm)],
+              ["المتاح ناقص المطلوب المقدّر", mm(prediction.availableMinusEstimatedRequiredMm)],
+              ["إصدار الحساب", stored.witness.formula.engineVersion], ["المعادلة", stored.witness.formula.formulaVersion],
+              ["مرجع النتيجة المحفوظة", stored.witness.reference?.source ?? null],
+              ["معرف التحليل المختار", analysis.selection.id], ["بصمة النتيجة المحفوظة", analysis.stored.resultHash],
+              ["الاعتماد السريري وملاءمة المرجع للحالة", "غير معتمد؛ تقدير يحتاج مراجعة الطبيب"]]);
+          } else table(key, [["معرف التحليل المختار", analysis.selection.id],
           ["الاختيار المحفوظ", canonicalJourneyJSON(analysis.selection)], ["حالة النتيجة المحفوظة", analysis.stored.result.state],
           ["النتيجة والشواهد والوحدات المحفوظة", canonicalJourneyJSON(analysis.stored.result)], ["بصمة النتيجة المحفوظة", analysis.stored.resultHash],
           ["الاعتماد السريري", "غير معتمد"]]);
+        }
         if (!projected.analyses.length) paragraph(key, "لم تُحفظ تحليلات مختارة في هذه النسخة؛ لم يُحسب تحليل جديد للعرض.");
       } else { unmapped.push({ sourceKey: key, kind: source.kind, reason: "assessment_layout_not_mapped" }); continue; }
       paragraph(key, `عدد الملاحظات في التقييم المحفوظ: ${revision.content.draft.observations.observations.length}؛ الملاحظات المعروضة مباشرة في هذا القسم: ${observationRows?.length ?? 0}. بقية الملاحظات تبقى في التقييم ومقاطعها المختارة، ولا يعني غيابها هنا أنها غير مسجلة.`);

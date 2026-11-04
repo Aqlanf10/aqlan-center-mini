@@ -5,7 +5,7 @@ export interface AssessmentMeasurementSetV2 {
 }
 export const DISABLED_ASSESSMENT_METHODS=["moyers","tanaka_johnston","huckaba","ashley_howe","stanley_kerber","pont","linder_harth","peck_peck"] as const;
 export type DraftAnalysisSelectionV2={state:"draft";id:string;measurementSetId:string}&(
-  {method:"arch_space";arch:"upper"|"lower"}|{method:"bolton_anterior"|"bolton_overall"}|{method:typeof DISABLED_ASSESSMENT_METHODS[number]}
+  {method:"arch_space";arch:"upper"|"lower"}|{method:"tanaka_johnston_1974";arch:"upper"|"lower"}|{method:"bolton_anterior"|"bolton_overall"}|{method:typeof DISABLED_ASSESSMENT_METHODS[number]}
 );
 export interface AssessmentDraftV2 {
   schemaVersion:2;observations:AssessmentObservationSetV2;measurementSets:AssessmentMeasurementSetV2[];analyses:DraftAnalysisSelectionV2[];
@@ -39,8 +39,8 @@ export function checkAssessmentDraftV2(raw:unknown):Checked<AssessmentDraftV2>{
     if(!plain(a)||!observationIdV2(a.id)||!observationIdV2(a.measurementSetId)||a.state!=="draft"
       ||analyses.some(x=>x.id===a.id)||!measurementSets.some(s=>s.id===a.measurementSetId))return fail("invalid_analysis_selection");
     const common={state:"draft" as const,id:a.id,measurementSetId:a.measurementSetId};
-    if(a.method==="arch_space"&&keys(a,["state","id","measurementSetId","method","arch"])&&(a.arch==="upper"||a.arch==="lower"))
-      analyses.push({...common,method:"arch_space",arch:a.arch});
+    if((a.method==="arch_space"||a.method==="tanaka_johnston_1974")&&keys(a,["state","id","measurementSetId","method","arch"])&&(a.arch==="upper"||a.arch==="lower"))
+      analyses.push({...common,method:a.method,arch:a.arch});
     else if((a.method==="bolton_anterior"||a.method==="bolton_overall")&&keys(a,["state","id","measurementSetId","method"]))analyses.push({...common,method:a.method});
     else if(typeof a.method==="string"&&DISABLED_ASSESSMENT_METHODS.some(m=>m===a.method)&&keys(a,["state","id","measurementSetId","method"]))
       analyses.push({...common,method:a.method as typeof DISABLED_ASSESSMENT_METHODS[number]});

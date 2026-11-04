@@ -16,6 +16,8 @@ export interface MeasurementEditorOwnerV2 {
 export interface MeasurementSourceChoiceV2 extends AssessmentSourceV2 { label: string }
 const control = "min-h-11 min-w-11 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm disabled:opacity-40";
 const keyOf = (s: AssessmentSourceV2) => `${s.kind}:${s.id}:${s.version}`;
+// Presentation-only rounding; the stored calculation retains full precision.
+const mm = (value: number) => <bdi dir="ltr" className="inline-block whitespace-nowrap tabular-nums">{Number(value.toFixed(3))} mm</bdi>;
 const states: Record<MeasurementValueDraftV2["state"], string> = { not_recorded: "غير مسجل", measured: "مقاس", recorded: "موثق", unknown: "غير معلوم", not_measured: "لم يُقَس", unavailable: "غير متاح", not_applicable: "لا ينطبق", tooth_absent: "السن مفقود", not_erupted: "لم يبزغ" };
 export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources }: {
   draft: MeasurementEditorDraftV2; onChange(draft: MeasurementEditorDraftV2): void;
@@ -64,11 +66,13 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
     { title: "مساحة الفك السفلي", selection: { state: "draft", id: "", measurementSetId: set.id, method: "arch_space", arch: "lower" } },
     { title: "Bolton أمامي", selection: { state: "draft", id: "", measurementSetId: set.id, method: "bolton_anterior" } },
     { title: "Bolton عام", selection: { state: "draft", id: "", measurementSetId: set.id, method: "bolton_overall" } },
+    { title: "Tanaka–Johnston — مسافة الفك العلوي المختلط", selection: { state: "draft", id: "", measurementSetId: set.id, method: "tanaka_johnston_1974", arch: "upper" } },
+    { title: "Tanaka–Johnston — مسافة الفك السفلي المختلط", selection: { state: "draft", id: "", measurementSetId: set.id, method: "tanaka_johnston_1974", arch: "lower" } },
   ] : [];
   const assigned = new Set(draft.payload.analyses.map(a => a.id));
   for (const option of selections) {
     const existing = draft.payload.analyses.find(a => a.measurementSetId === option.selection.measurementSetId && a.method === option.selection.method
-      && (a.method !== "arch_space" || option.selection.method === "arch_space" && a.arch === option.selection.arch));
+      && (!("arch" in a) || "arch" in option.selection && a.arch === option.selection.arch));
     if (existing) option.selection = existing;
     else { let suffix = 1; while (assigned.has(`analysis_${suffix}`)) suffix++; option.selection = { ...option.selection, id: `analysis_${suffix}` }; assigned.add(option.selection.id); }
   }
@@ -125,20 +129,46 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
     </section>}
     <fieldset><legend className="font-bold">التحليلات من القياسات نفسها</legend>{selections.map(({ title, selection }) => <label key={selection.id} className="flex min-h-11 items-center gap-2">
       <input type="checkbox" disabled={!editable} checked={draft.payload.analyses.some(a => a.id === selection.id)} onChange={() => publish(toggleMeasurementAnalysisV2(draft, selection))} />{title}</label>)}</fieldset>
+    <details className="rounded-lg border p-3 text-sm"><summary className="min-h-11 cursor-pointer font-bold">مدخلات وحدود Tanaka–Johnston</summary>
+      <p>النسخة المتاحة للأسنان المختلطة: قياسات القواطع الدائمة السفلية الأربع، وقياسات قواطع الفك المطلوب الفعلية، والمسافة المتاحة لذلك الفك. راجع بزوغ القواطع وصحة القياس ومصدره. يجب توثيق الناب والضاحكين في كل جهة من الفك المطلوب كغير بازغة؛ لا تستبدل قياساً معروفاً بتنبؤ.</p>
+      <p>المطلوب هنا يجمع القواطع والنابين والضواحك في الفك. قارنه بالمسافة المتاحة بين أنسي الرحى الأولى في الجهتين، عبر مسار القوس الذي وثّقته في طريقة القياس.</p>
+      <p>التقدير للناب والضاحكين معاً في كل جهة، ولا يحدد عرض كل سن منفرداً. مجال الدعم الحالي لمجموع القواطع السفلية20.5–27مم سياسة للمنتج توافق مجال جداول الورقة، وليس مدى طبيعياً أو ضماناً لدقة التنبؤ لهذا المريض.</p>
+      <a className="underline" href="https://uwcscholar.uwc.ac.za/bitstreams/f992423a-c0f1-44d8-86d1-128545c59ccd/download" target="_blank" rel="noreferrer">المرجع الأصلي1974؛ راجع ملاءمته للحالة</a>
+    </details>
     {!!readiness.errors.length && <ul role="status" className="text-xs text-amber-900">{readiness.errors.map((e, index) => <li key={index}>{rows.find(o => o.id === e.observationId)?.label ?? "بنية المجموعة"}: {observationInputHintV2(e.code)}</li>)}</ul>}
     {readiness.analyses.map(({ selection, readiness: checked }) => <div key={selection.id} data-testid={`analysis-${selection.id}`} className="space-y-1 rounded-lg border p-3">
-      <p className="font-bold">{selection.method}{selection.method === "arch_space" ? ` · ${selection.arch}` : ""}</p>
+      <p className="font-bold">{selection.method === "tanaka_johnston_1974" ? "Tanaka–Johnston: تقدير المسافة المختلطة" : selection.method}{"arch" in selection ? ` · ${selection.arch === "upper" ? "الفك العلوي" : "الفك السفلي"}` : ""}</p>
       {!checked.ok ? <p role="alert">تعذّر التحقق من مراجع التحليل: {checked.code}</p> : checked.value.state === "incomplete" ? <ul>{checked.value.missing.map((m, i) => <li key={i}>
-        {m.kind === "tooth_width" ? `قياس السن ${m.tooth} غير مكتمل` : m.kind === "available_space" ? `المساحة المتاحة ${m.arch} غير مكتملة` : "نوع الأسنان غير موثق"}</li>)}</ul>
-        : checked.value.state === "unsupported_dentition" ? <p>لا تطبق طرق الأسنان الدائمة على الأسنان اللبنية أو المختلطة.</p>
-          : checked.value.state === "inapplicable" ? <p>التحليل غير منطبق: السن {checked.value.tooth} {checked.value.reason === "tooth_absent" ? "مفقود" : "لم يبزغ"}؛ لا يُستبدل بصفر.</p>
+        {m.kind === "tooth_width" ? `قياس السن ${m.tooth} غير مكتمل` : m.kind === "available_space" ? `المساحة المتاحة ${m.arch} غير مكتملة` : m.kind === "unerupted_segment_status" ? `حالة بزوغ السن ${m.tooth} غير موثقة كغير بازغ` : "نوع الأسنان غير موثق"}</li>)}</ul>
+        : checked.value.state === "unsupported_dentition" ? <p>{selection.method === "tanaka_johnston_1974" ? "هذه النسخة من التنبؤ تتطلب أسناناً مختلطة موثقة." : "لا تطبق طرق الأسنان الدائمة على الأسنان اللبنية أو المختلطة."}</p>
+          : checked.value.state === "inapplicable" ? <p>التحليل غير منطبق: السن {checked.value.tooth} {({ tooth_absent: "مفقود؛ لا يُستبدل بصفر", not_erupted: "لم يبزغ؛ القياس الفعلي مطلوب", segment_width_already_measured: "له قياس محفوظ؛ لا تستبدله بتنبؤ هذه النسخة", target_not_applicable: "مسجل كغير منطبق" })[checked.value.reason]}.</p>
+            : checked.value.state === "outside_supported_predictor_domain" ? <p>مجموع القواطع السفلية {checked.value.predictorSumMm} mm خارج مجال الدعم {checked.value.minimumMm}–{checked.value.maximumMm} mm. لا تُستنتج نتيجة خارج هذا المجال في النسخة الحالية؛ المجال ليس معياراً تشخيصياً.</p>
             : <><p className="text-amber-900">حساب مسودة غير معتمد سريريًا؛ لا يوصي بقلع أو برد.</p>
               {checked.value.witness.result.state === "unavailable" ? <p>الحساب غير متاح: {checked.value.witness.result.reason}</p>
                 : checked.value.witness.result.method === "arch_space" ? <p>المتاح {checked.value.witness.result.availableMm} mm − المطلوب {checked.value.witness.result.requiredMm} mm = {checked.value.witness.result.availableMinusRequiredMm} mm</p>
+                  : checked.value.witness.result.method === "tanaka_johnston_1974_approximation_v1" ? <>
+                    <div className="grid gap-1 py-2 sm:grid-cols-2">
+                      <p>القواطع السفلية المقاسة: {mm(checked.value.witness.result.measuredLowerIncisorSumMm)}</p>
+                      <p>قواطع الفك المطلوب المقاسة: {mm(checked.value.witness.result.measuredTargetIncisorSumMm)}</p>
+                      <p>تقدير الناب والضاحكين لكل جهة: {mm(checked.value.witness.result.predictedCaninePremolarPerQuadrantMm)}</p>
+                      <p>تقدير الجهتين: {mm(checked.value.witness.result.predictedBothQuadrantsMm)}</p>
+                      <p>المتاح المقاس {mm(checked.value.witness.result.measuredAvailableMm)}</p>
+                      <p>المطلوب المقدّر {mm(checked.value.witness.result.estimatedRequiredMm)}</p>
+                      <p className="font-semibold sm:col-span-2">الفرق — المتاح ناقص المطلوب المقدّر: {mm(checked.value.witness.result.availableMinusEstimatedRequiredMm)}</p>
+                    </div>
+                    <p>هذه نتيجة تقديرية؛ ملاءمة مرجعها لهذا المريض لم تعتمد بعد.</p>
+                  </>
                   : <><p>مجموع العلوي {checked.value.witness.result.upperMm} mm · السفلي {checked.value.witness.result.lowerMm} mm · النسبة {checked.value.witness.result.ratioPercent}%</p>
                     <p>فرق السفلي بمرجع علوي: {checked.value.witness.result.upperReference.lowerMinusExpectedMm} mm · فرق العلوي بمرجع سفلي: {checked.value.witness.result.lowerReference.upperMinusExpectedMm} mm</p></>}
-              <p className="break-all text-xs">{checked.value.witness.formula.engineVersion} · {checked.value.witness.formula.formulaVersion}</p>
-              {checked.value.witness.reference && <p className="break-all text-xs">المرجع {checked.value.witness.reference.id} · النسخة {checked.value.witness.reference.version} · {checked.value.witness.reference.percent}% · {checked.value.witness.reference.source} · {checked.value.witness.reference.sourceVerification} · {checked.value.witness.reference.review}</p>}
+              {selection.method === "tanaka_johnston_1974" ? <details className="text-xs">
+                <summary className="min-h-11 cursor-pointer py-3">مرجع التقدير وإصدار الحساب</summary>
+                <p>المصدر: Tanaka وJohnston، 1974. المعادلة متحققة من المصدر الأصلي؛ الملاءمة للحالة تحتاج مراجعة الطبيب.</p>
+                <p dir="ltr" className="break-all">{checked.value.witness.reference?.source}</p>
+                <p dir="ltr" className="break-all">{checked.value.witness.formula.engineVersion} · {checked.value.witness.formula.formulaVersion}</p>
+              </details> : <>
+                <p className="break-all text-xs">{checked.value.witness.formula.engineVersion} · {checked.value.witness.formula.formulaVersion}</p>
+                {checked.value.witness.reference && <p className="break-all text-xs">المرجع {checked.value.witness.reference.id} · النسخة {checked.value.witness.reference.version} · {"percent" in checked.value.witness.reference ? `${checked.value.witness.reference.percent}% · ` : "مرجع تنبؤ · "}{checked.value.witness.reference.source} · {checked.value.witness.reference.sourceVerification} · {checked.value.witness.reference.review}</p>}
+              </>}
             </>}
     </div>)}
   </section>;

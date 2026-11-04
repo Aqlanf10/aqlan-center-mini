@@ -48,14 +48,16 @@ export async function readProblemSourceCandidates(client: DbClient, scope: Journ
       for (const result of revision.content.results) {
         if (result.result.state !== "ready" || result.result.witness.result.state !== "calculated") continue;
         const selection = revision.content.draft.analyses.find(a => a.id === result.analysisId)!;
-        const target = selection.method === "arch_space" ? { kind: "arch", arch: selection.arch } : { kind: "case" };
+        const target = "arch" in selection ? { kind: "arch", arch: selection.arch } : { kind: "case" };
         const arithmetic = result.result.witness.result;
         const numeric = (value: number) => Number(value.toFixed(3));
         const summary = arithmetic.method === "arch_space"
           ? `المتاح: ${numeric(arithmetic.availableMm)} mm · المطلوب: ${numeric(arithmetic.requiredMm)} mm · المتاح ناقص المطلوب: ${numeric(arithmetic.availableMinusRequiredMm)} mm`
+          : arithmetic.method === "tanaka_johnston_1974_approximation_v1"
+            ? `تقدير Tanaka–Johnston: القواطع السفلية المقاسة ${numeric(arithmetic.measuredLowerIncisorSumMm)} mm · قواطع الفك المقاسة ${numeric(arithmetic.measuredTargetIncisorSumMm)} mm · تقدير الناب والضاحكين لكل جهة ${numeric(arithmetic.predictedCaninePremolarPerQuadrantMm)} mm · المتاح المقاس ${numeric(arithmetic.measuredAvailableMm)} mm · المطلوب المقدّر ${numeric(arithmetic.estimatedRequiredMm)} mm · المتاح ناقص المقدّر ${numeric(arithmetic.availableMinusEstimatedRequiredMm)} mm · ملاءمة المرجع للمريض غير معتمدة`
           : `مجموع العلوي: ${numeric(arithmetic.upperMm)} mm · مجموع السفلي: ${numeric(arithmetic.lowerMm)} mm · نسبة السفلي إلى العلوي: ${numeric(arithmetic.ratioPercent)}%`;
         add({ kind: "assessment_analysis", id: revision.id, member: result.analysisId, version }, {
-          category: "نتيجة حسابية تحتاج تفسير الطبيب", title: selection.method === "arch_space" ? "تحليل المسافة" : selection.method === "bolton_anterior" ? "بولتون الأمامي" : "بولتون الكلي", summary, proposedLabel: null,
+          category: "نتيجة حسابية تحتاج تفسير الطبيب", title: selection.method === "arch_space" ? "تحليل المسافة" : selection.method === "tanaka_johnston_1974" ? "تقدير المسافة المختلطة Tanaka–Johnston" : selection.method === "bolton_anterior" ? "بولتون الأمامي" : "بولتون الكلي", summary, proposedLabel: null,
           site: siteOf(target), target, snapshot: { selection, result, observations: revision.content.draft.observations.observations.filter(o => result.result.dependencyObservationIds.includes(o.id)) },
           sourceActor: revision.createdBy, sourceDate: revision.createdAt, available, requiresImages,
         });

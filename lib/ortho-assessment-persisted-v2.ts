@@ -7,8 +7,8 @@ import { decodeAnyAssessmentRevisionStructure } from "./ortho-assessment-read-v2
 import type { AssessmentSourceV2 } from "./ortho-assessment-v2";
 export { checkAnyAssessmentCommand } from "./ortho-assessment-command-v2";
 export type { AssessmentCommandV2,AnyAssessmentCommand } from "./ortho-assessment-command-v2";
-export const ASSESSMENT_PAYLOAD_VERIFIER="ortho-assessment-payload-2.1.0" as const;
-export interface PersistedAssessmentContentV2 {schemaVersion:2;verifierVersion:typeof ASSESSMENT_PAYLOAD_VERIFIER;draft:AssessmentDraftV2;results:{analysisId:string;result:DraftAnalysisReadinessV2;resultHash:string}[]}
+export const ASSESSMENT_PAYLOAD_VERIFIER="ortho-assessment-payload-2.2.0" as const;
+export interface PersistedAssessmentContentV2 {schemaVersion:2;verifierVersion:typeof ASSESSMENT_PAYLOAD_VERIFIER|"ortho-assessment-payload-2.1.0";draft:AssessmentDraftV2;results:{analysisId:string;result:DraftAnalysisReadinessV2;resultHash:string}[]}
 export interface AssessmentRevisionBase {
   id:number;patientId:number;recordedPatientId:number;orthoCaseId:number;clinicalCaseId:number;version:number;supersedesRevisionId:number|null;
   createdAt:string;createdBy:string;reason:string;recordingContext:"current"|"retrospective";contentHash:string;
@@ -22,7 +22,10 @@ export function createPersistedAssessmentV2(raw:unknown):Checked<PersistedAssess
   const parsed=checkAssessmentDraftV2(raw);if(!parsed.ok)return parsed;const draft=parsed.value,results:PersistedAssessmentContentV2["results"]=[];
   for(const selection of draft.analyses){const result=deriveDraftAnalysisV2(draft,draft.measurementSets.find(s=>s.id===selection.measurementSetId),selection);if(!result.ok)return result;
     results.push({analysisId:selection.id,result:result.value,resultHash:assessmentJsonHash(result.value)});}
-  return {ok:true,value:{schemaVersion:2,verifierVersion:ASSESSMENT_PAYLOAD_VERIFIER,draft,results}};
+  // Existing-method commands keep their exact old payload and replay hashes.
+  // Only an explicit new analysis selection opts into the new verifier.
+  const verifierVersion=draft.analyses.some(a=>a.method==="tanaka_johnston_1974")?ASSESSMENT_PAYLOAD_VERIFIER:"ortho-assessment-payload-2.1.0";
+  return {ok:true,value:{schemaVersion:2,verifierVersion,draft,results}};
 }
 export function decodeAnyAssessmentRevision(raw:unknown,scope:{patientId:number;orthoCaseId:number;clinicalCaseId:number}):Checked<AnyAssessmentRevision>{
   const parsed=decodeAnyAssessmentRevisionStructure(raw,scope);if(!parsed.ok)return parsed;
