@@ -6,6 +6,7 @@ import {
 import type { LabOrder, LabOrderStatus } from "./lab";
 import { LabFinancialBoundaryError } from "./lab-financial-boundary";
 import { clinicalLabOrder } from "./canonical-lab-reads";
+import { visibleLabOrderEvents } from "./lab-event-visibility";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
 import type { StaffRecordConstraint } from "./staff-capabilities";
 import type { VerifiedDurableSession } from "./staff-durable-session";
@@ -30,7 +31,8 @@ import {
  *   map's field rule; the legacy route allowed the admin role label). Its audit row
  *   commits WITH the cancel (the legacy route wrote it after the commit).
  * - Events: a registered record read (`read:lab.events`, clinical.lab.view) inside the
- *   patient scope.
+ *   patient scope. Financial history follows cost visibility; batch expense notes
+ *   additionally need expense visibility and the whole patient scope.
  * - Delete: one admitted `clinical.lab.cancel` transaction inside the patient scope,
  *   the legacy rules unchanged (source-linked or settled refused, reason required), the
  *   audit row with the delete (the legacy wrote it after the commit).
@@ -176,7 +178,11 @@ export async function readCanonicalLabEvents(session: VerifiedDurableSession, ra
   return runCanonicalReadSnapshot(session, "read:lab.events", async (query, scope) => {
     const { rows: [row] } = await query.query<{ patient_id: number }>("SELECT patient_id FROM lab_orders WHERE id = $1", [id]);
     if (!row || !await inScope(query, scope.patientScope, row.patient_id)) throw notFound();
-    return { events: await labOrderEventsWith(query, id) };
+    return { events: visibleLabOrderEvents(await labOrderEventsWith(query, id), {
+      costs: scope.granted("finance.cost-prices.view"),
+      expenses: scope.granted("finance.expenses.view"),
+      allPatients: scope.patientScope.kind === "all",
+    }) };
   }, { errorPrefix: "STAFF_READ", maxBytes: 256 * 1024 });
 }
 
