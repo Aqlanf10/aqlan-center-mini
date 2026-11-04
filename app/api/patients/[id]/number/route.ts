@@ -5,9 +5,13 @@ import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { changePatientNumber, readPatientNumber } from "@/lib/patient-numbering-db";
 import { patientNumberingErrorResponse } from "@/lib/patient-numbering-response";
+import { canonicalPatientNumberRoute, commandCanonicalPatientNumber, readCanonicalPatientNumber } from "@/lib/canonical-patient-number";
 export const dynamic = "force-dynamic";
 type Context = {params: Promise<{id: string}>};
 export async function GET(_request: Request, context: Context) {
+  // M2 slice 78: patients.number.manage inside the patient scope, under the numbering locks.
+  const canonical = await canonicalPatientNumberRoute(null, async handle => readCanonicalPatientNumber(handle, (await context.params).id));
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return NextResponse.json({message: "سجّل الدخول من جديد."}, {status: 401});
   if (!isAdmin(session.role)) return NextResponse.json({message: "لا توجد صلاحية لتعديل أرقام الملفات."}, {status: 403});
@@ -15,6 +19,9 @@ export async function GET(_request: Request, context: Context) {
   catch (error) { return patientNumberingErrorResponse(error); }
 }
 export async function PATCH(request: Request, context: Context) {
+  // M2 slice 78: one admitted patients.number.manage transaction; the legacy body and audit.
+  const canonical = await canonicalPatientNumberRoute(request, async (handle, body) => commandCanonicalPatientNumber(handle, (await context.params).id, body));
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return NextResponse.json({message: "سجّل الدخول من جديد."}, {status: 401});
   if (!isAdmin(session.role)) return NextResponse.json({message: "لا توجد صلاحية لتعديل أرقام الملفات."}, {status: 403});

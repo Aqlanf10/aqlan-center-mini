@@ -14,7 +14,8 @@ async function authorize(client: DbClient, session: SessionPayload) {
   const current = await revalidateSessionInTransaction(session, client);
   if (!current || !isAdmin(current.role)) throw new PatientNumberingError("forbidden", "لا توجد صلاحية لإدارة أرقام الملفات، أو انتهت الجلسة.");
 }
-async function numberingLocks(client: DbClient) {
+/** The numbering domain locks (import, then numbering); shared with the canonical command (M2 slice 78). */
+export async function numberingLocks(client: DbClient) {
   await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_import'))");
   await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_numbering'))");
 }
@@ -28,10 +29,14 @@ async function transaction<T>(session: SessionPayload, work: (client: DbClient) 
       return work(client);
     });
   } catch (error) {
-    if ((error as {code?: string}).code === "23505") throw new PatientNumberingError("duplicate", "رقم الملف مستخدم حاليًا أو سبق استخدامه؛ اختر رقمًا آخر.");
-    if (["55P03", "40P01"].includes((error as {code?: string}).code ?? "")) throw new PatientNumberingError("busy", "هناك عملية ترقيم أخرى؛ حدّث المعاينة وأعد المحاولة.");
-    throw error;
+    throw numberingDatabaseError(error);
   }
+}
+/** A unique violation or a lock conflict in Arabic; anything else unchanged. */
+export function numberingDatabaseError(error: unknown): unknown {
+  if ((error as {code?: string}).code === "23505") return new PatientNumberingError("duplicate", "رقم الملف مستخدم حاليًا أو سبق استخدامه؛ اختر رقمًا آخر.");
+  if (["55P03", "40P01"].includes((error as {code?: string}).code ?? "")) return new PatientNumberingError("busy", "هناك عملية ترقيم أخرى؛ حدّث المعاينة وأعد المحاولة.");
+  return error;
 }
 async function preview(client: DbClient): Promise<NumberingPreview> {
   const {rows} = await client.query<{
@@ -67,7 +72,7 @@ export async function changeNumberingFloor(session: SessionPayload, input: {
     return after;
   });
 }
-async function snapshot(client: DbClient, patientId: number, lock = false): Promise<PatientNumberSnapshot> {
+export async function snapshot(client: DbClient, patientId: number, lock = false): Promise<PatientNumberSnapshot> {
   const {rows} = await client.query<{id: number; patient_number: string; patient_number_version: string}>(
     `SELECT id, patient_number, patient_number_version::text FROM patients WHERE id=$1 ${lock ? "FOR UPDATE" : ""}`, [patientId]);
   if (!rows[0]) throw new PatientNumberingError("missing", "لم يُعثر على ملف المريض.");
@@ -80,22 +85,39 @@ export function readPatientNumber(session: SessionPayload, patientId: number) {
   validId(patientId);
   return transaction(session, client => snapshot(client, patientId));
 }
+export interface PatientNumberChange { number: string; version: string; expectedPatientNumber: string; reason: string }
+/** The command's input, validated exactly as before (M2 slice 78 shares it). */
+export function parsePatientNumberChange(input: {
+  patientNumber: unknown; expectedVersion: unknown; expectedPatientNumber: unknown; reason: unknown;
+}): PatientNumberChange {
+  const number = parsePatientNumber(input.patientNumber), version = parseNumberingVersion(input.expectedVersion), reason = numberingReason(input.reason);
+  if (!number || !version || !reason || typeof input.expectedPatientNumber !== "string") throw new PatientNumberingError("invalid", "أدخل رقم ملف صحيحًا وسبب التعديل وأعد تحميل الرقم الحالي.");
+  return {number, version, expectedPatientNumber: input.expectedPatientNumber, reason};
+}
 export async function changePatientNumber(session: SessionPayload, patientId: number, input: {
   patientNumber: unknown; expectedVersion: unknown; expectedPatientNumber: unknown; reason: unknown;
 }): Promise<PatientNumberSnapshot> {
   validId(patientId);
-  const number = parsePatientNumber(input.patientNumber), version = parseNumberingVersion(input.expectedVersion), reason = numberingReason(input.reason);
-  if (!number || !version || !reason || typeof input.expectedPatientNumber !== "string") throw new PatientNumberingError("invalid", "أدخل رقم ملف صحيحًا وسبب التعديل وأعد تحميل الرقم الحالي.");
-  return transaction(session, async client => {
-    const before = await snapshot(client, patientId, true);
-    await authorize(client, session); // expiry while waiting on the exact patient row
-    if (before.version !== version || before.patientNumber !== input.expectedPatientNumber) throw new PatientNumberingError("stale", "تغيّر رقم الملف منذ فتحه؛ حدّث الصفحة قبل المحاولة.");
-    if (before.patientNumber === number) throw new PatientNumberingError("invalid", "رقم الملف الجديد مطابق للحالي.");
-    await client.query("UPDATE patients SET patient_number=$2 WHERE id=$1", [patientId, number]);
-    const after = await snapshot(client, patientId);
-    await insertAuditRow(client, {action: "patient.number.change", entity: "patient", entityId: patientId,
-      actor: session.username, actorRole: session.role, details: {before, after, reason,
-        internalPatientIdUnchanged: true, oldNumberRetired: true}});
-    return after;
-  });
+  const change = parsePatientNumberChange(input);
+  return transaction(session, client => changePatientNumberOn(client, patientId, change,
+    {actor: session.username, actorRole: session.role},
+    () => authorize(client, session))); // expiry while waiting on the exact patient row
+}
+/**
+ * The number change on the caller's transaction, after `numberingLocks` (M2 slice 78):
+ * the patient row FOR UPDATE, `recheck` (the caller's authority after the row wait), the
+ * stale/same checks, the update and its audit row.
+ */
+export async function changePatientNumberOn(client: DbClient, patientId: number, change: PatientNumberChange,
+  actor: {actor: string; actorRole: string | null}, recheck: () => Promise<void>): Promise<PatientNumberSnapshot> {
+  const before = await snapshot(client, patientId, true);
+  await recheck();
+  if (before.version !== change.version || before.patientNumber !== change.expectedPatientNumber) throw new PatientNumberingError("stale", "تغيّر رقم الملف منذ فتحه؛ حدّث الصفحة قبل المحاولة.");
+  if (before.patientNumber === change.number) throw new PatientNumberingError("invalid", "رقم الملف الجديد مطابق للحالي.");
+  await client.query("UPDATE patients SET patient_number=$2 WHERE id=$1", [patientId, change.number]);
+  const after = await snapshot(client, patientId);
+  await insertAuditRow(client, {action: "patient.number.change", entity: "patient", entityId: patientId,
+    actor: actor.actor, actorRole: actor.actorRole, details: {before, after, reason: change.reason,
+      internalPatientIdUnchanged: true, oldNumberRetired: true}});
+  return after;
 }

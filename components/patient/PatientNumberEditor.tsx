@@ -6,7 +6,9 @@ import { isAdmin } from "@/lib/roles";
 import { parsePatientNumber, numberingReason, type PatientNumberSnapshot } from "@/lib/patient-numbering";
 
 /** Dedicated edit command: never piggyback numbering on the demographic PATCH. */
-export function PatientNumberEditor({patientId, onChanged}: {patientId: number; onChanged: () => void}) {
+/** `canManage` (M2 slice 78): the canonical file passes its capability projection
+ * (patients.number.manage or the owner); without it the legacy admin label decides. */
+export function PatientNumberEditor({patientId, onChanged, canManage}: {patientId: number; onChanged: () => void; canManage?: boolean}) {
   const session = useSession();
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false);
   const [snapshot, setSnapshot] = useState<PatientNumberSnapshot | null>(null);
@@ -50,7 +52,7 @@ export function PatientNumberEditor({patientId, onChanged}: {patientId: number; 
     } catch (cause) { if (token === generation.current) { setError(cause instanceof Error ? cause.message : "لم يتأكد الحفظ؛ حدّث الرقم قبل إعادة المحاولة."); } }
     finally { if (token === generation.current) {saving.current=false; setSavePending(false); setBusy(false);} }
   }
-  if (!session || !isAdmin(session.role)) return null;
+  if (!session || !(canManage ?? isAdmin(session.role))) return null;
   return <section className="space-y-3" aria-label="تعديل رقم ملف المريض">
     {!open && <button type="button" className="btn btn-secondary min-h-11" onClick={load}>تعديل رقم الملف</button>}
     {success && <p role="status" className="text-emerald-700">{success}</p>}

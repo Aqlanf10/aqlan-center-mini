@@ -12,6 +12,7 @@ import { CanonicalClinicalDocumentation } from "./CanonicalClinicalDocumentation
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientEndo } from "@/components/PatientEndo";
+import { PatientNumberEditor } from "@/components/patient/PatientNumberEditor";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -70,6 +71,8 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [clinicalVersion, setClinicalVersion] = useState(0);
+  const [fileVersion, setFileVersion] = useState(0);
+  const canManageNumber = session?.isOwner === true || (session?.capabilities ?? []).includes("patients.number.manage");
   const canDocument = session?.isOwner === true || (session?.capabilities ?? []).includes("clinical.visits.document");
 
   useEffect(() => {
@@ -86,7 +89,7 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [patientId]);
+  }, [patientId, fileVersion]);
 
   if (error) {
     return (
@@ -137,6 +140,10 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         <PatientEditForm patient={patient} care={projection.care} patientId={patientId}
           onCancel={() => setEditing(false)}
           onSaved={saved => { setFile(current => current ? { ...current, patient: { ...current.patient, ...saved } } : current); setEditing(false); }} />
+      ) : null}
+      {canManageNumber ? (
+        /* M2 slice 78: the dedicated number command — patients.number.manage inside the scope (server-enforced). */
+        <div data-testid="canonical-patient-number"><PatientNumberEditor key={`${patientId}:${session?.username ?? ""}`} patientId={patient.id} canManage onChanged={() => setFileVersion(version => version + 1)} /></div>
       ) : null}
       <section aria-labelledby="canonical-patient-details" className="rounded-2xl border border-slate-200 bg-white p-4">
         <div className="mb-2 flex items-center justify-between gap-2">
