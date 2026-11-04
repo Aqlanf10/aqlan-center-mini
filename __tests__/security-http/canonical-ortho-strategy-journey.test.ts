@@ -104,7 +104,7 @@ it("browser: 390px saved clinical document and exact historical selection, no ed
     if(process.env.HR_EVIDENCE_DIR){mkdirSync(process.env.HR_EVIDENCE_DIR,{recursive:true});await page.screenshot({path:join(process.env.HR_EVIDENCE_DIR,"ortho-strategy-390.png"),fullPage:true});}
     const selector=panel.getByLabel("نسخة خطة الحالة"), options=await selector.locator("option").evaluateAll(nodes=>nodes.map(n=>(n as HTMLOptionElement).value));
     await selector.selectOption(options[1]);await panel.getByText("سبب النسخة: SYN محفوظ أول",{exact:true}).waitFor();
-    expect(calls.filter(call=>!new RegExp(`^(GET /api/(auth/me|patients/${ids.own}(/(contact|timeline))?|ortho(/${ids.active}(/strategy)?)?)|POST /api/auth/login)$`).test(call))).toEqual([]);
+    expect(calls.filter(call=>!new RegExp(`^(GET /api/(auth/me|patients/${ids.own}(/(contact|timeline|family))?|ortho(/${ids.active}(/strategy)?)?)|POST /api/auth/login)$`).test(call))).toEqual([]);
   } finally {await context.close();}
   expect(await journey.ddlLog()).toEqual([]);
 });

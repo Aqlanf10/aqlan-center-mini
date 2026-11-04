@@ -91,7 +91,7 @@ it("browser: the existing editor survives parent refresh and reconciles a lost r
     expect(await panel.getByTestId("assessment-v2-draft").count()).toBe(0);
     expect((await journey.db.query("SELECT id,version,content_sha256,content FROM ortho_assessment_revisions WHERE ortho_case_id=$1 ORDER BY version",[caseId])).rows).toEqual(committed);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
-    expect(calls.filter(call=>!new RegExp(`^(GET /api/(auth/me|patients/${patientId}(/(contact|timeline))?|ortho(/${caseId}(/assessment)?)?)|POST /api/(auth/login|ortho/${caseId}/assessment))$`).test(call))).toEqual([]);
+    expect(calls.filter(call=>!new RegExp(`^(GET /api/(auth/me|patients/${patientId}(/(contact|timeline|family))?|ortho(/${caseId}(/assessment)?)?)|POST /api/(auth/login|ortho/${caseId}/assessment))$`).test(call))).toEqual([]);
   }finally{await context.close();}
   expect(await journey.ddlLog()).toEqual([]);
 });

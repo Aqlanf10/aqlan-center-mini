@@ -104,7 +104,8 @@ it("browser: an on-demand RTL summary uses only admitted reads, preserves the re
     expect(await panel.getByRole("listitem").count()).toBe(2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     expect(await page.content()).not.toMatch(/SYN-hidden-clinical-note|SYN-outside-private|مريض خارج النطاق/);
-    const allowed = new RegExp(`^GET /api/(auth/me|patients/${ids.own}(/(contact|timeline))?|ortho)$`);
+    // The family panel (M2 slice 72) reads the patient's family on every canonical file.
+    const allowed = new RegExp(`^GET /api/(auth/me|patients/${ids.own}(/(contact|timeline|family))?|ortho)$`);
     expect(calls.filter(call => !allowed.test(call))).toEqual([]); expect(failures).toEqual([]);
     if (process.env.HR_EVIDENCE_DIR) {
       mkdirSync(process.env.HR_EVIDENCE_DIR, { recursive: true });

@@ -100,7 +100,7 @@ it("browser: on-demand clinical detail fits 390px, escapes native notes and uses
     expect(await panel.locator("b").count()).toBe(0);
     expect(await panel.locator("img,a[href*='document'],button[type='submit']").count()).toBe(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-    const allowed = new RegExp(`^GET /api/(auth/me|patients/${ids.own}(/(contact|timeline))?|ortho(/${ids.active})?)$`);
+    const allowed = new RegExp(`^GET /api/(auth/me|patients/${ids.own}(/(contact|timeline|family))?|ortho(/${ids.active})?)$`);
     expect(calls.filter(call => !allowed.test(call))).toEqual([]);
     if (process.env.HR_EVIDENCE_DIR) {
       mkdirSync(process.env.HR_EVIDENCE_DIR, { recursive: true });
