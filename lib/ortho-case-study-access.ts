@@ -1,3 +1,4 @@
+import {requireStudySpacePlanRead,type StudySpacePlan} from "./ortho-study-space-plan-store";
 /** Fresh section/source authority for saved study reads, documentation and
  * export/recovery/download. Never authorizes from recorded patient identity. */
 import type { DbClient } from "./db";
@@ -16,7 +17,9 @@ export async function requireCurrentStudyRead(client: DbClient, owner: JourneyOw
   for (const source of saved.sources) {
     if (source.access.images && !authority.canViewImages || source.access.plans && !authority.canViewPlans) journeyFail(403, "study_section_restricted");
     if (source.state !== "available") continue;
-    if (source.selection.kind === "problem_review") {
+    if (source.selection.kind === "space_plan") {
+      await requireStudySpacePlanRead(client,owner,authority,source.payload as StudySpacePlan,assessmentAccess);
+    } else if (source.selection.kind === "problem_review") {
       await requireStudyProblemReviewRead(client, owner, authority, source.payload as StudyProblemReview, assessmentAccess);
     } else if (source.selection.kind === "assessment") {
       const parsed = decodeAnyAssessmentRevision(source.payload, { patientId: saved.recordedPatientId,

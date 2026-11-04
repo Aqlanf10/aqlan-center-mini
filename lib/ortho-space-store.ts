@@ -5,20 +5,7 @@ import { journeyClinicalSources } from "./ortho-case-journey-clinical-sources";
 import { createStudyAssessmentAccess, prepareStudyAssessmentAccess, lockStudySourceUnion, requirePreparedAssessmentAccess } from "./ortho-case-study-assessment-access";
 import { readSpaceCommand, projectIpr, contactKey, iprReviewNeeded, spaceBudget, type SpacePlan } from "./ortho-space-ledger";
 import { readSpaceSavedContent, type SpaceSavedContent } from "./ortho-space-saved";
-import type { AnyAssessmentRevision } from "./ortho-assessment-persisted-v2";
-import type { ProblemSourceRef } from "./ortho-problem-sources";
-function baselines(revisions: AnyAssessmentRevision[]) {
-  return revisions.flatMap(r => r.schemaVersion !== 2 ? [] : r.content.results.flatMap(result => {
-    if (result.result.state !== "ready" || result.result.witness.result.state !== "calculated") return [];
-    const n = result.result.witness.result;
-    if (n.method !== "arch_space" && n.method !== "tanaka_johnston_1974_approximation_v1") return [];
-    const selection = r.content.draft.analyses.find(a => a.id === result.analysisId);
-    if (!selection || !("arch" in selection)) return [];
-    return [{ ref: { kind: "assessment_analysis", id: r.id, member: result.analysisId, version: `sha256:${r.contentHash}` } as ProblemSourceRef,
-      arch: selection.arch, discrepancyMm: n.method === "arch_space" ? n.availableMinusRequiredMm : n.availableMinusEstimatedRequiredMm,
-      estimated: n.method !== "arch_space", revision: r }];
-  }));
-}
+import { spaceBaselines } from "./ortho-space-baselines";
 type Adjustment = { id: number; visit_id: number | null; done_on: string; recorded_by: string };
 async function prepare(client: DbClient, input: JourneyOwnerInput, write: boolean, command?: ReturnType<typeof readSpaceCommand> & { ok: true }) {
   const authority = await authorizeJourney(client, input, write);
@@ -27,7 +14,7 @@ async function prepare(client: DbClient, input: JourneyOwnerInput, write: boolea
   const history = await journeyHistory(client, "ortho_space_entries", discovered, readSpaceSavedContent);
   const cache = createStudyAssessmentAccess();
   const sources = await journeyClinicalSources(client, discovered, authority, ["assessment", "strategy"], cache, true);
-  const allBaselines = baselines(sources.assessments);
+  const allBaselines = spaceBaselines(sources.assessments);
   const latestAssessmentVersion = Math.max(0, ...sources.assessments.map(r => r.version), ...sources.unavailableAssessments.values());
   const latestAssessment = sources.assessments.find(r => r.version === latestAssessmentVersion);
   const plans = history.revisions.map(r => r.content.authored).filter((p): p is SpacePlan => p.kind === "plan");

@@ -1,3 +1,8 @@
+import {getOrthoStudySourceChoices} from "../../lib/ortho-case-study-inventory";
+import {saveOrthoCaseStudy,getOrthoCaseStudy} from "../../lib/ortho-case-study-store";
+import {CASE_TEMPLATE_VERSION} from "../../lib/ortho-case-template";
+import {STUDY_TEMPLATE_HASH} from "../../lib/ortho-case-study-template";
+import {projectStudyRecordedFacts} from "../../lib/ortho-case-study-recorded-facts";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createSessionToken, sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
@@ -105,4 +110,37 @@ it("moves the current owner during an explicit patient merge while preserving re
   const scope = { ...p.scope, patientId: target };
   expect(await getOrthoSpaceLedger(scope)).toMatchObject({ ok: true, patientId: target, ipr: { totals: [{ performedUm: 100 }] } });
   expect(await appendOrthoSpaceEntry({ ...scope, command })).toMatchObject({ ok: true, replayed: true, revision: { id: saved.revision.id, patientId: target, recordedPatientId: p.scope.patientId } });
+});
+
+it("captures an explicit saved space plan in the study and preserves the old budget after a newer plan",async()=>{
+ const p=await prepared();
+ const inventory=await getOrthoStudySourceChoices({...p.scope,kind:"space_plan"});if(!inventory.ok||inventory.state!=="available")throw Error("missing space choices");
+ expect(inventory.choices).toHaveLength(1);const selection=inventory.choices[0].selection!;
+ const command={schemaVersion:1,clientRequestId:randomUUID(),expectedHead:null,baseDocumentedRevision:null,kind:"draft",documentedFrom:null,reason:"Synthetic captured space budget",
+  content:{template:{key:"full-orthodontic-case",version:CASE_TEMPLATE_VERSION,contentHash:STUDY_TEMPLATE_HASH},identityDisclosure:"case_only",sources:[selection],groups:[],mediaUses:[],comment:"",
+   panels:[{instanceId:"space",layoutKey:"model-measurements",included:true,state:"available",sourceKeys:[selection.key],images:[],comment:""}]}};
+ const saved=await saveOrthoCaseStudy({...p.scope,command});if(!saved.ok)throw Error(saved.code);
+ const before=projectStudyRecordedFacts(saved.revision.content,p.scope,"space","draft");expect(JSON.stringify(before)).toContain("-1.7");
+ const revised=await appendOrthoSpaceEntry({...p.scope,command:{...p.command,clientRequestId:randomUUID(),expectedHeadId:p.plan.revision.id,content:{...p.command.content,contacts:[{...p.command.content.contacts[0],budgetGainUm:200}]}}});if(!revised.ok)throw Error(revised.code);
+ const old=await getOrthoCaseStudy({...p.scope,revisionId:saved.revision.id});if(!old.ok||!old.revision)throw Error("missing saved study");
+ expect(projectStudyRecordedFacts(old.revision.content,p.scope,"space","draft")).toEqual(before);
+ const forged=await saveOrthoCaseStudy({...p.scope,command:{...command,clientRequestId:randomUUID(),expectedHead:old.head,content:{...command.content,sources:[{...selection,contentHash:"f".repeat(64)}]}}});expect(forged).toMatchObject({ok:false});
+ const foreign=await prepared();request.token=createSessionToken(p.scope.session);
+ const swapped=await saveOrthoCaseStudy({...p.scope,command:{...command,clientRequestId:randomUUID(),expectedHead:old.head,content:{...command.content,sources:[{...selection,id:foreign.plan.revision.id,contentHash:foreign.plan.revision.contentHash}]}}});
+ expect(swapped).toMatchObject({ok:false});
+ const password='synthetic-space-reader',username=`space-reader-${randomUUID()}`;
+ const user=(await f.pool.query("INSERT INTO users(username,display_name,password_hash,role,permissions) VALUES($1,'Synthetic space reader',$2,'doctor',$3) RETURNING id",[username,password,JSON.stringify({canViewAllPatients:true,canViewPlans:true})])).rows[0];
+ const actor:SessionPayload={userId:user.id,username,role:'doctor',credentialVersion:sessionCredentialVersion(password),expiresAt:Date.now()+600000};request.token=createSessionToken(actor);
+ const scope={...p.scope,session:actor};
+ expect(await getOrthoCaseStudy({...scope,revisionId:saved.revision.id})).toMatchObject({ok:true});
+ await f.pool.query('UPDATE users SET permissions=$1 WHERE id=$2',[JSON.stringify({canViewAllPatients:true,canViewPlans:false}),user.id]);
+ expect(await getOrthoStudySourceChoices({...scope,kind:'space_plan'})).toMatchObject({ok:true,state:'restricted',choices:[]});
+ expect(await getOrthoCaseStudy({...scope,revisionId:saved.revision.id})).toMatchObject({ok:false,status:403});
+ request.token=createSessionToken(p.scope.session);
+ const target=(await f.pool.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic study merge target') RETURNING id",[`SYN-STUDY-MERGE-${randomUUID()}`])).rows[0].id;
+ expect(await f.db.mergeDuplicatePatient(p.scope.patientId,target,{actor:p.scope.session.username,reason:'Synthetic documented patient merge'})).toMatchObject({ok:true});
+ const mergedScope={...p.scope,patientId:target},merged=await getOrthoCaseStudy({...mergedScope,revisionId:saved.revision.id});
+ if(!merged.ok||!merged.revision)throw Error('merged study unavailable');
+ expect(merged.revision.recordedPatientId).toBe(p.scope.patientId);
+ expect(projectStudyRecordedFacts(merged.revision.content,mergedScope,'space','draft')).toEqual(before);
 });

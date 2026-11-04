@@ -1,3 +1,4 @@
+import {readSpaceSavedContent} from "./ortho-space-saved";
 import { readStudyProblemReview } from "./ortho-study-problem-review";
 import { permitsOrthoDocumentation, orthoDocumentationContext } from "./ortho-documentation-context";
 import type { CaseStatus as OrthoLifecycleStatus } from "./ortho";
@@ -49,7 +50,11 @@ function envelope(raw: unknown, scope: JourneyScope, selection: StudySourceSelec
 }
 function payload(raw: unknown, scope: JourneyScope, s: StudySourceSelection): { value: unknown; images: boolean; plans: boolean } {
   let value: unknown = raw, images = false, plans = false;
-  if (s.kind === "problem_review") {
+  if (s.kind === "space_plan") {
+    const r=envelope(raw,scope,s),parsed=readSpaceSavedContent(r.content);
+    if(!parsed.ok||parsed.value.authored.kind!=="plan")fail();
+    same(r.content,parsed.value);plans=true;
+  } else if (s.kind === "problem_review") {
     const result = readStudyProblemReview(raw, scope);
     if (result.id !== s.id || s.version !== null || journeyContentHash(result) !== s.contentHash) fail();
     value = result; images = result.source.requiresImages;

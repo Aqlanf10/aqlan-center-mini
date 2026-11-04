@@ -125,6 +125,7 @@ const sourceNames: Record<StudySourceKind, readonly [string, string]> = {
     "جلسات المتابعة",
     "Follow-up sessions"
   ],
+  "space_plan": ["ميزانية المسافات المخططة", "Planned space budget"],
   "problem_review": ["مراجعة مصدر المشكلة", "Problem source review"],
   "plan_consent": [
     "الخطة والموافقة المسجلة",

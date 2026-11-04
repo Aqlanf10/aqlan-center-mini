@@ -5,7 +5,7 @@ import { parseOrthoStudyMediaUses, type OrthoStudyMediaUseDraft } from "./ortho-
 import { readOccurrenceEvidence, type OccurrenceEvidence } from "./ortho-case-occurrence";
 import { journeyHash, journeyId, type Checked } from "./ortho-case-journey-records";
 export const STUDY_TEMPLATE_KEY = "full-orthodontic-case" as const;
-export const STUDY_SOURCE_KINDS = ["assessment", "diagnosis", "strategy", "decision", "retention_event", "document", "ceph_study", "adjustment", "plan_consent", "problem_review"] as const;
+export const STUDY_SOURCE_KINDS = ["assessment", "diagnosis", "strategy", "decision", "retention_event", "document", "ceph_study", "adjustment", "plan_consent", "problem_review", "space_plan"] as const;
 export type StudySourceKind = typeof STUDY_SOURCE_KINDS[number];
 export interface StudySourceSelection { key: string; kind: StudySourceKind; id: number; version: number | null; contentHash: string }
 export interface StudyGroupDraft { id: string; label: string; occurrence: OccurrenceEvidence; phase: string | null; sourceKeys: string[] }
@@ -54,7 +54,7 @@ export function readStudyDraftContent(raw: unknown): StudyDraftContent {
   const sources = unique(list(c.sources, STUDY_LIMITS.sources, rawSource => {
     const s = obj(rawSource, ["key", "kind", "id", "version", "contentHash"]);
     if (typeof s.kind !== "string" || !STUDY_SOURCE_KINDS.includes(s.kind as StudySourceKind)) return fail("invalid_study_source_kind");
-    const versioned = ["assessment", "diagnosis", "strategy", "decision", "retention_event"].includes(s.kind);
+    const versioned = ["assessment", "diagnosis", "strategy", "decision", "retention_event", "space_plan"].includes(s.kind);
     if (versioned ? !journeyId(s.version) : s.version !== null) return fail("invalid_study_source_version");
     return { key: key(s.key), kind: s.kind as StudySourceKind, id: id(s.id), version: versioned ? id(s.version) : null, contentHash: hash(s.contentHash) };
   }), s => s.key);

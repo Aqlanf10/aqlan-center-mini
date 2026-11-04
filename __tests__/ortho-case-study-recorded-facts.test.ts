@@ -62,7 +62,7 @@ describe("captured source-specific display without new clinical inference", () =
   });
 });
 
-function documentary(kind: "decision" | "retention_event", content: unknown, layoutKey: string): StudySavedContent {
+function documentary(kind: "decision" | "retention_event" | "space_plan", content: unknown, layoutKey: string): StudySavedContent {
   const study = diagnosis(), selection = { key: `${kind}_91`, kind, id: 91, version: 1, contentHash: journeyContentHash(content) };
   study.authored.sources = [selection]; study.authored.panels[0] = { ...study.authored.panels[0], layoutKey, sourceKeys: [selection.key] };
   study.sources = [{ selection, state: "available", unavailableReason: null, access: { images: false, plans: false }, payload: {
@@ -179,4 +179,19 @@ it("preserves plan item/consent scope without allowing injected financial fields
   const text = JSON.stringify(projectStudyRecordedFacts(input, scope, "diagnosis_panel", "draft").blocks);
   expect(text).toContain("selected_clinical_case_only"); expect(text).toContain("existing_whole_plan_observation"); expect(text).toContain("not_recorded"); expect(text).not.toContain("price");
   input.sources[0].payload = { ...payload, price: 999 }; expect(() => projectStudyRecordedFacts(input, scope, "diagnosis_panel", "draft")).toThrow();
+});
+
+it("projects a selected space plan without turning estimates into performed IPR or filling unknowns",()=>{
+ const content={authored:{kind:"plan",arch:"upper",strategyRevisionId:5,baseline:{kind:"assessment_analysis",id:7,member:"upper",version:`sha256:${"a".repeat(64)}`},
+  gains:[],uses:[],contacts:[{teeth:[11,12],plannedUm:500,budgetGainUm:300,clinicianLimitUm:600,note:"Synthetic confirmed contact"}],rationale:"Synthetic plan",alternatives:"Synthetic alternatives"},baseline:{discrepancyMm:-2,estimated:true},adjustment:null};
+ const input=documentary("space_plan",content,"model-measurements");input.sources[0].access.plans=true;
+ const result=projectStudyRecordedFacts(input,scope,"diagnosis_panel","draft"),text=JSON.stringify(result.blocks);
+ expect(result.complete).toBe(true);expect(text).toContain("-1.7");expect(text).toContain("0.3");expect(text).toContain("0.5");expect(text).toContain("مساحة أسنان مقدرة");expect(text).toContain("لا تثبت تحقق الحركة أو تنفيذ IPR");
+ const unknown=structuredClone(content) as typeof content & {authored:{contacts:{budgetGainUm:number|null}[]}};
+ // Null is part of the domain, not a zero-valued planning shortcut.
+ const missingContent={...unknown,authored:{...unknown.authored,contacts:unknown.authored.contacts.map(c=>({...c,budgetGainUm:null}))}};
+ const missing=documentary("space_plan",missingContent,"model-measurements");missing.sources[0].access.plans=true;
+ const rows=projectStudyRecordedFacts(missing,scope,"diagnosis_panel","draft").blocks.flatMap(b=>b.kind==="table"?b.rows:[]);
+ expect(rows.find(r=>r.cells[0]==="الرصيد التقديري mm")?.cells[1]).toBe("غير مسجل");
+ expect(()=>projectStudyRecordedFacts({...input,sources:[{...input.sources[0],access:{images:false,plans:false}}]},scope,"diagnosis_panel","draft")).toThrow();
 });

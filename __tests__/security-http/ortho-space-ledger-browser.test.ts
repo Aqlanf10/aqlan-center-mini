@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
+import JSZip from "jszip";
 import { Client } from "pg";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -112,6 +113,39 @@ it.each([390, 1280])("saves a linked space plan, documents IPR in two actual ses
     expect((await authedGet(`/api/ortho/${ortho}/space-ledger?patientId=${patient}`, h.sessions.accountant)).status).toBe(403);
     expect((await authedMutation(`/api/ortho/${ortho}/space-ledger`, h.sessions.reception, 'POST', JSON.stringify({ patientId: patient, command: {} }))).status).toBe(403);
     expect((await db.query("SELECT (SELECT count(*)::int FROM invoices WHERE patient_id=$1) invoices,(SELECT count(*)::int FROM payments WHERE patient_id=$1) payments,(SELECT count(*)::int FROM visits WHERE patient_id=$1) visits", [patient])).rows).toEqual([{ invoices: 0, payments: 0, visits: 2 }]);
+    // Select the existing immutable plan; never retype its measurements or
+    // confuse planned 0.3 mm with the corrected performed 0.25 mm above.
+    await page.getByRole('button', { name: /عرض الحالة/ }).click();
+    const study=page.getByRole('region',{name:'دراسة حالة التقويم',exact:true});
+    await study.getByLabel('إضافة المرجع إلى القسم',{exact:true}).selectOption('section_7');
+    await study.getByLabel('نوع مصدر الدراسة',{exact:true}).selectOption('space_plan');
+    const choices=study.getByRole('group',{name:'اختيار مصدر حقيقي',exact:true}).getByRole('button',{name:'اختيار',exact:true});
+    await expect.poll(()=>choices.count()).toBe(1);await choices.click();
+    await study.getByLabel('سبب حفظ النسخة',{exact:true}).fill('Synthetic saved planned space budget');
+    const saved=page.waitForResponse(r=>r.url().includes(`/ortho/${ortho}/case-study/editor`)&&r.request().method()==='POST');
+    await study.getByRole('button',{name:'حفظ مسودة الدراسة',exact:true}).click();expect((await saved).status()).toBe(201);
+    const review=study.getByRole('region',{name:'مراجعة الدراسة المحفوظة',exact:true});
+    await review.getByRole('combobox',{name:'القسم المحفوظ المعروض',exact:true}).selectOption('section_7');
+    await expect.poll(()=>review.innerText()).toContain('-1.7');
+    expect(await review.innerText()).toContain('تقديرات الطبيب لا تثبت تحقق الحركة أو تنفيذ IPR');
+    expect(await review.innerText()).toContain('0.3');expect(await review.innerText()).not.toContain('0.25');
+    await study.getByLabel('سبب حفظ النسخة',{exact:true}).fill('Synthetic documentary review of planned budget');
+    const documented=page.waitForResponse(r=>r.url().includes(`/ortho/${ortho}/case-study/editor`)&&r.request().method()==='POST');
+    await study.getByRole('button',{name:'توثيق النسخة المحفوظة نفسها',exact:true}).click();expect((await documented).status()).toBe(201);
+    const href=await study.getByRole('link',{name:'PowerPoint نصي قابل للتحرير',exact:true}).getAttribute('href');
+    const exported=await context.request.get(new URL(href!,baseUrl).href);expect(exported.status()).toBe(200);
+    const zip=await JSZip.loadAsync(await exported.body());
+    const slides=Object.keys(zip.files).filter(key=>/^ppt\/slides\/slide\d+\.xml$/.test(key));
+    const xml=(await Promise.all(slides.map(key=>zip.file(key)!.async('text')))).join('\n');
+    expect(xml).toContain('-1.7');expect(xml).toContain('ميزانية مسافات مخططة محفوظة');
+    await page.reload();
+    // The original URL explicitly opens the prescription pillar. Reopen the
+    // study after reload before verifying its persisted documentary version.
+    await page.getByRole('button',{name:/عرض الحالة/}).click();
+    await review.getByRole('combobox',{name:'القسم المحفوظ المعروض',exact:true}).selectOption('section_7');
+    await expect.poll(()=>review.innerText()).toContain('-1.7');
+    await review.scrollIntoViewIfNeeded();await page.screenshot({path:`.settings-ui-artifacts/ortho-space-study-${width}.png`});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
     expect(errors).toEqual([]);
   } catch (e) { await page.screenshot({ path: `.settings-ui-artifacts/ortho-space-ledger-failure-${width}.png`, fullPage: true }); throw e; }
   finally { await context.close(); }

@@ -1,3 +1,5 @@
+import {readSpaceSavedContent} from "./ortho-space-saved";
+import {spaceBudget} from "./ortho-space-ledger";
 /** First source-specific semantic projection, working/unreviewed.
  * Captured facts only. Current authorization belongs to the caller's locked reader.
  * No source fetch, clinical inference, approval, formatting of money or render job. */
@@ -46,7 +48,22 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
     if (!captured) throw new Error("study_source_binding_missing");
     if (captured.state !== "available") { unavailable.push({ sourceKey: key, reason: captured.unavailableReason ?? "source_unavailable" }); continue; }
     const source = captured.selection, value = record(captured.payload);
-    if (source.kind === "problem_review" && ["diagnosis", "objectives", "problem-plan-strategy"].includes(panel.layoutKey)) {
+    if (source.kind === "space_plan" && ["model-measurements", "cast-analysis", "problem-plan-strategy", "mechanotherapy"].includes(panel.layoutKey)) {
+      const parsed=readSpaceSavedContent(value.content);
+      if(!parsed.ok||parsed.value.authored.kind!=="plan"||!parsed.value.baseline)throw Error("invalid_space_plan_projection");
+      const plan=parsed.value.authored,baseline=parsed.value.baseline,budget=spaceBudget(plan,baseline.discrepancyMm);
+      const mm=(um:number|null)=>um===null?null:um/1000;
+      paragraph(key,"ميزانية مسافات مخططة محفوظة؛ تقديرات الطبيب لا تثبت تحقق الحركة أو تنفيذ IPR. الرصيد التقديري = فرق خط الأساس + المكاسب المدرجة − الاستخدامات الإضافية، بوحدة mm.");
+      table(key,[["الفك",plan.arch==="upper"?"العلوي":"السفلي"],["نسخة سجل المسافات",value.version],["مسجل الخطة",value.createdBy],["تاريخ تسجيلها",value.createdAt],
+        ["مرجع التقييم",plan.baseline.id],["معرف التحليل",plan.baseline.member],["بصمة نسخة التقييم",plan.baseline.version],["نسخة الاستراتيجية المرتبطة",plan.strategyRevisionId],
+        ["طبيعة خط الأساس",baseline.estimated?"فرق يعتمد على مساحة أسنان مقدرة":"فرق قياسات مسجلة"],["فرق خط الأساس mm",budget.baselineDiscrepancyMm],
+        ["مساهمة IPR الإضافية المخططة بعد خط الأساس mm",mm(budget.iprUm)],["مجموع المكاسب المخططة المدرجة mm",mm(budget.gainsUm)],["الاستخدامات الإضافية المخططة mm",mm(budget.usesUm)],["الرصيد التقديري mm",budget.estimatedBalanceMm],
+        ["مبرر الخطة",plan.rationale],["البدائل الموثقة",plan.alternatives]]);
+      for(const gain of plan.gains)table(key,[["المكسب",gain.label],["الطريقة المسجلة",gain.method],["التقدير mm",mm(gain.estimateUm)],["مجموعة التداخل",gain.overlapGroup],["مدرج في الجمع",gain.included?"نعم":"لا"],["مبرر التقدير",gain.rationale]]);
+      for(const use of plan.uses)table(key,[["الاستخدام الإضافي",use.label],["المقدار المخطط mm",mm(use.amountUm)]]);
+      for(const contact of plan.contacts)table(key,[["السنّان المسجلان FDI",contact.teeth.join(" — ")],["IPR المخطط التراكمي للتماس mm",mm(contact.plannedUm)],["المساهمة الإضافية بعد خط الأساس mm",mm(contact.budgetGainUm)],["حد الطبيب المسجل mm",mm(contact.clinicianLimitUm)],["ملاحظة الطبيب",contact.note]]);
+      paragraph(key,"المقدار المجهول يظهر غير مسجل ولا يعامل كصفر. حد الطبيب ليس معيار أمان آلياً، وأرقام الأسنان لا تثبت تجاورها. المنفذ الفعلي وتعديلاته يُراجعان في سجل الجلسات ولا يُستنتجان من هذه الخطة.");
+    } else if (source.kind === "problem_review" && ["diagnosis", "objectives", "problem-plan-strategy"].includes(panel.layoutKey)) {
       const item = readStudyProblemReview(value, { ...scope, patientId: study.recordedPatientId }), evidence = item.source;
       table(key, [["معرف المشكلة المشتركة", item.problemId], ["نص المشكلة وقت مراجعة هذا المصدر", item.problemLabelAtReview],
         ["معرف مراجعة المصدر", item.id], ["المراجع", item.reviewedBy], ["معرف المراجع", item.actorId],

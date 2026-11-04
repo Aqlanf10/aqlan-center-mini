@@ -22,6 +22,8 @@ async function candidates(client: DbClient, owner: JourneyOwner, kind: StudySour
     const table = versioned[kind as keyof typeof versioned];
     return (await client.query<Candidate>(`SELECT id,version FROM ${table} WHERE ortho_case_id=$1 AND id>$2 ORDER BY id LIMIT 26`, [owner.orthoCaseId, afterId])).rows;
   }
+  if (kind === "space_plan") return (await client.query<Candidate>(`SELECT id,version FROM ortho_space_entries
+    WHERE patient_id=$1 AND ortho_case_id=$2 AND clinical_case_id=$3 AND id>$4 AND content->'authored'->>'kind'='plan' ORDER BY id LIMIT 26`, [owner.patientId, owner.orthoCaseId, owner.clinicalCaseId, afterId])).rows;
   if (kind === "problem_review") return (await client.query<Candidate>(`SELECT id,NULL::integer AS version FROM ortho_problem_source_reviews
     WHERE patient_id=$1 AND ortho_case_id=$2 AND clinical_case_id=$3 AND id>$4 ORDER BY id LIMIT 26`, [owner.patientId, owner.orthoCaseId, owner.clinicalCaseId, afterId])).rows;
   if (kind === "document") return (await client.query<Candidate>(`SELECT id,NULL::integer AS version FROM patient_documents
@@ -40,7 +42,7 @@ export async function getOrthoStudySourceChoices(input: JourneyOwnerInput & { ki
       || input.afterId !== undefined && !journeyId(input.afterId)) journeyFail(400, "invalid_study_inventory_query");
     const authority = await authorizeJourney(client, input, false), discovered = await discoverJourneyOwner(client, input);
     if ((input.kind === "document" || input.kind === "ceph_study") && !authority.canViewImages
-      || input.kind === "plan_consent" && !authority.canViewPlans) {
+      || (input.kind === "plan_consent" || input.kind === "space_plan") && !authority.canViewPlans) {
       const owner = await lockJourneyOwner(client, input, false);
       if (owner.clinicalCaseId !== discovered.clinicalCaseId) journeyFail(409, "study_owner_changed");
       assertJourneyCurrent(authority);
