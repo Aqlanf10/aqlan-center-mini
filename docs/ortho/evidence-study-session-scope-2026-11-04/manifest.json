@@ -1,0 +1,144 @@
+{
+  "applicationCommit": "887ec24bc9265941e48c492255f8e803370a6f41",
+  "baseCommit": "07006cc40d2a5b5d4bd0b7597853f6c71a3ea156",
+  "buildId": "Lg2hUsmY18FRf8W84baBA",
+  "recordedAtUtc": "2026-11-04T03:41:37.757306+00:00",
+  "scope": "Explicit Ortho session authority separate from full clinical visit authority. No data writes in source reads; no schema/clinical formula change. Not full-module acceptance.",
+  "tests": {
+    "focusedUnit": {
+      "passed": 165,
+      "files": 16
+    },
+    "allUnit": {
+      "passed": 14108,
+      "files": 826,
+      "seconds": 568.63
+    },
+    "postgresDistinct": {
+      "passed": 28,
+      "files": 3,
+      "finalConcurrencyRerunPassed": 8
+    },
+    "http": {
+      "passed": 8,
+      "files": 3
+    },
+    "buildAndTypecheck": "passed",
+    "changedFileLint": "passed; no warnings",
+    "runtimeBraces": "passed",
+    "runtimeLintInputs": "passed"
+  },
+  "files": [
+    {
+      "path": "phase19-session-scope-red.log",
+      "bytes": 1630,
+      "sha256": "b10d020421cdd664988606a7916988831ae72e4f25f24793c7a40f085421e091",
+      "rawSha256": "b10d020421cdd664988606a7916988831ae72e4f25f24793c7a40f085421e091",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-session-scope-pg.log",
+      "bytes": 1861,
+      "sha256": "3abca791de5829487edb8cf2f4d5d10acf687c9ce16f5ad7ecea163d2356ea77",
+      "rawSha256": "3abca791de5829487edb8cf2f4d5d10acf687c9ce16f5ad7ecea163d2356ea77",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-session-scope-pg-accepted.log",
+      "bytes": 782,
+      "sha256": "784625b1356c531360e0732887b7325e957f788c3f833a9692e6b42d88913f5f",
+      "rawSha256": "784625b1356c531360e0732887b7325e957f788c3f833a9692e6b42d88913f5f",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-session-concurrency-pg.log",
+      "bytes": 673,
+      "sha256": "39130e51d65b6191e2847f67ac2f7305c35496767de32c99874b6d0a0a4644bf",
+      "rawSha256": "39130e51d65b6191e2847f67ac2f7305c35496767de32c99874b6d0a0a4644bf",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-unit.log",
+      "bytes": 636,
+      "sha256": "bb3d194406d20671cf4317d39791d3c9bce18d69790f9a937031814976547439",
+      "rawSha256": "bb3d194406d20671cf4317d39791d3c9bce18d69790f9a937031814976547439",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-full-unit.log",
+      "bytes": 1275,
+      "sha256": "7f0f4980238bfad9e5a66e3ff08076e35b4e5281a38b2656573570ee6b5d83e4",
+      "rawSha256": "7f0f4980238bfad9e5a66e3ff08076e35b4e5281a38b2656573570ee6b5d83e4",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-build.log",
+      "bytes": 2255,
+      "sha256": "5c4f9c2a8c96a95371e529ce800517e2e1292473d83aa5e4e4e6ee343ff2a77b",
+      "rawSha256": "96bd8c64d044a933e81c628354023393742369cb2c76ac59eb70f3bfd522e50e",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-build-final.log",
+      "bytes": 13581,
+      "sha256": "d5679038d753c970a4d01a23c0e6a9aab508651882d65a3cf4fcda07e5ba2e6d",
+      "rawSha256": "029ee5689342ff9070140719ba7a5d07975966c8105fa19c4d1d53d229b2aee4",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-lint-final.log",
+      "bytes": 209,
+      "sha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "rawSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-http.log",
+      "bytes": 890,
+      "sha256": "5537149fe997c8fa6ea5891ba07881356a51daa059e0ed2405adccc5c87b8ba7",
+      "rawSha256": "5537149fe997c8fa6ea5891ba07881356a51daa059e0ed2405adccc5c87b8ba7",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-preflight.log",
+      "bytes": 998,
+      "sha256": "a44b634f03d597f3eff7d51671ee11125dae62fc9d1f57a5c11df56edd21a8b5",
+      "rawSha256": "a44b634f03d597f3eff7d51671ee11125dae62fc9d1f57a5c11df56edd21a8b5",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-runtime-braces.log",
+      "bytes": 108,
+      "sha256": "d0813c01d2850a593154a4b1ff3abca4f3332a789878484f5811846b9790c531",
+      "rawSha256": "d0813c01d2850a593154a4b1ff3abca4f3332a789878484f5811846b9790c531",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase19-runtime-lint.log",
+      "bytes": 137,
+      "sha256": "dbf824870415aba6c7359829cee078d2249e0ed1aba4fb5ca733dc4d3b498e3e",
+      "rawSha256": "dbf824870415aba6c7359829cee078d2249e0ed1aba4fb5ca733dc4d3b498e3e",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    }
+  ],
+  "sourceHashes": {
+    "__tests__/postgres/ortho-journey-integration.test.ts": "f61ab6d512781a2d9e353e1b8a2c58630203267e1fceac3ee813982434ee8013",
+    "__tests__/security-http/ortho-space-ledger-browser.test.ts": "25bb144e213b45a478642b2a95d449c519da453492cd126c997d4288518302cf",
+    "lib/ortho-case-study-access.ts": "7d93fa7247eeeed87fe6cb03a2c2f543eeb58d0bab34fa36b0910486b6c34215",
+    "lib/ortho-case-study-assessment-access.ts": "7f8aea10f7b351ac911c26780f36fa497b9e76728af1f6d7ec0927c127801057",
+    "lib/ortho-case-study-source-union.ts": "7bbe889b100446d19f2e4263d07ff853be7c341c25b40ac875b4cb8425cfaa65",
+    "lib/ortho-case-study-sources.ts": "8791bc9502728958b590e9683b69ed6674b89c57947cd83088570d0395a2301d"
+  },
+  "ciAtCapture": {
+    "runId": 41766831339,
+    "head": "07006cc4",
+    "unit": "passed",
+    "typecheck": "passed",
+    "lint": "passed",
+    "dependencyAudit": "passed",
+    "productionBuild": "passed",
+    "postgres": "in progress",
+    "runtimeProof": "in progress",
+    "notAttributedToThisCommit": true
+  }
+}

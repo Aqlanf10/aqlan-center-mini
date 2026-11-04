@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-case-study __tests__/ortho-study __tests__/ortho-case-journey __tests__/ortho-assessment-versioned-sources.test.ts __tests__/audit-coverage.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+
+ Test Files  16 passed (16)
+      Tests  165 passed (165)
+   Start at  03:28:50
+   Duration  13.85s (transform 3.85s, setup 0ms, import 9.80s, tests 979ms, environment 2ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

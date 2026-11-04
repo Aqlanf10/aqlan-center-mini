@@ -1,0 +1,58 @@
+
+> aqlan-center@0.1.0 build
+> next build
+
+▲ Next.js 16.4.2 (Turbopack)
+✓ Running next.config.ts took 33ms
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: 33554432
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 16.1s
+  Running TypeScript ...
+__tests__/postgres/ortho-journey-integration.test.ts(119,68): error TS2345: Argument of type 'DbPool' is not assignable to parameter of type 'DbClient'.
+  Property 'release' is missing in type 'DbPool' but required in type 'DbClient'.
+Failed to type check.
+
+Turbopack build encountered 1 warning:
+./lib/migration-files.ts:37:25
+Warning: Dynamic filesystem access causes tracing of the whole project
+  35 | export async function loadMigrationFiles(dir?: string): Promise<MigrationFile[]> {
+  36 |   const resolved = dir ?? defaultMigrationsDir();
+> 37 |   const entries = await readdir(resolved);
+     |                         ^^^^^^^^^^^^^^^^^
+  38 |   const files: MigrationFile[] = [];
+  39 |   for (const filename of entries) {
+  40 |     const match = MIGRATION_FILENAME_PATTERN.exec(filename);
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: fs.readdir(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  #1 [App Route]:
+    ./lib/migration-files.ts
+    ./lib/backupVolume.ts
+    ./app/api/internal/backup/run/route.ts
+
+  #2 [App Route]:
+    ./lib/migration-files.ts
+    ./lib/db.ts
+    ./app/api/settings/route.ts
+
+  #3 [Server Component]:
+    ./lib/migration-files.ts
+    ./lib/db.ts
+    ./app/layout.tsx
+
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
