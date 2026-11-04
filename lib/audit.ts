@@ -115,7 +115,7 @@ export type AuditAction =
   // ── من مستودع الوكيل الآخر: بوابة التسعير، نسب الإهلاك، الوصفات، النسخة الكاملة ──
   | "services.price_batch" | "services.provisional"
   | "material_rate.set" | "material_rate.clear"
-  | "prescription.create" | "prescription.void"
+  | "prescription.create" | "prescription.void" | "radiology_request.create" | "radiology_request.print"
   | "referral.create" | "referral.complete" | "referral.cancel"
   /* (REF-1) خطوات الإحالة الداخلية. */
   | "referral.accept" | "referral.decline" | "referral.schedule" | "referral.return"
@@ -326,6 +326,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "services.provisional": "ملء أسعار تخمينية موسومة",
   "material_rate.set": "تحديد نسبة إهلاك مواد",
   "material_rate.clear": "محو نسبة إهلاك مواد",
+  "radiology_request.print": "طباعة طلب أشعة محفوظ",
+  "radiology_request.create": "إصدار طلب أشعة محفوظ",
   "prescription.create": "إصدار وصفة موثّقة",
   "prescription.void": "إبطال وصفة بسببها",
   "referral.create": "إحالة مريض إلى أخصائي",

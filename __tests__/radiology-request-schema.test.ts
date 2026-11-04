@@ -1,0 +1,20 @@
+/** Bounded in-memory SQL-shape compatibility only; NOT native PostgreSQL/restore proof. */
+import { PGlite } from '@electric-sql/pglite';
+import { beforeAll, afterAll, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { RADIOLOGY_REQUEST_SQL } from '../lib/radiology-request-schema';
+import { RADIOLOGY_REQUEST_MIGRATIONS, validateRadiologyRequestMigration } from '../lib/radiology-request-migration';
+import type { DbClient } from '../lib/db';
+let db:PGlite;
+const KEY='11111111-1111-4111-8111-111111111111';
+const snapshot={version:1,patientId:1,visitId:3,doctorId:2,centerId:'22222222-2222-7222-8222-222222222222',examination:'Synthetic examination',region:'Synthetic region',notes:'',patientName:'Synthetic patient',doctorName:'Synthetic doctor',centerName:'Synthetic center',centerAddress:'Synthetic address',clinicName:'Synthetic clinic',clinicAddress:'',clinicPhone:'',timeZone:'Asia/Aden'};
+const insert=(s:unknown,key=KEY)=>db.query('INSERT INTO radiology_requests(command_key,actor_user_id,actor_username,patient_id,visit_id,doctor_party_id,payload_sha256,snapshot) VALUES($1,1,\'synthetic\',1,3,2,$2,$3)',[key,'a'.repeat(64),JSON.stringify(s)]);
+const client=()=>db as unknown as DbClient;
+const applied=()=>RADIOLOGY_REQUEST_MIGRATIONS.map(row=>({...row,adopted:false}));
+beforeAll(async()=>{db=new PGlite();await db.exec('CREATE TABLE patients(id INTEGER PRIMARY KEY); CREATE TABLE visits(id INTEGER PRIMARY KEY); CREATE TABLE parties(id INTEGER PRIMARY KEY); INSERT INTO patients VALUES(1); INSERT INTO visits VALUES(3); INSERT INTO parties VALUES(2);');await validateRadiologyRequestMigration(client(),RADIOLOGY_REQUEST_MIGRATIONS,[]);await db.exec(RADIOLOGY_REQUEST_SQL);});
+afterAll(async()=>{await db?.close();});
+it('matches exact checked-in SQL and validates registered catalog',async()=>{expect(readFileSync('migrations/0094_radiology_requests.sql','utf8')).toBe(RADIOLOGY_REQUEST_SQL);await validateRadiologyRequestMigration(client(),RADIOLOGY_REQUEST_MIGRATIONS,applied());});
+it('refuses unregistered residue, wrong checksum and adopted provenance',async()=>{await expect(validateRadiologyRequestMigration(client(),RADIOLOGY_REQUEST_MIGRATIONS,[])).rejects.toThrow('CATALOG_MISMATCH');await expect(validateRadiologyRequestMigration(client(),RADIOLOGY_REQUEST_MIGRATIONS,[{...applied()[0],adopted:true}])).rejects.toThrow('CATALOG_MISMATCH');});
+it('binds scalar scope to mandatory snapshot identity and bounded shape',async()=>{for(const patch of [{patientId:2},{visitId:null},{doctorId:7},{version:2},{patientName:''},{examination:'x'.repeat(201)},{timeZone:null},{centerId:'invalid'}])await expect(insert({...snapshot,...patch})).rejects.toThrow();const missing={...snapshot} as Record<string,unknown>;delete missing.patientId;await expect(insert(missing)).rejects.toThrow();});
+it('retains immutable issued snapshots and protects populated truncate',async()=>{await insert(snapshot);await expect(db.exec("UPDATE radiology_requests SET snapshot='{}'::jsonb")).rejects.toThrow('HISTORY_RETAINED');await expect(db.exec('DELETE FROM radiology_requests')).rejects.toThrow('HISTORY_RETAINED');await expect(db.exec('TRUNCATE radiology_requests')).rejects.toThrow('HISTORY_RETAINED');const {rows}=await db.query('SELECT snapshot FROM radiology_requests');expect(rows).toEqual([{snapshot}]);});
+it('detects tampered function body, disabled triggers and missing history index before adoption',async()=>{await db.exec('BEGIN; ALTER TABLE radiology_requests DISABLE TRIGGER radiology_request_immutable;');await expect(validateRadiologyRequestMigration(client(),RADIOLOGY_REQUEST_MIGRATIONS,applied())).rejects.toThrow('CATALOG_MISMATCH');await db.exec('ROLLBACK; BEGIN; DROP INDEX radiology_requests_patient_history;');await expect(validateRadiologyRequestMigration(client(),RADIOLOGY_REQUEST_MIGRATIONS,applied())).rejects.toThrow('CATALOG_MISMATCH');await db.exec('ROLLBACK;');});

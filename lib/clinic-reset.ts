@@ -160,7 +160,18 @@ export async function assertNoPrescriptionIssuanceHistory(client: Pick<DbClient,
   if (!history || history.exists) throw new ProtectedPrescriptionHistoryError();
 }
 
+/** Issued imaging requests are retained clinical snapshots and retry receipts. */
+export class ProtectedRadiologyHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد إصدار طلبات أشعة محفوظة. لم يُمسح شيء؛ يجب الاحتفاظ بطلبات الأشعة وسجل إصدارها."); this.name = "ProtectedRadiologyHistoryError"; }
+}
+export async function assertNoRadiologyRequestHistory(client: Pick<DbClient, "query">): Promise<void> {
+  await client.query("LOCK TABLE radiology_requests IN EXCLUSIVE MODE");
+  const { rows: [history] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM radiology_requests) AS exists");
+  if (!history || history.exists) throw new ProtectedRadiologyHistoryError();
+}
+
 export const RESET_KEEP_TABLES = [
+  "radiology_requests",
   "prescription_issuance_commands",
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.

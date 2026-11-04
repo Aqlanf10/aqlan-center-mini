@@ -1,4 +1,5 @@
 import { MEDICATION_CATALOG_KEY } from "@/lib/medication-catalog";
+import { RADIOLOGY_CENTERS_KEY } from "@/lib/radiology-centers";
 import { NextResponse } from "next/server";
 import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -78,6 +79,9 @@ export async function PATCH(request: Request) {
   if (MEDICATION_CATALOG_KEY in source && source.__expectedActor !== session.username) {
     return NextResponse.json({ message: "تغيّرت الجلسة؛ حدّث دليل الأدوية قبل الحفظ." }, { status: 409 });
   }
+  if (RADIOLOGY_CENTERS_KEY in source && source.__expectedActor !== session.username) {
+    return NextResponse.json({ message: "تغيّرت الجلسة؛ حدّث مراكز الأشعة قبل الحفظ." }, { status: 409 });
+  }
   const expectedRaw = (source.__versions ?? null) as Record<string, unknown> | null;
   const reason = typeof source.__reason === "string" ? source.__reason : null;
 
@@ -126,7 +130,7 @@ export async function PATCH(request: Request) {
     const result = await saveSettingsAudited({
       values, expected, reason,
       actor: session.username, actorRole: session.role,
-      ...(MEDICATION_CATALOG_KEY in values ? { session } : {}),
+      ...((MEDICATION_CATALOG_KEY in values || RADIOLOGY_CENTERS_KEY in values) ? { session } : {}),
     });
     if (!result.ok && "problem" in result) {
       return NextResponse.json({ message: result.problem }, { status: 400 });
@@ -141,6 +145,7 @@ export async function PATCH(request: Request) {
     return await settingsSnapshot({ __changed: result.changed });
   } catch (error) {
     if (error instanceof Error && /^MEDICATION_CATALOG_(AUTHORITY_REQUIRED|SESSION_EXPIRED)$/.test(error.message)) return NextResponse.json({ message: "تغيّرت صلاحية الجلسة؛ أعد تسجيل الدخول قبل تعديل دليل الأدوية." }, { status: 403 });
+    if (error instanceof Error && /^RADIOLOGY_CENTERS_(AUTHORITY_REQUIRED|SESSION_EXPIRED)$/.test(error.message)) return NextResponse.json({ message: "تغيّرت صلاحية الجلسة؛ أعد تسجيل الدخول قبل تعديل مراكز الأشعة." }, { status: 403 });
     return NextResponse.json({ message: "تعذّر حفظ الإعدادات. أعد المحاولة." }, { status: 500 });
   }
 }
@@ -171,6 +176,9 @@ export async function POST(request: Request) {
   const keys = Array.isArray(source.keys) ? source.keys.filter((k): k is string => typeof k === "string") : [];
   if (keys.includes(MEDICATION_CATALOG_KEY) && source.__expectedActor !== session.username) {
     return NextResponse.json({ message: "تغيّرت الجلسة؛ حدّث دليل الأدوية قبل الحفظ." }, { status: 409 });
+  }
+  if (keys.includes(RADIOLOGY_CENTERS_KEY) && source.__expectedActor !== session.username) {
+    return NextResponse.json({ message: "تغيّرت الجلسة؛ حدّث مراكز الأشعة قبل الحفظ." }, { status: 409 });
   }
   if (keys.length === 0) return NextResponse.json({ message: "حدّد المفاتيح." }, { status: 400 });
 
@@ -209,7 +217,7 @@ export async function POST(request: Request) {
       values, expected, mode: "reset",
       reason,
       actor: session.username, actorRole: session.role,
-      ...(MEDICATION_CATALOG_KEY in values ? { session } : {}),
+      ...((MEDICATION_CATALOG_KEY in values || RADIOLOGY_CENTERS_KEY in values) ? { session } : {}),
     });
     if (!result.ok && "problem" in result) {
       return NextResponse.json({ message: result.problem }, { status: 400 });
@@ -224,6 +232,7 @@ export async function POST(request: Request) {
     return await settingsSnapshot({ __changed: result.changed });
   } catch (error) {
     if (error instanceof Error && /^MEDICATION_CATALOG_(AUTHORITY_REQUIRED|SESSION_EXPIRED)$/.test(error.message)) return NextResponse.json({ message: "تغيّرت صلاحية الجلسة؛ أعد تسجيل الدخول قبل تعديل دليل الأدوية." }, { status: 403 });
+    if (error instanceof Error && /^RADIOLOGY_CENTERS_(AUTHORITY_REQUIRED|SESSION_EXPIRED)$/.test(error.message)) return NextResponse.json({ message: "تغيّرت صلاحية الجلسة؛ أعد تسجيل الدخول قبل تعديل مراكز الأشعة." }, { status: 403 });
     return NextResponse.json({ message: "تعذّرت الإعادة إلى الافتراضي." }, { status: 500 });
   }
 }
