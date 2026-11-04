@@ -16,7 +16,11 @@ This note classifies every field and every action. It separates what follows fro
 
 - **Money rule (owner, 6615124926).** Prices and financial information only for actors explicitly granted the matching type — in the server, the API, direct access and print. View and edit are separate, and there are no automatic grants.
 - **Never wider than legacy.** The canonical path may narrow a role label's reach to an explicit grant, but never widen it.
-- **The map** gives `POST /visits/[id]/clinical` the capability `clinical.visits.document`, and signing additionally `clinical.visits.sign`. `GET /visits/[id]/billing-preview` and `financial-context` are `finance.invoices.view`.
+- **The map** (names approved by the owner, Dot 6484846432) gives `POST /visits/[id]/clinical` the capability `clinical.visits.document`, and signing additionally `clinical.visits.sign`. `GET /visits/[id]/billing-preview` and `financial-context` are `finance.invoices.view`.
+- **The same map already rules the price-override fields** (correction, 2026-11-04 — the first version of this note missed it and asked the owner):
+  - `priceOverrides[].kind=discount` needs `finance.discounts.apply`, within `billing.max_discount_percent`; beyond the ceiling, `finance.discounts.override`;
+  - `priceOverrides[].kind=increase` needs `finance.price-increases.apply`;
+  - `orthoSession` needs `clinical.ortho.edit`.
 
 ## 2. The read: field-by-field projection (`GET /api/visits/[id]/clinical`)
 
@@ -40,14 +44,15 @@ Hidden groups are omitted, never zeroed. A doctor without the invoice view still
 | Save notes (chief complaint … next plan) | `clinical.visits.document` inside the scope; the clinician link or the owner, or a documenting account for **today's visits only** | legacy: doctor/admin any day, assistant today only |
 | Addendum on a signed visit | `clinical.visits.document` + `clinical.visits.sign`; the clinician link or the owner | the map's sign rule; legacy doctor/admin |
 | Procedures without a price | `clinical.visits.document`; the price comes from the plan item or the service catalogue on the server | legacy |
+| Procedure price below the catalogue (discount) | + `finance.discounts.apply` with a written reason, within `billing.max_discount_percent`; beyond it `finance.discounts.override` | the approved map (legacy: role labels and the same ceiling) |
+| Procedure price above the catalogue (increase) | + `finance.price-increases.apply` with a written reason | the approved map (legacy: admin only) |
+| Orthodontic session data at signing | + `clinical.ortho.edit` | the approved map |
 | Sign | `clinical.visits.sign` + the clinician link or the owner. Invoice, inventory and ortho adjustment in the same transaction, as legacy. The signer needs no money view: amounts are computed on the server and never returned without `finance.invoices.view` | legacy doctor/admin; map |
 | Lab draft inside the save (`labRequestKey`) | `clinical.lab.order` (lab create since slice 68) inside the scope | legacy doctor/admin |
 
 ## 4. Owner decisions needed (isolated; nothing is assumed)
 
-1. **Price overrides while documenting (`ProcedurePriceOverride`).** The legacy screen lets a doctor or admin change a procedure's price before signing.
-   - Proposal: an override needs `finance.invoices.create`, the existing grant for issuing invoice prices. Without it, the server price stands.
-   - Alternative: keep the legacy doctor/admin reach.
+1. ~~Price overrides while documenting.~~ **Already decided by the approved map** (§1): discount `finance.discounts.apply` (beyond the ceiling `finance.discounts.override`), increase `finance.price-increases.apply`. Nothing to ask.
 2. **"No charge" for an orthodontic adjustment outside the contract (`outsideContractDecision`).** This is a clinical-financial decision that legacy reserved to doctor and admin.
    - Proposal: `finance.invoices.create` or `finance.agreements.manage`.
    - Alternative: the clinician link, as legacy.
@@ -55,15 +60,15 @@ Hidden groups are omitted, never zeroed. A doctor without the invoice view still
 
 Until these are decided, the canonical path will:
 - serve the read with the money group by `finance.invoices.view` (proposal 3);
-- save notes, add addenda and save procedures without price overrides;
-- refuse an override or a no-charge decision on the canonical path (409), rather than guessing.
+- save notes, add addenda and save procedures, with price overrides by the map's grants (§3);
+- refuse a no-charge decision on the canonical path (409), rather than guessing.
 
-Signing lands in its own slice once 1 and 2 are answered: a signature with an unresolved override must not be half-supported.
+Signing lands in its own slice once decision 2 is answered: a signature with an unresolved billing decision must not be half-supported.
 
 ## 5. Slices
 
 | Slice | Content | Waits on |
 |---|---|---|
 | 84 | `GET /visits/[id]/clinical` with the projection above; `GET lab-work-command` | — (proposal 3 applies the money rule; reversible) |
-| 85 | `POST` save notes, addendum, procedures without price override; override and no-charge refuse (409) | — |
-| 86 | `POST` sign (invoice, inventory, ortho adjustment, lab command) | decisions 1–2 |
+| 85 | `POST` save notes, addendum, procedures; price overrides by the map's grants | — |
+| 86 | `POST` sign (invoice, inventory, ortho adjustment, lab command); no-charge refuses (409) until decision 2 | decision 2 |
