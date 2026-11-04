@@ -6356,10 +6356,23 @@
    "assistant"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 84: read:patients.clinical on one owning snapshot; the visit inside the scope by the queue read's condition; getClinicalVisitWith (the legacy composite) on that snapshot; an unlinked visit's phone-matched file contributes its record context only inside the scope. Allowlist projection: the money group only with finance.invoices.view or the protected owner (design proposal 3, reversible); ortho with clinical.ortho.view.",
+  "projection": {
+   "legacy": "canAccessPatient (role labels with patient access); assistant label today only; the money fields to every label.",
+   "groups": {
+    "clinical": "notes, status, procedures and outstanding work without prices, previous visit, latest diagnosis, active cases, lab orders, suggestions, referral — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view (read:patients.clinical)",
+    "money": "line prices and totals, visit total, billing/plan currencies, invoice reference, plan warning, session pricing, outstanding billing and coverage fields, the lab signing fence (a hash over prices), the ortho adjustment billing class — finance.invoices.view or the protected owner; omitted otherwise",
+    "ortho": "orthodontic chairside data and ortho active cases — clinical.ortho.view"
+   },
+   "rows": "a visit outside the scope reads like a missing one (404)"
+  }
  },
  {
   "route": "/api/visits/[id]/clinical",
@@ -6439,11 +6452,13 @@
    "admin",
    "doctor"
   ],
-  "need": [],
+  "need": [
+   "clinical.lab.order"
+  ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 84: one admitted clinical.lab.order transaction (the legacy doctor/admin labels); the visit's file inside the patient scope (unlinked or outside = 404); the legacy lock order (patient FOR NO KEY UPDATE NOWAIT, then the visit FOR SHARE NOWAIT) and the same actor/key try-lock, so an in-flight command reads as busy (409), never as absent; readLabWorkCommandForActorInTransaction with the canonical actor's user id; never creates."
  },
  {
   "route": "/api/visits/[id]/materials",

@@ -18145,7 +18145,23 @@ export async function getClinicalVisit(
   options: { actorPartyId?: number | null } = {},
 ): Promise<ClinicalVisit | null> {
   await ensureSchema();
-  const pool = getPool();
+  return getClinicalVisitWith(getPool(), visitId, options);
+}
+
+/**
+ * The same composite on a supplied snapshot/client (M2 slice 84): the canonical read runs
+ * it on its owning RR snapshot, then projects the money group by grant. Read only.
+ */
+export async function getClinicalVisitWith(
+  pool: Pick<DbClient, "query">,
+  visitId: number,
+  options: {
+    actorPartyId?: number | null;
+    /** Canonical callers: an unlinked visit's phone-matched patient contributes its record
+     * context only when the caller's scope admits it; refused, the visit reads as unmatched. */
+    admitPreviewPatient?: (patientId: number) => Promise<boolean>;
+  } = {},
+): Promise<ClinicalVisit | null> {
   const { rows } = await pool.query<ClinicalRow>(
     `SELECT id, patient_id, patient_name, patient_phone, chief_complaint, examination, diagnosis,
             treatment_done, next_plan, addendum, doctor_id, signed_at, signed_by,
@@ -18171,7 +18187,9 @@ export async function getClinicalVisit(
   );
   const procedures = procedureRows.map(toProcedureLine);
   const row = rows[0];
-  const patientId = await previewPatientId(pool, row);
+  let patientId = await previewPatientId(pool, row);
+  if (patientId !== null && row.patient_id === null && options.admitPreviewPatient
+    && !(await options.admitPreviewPatient(patientId))) patientId = null;
   /* (TD-05 owner review) عملة بنود الخطة المرتبطة بالزيارة — واحدةً فتُعاين
      الأرقام بها، أو مختلطة/غائبة فتعاين بالأساس (والتوقيع المختلط مرفوض). */
   const { rows: linkedCurrencyRows } = await pool.query<{ base_currency: string }>(
@@ -18186,7 +18204,7 @@ export async function getClinicalVisit(
     ? (linkedCurrencyRows[0].base_currency as Currency)
     : null;
   const plan = await visitPlanContext(pool, patientId, procedures);
-  const ortho = await visitOrthoContext(patientId, visitId);
+  const ortho = await visitOrthoContext(pool, patientId, visitId);
   const workflow = await visitWorkflowContext(pool, visitId, patientId, procedures);
   // طلبات المختبر المرتبطة بالزيارة — ليعرف الزر السياقي ما هو موجود سلفًا (§١٩).
   const { rows: visitLabRows } = await pool.query<{
@@ -18264,7 +18282,7 @@ export async function getClinicalVisit(
  * الداخل إن كانت جهته طبيبًا، وطبيب المريض الأساسي، والجلسة المخطَّطة التالية (بفاصلها).
  */
 async function visitSuggestionsFor(
-  pool: DbPool,
+  pool: Pick<DbClient, "query">,
   visitId: number,
   patientId: number | null,
   actorPartyId: number | null,
@@ -18336,7 +18354,7 @@ export const ORTHO_CASE_FUNDED_SQL =
 
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
 async function baseOrthoAdjustmentBillingClass(
-  db: DbClient | DbPool, caseId: number, patientId: number,
+  db: Pick<DbClient, "query">, caseId: number, patientId: number,
 ): Promise<BillingClassification> {
   const { rows: [evidence] } = await db.query<{
     baseline_kind: string | null; legacy_financial_mode: string | null;
@@ -18375,7 +18393,7 @@ async function baseOrthoAdjustmentBillingClass(
 
 /** Explicit routine coverage is independent of an ordinary invoice's existence.
  * Signing freezes the exact revision; already signed snapshots are never rebased. */
-export async function orthoAdjustmentCoverage(db: DbClient | DbPool, caseId: number, patientId: number, lock = false): Promise<{ classification: BillingClassification; revisionId: string | null }> {
+export async function orthoAdjustmentCoverage(db: Pick<DbClient, "query">, caseId: number, patientId: number, lock = false): Promise<{ classification: BillingClassification; revisionId: string | null }> {
   const { resolveExplicitFollowupCoverage } = await import("./ortho-followup-coverage-db");
   const explicit = await resolveExplicitFollowupCoverage(db, caseId, patientId, lock);
   if (explicit.state === "review_required") return { classification: "REVIEW_REQUIRED", revisionId: null };
@@ -18385,17 +18403,17 @@ export async function orthoAdjustmentCoverage(db: DbClient | DbPool, caseId: num
   };
   return { classification: await baseOrthoAdjustmentBillingClass(db, caseId, patientId), revisionId: null };
 }
-export async function orthoAdjustmentBillingClass(db: DbClient | DbPool, caseId: number, patientId: number): Promise<BillingClassification> {
+export async function orthoAdjustmentBillingClass(db: Pick<DbClient, "query">, caseId: number, patientId: number): Promise<BillingClassification> {
   return (await orthoAdjustmentCoverage(db, caseId, patientId)).classification;
 }
 
-async function visitOrthoContext(patientId: number | null, visitId: number): Promise<VisitOrtho | null> {
+async function visitOrthoContext(q: Pick<DbClient, "query">, patientId: number | null, visitId: number): Promise<VisitOrtho | null> {
   if (!patientId) return null;
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const open = await openOrthoCaseFor(patientId, today);
+  const open = await openOrthoCaseForWith(q, patientId, today);
   if (!open) return null;
   const last = open.adjustments[0] ?? null;
-  const visitAdjustmentId = await orthoAdjustmentForVisit(open.id, visitId);
+  const visitAdjustmentId = await orthoAdjustmentForVisitWith(q, open.id, visitId);
   return {
     caseId: open.id,
     appliance: open.appliance,
@@ -18417,14 +18435,14 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
        أو فكُّه لاحقًا كتابةَ تاريخها؛ وغير الموقّعة تُصنَّف بالاتفاق القائم ساعة التوقيع. */
     adjustmentBillingClass: await (async () => {
       if (visitAdjustmentId !== null) {
-        const { rows: [frozen] } = await getPool().query<{ billing_class: string | null; billing_decision: string | null }>(
+        const { rows: [frozen] } = await q.query<{ billing_class: string | null; billing_decision: string | null }>(
           `SELECT billing_class, billing_decision FROM ortho_adjustments WHERE id = $1`, [visitAdjustmentId]);
         if (frozen?.billing_class) {
           const decision = frozen.billing_decision === "billed" || frozen.billing_decision === "no_charge" ? frozen.billing_decision : null;
           return effectiveAdjustmentClass(frozen.billing_class as BillingClassification, decision);
         }
       }
-      return orthoAdjustmentBillingClass(getPool(), open.id, patientId);
+      return orthoAdjustmentBillingClass(q, open.id, patientId);
     })(),
     nextWeeks: last?.nextWeeks ?? 4,
   };
@@ -18439,7 +18457,7 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
  * يحتاجه: المريض الذي وصل من الباب لا من الموعد.
  */
 async function previewPatientId(
-  pool: DbPool,
+  pool: Pick<DbClient, "query">,
   visit: { patient_id: number | null; patient_phone?: string | null },
 ): Promise<number | null> {
   if (visit.patient_id) return visit.patient_id;
@@ -18457,7 +18475,7 @@ async function previewPatientId(
  * مصدرٌ واحد لتحذير الشاشة ولرفض التوقيع. القراءة بلا قفل: التوقيع يرفض قبل أن يكتب شيئًا.
  */
 async function unlinkedPlanSessionConflicts(
-  db: DbClient | DbPool,
+  db: Pick<DbClient, "query">,
   patientId: number | null,
   procedures: readonly ProcedureLine[],
 ): Promise<{ messages: string[]; amendedService: boolean }> {
@@ -18573,7 +18591,7 @@ async function unlinkedPlanSessionConflicts(
  *    المريض قبل المحاسب.
  */
 async function visitPlanContext(
-  pool: DbPool,
+  pool: Pick<DbClient, "query">,
   patientId: number | null,
   procedures: ProcedureLine[],
 ): Promise<{ matched: number; title: string | null; warning: string | null; amendedServiceConflict: boolean }> {
@@ -18632,7 +18650,7 @@ async function visitPlanContext(
  * من خطط المريض، و**سعر كل جلسة من الخطة** وفق قاعدة الفوترة — لا من ذاكرة أحد.
  */
 async function visitWorkflowContext(
-  pool: DbPool,
+  pool: Pick<DbClient, "query">,
   visitId: number,
   patientId: number | null,
   procedures: ProcedureLine[],
@@ -18720,7 +18738,7 @@ async function visitWorkflowContext(
   const latestDiagnosis = diagnosisRow
     ? { text: diagnosisRow.diagnosis, date: clinicDateString(diagnosisRow.arrived_at, CLINIC_TIME_ZONE) }
     : null;
-  const [cases, caseItems] = await Promise.all([listPatientCases(patientId), listCasePlanItems(patientId)]);
+  const [cases, caseItems] = await Promise.all([listPatientCasesWith(pool, patientId), listCasePlanItemsWith(pool, patientId)]);
   // Historical identity (including void) is not a next clinical step. Retain all saved open sessions.
   const { rows: historicalItems } = await pool.query<{ plan_item_id: number; open_session: boolean }>(
     `SELECT la.plan_item_id, EXISTS (SELECT 1 FROM treatment_sessions s
@@ -29974,7 +29992,10 @@ export async function changePatientProblemStatus(input: ChangePatientProblemStat
 /** بنود خطط المريض القائمة (غير الملغاة) مع حالتها وأولويتها — لترتيب الخطة الشاملة وربطها بالحالات. */
 export async function listCasePlanItems(patientId: number): Promise<{ items: CasePlanItem[]; dependencies: PlanItemDependency[] }> {
   await ensureSchema();
-  const pool = getPool();
+  return listCasePlanItemsWith(getPool(), patientId);
+}
+/** The same read over a caller-owned query facade (M2 slice 84: the cockpit snapshot). */
+export async function listCasePlanItemsWith(pool: Pick<DbClient, "query">, patientId: number): Promise<{ items: CasePlanItem[]; dependencies: PlanItemDependency[] }> {
   const { rows: items } = await pool.query<{
     id: number; plan_id: number; plan_title: string; service_name: string; category: string | null; tooth_code: number | null;
     surfaces: string | null; billing_status: BillingStatus; case_site: string | null; origin: string | null;
@@ -31173,7 +31194,10 @@ export async function recordOrthoBaseline(input: BaselineDraft & {
 
 /** شدّة التقويم المرتبطة بزيارة (إن وُجدت) — لشاشة الزيارة: «سُجّلت شدّة هذه الزيارة». */
 async function orthoAdjustmentForVisit(caseId: number, visitId: number): Promise<number | null> {
-  const { rows } = await getPool().query<{ id: number }>(
+  return orthoAdjustmentForVisitWith(getPool(), caseId, visitId);
+}
+async function orthoAdjustmentForVisitWith(q: Pick<DbClient, "query">, caseId: number, visitId: number): Promise<number | null> {
+  const { rows } = await q.query<{ id: number }>(
     `SELECT id FROM ortho_adjustments WHERE case_id = $1 AND visit_id = $2 ORDER BY id LIMIT 1`,
     [caseId, visitId],
   );
@@ -32038,7 +32062,7 @@ async function visitWalkoutInSnapshot(pool: DbClient, visitId: number): Promise<
  * الإحالة التي جاءت بها الزيارة: موعدها المربوط بالإحالة أولًا (حجز الإحالة)، وإلا إحالةٌ داخلية
  * مفتوحة للمريض في حالة الزيارة نفسها (`visits.case_id`). قراءةٌ فقط — لا تغيّر حالةً ولا مالًا.
  */
-async function visitReferralContext(pool: DbPool, visitId: number, patientId: number): Promise<VisitReferral | null> {
+async function visitReferralContext(pool: Pick<DbClient, "query">, visitId: number, patientId: number): Promise<VisitReferral | null> {
   const { rows } = await pool.query<{
     id: number; doctor_name: string | null; reason: string; teeth: string | null; workflow_state: string;
     case_title: string | null; blocks_title: string | null;

@@ -40,6 +40,7 @@ export const CANONICAL_PAGES: readonly CanonicalPage[] = Object.freeze([
  { href: "/my-work", label: "عملي السريري", anyOf: ["clinical.referrals.manage"], record: "patient", exact: true, description: "الإحالات إليك ومنك وما عاد إليك ضمن نطاق مرضاك، وجدول مواعيدك اليوم؛ لحساب مرتبط بطبيب." },
  { href: "/finance", label: "الصندوق والورديات", anyOf: ["finance.shifts.view"], exact: true, description: "إجماليات الصندوق، تفاصيل الحركات المسموحة، وفتح الوردية وإقفالها بحسب صلاحياتك." },
  { href: "/patients/[id]", label: "ملف المريض", anyOf: [], record: "patient", pattern: /^\/patients\/[1-9][0-9]{0,9}$/, description: "ملف مريضٍ ضمن نطاق مرضاك." },
+ { href: "/visits/[id]", label: "الزيارة", anyOf: ["clinical.plans.view", "clinical.visits.document", "clinical.xrays.view"], record: "patient", pattern: /^\/visits\/[1-9][0-9]{0,9}$/, description: "زيارةٌ ضمن نطاق مرضاك: التوثيق والإجراءات، والمبالغ لمن يملك عرض الفواتير." },
  { href: "/staff-access", label: "صلاحيات الطاقم", anyOf: ["staff.view"], description: "دليل الطاقم وتعديل صلاحيات كل موظف بمراجعة وتدقيق." },
  { href: "/settings/laboratories", label: "دليل المختبرات", anyOf: ["clinical.laboratories.manage"], exact: true, description: "المختبرات وبيانات التواصل ومدة التسليم؛ الحسابات والعملة من شاشة الحسابات." },
  { href: "/settings/lab-pricing", label: "أسعار المختبرات", anyOf: ["finance.cost-prices.view", "finance.lab-prices.edit"], exact: true, description: "أسعار خدمات كل مختبر وتواريخ سريانها؛ الأسعار لمن يملك رؤية التكلفة فقط، والتعديل لمن يملك تعديل الأسعار." },

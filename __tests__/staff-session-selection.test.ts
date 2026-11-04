@@ -58,7 +58,15 @@ describe("capability presentation", () => {
   expect(isCanonicalPage("/staff-access")).toBe(true);
   expect(isCanonicalPage("/patients")).toBe(true);
   expect(isCanonicalPage("/visits")).toBe(true);
-  expect(isCanonicalPage("/visits/12")).toBe(false);
+  // M2 slice 84: one visit's cockpit is a pattern-matched page gated by a clinical grant;
+  // nested visit screens stay legacy until their own routes are canonical.
+  expect(canonicalPageFor("/visits/12")?.href).toBe("/visits/[id]");
+  expect(isCanonicalPage("/visits/12/walkout")).toBe(false);
+  expect(isCanonicalPage("/visits/0")).toBe(false);
+  const visitPage = canonicalPageFor("/visits/12")!;
+  expect(canonicalPageAllowed(visitPage, ["appointments.create"], false, { patientScope: "all" })).toBe(false);
+  expect(canonicalPageAllowed(visitPage, ["clinical.visits.document"], false, { patientScope: "own" })).toBe(true);
+  expect(canonicalPageAllowed(visitPage, ["clinical.visits.document"], false, { patientScope: "none" })).toBe(false);
   // The patient list is exact; one patient's file is a separate, pattern-matched page.
   expect(isCanonicalPage("/patients/12")).toBe(true);
   expect(canonicalPageFor("/patients/12")?.href).toBe("/patients/[id]");

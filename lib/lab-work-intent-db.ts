@@ -46,7 +46,7 @@ async function authorize(client:DbClient,session:SessionPayload,patientId:number
     ||!await canAccessPatient(active,patientId,undefined,client,"nowait"))return fail("unauthorized",403);
   return active;
 }
-function checkContext(input:LabWorkCommandContext){
+function checkContext(input:Pick<LabWorkCommandContext,"patientId"|"sourceId"|"requestHash"|"requestKey">){
   if(!positive(input.patientId)||!positive(input.sourceId)||!/[\s\S]/.test(input.requestHash)
     ||! /^[A-Za-z0-9._:-]{8,128}$/.test(input.requestKey))fail("invalid_command",400);
 }
@@ -54,6 +54,14 @@ const hash=(raw:string)=>createHash("sha256").update(raw).digest("hex");
 /** Caller owns patient/source lock. Same actor/key serialized before stale revision checks. */
 export async function readLabWorkCommandInTransaction(client:DbClient,input:LabWorkCommandContext):Promise<LabWorkCommandResult|null>{
   checkContext(input);const active=await authorize(client,input.session,input.patientId);
+  return readLabWorkCommandForActorInTransaction(client,{...input,actorUserId:active.userId});
+}
+/** The receipt read after the caller has authorized the actor (legacy: authorize above;
+ * canonical, M2 slice 84: an admitted clinical.lab.order operation inside the scope).
+ * Same actor/key try-lock: an in-flight command reads as busy, never as absent. */
+export async function readLabWorkCommandForActorInTransaction(client:QueryDb,input:Omit<LabWorkCommandContext,"session">&{actorUserId:number}):Promise<LabWorkCommandResult|null>{
+  checkContext(input);if(!positive(input.actorUserId))fail("unauthorized",403);
+  const active={userId:input.actorUserId};
   const lock=await client.query<{locked:boolean}>("SELECT pg_try_advisory_xact_lock(hashtext($1),hashtext($2)) AS locked",[`lab-work:${active.userId}`,input.requestKey]);
   if(lock.rows[0]?.locked!==true)fail("command_busy");
   const {rows}=await client.query<{patient_id:number;source_kind:string;source_id:number;request_hash:string;result:{outcome?:string;code?:string;labWork?:LabWorkReceipt[]}}>(

@@ -16,6 +16,9 @@ import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { assistantProcedureChange } from "@/lib/clinical-finalizer";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalVisitClinical } from "@/lib/canonical-visit-clinical";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +39,14 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 84: a clinical grant; the visit inside the scope (outside reads like missing);
+  // the money group only with finance.invoices.view or the protected owner.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalVisitClinical(selected.handle, (await context.params).id), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل الزيارة."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const visitId = await idFrom(context);

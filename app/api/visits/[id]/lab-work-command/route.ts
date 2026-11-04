@@ -2,9 +2,20 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { labWorkIntentSupported, readLabWorkCommandInTransaction, LabWorkIntentError } from "@/lib/lab-work-intent-db";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalLabCommandFailure, readCanonicalVisitLabCommand } from "@/lib/canonical-visit-clinical";
 export const dynamic = "force-dynamic";
 /** Reconcile an exact actor-bound operation without persisting or recovering its clinical body. */
 export async function GET(request:Request,context:{params:Promise<{id:string}>}) {
+ // M2 slice 84: clinical.lab.order inside the patient scope; the legacy lock order; never creates.
+ const selected=await selectRequestStaffEnvelope();
+ if(selected.kind==="denied")return NextResponse.json({message:"انتهت الجلسة."},{status:401});
+ if(selected.kind==="canonical"){
+  const url=new URL(request.url);
+  try{return NextResponse.json(await readCanonicalVisitLabCommand(selected.handle,(await context.params).id,url.searchParams.get("key")??"",url.searchParams.get("hash")??""),{headers:NO_STORE});}
+  catch(error){return canonicalLabCommandFailure(error);}
+ }
  const session=await requireSession();
  if(!session)return NextResponse.json({message:"انتهت الجلسة."},{status:401});
  if(!["admin","doctor"].includes(session.role))return NextResponse.json({message:"هذه العملية للطبيب أو المدير."},{status:403});
