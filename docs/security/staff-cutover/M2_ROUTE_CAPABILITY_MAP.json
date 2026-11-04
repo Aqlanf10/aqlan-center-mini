@@ -3929,10 +3929,21 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 82: read:patients.clinical; listPatientMaterialsWith on the owning snapshot (the newest 100 movements of the patient and its visits); quantities only, the movement cost never leaves the server.",
+  "projection": {
+   "legacy": "canAccessPatient (role labels with patient access).",
+   "groups": {
+    "clinical": "consumable quantities, items and dates — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view (read:patients.clinical); never a cost"
+   },
+   "rows": "patient outside the scope reads like a missing one (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/medical-history",
@@ -6432,10 +6443,21 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 82: read:patients.clinical; the visit inside the scope by the queue read's condition (all, the clinician's assigned visit, or its patient inside the scope); visitMaterialMovementsWith; quantities only, no cost.",
+  "projection": {
+   "legacy": "canAccessPatient (role labels with patient access).",
+   "groups": {
+    "clinical": "consumable quantities, items and dates — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view (read:patients.clinical); never a cost"
+   },
+   "rows": "a visit outside the scope reads like a missing one (404)"
+  }
  },
  {
   "route": "/api/visits/[id]/next",

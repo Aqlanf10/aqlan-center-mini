@@ -2,7 +2,7 @@ import "server-only";
 import {
   browsePatientsWith, computeDebtRowsInSnapshot, getPatientWith, getSettingsWith, listMedicalHistoryWith, listPatientAppointmentsWith,
   listPatientVisitsWith, listVitalsWith, patientInDoctorScopeWith, patientTimelineWith, searchPatientsWith,
-  listPatientDiagnosesWith, listIntakeFormsWith, patientChartWith, listPatientReferralsWith, listContactConsentsWith, contactConsentStatesWith,
+  listPatientDiagnosesWith, listIntakeFormsWith, patientChartWith, listPatientMaterialsWith, visitMaterialMovementsWith, listPatientReferralsWith, listContactConsentsWith, contactConsentStatesWith,
   CLINIC_TIME_ZONE, listPatientCasesWith, listPatientPlansWith, openOrthoCaseForWith, type DbClient, type PatientListRow, type PatientProblem,
   listPatientCaseRowsWith, listPatientPlannedVisitsWith, patientLedgerInSnapshot, patientWorkflowWith, patientHasMedicalAlertWith, patientsWithMedicalAlertWith,
 } from "./db";
@@ -297,6 +297,25 @@ export async function readCanonicalIntakeHistory(session: VerifiedDurableSession
  * built from them and its summary — clinical facts only, no money. */
 export async function readCanonicalChart(session: VerifiedDurableSession, patientId: number) {
   return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => patientChartWith(query, patientId));
+}
+/** GET /api/patients/[id]/materials (M2 slice 82): consumables used on the patient — a
+ * clinical grant inside the patient scope; quantities only, never a cost. */
+export async function readCanonicalPatientMaterials(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => listPatientMaterialsWith(query, patientId));
+}
+/** GET /api/visits/[id]/materials (M2 slice 82): the visit inside the scope by the queue
+ * read's condition (`all`, the clinician's assigned visit, or its patient inside the
+ * scope); outside reads like missing (404). Quantities only, never a cost. */
+export async function readCanonicalVisitMaterials(session: VerifiedDurableSession, visitId: number) {
+  if (!Number.isSafeInteger(visitId) || visitId <= 0 || visitId > 2147483647) throw new CanonicalPatientReadRefusal("invalid_patient_query", "رقم الزيارة غير صالح.");
+  return runCanonicalReadSnapshot(session, "read:patients.clinical", async (query, scope) => {
+    const { rows: [visit] } = await query.query<{ patient_id: number | null; doctor_id: number | null }>("SELECT patient_id, doctor_id FROM visits WHERE id = $1", [visitId]);
+    const inside = visit !== undefined && (scope.patientScope.kind === "all"
+      || (scope.patientScope.kind === "own" && (visit.doctor_id === scope.patientScope.clinicianPartyId
+        || (visit.patient_id !== null && await patientInDoctorScopeWith(query, scope.patientScope.clinicianPartyId, visit.patient_id)))));
+    if (!inside) throw new CanonicalPatientReadRefusal("patient_not_found", "لا توجد زيارة بهذا الرقم ضمن مرضاك.");
+    return { patientId: visit!.patient_id, lines: await visitMaterialMovementsWith(query, visitId) };
+  }, { errorPrefix: "STAFF_READ", maxBytes: PATIENT_DIRECTORY_MAX_BYTES });
 }
 export async function readCanonicalReferrals(session: VerifiedDurableSession, patientId: number) {
   return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => listPatientReferralsWith(query, patientId));

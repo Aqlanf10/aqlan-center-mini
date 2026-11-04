@@ -26645,7 +26645,35 @@ export interface VisitMaterialLine {
 /** (P4) المواد المصروفة على زيارةٍ بعينها — التلقائية واليدوية من سجل الحركات نفسه. */
 export async function visitMaterialMovements(visitId: number): Promise<VisitMaterialLine[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return visitMaterialMovementsWith(getPool(), visitId);
+}
+
+/** A patient's consumable movements (newest 100), as GET /api/patients/[id]/materials
+ * returns them; on a supplied snapshot/client (M2 slice 82). No cost columns. */
+export async function listPatientMaterialsWith(q: Pick<DbClient, "query">, patientId: number) {
+  const { rows } = await q.query<{
+    id: number; item_id: number; kind: string; qty: string; expiry_date: unknown; reason: string | null;
+    visit_id: number | null; created_by: string; created_at: Date; item_name: string; unit: string; category: string | null;
+  }>(
+    `SELECT m.id, m.item_id, m.kind, m.qty, m.expiry_date, m.reason, m.visit_id, m.created_by, m.created_at,
+            i.name AS item_name, i.unit, i.category
+       FROM inventory_movements m
+       JOIN inventory_items i ON i.id = m.item_id
+      WHERE m.patient_id = $1 OR m.visit_id IN (SELECT id FROM visits WHERE patient_id = $1)
+      ORDER BY m.id DESC
+      LIMIT 100`,
+    [patientId],
+  );
+  return rows.map((r) => ({
+    id: r.id, itemId: r.item_id, itemName: r.item_name, category: r.category, unit: r.unit, kind: r.kind,
+    qty: Number(r.qty), expiryDate: r.expiry_date ? String(r.expiry_date).slice(0, 10) : null,
+    reason: r.reason, visitId: r.visit_id, createdBy: r.created_by, createdAt: r.created_at.toISOString(),
+  }));
+}
+
+/** The same lines on a supplied snapshot/client (M2 slice 82). No cost columns. */
+export async function visitMaterialMovementsWith(q: Pick<DbClient, "query">, visitId: number): Promise<VisitMaterialLine[]> {
+  const { rows } = await q.query<{
     id: number; item_id: number; item_name: string; unit: string; qty: string;
     reason: string | null; created_by: string; created_at: Date;
   }>(
