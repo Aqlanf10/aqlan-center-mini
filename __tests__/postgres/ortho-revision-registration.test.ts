@@ -9,7 +9,10 @@ let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 let files: Awaited<ReturnType<typeof loadMigrationFiles>>;
 beforeEach(async () => {
   fixture = await openBackupTimestampFixture(process.env);
-  files = await loadMigrationFiles();
+  // This fixture intentionally omits 0051/0052 to test their original admission.
+  // 0106 defines a function with 0052 row types, so it cannot precede 0052.
+  // Its actual forward upgrade is tested by ortho-assessment-verifier-migration.
+  files = (await loadMigrationFiles()).filter(file => file.version < "0106");
   await migrate(fixture.source, { apply: true, files: files.filter(file => !["0051", "0052"].includes(file.version)) });
 });
 afterEach(async () => { await fixture?.close(); });

@@ -1,0 +1,35 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-revision-registration.test.ts -t serializes runtime startup
+
+
+ RUN  v4.1.12 /workspace/ortho-ceph-verification
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-revision-registration.test.ts (16 tests | 1 failed | 15 skipped) 3049ms
+     × serializes runtime startup and then admits the exact CLI union without another application 3047ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-revision-registration.test.ts > 0051/0052 registration on a real fresh main/HR/finance predecessor > serializes runtime startup and then admits the exact CLI union without another application
+error: relation "ortho_assessment_revisions" does not exist
+ ❯ node_modules/pg/lib/client.js:694:17
+ ❯ applyMigrationInTransaction lib/migrations.ts:450:5
+    448|       await guardOrthoRevisionMigration(client, file);
+    449|     }
+    450|     await client.query(file.sql);
+       |     ^
+    451|     await client.query(
+    452|       `INSERT INTO schema_migrations (version, name, checksum, adopted)
+ ❯ migrateHoldingLock lib/migrations.ts:413:7
+ ❯ migrate lib/migrations.ts:332:14
+ ❯ __tests__/postgres/ortho-revision-registration.test.ts:13:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 15 skipped (16)
+   Start at  01:48:47
+   Duration  4.23s (transform 208ms, setup 0ms, import 306ms, tests 3.05s, environment 0ms)
+

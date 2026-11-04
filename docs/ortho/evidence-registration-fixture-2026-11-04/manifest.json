@@ -1,0 +1,7 @@
+{
+  "baseline": "650fff481f054b75d4ac4913f2035175ac51079e",
+  "verificationWorktree": "isolated detached baseline; only registration test changed",
+  "negativeControl": "unmodified baseline: original registration setup fails because 0106 needs missing 0052 row type",
+  "positive": "16 original registration cases plus actual 0106 upgrade pass; 17 tests in 59.10s",
+  "testSha256": "86cfd81051bf7091fbc2778fb1561705ac4b0a895dae6af3868a50f367d885c8"
+}
