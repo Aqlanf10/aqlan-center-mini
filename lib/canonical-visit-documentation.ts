@@ -8,8 +8,12 @@ import {
 import { InventoryBusy, InventoryTrackingRequired } from "./inventory-domain/legacy-write-guard";
 import { checkOrthoSessionDraft } from "./ortho-baseline";
 import { CLINICAL_SIGN_MESSAGES } from "./clinical-sign-messages";
+import { labVisitReviewVersion, labVisitSignatureVersion } from "./lab-visit-signature";
 import { ClinicalDoctorIdentityConflict } from "./clinical-doctor-identity";
-import { LabWorkIntentError } from "./lab-work-intent-db";
+import { createHash } from "node:crypto";
+import { LabWorkIntentError, canonicalLabActor } from "./lab-work-intent-db";
+import { LabWorkContractError, parseLabWorkDraft, parseLabWorkRetirements, type LabWorkDraft } from "./lab-work-intent-contract";
+import { settleRejectedClinicalLabCommandOn } from "./clinical-lab-command-settlement";
 import { foreignRatesFromSettings } from "./service-pricing";
 import { clinicDateString } from "./schedule";
 import { CLINIC_BASE_CURRENCY, isCurrency } from "./money";
@@ -40,8 +44,14 @@ import type { VerifiedDurableSession } from "./staff-durable-session";
  * - The addendum (the map: `clinical.visits.document`) appends to a signed visit, with the
  *   same actor rule; audited in the same transaction; an optional request key replays.
  * - Refused, never guessed (409): a change of the visit's billing currency (financial
- *   group 4); a lab draft inside the save (the lab identity layer still re-authorizes a
- *   legacy session).
+ *   group 4).
+ * - A lab draft inside the save (M2 slice 87): a clinician-linked actor or the owner holding
+ *   `clinical.lab.order` (legacy doctor/admin); the legacy command identity (request key,
+ *   the body's hash, the expected patient) and body; the lab layer binds the receipt to the
+ *   canonical actor (`canonicalLabActor`). An exact replay returns the saved result; a
+ *   deterministic rejection rolls back and is then settled durably in a freshly admitted
+ *   operation that re-proves the same authority (legacy semantics); unknown failures stay
+ *   unresolved.
  * - The response is the projected cockpit read (no money without finance.invoices.view).
  *
  * Signing (M2 slice 86; owner decisions 6629149113): `action: "sign"` in the same admitted
@@ -55,8 +65,9 @@ import type { VerifiedDurableSession } from "./staff-durable-session";
  * the owner-only setting `ortho.case_doctor_no_charge` is on; never a finance grant. The
  * reason, the decider and the basis go to the `visit.sign` audit row in the same
  * transaction. The sign summary's amounts and invoice references are returned only with
- * `finance.invoices.view` or to the owner. A visit carrying a durable lab identity
- * refuses (409) until the lab identity layer accepts a canonical actor.
+ * `finance.invoices.view` or to the owner. A visit carrying durable lab work is signed only
+ * by a signer holding `clinical.lab.order` (or the owner): the lab layer materializes its
+ * orders bound to the canonical actor (slice 87).
  */
 export class CanonicalVisitDocumentRefusal extends Error {
   constructor(readonly code: string, readonly status: 400 | 403 | 404 | 409, message: string, readonly extra: Record<string, unknown> = {}) {
@@ -70,6 +81,7 @@ const KEY = /^[A-Za-z0-9._:-]{8,128}$/;
 const text = (value: unknown, max = 2000) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 
 type ProcedureRow = {
+  labWork?: LabWorkDraft | null;
   serviceId: number; toothCode: number | null; surfaces: string | null; quantity: number;
   unitPriceMinor: number | null; priceReason: string | null; doctorId: number | null; note: string | null; planItemId: number | null;
 };
@@ -79,6 +91,7 @@ export function parseCanonicalProcedures(raw: unknown): ProcedureRow[] | null {
   if (raw === undefined) return null;
   if (!Array.isArray(raw)) throw refuse("invalid_procedures", 400, "قائمة الإجراءات غير صالحة.");
   return raw.map(row => (row ?? {}) as Record<string, unknown>).filter(row => Number(row.serviceId) > 0).map(row => ({
+    ...(row.labWork !== undefined ? { labWork: parseLabWorkDraft(row.labWork) } : {}),
     serviceId: Number(row.serviceId),
     toothCode: Number(row.toothCode) || null,
     surfaces: typeof row.surfaces === "string" ? row.surfaces : null,
@@ -106,7 +119,11 @@ export async function commandCanonicalVisitDocument(session: VerifiedDurableSess
   const body = (rawBody ?? {}) as Record<string, unknown>;
   if (typeof rawBody !== "object" || rawBody === null || Array.isArray(rawBody)) throw refuse("invalid_body", 400, "طلب غير صالح.");
   const action = String(body.action ?? "save");
-  const signed = await withStaffOperation(pool, session, "clinical.visits.document", async (client, handle): Promise<Record<string, unknown> | undefined> => {
+  const labCommand = hasLabCommand(body) ? labCommandOf(body) : null;
+  let labActor: { userId: number; username: string; role: string } | null = null;
+  let signed: Record<string, unknown> | undefined;
+  try {
+  signed = await withStaffOperation(pool, session, "clinical.visits.document", async (client, handle): Promise<Record<string, unknown> | undefined> => {
     const scope = await staffOperationPatientScope(client, handle, "clinical.visits.document");
     if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
     const { rows: [visit] } = await client.query<{ patient_id: number | null; doctor_id: number | null; arrived_at: Date; billing_currency: string | null }>(
@@ -125,14 +142,78 @@ export async function commandCanonicalVisitDocument(session: VerifiedDurableSess
       return sign(client, handle, visitId, visit!, body, clinician, owner, identity);
     }
     if (action !== "save" && action !== "addendum") throw refuse("invalid_action", 400, "إجراء غير معروف على الزيارة.");
-    if (hasLabCommand(body)) throw refuse("lab_draft_not_canonical", 409, "حفظ مسوّدة المختبر من الزيارة على الحساب الموحّد لم يُفعَّل بعد؛ احفظ التوثيق دونها، أو أنشئ الطلب من شاشة المختبر.");
     const identity = await staffOperationIdentity(client, handle, "clinical.visits.document");
+    if (labCommand) {
+      await requireLabAuthority(client, handle, full, owner);
+      if (action !== "save" || !labCommand.valid) throw refuse("invalid_lab_command", 400, "هوية عملية مسوّدة المختبر غير صالحة.");
+      if (labCommand.patientId !== visit!.patient_id) throw refuse("source_changed", 409, "تغيّر المريض المرتبط بالزيارة؛ حدّث الملف قبل حفظ عمل المختبر.");
+      labActor = identity;
+    }
     if (action === "addendum") { await addendum(client, visitId, body, identity); return undefined; }
-    await save(client, handle, visitId, visit!, body, full, identity);
+    await save(client, handle, visitId, visit!, body, full, identity, labCommand && labActor ? { ...labCommand, actor: labActor } : null);
     return undefined;
   });
+  } catch (error) {
+    const code = labCommand?.valid && labActor ? labRejectionCode(error) : null;
+    if (code && labCommand && labActor) {
+      const outcome = await settleCanonicalLabRejection(pool, session, visitId, labCommand, labActor, code).catch(() => null);
+      if (outcome?.outcome === "applied") {
+        return { ...await readCanonicalVisitClinical(session, visitId), labWorkCommand: labReceipt(visitId, labCommand, labActor) };
+      }
+      if (outcome?.outcome === "rejected") {
+        throw new CanonicalVisitDocumentRefusal(outcome.code, 409, "لم يُحفظ الطلب. حدّث البيانات وصحّحها ثم احفظ من جديد.",
+          { labWorkCommand: labReceipt(visitId, labCommand, labActor), labWorkOutcome: "rejected" });
+      }
+    }
+    throw error;
+  }
   const read = await readCanonicalVisitClinical(session, visitId);
-  return signed ? { ...read, signResult: signed } : read;
+  if (signed) return { ...read, signResult: signed };
+  return labCommand && labActor ? { ...read, labWorkCommand: labReceipt(visitId, labCommand, labActor) } : read;
+}
+
+type LabCommand = { valid: boolean; patientId: number; requestKey: string; requestHash: string; retirements: unknown };
+/** The legacy command identity: the request key, the expected patient and the body's hash. */
+function labCommandOf(body: Record<string, unknown>): LabCommand {
+  const valid = Array.isArray(body.procedures) && Number.isSafeInteger(body.labPatientId) && Number(body.labPatientId) > 0
+    && typeof body.labRequestKey === "string" && KEY.test(body.labRequestKey);
+  return { valid, patientId: Number(body.labPatientId), requestKey: String(body.labRequestKey ?? ""),
+    requestHash: createHash("sha256").update(JSON.stringify(body)).digest("hex"), retirements: body.labRetirements };
+}
+const labReceipt = (visitId: number, command: LabCommand, actor: { username: string }) =>
+  ({ requestKey: command.requestKey, requestHash: command.requestHash, visitId, patientId: command.patientId, actor: actor.username });
+async function requireLabAuthority(client: DbClient, handle: Parameters<typeof staffOperationCapabilities>[1], full: boolean, owner: boolean) {
+  if (!full) throw refuse("lab_draft_clinician_only", 403, "مسوّدة المختبر للطبيب المرتبط أو المالك.");
+  if (!owner && !(await staffOperationCapabilities(client, handle, "clinical.visits.document", ["clinical.lab.order"] as const)).has("clinical.lab.order")) {
+    throw refuse("lab_order_not_granted", 403, "مسوّدة المختبر تحتاج صلاحية طلب أعمال المختبر.");
+  }
+}
+const UNRESOLVED_LAB = new Set(["command_busy", "intent_busy", "clinical_boundary_busy", "unauthorized", "schema_unavailable", "idempotency_conflict", "source_changed", "invalid_receipt"]);
+/** The legacy route's deterministic rejections: only these are settled durably. */
+function labRejectionCode(error: unknown): string | null {
+  if (error instanceof LabWorkContractError) return error.code;
+  if (error instanceof LabWorkIntentError && error.status === 409 && !UNRESOLVED_LAB.has(error.code)) return error.code;
+  if (error instanceof ClinicalDoctorIdentityConflict) return error.code;
+  if (error instanceof ClinicalPlanConflict) return "clinical_plan_conflict";
+  if (error instanceof ProcedurePriceRejected) return "procedure_price_rejected";
+  return null;
+}
+/** Settlement in a freshly admitted operation: the same scope, clinician-or-owner and
+ * clinical.lab.order are proved again before the rejection receipt is written. */
+async function settleCanonicalLabRejection(pool: ReturnType<typeof getPool>, session: VerifiedDurableSession, visitId: number,
+  command: LabCommand, actor: { userId: number; username: string; role: string }, code: string) {
+  return withStaffOperation(pool, session, "clinical.visits.document", async (client, handle) => {
+    const scope = await staffOperationPatientScope(client, handle, "clinical.visits.document");
+    if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+    if (scope.kind === "own" && !await patientInDoctorScopeWith(client, scope.clinicianPartyId, command.patientId)) throw refuse("visit_not_found", 404, VISIT_MISSING);
+    const clinician = await staffOperationClinician(client, handle, "clinical.visits.document");
+    const owner = await staffOperationIsProtectedOwner(client, handle, "clinical.visits.document");
+    await requireLabAuthority(client, handle, clinician !== null || owner, owner);
+    const identity = await staffOperationIdentity(client, handle, "clinical.visits.document");
+    if (identity.userId !== actor.userId) throw new Error("STAFF_OPERATION_PERMISSIONS_STALE");
+    return settleRejectedClinicalLabCommandOn(client, { patientId: command.patientId, visitId, session: canonicalLabActor(identity),
+      requestKey: command.requestKey, requestHash: command.requestHash, code });
+  });
 }
 
 const NO_CHARGE_REFUSED = "قرار «بلا رسوم» لشدّة خارج الاتفاق للمالك، ولطبيب حالة التقويم المسؤول عنها بصلاحية تعديل التقويم إذا فعّل المالك ذلك في الإعدادات.";
@@ -143,7 +224,7 @@ async function sign(
   identity: { userId: number; username: string; role: string },
 ): Promise<Record<string, unknown>> {
   const held = await staffOperationCapabilities(client, handle, "clinical.visits.document",
-    ["clinical.visits.sign", "clinical.ortho.edit", "finance.invoices.view"] as const);
+    ["clinical.visits.sign", "clinical.ortho.edit", "finance.invoices.view", "clinical.lab.order"] as const);
   if (!owner && !held.has("clinical.visits.sign")) throw refuse("visit_sign_not_granted", 403, "توقيع الزيارة يحتاج صلاحية توقيع الزيارات.");
   const full = clinician !== null || owner;
   const orthoEdit = owner || held.has("clinical.ortho.edit");
@@ -175,6 +256,17 @@ async function sign(
   if (visit.patient_id === null) throw refuse("visit_unlinked", 409, "اربط الزيارة بملف مريض أو افتح له ملفًا قبل التوقيع — الفاتورة تدخل كشف حسابه.");
   const existing = await getClinicalVisitWith(client, visitId, { actorPartyId: clinician });
   if (!existing) throw refuse("visit_not_found", 404, VISIT_MISSING);
+  // The lab review fence: a reviewer without the money view signs against the money-free
+  // version; once it matches here, the server supplies the full fence the body re-checks
+  // under its own locks. A reviewer holding the full fence may still send it.
+  let labSignVersion = typeof body.labSignVersion === "string" ? body.labSignVersion : null;
+  if (typeof body.labReviewVersion === "string") {
+    if (body.labReviewVersion !== labVisitReviewVersion({ ...existing, visitId })) {
+      throw refuse("stale_lab_sign_review", 409, "تغيّرت أعمال الزيارة منذ المراجعة؛ حدّث البيانات وراجعها قبل التوقيع.");
+    }
+    labSignVersion = labVisitSignatureVersion({ visitId, patientId: existing.patientId, doctorId: existing.doctorId,
+      billingCurrency: existing.billingCurrency, diagnosis: existing.diagnosis, treatmentDone: existing.treatmentDone, procedures: existing.procedures });
+  }
   let outcome: Awaited<ReturnType<typeof signClinicalVisitLockedOn>>;
   try {
     outcome = await signClinicalVisitLockedOn(client, {
@@ -184,7 +276,9 @@ async function sign(
       dependencyOverrideReason: typeof body.dependencyOverrideReason === "string" ? body.dependencyOverrideReason : null,
       orthoSession: orthoSession.value, outsideContractDecision: decision,
       signerRole: identity.role,
-      labSignVersion: typeof body.labSignVersion === "string" ? body.labSignVersion : null,
+      // Durable lab work materializes only for a clinician or the owner holding clinical.lab.order (legacy doctor/admin).
+      ...(full && (owner || held.has("clinical.lab.order")) ? { session: canonicalLabActor(identity) } : {}),
+      labSignVersion,
       authorizeNoCharge: async caseId => {
         if (owner) return;
         const { rows: [kase] } = caseId === null ? { rows: [] as { responsible_doctor_id: number | null }[] }
@@ -194,7 +288,7 @@ async function sign(
     }, existing);
   } catch (error) {
     if (error instanceof LabWorkIntentError && error.code === "unauthorized") {
-      throw refuse("lab_sign_not_canonical", 409, "تحمل هذه الزيارة عمل مختبر بهوية محفوظة؛ توقيعها من الحساب الموحّد لم يُفعَّل بعد. لم يُوقَّع شيء.");
+      throw refuse("lab_order_not_granted", 403, "توقيع زيارةٍ تحمل عمل مختبر يحتاج طبيبًا مرتبطًا بصلاحية طلب أعمال المختبر، أو المالك. لم يُوقَّع شيء.");
     }
     throw error;
   }
@@ -274,6 +368,7 @@ async function save(
   client: DbClient, handle: Parameters<typeof staffOperationCapabilities>[1], visitId: number,
   visit: { doctor_id: number | null; billing_currency: string | null }, body: Record<string, unknown>, full: boolean,
   identity: { username: string; role: string },
+  lab: (LabCommand & { actor: { userId: number; username: string; role: string } }) | null = null,
 ) {
   const notes = {
     chiefComplaint: text(body.chiefComplaint, 500), examination: text(body.examination), diagnosis: text(body.diagnosis),
@@ -283,7 +378,11 @@ async function save(
   if (body.billingCurrency !== undefined && body.billingCurrency !== null) {
     const stored = isCurrency(visit.billing_currency) ? visit.billing_currency : CLINIC_BASE_CURRENCY;
     if (!isCurrency(body.billingCurrency)) throw refuse("invalid_currency", 400, "عملة الزيارة غير صالحة.");
-    if (body.billingCurrency !== stored) throw refuse("billing_currency_financial", 409, "تغيير عملة الزيارة قرارٌ مالي لم يُنقل بعد إلى الحساب الموحّد؛ احفظ دون تغييرها.");
+    if (body.billingCurrency !== stored) {
+      // Inside a lab command the legacy route settles this as a deterministic rejection.
+      if (lab) throw new LabWorkIntentError("invalid_billing_currency", "عملة الزيارة غير صالحة.", 409);
+      throw refuse("billing_currency_financial", 409, "تغيير عملة الزيارة قرارٌ مالي لم يُنقل بعد إلى الحساب الموحّد؛ احفظ دون تغييرها.");
+    }
   }
   if (!full) {
     if (notes.doctorId !== (visit.doctor_id ?? null)) throw refuse("assistant_doctor_locked", 403, "التوثيق دون ارتباطٍ بطبيب لا يغيّر الطبيب المعالج.");
@@ -325,12 +424,18 @@ async function save(
   const overrides: ProcedurePriceOverride[] = [];
   const outcome = await setVisitProceduresOn(client, {
     visitId, procedures: withKept, clinicalNotes: notes, overrides, rates: foreignRatesFromSettings(settings),
+    ...(lab ? { labCommand: { expectedPatientId: lab.patientId, requestKey: lab.requestKey, requestHash: lab.requestHash,
+      retirements: parseLabWorkRetirements(lab.retirements), session: canonicalLabActor(lab.actor) } } : {}),
     authority: {
       grants: { discount: held.has("finance.discounts.apply"), discountOverride: held.has("finance.discounts.override"), increase: held.has("finance.price-increases.apply") },
       maxDiscountPercent: Number.isFinite(maxDiscount) ? maxDiscount : 0,
     },
   });
-  if (outcome !== "saved") throw refuse("visit_signed", 409, "الزيارة موقَّعة — لا تُعدَّل إجراءاتها.");
+  if (outcome === "replayed") return; // an exact lab replay: the saved result stands, nothing new written
+  if (outcome !== "saved") {
+    if (lab) throw new LabWorkIntentError("visit_signed", "الزيارة موقَّعة — لا تُعدَّل إجراءاتها.", 409);
+    throw refuse("visit_signed", 409, "الزيارة موقَّعة — لا تُعدَّل إجراءاتها.");
+  }
   for (const override of overrides) {
     await insertAuditRow(client, {
       action: "visit.price_override", entity: "visit", entityId: visitId, entityLabel: override.serviceName,
@@ -356,6 +461,7 @@ export function canonicalVisitDocumentFailure(error: unknown): NextResponse {
   if (error instanceof ClinicalPlanConflict || error instanceof ClinicalDoctorIdentityConflict) {
     return NextResponse.json({ code: error instanceof ClinicalDoctorIdentityConflict ? error.code : "clinical_plan_conflict", message: error.message }, { status: 409, headers: NO_STORE });
   }
+  if (error instanceof LabWorkContractError) return NextResponse.json({ code: error.code, message: error.message }, { status: 400, headers: NO_STORE });
   if (error instanceof LabWorkIntentError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
   if ((error as { code?: string }).code === "55P03") return NextResponse.json({ code: "busy", message: "يوجد تحديث سريري جارٍ؛ حدّث الزيارة وأعد المحاولة." }, { status: 409, headers: NO_STORE });
   return canonicalPatientReadFailure(error, "تعذّر حفظ الزيارة.");

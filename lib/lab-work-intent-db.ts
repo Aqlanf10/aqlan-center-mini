@@ -24,8 +24,22 @@ export type LabWorkCommandResult = {outcome:"applied";labWork:LabWorkReceipt[]} 
 export function assertLabWorkCommandApplied(result:LabWorkCommandResult):asserts result is Extract<LabWorkCommandResult,{outcome:"applied"}>{
   if(result.outcome==="rejected")throw new LabWorkIntentError(result.code,"عملية المختبر مرفوضة نهائيًا؛ استخدم طلبًا جديدًا بعد التصحيح.",409);
 }
+/** A canonical staff actor (M2 slice 87). The canonical caller has already admitted its
+ * operation in THIS transaction and proved clinical.lab.order, the patient scope and the
+ * clinician-or-owner rule; the lab layer then binds receipts and identities to its user id
+ * instead of re-validating a legacy session. Branded by a module symbol: a value parsed
+ * from JSON or built elsewhere can never pass as one. */
+const CANONICAL_LAB_ACTOR: unique symbol = Symbol("canonical-lab-actor");
+export interface CanonicalLabActor { readonly [CANONICAL_LAB_ACTOR]: true; readonly userId: number; readonly username: string; readonly role: string }
+export type LabActorSource = SessionPayload | CanonicalLabActor;
+export function canonicalLabActor(identity: { userId: number; username: string; role: string }): CanonicalLabActor {
+  if (!positive(identity.userId) || !identity.username) fail("unauthorized", 403);
+  return Object.freeze({ [CANONICAL_LAB_ACTOR]: true as const, userId: identity.userId, username: identity.username, role: identity.role });
+}
+const isCanonicalLabActor = (source: LabActorSource): source is CanonicalLabActor =>
+  typeof source === "object" && source !== null && (source as Partial<Record<typeof CANONICAL_LAB_ACTOR, unknown>>)[CANONICAL_LAB_ACTOR] === true;
 export interface LabWorkCommandContext {
-  patientId:number;sourceKind:"visit"|"invoice";sourceId:number;session:SessionPayload;requestKey:string;requestHash:string;
+  patientId:number;sourceKind:"visit"|"invoice";sourceId:number;session:LabActorSource;requestKey:string;requestHash:string;
 }
 interface IntentRow {id:string;patient_id:number;origin_kind:"visit"|"invoice";origin_visit_id:number|null;origin_invoice_id:number|null;group_kind:"single"|"bridge";revision:number;state:"draft"|"materialized"|"cancelled";prescription:LabPrescriptionInput;initial_order_id:number|null;}
 interface MemberRow {id:string;intent_id:string;patient_id:number;service_id:number;source_category:string;tooth_code:number;quantity:number;plan_item_id:number|null;doctor_id:number|null;created_revision:number;retired_revision:number|null;}
@@ -40,7 +54,9 @@ export async function labWorkIntentSupported(db:QueryDb):Promise<boolean>{
   const marker=await db.query<{version:number}>("SELECT version FROM lab_work_intent_schema WHERE singleton=TRUE");
   return marker.rows.length===1&&marker.rows[0].version===1;
 }
-async function authorize(client:DbClient,session:SessionPayload,patientId:number){
+type LabActor={userId:number;username:string;role:string};
+async function authorize(client:DbClient,session:LabActorSource,patientId:number):Promise<LabActor>{
+  if(isCanonicalLabActor(session))return {userId:session.userId,username:session.username,role:session.role};
   const active=await revalidateSessionInTransaction(session,client);
   if(!active||!["admin","doctor"].includes(active.role)||!positive(active.userId)
     ||!await canAccessPatient(active,patientId,undefined,client,"nowait"))return fail("unauthorized",403);
@@ -212,7 +228,7 @@ async function linkSource(client:DbClient,input:{patientId:number;intentId:strin
   if(old){if(old.intent_id!==input.intentId||old.member_id!==input.memberId||old.patient_id!==input.patientId)fail("competing_prescription");return;}
   await client.query(`INSERT INTO lab_prescription_source_memberships(intent_id,member_id,patient_id,${column},linked_by_user_id) VALUES($1,$2,$3,$4,$5)`,[input.intentId,input.memberId,input.patientId,input.sourceId,input.actorId]);
 }
-async function ensureOrder(client:DbClient,intent:IntentRow,actor:SessionPayload,actualDoctors:(number|null)[]){
+async function ensureOrder(client:DbClient,intent:IntentRow,actor:LabActor,actualDoctors:(number|null)[]){
   if(intent.state==="cancelled")fail("cancelled_intent");
   try{await client.query("LOCK TABLE lab_orders IN ROW EXCLUSIVE MODE NOWAIT");}catch(error){if((error as {code?:string}).code==="55P03")fail("clinical_boundary_busy");throw error;}
   if(intent.initial_order_id!==null){
@@ -239,7 +255,7 @@ async function ensureOrder(client:DbClient,intent:IntentRow,actor:SessionPayload
   return {orderId:order.id,created:true,intent:updated};
 }
 
-export async function materializeInvoiceLabWorkInTransaction(client:DbClient,input:{patientId:number;invoiceId:number;visitId?:number|null;session:SessionPayload;requestKey:string;requestHash:string;rows:readonly InvoiceLabSourceRow[];retirements?:unknown}):Promise<MaterializedLabWorkReceipt[]>{
+export async function materializeInvoiceLabWorkInTransaction(client:DbClient,input:{patientId:number;invoiceId:number;visitId?:number|null;session:LabActorSource;requestKey:string;requestHash:string;rows:readonly InvoiceLabSourceRow[];retirements?:unknown}):Promise<MaterializedLabWorkReceipt[]>{
   const hasPayload=input.rows.some(row=>row.labWork!==undefined&&row.labWork!==null)||(Array.isArray(input.retirements)&&input.retirements.length>0);
   const supported=await labWorkIntentSupported(client);
   if(!supported){if(hasPayload)fail("schema_unavailable",503);return [];}
@@ -273,7 +289,7 @@ export async function materializeInvoiceLabWorkInTransaction(client:DbClient,inp
   await recordVisitLabWorkCommandInTransaction(client,context,results);return results;
 }
 
-export async function materializeVisitLabWorkInTransaction(client:DbClient,input:{patientId:number;visitId:number;invoiceId:number|null;session:SessionPayload;rows:readonly VisitLabSourceRow[]}){
+export async function materializeVisitLabWorkInTransaction(client:DbClient,input:{patientId:number;visitId:number;invoiceId:number|null;session:LabActorSource;rows:readonly VisitLabSourceRow[]}){
   await requireCapability(client);const actor=await authorize(client,input.session,input.patientId);
   await validateOrigin(client,input.patientId,"visit",input.visitId);
   const command=normalizeLabWorkGroups(input.rows);await lockIntents(client,command.groups.map(g=>g.intentId));

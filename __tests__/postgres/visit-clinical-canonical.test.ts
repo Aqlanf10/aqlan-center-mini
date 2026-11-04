@@ -51,7 +51,10 @@ describe("visit cockpit read", () => {
   it("the owner reads the legacy composite unchanged (nothing dropped by the allowlist)", async () => {
     const legacy = await db.getClinicalVisit(ids.visit, { actorPartyId: null });
     const canonical = await cockpit.readCanonicalVisitClinical(await fx.session("owner"), ids.visit);
-    expect(JSON.parse(JSON.stringify(canonical))).toEqual(JSON.parse(JSON.stringify(legacy)));
+    // Slice 87 adds one clinical field, the money-free lab review fence; everything else is the legacy composite.
+    const { labReviewVersion, ...rest } = JSON.parse(JSON.stringify(canonical));
+    expect(labReviewVersion).toMatch(/^[a-f0-9]{64}$/);
+    expect(rest).toEqual(JSON.parse(JSON.stringify(legacy)));
     expect(canonical).toMatchObject({ totalMinor: PRICE, procedures: [{ unitPriceMinor: PRICE, totalMinor: PRICE }] });
   });
 
@@ -82,7 +85,8 @@ describe("visit cockpit read", () => {
     // The owner's scope admits the matched file: the legacy preview is kept, as legacy shows it.
     const legacy = await db.getClinicalVisit(ids.walkIn, { actorPartyId: null });
     expect(JSON.stringify(legacy)).toContain("SYN-PRIVATE-CASE");
-    expect(JSON.parse(JSON.stringify(await cockpit.readCanonicalVisitClinical(await fx.session("owner"), ids.walkIn)))).toEqual(JSON.parse(JSON.stringify(legacy)));
+    const { labReviewVersion: _fence, ...ownerRead } = JSON.parse(JSON.stringify(await cockpit.readCanonicalVisitClinical(await fx.session("owner"), ids.walkIn)));
+    expect(ownerRead).toEqual(JSON.parse(JSON.stringify(legacy)));
   });
 
   it("no clinical grant is refused", async () => {

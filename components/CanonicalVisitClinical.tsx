@@ -41,6 +41,8 @@ type CockpitVisit = {
   referral: { fromName: string | null; reason: string } | null;
   ortho?: { appliance: string; phase: string; upperWire: string | null; lowerWire: string | null; lastAdjustment: string | null; visitAdjustmentId?: number | null; adjustmentBillingClass?: string } | null;
   totalMinor?: number; billingCurrency?: Currency | null; invoiceId?: number | null;
+  /** The money-free lab review fence (slice 87), sent back with the signature. */
+  labReviewVersion?: string;
 };
 type NoteKey = "chiefComplaint" | "examination" | "diagnosis" | "treatmentDone" | "nextPlan";
 type Draft = { key: string; serviceId: number; serviceName: string; toothCode: number | null; surfaces: string | null; quantity: number; doctorId: number | null; planItemId: number | null; note: string | null };
@@ -262,6 +264,7 @@ export function CanonicalVisitClinical({ visitId }: { visitId: number }) {
           <button type="button" disabled={busy || draftsChanged || (noCharge && noChargeReason.trim().length < 3)}
             onClick={() => void submit({
               action: "sign",
+              ...(visit.labReviewVersion ? { labReviewVersion: visit.labReviewVersion } : {}),
               ...(noCharge ? { outsideContractDecision: { decision: "no_charge", reason: noChargeReason } } : {}),
               ...(unmet.length > 0 && overrideReason.trim() ? { dependencyOverrideReason: overrideReason } : {}),
             }, "وُقّعت الزيارة.")}

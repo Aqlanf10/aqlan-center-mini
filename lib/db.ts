@@ -18913,7 +18913,7 @@ async function lockVisitPatientFirst(client: DbClient, visitId: number): Promise
 
 type SetVisitProceduresInput = {
   visitId: number;
-  labCommand?: { expectedPatientId: number; requestKey: string; requestHash: string; retirements?: unknown; session: import("./auth").SessionPayload };
+  labCommand?: { expectedPatientId: number; requestKey: string; requestHash: string; retirements?: unknown; session: import("./lab-work-intent-db").LabActorSource };
   /** `unitPriceMinor: null` (canonical callers only): the server price, never a request. */
   procedures: (Omit<VisitProcedureInput, "unitPriceMinor"> & { unitPriceMinor: number | null; keptPriceMinor?: number | null })[];
   /** HTTP saves notes and procedures atomically; other callers retain procedure-only behavior. */
@@ -19544,7 +19544,7 @@ export type SignClinicalVisitInput = {
   /** (CASE-1) شدّة التقويم في هذه الزيارة — تُكتب داخل معاملة التوقيع، مرةً واحدة لكل (حالة، زيارة). */
   orthoSession?: OrthoSessionDraft | null;
   signerRole?: string | null;
-  session?: import("./auth").SessionPayload;
+  session?: import("./lab-work-intent-db").LabActorSource;
   labSignVersion?: string | null;
   /** (P1-C) قرار الشدّة خارج العقد عند التوقيع: «بلا رسوم» بسببٍ مكتوب. والفوترة تكون بسطر خدمة تقويم. */
   outsideContractDecision?: { decision: "no_charge"; reason: string } | null;

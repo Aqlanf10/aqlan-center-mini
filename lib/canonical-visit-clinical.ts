@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { getClinicalVisitWith, getPool, patientInDoctorScopeWith, type ClinicalVisit } from "./db";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
+import { labVisitReviewVersion } from "./lab-visit-signature";
 import { CanonicalPatientReadRefusal } from "./canonical-patient-reads";
 import { NO_STORE, canonicalPatientReadFailure } from "./canonical-patient-http";
 import { LabWorkIntentError, labWorkIntentSupported, readLabWorkCommandForActorInTransaction } from "./lab-work-intent-db";
@@ -42,7 +43,7 @@ const pick = (source: object, keys: readonly string[]): Row => {
 };
 
 export const VISIT_CLINICAL_KEYS = Object.freeze([
-  "labWorkIntentSupported", "labWorkIntentRequired", "id", "patientId", "patientName", "chiefComplaint", "examination",
+  "labWorkIntentSupported", "labWorkIntentRequired", "labReviewVersion", "id", "patientId", "patientName", "chiefComplaint", "examination",
   "diagnosis", "treatmentDone", "nextPlan", "addendum", "doctorId", "status", "signedAt", "signedBy", "arrivedAt",
   "procedures", "planItemsMatched", "planTitle", "amendedServiceConflict", "plannedVisit", "previousVisit",
   "latestDiagnosis", "activeCases", "outstanding", "labOrders", "suggestions", "referral",
@@ -104,6 +105,8 @@ export async function readCanonicalVisitClinical(session: VerifiedDurableSession
     const visit = await getClinicalVisitWith(query, visitId, { actorPartyId: scope.clinicianPartyId, admitPreviewPatient: patientInside });
     if (!visit) throw new CanonicalPatientReadRefusal("patient_not_found", VISIT_MISSING);
     const owner = scope.isProtectedOwner();
+    // The money-free lab review fence (slice 87): what a reviewer without the invoice view signs against.
+    if (visit.labWorkIntentSupported) Object.assign(visit, { labReviewVersion: labVisitReviewVersion({ ...visit, visitId: visit.id }) });
     return projectCanonicalVisitClinical(visit, {
       money: owner || scope.granted("finance.invoices.view"),
       ortho: owner || scope.granted("clinical.ortho.view"),

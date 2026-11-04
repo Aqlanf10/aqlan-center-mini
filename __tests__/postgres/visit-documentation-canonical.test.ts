@@ -110,7 +110,8 @@ describe("save", () => {
     expect(await refusal(act("doctor", ids.today, { action: "sign" }))).toMatchObject({ code: "visit_sign_not_granted", status: 403 });
     expect((await q("SELECT signed_at FROM visits WHERE id=$1", [ids.today]))[0].signed_at).toBeNull();
     expect(await refusal(act("doctor", ids.today, { billingCurrency: "USD" }))).toMatchObject({ code: "billing_currency_financial", status: 409 });
-    expect(await refusal(act("doctor", ids.today, { labRequestKey: "syn-lab-key-0001", procedures: [] }))).toMatchObject({ code: "lab_draft_not_canonical", status: 409 });
+    // Slice 87: the lab draft is canonical; without clinical.lab.order it is refused by its grant.
+    expect(await refusal(act("doctor", ids.today, { labRequestKey: "syn-lab-key-0001", procedures: [] }))).toMatchObject({ code: "lab_order_not_granted", status: 403 });
     expect(await refusal(act("doctor", ids.signed, { diagnosis: "تعديل", doctorId: fx.parties.doctor! }))).toMatchObject({ code: "visit_signed", status: 409 });
     expect(await refusal(act("doctor", ids.otherVisit, { diagnosis: "x" }))).toMatchObject({ code: "visit_not_found", status: 404 });
     expect(await refusal(act("front", ids.today, { diagnosis: "x" }))).toMatchObject({ message: expect.stringMatching(/CAPABILITY_DENIED$/) });
