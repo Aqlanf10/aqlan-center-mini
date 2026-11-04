@@ -693,3 +693,30 @@ Rollback to an old binary must keep issuance disabled. Do not remove the receipt
 table or rewrite history. Native PostgreSQL 18 concurrency, both official restore
 paths, exact generated schema contract and full CI remain release gates. See
 `docs/review/rx-history-integrity-20261101/PROTOCOL.md` for the complete protocol.
+
+
+## 0094 — immutable radiology requests
+
+`0094_radiology_requests.sql` adds `radiology_requests`: one UUID command key,
+actor and clinician identity, patient/optional visit bindings, payload digest,
+and a versioned clinical snapshot containing the selected center's name/address.
+The snapshot validator checks required typed fields, identity equality, lengths,
+center UUID and total JSON size. Patient, visit and doctor foreign keys restrict
+deletion; row update/delete and nonempty truncate guards retain issued history.
+The patient-history index orders by patient, creation timestamp and command key.
+No existing clinical rows are rewritten, and 0090–0093 remain unchanged.
+
+Issuance commits the immutable row and awaited creation audit together. Exact
+replay returns the stored snapshot after fresh authority checks; read-only
+recovery never creates a request. Center settings default to an empty catalogue;
+later center edits or disabling do not rewrite issued snapshots. Reception needs
+an explicit print grant and cannot issue; the application print action rechecks
+current scope and awaits its own audit. Native browser printing of content
+already disclosed cannot be revoked by the application.
+
+Nonempty radiology history blocks test-data reset, source-patient merge and bound
+visit deletion/reparenting. Archive/export/restore retain the receipts and their
+snapshots; do not drop the table, delete backups, or rewrite migration history
+for rollback. Exact-head native PostgreSQL, restore, built-HTTP and A6 PDF gates
+remain release requirements. This registration/documentation is not permission
+to migrate Production, nor a claim that those gates have passed.
