@@ -9,6 +9,7 @@ import { CanonicalOrthoCases } from "./CanonicalOrthoCases";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { CanonicalReferralWork, type ReferralRow } from "./CanonicalReferralWork";
 import { CanonicalClinicalDocumentation } from "./CanonicalClinicalDocumentation";
+import { PatientDocuments } from "@/components/PatientDocuments";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -195,6 +196,11 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
           ownerKey={session.username} canDocument={session.isOwner === true || !!session.capabilities?.includes("clinical.visits.document")} canEdit={session.isOwner === true || !!session.capabilities?.includes("clinical.plans.edit")} /> : null}
       {projection.care ? <PlannedVisitsPanel patientId={patientId}
         canBook={session?.isOwner === true || (session?.capabilities ?? []).includes("appointments.create")} /> : null}
+      {session?.isOwner === true || (session?.capabilities?.includes("clinical.xrays.view") && (session.patientScope === "own" || session.patientScope === "all"))
+        ? <section aria-label="الأشعة والمستندات" className="rounded-2xl border border-slate-200 bg-white p-4" data-testid="canonical-documents">
+          {/* M2 slice 75: X-rays and documents inside the patient scope; upload, hide and photo by their own grants (server-enforced). */}
+          <PatientDocuments patientId={patient.id} />
+        </section> : null}
       <TimelinePanel patientId={patientId} />
 
       <p className="text-xs text-slate-600">بقية تفاصيل الملف والخطط والحساب والمستندات تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>

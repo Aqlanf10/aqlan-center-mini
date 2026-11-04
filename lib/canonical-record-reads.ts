@@ -53,6 +53,10 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:families.record": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze([]) }),
   /** GET /api/families (?q, ?phone): linking search for family writers, members inside
    * the patient scope only (M2 slice 72). */
+  /** GET /api/patients/[id]/documents and GET /api/documents/[id]: X-rays and documents
+   * inside the patient scope; hidden ones only with patients.documents.delete (M2 slice 75). */
+  "read:documents.list": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
+  "read:documents.file": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
   "read:families.search": Object.freeze({ record: "patient", need: Object.freeze(["patients.edit"] as const), anyOf: Object.freeze([]) }),
   /** Clinical sub-reads of one patient (medical history, vitals, problems): a clinical
    * grant (the care group of lib/canonical-patient-reads.ts) inside the patient scope. */

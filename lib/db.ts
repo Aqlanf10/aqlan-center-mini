@@ -5791,6 +5791,25 @@ export type PatientPhotoResult =
  * صورة المريض = مستندٌ صوريٌّ قائمٌ من مستنداته هو — لا صورة مريضٍ آخر ولا ملفٌّ مخفي.
  * `documentId = null` يزيل الصورة (المستند نفسه يبقى في مستنداته).
  */
+/** (M2 slice 75) `setPatientPhoto` on the caller's transaction, the patient row locked first. */
+export async function setPatientPhotoOn(client: DbClient, patientId: number, documentId: number | null): Promise<PatientPhotoResult> {
+  const { rows: [locked] } = await client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [patientId]);
+  if (!locked) return { ok: false, reason: "not_found" };
+  if (documentId !== null) {
+    const { rows: [document] } = await client.query<{ mime_type: string }>(
+      `SELECT mime_type FROM patient_documents WHERE id = $1 AND patient_id = $2 AND removed_at IS NULL`,
+      [documentId, patientId],
+    );
+    if (!document) return { ok: false, reason: "document_not_found" };
+    if (!document.mime_type.startsWith("image/")) return { ok: false, reason: "not_image" };
+  }
+  const { rows } = await client.query<PatientRow>(
+    `UPDATE patients SET photo_document_id = $2 WHERE id = $1 RETURNING ${PATIENT_COLUMNS}`,
+    [patientId, documentId],
+  );
+  return rows[0] ? { ok: true, patient: toPatient(rows[0]) } : { ok: false, reason: "not_found" };
+}
+
 export async function setPatientPhoto(patientId: number, documentId: number | null): Promise<PatientPhotoResult> {
   await ensureSchema();
   if (documentId !== null) {
@@ -23712,6 +23731,25 @@ export async function listPatientDocuments(
   return rows.map(toDocument);
 }
 
+/** (M2 slice 75) The same list on the caller's snapshot. */
+export async function listPatientDocumentsWith(q: Pick<DbClient, "query">, patientId: number, includeRemoved: boolean): Promise<PatientDocument[]> {
+  const { rows } = await q.query<DocumentRow>(
+    `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents
+      WHERE patient_id = $1 ${includeRemoved ? "" : "AND removed_at IS NULL"}
+      ORDER BY COALESCE(taken_on, uploaded_at::date) DESC, id DESC`,
+    [patientId],
+  );
+  return rows.map(toDocument);
+}
+
+/** (M2 slice 75) The download row on the caller's snapshot; the storage key never leaves the server. */
+export async function getDocumentForDownloadWith(q: Pick<DbClient, "query">, id: number): Promise<{ document: PatientDocument; storageKey: string } | null> {
+  const { rows } = await q.query<DocumentRow & { storage_key: string }>(
+    `SELECT ${DOCUMENT_COLUMNS}, storage_key FROM patient_documents WHERE id = $1`, [id]);
+  if (!rows[0]) return null;
+  return { document: toDocument(rows[0]), storageKey: rows[0].storage_key };
+}
+
 /** الوصف مع مفتاح التخزين — للتنزيل وحده، ولا يخرج المفتاح إلى المتصفّح أبدًا. */
 export async function getDocumentForDownload(id: number): Promise<
   { document: PatientDocument; storageKey: string } | null
@@ -23822,27 +23860,33 @@ export async function recordDocument(input: {
   height?: number | null;
 }): Promise<PatientDocument> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client) => {
-    await validateDocumentAssociations(input, client);
-    const { rows } = await client.query<DocumentRow>(
-      `INSERT INTO patient_documents
-         (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
-          note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view,
-          width, height)
-       VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
-               $12::int, $13::int, $14::text, $15::text, $16::int, $17::int)
-       RETURNING ${DOCUMENT_COLUMNS}`,
-      [
-        input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
-        input.sizeBytes, input.sha256, input.storageKey,
-        input.note?.trim() || null, input.takenOn, input.uploadedBy,
-        input.orthoCaseId ?? null, input.adjustmentId ?? null,
-        input.photoStage ?? null, input.photoView ?? null,
-        input.width ?? null, input.height ?? null,
-      ],
-    );
-    return toDocument(rows[0]);
-  });
+  return withTransaction(getPool(), async (client) => recordDocumentOn(client, input));
+}
+
+type RecordDocumentInput = Parameters<typeof recordDocument>[0];
+
+/** The body of `recordDocument` on the caller's transaction (M2 slice 75): the
+ * associations re-validated under their locks, then the row. */
+export async function recordDocumentOn(client: DbClient, input: RecordDocumentInput): Promise<PatientDocument> {
+  await validateDocumentAssociations(input, client);
+  const { rows } = await client.query<DocumentRow>(
+    `INSERT INTO patient_documents
+       (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
+        note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view,
+        width, height)
+     VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
+             $12::int, $13::int, $14::text, $15::text, $16::int, $17::int)
+     RETURNING ${DOCUMENT_COLUMNS}`,
+    [
+      input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
+      input.sizeBytes, input.sha256, input.storageKey,
+      input.note?.trim() || null, input.takenOn, input.uploadedBy,
+      input.orthoCaseId ?? null, input.adjustmentId ?? null,
+      input.photoStage ?? null, input.photoView ?? null,
+      input.width ?? null, input.height ?? null,
+    ],
+  );
+  return toDocument(rows[0]);
 }
 
 /**
@@ -23866,6 +23910,20 @@ export async function removeDocument(input: {
   if ((rowCount ?? 0) === 0) return { ok: false, message: "المستند غير موجود أو مخفيٌّ سلفًا." };
   // (PAT-3) صورةٌ أُخفيت لا تبقى صورة المريض.
   await getPool().query(`UPDATE patients SET photo_document_id = NULL WHERE photo_document_id = $1`, [input.id]);
+  return { ok: true };
+}
+
+/** (M2 slice 75) `removeDocument` on the caller's transaction (row and photo pointer together). */
+export async function removeDocumentOn(client: DbClient, input: { id: number; actor: string; note: string }): Promise<{ ok: true } | { ok: false; message: string }> {
+  const reason = input.note.trim();
+  if (reason.length < 3) return { ok: false, message: "اكتب سبب الإخفاء." };
+  const { rowCount } = await client.query(
+    `UPDATE patient_documents SET removed_at = NOW(), removed_by = $2, removed_note = $3
+      WHERE id = $1 AND removed_at IS NULL`,
+    [input.id, input.actor, reason],
+  );
+  if ((rowCount ?? 0) === 0) return { ok: false, message: "المستند غير موجود أو مخفيٌّ سلفًا." };
+  await client.query(`UPDATE patients SET photo_document_id = NULL WHERE photo_document_id = $1`, [input.id]);
   return { ok: true };
 }
 

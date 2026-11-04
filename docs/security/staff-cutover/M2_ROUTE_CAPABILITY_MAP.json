@@ -617,8 +617,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 75: patients.documents.delete (legacy admin label) inside the scope; written reason; row lock, hide, photo pointer and audit in one transaction."
  },
  {
   "route": "/api/documents/[id]",
@@ -633,8 +633,16 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 75: record read read:documents.file (clinical.xrays.view); the document's patient inside the scope (404 like missing); hidden only for patients.documents.delete or the owner; bytes read from storage only after admission; no-store, nosniff.",
+  "projection": {
+   "legacy": "canViewXrays role access; hidden documents for the admin label.",
+   "groups": {
+    "file": "the document bytes, inline or as a download",
+    "hidden": "only with patients.documents.delete or the protected owner"
+   },
+   "rows": "one document whose patient is inside the patient scope"
+  }
  },
  {
   "route": "/api/executive",
@@ -3494,8 +3502,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "",
+  "status": "canonical-done",
+  "note": "M2 slice 75: record read read:documents.list (clinical.xrays.view) inside the patient scope; the declared projection applies (removed documents only with patients.documents.delete or the protected owner); storage readiness; no storage key.",
   "projection": {
    "legacy": "listPatientDocuments(patientId, isAdmin(role)): admin also receives removed (soft-deleted) documents.",
    "groups": {
@@ -3518,8 +3526,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 75: one admitted clinical.xrays.upload transaction; grant, scope, size limit and associations before any disk write; forged signature audited without a file (400); file then row with the document.upload audit in the same transaction; optional requestKey receipt."
  },
  {
   "route": "/api/patients/[id]/endo",
@@ -3999,8 +4007,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 75: patients.edit inside the scope; an image of the patient's own visible documents or null; patient row lock and audit in one transaction."
  },
  {
   "route": "/api/patients/[id]/plans",
