@@ -3549,10 +3549,22 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 77: read:patients.clinical; listPatientEndoWith on the owning snapshot; plan items and plan progress only with clinical.plans.view (visibleEndoTreatment); no money.",
+  "projection": {
+   "legacy": "guardPatient (canAccessPatient); plan items with canViewPlans.",
+   "groups": {
+    "clinical": "episodes, visit records, canals and addenda — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view (read:patients.clinical)",
+    "plan": "the linked crown plan item and plan-derived progress — clinical.plans.view or the protected owner"
+   },
+   "rows": "patient outside the scope reads like a missing one (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/endo",
@@ -3566,8 +3578,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Signed visit addenda additionally require clinical.visits.sign."
+  "status": "canonical-done",
+  "note": "M2 slice 77: one admitted clinical.visits.document transaction inside the patient scope AND the validated clinician link or the protected owner (legacy: doctor/admin labels); openEndoTreatmentOn unchanged (patient FOR UPDATE, case FOR SHARE, one in-progress episode per tooth) with endo.open in the same transaction; a refusal rolls back."
  },
  {
   "route": "/api/patients/[id]/endo/[treatmentId]",
@@ -3581,8 +3593,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Signed visit addenda additionally require clinical.visits.sign."
+  "status": "canonical-done",
+  "note": "M2 slice 77: one admitted clinical.visits.document transaction inside the patient scope AND the validated clinician link or the protected owner (legacy: doctor/admin labels); changeEndoStatusOn unchanged (episode FOR UPDATE, signed visits and readiness before completion) with endo.status in the same transaction."
  },
  {
   "route": "/api/patients/[id]/endo/[treatmentId]/crown",
@@ -3596,8 +3608,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Signed visit addenda additionally require clinical.visits.sign."
+  "status": "canonical-done",
+  "note": "M2 slice 77: one admitted clinical.visits.document transaction inside the patient scope AND the validated clinician link or the protected owner (legacy: doctor/admin labels); plan-item links additionally need clinical.plans.edit (legacy canEditPlans); setEndoCrownOn unchanged (patient, episode, items, the shared dependency writer) with endo.crown."
  },
  {
   "route": "/api/patients/[id]/endo/[treatmentId]/visits",
@@ -3611,8 +3623,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Signed visit addenda additionally require clinical.visits.sign."
+  "status": "canonical-done",
+  "note": "M2 slice 77: one admitted clinical.visits.document transaction inside the patient scope AND the validated clinician link or the protected owner (legacy: doctor/admin labels); saveEndoVisitOn unchanged (episode then visit FOR UPDATE, signed visit refused, expectedVersion, same-content replay); the clinician party is the validated link; endo.visit_save in the same transaction."
  },
  {
   "route": "/api/patients/[id]/endo/[treatmentId]/visits/[endoVisitId]/addenda",
@@ -3626,8 +3638,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Signed visit addenda additionally require clinical.visits.sign."
+  "status": "canonical-done",
+  "note": "M2 slice 77: one admitted clinical.visits.document transaction inside the patient scope AND the validated clinician link or the protected owner (legacy: doctor/admin labels); and clinical.visits.sign (signed visits only); addEndoAddendumOn unchanged with its request key (endo_addenda.request_key) and endo.addendum."
  },
  {
   "route": "/api/patients/[id]/family",

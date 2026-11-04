@@ -11,6 +11,7 @@ import { CanonicalReferralWork, type ReferralRow } from "./CanonicalReferralWork
 import { CanonicalClinicalDocumentation } from "./CanonicalClinicalDocumentation";
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { DentalChart } from "@/components/DentalChart";
+import { PatientEndo } from "@/components/PatientEndo";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -46,6 +47,21 @@ interface PatientFileView {
 
 const VISIT_STATUS_LABEL: Record<VisitStatus, string> = { waiting: "في الانتظار", called: "نُودي", in_chair: "على الكرسي", done: "انتهت" };
 const CHANNEL_LABEL: Record<string, string> = { whatsapp: "واتساب", sms: "رسالة نصية", email: "بريد", call: "اتصال" };
+
+/**
+ * M2 slice 77: endodontics on demand — nothing is read until the section is opened. A
+ * clinical grant inside the scope reads; recording needs clinical.visits.document with the
+ * clinician link or the owner, plan links clinical.plans.edit (all server-enforced).
+ */
+function CanonicalEndoSection({ patientId, canWrite, canEditPlans, openVisitId }: { patientId: number; canWrite: boolean; canEditPlans: boolean; openVisitId: number | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details className="rounded-2xl border border-slate-200 bg-white p-4" data-testid="canonical-endo" onToggle={event => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+      <summary className="min-h-11 cursor-pointer text-sm font-bold text-navy-900">علاج الجذور</summary>
+      {open ? <div className="mt-3"><PatientEndo patientId={patientId} canWrite={canWrite} canEditPlans={canEditPlans} openVisitId={openVisitId} /></div> : null}
+    </details>
+  );
+}
 
 export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
   const session = useSession();
@@ -208,6 +224,11 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
           {/* M2 slice 75: X-rays and documents inside the patient scope; upload, hide and photo by their own grants (server-enforced). */}
           <PatientDocuments patientId={patient.id} />
         </section> : null}
+      {projection.care ? (
+        <CanonicalEndoSection patientId={patient.id} canWrite={canDocument}
+          canEditPlans={session?.isOwner === true || (session?.capabilities ?? []).includes("clinical.plans.edit")}
+          openVisitId={(file.visits ?? []).find(visit => visit.status !== "done")?.id ?? null} />
+      ) : null}
       <TimelinePanel patientId={patientId} />
 
       <p className="text-xs text-slate-600">بقية تفاصيل الملف والخطط والحساب والمستندات تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>
