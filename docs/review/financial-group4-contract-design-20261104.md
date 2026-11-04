@@ -54,10 +54,11 @@ Nothing here changes behaviour until the slices land.
 
 ## 3. Decisions for the owner (isolated; nothing is assumed)
 
-**G4-1 — Plan amounts.** Plan item prices and totals become invoice prices. Agreement funding, instalments and paid balances are the patient's account.
-- *Proposal:*
-  - prices and totals with `finance.invoices.view` (as the visit's amounts);
-  - funding, instalments, paid and remaining with `finance.patient-ledger.view`;
+**G4-1 — Plan amounts.**
+- *Already in force:* the canonical patient workflow summary (M2 slice 6) shows each active plan's account figures (total, done, remaining, overdue, next due date, currency) with `finance.patient-ledger.view`. The canonical plan reads carry no money at all.
+- *Proposal, consistent with that precedent:*
+  - account-level plan figures — total, paid, remaining, instalments, agreement funding — with `finance.patient-ledger.view`, as in force;
+  - item-level prices — what becomes an invoice line — with `finance.invoices.view`, as the visit's amounts (decision 6629149113);
   - writing a price on a plan item with `finance.invoices.create`, besides `clinical.plans.edit`.
 - *Alternative:* one grant for all plan money.
 
