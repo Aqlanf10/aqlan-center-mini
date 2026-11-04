@@ -26,6 +26,7 @@ Fourth contract of group 3. Synthetic data only. No migration, no schema change,
   - a document of a patient outside the scope reads as missing;
   - downloads are `no-store` and `nosniff`.
 - **Duplicate prevention:** an optional `requestKey` (the documents screen sends one) gives a receipt, so a double press keeps one document.
+- **Screen, on demand.** The canonical patient file shows «الأشعة والمستندات» as a closed section: no list and no image is requested until it is opened. Without this, opening the file would fetch every thumbnail. The ceph journeys pin «no image request» on the file, and they caught it.
 
 ## Tests (local, PostgreSQL 18)
 

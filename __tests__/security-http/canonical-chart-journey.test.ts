@@ -6,8 +6,8 @@
  *   documenting account without the clinician link is refused (403, Arabic), outside the
  *   scope answers like missing, a visit of another patient 409; reads by a clinical grant,
  *   none without one.
- * - Browser: the canonical patient file shows the chart read-only for a viewer at 390px;
- *   no failed API call; no DDL.
+ * - Browser: the canonical patient file reads nothing until the chart section is opened,
+ *   then shows the chart read-only for a viewer at 390px; no failed API call; no DDL.
  */
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
@@ -92,7 +92,14 @@ it("browser: the canonical patient file shows the chart read-only for a viewer a
   page.on("response", response => { const path = new URL(response.url()).pathname; if (path.startsWith("/api/") && response.status() >= 400) failures.push(`${response.status()} ${path}`); });
   await page.goto(`${journey.baseUrl}/patients/${ids.mine}`);
   const chart = page.getByTestId("canonical-dental-chart");
+  const chartReads: string[] = [];
+  page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/chart")) chartReads.push(request.method()); });
+  await chart.waitFor();
+  // Nothing is read until the section is opened.
+  expect(chartReads).toEqual([]);
+  await chart.locator("summary").click();
   await chart.locator('[data-testid="dental-chart-workspace"][data-read-state="ready"]').waitFor();
+  expect(chartReads).toEqual(["GET"]);
   expect(failures).toEqual([]);
   expect(writes).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);

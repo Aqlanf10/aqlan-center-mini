@@ -21,7 +21,7 @@ Fifth contract of group 3. Synthetic data only. No migration, no schema change, 
 - **Duplicate prevention.** `requestKey` is optional, as for the diagnosis in slice 74:
   - the reviewed chart editor (whose body is pinned by its tests) already blocks a repeated press with a synchronous guard, and never offers a blind retry after an uncertain save;
   - when a key is sent, the receipt applies — the same request returns the first event (`replayed`), and a different request with the same key is refused (409).
-- **Screen.** The canonical patient file shows the chart to any account holding a clinical grant inside the scope. The editor is offered by the capability projection (`clinical.visits.document` or the owner) through a new optional `canEdit` prop. Without the prop, the legacy role labels decide as before. The server decides every write.
+- **Screen.** The canonical patient file shows the chart as an on-demand section — nothing is read until it is opened — to any account holding a clinical grant inside the scope. The editor is offered by the capability projection (`clinical.visits.document` or the owner) through a new optional `canEdit` prop. Without the prop, the legacy role labels decide as before. The server decides every write.
 - **No money.** The chart has no price or amount; the GET response is only tooth events, the chart built from them, and its summary.
 
 ## Tests (local, PostgreSQL 18)

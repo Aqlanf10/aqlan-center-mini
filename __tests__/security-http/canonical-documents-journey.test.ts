@@ -5,7 +5,8 @@
  * - HTTP: multipart upload under clinical.xrays.upload with a request key (a repeat keeps
  *   one document), download with no-store/nosniff, outside the scope 404, a forged
  *   signature 400 with no file, hide needs patients.documents.delete.
- * - Browser: the canonical patient file lists the X-ray; no failed API call; no DDL.
+ * - Browser: the canonical patient file reads nothing until the documents section is
+ *   opened, then lists the X-ray; no failed API call; no DDL.
  */
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
@@ -76,8 +77,15 @@ it("browser: the canonical patient file lists the X-ray", async () => {
   await journey.browserLogin(page, "viewer");
   const failures: string[] = [];
   page.on("response", response => { const path = new URL(response.url()).pathname; if (path.startsWith("/api/") && response.status() >= 400) failures.push(`${response.status()} ${path}`); });
+  const documentCalls: string[] = [];
+  page.on("request", request => { const path = new URL(request.url()).pathname; if (path.includes("/documents")) documentCalls.push(path); });
   await page.goto(`${journey.baseUrl}/patients/${ids.mine}`);
-  await page.getByTestId("canonical-documents").getByText("أشعة بانورامية اصطناعية").first().waitFor();
+  const section = page.getByTestId("canonical-documents");
+  await section.waitFor();
+  // Nothing (no list, no image) is read until the section is opened.
+  expect(documentCalls).toEqual([]);
+  await section.locator("summary").click();
+  await section.getByText("أشعة بانورامية اصطناعية").first().waitFor();
   expect(failures).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await context.close();

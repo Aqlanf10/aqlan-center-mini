@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { CanonicalNextSession } from "./CanonicalNextSession";
 import { CanonicalCephStudies } from "./CanonicalCephStudies";
 import { CanonicalClinicalPlans } from "./CanonicalClinicalPlans";
@@ -55,11 +55,23 @@ const CHANNEL_LABEL: Record<string, string> = { whatsapp: "واتساب", sms: "
  * clinician link or the owner, plan links clinical.plans.edit (all server-enforced).
  */
 function CanonicalEndoSection({ patientId, canWrite, canEditPlans, openVisitId }: { patientId: number; canWrite: boolean; canEditPlans: boolean; openVisitId: number | null }) {
+  return (
+    <OnDemandSection title="علاج الجذور" testId="canonical-endo">
+      <PatientEndo patientId={patientId} canWrite={canWrite} canEditPlans={canEditPlans} openVisitId={openVisitId} />
+    </OnDemandSection>
+  );
+}
+
+/**
+ * A clinical section that reads nothing until it is opened (M2 slices 75–77): the patient
+ * file stays light and never loads images or clinical detail the user did not ask for.
+ */
+function OnDemandSection({ title, testId, children }: { title: string; testId: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <details className="rounded-2xl border border-slate-200 bg-white p-4" data-testid="canonical-endo" onToggle={event => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
-      <summary className="min-h-11 cursor-pointer text-sm font-bold text-navy-900">علاج الجذور</summary>
-      {open ? <div className="mt-3"><PatientEndo patientId={patientId} canWrite={canWrite} canEditPlans={canEditPlans} openVisitId={openVisitId} /></div> : null}
+    <details className="rounded-2xl border border-slate-200 bg-white p-4" data-testid={testId} onToggle={event => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+      <summary className="min-h-11 cursor-pointer text-sm font-bold text-navy-900">{title}</summary>
+      {open ? <div className="mt-3">{children}</div> : null}
     </details>
   );
 }
@@ -212,10 +224,10 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         canManageReferrals={session?.isOwner === true || (session?.capabilities ?? []).includes("clinical.referrals.manage")}
         appointments={(file.appointments ?? []).map(item => ({ id: item.id, date: item.scheduledDate, time: item.scheduledTime, status: item.status }))} /> : null}
       {projection.care ? (
-        <section aria-label="مخطط الأسنان" data-testid="canonical-dental-chart">
+        <OnDemandSection title="مخطط الأسنان" testId="canonical-dental-chart">
           {/* M2 slice 76: a clinical grant inside the patient scope; recording by clinical.visits.document with the clinician link or the owner (server-enforced). */}
           <DentalChart patientId={patient.id} canEdit={canDocument} />
-        </section>
+        </OnDemandSection>
       ) : null}
       {projection.care && canDocument ? (
         <CanonicalClinicalDocumentation patientId={patient.id} patientName={patient.fullName} medicalAlert={patient.medicalAlert ?? null}
@@ -227,10 +239,10 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
       {projection.care ? <PlannedVisitsPanel patientId={patientId}
         canBook={session?.isOwner === true || (session?.capabilities ?? []).includes("appointments.create")} /> : null}
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.xrays.view") && (session.patientScope === "own" || session.patientScope === "all"))
-        ? <section aria-label="الأشعة والمستندات" className="rounded-2xl border border-slate-200 bg-white p-4" data-testid="canonical-documents">
-          {/* M2 slice 75: X-rays and documents inside the patient scope; upload, hide and photo by their own grants (server-enforced). */}
+        ? <OnDemandSection title="الأشعة والمستندات" testId="canonical-documents">
+          {/* M2 slice 75: X-rays and documents inside the patient scope; upload, hide and photo by their own grants (server-enforced). Images load only after opening. */}
           <PatientDocuments patientId={patient.id} />
-        </section> : null}
+        </OnDemandSection> : null}
       {projection.care ? (
         <CanonicalEndoSection patientId={patient.id} canWrite={canDocument}
           canEditPlans={session?.isOwner === true || (session?.capabilities ?? []).includes("clinical.plans.edit")}
