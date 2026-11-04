@@ -13,9 +13,9 @@
   Finished TypeScript in 95s ...
   Collecting page data using 4 workers ...
   Generating static pages using 4 workers (0/5) ...
-  Generating static pages using 4 workers (1/5) 
-  Generating static pages using 4 workers (2/5) 
-  Generating static pages using 4 workers (3/5) 
+  Generating static pages using 4 workers (1/5)
+  Generating static pages using 4 workers (2/5)
+  Generating static pages using 4 workers (3/5)
 ✓ Generating static pages using 4 workers (5/5) in 133ms
 Turbopack build encountered 1 warning:
 ./lib/migration-files.ts:37:25

@@ -228,8 +228,10 @@
     },
     {
       "path": "build-final.txt",
-      "bytes": 13767,
-      "sha256": "65ad6c1b5a653bfe551c26bfee30d712573091e6fa650e401fcafe9627664e35"
+      "bytes": 13761,
+      "sha256": "3e3e8f8271b2ee3f8508bd5d8f87cdb6b10ffc9a56c0ae2beab34cbc9727e2b9",
+      "rawSourceSha256": "65ad6c1b5a653bfe551c26bfee30d712573091e6fa650e401fcafe9627664e35",
+      "normalization": "Console CR line endings and trailing line whitespace removed; text otherwise unchanged"
     },
     {
       "path": "changed-branches.json",
