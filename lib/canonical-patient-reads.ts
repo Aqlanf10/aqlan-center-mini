@@ -9,6 +9,8 @@ import {
 import { deriveAlerts, reviewDue } from "./medical-history";
 import { parseConsentMode } from "./patient-identity";
 import { arrivalPanelWith } from "./arrival-panel-db";
+import { resolveClinicalNavigationContextWith } from "./clinical-navigation-db";
+import type { ClinicalNavigationContext } from "./patient-navigation";
 import { listLegacyBalanceArrangements, listLegacyOpeningPositionsWith } from "./legacy-balance-arrangements-db";
 import { clinicDateString } from "./schedule";
 import type { TimelineEvent } from "./workflow";
@@ -316,6 +318,25 @@ export async function readCanonicalVisitMaterials(session: VerifiedDurableSessio
     if (!inside) throw new CanonicalPatientReadRefusal("patient_not_found", "لا توجد زيارة بهذا الرقم ضمن مرضاك.");
     return { patientId: visit!.patient_id, lines: await visitMaterialMovementsWith(query, visitId) };
   }, { errorPrefix: "STAFF_READ", maxBytes: PATIENT_DIRECTORY_MAX_BYTES });
+}
+/** GET /api/patients/[id]/clinical-context (M2 slice 83): validates an exact navigation
+ * graph (plan, item, case, episode, visit) inside the patient scope — a clinical grant;
+ * plan references additionally need clinical.plans.view (the legacy plan guard) and ortho
+ * references clinical.ortho.view (the independent ortho projection). Never links,
+ * creates or chooses the latest work. */
+export async function readCanonicalClinicalContext(session: VerifiedDurableSession, patientId: number, requested: ClinicalNavigationContext) {
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async (query, scope) => {
+    if ((requested.planId !== undefined || requested.planItemId !== undefined) && !scope.granted("clinical.plans.view")) {
+      throw new CanonicalClinicalContextRefusal("plan_view_required", 403, "عرض خطط العلاج غير مفعّل لحسابك.");
+    }
+    if (requested.orthoCaseId !== undefined && !scope.granted("clinical.ortho.view")) {
+      throw new CanonicalClinicalContextRefusal("ortho_view_required", 403, "حالة التقويم تحتاج صلاحية عرض التقويم المستقلة.");
+    }
+    return resolveClinicalNavigationContextWith(query, patientId, requested);
+  });
+}
+export class CanonicalClinicalContextRefusal extends Error {
+  constructor(readonly code: string, readonly status: 403, message: string) { super(message); this.name = "CanonicalClinicalContextRefusal"; }
 }
 export async function readCanonicalReferrals(session: VerifiedDurableSession, patientId: number) {
   return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => listPatientReferralsWith(query, patientId));
