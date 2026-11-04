@@ -5572,6 +5572,16 @@ export async function patientInDoctorScopeWith(q: Pick<DbClient, "query">, docto
   return rows[0]?.inside === true;
 }
 
+/** Every patient id inside one clinician's "own" scope, in a caller-owned snapshot: the
+ * same predicate (DOCTOR_PATIENT_CONDITION) as patientInDoctorScopeWith and the list. */
+export async function patientIdsInDoctorScopeWith(q: Pick<DbClient, "query">, doctorPartyId: number): Promise<number[]> {
+  const { rows } = await q.query<{ id: number }>(
+    `SELECT patients.id FROM patients WHERE ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$1")} ORDER BY patients.id`,
+    [doctorPartyId],
+  );
+  return rows.map(row => row.id);
+}
+
 /**
  * يحدّث بيانات المريض القابلة للتصحيح.
  *
@@ -11612,6 +11622,10 @@ async function runPaymentTransaction(
 }
 
 /** Read-only UI targets; the transaction writer revalidates all evidence. */
+/** The same read on a caller-owned snapshot (M2 slice 88: the canonical patient ledger). */
+export async function patientReversedInstallmentRecoveriesWith(q: Pick<DbClient, "query">, patientId: number): Promise<PatientInstallmentRecoveryRead> {
+  return publicRecoveryRead(await readRecoveryDocumentStates(q as DbClient, patientId));
+}
 export async function patientReversedInstallmentRecoveries(patientId: number): Promise<PatientInstallmentRecoveryRead> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -11927,7 +11941,11 @@ export async function patientLedgerInSnapshot(patientId: number, client: DbClien
  */
 export async function patientReceiptRemainders(patientId: number): Promise<Record<number, number>> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number; remaining: string }>(
+  return patientReceiptRemaindersWith(getPool(), patientId);
+}
+/** The same read on a caller-owned snapshot (M2 slice 88). */
+export async function patientReceiptRemaindersWith(q: Pick<DbClient, "query">, patientId: number): Promise<Record<number, number>> {
+  const { rows } = await q.query<{ id: number; remaining: string }>(
     `SELECT y.id, (y.amount_minor - COALESCE(SUM(r.amount_minor), 0))::text AS remaining
        FROM payments y
        LEFT JOIN payments r ON r.reversal_of_id = y.id AND r.kind = 'refund'
@@ -21576,25 +21594,27 @@ export async function listPatientPlansWith(q: Pick<DbClient, "query">, patientId
 import {readPatientStatementEvidence} from "./patient-statement-evidence";
 export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant";patientFacing?:boolean}={}){
   await ensureSchema();
-  return withFinancialReadSnapshot(getPool(),async runner=>{
-    const client=runner as DbClient;
-    const ledger=await patientLedgerInSnapshot(patientId,client);
-    const {rows}=await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
-    // The same complete patient plan set and fail-closed currency validation as
-    // patientPlanCurrencies; reuse rows already required for statement details.
-    const planCurrencies=new Map(rows.map(row=>[row.id,{patientId,currency:requireCurrency(row.base_currency,"خطة علاج",row.id)}]));
-    const plans=await hydratePlans(rows,today,client,true);
-    // Opt-in: historical agreements are saved facts read on this same snapshot client.
-    let historicalAgreements:HistoricalStatementAgreement[]|null|undefined;
-    if(options.historicalAgreements==="tolerant"){
-      try{historicalAgreements=await readStatementHistoricalAgreements(client,patientId);}
-      catch(error){if(!(error instanceof StatementHistoricalDetailsError))throw error;historicalAgreements=null;}
-    }else if(options.historicalAgreements){
-      historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
-    }
-    const statementEvidence=options.patientFacing?await readPatientStatementEvidence(client,patientId,ledger):undefined;
-    return {ledger,planCurrencies,plans,historicalAgreements,statementEvidence};
-  });
+  return withFinancialReadSnapshot(getPool(),async runner=>patientStatementSnapshotOn(runner as DbClient,patientId,today,options));
+}
+/** The same statement inputs on a caller-owned read-only snapshot (the canonical patient
+ * account, M2 slice 88). */
+export async function patientStatementSnapshotOn(client:DbClient,patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant";patientFacing?:boolean}={}){
+  const ledger=await patientLedgerInSnapshot(patientId,client);
+  const {rows}=await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
+  // The same complete patient plan set and fail-closed currency validation as
+  // patientPlanCurrencies; reuse rows already required for statement details.
+  const planCurrencies=new Map(rows.map(row=>[row.id,{patientId,currency:requireCurrency(row.base_currency,"خطة علاج",row.id)}]));
+  const plans=await hydratePlans(rows,today,client,true);
+  // Opt-in: historical agreements are saved facts read on this same snapshot client.
+  let historicalAgreements:HistoricalStatementAgreement[]|null|undefined;
+  if(options.historicalAgreements==="tolerant"){
+    try{historicalAgreements=await readStatementHistoricalAgreements(client,patientId);}
+    catch(error){if(!(error instanceof StatementHistoricalDetailsError))throw error;historicalAgreements=null;}
+  }else if(options.historicalAgreements){
+    historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
+  }
+  const statementEvidence=options.patientFacing?await readPatientStatementEvidence(client,patientId,ledger):undefined;
+  return {ledger,planCurrencies,plans,historicalAgreements,statementEvidence};
 }
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {
   return readPlans(PATIENT_PLANS_WHERE,[patientId],today);

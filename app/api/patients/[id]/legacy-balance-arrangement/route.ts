@@ -13,6 +13,9 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { canViewMoney } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalLegacyBalanceArrangements } from "@/lib/canonical-patient-account";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +39,13 @@ async function mayView(session: Awaited<ReturnType<typeof requireSession>>, pati
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // M2 slice 88: finance.patient-ledger.view inside the patient scope; the manage control by grant.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalLegacyBalanceArrangements(selected.handle, Number((await params).id)), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل ترتيب الرصيد السابق."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const patientId = idOf((await params).id);

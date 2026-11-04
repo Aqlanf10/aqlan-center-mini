@@ -978,9 +978,16 @@
    "finance.patient-ledger.view"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 88: read:finance.debts (finance.patient-ledger.view); rows only inside the actor patient scope (own = the validated clinician link), the legacy 500-row cap.",
+  "projection": {
+   "legacy": "every money role reads every debtor (500-row cap).",
+   "groups": {
+    "account": "the debtor rows — finance.patient-ledger.view"
+   },
+   "rows": "patient scope all: every debtor; own: only the validated clinician's patients (the patient-list predicate); the legacy 500-row cap"
+  }
  },
  {
   "route": "/api/finance/expense-categories",
@@ -3437,8 +3444,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 88: read:patients.ledger inside the patient scope; read only. Create/revise/collect: slice 91."
  },
  {
   "route": "/api/patients/[id]/debt-repayments",
@@ -3780,8 +3787,16 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 88: read:patients.ledger (finance.patient-ledger.view) inside the patient scope, one snapshot; the legacy body by the shared builder; controls by grant (receipt remainders finance.payments.void, openings finance.opening-balances.manage, legacy arrangements finance.legacy.record).",
+  "projection": {
+   "legacy": "admin, reception, cashier and accountant per their finance switches, and a doctor through the patient-payments switch read the whole account; receipt remainders for the admin label; opening-balance controls for admin (reception add by setting); legacy arrangement controls for admin and reception.",
+   "groups": {
+    "account": "the whole account (invoices, payments, openings, balances, plans, provenance, arrangements) — finance.patient-ledger.view inside the patient scope",
+    "controls": "receiptRemaining with finance.payments.void or the owner; openingAccess with finance.opening-balances.manage; legacyArrangementAccess with finance.legacy.record. finance.invoices.view and clinical grants never substitute"
+   },
+   "rows": "one patient inside the patient scope; outside reads like missing"
+  }
  },
  {
   "route": "/api/patients/[id]/legacy",
@@ -3812,8 +3827,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 88: read:patients.ledger inside the patient scope; canManage with finance.legacy.record. Writes stay legacy until slice 95."
  },
  {
   "route": "/api/patients/[id]/legacy-balance-arrangement",
@@ -4193,7 +4208,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": ""
+  "note": "Held for owner decision G4-7: the route sets the case's responsible doctor (the case-doctor link that decision 6629149113 ties to clinical-financial authority), while the mapped grant is labelled payment responsibility. Canonical sessions stay refused until decided."
  },
  {
   "route": "/api/patients/[id]/responsibility",
@@ -4207,7 +4222,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": ""
+  "note": "Held for owner decision G4-7: the route sets the case's responsible doctor (the case-doctor link that decision 6629149113 ties to clinical-financial authority), while the mapped grant is labelled payment responsibility. Canonical sessions stay refused until decided."
  },
  {
   "route": "/api/patients/[id]/return-booking-context",
@@ -4237,8 +4252,15 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 88: read:patients.ledger inside the patient scope; the statement document from one snapshot with the legacy checks and assembly.",
+  "projection": {
+   "legacy": "money roles; cashier and accountant only with their patient-ledger switch.",
+   "groups": {
+    "account": "the whole statement document — finance.patient-ledger.view inside the patient scope; finance.invoices.view never substitutes"
+   },
+   "rows": "one patient inside the patient scope; outside reads like missing"
+  }
  },
  {
   "route": "/api/patients/[id]/timeline",
@@ -4277,8 +4299,15 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 88: read:patients.ledger inside the patient scope; the same projection on the canonical snapshot.",
+  "projection": {
+   "legacy": "money roles; cashier and accountant only with their patient-ledger switch.",
+   "groups": {
+    "account": "the treatment financial references — finance.patient-ledger.view inside the patient scope"
+   },
+   "rows": "one patient inside the patient scope; outside reads like missing"
+  }
  },
  {
   "route": "/api/patients/[id]/vitals",

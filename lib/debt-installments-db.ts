@@ -148,24 +148,29 @@ export async function debtRepaymentWorkspace(patientId:number,today:string) {
   await ensureSchema();const client=await getPool().connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const arrangements=await readDebtRepayments(client,patientId,today);
-    const invoices=(await client.query<{id:number;invoice_number:string;base_currency:string}>("SELECT id,invoice_number,base_currency FROM invoices WHERE patient_id=$1 AND status<>'cancelled' ORDER BY id",[patientId])).rows;
-    const openings=(await client.query<{currency:string}>("SELECT currency FROM patient_opening_balances WHERE patient_id=$1 ORDER BY currency",[patientId])).rows;
-    const targets=[];
-    for (const target of [
-      ...invoices.map(row=>({patientId,currency:requireCurrency(row.base_currency,"فاتورة",row.id),invoiceId:row.id,openingCurrency:null,label:`فاتورة ${row.invoice_number}`})),
-      ...openings.map(row=>({patientId,currency:requireCurrency(row.currency,"رصيد",patientId),invoiceId:null,openingCurrency:requireCurrency(row.currency,"رصيد",patientId),label:`رصيد سابق ${row.currency}`})),
-    ]) {
-      const position=await readDebtPosition(client,target);
-      const existing=arrangements.find(row=>row.target.invoiceId===target.invoiceId&&row.target.openingCurrency===target.openingCurrency);
-      const accountDueMinor=(await debtAccountDue(client,patientId,target.currency)).due;
-      const legacyActive=target.openingCurrency!==null&&(await client.query("SELECT id FROM legacy_balance_arrangements WHERE patient_id=$1 AND currency=$2 AND cancelled_at IS NULL",[patientId,target.currency])).rows.length>0;
-      if(position.remainingMinor>0||existing)targets.push({target:{patientId:target.patientId,currency:target.currency,invoiceId:target.invoiceId,openingCurrency:target.openingCurrency},label:target.label,
-        remainingMinor:position.remainingMinor,collectedMinor:position.settledMinor,principalMinor:position.principalMinor,sourceHash:position.sourceHash,accountDueMinor,legacyActive,
-        arrangementId:existing?.id??null,version:existing?.version??0});
-    }
-    await client.query("COMMIT");return {arrangements,targets};
+    const result=await debtRepaymentWorkspaceInSnapshot(client,patientId,today);
+    await client.query("COMMIT");return result;
   } catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+}
+/** The same workspace on a caller-owned read-only snapshot (the canonical patient account, M2 slice 88). */
+export async function debtRepaymentWorkspaceInSnapshot(client:DbClient,patientId:number,today:string) {
+  const arrangements=await readDebtRepayments(client,patientId,today);
+  const invoices=(await client.query<{id:number;invoice_number:string;base_currency:string}>("SELECT id,invoice_number,base_currency FROM invoices WHERE patient_id=$1 AND status<>'cancelled' ORDER BY id",[patientId])).rows;
+  const openings=(await client.query<{currency:string}>("SELECT currency FROM patient_opening_balances WHERE patient_id=$1 ORDER BY currency",[patientId])).rows;
+  const targets=[];
+  for (const target of [
+    ...invoices.map(row=>({patientId,currency:requireCurrency(row.base_currency,"فاتورة",row.id),invoiceId:row.id,openingCurrency:null,label:`فاتورة ${row.invoice_number}`})),
+    ...openings.map(row=>({patientId,currency:requireCurrency(row.currency,"رصيد",patientId),invoiceId:null,openingCurrency:requireCurrency(row.currency,"رصيد",patientId),label:`رصيد سابق ${row.currency}`})),
+  ]) {
+    const position=await readDebtPosition(client,target);
+    const existing=arrangements.find(row=>row.target.invoiceId===target.invoiceId&&row.target.openingCurrency===target.openingCurrency);
+    const accountDueMinor=(await debtAccountDue(client,patientId,target.currency)).due;
+    const legacyActive=target.openingCurrency!==null&&(await client.query("SELECT id FROM legacy_balance_arrangements WHERE patient_id=$1 AND currency=$2 AND cancelled_at IS NULL",[patientId,target.currency])).rows.length>0;
+    if(position.remainingMinor>0||existing)targets.push({target:{patientId:target.patientId,currency:target.currency,invoiceId:target.invoiceId,openingCurrency:target.openingCurrency},label:target.label,
+      remainingMinor:position.remainingMinor,collectedMinor:position.settledMinor,principalMinor:position.principalMinor,sourceHash:position.sourceHash,accountDueMinor,legacyActive,
+      arrangementId:existing?.id??null,version:existing?.version??0});
+  }
+  return {arrangements,targets};
 }
 export async function listDebtRepayments(patientId: number, today: string) {
   await ensureSchema(); const client=await getPool().connect();

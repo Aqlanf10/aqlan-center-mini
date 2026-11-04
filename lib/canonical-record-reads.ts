@@ -46,6 +46,11 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:ortho.cases": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients: search and browse the patient list. */
   "read:patients.directory": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/ledger and the patient account reads (M2 slice 88): the
+   * patient's whole financial account inside the patient scope; finance.patient-ledger.view. */
+  "read:patients.ledger": Object.freeze({ record: "patient", need: Object.freeze(["finance.patient-ledger.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/finance/debts: the debtors list, rows inside the actor's patient scope (M2 slice 88). */
+  "read:finance.debts": Object.freeze({ record: "patient", need: Object.freeze(["finance.patient-ledger.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]: one patient's file, only inside the actor's patient scope. */
   "read:patients.record": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze([]) }),
   /** GET /api/families/[id] and /api/patients/[id]/family: members inside the patient

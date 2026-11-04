@@ -83,11 +83,20 @@ Nothing here changes behaviour until the slices land.
 **G4-6 — The legacy setting `workflow.doctor_financial_view`** (a role-label toggle).
 - *Proposal:* it has no effect on canonical sessions, where a doctor sees money only through explicit grants. Its help text says so. It is not migrated into an automatic grant.
 
+**G4-7 — The case's responsible doctor** (`GET/PATCH /api/patients/[id]/responsibility`).
+- *What the route does:* it reads and changes the responsible doctor of a clinical or orthodontic case (legacy: admin label only, a written reason, audited).
+- *Why it is a question:* the map gives it `finance.patient-ledger.manage`, whose label is "payment responsibility and patient account". The route sets the case-doctor link instead — the link that decision 6629149113 uses for the "no charge" authority, and that the clinician's own patient scope follows. A finance grant would then decide a clinical-financial authority, which that decision rules out.
+- *Proposal:*
+  - the protected owner only, as the legacy admin-only rule, until the owner names a grant;
+  - or a clinical grant the owner names (for example `clinical.plans.edit`); never a finance grant alone.
+- *Until decided:* canonical sessions are refused on this route (slice 88 leaves it on legacy).
+
 ## 4. Slices (each after its decision where one is listed)
 
 | Slice | Content | Waits on |
 |---|---|---|
-| 88 | Patient account reads (ledger, statement, treatment-financial-context, debts list, legacy balance arrangement read), responsibility | — |
+| 88 | Patient account reads (ledger, statement, treatment-financial-context, debts list, legacy balance arrangement read, debt-repayment workspace) — **done** | — |
+| 88b | Responsibility (the case's responsible doctor) | G4-7 |
 | 89 | Visit money reads (billing preview, financial context, walkout) | G4-4 |
 | 90 | Payment reads and collection (payments, attempts retire, defer) with the shift rule and request keys | G4-4 |
 | 91 | Payment correction/void; debt repayment arrangements and collection | — |

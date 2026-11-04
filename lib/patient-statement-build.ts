@@ -183,8 +183,20 @@ export function assemblePatientStatement(patient: Pick<Patient, "fullName" | "pa
 export async function loadPatientStatementDocument(patientId: number, options: PatientStatementOptions) {
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const [patient, settings, snapshot] = await Promise.all([getPatient(patientId), getSettingsSafe(),
-    patientStatementSnapshot(patientId, today, { historicalAgreements: options.type !== "period", patientFacing: true })]);
+    patientStatementSnapshot(patientId, today, statementSnapshotOptions(options))]);
   if (!patient) return null;
+  return patientStatementDocumentFrom(patientId, patient, settings, snapshot, options, today);
+}
+
+/** The snapshot options every statement read uses. */
+export function statementSnapshotOptions(options: PatientStatementOptions) {
+  return { historicalAgreements: options.type !== "period", patientFacing: true } as const;
+}
+
+/** The statement from already-read inputs (the legacy loader above, and the canonical
+ * patient account on its own snapshot, M2 slice 88): the same checks and assembly. */
+export function patientStatementDocumentFrom(patientId: number, patient: Pick<Patient, "fullName" | "patientNumber" | "phone">,
+  settings: SettingsMap, snapshot: Snapshot, options: PatientStatementOptions, today: string) {
   if (!snapshot.statementEvidence) throw new StatementProjectionError();
   const projected = projectPatientStatement({ patientId, ledger: snapshot.ledger, planCurrencies: snapshot.planCurrencies, evidence: snapshot.statementEvidence }, options);
   if (options.type !== "period" && JSON.stringify(projected.balances) !== JSON.stringify(ledgerBalancesByCurrency(patientId, snapshot.ledger, snapshot.planCurrencies))) throw new StatementProjectionError();
