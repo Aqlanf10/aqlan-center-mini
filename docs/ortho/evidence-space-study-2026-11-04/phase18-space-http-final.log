@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-space-ledger-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts (2 tests | 2 failed) 56575ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390 27826ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280 26471ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280
+TimeoutError: locator.selectOption: Timeout 20000ms exceeded.
+Call log:
+  - waiting for getByRole('region', { name: 'دراسة حالة التقويم', exact: true }).getByRole('region', { name: 'مراجعة الدراسة المحفوظة', exact: true }).getByRole('combobox', { name: 'القسم المحفوظ المعروض', exact: true })
+
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts:142:82
+    140|     expect(xml).toContain('-1.7');expect(xml).toContain('ميزانية مسافا…
+    141|     await page.reload();
+    142|     await review.getByRole('combobox',{name:'القسم المحفوظ المعروض',ex…
+       |                                                                                  ^
+    143|     await expect.poll(()=>review.innerText()).toContain('-1.7');
+    144|     await review.scrollIntoViewIfNeeded();await page.screenshot({path:…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  03:15:55
+   Duration  63.90s (transform 55ms, setup 0ms, import 603ms, tests 56.58s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

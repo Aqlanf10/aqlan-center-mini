@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-space-ledger-browser.test.ts __tests__/security-http/ortho-study-image-browser.test.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/patient-cockpit-real-contract-ui.test.ts __tests__/security-http/ortho-case-navigation-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts (2 tests | 2 failed) 56383ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390 27661ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280 26988ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280
+TimeoutError: locator.selectOption: Timeout 20000ms exceeded.
+Call log:
+  - waiting for getByRole('region', { name: 'دراسة حالة التقويم', exact: true }).getByRole('region', { name: 'مراجعة الدراسة المحفوظة', exact: true }).getByLabel('القسم المحفوظ المعروض', { exact: true })
+
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts:128:67
+    126|     await study.getByRole('button',{name:'حفظ مسودة الدراسة',exact:tru…
+    127|     const review=study.getByRole('region',{name:'مراجعة الدراسة المحفو…
+    128|     await review.getByLabel('القسم المحفوظ المعروض',{exact:true}).sele…
+       |                                                                   ^
+    129|     await expect.poll(()=>review.innerText()).toContain('-1.7');
+    130|     expect(await review.innerText()).toContain('تقديرات الطبيب لا تثبت…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  2 failed | 11 passed (13)
+   Start at  03:13:38
+   Duration  120.82s (transform 257ms, setup 0ms, import 871ms, tests 113.99s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

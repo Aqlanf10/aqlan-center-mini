@@ -1,0 +1,53 @@
+{
+  "sourceSha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+  "applicationCommit": "2355352a35d07b8384fd7580c87a4d50239134de",
+  "scope": "Scoped acceptance only",
+  "requirements": [
+    {
+      "id": "V2R265",
+      "status": "موجود ومتحقق جزئياً",
+      "evidence": "Saved planned budget selected, reviewed and text-exported without reentry; later measured-space comparison remains incomplete."
+    },
+    {
+      "id": "V2R266",
+      "status": "موجود ومتحقق جزئياً",
+      "evidence": "Existing actual IPR ledger regression verified; study explicitly displays planned values only; performed-source capture remains incomplete."
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "O04",
+      "status": "جزئي ضمن النطاق",
+      "evidence": "Source and saved study blocked after plan permission revocation; foreign sources refused."
+    },
+    {
+      "id": "O16",
+      "status": "جزئي ضمن النطاق",
+      "evidence": "Two real synthetic sessions plus idempotent replay and correction; planned and performed remain distinct in study."
+    },
+    {
+      "id": "O22",
+      "status": "جزئي ضمن النطاق",
+      "evidence": "Captured old budget unchanged after a newer plan; no live values substituted."
+    },
+    {
+      "id": "O40",
+      "status": "جزئي ضمن النطاق",
+      "evidence": "Older measured baseline remains explicit in saved planned-budget snapshot."
+    },
+    {
+      "id": "O52",
+      "status": "جزئي ضمن النطاق",
+      "evidence": "Documentary save and text export/reopen verified; all export-failure and illustrated cases remain incomplete."
+    }
+  ],
+  "notAccepted": [
+    "O21",
+    "O23",
+    "O25",
+    "O35",
+    "O51",
+    "O52 full"
+  ],
+  "evidence": "evidence-space-study-2026-11-04/manifest.json"
+}

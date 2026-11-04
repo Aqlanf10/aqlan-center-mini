@@ -1,0 +1,199 @@
+{
+  "applicationCommit": "2355352a35d07b8384fd7580c87a4d50239134de",
+  "relatedCommits": [
+    "79f601e7",
+    "e7124129"
+  ],
+  "buildId": "Nz_Tjh7wBVAHGMApGbKq5",
+  "recordedAtUtc": "2026-11-04T03:23:10.667622+00:00",
+  "scope": "Phase18 planned space budget in study; CI preview audit classification; includes saved image gallery regression. Not full-module acceptance.",
+  "tests": {
+    "unit": {
+      "passed": 14108,
+      "files": 826
+    },
+    "postgresDistinct": {
+      "passed": 33,
+      "files": 5,
+      "mergeFinalRerun": 7
+    },
+    "httpDistinct": {
+      "passed": 13,
+      "files": 5,
+      "firstRun": {
+        "passed": 11,
+        "failed": 2
+      },
+      "finalSpaceRerun": {
+        "passed": 2
+      }
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "lint": {
+      "errors": 0,
+      "warnings": 352
+    },
+    "runtimeBraces": "passed",
+    "runtimeLintInputs": "passed"
+  },
+  "testCorrections": "Invalid synthetic budget exceeded plan; corrected fixture only. Browser accessible-name selector and explicit study reopening after prescription deep-link reload corrected; no retries/removed checks/product workaround. Final PG merge assertion added after build; no runtime source changes after build.",
+  "hostedCI": {
+    "runId": 41763277401,
+    "head": "c8d1b32b6f4a10d0579d820c33956becf1efec17",
+    "quality": "failed one audit classification test; corrected locally",
+    "http": "skipped",
+    "postgres": "in progress at 03:22 UTC",
+    "newHeadResult": "not yet available"
+  },
+  "files": [
+    {
+      "path": "phase18-audit-coverage.log",
+      "bytes": 499,
+      "sha256": "eaf64033756f8c6a1d2eaaa66fd59be6fbf22015d6a4fca0ec32dd1af23aa340",
+      "rawSha256": "eaf64033756f8c6a1d2eaaa66fd59be6fbf22015d6a4fca0ec32dd1af23aa340",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-build.log",
+      "bytes": 13582,
+      "sha256": "dc33c91c5ed58ae456226bb98a0729e7095d9018913262132151a57bce50381b",
+      "rawSha256": "ede84818cd28e4be2e30b400f38f86f6dfbc01e6577d3ea922a3e515624275f7",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-full-unit.log",
+      "bytes": 1275,
+      "sha256": "f1e5cbf912b4aa9eb9028fab7383ed4479c5345db0634d161d793d7bb5508bd9",
+      "rawSha256": "f1e5cbf912b4aa9eb9028fab7383ed4479c5345db0634d161d793d7bb5508bd9",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-lint.log",
+      "bytes": 272453,
+      "sha256": "a8fc56a29f8c7f7b7483ca884bcc3b22fbcc6b40591d118edf01adc8adb5b87c",
+      "rawSha256": "a8fc56a29f8c7f7b7483ca884bcc3b22fbcc6b40591d118edf01adc8adb5b87c",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-types-final.log",
+      "bytes": 257,
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "rawSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-preflight.log",
+      "bytes": 998,
+      "sha256": "a44b634f03d597f3eff7d51671ee11125dae62fc9d1f57a5c11df56edd21a8b5",
+      "rawSha256": "a44b634f03d597f3eff7d51671ee11125dae62fc9d1f57a5c11df56edd21a8b5",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-runtime-braces.log",
+      "bytes": 108,
+      "sha256": "efcc9c27cfdca720aae1da6c8f04c151ba5af1b909a0775347389e2ba3d64416",
+      "rawSha256": "efcc9c27cfdca720aae1da6c8f04c151ba5af1b909a0775347389e2ba3d64416",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-runtime-lint.log",
+      "bytes": 137,
+      "sha256": "04771888ca1831a19e6bbfde0107c5d8d297f72f2ae25e5ef224362a2e6215c6",
+      "rawSha256": "04771888ca1831a19e6bbfde0107c5d8d297f72f2ae25e5ef224362a2e6215c6",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-source-union-pg.log",
+      "bytes": 786,
+      "sha256": "97f9de375821ee366edc848116caa68e2d42948ab320dd8233af3868adb71d71",
+      "rawSha256": "97f9de375821ee366edc848116caa68e2d42948ab320dd8233af3868adb71d71",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-space-study-pg-authority.log",
+      "bytes": 714,
+      "sha256": "99ca05d66e44a98bb5a802707b7777791d914c344e29c6fedc8eb72f41cf29ad",
+      "rawSha256": "99ca05d66e44a98bb5a802707b7777791d914c344e29c6fedc8eb72f41cf29ad",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-space-study-merge-pg.log",
+      "bytes": 666,
+      "sha256": "c15615160525fc5b2260d8f01eb337771ddfa753080d73783f785adfea02a7c3",
+      "rawSha256": "c15615160525fc5b2260d8f01eb337771ddfa753080d73783f785adfea02a7c3",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-http-browser.log",
+      "bytes": 2966,
+      "sha256": "92290e4e6363790b1c23a2b658da5b3feca93c6ecb9afd9814bc1e2968970892",
+      "rawSha256": "9abe0ddaae4433d71e73aa1454701dea025066107739dda278bf8dbdaaf4cc31",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-space-http-final.log",
+      "bytes": 2628,
+      "sha256": "ecea7c83121b356742054722f2b28e1c959c4cc576ead21f13e7c555e4fb86b1",
+      "rawSha256": "fd5e14bcfdafe86b1ddf47890260e99a52ab87ff7119e86075cd9c84c8ed9195",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-space-http-reopen.log",
+      "bytes": 772,
+      "sha256": "a3a0d1104473fcafff487490087ebf901c42e6f575d35c845c399f79e65aba47",
+      "rawSha256": "a3a0d1104473fcafff487490087ebf901c42e6f575d35c845c399f79e65aba47",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase18-space-study-pg.log",
+      "bytes": 1256,
+      "sha256": "410ef63cf994b9169825dd6959b6106633eef15e9093bd8d4a7631d27b83eda5",
+      "rawSha256": "410ef63cf994b9169825dd6959b6106633eef15e9093bd8d4a7631d27b83eda5",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "heads-phase18.tsv",
+      "bytes": 26922,
+      "sha256": "39ec2b474b2b30e4d6620264505d108cfa9c30ac1eab60f4d680b9a64618d9f2",
+      "rawSha256": "39ec2b474b2b30e4d6620264505d108cfa9c30ac1eab60f4d680b9a64618d9f2",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "ortho-space-study-390.png",
+      "bytes": 69354,
+      "sha256": "6126ca0390b03eb6357c7b52081c1a2607fa20cbf074cf655fdf03fe0c455c83",
+      "syntheticOnly": true,
+      "visuallyInspected": true
+    },
+    {
+      "path": "ortho-space-study-1280.png",
+      "bytes": 107774,
+      "sha256": "2d7f0a86228b99fda9b027f6aba7585e08429526a9e1c04e75ac80f234697053",
+      "syntheticOnly": true,
+      "visuallyInspected": true
+    }
+  ],
+  "sourceHashes": {
+    "__tests__/ortho-case-study-recorded-facts.test.ts": "66672f939c88966fcafe5c73487cbcfdb4578c1c6025ddca582d3e8d6e7a3d37",
+    "__tests__/postgres/ortho-space-ledger.test.ts": "8fc4b26ab1beaa28b6bf9bfc44ff27b6e131d25231f04ef3c26bca0e9faad6ed",
+    "__tests__/postgres/ortho-study-image.test.ts": "bd5e18d6a22e103a83083a3ead5ea37082b89423948cf7a2fd8c01b4d75be8ff",
+    "__tests__/security-http/ortho-space-ledger-browser.test.ts": "c17608bf71f4ebda034c7c65d6991cfd130661f16f5334117419abce473a0dc2",
+    "__tests__/security-http/ortho-study-image-browser.test.ts": "792595660e18d9b02db50299cf4d8cb33a221c80039db8ac4e221038baf55f0c",
+    "components/OrthoSavedStudyImages.tsx": "2c80441f8282c0feaf18636899da782e1fe438d44a8d4c0d4efb8069992cf46e",
+    "components/OrthoSavedStudyReview.tsx": "9199b90bf42eab8724128f6e4d726481e1d1ac95064d583511d445e5b6c5183e",
+    "lib/audit-coverage.ts": "ac7ed2f217422ee9a3f6226c8e65a26f81922bf3c6f87c77a5d07e285cc5be73",
+    "lib/ortho-case-presentation-i18n.ts": "6ae397a2fcf1750b9b1717d4a90253d91d498066a0072d6ea08a523a150855ed",
+    "lib/ortho-case-study-access.ts": "4e6111bd2bfe56b8d6eedff78902bb9879c5c58d8dc435405686f1bf23b21828",
+    "lib/ortho-case-study-capture.ts": "75682574e1e685ea24c24f1b57f213b68e5d64ab2ee954640c6b3bbcb53e2faf",
+    "lib/ortho-case-study-inventory-client.ts": "1314210c47cec1edf22731c764d8e28a95a44f91c797a2d8e555618a6cce298d",
+    "lib/ortho-case-study-inventory.ts": "387950d3c48bda086584b979de78cb8027efdf251e4c2bb7d0b173baae04697f",
+    "lib/ortho-case-study-recorded-facts.ts": "16682468f0f88ebece75b69625aab069940e0db0d5b66a9f4b670a31557da737",
+    "lib/ortho-case-study-source-union.ts": "de60d18c73d18fd90bd4d6c6f999377d2af68faf97512f1c9084c5e1dcc1a869",
+    "lib/ortho-case-study-sources.ts": "b574426edbfb1f23650aad39a2ae017f7158ae6690f1e77959a03111cbed2054",
+    "lib/ortho-case-study.ts": "0df1addc37e55b058ee26b8314c3942e8b00d86d083122974edc9e77791a595a",
+    "lib/ortho-space-baselines.ts": "aefeb80d1931e1d6fb93fc562c522351683eba31ffcd693c678ee2d9eaa1d1e5",
+    "lib/ortho-space-store.ts": "8a73c6d25e59af33f03c163868f232bc354943a505f69f988a07fd33a1371f69",
+    "lib/ortho-study-space-plan-store.ts": "769383d20ff30eef77311aa87ceece235af954d9adec849bd6a48261861de69e"
+  }
+}
