@@ -2705,6 +2705,7 @@ export async function openVisitPatientFileOn(client: DbClient, visitId: number, 
   const visit = rows[0];
   if (!visit) return { ok: false, reason: "not_found" };
   if (visit.patient_id !== null) {
+    await admit?.(visit.patient_id);
     return { ok: true, patientId: visit.patient_id, created: false };
   }
   if (visit.signed_at) return { ok: false, reason: "signed" };
@@ -29460,13 +29461,15 @@ export async function recordVitals(
 }
 
 /** The body of `recordVitals` on the caller's transaction (M2 slice 74): the patient row
- * locked first, the reading linked to today's open visit, the alert in the same write. */
+ * locked first, admission after any wait, then the reading and alert in the same write. */
 export async function recordVitalsOn(
   client: DbClient, patientId: number, input: VitalsInput, recordedBy: string,
   options: { recordedDate?: string; medicalAlert?: string | null } = {},
+  admit?: () => Promise<void>,
 ): Promise<VitalsRecord | null> {
   const patient = await client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [patientId]);
   if (!patient.rowCount) return null;
+  await admit?.();
   const { rows } = await client.query<VitalsRow>(
   `INSERT INTO patient_vitals
      (patient_id, visit_id, bp_systolic, bp_diastolic, pulse, temperature, spo2, glucose, weight_kg, recorded_by, recorded_at)
