@@ -14,8 +14,9 @@ export interface StudyAssessmentAccess {
   graphs: Map<string, AssessmentSourceGraph>; targets: Map<string, Target>;
   current: AssessmentExternalCapture | null;
   planIds: Set<number>; currentPlanIds: Set<number>;
+  sessionVisitIds: Set<number>; currentSessionVisitIds: Set<number>;
 }
-export const createStudyAssessmentAccess = (): StudyAssessmentAccess => ({ closures: new Map(), graphs: new Map(), targets: new Map(), current: null, planIds: new Set(), currentPlanIds: new Set() });
+export const createStudyAssessmentAccess = (): StudyAssessmentAccess => ({ closures: new Map(), graphs: new Map(), targets: new Map(), current: null, planIds: new Set(), currentPlanIds: new Set(), sessionVisitIds: new Set(), currentSessionVisitIds: new Set() });
 const cacheKey = (r: AnyAssessmentRevision) => journeyContentHash({ id: r.id, version: r.version, contentHash: r.contentHash,
   orthoCaseId: r.orthoCaseId, clinicalCaseId: r.clinicalCaseId, sources: assessmentRevisionSources(r) });
 export function addStudySourceTargets(cache: StudyAssessmentAccess, targets: readonly Target[]) {
@@ -25,6 +26,14 @@ export function addStudySourceTargets(cache: StudyAssessmentAccess, targets: rea
 export function addStudyPlanTargets(cache: StudyAssessmentAccess, ids: readonly number[]) {
   if (cache.current !== null) journeyFail(500, "study_source_union_already_locked");
   for (const id of ids) cache.planIds.add(id);
+}
+/** Ortho adjustments supply their own exact case membership. A general visit
+ * may have no specialty case yet; this must not authorize its full clinical
+ * notes as an assessment source. Keep these two authorities separate. */
+export function addStudySessionVisitTargets(cache: StudyAssessmentAccess, ids: readonly number[]) {
+  if (cache.current !== null) journeyFail(500, "study_source_union_already_locked");
+  for (const id of ids) cache.sessionVisitIds.add(id);
+  if (cache.sessionVisitIds.size > 128) journeyFail(409, "study_session_reference_limit");
 }
 export async function prepareStudyAssessmentAccess(client: DbClient, scope: JourneyScope, authority: JourneyAuthority,
   revisions: readonly AnyAssessmentRevision[], cache: StudyAssessmentAccess): Promise<void> {
@@ -52,6 +61,15 @@ export async function lockStudySourceUnion(client: DbClient, scope: JourneyScope
   if (beforeExternalCapture) await beforeExternalCapture();
   try { cache.current = await captureAssessmentExternalSources(client, scope, [...cache.targets.values()], authority.canViewImages); }
   catch (error) { if (error instanceof AssessmentStoreFault) journeyFail(error.status, "study_source_union_unavailable"); throw error; }
+  // Shared visits precede the case and adjustment locks, matching the session
+  // writer. Recheck the adjustment -> visit binding after the case lock below.
+  if (cache.sessionVisitIds.size) {
+    const { rows } = await client.query<{ id: number }>(
+      `SELECT id FROM visits WHERE id=ANY($1::int[]) AND patient_id=$2
+        AND (case_id IS NULL OR case_id=$3) ORDER BY id FOR SHARE`,
+      [[...cache.sessionVisitIds].sort((a,b) => a-b), scope.patientId, scope.clinicalCaseId]);
+    for (const row of rows) cache.currentSessionVisitIds.add(row.id);
+  }
   for (const [key, { closure }] of cache.closures) cache.graphs.set(key, { ...closure, states: assessmentSourceStates(closure, cache.current), historicallyReadable: cache.current.historicallyReadable });
 }
 export function requirePreparedAssessmentAccess(cache: StudyAssessmentAccess, revision: AnyAssessmentRevision,

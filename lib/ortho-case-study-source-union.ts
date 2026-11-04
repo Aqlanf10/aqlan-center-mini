@@ -13,7 +13,7 @@ import { journeyFail, type JourneyAuthority, type JourneyOwner } from "./ortho-c
 import type { JourneyRevisionReference } from "./ortho-case-journey-records";
 import type { StudySavedContent } from "./ortho-case-study-capture";
 import type { StudyDraftContent } from "./ortho-case-study";
-import { addStudyPlanTargets, addStudySourceTargets, prepareStudyAssessmentAccess, type StudyAssessmentAccess } from "./ortho-case-study-assessment-access";
+import { addStudyPlanTargets, addStudySourceTargets, addStudySessionVisitTargets, prepareStudyAssessmentAccess, type StudyAssessmentAccess } from "./ortho-case-study-assessment-access";
 export async function prepareDecisionSourceUnion(client: DbClient, owner: JourneyOwner, authority: JourneyAuthority,
   contents: readonly DecisionSavedContent[], cache: StudyAssessmentAccess) {
   addStudyPlanTargets(cache, contents.flatMap(c => c.authored.planId === null ? [] : [c.authored.planId]));
@@ -60,7 +60,7 @@ export async function prepareSavedStudySourceUnion(client: DbClient, owner: Jour
       addStudyPlanTargets(cache, [source.selection.id]);
     } else if (source.selection.kind === "adjustment") {
       const visitId = (source.payload as { visitId: number | null }).visitId;
-      if (visitId !== null) addStudySourceTargets(cache, [{ kind: "clinical_visit", id: visitId }]);
+      if (visitId !== null) addStudySessionVisitTargets(cache, [visitId]);
     }
   }
   await prepareDecisionSourceUnion(client, owner, authority, decisions, cache); retentionTargets(retention, authority, cache);

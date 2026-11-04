@@ -28,7 +28,7 @@ it.each([390, 1280])("saves a linked space plan, documents IPR in two actual ses
   const sessions: number[] = [];
   for (let i = 0; i < 2; i++) {
     const visit = (await db.query("INSERT INTO visits(patient_id,patient_name,status) VALUES($1,'Synthetic actual visit','done') RETURNING id", [patient])).rows[0].id;
-    sessions.push((await db.query("INSERT INTO ortho_adjustments(case_id,visit_id,recorded_by) VALUES($1,$2,'طبيب اصطناعي') RETURNING id", [ortho, visit])).rows[0].id);
+    sessions.push((await db.query("INSERT INTO ortho_adjustments(case_id,visit_id,done,recorded_by) VALUES($1,$2,$3,'طبيب اصطناعي') RETURNING id", [ortho, visit, `إجراء جلسة اصطناعية ${i+1}`])).rows[0].id);
   }
   const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: 'ar-YE' });
   const [name, ...value] = h.sessions.admin.cookie.split('='); await context.addCookies([{ name, value: value.join('='), url: baseUrl }]);
@@ -121,6 +121,13 @@ it.each([390, 1280])("saves a linked space plan, documents IPR in two actual ses
     await study.getByLabel('نوع مصدر الدراسة',{exact:true}).selectOption('space_plan');
     const choices=study.getByRole('group',{name:'اختيار مصدر حقيقي',exact:true}).getByRole('button',{name:'اختيار',exact:true});
     await expect.poll(()=>choices.count()).toBe(1);await choices.click();
+    await study.getByLabel('قسم جديد للدراسة',{exact:true}).selectOption('visit');
+    await study.getByRole('button',{name:'إضافة القسم',exact:true}).click();
+    const sessionPanel=await study.getByLabel('إضافة المرجع إلى القسم',{exact:true}).locator('option').last().getAttribute('value');
+    expect(sessionPanel).toMatch(/^panel_/);
+    await study.getByLabel('إضافة المرجع إلى القسم',{exact:true}).selectOption(sessionPanel!);
+    await study.getByLabel('نوع مصدر الدراسة',{exact:true}).selectOption('adjustment');
+    await expect.poll(()=>choices.count()).toBe(2);await choices.first().click();
     await study.getByLabel('سبب حفظ النسخة',{exact:true}).fill('Synthetic saved planned space budget');
     const saved=page.waitForResponse(r=>r.url().includes(`/ortho/${ortho}/case-study/editor`)&&r.request().method()==='POST');
     await study.getByRole('button',{name:'حفظ مسودة الدراسة',exact:true}).click();expect((await saved).status()).toBe(201);
@@ -129,6 +136,8 @@ it.each([390, 1280])("saves a linked space plan, documents IPR in two actual ses
     await expect.poll(()=>review.innerText()).toContain('-1.7');
     expect(await review.innerText()).toContain('تقديرات الطبيب لا تثبت تحقق الحركة أو تنفيذ IPR');
     expect(await review.innerText()).toContain('0.3');expect(await review.innerText()).not.toContain('0.25');
+    await review.getByRole('combobox',{name:'القسم المحفوظ المعروض',exact:true}).selectOption(sessionPanel!);
+    await expect.poll(()=>review.innerText()).toContain('إجراء جلسة اصطناعية 1');
     await study.getByLabel('سبب حفظ النسخة',{exact:true}).fill('Synthetic documentary review of planned budget');
     const documented=page.waitForResponse(r=>r.url().includes(`/ortho/${ortho}/case-study/editor`)&&r.request().method()==='POST');
     await study.getByRole('button',{name:'توثيق النسخة المحفوظة نفسها',exact:true}).click();expect((await documented).status()).toBe(201);
@@ -138,6 +147,8 @@ it.each([390, 1280])("saves a linked space plan, documents IPR in two actual ses
     const slides=Object.keys(zip.files).filter(key=>/^ppt\/slides\/slide\d+\.xml$/.test(key));
     const xml=(await Promise.all(slides.map(key=>zip.file(key)!.async('text')))).join('\n');
     expect(xml).toContain('-1.7');expect(xml).toContain('ميزانية مسافات مخططة محفوظة');
+    expect(xml).toContain('إجراء جلسة اصطناعية 1');
+    expect((await db.query('SELECT case_id FROM visits WHERE patient_id=$1 ORDER BY id',[patient])).rows).toEqual([{case_id:null},{case_id:null}]);
     await page.reload();
     // The original URL explicitly opens the prescription pillar. Reopen the
     // study after reload before verifying its persisted documentary version.

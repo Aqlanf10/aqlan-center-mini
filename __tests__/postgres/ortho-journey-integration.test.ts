@@ -6,6 +6,8 @@ import { openPeriodontalFixture } from "./_periodontal-fixture";
 import { appendOrthoRetentionEvent, getOrthoRetentionEvents } from "../../lib/ortho-retention-event-store";
 import { getOrthoCaseStudy, saveOrthoCaseStudy } from "../../lib/ortho-case-study-store";
 import { getOrthoStudyPanelReview } from "../../lib/ortho-case-study-review-store";
+import { getOrthoStudySourceChoices } from "../../lib/ortho-case-study-inventory";
+import { captureAssessmentExternalSources } from "../../lib/ortho-assessment-versioned-sources";
 import { CASE_TEMPLATE_VERSION } from "../../lib/ortho-case-template";
 import { STUDY_TEMPLATE_HASH } from "../../lib/ortho-case-study-template";
 import { verifyRetentionRead, verifyRetentionSaved } from "../../lib/ortho-retention-client";
@@ -95,5 +97,40 @@ describe("integrated case records on actual PostgreSQL", () => {
     const first = await scope(), second = await scope();
     expect(await saveOrthoCaseStudy({ ...first, patientId: second.patientId, command: study() })).toMatchObject({ ok: false, status: 404 });
     expect(await getOrthoRetentionEvents({ ...first, patientId: second.patientId })).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it.each([null, 'same'])("captures a real Ortho session with visit case %s without assigning the visit, then refuses a foreign case link", async visitCase => {
+    const owner = await scope(), visitId = (await fixture.pool.query("INSERT INTO visits(patient_id,patient_name,status,case_id) VALUES($1,'Synthetic session visit','done',$2) RETURNING id", [owner.patientId, visitCase === null ? null : owner.clinicalCaseId])).rows[0].id;
+    const adjustmentId = (await fixture.pool.query("INSERT INTO ortho_adjustments(case_id,visit_id,done,note,recorded_by) VALUES($1,$2,'Synthetic actual procedure','Synthetic session note','synthetic') RETURNING id", [owner.orthoCaseId, visitId])).rows[0].id;
+    const before = await money(), choices = await getOrthoStudySourceChoices({ ...owner, kind: 'adjustment' });
+    expect(choices).toMatchObject({ ok: true, state: 'available' });
+    if (!choices.ok || choices.state !== 'available') throw Error('session choices unavailable');
+    const selected = choices.choices.find(c => c.id === adjustmentId)?.selection;
+    expect(selected).toBeTruthy(); if (!selected) throw Error('session source missing');
+    const command = study(); command.content.sources = [selected];
+    command.content.panels = [{ instanceId: 'session', layoutKey: 'visit', included: true, state: 'available', sourceKeys: [selected.key], images: [], comment: '' }];
+    const saved = await saveOrthoCaseStudy({ ...owner, command }); if (!saved.ok) throw Error(saved.code);
+    const read = await getOrthoCaseStudy({ ...owner, revisionId: saved.revision.id });
+    expect(read).toMatchObject({ ok: true, revision: { content: { sources: [{ payload: { id: adjustmentId, visitId, done: 'Synthetic actual procedure' } }] } } });
+    const review=await getOrthoStudyPanelReview({...owner,revisionId:saved.revision.id,panelId:'session'});
+    expect(review.ok).toBe(true);expect(JSON.stringify(review)).toContain('Synthetic actual procedure');
+    expect((await fixture.pool.query('SELECT case_id FROM visits WHERE id=$1', [visitId])).rows[0].case_id).toBe(visitCase === null ? null : owner.clinicalCaseId);
+    expect(await money()).toEqual(before);
+    const clinicalClient = await fixture.pool.connect();
+    try {
+      await clinicalClient.query('BEGIN');
+      const clinicalSources = await captureAssessmentExternalSources(clinicalClient, owner, [{ kind: 'clinical_visit', id: visitId }], true);
+      expect(clinicalSources.has(`clinical_visit:${visitId}`)).toBe(visitCase !== null);
+    } finally { await clinicalClient.query('ROLLBACK'); clinicalClient.release(); }
+    const otherCase = (await fixture.pool.query("INSERT INTO clinical_cases(patient_id,specialty,title,created_by) VALUES($1,'orthodontics','Synthetic other case','synthetic') RETURNING id", [owner.patientId])).rows[0].id;
+    const writer=await fixture.pool.connect();
+    await writer.query('BEGIN');
+    await writer.query('UPDATE visits SET case_id=$1 WHERE id=$2', [otherCase, visitId]);
+    const pending=getOrthoCaseStudy({ ...owner, revisionId: saved.revision.id });
+    try {
+      await expect.poll(async()=> (await fixture.pool.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT id FROM visits WHERE id=ANY%') AS waiting")).rows[0].waiting,{timeout:5000}).toBe(true);
+      await writer.query('COMMIT');
+      expect(await pending).toMatchObject({ ok: false, status: 403 });
+    } finally { await writer.query('ROLLBACK'); writer.release(); await pending; }
   });
 });

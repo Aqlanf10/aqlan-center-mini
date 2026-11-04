@@ -12,7 +12,7 @@ import { lockJourneyPlan, type JourneyPlanSource } from "./ortho-case-journey-pl
 import { JourneyFault, journeyFail, type JourneyAuthority, type JourneyOwner, type JourneyOwnerInput } from "./ortho-case-journey-authority";
 import { journeyHash, journeyId } from "./ortho-case-journey-records";
 import type { StudyDraftContent, StudySourceSelection } from "./ortho-case-study";
-import { addStudyPlanTargets, addStudySourceTargets, lockStudySourceUnion, type StudyAssessmentAccess } from "./ortho-case-study-assessment-access";
+import { addStudyPlanTargets, addStudySourceTargets, addStudySessionVisitTargets, lockStudySourceUnion, type StudyAssessmentAccess } from "./ortho-case-study-assessment-access";
 import { studyPgPositiveInteger } from "./ortho-case-study-pg-values";
 
 export interface StudySourceCapture {
@@ -54,7 +54,7 @@ export async function lockStudyExternalSources(client: DbClient, input: JourneyO
     const { rows } = await client.query<{ id: number; visit_id: number | null }>(
       "SELECT id,visit_id FROM ortho_adjustments WHERE case_id=$1 AND id=ANY($2::int[]) ORDER BY id", [input.orthoCaseId, adjustmentIds]);
     for (const row of rows) external.visits.set(row.id, row.visit_id);
-    addStudySourceTargets(assessmentAccess, rows.flatMap(r => r.visit_id === null ? [] : [{ kind: "clinical_visit" as const, id: r.visit_id }]));
+    addStudySessionVisitTargets(assessmentAccess, rows.flatMap(r => r.visit_id === null ? [] : [r.visit_id]));
   }
   const selectedPlans = selectedIds(content, "plan_consent");
   addStudyPlanTargets(assessmentAccess, selectedPlans);
@@ -67,7 +67,7 @@ export async function lockStudyExternalSources(client: DbClient, input: JourneyO
       }
     }
   });
-  for (const id of external.visits.values()) if (id !== null && !assessmentAccess.current?.has(`clinical_visit:${id}`)) journeyFail(409, "study_visit_scope_changed");
+  for (const id of external.visits.values()) if (id !== null && !assessmentAccess.currentSessionVisitIds.has(id)) journeyFail(409, "study_visit_scope_changed");
   if (!authority.canViewImages && content.sources.some(s => s.kind === "document" || s.kind === "ceph_study")) journeyFail(403, "study_images_restricted");
   for (const id of selectedIds(content, "ceph_study")) {
     const { rows } = await client.query<Record<string, unknown>>(

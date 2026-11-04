@@ -59,8 +59,8 @@ export async function requireCurrentStudyRead(client: DbClient, owner: JourneyOw
     } else if (source.selection.kind === "adjustment") {
       const visitId = (source.payload as { visitId: number | null }).visitId;
       const { rows } = await client.query<{ id: number; visit_id: number | null }>(
-        "SELECT id,visit_id FROM ortho_adjustments WHERE id=$1 AND case_id=$2", [source.selection.id, owner.orthoCaseId]);
-      if (!rows[0] || rows[0].visit_id !== visitId || visitId !== null && !assessmentAccess.current?.has(`clinical_visit:${visitId}`))
+        "SELECT id,visit_id FROM ortho_adjustments WHERE id=$1 AND case_id=$2 FOR SHARE", [source.selection.id, owner.orthoCaseId]);
+      if (!rows[0] || rows[0].visit_id !== visitId || visitId !== null && !assessmentAccess.currentSessionVisitIds.has(visitId))
         journeyFail(403, "study_adjustment_source_restricted");
     }
   }
