@@ -32,7 +32,7 @@ const post = (patientId: number, cookie: string, body: Record<string, unknown>) 
 
 beforeAll(async () => {
   journey = await openCanonicalJourney({
-    portOffset: 128, secret: "canonical-chart-journey-secret-0123456789abcdef", accounts: ACCOUNTS, ownerKey: "owner",
+    portOffset: 140, secret: "canonical-chart-journey-secret-0123456789abcdef", accounts: ACCOUNTS, ownerKey: "owner",
     async seed(db, _ids, parties) {
       ids.mine = (await db.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone,primary_doctor_id) VALUES ('SYN-CJ-1','مريض المخطط التجريبي','0500000971',$1) RETURNING id", [parties.doctor!])).rows[0].id;
       ids.other = (await db.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone) VALUES ('SYN-CJ-2','مريض بعيد','0500000972') RETURNING id")).rows[0].id;

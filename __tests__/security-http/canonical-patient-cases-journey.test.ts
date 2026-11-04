@@ -49,10 +49,14 @@ it("HTTP: exact projection, scope, independent plan and ortho grants, and no que
   expect(outside.status).toBe(404); expect(missing.status).toBe(404); expect(await outside.json()).toEqual(await missing.json());
   for (const id of ["1e0", "-1", "0", "2147483648"]) expect((await journey.api(`/api/patients/${id}/cases`, own.cookie)).status).toBe(400);
 });
-it("HTTP: a read grant does not activate the legacy case writer, even for the owner", async () => {
+// M2 slice 80 made the case POST canonical (clinical.plans.edit + clinician/owner, requestKey
+// required). A canonical session never reaches the legacy writer: without a request key the
+// canonical command refuses (400) and nothing is written.
+it("HTTP: the legacy case writer is never reached by a canonical session; a keyless create writes nothing", async () => {
   const before = (await journey.db.query("SELECT (SELECT count(*) FROM clinical_cases)::int cases,(SELECT count(*) FROM audit_log)::int audit")).rows;
   const response = await journey.api(`/api/patients/${ids.patient}/cases`, (await journey.login("owner")).cookie, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ specialty: "general", title: "SYN must not write" }) });
-  expect(response.status).toBe(401);
+  expect(response.status).toBe(400);
+  expect((await response.json()).message).toMatch(/[؀-ۿ]/);
   // Login itself can audit; compare the domain state rather than login rows.
   expect((await journey.db.query("SELECT count(*)::int cases FROM clinical_cases")).rows[0].cases).toBe(before[0].cases);
   expect((await journey.db.query("SELECT count(*)::int n FROM audit_log WHERE action='case.create' AND summary LIKE '%SYN must not write%'")).rows[0].n).toBe(0);
