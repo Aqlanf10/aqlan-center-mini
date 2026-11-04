@@ -139,7 +139,7 @@ export async function commandCanonicalVisitDocument(session: VerifiedDurableSess
     }
     if (action === "sign") {
       const identity = await staffOperationIdentity(client, handle, "clinical.visits.document");
-      return sign(client, handle, visitId, visit!, body, clinician, owner, identity);
+      return signCanonicalVisitInOperation(client, handle, visitId, visit!, body, clinician, owner, identity);
     }
     if (action !== "save" && action !== "addendum") throw refuse("invalid_action", 400, "إجراء غير معروف على الزيارة.");
     const identity = await staffOperationIdentity(client, handle, "clinical.visits.document");
@@ -149,8 +149,8 @@ export async function commandCanonicalVisitDocument(session: VerifiedDurableSess
       if (labCommand.patientId !== visit!.patient_id) throw refuse("source_changed", 409, "تغيّر المريض المرتبط بالزيارة؛ حدّث الملف قبل حفظ عمل المختبر.");
       labActor = identity;
     }
-    if (action === "addendum") { await addendum(client, visitId, body, identity); return undefined; }
-    await save(client, handle, visitId, visit!, body, full, identity, labCommand && labActor ? { ...labCommand, actor: labActor } : null);
+    if (action === "addendum") { await appendCanonicalVisitAddendum(client, visitId, body, identity); return undefined; }
+    await saveCanonicalVisitDocumentation(client, handle, visitId, visit!, body, full, identity, labCommand && labActor ? { ...labCommand, actor: labActor } : null);
     return undefined;
   });
   } catch (error) {
@@ -218,7 +218,7 @@ async function settleCanonicalLabRejection(pool: ReturnType<typeof getPool>, ses
 
 const NO_CHARGE_REFUSED = "قرار «بلا رسوم» لشدّة خارج الاتفاق للمالك، ولطبيب حالة التقويم المسؤول عنها بصلاحية تعديل التقويم إذا فعّل المالك ذلك في الإعدادات.";
 
-async function sign(
+async function signCanonicalVisitInOperation(
   client: DbClient, handle: Parameters<typeof staffOperationCapabilities>[1], visitId: number,
   visit: { patient_id: number | null }, body: Record<string, unknown>, clinician: number | null, owner: boolean,
   identity: { userId: number; username: string; role: string },
@@ -342,7 +342,7 @@ async function sign(
   };
 }
 
-async function addendum(client: DbClient, visitId: number, body: Record<string, unknown>, identity: { userId: number; username: string; role: string }) {
+async function appendCanonicalVisitAddendum(client: DbClient, visitId: number, body: Record<string, unknown>, identity: { userId: number; username: string; role: string }) {
   const note = text(body.text, 1000);
   if (!note) throw refuse("invalid_addendum", 400, "اكتب نصّ الملحق.");
   const requestKey = body.requestKey === undefined ? null : typeof body.requestKey === "string" && KEY.test(body.requestKey) ? body.requestKey : false;
@@ -364,7 +364,7 @@ async function addendum(client: DbClient, visitId: number, body: Record<string, 
   });
 }
 
-async function save(
+async function saveCanonicalVisitDocumentation(
   client: DbClient, handle: Parameters<typeof staffOperationCapabilities>[1], visitId: number,
   visit: { doctor_id: number | null; billing_currency: string | null }, body: Record<string, unknown>, full: boolean,
   identity: { username: string; role: string },

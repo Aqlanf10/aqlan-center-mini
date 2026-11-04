@@ -31248,9 +31248,6 @@ export async function recordOrthoBaseline(input: BaselineDraft & {
 }
 
 /** شدّة التقويم المرتبطة بزيارة (إن وُجدت) — لشاشة الزيارة: «سُجّلت شدّة هذه الزيارة». */
-async function orthoAdjustmentForVisit(caseId: number, visitId: number): Promise<number | null> {
-  return orthoAdjustmentForVisitWith(getPool(), caseId, visitId);
-}
 async function orthoAdjustmentForVisitWith(q: Pick<DbClient, "query">, caseId: number, visitId: number): Promise<number | null> {
   const { rows } = await q.query<{ id: number }>(
     `SELECT id FROM ortho_adjustments WHERE case_id = $1 AND visit_id = $2 ORDER BY id LIMIT 1`,
