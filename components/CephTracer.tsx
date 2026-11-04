@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { formatClinicTimestamp } from "@/lib/clinic-clock";
 import {
-  CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, LANDMARK_ORDER, landmarkDef, projectCephStampedValues, projectOnLine, REQUIRED_LANDMARKS, round1,
-  suggestDiagnosis, suggestLandmarks, summarize,
+  CEPH_SCHOOLS, computeAll, enrichWithRefs, LANDMARK_ORDER, landmarkDef, projectCephStampedValues, projectOnLine, REQUIRED_LANDMARKS, round1,
+  suggestLandmarks, summarize,
   type CephSchool, type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
 } from "@/lib/ceph";
 
@@ -172,7 +172,6 @@ export function CephTracer({
     return map;
   });
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiDxLoading, setAiDxLoading] = useState(false);
   const [scale, setScale] = useState<number | null>(analysis.mmPerPixel);
   const [calibration, setCalibration] = useState<AnalysisProp["calibration"]>(analysis.calibration);
   const [active, setActive] = useState<LandmarkCode | null>(null);
@@ -571,19 +570,6 @@ export function CephTracer({
     }
   };
 
-  const fillSuggestion = () => {
-    if (!table) return;
-    const s = suggestDiagnosis(table);
-    setDx((prev) => ({
-      skeletal: s.skeletal,
-      dental: s.dental,
-      softTissue: s.softTissue,
-      note: prev.note,
-      finalDx: prev.finalDx || `${s.skeletal}`,
-    }));
-    setDxDirty(true);
-  };
-
   const autoLocateAi = async () => {
     if (completed) return;
     setAiLoading(true);
@@ -632,54 +618,6 @@ export function CephTracer({
       setMessage("🔮 تم وضع المعالم المقترحة (الذكاء الاصطناعي يقترح ولا يعتمد).");
     } finally {
       setAiLoading(false);
-    }
-  };
-
-  const generateIntelligentDiagnosis = async () => {
-    setAiDxLoading(true);
-    setMessage("جاري توليد التشخيص التقويمي السردي وخطة العلاج الموجهة…");
-    try {
-      const res = await fetch(`/api/ceph/${analysis.id}/ai-analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate-diagnosis", useAiChat: true }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDx({
-          skeletal: data.suggestion.skeletal,
-          dental: data.suggestion.dental,
-          softTissue: data.suggestion.softTissue,
-          finalDx: data.suggestion.finalDx,
-          note: data.suggestion.recommendationsText,
-        });
-        setDxDirty(true);
-        setMessage("🧠 تم توليد التشخيص التقويمي الذكي وخطة العلاج السردية — يرجى مراجعة الحقول والضغط على 'حفظ التشخيص'.");
-      } else {
-        const expert = generateCephExpertDiagnosis(table ?? results);
-        setDx({
-          skeletal: expert.formatted.skeletal,
-          dental: expert.formatted.dental,
-          softTissue: expert.formatted.softTissue,
-          finalDx: expert.formatted.finalDx,
-          note: expert.formatted.recommendationsText,
-        });
-        setDxDirty(true);
-        setMessage("🧠 تم استنتاج التشخيص وخطة العلاج من محرك الخبير السيفالومتري المدمج.");
-      }
-    } catch {
-      const expert = generateCephExpertDiagnosis(table ?? results);
-      setDx({
-        skeletal: expert.formatted.skeletal,
-        dental: expert.formatted.dental,
-        softTissue: expert.formatted.softTissue,
-        finalDx: expert.formatted.finalDx,
-        note: expert.formatted.recommendationsText,
-      });
-      setDxDirty(true);
-      setMessage("🧠 تم توليد التشخيص من محرك التحليل المدمج.");
-    } finally {
-      setAiDxLoading(false);
     }
   };
 
@@ -1792,32 +1730,10 @@ export function CephTracer({
                 </table>
               )}
             </div>
-            {/* التشخيص المنظم: اقتراحُ النظام يُحرَّر ويوقَّع — المعتمد يُقرأ لا يُكتب. */}
+            {/* Clinician-authored diagnosis; saved historical text is never regenerated. */}
             <div className="border-t border-slate-200 px-4 py-3">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-slate-700">التشخيص السيفالومتري المنظم</p>
-                {!completed && (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => void generateIntelligentDiagnosis()}
-                      disabled={aiDxLoading}
-                      className="rounded-md border border-purple-300 bg-purple-50 px-2 py-0.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-40 inline-flex items-center gap-1"
-                      title="يولد تشخيصاً تقويمياً سردياً شاملاً وخطة علاج موجهة بالذكاء الاصطناعي ومحرك الخبير"
-                    >
-                      <span>🧠</span>
-                      <span>{aiDxLoading ? "جاري التوليد…" : "توليد التشخيص الذكي"}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={fillSuggestion}
-                      className="rounded-md border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
-                      title="يملأ الحقول من القياسات — اقتراحٌ قابل للتحرير"
-                    >
-                      تعبئة أساسية
-                    </button>
-                  </div>
-                )}
               </div>
               {completed ? (
                 diagnosis ? (
@@ -1835,7 +1751,7 @@ export function CephTracer({
               ) : (
                 <div className="space-y-2">
                   <p className="rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-500">
-                    ما يكتبه النظام <b>اقتراحٌ موسوم</b> قابل للتحرير — ولا يُختم إلا باعتمادك التحليل.
+                    راجع القياسات والسجلات ثم دوّن تقييمك السريري. التشخيص وخطة العلاج من اختيار الطبيب، والحفظ يبقي التحليل مسودة حتى اعتماده.
                   </p>
                   <textarea
                     value={dx.skeletal}

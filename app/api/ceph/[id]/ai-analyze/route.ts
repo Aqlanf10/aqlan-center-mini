@@ -2,13 +2,12 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  getCephStudy, getPatient, getSettingsSafe, updateCephDiagnosis, updateCephLandmarks,
+  getCephStudy, getPatient, updateCephLandmarks,
 } from "@/lib/db";
 import {
-  computeAll, generateCephExpertDiagnosis, suggestLandmarks,
+  suggestLandmarks,
   type LandmarkCode, type Pt,
 } from "@/lib/ceph";
-import { aiChat, getAiSettings } from "@/lib/ai";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -55,6 +54,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
   } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح — مطلوب JSON." }, { status: 400 });
+  }
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح — مطلوب كائن JSON." }, { status: 400 });
   }
 
   const study = await getCephStudy(id);
@@ -108,95 +111,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
   }
 
-  // 2) خيار توليد التشخيص التقويمي الذكي وخطة العلاج
+  // Retired clinical inference is closed even for old clients with save flags.
+  // Preserve existing diagnosis records; manual edits use the scoped PATCH route.
   if (body.action === "generate-diagnosis") {
-    const patient = await getPatient(study.analysis.patientId);
-
-    let age: number | undefined;
-    if (patient?.birthYear) {
-      const refYear = study.analysis.xrayDate
-        ? new Date(study.analysis.xrayDate).getUTCFullYear()
-        : new Date().getUTCFullYear();
-      age = Math.max(0, refYear - patient.birthYear);
-    }
-    const gender = patient?.gender ?? undefined;
-
-    const currentPoints: Partial<Record<LandmarkCode, Pt>> = {};
-    for (const lm of study.landmarks) {
-      currentPoints[lm.code] = { x: lm.x, y: lm.y };
-    }
-
-    const results = computeAll(currentPoints, study.analysis.mmPerPixel ?? NaN);
-    const expert = generateCephExpertDiagnosis(results, { age, gender });
-
-    let aiEnhancedText: string | null = null;
-    /* (P2-11 — قرار المالك) وصف التحليل السيفالومتري نصٌّ سريري: لا يخرج إلى المزوّد
-       الخارجي إلا بتفعيل `ai.clinical_external` صراحةً — وإلا فالتشخيص من المحرك المحلي. */
-    const clinicalExternal = (await getSettingsSafe().catch(() => null))?.["ai.clinical_external"] === "true";
-    const shouldTryAi = body.useAiChat !== false && clinicalExternal;
-
-    if (shouldTryAi) {
-      try {
-        const aiSettings = await getAiSettings();
-        if (aiSettings.enabled && aiSettings.hasKey) {
-          const clinicalContext = `التحليل السيفالومتري:
-- التصنيف الهيكلي السهمي: ${expert.sagittalSkeletal.classification} (${expert.sagittalSkeletal.descriptionAr})
-- النمط الهيكلي العمودي: ${expert.verticalSkeletal.pattern} (${expert.verticalSkeletal.growthTendencyAr})
-- القواطع والتعويض: ${expert.dentalAnalysis.descriptionAr} — ${expert.dentalAnalysis.compensationAr}
-- الأنسجة الرخوة والبروفايل: ${expert.aestheticProfile.summaryAr}
-- العمر: ${age != null ? `${age} سنة` : "غير مسجل"} | الجنس: ${gender === "male" ? "ذكر" : gender === "female" ? "أنثى" : "غير محدد"}`;
-
-          const res = await aiChat({
-            messages: [
-              {
-                role: "system",
-                content:
-                  "أنت استشاري تقويم أسنان وخبير سيفالومتري في مركز عقلان. قدم ملخص تشخيصي تقويمي موجز وتوصيات خطة العلاج (القلع vs اللاقلاع، أجهزة تعديل النمو، التوسيع، الزرعات العظمية، أو الجراحة). التزم باللغة العربية الطبية الاحترافية واجعل الناتج لا يتجاوز 180 كلمة.",
-              },
-              { role: "user", content: clinicalContext },
-            ],
-            maxTokens: 500,
-            temperature: 0.2,
-          }, aiSettings);
-
-          if (res.ok && res.content.trim()) {
-            aiEnhancedText = res.content.trim();
-          }
-        }
-      } catch {
-        // Fallback to pure expert engine gracefully if AI is offline
-      }
-    }
-
-    const suggestion = {
-      skeletal: expert.formatted.skeletal,
-      dental: expert.formatted.dental,
-      softTissue: expert.formatted.softTissue,
-      finalDx: expert.formatted.finalDx,
-      recommendationsText: aiEnhancedText || expert.formatted.recommendationsText,
-    };
-
-    if (body.saveToDiagnosis && study.analysis.status === "draft") {
-      await updateCephDiagnosis(
-        id,
-        {
-          skeletal: suggestion.skeletal,
-          dental: suggestion.dental,
-          softTissue: suggestion.softTissue,
-          finalDx: suggestion.finalDx,
-          note: suggestion.recommendationsText,
-        },
-        session.username,
-      );
-    }
-
     return NextResponse.json({
-      ok: true,
-      action: "generate-diagnosis",
-      expertDiagnosis: expert,
-      aiEnhancedText,
-      suggestion,
-    });
+      code: "clinical_review_required",
+      message: "التشخيص وخطة العلاج يحررهما الطبيب بعد مراجعة القياسات والسجلات. التوليد الآلي غير متاح.",
+    }, { status: 409 });
   }
 
   return NextResponse.json({ message: "الإجراء action غير مدعوم." }, { status: 400 });
