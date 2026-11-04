@@ -213,15 +213,26 @@ export async function commandCanonicalDiagnosis(session: VerifiedDurableSession,
   // Optional here: the reviewed diagnosis panel (hash-pinned) sends its exact body once
   // under repeated submission, and each version is serialized by the writer's advisory
   // lock. A key, when sent, gives the same receipt as the other records.
-  const requestKey = body.requestKey === undefined ? null : requestKeyOf(body);
-  const check = validateDiagnosisContent(body.content);
-  if (!check.ok) throw invalid(check.message, "content");
+  // The body is validated only after the clinician/owner check, as the legacy route checked
+  // the role before reading the body: a refused actor never sees validation messages.
+  let parseError: unknown = null;
+  let requestKey: string | null = null;
+  let orthoCaseId: number | null = null;
+  let content: Record<string, unknown> = {};
   const label = typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 120) : null;
-  const orthoCaseId = parseCaseId(body.orthoCaseId);
-  const content = check.content as unknown as Record<string, unknown>;
+  try {
+    requestKey = body.requestKey === undefined ? null : requestKeyOf(body);
+    const check = validateDiagnosisContent(body.content);
+    if (!check.ok) throw invalid(check.message, "content");
+    content = check.content as unknown as Record<string, unknown>;
+    orthoCaseId = parseCaseId(body.orthoCaseId);
+  } catch (error) { parseError = error; }
   try {
     return await clinicalWrite(session, patientId, "diagnosis.create", requestKey, fingerprintOf({ patientId, content, label, orthoCaseId }), "التشخيص", pool, ({ client, handle, actor }) => ({
-      authorize: () => requireClinicianOrOwner(client, handle, "diagnosis_clinician_required", "تسجيل التشخيص للطبيب المرتبط بجهة طبيب."),
+      authorize: async () => {
+        await requireClinicianOrOwner(client, handle, "diagnosis_clinician_required", "تسجيل التشخيص للطبيب المرتبط بجهة طبيب.");
+        if (parseError) throw parseError;
+      },
       replay: async id => {
         const { rows: [row] } = await client.query<{ id: number; version: number }>("SELECT id, version FROM patient_diagnoses WHERE id = $1", [id]);
         return row ?? null;

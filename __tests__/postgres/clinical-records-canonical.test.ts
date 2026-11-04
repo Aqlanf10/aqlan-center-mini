@@ -79,6 +79,9 @@ describe("diagnosis", () => {
     expect([a.version, b.version].sort()).toEqual([1, 2]);
     expect(await refusal(rec.commandCanonicalDiagnosis(await fx.session("nurse"), String(ids.mine), { requestKey: key(), content: content() })))
       .toMatchObject({ code: "diagnosis_clinician_required", status: 403 });
+    // The role-level check comes before validation (as legacy): an invalid body still reads 403.
+    expect(await refusal(rec.commandCanonicalDiagnosis(await fx.session("nurse"), String(ids.mine), { requestKey: "bad", content: null })))
+      .toMatchObject({ code: "diagnosis_clinician_required", status: 403 });
     expect((await q("SELECT count(*)::int AS n FROM patient_diagnoses WHERE patient_id=$1", [ids.mine]))[0].n).toBe(2);
     expect((await q("SELECT count(*)::int AS n FROM audit_log WHERE action='diagnosis.create' AND details->>'المريض'=$1::text", [ids.mine]))[0].n).toBe(2);
   });
