@@ -128,10 +128,16 @@ function handlerAudits(local: Map<string, string>, handler: string, audited: Set
 // classification. Behavioral checks below and plans-creation-entry.test.ts cover
 // refusal, preserved policy, body limits and no writer/success-audit invocation;
 // plan-creation-entry-http.test.ts covers proxy policy and unchanged DB rows.
+// ceph-clinician-review.test.ts and ceph-clinician-review-browser.test.ts cover
+// both retired ceph actions, old save flags and unchanged diagnosis/landmark rows.
 const REFUSAL_ONLY = {
   "POST /api/plans": {
     reason: "إنشاء الخطط القديم موقوف: رفض 409 بعد الصلاحيات، بلا كتابة أو تدقيق نجاح.",
     sha256: "cd5aa5ddddd9ccb7aba89bbdb3d060c96113a7a6226e1167f67634612a23ac2e",
+  },
+  "POST /api/ceph/[id]/ai-analyze": {
+    reason: "توليد التشخيص والمعالم القديم موقوف: رفض409 بعد صلاحية المريض، بلا كتابة أو تدقيق نجاح.",
+    sha256: "74f7035f77e601b2b63dd7b5afc79045049a9d4e0498933181d0cbcb55ed6913",
   },
 };
 const audited = auditingLibFunctions();
