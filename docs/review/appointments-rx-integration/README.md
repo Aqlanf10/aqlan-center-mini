@@ -60,5 +60,16 @@ PostgreSQL 18; no production or Stage database migration was performed.
 Hosted CI at the final integration commit, actual supported-browser print
 acceptance, and a coordinated Stage doctor/staff/duty review remain release
 gates. Real roster correctness cannot be inferred from synthetic fixtures.
-No remote branch publication, PR merge, or deployment is authorized by this
-continuation, and none is performed by this integration work.
+The initial preparation was local only. The owner's subsequent continuation on
+2026-11-04 authorizes publishing this isolated branch as a draft review and
+running GitHub CI. It does not authorize merging, changing another branch, or
+deploying to Stage/Production. The current CI result belongs to the exact PR head
+and must be checked there; earlier local evidence is not a hosted-CI claim.
+
+The retained single local lab-PDF failure is diagnosed in `print-diagnosis.md`;
+the approved Rx files and the strict PDF oracle are unchanged.
+`roster-radiology-audit.md` records the fresh 62-case compatibility check and
+the separate radiology boundary. Immediately before publication, read-only
+Railway configuration showed Stage bound to the Rx branch at `b804d515` and
+Production bound to `main` at `6a6bdc0c`, with no staged configuration changes.
+Neither service follows this isolated review branch.

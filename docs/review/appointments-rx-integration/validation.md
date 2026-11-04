@@ -75,10 +75,13 @@ screenshots/PDF; the remaining logs document schema, restore, browser and print
 results. Roster screenshots show both missing and ambiguous mappings at mobile
 and desktop widths. They contain synthetic identities only.
 
-There is no exact-head hosted CI result for this unpushed integration branch.
+At the end of local preparation there was no exact-head hosted CI result.
+The subsequent owner instruction authorizes draft publication and supported
+GitHub CI; the draft PR/checks are the source of truth for the final head.
 The earlier #522 CI success applies only to its appointments source commit.
 The full HTTP suite was not rerun on this composed branch; the listed 21 cases
 are focused real application acceptance. No real doctor roster, approved leave,
 patient data or deployed application was read or validated. Stage coordination,
 supported-browser print acceptance and hosted CI remain required before any
-release decision. Nothing was merged, remotely published, or deployed here.
+release decision. The preparation did not merge or deploy anything; subsequent
+draft publication does not authorize either action.
