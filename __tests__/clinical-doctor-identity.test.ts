@@ -139,6 +139,8 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
   dependencies.phoneLookupForms = domain("phoneLookupForms", { toWhatsAppNumber });
   dependencies.lockVisitPatientFirst = domain("lockVisitPatientFirst", dependencies);
   dependencies.saveClinicalNotes = domain("saveClinicalNotes", dependencies);
+  // M2 slice 85: the legacy save wraps its exact body (setVisitProceduresOn) in its own transaction.
+  dependencies.setVisitProceduresOn = domain("setVisitProceduresOn", dependencies);
   return { state: () => structuredClone(state), query, writeEffects, dependencies,
     save: domain<(input: Record<string, unknown>) => Promise<boolean>>("setVisitProcedures", dependencies),
     sign: domain<(input: Record<string, unknown>) => Promise<{ reason: string | null; invoiceId: number | null }>>("signClinicalVisit", dependencies),

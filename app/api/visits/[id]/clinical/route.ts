@@ -19,6 +19,7 @@ import { assistantProcedureChange } from "@/lib/clinical-finalizer";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { readCanonicalVisitClinical } from "@/lib/canonical-visit-clinical";
+import { canonicalVisitDocumentFailure, commandCanonicalVisitDocument } from "@/lib/canonical-visit-documentation";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +80,18 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
  * بالخطأ.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 85: save and addendum on one admitted clinical.visits.document transaction;
+  // price overrides by the approved map's grants; signing, a currency change and a lab draft refuse (409).
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    let canonicalBody: unknown;
+    try { canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try { return NextResponse.json(await commandCanonicalVisitDocument(selected.handle, (await context.params).id, canonicalBody), { headers: NO_STORE }); }
+    catch (error) { return canonicalVisitDocumentFailure(error); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (session.role !== "doctor" && session.role !== "admin" && session.role !== "assistant") return clinicalOnly();

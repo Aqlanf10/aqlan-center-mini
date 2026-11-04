@@ -74,7 +74,7 @@ import { withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
 import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
-import { decideProcedurePrice, type PriceOverrideKind } from "./price-authority";
+import { decideProcedurePrice, decideProcedurePriceByGrants, type PriceOverrideKind } from "./price-authority";
 import { SAVED_REPORTS_SQL } from "./saved-reports-schema";
 import { FINANCE_CONTROLS_SQL } from "./finance-controls-schema";
 import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
@@ -18911,17 +18911,18 @@ async function lockVisitPatientFirst(client: DbClient, visitId: number): Promise
   return patientId;
 }
 
-export async function setVisitProcedures(input: {
+type SetVisitProceduresInput = {
   visitId: number;
   labCommand?: { expectedPatientId: number; requestKey: string; requestHash: string; retirements?: unknown; session: import("./auth").SessionPayload };
-  procedures: VisitProcedureInput[];
+  /** `unitPriceMinor: null` (canonical callers only): the server price, never a request. */
+  procedures: (Omit<VisitProcedureInput, "unitPriceMinor"> & { unitPriceMinor: number | null; keptPriceMinor?: number | null })[];
   /** HTTP saves notes and procedures atomically; other callers retain procedure-only behavior. */
   clinicalNotes?: Omit<Parameters<typeof saveClinicalNotes>[0], "visitId">;
   /**
    * (P1-6) سلطة التسعير لمستخدمٍ حقيقي: السعر من الدليل، والانحراف بسببٍ وضمن
    * صلاحيته. المسارات الداخلية (رحلات التحقق) تمرّ بلا سلطة كما كانت.
    */
-  authority?: { role: string; maxDiscountPercent: number };
+  authority?: { role: string; maxDiscountPercent: number } | { grants: import("./price-authority").PriceGrants; maxDiscountPercent: number };
   /** تُملأ بالانحرافات المقبولة عن الدليل — ليسجّلها المسار في التدقيق. */
   overrides?: ProcedurePriceOverride[];
   /**
@@ -18930,11 +18931,31 @@ export async function setVisitProcedures(input: {
    */
   billingCurrency?: Currency;
   rates?: ForeignRates;
-}): Promise<boolean> {
+};
+
+export async function setVisitProcedures(input: SetVisitProceduresInput): Promise<boolean> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const outcome = await setVisitProceduresOn(client, input);
+    await client.query(outcome === "saved" ? "COMMIT" : "ROLLBACK");
+    return outcome !== "signed";
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The legacy save body on a caller-owned transaction (M2 slice 84/85: the canonical save
+ * runs it inside one admitted staff operation). "replayed" and "signed" leave nothing to
+ * commit: the caller rolls back (legacy) or refuses (canonical).
+ */
+export async function setVisitProceduresOn(client: DbClient, input: SetVisitProceduresInput): Promise<"saved" | "signed" | "replayed"> {
+  {
     const lockedPatientId = await lockVisitPatientFirst(client, input.visitId);
     const labApi: typeof import("./lab-work-intent-db") = await import("./lab-work-intent-db");
     if (input.labCommand && (!Number.isSafeInteger(input.labCommand.expectedPatientId) || input.labCommand.expectedPatientId <= 0
@@ -18958,7 +18979,7 @@ export async function setVisitProcedures(input: {
       const priorLabCommand = await labApi.readLabWorkCommandInTransaction(client, labContext);
       if (priorLabCommand) {
         labApi.assertLabWorkCommandApplied(priorLabCommand);
-        await client.query("ROLLBACK"); return true;
+        return "replayed";
       }
     }
     if (!input.labCommand) {
@@ -18976,13 +18997,10 @@ export async function setVisitProcedures(input: {
       `SELECT id, patient_id, billing_currency, planned_visit_id FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
-    if (!rows[0]) { await client.query("ROLLBACK"); return false; }
+    if (!rows[0]) return "signed";
     if (rows[0].patient_id !== null && rows[0].patient_id !== lockedPatientId) throw new ClinicalPlanConflict();
     await lockClinicalDoctors(client, input.procedures.map((line) => line.doctorId));
-    if (input.clinicalNotes && !(await saveClinicalNotes({ ...input.clinicalNotes, visitId: input.visitId }, client))) {
-      await client.query("ROLLBACK");
-      return false;
-    }
+    if (input.clinicalNotes && !(await saveClinicalNotes({ ...input.clinicalNotes, visitId: input.visitId }, client))) return "signed";
     const visitCurrency: Currency = input.billingCurrency
       ?? (isCurrency(rows[0].billing_currency) ? (rows[0].billing_currency as Currency) : CLINIC_BASE_CURRENCY);
     if (input.billingCurrency) {
@@ -19038,7 +19056,7 @@ export async function setVisitProcedures(input: {
     const seenInVisit = new Map<number, number>();
     for (const procedure of input.procedures) {
       let quantity = Math.max(1, Math.round(procedure.quantity));
-      let unitPriceMinor = Math.max(0, Math.round(procedure.unitPriceMinor));
+      let unitPriceMinor = procedure.unitPriceMinor === null ? 0 : Math.max(0, Math.round(procedure.unitPriceMinor));
 
       if (input.authority && !procedure.planItemId) {
         const service = catalog.get(procedure.serviceId);
@@ -19054,7 +19072,13 @@ export async function setVisitProcedures(input: {
         const configured = priced.minor === null ? false
           : priced.source === "catalog" && visitCurrency !== CLINIC_BASE_CURRENCY ? true
             : service.price_configured;
-        const decision = decideProcedurePrice({
+        const decision = "grants" in input.authority
+          ? decideProcedurePriceByGrants({
+            serviceName: service.name, catalogMinor: priced.minor ?? 0, priceConfigured: configured,
+            requestedMinor: procedure.unitPriceMinor === null ? null : unitPriceMinor, keptMinor: procedure.keptPriceMinor ?? null,
+            reason: procedure.priceReason ?? null, maxDiscountPercent: input.authority.maxDiscountPercent,
+          }, input.authority.grants)
+          : decideProcedurePrice({
           serviceName: service.name,
           catalogMinor: priced.minor ?? 0,
           priceConfigured: configured,
@@ -19121,13 +19145,7 @@ export async function setVisitProcedures(input: {
       );
     }
     if (labContext && labPreparation) await labApi.recordVisitLabWorkCommandInTransaction(client, labContext, labPreparation.revisions);
-    await client.query("COMMIT");
-    return true;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+    return "saved";
   }
 }
 
@@ -20620,8 +20638,14 @@ export async function addVisitAddendum(input: {
   visitId: number; text: string; author: string;
 }): Promise<boolean> {
   await ensureSchema();
+  return addVisitAddendumOn(getPool(), input);
+}
+/** The same append on a caller-owned query facade (M2 slice 85: inside the admitted operation). */
+export async function addVisitAddendumOn(db: Pick<DbClient, "query">, input: {
+  visitId: number; text: string; author: string;
+}): Promise<boolean> {
   const entry = formatAddendum({ text: input.text, author: input.author, at: new Date().toISOString() });
-  const { rowCount } = await getPool().query(
+  const { rowCount } = await db.query(
     `UPDATE visits
         SET addendum = CASE WHEN addendum IS NULL OR addendum = '' THEN $2::text
                             ELSE addendum || E'\n' || $2::text END

@@ -42,7 +42,7 @@ Hidden groups are omitted, never zeroed. A doctor without the invoice view still
 | Action | Canonical rule | Basis |
 |---|---|---|
 | Save notes (chief complaint … next plan) | `clinical.visits.document` inside the scope; the clinician link or the owner, or a documenting account for **today's visits only** | legacy: doctor/admin any day, assistant today only |
-| Addendum on a signed visit | `clinical.visits.document` + `clinical.visits.sign`; the clinician link or the owner | the map's sign rule; legacy doctor/admin |
+| Addendum on a signed visit | `clinical.visits.document` (the approved map's `addendum` branch adds no capability); the clinician link or the owner any day, another documenting account today's visits only | legacy doctor/admin, assistant today only (corrected in slice 85: the first version wrongly added `clinical.visits.sign`) |
 | Procedures without a price | `clinical.visits.document`; the price comes from the plan item or the service catalogue on the server | legacy |
 | Procedure price below the catalogue (discount) | + `finance.discounts.apply` with a written reason, within `billing.max_discount_percent`; beyond it `finance.discounts.override` | the approved map (legacy: role labels and the same ceiling) |
 | Procedure price above the catalogue (increase) | + `finance.price-increases.apply` with a written reason | the approved map (legacy: admin only) |

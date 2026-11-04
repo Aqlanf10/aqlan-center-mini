@@ -6388,7 +6388,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": "Signing additionally requires clinical.visits.sign.",
+  "note": "Signing additionally requires clinical.visits.sign. M2 slice 85 (save and addendum canonical; sign pending slice 86): one admitted clinical.visits.document transaction; the visit inside the scope by the queue read's condition (outside 404); a clinician-linked actor or the protected owner documents any day (notes, treating doctor, procedures), any other documenting account today's visits only and notes only (doctor and procedures unchanged, 403); setVisitProceduresOn (the legacy body) with price authority by grants per the priceOverrides fields below (a missing price is the server price: an unchanged saved line keeps its saved price, a new line the catalogue price; a manual price for an unpriced service needs finance.price-increases.apply), each override audited in the same transaction; the addendum appends to a signed visit, audited in the same transaction, optional requestKey replay; sign, a billing-currency change (financial group 4) and a lab draft inside the save refuse (409). The response is the projected cockpit read.",
   "branches": {
    "discriminator": "action",
    "values": {
