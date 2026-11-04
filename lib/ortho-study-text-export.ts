@@ -3,6 +3,7 @@ import type { JourneyScope } from "./ortho-case-journey-records";
 import type { StudyRevision } from "./ortho-case-study-history";
 import type { StudySavedContent } from "./ortho-case-study-capture";
 import { projectStudyRecordedFacts } from "./ortho-case-study-recorded-facts";
+import { studySourceName } from "./ortho-case-presentation-i18n";
 
 export const STUDY_TEXT_RENDERER = "ortho-text-v1";
 export interface StudyTextPage { title: string; lines: string[]; sourceKeys: string[] }
@@ -10,9 +11,9 @@ export interface StudyTextPresentation { caseId: number; revisionId: number; rev
 
 /** Bounded text-only export of a saved version. No current facts are mixed into
  * the snapshot, no image transform is guessed, and overflow is paginated. */
-export function studyTextPresentation(revision: StudyRevision<StudySavedContent>, scope: JourneyScope): StudyTextPresentation {
+export function studyTextPresentation(revision: StudyRevision<StudySavedContent>, scope: JourneyScope, illustrated = false, panelId?: string): StudyTextPresentation {
   const pages: StudyTextPage[] = [];
-  for (const panel of revision.content.authored.panels.filter(panel => panel.included)) {
+  for (const panel of revision.content.authored.panels.filter(panel => panel.included && (panelId === undefined || panel.instanceId === panelId))) {
     const facts = projectStudyRecordedFacts(revision.content, scope, panel.instanceId, revision.kind);
     const title = caseLayout(panel.layoutKey)!.titleAr;
     const lines: string[] = [];
@@ -23,10 +24,11 @@ export function studyTextPresentation(revision: StudyRevision<StudySavedContent>
     }
     for (const comment of [revision.content.authored.comment, panel.comment].filter(Boolean)) lines.push(`تعليق الطبيب: ${comment}`);
     if (panel.images.length || panel.sourceKeys.some(key => revision.content.sources.some(source => source.selection.key === key && source.selection.kind === "document"))) {
-      lines.push("هذه نسخة نصية. الصور المختارة وتحويلاتها لا تُصدّر في هذه النسخة؛ راجع صور الحالة الأصلية داخل الملف.");
+      lines.push(illustrated ? (panel.images.length ? "الصور المختارة لهذا القسم مرفقة بإطاراتها المحفوظة في الصفحات التالية." : "يوجد مرجع مستند دون صورة مختارة للتصدير في هذا القسم.") : "هذه نسخة نصية. الصور المختارة وتحويلاتها لا تُصدّر في هذه النسخة؛ راجع صور الحالة الأصلية داخل الملف.");
     }
-    for (const item of facts.unavailable) lines.push(`مصدر غير متاح: ${item.sourceKey} (${item.reason})`);
-    for (const item of facts.unmapped) lines.push(`مصدر محفوظ لم يُعرض نصياً: ${item.sourceKey} (${item.reason})`);
+    const sourceName = (key: string) => { const source = revision.content.authored.sources.find(s => s.key === key); return source ? `${studySourceName(source.kind, "ar")} #${source.id}` : "مرجع الدراسة"; };
+    for (const item of facts.unavailable) lines.push(`مصدر غير متاح: ${sourceName(item.sourceKey)}. راجع المصدر داخل ملف الحالة.`);
+    for (const item of facts.unmapped) lines.push(`تفاصيل المصدر غير معروضة نصياً في هذا القسم: ${sourceName(item.sourceKey)}. راجعها داخل ملف الحالة.`);
     if (!lines.length) lines.push("لا توجد حقائق نصية مسجلة في هذا القسم.");
     // Split long words/lines without dropping a character. No font shrinking
     // substitutes for pagination, including a long visit/assessment history.

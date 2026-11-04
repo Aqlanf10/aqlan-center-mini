@@ -46,6 +46,47 @@ async function prepared() {
   return { scope, plan: p, command, adjustment };
 }
 const perform = (p: Awaited<ReturnType<typeof prepared>>, adjustmentId: number, expectedHeadId: number, performedUm: number | null, extra = {}) => ({ schemaVersion: 1, clientRequestId: randomUUID(), expectedHeadId, reason: "Synthetic actual session documentation", content: { kind: "ipr", arch: "upper", planEntryId: p.plan.revision.id, teeth: [11, 12], adjustmentId, performedUm, measurementNote: "Synthetic direct measurement", supersedesEntryId: null, reviewReason: null, ...extra } });
+it("captures performed IPR with correction ancestry, freezes older studies, preserves unknown totals and rechecks permissions after a patient merge",async()=>{
+ const p=await prepared(),one=await p.adjustment(),two=await p.adjustment();
+ const before=(await f.pool.query("SELECT (SELECT count(*)::int FROM invoices) invoices,(SELECT count(*)::int FROM payments) payments,(SELECT count(*)::int FROM visits) visits")).rows;
+ const first=await appendOrthoSpaceEntry({...p.scope,command:perform(p,one,p.plan.revision.id,100)});if(!first.ok)throw Error(first.code);
+ const second=await appendOrthoSpaceEntry({...p.scope,command:perform(p,two,first.revision.id,200)});if(!second.ok)throw Error(second.code);
+ const choices=await getOrthoStudySourceChoices({...p.scope,kind:'space_ipr'});if(!choices.ok||choices.state!=='available')throw Error('missing IPR choice');
+ expect(choices.choices).toHaveLength(1);const selection=choices.choices[0].selection!;
+ const command={schemaVersion:1,clientRequestId:randomUUID(),expectedHead:null,baseDocumentedRevision:null,kind:'draft',documentedFrom:null,reason:'Synthetic captured IPR',content:{template:{key:'full-orthodontic-case',version:CASE_TEMPLATE_VERSION,contentHash:STUDY_TEMPLATE_HASH},identityDisclosure:'case_only',sources:[selection],groups:[],mediaUses:[],comment:'',panels:[{instanceId:'ipr',layoutKey:'visit',included:true,state:'available',sourceKeys:[selection.key],images:[],comment:''}]}};
+ const saved=await saveOrthoCaseStudy({...p.scope,command});if(!saved.ok)throw Error(saved.code);
+ expect(saved.revision.content.sources[0].payload).toMatchObject({headId:second.revision.id,totals:[{performedUm:300}]});
+ const beforeFacts=projectStudyRecordedFacts(saved.revision.content,p.scope,'ipr','draft');
+ const correction=await appendOrthoSpaceEntry({...p.scope,command:perform(p,one,second.revision.id,50,{supersedesEntryId:first.revision.id})});if(!correction.ok)throw Error(correction.code);
+ const old=await getOrthoCaseStudy({...p.scope,revisionId:saved.revision.id});if(!old.ok||!old.revision)throw Error('missing old IPR study');
+ expect(projectStudyRecordedFacts(old.revision.content,p.scope,'ipr','draft')).toEqual(beforeFacts);
+ const current=await getOrthoStudySourceChoices({...p.scope,kind:'space_ipr'});if(!current.ok||current.state!=='available')throw Error('missing corrected IPR');
+ const next=current.choices[0].selection!;
+ const corrected=await saveOrthoCaseStudy({...p.scope,command:{...command,clientRequestId:randomUUID(),expectedHead:old.head,content:{...command.content,sources:[next],panels:[{...command.content.panels[0],sourceKeys:[next.key]}]}}});if(!corrected.ok)throw Error(corrected.code);
+ expect(corrected.revision.content.sources[0].payload).toMatchObject({currentIds:[second.revision.id,correction.revision.id],totals:[{performedUm:250}]});
+ expect(JSON.stringify(projectStudyRecordedFacts(corrected.revision.content,p.scope,'ipr','draft'))).toContain('استبدل بتصحيح');
+ const unknown=await appendOrthoSpaceEntry({...p.scope,command:perform(p,two,correction.revision.id,null,{supersedesEntryId:second.revision.id,reviewReason:'Synthetic clinician confirms unavailable measurement; do not infer zero'})});if(!unknown.ok)throw Error(unknown.code);
+ const latest=await getOrthoStudySourceChoices({...p.scope,kind:'space_ipr'});if(!latest.ok||latest.state!=='available')throw Error('missing unknown IPR');
+ const last=latest.choices[0].selection!;
+ const read=await getOrthoCaseStudy(p.scope);if(!read.ok)throw Error(read.code);
+ const unknownStudy=await saveOrthoCaseStudy({...p.scope,command:{...command,clientRequestId:randomUUID(),expectedHead:read.head,content:{...command.content,sources:[last],panels:[{...command.content.panels[0],sourceKeys:[last.key]}]}}});if(!unknownStudy.ok)throw Error(unknownStudy.code);
+ expect(unknownStudy.revision.content.sources[0].payload).toMatchObject({totals:[{performedUm:null}]});
+ const head=await getOrthoCaseStudy(p.scope);if(!head.ok)throw Error(head.code);
+ expect(await saveOrthoCaseStudy({...p.scope,command:{...command,clientRequestId:randomUUID(),expectedHead:head.head,content:{...command.content,sources:[{...selection,contentHash:'f'.repeat(64)}]}}})).toMatchObject({ok:false});
+ expect((await f.pool.query("SELECT (SELECT count(*)::int FROM invoices) invoices,(SELECT count(*)::int FROM payments) payments,(SELECT count(*)::int FROM visits) visits")).rows).toEqual(before);
+ const target=(await f.pool.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic IPR merge') RETURNING id",[`SYN-IPR-MERGE-${randomUUID()}`])).rows[0].id;
+ expect(await f.db.mergeDuplicatePatient(p.scope.patientId,target,{actor:p.scope.session.username,reason:'Synthetic explicit merge'})).toMatchObject({ok:true});
+ const mergedScope={...p.scope,patientId:target};
+ const merged=await getOrthoCaseStudy({...mergedScope,revisionId:saved.revision.id});if(!merged.ok||!merged.revision)throw Error('merged IPR unavailable');
+ expect(merged.revision.recordedPatientId).toBe(p.scope.patientId);expect(projectStudyRecordedFacts(merged.revision.content,mergedScope,'ipr','draft')).toEqual(beforeFacts);
+ const password='synthetic-ipr-reader',username=`ipr-reader-${randomUUID()}`;
+ const user=(await f.pool.query("INSERT INTO users(username,display_name,password_hash,role,permissions) VALUES($1,'Synthetic IPR reader',$2,'doctor',$3) RETURNING id",[username,password,JSON.stringify({canViewAllPatients:true,canViewPlans:true})])).rows[0];
+ const actor:SessionPayload={userId:user.id,username,role:'doctor',credentialVersion:sessionCredentialVersion(password),expiresAt:Date.now()+600000};request.token=createSessionToken(actor);
+ expect(await getOrthoCaseStudy({...mergedScope,session:actor,revisionId:saved.revision.id})).toMatchObject({ok:true});
+ await f.pool.query('UPDATE users SET permissions=$1 WHERE id=$2',[JSON.stringify({canViewAllPatients:true,canViewPlans:false}),user.id]);
+ expect(await getOrthoCaseStudy({...mergedScope,session:actor,revisionId:saved.revision.id})).toMatchObject({ok:false,status:403});
+ expect(await getOrthoStudySourceChoices({...mergedScope,session:actor,kind:'space_ipr'})).toMatchObject({ok:true,state:'restricted',choices:[]});
+});
 describe("linked documentary space ledger on PostgreSQL", () => {
   it("registers exact runtime SQL", async () => expect(await readFile('migrations/0107_ortho_space_ledger.sql','utf8')).toBe(ORTHO_SPACE_SQL));
   it("reuses the stored analysis and strategy, adds two visits once, corrects one fact, and leaves money and treatment unchanged", async () => {

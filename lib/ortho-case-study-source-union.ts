@@ -1,4 +1,6 @@
 import {readStudySpacePlans,prepareStudySpacePlanAccess,type StudySpacePlan} from "./ortho-study-space-plan-store";
+import {readStudyIprSnapshots,prepareStudyIprAccess} from "./ortho-study-ipr-store";
+import type {StudyIprSnapshot} from "./ortho-study-ipr";
 /** Source-union discovery performs immutable reads only. Its caller locks the
  * complete external union once, before locking either case. */
 import type { DbClient } from "./db";
@@ -41,7 +43,9 @@ export async function prepareSavedStudySourceUnion(client: DbClient, owner: Jour
   for (const saved of contents) for (const source of saved.sources) {
     if (source.access.images && !authority.canViewImages || source.access.plans && !authority.canViewPlans) journeyFail(403, "study_section_restricted");
     if (source.state !== "available") continue;
-    if (source.selection.kind === "space_plan") {
+    if (source.selection.kind === "space_ipr") {
+      await prepareStudyIprAccess(client,owner,authority,[source.payload as StudyIprSnapshot],cache);
+    } else if (source.selection.kind === "space_plan") {
       await prepareStudySpacePlanAccess(client,owner,authority,[source.payload as StudySpacePlan],cache);
     } else if (source.selection.kind === "assessment") {
       const parsed = decodeAnyAssessmentRevision(source.payload, { ...owner, patientId: saved.recordedPatientId });
@@ -67,6 +71,9 @@ export async function prepareSavedStudySourceUnion(client: DbClient, owner: Jour
 }
 export async function prepareIncomingStudySourceUnion(client: DbClient, owner: JourneyOwner, authority: JourneyAuthority,
   content: StudyDraftContent, cache: StudyAssessmentAccess) {
+  const ipr=await readStudyIprSnapshots(client,owner,content.sources.filter(s=>s.kind==="space_ipr").map(s=>s.id));
+  if(content.sources.some(s=>s.kind==="space_ipr"&&ipr.get(s.id)?.headVersion!==s.version))journeyFail(403,"study_ipr_unavailable");
+  await prepareStudyIprAccess(client,owner,authority,[...ipr.values()],cache);
   const spacePlans=await readStudySpacePlans(client,owner,content.sources.filter(s=>s.kind==="space_plan").map(s=>s.id));
   if(content.sources.some(s=>s.kind==="space_plan"&&spacePlans.get(s.id)?.version!==s.version))journeyFail(403,"study_space_plan_unavailable");
   await prepareStudySpacePlanAccess(client,owner,authority,[...spacePlans.values()],cache);

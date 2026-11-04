@@ -163,6 +163,8 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
       {ready.revision && <div className="flex flex-wrap gap-3 rounded-lg bg-slate-50 p-3 text-sm">
         <a className={control} target="_blank" rel="noopener noreferrer" href={`/print/ortho-study/${orthoCaseId}?patientId=${patientId}&revisionId=${ready.revision.id}`}>طباعة النسخة المحفوظة / PDF نصي</a>
         <a className={control} href={`/api/ortho/${orthoCaseId}/case-study/text-pptx?patientId=${patientId}&revisionId=${ready.revision.id}`}>PowerPoint نصي قابل للتحرير</a>
+        <a className={control} href={`/api/ortho/${orthoCaseId}/case-study/illustrated-pptx?patientId=${patientId}&revisionId=${ready.revision.id}`}>PowerPoint مصور قابل للتحرير</a>
+        <a className={control} target="_blank" rel="noopener noreferrer" href={`/print/ortho-study/${orthoCaseId}?patientId=${patientId}&revisionId=${ready.revision.id}&mode=illustrated`}>معاينة الدراسة المصورة / PDF</a>
         <p className="w-full">التصدير للنسخة المحفوظة المعروضة فقط؛ الصور وإخفاء الهوية للتعليم غير مشمولين في النسخة النصية.</p>
       </div>}
       {!draft ? <p role="alert">{t("تعذّر فك المسودة المحلية؛ لم تُستبدل بمحتوى فارغ.")}</p> : <>
@@ -208,7 +210,7 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
         })}
         <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={!editable} onClick={() => void save("draft")}>{t("حفظ مسودة الدراسة")}</button>
           <button type="button" className={control} disabled={!canDocument} onClick={() => void save("documented")}>{t("توثيق النسخة المحفوظة نفسها")}</button></div>
-        <p>التصدير المصور الكامل يحتاج استكمال تجهيز الصور والتحقق من اتجاهها ومعاينتها. النسخة النصية متاحة للنسخ المحفوظة.</p>
+        <p>النسخة المصورة الحالية للمراجعة السريرية: نص وصفحات صور مختارة من النسخة المحفوظة. قالب المركز النهائي وإخفاء الهوية للمشاركة لم يكتملَا بعد.</p>
       </>}
     </>}
   </section>;

@@ -6,6 +6,9 @@ import {chromium,type Browser} from 'playwright';
 import {beforeAll,afterAll,expect,it} from 'vitest';
 import {baseUrl,harness,authedMutation,authedGet} from './_server';
 import {defaultOrthoMediaRecipe} from '../../lib/ortho-study-media';
+import JSZip from 'jszip';
+import {execFileSync} from 'node:child_process';
+import {writeFile} from 'node:fs/promises';
 let h:Awaited<ReturnType<typeof harness>>,db:Client,browser:Browser;
 beforeAll(async()=>{h=await harness();expect(new URL(h.seeded.dbUrl).pathname).toBe('/aqlan_sec_http');db=new Client({connectionString:h.seeded.dbUrl,ssl:false});await db.connect();browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined});await mkdir('.settings-ui-artifacts',{recursive:true});});
 afterAll(async()=>{await browser?.close();await db?.end();});
@@ -61,5 +64,31 @@ it.each([390,768,1280,1440])('selects, previews, rotates, saves and reloads the 
   await study.getByLabel('سبب حفظ النسخة',{exact:true}).fill('Synthetic independent uses from one original');const savingUses=page.waitForResponse(r=>r.url().includes(`/ortho/${p.orthoCaseId}/case-study/editor`)&&r.request().method()==='POST');await study.getByRole('button',{name:'حفظ مسودة الدراسة',exact:true}).click();expect((await savingUses).status()).toBe(201);
   const twice=await authedGet(`/api/ortho/${p.orthoCaseId}/case-study/editor?patientId=${p.patientId}`,h.sessions.admin);const two=(await twice.json()).revision.authored.mediaUses;expect(two).toHaveLength(2);expect(two[0]).toMatchObject({documentId:p.documentId,recipe:{rotationMilliDegrees:-180000,cropPpm:{left:0}}});expect(two[1]).toMatchObject({documentId:p.documentId,recipe:{rotationMilliDegrees:0,cropPpm:{left:200000}}});
   const original=await authedGet(`/api/documents/${p.documentId}`,h.sessions.admin);expect(Buffer.from(await original.arrayBuffer())).toEqual(p.bytes);expect(errors).toEqual([]);
+  if(width===1280){
+   const href=await study.getByRole('link',{name:'PowerPoint مصور قابل للتحرير',exact:true}).getAttribute('href');
+   const exported=await context.request.get(new URL(href!,baseUrl).href);expect(exported.status()).toBe(200);expect(exported.headers()['cache-control']).toContain('no-store');
+   const pptxBytes=await exported.body();await writeFile('.settings-ui-artifacts/ortho-illustrated-study.pptx',pptxBytes);
+   const zip=await JSZip.loadAsync(pptxBytes);const media=await Promise.all(Object.keys(zip.files).filter(k=>/^ppt\/media\/[^/]+$/.test(k)).map(k=>zip.file(k)!.async('nodebuffer')));
+   expect(media).toHaveLength(2);expect(media.some(b=>b.equals(p.bytes))).toBe(false);
+   const printHref=await study.getByRole('link',{name:'معاينة الدراسة المصورة / PDF',exact:true}).getAttribute('href');
+   const printed=await context.newPage();await printed.goto(new URL(printHref!,baseUrl).href);
+   await printed.getByRole('heading',{name:'دراسة الحالة — نسخة سريرية مصورة',exact:true}).waitFor();
+   expect(await printed.locator('.study-sheet .print-brand-header').count()).toBe(await printed.locator('.study-sheet').count());
+   expect(await printed.locator('[data-study-captured-at]').first().getAttribute('dir')).toBe('ltr');
+   expect(await printed.locator('.study-sheet img.print-watermark-protected').count()).toBe(2);
+   await printed.evaluate(async()=>{await document.fonts.ready;await Promise.all(Array.from(document.images).map(i=>i.decode()));});
+   const pngs=await printed.locator('.study-sheet img.study-image').evaluateAll(images=>images.map(i=>(i as HTMLImageElement).src));expect(pngs).toHaveLength(2);
+   for(const src of pngs)expect(media.some(b=>b.equals(Buffer.from(src.split(',')[1],'base64')))).toBe(true);
+   const pdfPath='.settings-ui-artifacts/ortho-illustrated-study.pdf';await printed.pdf({path:pdfPath,preferCSSPageSize:true,printBackground:true});
+   const pages=Number(execFileSync('pdfinfo',[pdfPath],{encoding:'utf8'}).match(/Pages:\s+(\d+)/)?.[1]);expect(pages).toBe(await printed.locator('.study-sheet').count());
+   const pdfText=execFileSync('pdftotext',['-layout',pdfPath,'-'],{encoding:'utf8'});expect(pdfText).toContain('ortho-illustrated-v1');
+   const imageSheet=printed.locator('.study-sheet').filter({has:printed.locator('img.study-image')}).first();await imageSheet.screenshot({path:'.settings-ui-artifacts/ortho-illustrated-image.png'});
+   const imageIndex=await imageSheet.evaluate(el=>Array.from(el.parentElement!.querySelectorAll('.study-sheet')).indexOf(el)+1);
+   await writeFile('.settings-ui-artifacts/ortho-illustrated-pdf-image.png',execFileSync('pdftoppm',['-f',String(imageIndex),'-l',String(imageIndex),'-r','96','-png','-singlefile',pdfPath],{maxBuffer:12*1024*1024}));
+   await printed.close();
+   expect((await authedGet(new URL(href!,baseUrl).pathname+new URL(href!,baseUrl).search,h.sessions.accountant)).status).toBe(403);
+   const removed=await db.query("UPDATE patient_documents SET removed_at=now(),removed_by='synthetic',removed_note='Synthetic export access revocation' WHERE id=$1 RETURNING id",[p.documentId]);expect(removed.rowCount).toBe(1);
+   const denied=await context.request.get(new URL(href!,baseUrl).href);expect(denied.status()).toBe(403);expect(denied.headers()['content-type']).not.toContain('presentation');
+  }
  }finally{await context.close();}
 });

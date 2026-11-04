@@ -1,4 +1,5 @@
 import {readStudySpacePlans,requireStudySpacePlanRead} from "./ortho-study-space-plan-store";
+import {readStudyIprSnapshots,requireStudyIprRead} from "./ortho-study-ipr-store";
 /** Canonical transaction-local study capture. No renderer, file reads, schedule,
  * consent or financial writes. Unsupported facts are explicitly unavailable. */
 import type { DbClient } from "./db";
@@ -111,13 +112,17 @@ async function captureSources(client: DbClient, owner: JourneyOwner, authority: 
   const retention = content.sources.some(s => s.kind === "retention_event")
     ? (await journeyHistory(client, "ortho_retention_entries", owner, decodeRetentionSavedContent)).revisions : [];
   const spacePlans = await readStudySpacePlans(client,owner,selectedIds(content,"space_plan"));
+  const ipr = await readStudyIprSnapshots(client,owner,selectedIds(content,"space_ipr"));
   const problemReviews = await readStudyProblemReviews(client, owner, selectedIds(content, "problem_review"));
   const captures: StudySourceCapture[] = [];
   for (const selection of content.sources) {
     let payload: unknown = null, actualHash: string | null = null;
     const access = { images: false, plans: false };
     let reason: StudySourceCapture["unavailableReason"] = "source_missing_or_outside_case";
-    if (selection.kind === "space_plan") {
+    if (selection.kind === "space_ipr") {
+      const row=ipr.get(selection.id);if(!row||row.headVersion!==selection.version)journeyFail(409,"study_ipr_unavailable");
+      payload=row;actualHash=journeyContentHash(row);access.plans=true;access.images=await requireStudyIprRead(client,owner,authority,row,assessmentAccess);
+    } else if (selection.kind === "space_plan") {
       const row=spacePlans.get(selection.id);
       if(!row||row.version!==selection.version)journeyFail(409,"study_space_plan_unavailable");
       payload=row;actualHash=row.contentHash;access.plans=true;access.images=await requireStudySpacePlanRead(client,owner,authority,row,assessmentAccess);

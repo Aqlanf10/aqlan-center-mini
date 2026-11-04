@@ -1,4 +1,5 @@
 import {readSpaceSavedContent} from "./ortho-space-saved";
+import {readStudyIprSnapshot} from "./ortho-study-ipr";
 import {spaceBudget} from "./ortho-space-ledger";
 /** First source-specific semantic projection, working/unreviewed.
  * Captured facts only. Current authorization belongs to the caller's locked reader.
@@ -48,7 +49,19 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
     if (!captured) throw new Error("study_source_binding_missing");
     if (captured.state !== "available") { unavailable.push({ sourceKey: key, reason: captured.unavailableReason ?? "source_unavailable" }); continue; }
     const source = captured.selection, value = record(captured.payload);
-    if (source.kind === "space_plan" && ["model-measurements", "cast-analysis", "problem-plan-strategy", "mechanotherapy"].includes(panel.layoutKey)) {
+    if (source.kind === "space_ipr" && ["visit","model-measurements","cast-analysis","mechanotherapy"].includes(panel.layoutKey)) {
+      const snapshot=readStudyIprSnapshot(value,{...scope,patientId:study.recordedPatientId});
+      paragraph(key,`سجل IPR المنفذ حتى نسخة السجل ${snapshot.headVersion}. هذه لقطة مؤرخة؛ التصحيح اللاحق يحتاج نسخة دراسة جديدة. المجموع يضم آخر تصحيح لكل تماس وجلسة فقط، ولا يثبت تاريخاً غير مسجل أو مقداراً مخططاً.`);
+      for(const total of snapshot.totals)table(key,[["الفك",total.arch==="upper"?"العلوي":"السفلي"],["التماس FDI",total.contact],["المجموع المنفذ الموثق mm",total.performedUm===null?null:total.performedUm/1000]]);
+      for(const e of snapshot.entries){const c=e.content.authored;if(c.kind!=="ipr")continue;
+        table(key,[["معرف حدث IPR",e.id],["نسخة السجل",e.version],["الفك",c.arch==="upper"?"العلوي":"السفلي"],["التماس FDI",c.teeth.join(" — ")],
+          ["حالة الحدث وقت اللقطة",snapshot.currentIds.includes(e.id)?"محتسب في المجموع الموثق":"استبدل بتصحيح؛ غير مضاف مرة أخرى"],
+          ["المقدار المسجل في هذه الجلسة mm",c.performedUm===null?null:c.performedUm/1000],["جلسة التقويم",c.adjustmentId],["الزيارة الفعلية",e.content.adjustment!.visitId],
+          ["تاريخ الجلسة كما سجل",e.content.adjustment!.occurredOn],["مسجل الجلسة",e.content.adjustment!.recordedBy],["مسجل حدث IPR",e.createdBy],["وقت التسجيل",e.createdAt],
+          ["نسخة خطة IPR",c.planEntryId],["الحدث المصحح",c.supersedesEntryId],["طريقة القياس ومصدره",c.measurementNote],["سبب مراجعة التجاوز",c.reviewReason],["سبب التوثيق",e.reason]]);
+      }
+      paragraph(key,"المقدار المجهول لا يعامل كصفر. لا يستنتج هذا السجل مكسب المسافة أو مقدار IPR التاريخي غير المسجل، ولا ينشئ توصية علاجية.");
+    } else if (source.kind === "space_plan" && ["model-measurements", "cast-analysis", "problem-plan-strategy", "mechanotherapy"].includes(panel.layoutKey)) {
       const parsed=readSpaceSavedContent(value.content);
       if(!parsed.ok||parsed.value.authored.kind!=="plan"||!parsed.value.baseline)throw Error("invalid_space_plan_projection");
       const plan=parsed.value.authored,baseline=parsed.value.baseline,budget=spaceBudget(plan,baseline.discrepancyMm);

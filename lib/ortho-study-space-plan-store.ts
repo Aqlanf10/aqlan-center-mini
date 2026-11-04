@@ -33,6 +33,11 @@ export async function requireStudySpacePlanRead(client:DbClient,owner:JourneyOwn
  if(!authority.canViewPlans)journeyFail(403,'study_space_plan_restricted');
  const live=(await readStudySpacePlans(client,owner,[entry.id])).get(entry.id),p=entry.content.authored;
  if(!live||p.kind!=='plan'||live.version!==entry.version||live.contentHash!==entry.contentHash||live.recordedPatientId!==entry.recordedPatientId)journeyFail(403,'study_space_plan_unavailable');
+ return requirePreparedStudySpacePlanAccess(authority,entry,cache);
+}
+export function requirePreparedStudySpacePlanAccess(authority:JourneyAuthority,entry:StudySpacePlan,cache:StudyAssessmentAccess){
+ const p=entry.content.authored;
+ if(!authority.canViewPlans||p.kind!=='plan')journeyFail(403,'study_space_plan_restricted');
  const baseline=[...cache.closures.values()].find(({revision:r})=>r.id===p.baseline.id&&`sha256:${r.contentHash}`===p.baseline.version)?.revision;
  if(!baseline)journeyFail(403,'study_space_baseline_unavailable');
  return requirePreparedAssessmentAccess(cache,baseline,authority,false);

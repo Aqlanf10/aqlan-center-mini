@@ -10,6 +10,11 @@ import {putFile,readFileByKey} from '../../lib/files';
 import {getStudyImageBasis,getStudyImagePreview} from '../../lib/ortho-study-image-store';
 import {defaultOrthoMediaRecipe} from '../../lib/ortho-study-media';
 import {identityDatabaseState} from '../helpers/hr-identity-state';
+import {saveOrthoCaseStudy} from '../../lib/ortho-case-study-store';
+import {withIllustratedStudy} from '../../lib/ortho-study-illustrated-store';
+import {CASE_TEMPLATE_VERSION} from '../../lib/ortho-case-template';
+import {STUDY_TEMPLATE_HASH} from '../../lib/ortho-case-study-template';
+import {randomUUID} from 'node:crypto';
 let directory = '';
 const request = vi.hoisted(() => ({ token: "" }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => name === "aqlan_flow_session" ? { value: request.token } : undefined }), headers: async () => new Headers() }));
@@ -34,6 +39,29 @@ async function image() {
   const command = {patientId:scope.patientId,documentId,sha256:stored.sha256,useId:'synthetic_use',purpose:'selected-use' as const,recipe:defaultOrthoMediaRecipe(12,8,1),frame:{width:12,height:8}};
   return {scope,bytes,stored,documentId,command};
 }
+async function savedImage(){
+ const p=await image(),selection={key:'image',kind:'document',id:p.documentId,version:null,contentHash:p.stored.sha256};
+ const command={schemaVersion:1,clientRequestId:randomUUID(),expectedHead:null,baseDocumentedRevision:null,kind:'draft',documentedFrom:null,reason:'Synthetic saved image export',content:{template:{key:'full-orthodontic-case',version:CASE_TEMPLATE_VERSION,contentHash:STUDY_TEMPLATE_HASH},identityDisclosure:'case_only',sources:[selection],groups:[],comment:'',panels:[{instanceId:'face',layoutKey:'face-overview',included:true,state:'available',sourceKeys:['image'],images:[{slot:'face-front',useId:'saved_use'}],comment:''}],mediaUses:[{useId:'saved_use',documentId:p.documentId,sourceSha256:p.stored.sha256,groupId:null,slotId:'face-front',order:0,view:'face-rest',caption:'Synthetic saved caption',recipe:p.command.recipe}]}};
+ const saved=await saveOrthoCaseStudy({...p.scope,command});if(!saved.ok)throw Error(saved.code);
+ return {...p,revisionId:saved.revision.id};
+}
+it('exports only a saved image and rejects removed sources or revoked authority after rendering before releasing bytes',async()=>{
+ const p=await savedImage(),input={...p.scope,revisionId:p.revisionId};
+ const state=await identityDatabaseState(f.pool);
+ const result=await withIllustratedStudy(input,async value=>value.pages.filter(p=>p.image).length);
+ expect(result).toMatchObject({ok:true,output:1});expect(await identityDatabaseState(f.pool)).toEqual(state);
+ expect(await readFileByKey(p.stored.key)).toEqual(p.bytes);
+ const denied=await withIllustratedStudy(input,async()=>{await f.pool.query('UPDATE users SET is_active=false WHERE id=$1',[p.scope.session.userId]);return Buffer.from('must not escape');});
+ expect(denied).toMatchObject({ok:false,status:401});expect(denied).not.toHaveProperty('output');
+ await f.pool.query('UPDATE users SET is_active=true WHERE id=$1',[p.scope.session.userId]);
+ const removed=await withIllustratedStudy(input,async()=>{await f.pool.query("UPDATE patient_documents SET removed_at=now(),removed_by='synthetic',removed_note='Synthetic post-render removal' WHERE id=$1",[p.documentId]);return Buffer.from('must not escape');});
+ expect(removed).toMatchObject({ok:false,status:403});expect(removed).not.toHaveProperty('output');
+});
+it('bounds simultaneous illustrated export and releases the slot after consumer failure',async()=>{
+ const p=await savedImage(),input={...p.scope,revisionId:p.revisionId};
+ await expect(withIllustratedStudy(input,async()=>{expect(await withIllustratedStudy(input,async()=>0)).toMatchObject({ok:false,code:'study_illustrated_busy'});throw Error('synthetic render failure');})).rejects.toThrow('synthetic render failure');
+ expect(await withIllustratedStudy(input,async()=>1)).toMatchObject({ok:true,output:1});
+});
 it('checks real database ownership, renders real private bytes and leaves source/document/clinical records unchanged',async () => {
   const p=await image(), before=(await f.pool.query('SELECT * FROM patient_documents WHERE id=$1',[p.documentId])).rows;
   const databaseBefore=await identityDatabaseState(f.pool);

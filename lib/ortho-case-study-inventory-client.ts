@@ -18,7 +18,7 @@ export function readStudyInventoryResponse(raw: unknown, scope: JourneyScope, ki
   if (value.ok !== true || value.patientId !== scope.patientId || value.orthoCaseId !== scope.orthoCaseId || value.clinicalCaseId !== scope.clinicalCaseId
     || value.kind !== kind || value.state !== "available" && value.state !== "restricted" || !Array.isArray(value.choices) || value.choices.length > 25
     || value.nextAfterId !== null && !journeyId(value.nextAfterId)) throw new Error("invalid_study_inventory_scope");
-  const versioned = ["assessment", "diagnosis", "strategy", "decision", "retention_event", "space_plan"].includes(kind);
+  const versioned = ["assessment", "diagnosis", "strategy", "decision", "retention_event", "space_plan", "space_ipr"].includes(kind);
   let previous = 0;
   const choices = value.choices.map(rawChoice => {
     const row = object(rawChoice, ["id", "version", "kind", "state", "unavailableReason", "selection"]);

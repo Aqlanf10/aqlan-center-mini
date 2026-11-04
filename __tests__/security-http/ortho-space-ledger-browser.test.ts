@@ -128,6 +128,8 @@ it.each([390, 1280])("saves a linked space plan, documents IPR in two actual ses
     await study.getByLabel('إضافة المرجع إلى القسم',{exact:true}).selectOption(sessionPanel!);
     await study.getByLabel('نوع مصدر الدراسة',{exact:true}).selectOption('adjustment');
     await expect.poll(()=>choices.count()).toBe(2);await choices.first().click();
+    await study.getByLabel('نوع مصدر الدراسة',{exact:true}).selectOption('space_ipr');
+    await expect.poll(()=>choices.count()).toBe(1);await choices.click();
     await study.getByLabel('سبب حفظ النسخة',{exact:true}).fill('Synthetic saved planned space budget');
     const saved=page.waitForResponse(r=>r.url().includes(`/ortho/${ortho}/case-study/editor`)&&r.request().method()==='POST');
     await study.getByRole('button',{name:'حفظ مسودة الدراسة',exact:true}).click();expect((await saved).status()).toBe(201);
@@ -138,6 +140,8 @@ it.each([390, 1280])("saves a linked space plan, documents IPR in two actual ses
     expect(await review.innerText()).toContain('0.3');expect(await review.innerText()).not.toContain('0.25');
     await review.getByRole('combobox',{name:'القسم المحفوظ المعروض',exact:true}).selectOption(sessionPanel!);
     await expect.poll(()=>review.innerText()).toContain('إجراء جلسة اصطناعية 1');
+    expect(await review.innerText()).toContain('0.25');
+    expect(await review.innerText()).toContain('استبدل بتصحيح؛ غير مضاف مرة أخرى');
     await study.getByLabel('سبب حفظ النسخة',{exact:true}).fill('Synthetic documentary review of planned budget');
     const documented=page.waitForResponse(r=>r.url().includes(`/ortho/${ortho}/case-study/editor`)&&r.request().method()==='POST');
     await study.getByRole('button',{name:'توثيق النسخة المحفوظة نفسها',exact:true}).click();expect((await documented).status()).toBe(201);
@@ -148,6 +152,12 @@ it.each([390, 1280])("saves a linked space plan, documents IPR in two actual ses
     const xml=(await Promise.all(slides.map(key=>zip.file(key)!.async('text')))).join('\n');
     expect(xml).toContain('-1.7');expect(xml).toContain('ميزانية مسافات مخططة محفوظة');
     expect(xml).toContain('إجراء جلسة اصطناعية 1');
+    expect(xml).toContain('0.25');expect(xml).toContain('سجل IPR المنفذ');
+    const illustratedHref=await study.getByRole('link',{name:'PowerPoint مصور قابل للتحرير',exact:true}).getAttribute('href');
+    const illustrated=await context.request.get(new URL(illustratedHref!,baseUrl).href);expect(illustrated.status()).toBe(200);
+    const illustratedZip=await JSZip.loadAsync(await illustrated.body());
+    const illustratedXml=(await Promise.all(Object.keys(illustratedZip.files).filter(key=>/^ppt\/slides\/slide\d+\.xml$/.test(key)).map(key=>illustratedZip.file(key)!.async('text')))).join('\n');
+    expect(illustratedXml).toContain('0.25');expect(illustratedXml).toContain('سجل IPR المنفذ');expect(illustratedXml).toContain('-1.7');
     expect((await db.query('SELECT case_id FROM visits WHERE patient_id=$1 ORDER BY id',[patient])).rows).toEqual([{case_id:null},{case_id:null}]);
     await page.reload();
     // The original URL explicitly opens the prescription pillar. Reopen the

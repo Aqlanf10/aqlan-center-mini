@@ -6,11 +6,13 @@ import { routeId } from "@/lib/ortho-journey-route";
 import { getOrthoCaseStudy } from "@/lib/ortho-case-study-store";
 import { studyTextPresentation } from "@/lib/ortho-study-text-export";
 import { OrthoStudyPrintButton } from "@/components/OrthoStudyPrintButton";
+import IllustratedStudyPrint from "@/components/OrthoIllustratedStudyPrint";
 export const dynamic = "force-dynamic";
 export default async function OrthoStudyPrint({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await requireSession(), query = await searchParams;
   const orthoCaseId = routeId((await params).id), patientId = routeId(query.patientId), revisionId = routeId(query.revisionId);
   if (!session || !orthoCaseId || !patientId || !revisionId) notFound();
+  if (query.mode === "illustrated") return <IllustratedStudyPrint session={session} orthoCaseId={orthoCaseId} patientId={patientId} revisionId={revisionId} />;
   const result = await getOrthoCaseStudy({ session, patientId, orthoCaseId, revisionId });
   if (!result.ok || !result.revision) notFound();
   const value = studyTextPresentation(result.revision, result);
