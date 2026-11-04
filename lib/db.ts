@@ -2680,27 +2680,36 @@ export async function openVisitPatientFile(visitId: number): Promise<
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{
-      id: number; patient_name: string; patient_phone: string | null; patient_id: number | null; signed_at: Date | null;
-    }>(
-      `SELECT id, patient_name, patient_phone, patient_id, signed_at FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
-    );
-    const visit = rows[0];
-    if (!visit) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (visit.patient_id !== null) {
-      await client.query("COMMIT");
-      return { ok: true, patientId: visit.patient_id, created: false };
-    }
-    if (visit.signed_at) { await client.query("ROLLBACK"); return { ok: false, reason: "signed" }; }
-    const { patientId, created } = await resolveVisitPatientDetailed(client, visit);
-    await client.query("COMMIT");
-    return { ok: true, patientId, created };
+    const result = await openVisitPatientFileOn(client, visitId);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+/** Body of `openVisitPatientFile` on the caller's transaction (M2 slice 81); a refusal must be rolled back by the caller.
+ * `admit` sees the resolved existing file (or null before a creation) BEFORE the visit is
+ * linked, so the link can never be its own scope witness. */
+export async function openVisitPatientFileOn(client: DbClient, visitId: number, admit?: (patientId: number | null) => Promise<void>): Promise<
+  { ok: true; patientId: number; created: boolean } | { ok: false; reason: "not_found" | "signed" }
+> {
+  const { rows } = await client.query<{
+    id: number; patient_name: string; patient_phone: string | null; patient_id: number | null; signed_at: Date | null;
+  }>(
+    `SELECT id, patient_name, patient_phone, patient_id, signed_at FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
+  );
+  const visit = rows[0];
+  if (!visit) return { ok: false, reason: "not_found" };
+  if (visit.patient_id !== null) {
+    return { ok: true, patientId: visit.patient_id, created: false };
+  }
+  if (visit.signed_at) return { ok: false, reason: "signed" };
+  const { patientId, created } = await resolveVisitPatientDetailed(client, visit, undefined, undefined, admit);
+  return { ok: true, patientId, created };
 }
 
 export async function linkVisitToPatient(visitId: number, patientId: number): Promise<
@@ -2710,61 +2719,66 @@ export async function linkVisitToPatient(visitId: number, patientId: number): Pr
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: visits } = await client.query<{ signed_at: Date | null; patient_id: number | null }>(
-      `SELECT signed_at, patient_id FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
-    );
-    if (!visits[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الزيارة غير موجودة." }; }
-    if (visits[0].signed_at) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "الزيارة موقَّعة — وفاتورتها صدرت لملفٍّ بعينه فلا تُحوَّل." };
-    }
-
-    const { rows: patients } = await client.query<{ full_name: string; phone: string | null }>(
-      `SELECT full_name, phone FROM patients WHERE id = $1`, [patientId],
-    );
-    if (!patients[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الملف غير موجود." }; }
-
-    // A chart event is patient-owned clinical history. Do not leave it attached
-    // to another patient's visit or silently transfer diagnoses during relinking.
-    // The visit lock serializes this check with the chart writer's FOR SHARE.
-    if (visits[0].patient_id !== patientId) {
-      const { rows: chartRecords } = await client.query(
-        `SELECT 1 FROM tooth_conditions WHERE visit_id = $1 LIMIT 1`, [visitId],
-      );
-      if (chartRecords[0]) {
-        await client.query("ROLLBACK");
-        return { ok: false, message: "الزيارة مرتبطة بسجل مخطط الأسنان — لا يمكن نقلها إلى ملف آخر." };
-      }
-    }
-
-    if (visits[0].patient_id !== patientId) {
-      const { labWorkIntentSupported } = await import("./lab-work-intent-db");
-      if (await labWorkIntentSupported(client)) {
-        const linked = await client.query(`SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1
-          UNION ALL SELECT 1 FROM visit_procedures WHERE visit_id=$1 AND lab_work_member_id IS NOT NULL
-          UNION ALL SELECT 1 FROM lab_work_commands WHERE source_kind='visit' AND source_id=$1 LIMIT 1`, [visitId]);
-        if (linked.rows.length) {
-          await client.query("ROLLBACK");
-          return { ok: false, message: "الزيارة مرتبطة بهوية عمل مختبر — لا يمكن نقلها إلى ملف آخر." };
-        }
-      }
-    }
-
-    // الاسم والهاتف يتبعان الملف: ما يظهر على اللوحة يجب أن يوافق ما في السجل.
-    await client.query(
-      `UPDATE visits SET patient_id = $2, patient_name = $3,
-              patient_phone = COALESCE(NULLIF(patient_phone, ''), $4::text)
-        WHERE id = $1`,
-      [visitId, patientId, patients[0].full_name, patients[0].phone],
-    );
-    await client.query("COMMIT");
-    return { ok: true, patientName: patients[0].full_name };
+    const result = await linkVisitToPatientOn(client, visitId, patientId);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+/** Body of `linkVisitToPatient` on the caller's transaction (M2 slice 81); a refusal must be rolled back by the caller. */
+export async function linkVisitToPatientOn(client: DbClient, visitId: number, patientId: number): Promise<
+  { ok: true; patientName: string } | { ok: false; message: string }
+> {
+  const { rows: visits } = await client.query<{ signed_at: Date | null; patient_id: number | null }>(
+    `SELECT signed_at, patient_id FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
+  );
+  if (!visits[0]) return { ok: false, message: "الزيارة غير موجودة." };
+  if (visits[0].signed_at) {
+    return { ok: false, message: "الزيارة موقَّعة — وفاتورتها صدرت لملفٍّ بعينه فلا تُحوَّل." };
+  }
+
+  const { rows: patients } = await client.query<{ full_name: string; phone: string | null }>(
+    `SELECT full_name, phone FROM patients WHERE id = $1`, [patientId],
+  );
+  if (!patients[0]) return { ok: false, message: "الملف غير موجود." };
+
+  // A chart event is patient-owned clinical history. Do not leave it attached
+  // to another patient's visit or silently transfer diagnoses during relinking.
+  // The visit lock serializes this check with the chart writer's FOR SHARE.
+  if (visits[0].patient_id !== patientId) {
+    const { rows: chartRecords } = await client.query(
+      `SELECT 1 FROM tooth_conditions WHERE visit_id = $1 LIMIT 1`, [visitId],
+    );
+    if (chartRecords[0]) {
+      return { ok: false, message: "الزيارة مرتبطة بسجل مخطط الأسنان — لا يمكن نقلها إلى ملف آخر." };
+    }
+  }
+
+  if (visits[0].patient_id !== patientId) {
+    const { labWorkIntentSupported } = await import("./lab-work-intent-db");
+    if (await labWorkIntentSupported(client)) {
+      const linked = await client.query(`SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1
+        UNION ALL SELECT 1 FROM visit_procedures WHERE visit_id=$1 AND lab_work_member_id IS NOT NULL
+        UNION ALL SELECT 1 FROM lab_work_commands WHERE source_kind='visit' AND source_id=$1 LIMIT 1`, [visitId]);
+      if (linked.rows.length) {
+        return { ok: false, message: "الزيارة مرتبطة بهوية عمل مختبر — لا يمكن نقلها إلى ملف آخر." };
+      }
+    }
+  }
+
+  // الاسم والهاتف يتبعان الملف: ما يظهر على اللوحة يجب أن يوافق ما في السجل.
+  await client.query(
+    `UPDATE visits SET patient_id = $2, patient_name = $3,
+            patient_phone = COALESCE(NULLIF(patient_phone, ''), $4::text)
+      WHERE id = $1`,
+    [visitId, patientId, patients[0].full_name, patients[0].phone],
+  );
+  return { ok: true, patientName: patients[0].full_name };
 }
 
 /**
@@ -2883,69 +2897,86 @@ export async function deleteVisit(
 ): Promise<{ ok: boolean; reason?: "not_found" | "signed" | "invoiced" | "lab_linked" }> {
   await ensureSchema();
   const client = await getPool().connect();
-  let snapshot: Record<string, unknown> | null = null;
+  let audit: AuditInput;
   try {
     await client.query("BEGIN");
-    const { rows: rowsV } = await client.query<{
-      id: number; patient_id: number | null; patient_name: string; status: string;
-      arrived_at: Date; signed_at: Date | null; invoice_id: number | null; note: string | null;
-    }>(
-      `SELECT id, patient_id, patient_name, status, arrived_at, signed_at, invoice_id, note
-         FROM visits WHERE id = $1 FOR UPDATE`,
-      [id],
-    );
-    if (!rowsV[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
-    }
-    const current = rowsV[0];
-    snapshot = {
-      id: current.id, patientId: current.patient_id, patientName: current.patient_name,
-      status: current.status, arrivedAt: current.arrived_at, note: current.note,
-      reason: context.reason ?? null,
-    };
-    if (current.signed_at) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "signed" };
-    }
-    if (current.invoice_id) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "invoiced" };
-    }
-    const labApi: typeof import("./lab-work-intent-db") = await import("./lab-work-intent-db");
-    if (await labApi.labWorkIntentSupported(client)) {
-      const linked = await client.query(`SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1
-        UNION ALL SELECT 1 FROM visit_procedures WHERE visit_id=$1 AND lab_work_intent_id IS NOT NULL
-        UNION ALL SELECT 1 FROM lab_work_commands WHERE source_kind='visit' AND source_id=$1 LIMIT 1`, [id]);
-      if (linked.rows.length) { await client.query("ROLLBACK"); return {ok:false,reason:"lab_linked"}; }
-    }
-    /* الروابط اللينة تشير إلى الزيارة فتُفرَّغ قبل حذفها (المفاتيح بلا تتالٍ). */
-    await client.query(`UPDATE plan_items SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE treatment_sessions SET visit_id = NULL, planned_visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE ortho_adjustments SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE tooth_conditions SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE patient_documents SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE lab_orders SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    /* إجراءات الزيارة تتالي معها (visit_procedures ON DELETE CASCADE). */
-    await client.query(`DELETE FROM visit_procedures WHERE visit_id = $1`, [id]);
-    await client.query(`DELETE FROM visits WHERE id = $1`, [id]);
+    const result = await deleteVisitOn(client, id, context);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
+    audit = result.audit;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
-  await recordAudit({
-    action: "visit.delete",
-    entity: "visit",
-    entityId: id,
-    entityLabel: snapshot ? String((snapshot as Record<string, unknown>).patientName ?? "") : `#${id}`,
-    details: snapshot,
-    actor: context.actor,
-    actorRole: context.actorRole ?? null,
-  });
+  await recordAudit(audit);
   return { ok: true };
+}
+
+/**
+ * Body of `deleteVisit` on the caller's transaction (M2 slice 81): the signed, invoiced and
+ * lab-linked guards, then the soft links and the row. A refusal must be rolled back by the
+ * caller. The audit row is returned: the legacy wrapper writes it after the commit as
+ * before, the canonical command inside the same transaction.
+ */
+export async function deleteVisitOn(
+  client: DbClient,
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: false; reason: "not_found" | "signed" | "invoiced" | "lab_linked" } | { ok: true; audit: AuditInput }> {
+  const { rows: rowsV } = await client.query<{
+    id: number; patient_id: number | null; patient_name: string; status: string;
+    arrived_at: Date; signed_at: Date | null; invoice_id: number | null; note: string | null;
+  }>(
+    `SELECT id, patient_id, patient_name, status, arrived_at, signed_at, invoice_id, note
+       FROM visits WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  if (!rowsV[0]) {
+    return { ok: false, reason: "not_found" };
+  }
+  const current = rowsV[0];
+  const snapshot = {
+    id: current.id, patientId: current.patient_id, patientName: current.patient_name,
+    status: current.status, arrivedAt: current.arrived_at, note: current.note,
+    reason: context.reason ?? null,
+  };
+  if (current.signed_at) {
+    return { ok: false, reason: "signed" };
+  }
+  if (current.invoice_id) {
+    return { ok: false, reason: "invoiced" };
+  }
+  const labApi: typeof import("./lab-work-intent-db") = await import("./lab-work-intent-db");
+  if (await labApi.labWorkIntentSupported(client)) {
+    const linked = await client.query(`SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1
+      UNION ALL SELECT 1 FROM visit_procedures WHERE visit_id=$1 AND lab_work_intent_id IS NOT NULL
+      UNION ALL SELECT 1 FROM lab_work_commands WHERE source_kind='visit' AND source_id=$1 LIMIT 1`, [id]);
+    if (linked.rows.length) return {ok:false,reason:"lab_linked"};
+  }
+  /* الروابط اللينة تشير إلى الزيارة فتُفرَّغ قبل حذفها (المفاتيح بلا تتالٍ). */
+  await client.query(`UPDATE plan_items SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE treatment_sessions SET visit_id = NULL, planned_visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE ortho_adjustments SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE tooth_conditions SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE patient_documents SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE lab_orders SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  /* إجراءات الزيارة تتالي معها (visit_procedures ON DELETE CASCADE). */
+  await client.query(`DELETE FROM visit_procedures WHERE visit_id = $1`, [id]);
+  await client.query(`DELETE FROM visits WHERE id = $1`, [id]);
+  return {
+    ok: true,
+    audit: {
+      action: "visit.delete",
+      entity: "visit",
+      entityId: id,
+      entityLabel: String(snapshot.patientName ?? ""),
+      details: snapshot,
+      actor: context.actor,
+      actorRole: context.actorRole ?? null,
+    },
+  };
 }
 
 /**

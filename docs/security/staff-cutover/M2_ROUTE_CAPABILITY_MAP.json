@@ -6244,8 +6244,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 81: one admitted visits.delete transaction (legacy admin label), the visit inside the patient scope (the queue read's condition; outside = missing 404); deleteVisitOn unchanged (signed, invoiced and lab-linked visits refuse) with visit.delete in the same transaction."
  },
  {
   "route": "/api/visits/[id]",
@@ -6261,7 +6261,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": "M2 slice 12: call, call_again, seat, return, finish and clear are canonical (one visits.manage transaction, legacy lock order, visit inside the current patient scope after the row lock, outside = missing 404, readiness gate unchanged, audit atomic). defer, link and open_file refuse on the canonical path (409 visit_action_not_canonical) until their slices; the route stays existing until then.",
+  "note": "M2 slice 12: call, call_again, seat, return, finish and clear are canonical (one visits.manage transaction, legacy lock order, visit inside the current patient scope after the row lock, outside = missing 404, readiness gate unchanged, audit atomic). M2 slice 81: link (visit and target file inside the scope, linkVisitToPatientOn, visit.link audit) and open_file (visits.manage + patients.create; the matched file checked before the link, outside the scope refused; patient.create audit) are canonical. defer (a payment decision) refuses on the canonical path (409) until the financial group; the route stays existing until then.",
   "branches": {
    "discriminator": "action",
    "values": {

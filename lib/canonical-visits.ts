@@ -176,8 +176,9 @@ export async function commandCanonicalArrival(session: VerifiedDurableSession, i
  * patient is one of the clinician's patients. A missing visit and one outside the
  * scope answer identically (404). The readiness gate and the written emergency
  * reason are unchanged; every move writes its audit row in the same transaction.
- * Deferring payment (a money decision), linking a walk-in to a file and opening a
- * file are not canonical yet and refuse (409).
+ * Deferring payment (a money decision) is not canonical yet and refuses (409); linking a
+ * walk-in to a file and opening a file are handled by lib/canonical-visit-file.ts (M2 slice
+ * 81) before this parser is reached.
  * ------------------------------------------------------------------------- */
 const QUEUE_ACTIONS = ["call", "call_again", "seat", "return", "finish", "clear"] as const;
 type QueueAction = typeof QUEUE_ACTIONS[number];
