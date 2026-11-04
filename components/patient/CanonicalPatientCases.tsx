@@ -10,6 +10,7 @@ import { CanonicalPlanDependencyEditor } from "./CanonicalPlanDependencyEditor";
 import { CanonicalProblemCreateEditor } from "./CanonicalProblemCreateEditor";
 import { CanonicalProblemStatusEditor } from "./CanonicalProblemStatusEditor";
 import { CanonicalCaseStatusEditor } from "./CanonicalCaseStatusEditor";
+import { CanonicalCaseCreateEditor } from "./CanonicalCaseCreateEditor";
 
 const itemStatus: Record<string, string> = { planned: "مخطط", in_progress: "بدأ علاجه", done: "منفذ", cancelled: "ملغى" };
 const specialty = (key: string) => SPECIALTY_LABEL[key as keyof typeof SPECIALTY_LABEL] ?? key;
@@ -57,6 +58,7 @@ export function CanonicalPatientCases({ patientId, canEdit, canDocument, ownerKe
         refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
       {canEdit ? <CanonicalPlanDependencyEditor key={`dependency:${ownerKey}:${patientId}`} patientId={patientId} ownerKey={ownerKey} feed={feed}
         refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
+      {canEdit ? <CanonicalCaseCreateEditor key={`case-create:${ownerKey}:${patientId}`} patientId={patientId} refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
       {canDocument ? <CanonicalProblemCreateEditor patientId={patientId} ownerKey={ownerKey} feed={feed} refresh={() => setRefresh(v => v + 1)} /> : null}
       {canDocument ? <CanonicalProblemStatusEditor patientId={patientId} ownerKey={ownerKey} feed={feed} refresh={() => setRefresh(v => v + 1)} /> : null}
       {canEdit ? <CanonicalCaseStatusEditor key={`case-status:${ownerKey}:${patientId}`} patientId={patientId} ownerKey={ownerKey} feed={feed}

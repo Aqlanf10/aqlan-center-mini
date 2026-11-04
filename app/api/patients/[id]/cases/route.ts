@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { canonicalCaseCreateRoute } from "@/lib/canonical-case-create";
 import { createClinicalCase, listCasePlanItems, listPatientCases, listPatientProblems } from "@/lib/db";
 import { checkCaseDraft } from "@/lib/cases";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
@@ -41,6 +42,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 /** فتح حالة تخصصية (أو ربط حالة تقويمٍ قائمة بالميزات العامة عبر orthoCaseId). */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  /* M2 slice 80: clinical.plans.edit inside the patient scope, the clinician link or the owner;
+     ortho needs clinical.ortho.view; idempotent by requestKey; the legacy body and audit. */
+  const canonical = await canonicalCaseCreateRoute(request, (await params).id);
+  if (canonical) return canonical;
   const patientId = idOf((await params).id);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, true);

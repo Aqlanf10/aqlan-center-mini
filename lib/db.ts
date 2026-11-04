@@ -29675,52 +29675,71 @@ export async function createClinicalCase(input: CaseDraft & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
-    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
-    if (input.responsiblePartyId !== null) {
-      const verified = await (await import("./initial-responsibility-authority")).authorizeInitialResponsibility(client, input.admittedSession, input.patientId, input.responsiblePartyId);
-      if (!verified) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_responsible" }; }
-      input = { ...input, actor: verified.username, actorRole: verified.role };
-      const { rows } = await client.query(`SELECT 1 FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.responsiblePartyId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_responsible" }; }
-    }
-    /* الجسر يبدأ بحالة التقويم نفسها (منتهيةً إن كانت منتهية) — فلا تظهر حالةٌ مغلقة «جارية». */
-    let bridgeStatus: SpecialtyCaseStatus = "active";
-    let bridgeClosedAt: Date | null = null;
-    let bridgeSite: string | null = input.site;
-    if (input.orthoCaseId !== null) {
-      const { rows } = await client.query<{ status: string; closed_at: Date | null; arches: string | null }>(
-        `SELECT status, closed_at, arches FROM ortho_cases WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [input.orthoCaseId, input.patientId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_ortho" }; }
-      /* (ORTHO-ID) موضع الجسر نطاق فك حالة التقويم نفسها لا نصٌّ حرٌّ يكتبه المنشئ — فتتطابق القراءتان. */
-      bridgeSite = orthoArchesSiteText(rows[0].arches) ?? bridgeSite;
-      bridgeStatus = rows[0].status === "active" || rows[0].status === "retention" ? "active"
-        : rows[0].status === "completed" ? "completed" : "closed";
-      if (bridgeStatus !== "active") bridgeClosedAt = rows[0].closed_at ?? new Date();
-      const { rows: bridged } = await client.query(`SELECT 1 FROM clinical_cases WHERE ortho_case_id = $1`, [input.orthoCaseId]);
-      if (bridged[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "already_bridged" }; }
-    }
-    const specialty = input.orthoCaseId !== null ? "orthodontics" : input.specialty;
-    const { rows: [created] } = await client.query<{ id: number }>(
-      `INSERT INTO clinical_cases (patient_id, specialty, title, site, problem, responsible_party_id, ortho_case_id, created_by, status, completed_at)
-       VALUES ($1, $2, $3, $4::text, $5::text, $6::int, $7::int, $8, $9, $10::timestamptz) RETURNING id`,
-      [input.patientId, specialty, input.title, bridgeSite, input.problem, input.responsiblePartyId, input.orthoCaseId, input.actor,
-        bridgeStatus, bridgeClosedAt],
-    );
-    await insertAuditRow(client, {
-      action: "case.create", entity: "patient", entityId: input.patientId, entityLabel: input.title,
-      details: { الحالة: created.id, التخصص: specialty, الموضع: bridgeSite ?? "—", الطبيب_المسؤول: input.responsiblePartyId ?? "—", جسر_التقويم: input.orthoCaseId ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
+    const result = await createClinicalCaseOn(client, input, async partyId => {
+      const verified = await (await import("./initial-responsibility-authority")).authorizeInitialResponsibility(client, input.admittedSession, input.patientId, partyId);
+      return verified ? { actor: verified.username, actorRole: verified.role } : null;
     });
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
-    const result = await getClinicalCase(created.id);
-    return { ok: true, case: result as SpecialtyCase };
+    const created = await getClinicalCase(result.caseId);
+    return { ok: true, case: created as SpecialtyCase };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
+}
+
+/**
+ * The case-opening body on the caller's transaction (M2 slice 80): patient FOR NO KEY
+ * UPDATE, the initial responsibility through `authorizeResponsible` (the legacy session
+ * check, or the canonical clinician/owner rule), the ortho bridge checks, the insert and
+ * the case.create audit row (`auditExtra` carries a request-key receipt). A refusal must be
+ * rolled back by the caller.
+ */
+export async function createClinicalCaseOn(client: DbClient, input: CaseDraft & { patientId: number; actor: string; actorRole?: string | null },
+  authorizeResponsible: (partyId: number) => Promise<{ actor: string; actorRole: string | null } | null>,
+  auditExtra: Record<string, string> = {},
+): Promise<{ ok: true; caseId: number } | { ok: false; reason: "no_patient" | "bad_responsible" | "bad_ortho" | "already_bridged" }> {
+  const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
+  if (!patient[0]) return { ok: false, reason: "no_patient" };
+  if (input.responsiblePartyId !== null) {
+    const verified = await authorizeResponsible(input.responsiblePartyId);
+    if (!verified) return { ok: false, reason: "bad_responsible" };
+    input = { ...input, actor: verified.actor, actorRole: verified.actorRole };
+    const { rows } = await client.query(`SELECT 1 FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.responsiblePartyId]);
+    if (!rows[0]) return { ok: false, reason: "bad_responsible" };
+  }
+  /* الجسر يبدأ بحالة التقويم نفسها (منتهيةً إن كانت منتهية) — فلا تظهر حالةٌ مغلقة «جارية». */
+  let bridgeStatus: SpecialtyCaseStatus = "active";
+  let bridgeClosedAt: Date | null = null;
+  let bridgeSite: string | null = input.site;
+  if (input.orthoCaseId !== null) {
+    const { rows } = await client.query<{ status: string; closed_at: Date | null; arches: string | null }>(
+      `SELECT status, closed_at, arches FROM ortho_cases WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [input.orthoCaseId, input.patientId]);
+    if (!rows[0]) return { ok: false, reason: "bad_ortho" };
+    /* (ORTHO-ID) موضع الجسر نطاق فك حالة التقويم نفسها لا نصٌّ حرٌّ يكتبه المنشئ — فتتطابق القراءتان. */
+    bridgeSite = orthoArchesSiteText(rows[0].arches) ?? bridgeSite;
+    bridgeStatus = rows[0].status === "active" || rows[0].status === "retention" ? "active"
+      : rows[0].status === "completed" ? "completed" : "closed";
+    if (bridgeStatus !== "active") bridgeClosedAt = rows[0].closed_at ?? new Date();
+    const { rows: bridged } = await client.query(`SELECT 1 FROM clinical_cases WHERE ortho_case_id = $1`, [input.orthoCaseId]);
+    if (bridged[0]) return { ok: false, reason: "already_bridged" };
+  }
+  const specialty = input.orthoCaseId !== null ? "orthodontics" : input.specialty;
+  const { rows: [created] } = await client.query<{ id: number }>(
+    `INSERT INTO clinical_cases (patient_id, specialty, title, site, problem, responsible_party_id, ortho_case_id, created_by, status, completed_at)
+     VALUES ($1, $2, $3, $4::text, $5::text, $6::int, $7::int, $8, $9, $10::timestamptz) RETURNING id`,
+    [input.patientId, specialty, input.title, bridgeSite, input.problem, input.responsiblePartyId, input.orthoCaseId, input.actor,
+      bridgeStatus, bridgeClosedAt],
+  );
+  await insertAuditRow(client, {
+    action: "case.create", entity: "patient", entityId: input.patientId, entityLabel: input.title,
+    details: { الحالة: created.id, التخصص: specialty, الموضع: bridgeSite ?? "—", الطبيب_المسؤول: input.responsiblePartyId ?? "—", جسر_التقويم: input.orthoCaseId ?? "—", ...auditExtra },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true, caseId: created.id };
 }
 
 /** انتقال الحالة: المسار المسموح وحده، والمنتهية لا تعود — والإلغاء بسببٍ مكتوب (قيد في القاعدة أيضًا). */
