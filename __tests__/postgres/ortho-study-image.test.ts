@@ -9,6 +9,7 @@ import {openPeriodontalFixture} from './_periodontal-fixture';
 import {putFile,readFileByKey} from '../../lib/files';
 import {getStudyImageBasis,getStudyImagePreview} from '../../lib/ortho-study-image-store';
 import {defaultOrthoMediaRecipe} from '../../lib/ortho-study-media';
+import {identityDatabaseState} from '../helpers/hr-identity-state';
 let directory = '';
 const request = vi.hoisted(() => ({ token: "" }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => name === "aqlan_flow_session" ? { value: request.token } : undefined }), headers: async () => new Headers() }));
@@ -35,12 +36,14 @@ async function image() {
 }
 it('checks real database ownership, renders real private bytes and leaves source/document/clinical records unchanged',async () => {
   const p=await image(), before=(await f.pool.query('SELECT * FROM patient_documents WHERE id=$1',[p.documentId])).rows;
+  const databaseBefore=await identityDatabaseState(f.pool);
   expect(await getStudyImageBasis({...p.scope,documentId:p.documentId,sha256:p.stored.sha256})).toMatchObject({ok:true,clinicalCaseId:p.scope.clinicalCaseId,basis:{orientedWidth:12,orientedHeight:8,exifOrientation:1}});
   const result=await getStudyImagePreview({...p.scope,command:p.command}); if(!result.ok) throw Error(result.code);
   expect(result.sourceSha256).toBe(createHash('sha256').update(p.bytes).digest('hex'));
   expect(await readFileByKey(p.stored.key)).toEqual(p.bytes);
   expect((await f.pool.query('SELECT * FROM patient_documents WHERE id=$1',[p.documentId])).rows).toEqual(before);
   expect((await f.pool.query('SELECT count(*)::int n FROM ortho_case_study_revisions WHERE patient_id=$1',[p.scope.patientId])).rows[0].n).toBe(0);
+  expect(await identityDatabaseState(f.pool)).toEqual(databaseBefore);
 });
 it('refuses a foreign case, stale digest, false basis and revoked user before exposing image bytes',async () => {
   const p=await image(), other=await setup(); request.token=createSessionToken(p.scope.session);
