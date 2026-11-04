@@ -3333,10 +3333,21 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 76: read:patients.clinical; patientChartWith on the owning snapshot (tooth events, the chart built from them, its summary); no money.",
+  "projection": {
+   "legacy": "canAccessPatient (doctor own patients unless canViewAllPatients; reception and admin all).",
+   "groups": {
+    "clinical": "the whole response — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view (read:patients.clinical)"
+   },
+   "rows": "patient outside the scope reads like a missing one (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/chart",
@@ -3350,8 +3361,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 76: one admitted clinical.visits.document transaction inside the patient scope AND the validated clinician link or the protected owner (legacy: doctor/admin labels); recordToothConditionOn unchanged (patient FOR KEY SHARE, then the visit FOR SHARE; another patient's visit 409); the chart.record audit row in the same transaction; optional requestKey receipt."
  },
  {
   "route": "/api/patients/[id]/clinical-context",

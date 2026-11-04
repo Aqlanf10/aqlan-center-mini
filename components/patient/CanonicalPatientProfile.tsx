@@ -10,6 +10,7 @@ import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { CanonicalReferralWork, type ReferralRow } from "./CanonicalReferralWork";
 import { CanonicalClinicalDocumentation } from "./CanonicalClinicalDocumentation";
 import { PatientDocuments } from "@/components/PatientDocuments";
+import { DentalChart } from "@/components/DentalChart";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -187,6 +188,12 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
       {projection.care ? <ClinicalPanels key={clinicalVersion} patientId={patientId}
         canManageReferrals={session?.isOwner === true || (session?.capabilities ?? []).includes("clinical.referrals.manage")}
         appointments={(file.appointments ?? []).map(item => ({ id: item.id, date: item.scheduledDate, time: item.scheduledTime, status: item.status }))} /> : null}
+      {projection.care ? (
+        <section aria-label="مخطط الأسنان" data-testid="canonical-dental-chart">
+          {/* M2 slice 76: a clinical grant inside the patient scope; recording by clinical.visits.document with the clinician link or the owner (server-enforced). */}
+          <DentalChart patientId={patient.id} canEdit={canDocument} />
+        </section>
+      ) : null}
       {projection.care && canDocument ? (
         <CanonicalClinicalDocumentation patientId={patient.id} patientName={patient.fullName} medicalAlert={patient.medicalAlert ?? null}
           onChanged={() => setClinicalVersion(version => version + 1)} />

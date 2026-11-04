@@ -6,6 +6,9 @@ import { CONDITION_LABEL, STAGE_LABEL, isValidTooth, toothName,
   type ConditionStage, type ToothCondition } from "@/lib/dental";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalChart } from "@/lib/canonical-patient-reads";
+import { canonicalClinicalRecordRoute, commandCanonicalToothCondition } from "@/lib/canonical-clinical-records";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,9 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 76: owning snapshot, a clinical grant (read:patients.clinical) inside the patient scope.
+  const canonical = await canonicalPatientGet((await context.params).id, readCanonicalChart, "تعذّر تحميل مخطط الأسنان.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -41,6 +47,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
  * ليس عمل الاستقبال. والدور يُفحص هنا لا في الواجهة وحدها.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 76: one admitted clinical.visits.document transaction inside the patient scope,
+     the clinician link or the owner, the chart.record audit row with the event. */
+  const canonical = await canonicalClinicalRecordRoute(request, async (handle, body) => commandCanonicalToothCondition(handle, (await context.params).id, body), "تعذّر حفظ حالة السن.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (session.role !== "doctor" && session.role !== "admin") {

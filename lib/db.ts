@@ -20584,7 +20584,16 @@ export async function patientChart(patientId: number): Promise<{
   summary: ChartSummary;
 }> {
   await ensureSchema();
-  const { rows } = await getPool().query<ToothRow>(
+  return patientChartWith(getPool(), patientId);
+}
+
+/** The chart body on a supplied snapshot/client (M2 slice 76). */
+export async function patientChartWith(q: Pick<DbClient, "query">, patientId: number): Promise<{
+  records: ToothRecord[];
+  chart: [number, ToothState][];
+  summary: ChartSummary;
+}> {
+  const { rows } = await q.query<ToothRow>(
     `SELECT id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by, recorded_at
        FROM tooth_conditions WHERE patient_id = $1 ORDER BY recorded_at, id`,
     [patientId],
@@ -20592,6 +20601,16 @@ export async function patientChart(patientId: number): Promise<{
   const records = rows.map(toToothRecord);
   const chart = buildChart(records);
   return { records, chart: [...chart.entries()], summary: chartSummary(chart) };
+}
+
+/** One chart event by id (the canonical request-key receipt re-reads the first record). */
+export async function getToothRecordWith(q: Pick<DbClient, "query">, id: number): Promise<ToothRecord | null> {
+  const { rows } = await q.query<ToothRow>(
+    `SELECT id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by, recorded_at
+       FROM tooth_conditions WHERE id = $1`,
+    [id],
+  );
+  return rows[0] ? toToothRecord(rows[0]) : null;
 }
 
 export class ToothVisitConflict extends Error {
@@ -20624,7 +20643,29 @@ export async function recordToothCondition(input: {
     throw new ToothVisitConflict();
   }
   await ensureSchema();
-  return withTransaction(getPool(), async (client) => {
+  return withTransaction(getPool(), (client) => recordToothConditionOn(client, input));
+}
+
+/**
+ * The chart event body on the caller's transaction (M2 slice 76): the legacy wrapper
+ * keeps its own transaction; the canonical command writes the audit row in the same one.
+ */
+export async function recordToothConditionOn(client: DbClient, input: {
+  patientId: number;
+  toothCode: number;
+  condition: ToothCondition;
+  stage: ConditionStage;
+  surfaces?: string | null;
+  note?: string | null;
+  visitId?: number | null;
+  recordedBy: string;
+}): Promise<ToothRecord | null> {
+  if (!isValidTooth(input.toothCode)) return null;
+  const visitId = input.visitId ?? null;
+  if (visitId !== null && (!Number.isInteger(visitId) || visitId <= 0 || visitId > 2_147_483_647)) {
+    throw new ToothVisitConflict();
+  }
+  {
     // Match the patient-merge lock order: patient first, then its visit. Keep the
     // patient stable until the chart event is inserted (including standalone events).
     const { rows: patients } = await client.query(
@@ -20653,7 +20694,7 @@ export async function recordToothCondition(input: {
       ],
     );
     return rows[0] ? toToothRecord(rows[0]) : null;
-  });
+  }
 }
 
 // ─── طبعات المستندات ─────────────────────────────────────────────────────────

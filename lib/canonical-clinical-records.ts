@@ -4,7 +4,9 @@ import { NextResponse } from "next/server";
 import {
   CLINIC_TIME_ZONE, DiagnosisAssociationError, createIntakeFormOn, getMedicalHistoryWith, getPool, getVitalsWith, insertAuditRow,
   patientInDoctorScopeWith, recordPatientDiagnosisOn, recordVitalsOn, saveMedicalHistoryOn, type DbClient,
+  ToothVisitConflict, getToothRecordWith, recordToothConditionOn,
 } from "./db";
+import { CONDITION_LABEL, STAGE_LABEL, isValidTooth, toothName, type ConditionStage, type ToothCondition } from "./dental";
 import { deriveAlerts, normalizeMedicalHistory, normalizeVitals } from "./medical-history";
 import { validateIntake } from "./portal";
 import { validateDiagnosisContent } from "./diagnosis";
@@ -64,7 +66,7 @@ function requestKeyOf(body: Record<string, unknown>): string {
 }
 const fingerprintOf = (value: unknown) => createHash("sha256").update(stableJson(value)).digest("hex");
 
-type Kind = "patient.medical_history" | "patient.vitals" | "intake.staff" | "diagnosis.create";
+type Kind = "patient.medical_history" | "patient.vitals" | "intake.staff" | "diagnosis.create" | "chart.record";
 
 /**
  * One admitted clinical record write: scope (no row lock), the request-key receipt,
@@ -219,13 +221,7 @@ export async function commandCanonicalDiagnosis(session: VerifiedDurableSession,
   const content = check.content as unknown as Record<string, unknown>;
   try {
     return await clinicalWrite(session, patientId, "diagnosis.create", requestKey, fingerprintOf({ patientId, content, label, orthoCaseId }), "التشخيص", pool, ({ client, handle, actor }) => ({
-      authorize: async () => {
-        // The legacy doctor/admin labels: the clinician link, or the protected owner.
-        const clinician = await staffOperationClinician(client, handle, "clinical.visits.document");
-        if (clinician === null && !await staffOperationIsProtectedOwner(client, handle, "clinical.visits.document")) {
-          throw new CanonicalClinicalRecordRefusal("diagnosis_clinician_required", 403, "تسجيل التشخيص للطبيب المرتبط بجهة طبيب.");
-        }
-      },
+      authorize: () => requireClinicianOrOwner(client, handle, "diagnosis_clinician_required", "تسجيل التشخيص للطبيب المرتبط بجهة طبيب."),
       replay: async id => {
         const { rows: [row] } = await client.query<{ id: number; version: number }>("SELECT id, version FROM patient_diagnoses WHERE id = $1", [id]);
         return row ?? null;
@@ -241,6 +237,74 @@ export async function commandCanonicalDiagnosis(session: VerifiedDurableSession,
     }));
   } catch (error) {
     if (error instanceof DiagnosisAssociationError) throw invalid(error.message, "orthoCaseId");
+    throw error;
+  }
+}
+
+/** The legacy doctor/admin labels: the actor's validated clinician link, or the protected owner. */
+async function requireClinicianOrOwner(client: DbClient, handle: StaffOperationHandle, code: string, message: string) {
+  const clinician = await staffOperationClinician(client, handle, "clinical.visits.document");
+  if (clinician === null && !await staffOperationIsProtectedOwner(client, handle, "clinical.visits.document")) {
+    throw new CanonicalClinicalRecordRefusal(code, 403, message);
+  }
+}
+
+/** The tooth event body, validated exactly as the legacy route does. */
+function toothConditionInput(body: Record<string, unknown>) {
+  // Omitted/null means a standalone chart event; a malformed supplied link is refused.
+  let visitId: number | null = null;
+  if (body.visitId !== undefined && body.visitId !== null) {
+    const raw = body.visitId;
+    if ((typeof raw !== "number" && !(typeof raw === "string" && /^\d+$/.test(raw)))
+      || !Number.isInteger(Number(raw)) || Number(raw) <= 0 || Number(raw) > 2_147_483_647) {
+      throw invalid("رقم الزيارة غير صالح.", "visitId");
+    }
+    visitId = Number(raw);
+  }
+  const toothCode = Number(body.toothCode);
+  if (!isValidTooth(toothCode)) throw invalid("رقم السن غير صالح بترقيم FDI.", "toothCode");
+  const condition = String(body.condition ?? "") as ToothCondition;
+  if (!Object.prototype.hasOwnProperty.call(CONDITION_LABEL, condition)) throw invalid("حالة السن غير معروفة.", "condition");
+  const stage = String(body.stage ?? "existing") as ConditionStage;
+  if (!Object.prototype.hasOwnProperty.call(STAGE_LABEL, stage)) throw invalid("مرحلة الحالة غير معروفة.", "stage");
+  return {
+    toothCode, condition, stage, visitId,
+    surfaces: typeof body.surfaces === "string" ? body.surfaces : null,
+    note: typeof body.note === "string" ? body.note.slice(0, 300) : null,
+  };
+}
+
+/**
+ * POST /api/patients/[id]/chart (M2 slice 76): one tooth event, append-only, under one
+ * admitted `clinical.visits.document` transaction inside the patient scope, by the
+ * actor's clinician link or the protected owner (the legacy doctor/admin labels, never
+ * wider). The writer keeps its lock order (patient FOR KEY SHARE, then the visit FOR
+ * SHARE); the `chart.record` audit row commits with the event. `requestKey` is optional
+ * (the reviewed chart editor already blocks a repeated press and never retries blindly);
+ * when sent, the same receipt as the other records applies.
+ */
+export async function commandCanonicalToothCondition(session: VerifiedDurableSession, rawPatientId: string, body: Record<string, unknown>, pool = getPool()) {
+  const patientId = positiveId(rawPatientId);
+  const requestKey = body.requestKey === undefined ? null : requestKeyOf(body);
+  const input = toothConditionInput(body);
+  try {
+    return await clinicalWrite(session, patientId, "chart.record", requestKey, fingerprintOf({ patientId, ...input }), "السجل", pool, ({ client, handle, actor }) => ({
+      authorize: () => requireClinicianOrOwner(client, handle, "chart_clinician_required", "المخطط السني للطبيب المرتبط بجهة طبيب أو للمالك."),
+      replay: id => getToothRecordWith(client, id),
+      write: async stamp => {
+        const record = await recordToothConditionOn(client, { patientId, ...input, recordedBy: actor.actor });
+        if (!record) throw patientMissing();
+        await insertAuditRow(client, {
+          action: "chart.record", entity: "patient", entityId: patientId,
+          entityLabel: `${toothName(input.toothCode)} — ${CONDITION_LABEL[input.condition]} (${STAGE_LABEL[input.stage]})`,
+          details: { السن: input.toothCode, الحالة: input.condition, المرحلة: input.stage, الأسطح: record.surfaces, السجل: record.id, ...stamp },
+          ...actor,
+        });
+        return record;
+      },
+    }));
+  } catch (error) {
+    if (error instanceof ToothVisitConflict) throw new CanonicalClinicalRecordRefusal("chart_visit_conflict", 409, error.message, "visitId");
     throw error;
   }
 }

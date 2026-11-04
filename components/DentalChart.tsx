@@ -31,17 +31,22 @@ const ORDERED_CONDITIONS: ToothCondition[] = [
   "bracket", "impacted", "fracture", "mobility", "extracted", "missing", "healthy",
 ];
 
-export function DentalChart({ patientId }: { patientId: number }) {
+/**
+ * `canEdit` (M2 slice 76): the canonical patient file passes its capability projection
+ * (clinical.visits.document or the owner); the server still decides every write. When
+ * omitted, the legacy role labels decide as before.
+ */
+export function DentalChart({ patientId, canEdit }: { patientId: number; canEdit?: boolean }) {
   const session = useSession();
   // A chart and its unsaved tooth editor belong to this patient and principal.
   // A keyed lifetime also protects A → B → A navigation from older callbacks.
   const owner = JSON.stringify([patientId, session?.username, session?.role,
     Object.entries(session?.permissions ?? {}).sort(([a], [b]) => a.localeCompare(b))]);
-  return <DentalChartWorkspace key={owner} patientId={patientId} session={session} />;
+  return <DentalChartWorkspace key={`${owner}:${canEdit ?? "role"}`} patientId={patientId} session={session} editable={canEdit} />;
 }
 
-function DentalChartWorkspace({ patientId, session }: { patientId: number; session: SessionInfo | null }) {
-  const canEdit = isAdmin(session?.role) || session?.role === "doctor";
+function DentalChartWorkspace({ patientId, session, editable }: { patientId: number; session: SessionInfo | null; editable?: boolean }) {
+  const canEdit = editable ?? (isAdmin(session?.role) || session?.role === "doctor");
 
   const [records, setRecords] = useState<ToothRecord[]>([]);
   const [loading, setLoading] = useState(true);

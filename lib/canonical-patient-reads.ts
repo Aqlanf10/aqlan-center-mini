@@ -2,7 +2,7 @@ import "server-only";
 import {
   browsePatientsWith, computeDebtRowsInSnapshot, getPatientWith, getSettingsWith, listMedicalHistoryWith, listPatientAppointmentsWith,
   listPatientVisitsWith, listVitalsWith, patientInDoctorScopeWith, patientTimelineWith, searchPatientsWith,
-  listPatientDiagnosesWith, listIntakeFormsWith, listPatientReferralsWith, listContactConsentsWith, contactConsentStatesWith,
+  listPatientDiagnosesWith, listIntakeFormsWith, patientChartWith, listPatientReferralsWith, listContactConsentsWith, contactConsentStatesWith,
   CLINIC_TIME_ZONE, listPatientCasesWith, listPatientPlansWith, openOrthoCaseForWith, type DbClient, type PatientListRow, type PatientProblem,
   listPatientCaseRowsWith, listPatientPlannedVisitsWith, patientLedgerInSnapshot, patientWorkflowWith, patientHasMedicalAlertWith, patientsWithMedicalAlertWith,
 } from "./db";
@@ -292,6 +292,11 @@ export async function readCanonicalDiagnoses(session: VerifiedDurableSession, pa
 }
 export async function readCanonicalIntakeHistory(session: VerifiedDurableSession, patientId: number) {
   return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => ({ forms: await listIntakeFormsWith(query, patientId) }));
+}
+/** GET /api/patients/[id]/chart (M2 slice 76): the append-only tooth events, the chart
+ * built from them and its summary — clinical facts only, no money. */
+export async function readCanonicalChart(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => patientChartWith(query, patientId));
 }
 export async function readCanonicalReferrals(session: VerifiedDurableSession, patientId: number) {
   return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => listPatientReferralsWith(query, patientId));
