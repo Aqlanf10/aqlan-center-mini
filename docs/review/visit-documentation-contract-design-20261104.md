@@ -33,7 +33,7 @@ Admission: `read:patients.clinical`, with the visit inside the scope by the queu
 | Outstanding work (clinical part) | `planItemId`, `serviceId`, `planTitle`, `serviceName`, `toothCode`, `sessionCount`, `doneSessions`, `quantity`, `status`, `surfaces`, `caseId`, `caseSite`, `unmetRequirements`, `clinicalConsentRecorded`, lab-work fields | a clinical grant |
 | Orthodontic chairside | `ortho` without `adjustmentBillingClass` | `clinical.ortho.view` (independent ortho projection) |
 | Signing gates | `amendedServiceConflict`, `planItemsMatched`, `planTitle` | a clinical grant (booleans and titles, no amounts) |
-| **Money** | per line `unitPriceMinor`, `totalMinor`, `planCurrency`; visit `totalMinor`, `billingCurrency`, `planCurrency`, `invoiceId`, `invoiceReferenceState`, `planWarning`; `sessionPricing`; outstanding `unitPriceMinor`, `billingRule`, `billingStatus`, `planCurrency`, `includedByAgreement`, `prebilled`, `origin`, `originInvoiceId`, `billedInvoiceId`, `financialReviewRequired`; `ortho.adjustmentBillingClass` | `finance.invoices.view` (as the visit billing preview), or the protected owner |
+| **Money** (owner decision 6629149113, item 2) | per line `unitPriceMinor`, `totalMinor`, `planCurrency`; visit `totalMinor`, `billingCurrency`, `planCurrency`, `invoiceId`, `invoiceReferenceState`, `planWarning`; `sessionPricing`; outstanding `unitPriceMinor`, `billingRule`, `billingStatus`, `planCurrency`, `includedByAgreement`, `prebilled`, `origin`, `originInvoiceId`, `billedInvoiceId`, `financialReviewRequired`; `ortho.adjustmentBillingClass`; the lab signing fence `labSignVersion` (a hash over prices) | `finance.invoices.view` held explicitly, or the protected owner. `finance.patient-ledger.view` is a separate grant: it neither shows these amounts nor is shown by `finance.invoices.view` |
 
 Hidden groups are omitted, never zeroed. A doctor without the invoice view still sees what was done and what remains, but not what it costs.
 
@@ -47,10 +47,14 @@ Hidden groups are omitted, never zeroed. A doctor without the invoice view still
 | Procedure price below the catalogue (discount) | + `finance.discounts.apply` with a written reason, within `billing.max_discount_percent`; beyond it `finance.discounts.override` | the approved map (legacy: role labels and the same ceiling) |
 | Procedure price above the catalogue (increase) | + `finance.price-increases.apply` with a written reason | the approved map (legacy: admin only) |
 | Orthodontic session data at signing | + `clinical.ortho.edit` | the approved map |
-| Sign | `clinical.visits.sign` + the clinician link or the owner. Invoice, inventory and ortho adjustment in the same transaction, as legacy. The signer needs no money view: amounts are computed on the server and never returned without `finance.invoices.view` | legacy doctor/admin; map |
+| Sign | `clinical.visits.document` + `clinical.visits.sign` inside the scope. A clinician-linked actor or the owner signs any day; another signing account finishes today's visits only, without orthodontic session data or a billing decision, and is never the default treating doctor (the legacy assistant finisher, P0-F). The visit must be linked to a file (an unlinked visit is linked or opened first, slice 81). Invoice, inventory and ortho adjustment in the same transaction, as legacy. The signer needs no money view: amounts are computed on the server and never returned without `finance.invoices.view` | legacy doctor/admin/assistant; map |
+| Orthodontic session data at signing | + `clinical.ortho.edit`, a clinician-linked actor or the owner | the approved map |
+| "No charge" for an orthodontic adjustment outside the contract (`outsideContractDecision`) | **Owner decision 6629149113, item 1:** the protected owner, or the ortho case's responsible doctor (the actor's validated clinician link equals `ortho_cases.responsible_doctor_id`) holding `clinical.ortho.edit`, and only while the owner-controlled setting `ortho.case_doctor_no_charge` is on (authority class, owner-only, default off: no automatic grant). `finance.invoices.create` and `finance.agreements.manage` never substitute for it. A written reason (3–300 characters) is required; the reason, the decider and the basis (owner / case doctor) are written to the `visit.sign` audit row in the same transaction | owner decision |
 | Lab draft inside the save (`labRequestKey`) | `clinical.lab.order` (lab create since slice 68) inside the scope | legacy doctor/admin |
 
-## 4. Owner decisions needed (isolated; nothing is assumed)
+## 4. Owner decisions (all answered)
+
+**Answered 2026-11-04 (6629149113):** question 2 below (the owner's item 1) — the case doctor authorized for orthodontics, or the owner, with an audited reason; question 3 (the owner's item 2) — `finance.invoices.view` explicitly, separate from the patient ledger; and the owner's item 3 — owner-controlled settings for these decisions. Question 1 was already answered by the approved map. The table in §3 is the rule in force. The original questions are kept below as a record.
 
 1. ~~Price overrides while documenting.~~ **Already decided by the approved map** (§1): discount `finance.discounts.apply` (beyond the ceiling `finance.discounts.override`), increase `finance.price-increases.apply`. Nothing to ask.
 2. **"No charge" for an orthodontic adjustment outside the contract (`outsideContractDecision`).** This is a clinical-financial decision that legacy reserved to doctor and admin.
@@ -71,4 +75,4 @@ Signing lands in its own slice once decision 2 is answered: a signature with an 
 |---|---|---|
 | 84 | `GET /visits/[id]/clinical` with the projection above; `GET lab-work-command` | — (proposal 3 applies the money rule; reversible) |
 | 85 | `POST` save notes, addendum, procedures; price overrides by the map's grants | — |
-| 86 | `POST` sign (invoice, inventory, ortho adjustment, lab command); no-charge refuses (409) until decision 2 | decision 2 |
+| 86 | `POST` sign (invoice, inventory, ortho adjustment); the no-charge decision by the owner's rule and setting; money-view separation and revocation tests | — (decided 6629149113) |

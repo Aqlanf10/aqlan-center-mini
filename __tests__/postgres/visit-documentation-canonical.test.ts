@@ -2,7 +2,8 @@
  * A clinician or the owner documents any day; another documenting account today's visits
  * only, notes only; a missing price is the server price; overrides by the approved map's
  * grants, audited in the same transaction; addendum on a signed visit (request key
- * replays); signing, a currency change and a lab draft refuse (409); outside is 404. */
+ * replays); a currency change and a lab draft refuse (409), signing needs its grant (slice
+ * 86); outside is 404. */
 vi.mock("server-only", () => ({}));
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
@@ -105,7 +106,8 @@ describe("save", () => {
   });
 
   it("refused, never guessed: signing, a currency change, a lab draft; a signed visit; outside the scope; no grant", async () => {
-    expect(await refusal(act("doctor", ids.today, { action: "sign" }))).toMatchObject({ code: "visit_sign_pending", status: 409 });
+    // Slice 86: signing is canonical; without clinical.visits.sign it is refused by its grant.
+    expect(await refusal(act("doctor", ids.today, { action: "sign" }))).toMatchObject({ code: "visit_sign_not_granted", status: 403 });
     expect((await q("SELECT signed_at FROM visits WHERE id=$1", [ids.today]))[0].signed_at).toBeNull();
     expect(await refusal(act("doctor", ids.today, { billingCurrency: "USD" }))).toMatchObject({ code: "billing_currency_financial", status: 409 });
     expect(await refusal(act("doctor", ids.today, { labRequestKey: "syn-lab-key-0001", procedures: [] }))).toMatchObject({ code: "lab_draft_not_canonical", status: 409 });

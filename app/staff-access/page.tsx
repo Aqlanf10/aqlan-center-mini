@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
 import { ROLE_LABEL, type Role } from "@/lib/roles";
 import { STAFF_CAPABILITIES, type StaffCapability, type StaffRecordScope } from "@/lib/staff-capability-catalogue";
-import { STAFF_CAPABILITY_LABELS, STAFF_SCOPE_LABELS, toggleStaffCapability } from "@/lib/staff-capability-labels";
+import { STAFF_CAPABILITY_LABELS, STAFF_CAPABILITY_NOTES, STAFF_SCOPE_LABELS, toggleStaffCapability } from "@/lib/staff-capability-labels";
 import { STAFF_MODULES, staffModuleVisible } from "@/lib/staff-modules";
 import { STAFF_STARTING_TEMPLATES, applyStartingTemplate } from "@/lib/staff-starting-templates";
 import { StaffAccountEditor } from "@/components/staff/StaffAccountEditor";
@@ -253,7 +253,10 @@ function CapabilityEditor({ userId }: { userId: number }) {
                   <label key={capability} className={`flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm ${allowed ? "text-navy-900" : "text-slate-400"}`}>
                     <input type="checkbox" checked={on} disabled={!allowed || busy}
                       onChange={event => setGrants(toggleStaffCapability(grants, capability, event.target.checked))} />
-                    {STAFF_CAPABILITY_LABELS[capability]}
+                    <span>
+                      {STAFF_CAPABILITY_LABELS[capability]}
+                      {STAFF_CAPABILITY_NOTES[capability] ? <span className="block text-xs font-normal text-slate-500" data-testid={`capability-note-${capability}`}>{STAFF_CAPABILITY_NOTES[capability]}</span> : null}
+                    </span>
                   </label>
                 );
               })}

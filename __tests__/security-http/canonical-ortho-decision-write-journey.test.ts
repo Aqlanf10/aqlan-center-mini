@@ -11,7 +11,10 @@ const ACCOUNTS = {
 } as const;
 type Key = keyof typeof ACCOUNTS;
 let journey: CanonicalJourney<Key>, seq = 0;
-beforeAll(async () => { journey = await openCanonicalJourney({ portOffset: 67, secret: "canonical-ortho-decision-write-0123456789", accounts: ACCOUNTS, ownerKey: "owner" }); }, 300000);
+// Owner decision 6629149113: the responsible case doctor decides "no charge" only while the
+// owner turns ortho.case_doctor_no_charge on; this journey's doctor scenarios run with it on.
+beforeAll(async () => { journey = await openCanonicalJourney({ portOffset: 67, secret: "canonical-ortho-decision-write-0123456789", accounts: ACCOUNTS, ownerKey: "owner",
+  async seed(db) { await db.query("INSERT INTO settings(key,value) VALUES('ortho.case_doctor_no_charge','true') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value"); } }); }, 300000);
 afterAll(async () => { await journey?.close(); }, 60000);
 async function scenario(assigned = true) {
   const patientId = (await journey.db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,$2,$3) RETURNING id", [`SYN-ODW-${++seq}`, `مريض قرار اصطناعي ${seq}`, assigned ? journey.parties.own : null])).rows[0].id as number;

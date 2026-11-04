@@ -1,9 +1,13 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import {
-  addVisitAddendumOn, getPool, getSettingsWith, insertAuditRow, patientInDoctorScopeWith, saveClinicalNotes, setVisitProceduresOn,
-  ClinicalPlanConflict, ProcedurePriceRejected, CLINIC_TIME_ZONE, type DbClient, type ProcedurePriceOverride,
+  addVisitAddendumOn, getClinicalVisitWith, getPool, getSettingsWith, insertAuditRow, patientInDoctorScopeWith, saveClinicalNotes,
+  setVisitProceduresOn, signClinicalVisitLockedOn, ClinicalPlanConflict, ProcedurePriceRejected, InventoryShortage, CLINIC_TIME_ZONE,
+  type DbClient, type ProcedurePriceOverride,
 } from "./db";
+import { InventoryBusy, InventoryTrackingRequired } from "./inventory-domain/legacy-write-guard";
+import { checkOrthoSessionDraft } from "./ortho-baseline";
+import { CLINICAL_SIGN_MESSAGES } from "./clinical-sign-messages";
 import { ClinicalDoctorIdentityConflict } from "./clinical-doctor-identity";
 import { LabWorkIntentError } from "./lab-work-intent-db";
 import { foreignRatesFromSettings } from "./service-pricing";
@@ -35,13 +39,27 @@ import type { VerifiedDurableSession } from "./staff-durable-session";
  *   `finance.price-increases.apply`; each override audited in the same transaction.
  * - The addendum (the map: `clinical.visits.document`) appends to a signed visit, with the
  *   same actor rule; audited in the same transaction; an optional request key replays.
- * - Refused, never guessed (409): signing (slice 86, owner decision 2 pending); a change of
- *   the visit's billing currency (financial group 4); a lab draft inside the save (the lab
- *   identity layer still re-authorizes a legacy session).
+ * - Refused, never guessed (409): a change of the visit's billing currency (financial
+ *   group 4); a lab draft inside the save (the lab identity layer still re-authorizes a
+ *   legacy session).
  * - The response is the projected cockpit read (no money without finance.invoices.view).
+ *
+ * Signing (M2 slice 86; owner decisions 6629149113): `action: "sign"` in the same admitted
+ * transaction, running the legacy locked body (`signClinicalVisitLockedOn`: invoice,
+ * sessions, inventory, ortho adjustment). `clinical.visits.sign` or the owner; a signer
+ * without a clinician link finishes today's visits only, without orthodontic session data
+ * or a billing decision, and is never the default treating doctor (the legacy assistant
+ * finisher). The visit must be linked to a file. Orthodontic session data needs
+ * `clinical.ortho.edit` (the map). "No charge" for an outside-contract adjustment: the
+ * owner, or the adjustment case's responsible doctor holding `clinical.ortho.edit` while
+ * the owner-only setting `ortho.case_doctor_no_charge` is on; never a finance grant. The
+ * reason, the decider and the basis go to the `visit.sign` audit row in the same
+ * transaction. The sign summary's amounts and invoice references are returned only with
+ * `finance.invoices.view` or to the owner. A visit carrying a durable lab identity
+ * refuses (409) until the lab identity layer accepts a canonical actor.
  */
 export class CanonicalVisitDocumentRefusal extends Error {
-  constructor(readonly code: string, readonly status: 400 | 403 | 404 | 409, message: string) {
+  constructor(readonly code: string, readonly status: 400 | 403 | 404 | 409, message: string, readonly extra: Record<string, unknown> = {}) {
     super(message);
     this.name = "CanonicalVisitDocumentRefusal";
   }
@@ -88,7 +106,7 @@ export async function commandCanonicalVisitDocument(session: VerifiedDurableSess
   const body = (rawBody ?? {}) as Record<string, unknown>;
   if (typeof rawBody !== "object" || rawBody === null || Array.isArray(rawBody)) throw refuse("invalid_body", 400, "طلب غير صالح.");
   const action = String(body.action ?? "save");
-  await withStaffOperation(pool, session, "clinical.visits.document", async (client, handle) => {
+  const signed = await withStaffOperation(pool, session, "clinical.visits.document", async (client, handle): Promise<Record<string, unknown> | undefined> => {
     const scope = await staffOperationPatientScope(client, handle, "clinical.visits.document");
     if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
     const { rows: [visit] } = await client.query<{ patient_id: number | null; doctor_id: number | null; arrived_at: Date; billing_currency: string | null }>(
@@ -96,19 +114,138 @@ export async function commandCanonicalVisitDocument(session: VerifiedDurableSess
     const inside = visit !== undefined && (scope.kind === "all" || visit.doctor_id === scope.clinicianPartyId
       || (visit.patient_id !== null && await patientInDoctorScopeWith(client, scope.clinicianPartyId, visit.patient_id)));
     if (!inside) throw refuse("visit_not_found", 404, VISIT_MISSING);
-    const full = await staffOperationClinician(client, handle, "clinical.visits.document") !== null
-      || await staffOperationIsProtectedOwner(client, handle, "clinical.visits.document");
+    const clinician = await staffOperationClinician(client, handle, "clinical.visits.document");
+    const owner = await staffOperationIsProtectedOwner(client, handle, "clinical.visits.document");
+    const full = clinician !== null || owner;
     if (!full && clinicDateString(visit!.arrived_at, CLINIC_TIME_ZONE) !== clinicDateString(new Date(), CLINIC_TIME_ZONE)) {
       throw refuse("visit_today_only", 403, "التوثيق دون ارتباطٍ بطبيب يقتصر على زيارات اليوم.");
     }
-    if (action === "sign") throw refuse("visit_sign_pending", 409, "توقيع الزيارة من الحساب الموحّد لم يُفعَّل بعد (ينتظر قرار المالك في «بلا رسوم» لشدّة التقويم). لم يُوقَّع شيء.");
+    if (action === "sign") {
+      const identity = await staffOperationIdentity(client, handle, "clinical.visits.document");
+      return sign(client, handle, visitId, visit!, body, clinician, owner, identity);
+    }
     if (action !== "save" && action !== "addendum") throw refuse("invalid_action", 400, "إجراء غير معروف على الزيارة.");
     if (hasLabCommand(body)) throw refuse("lab_draft_not_canonical", 409, "حفظ مسوّدة المختبر من الزيارة على الحساب الموحّد لم يُفعَّل بعد؛ احفظ التوثيق دونها، أو أنشئ الطلب من شاشة المختبر.");
     const identity = await staffOperationIdentity(client, handle, "clinical.visits.document");
-    if (action === "addendum") return addendum(client, visitId, body, identity);
-    return save(client, handle, visitId, visit!, body, full, identity);
+    if (action === "addendum") { await addendum(client, visitId, body, identity); return undefined; }
+    await save(client, handle, visitId, visit!, body, full, identity);
+    return undefined;
   });
-  return readCanonicalVisitClinical(session, visitId);
+  const read = await readCanonicalVisitClinical(session, visitId);
+  return signed ? { ...read, signResult: signed } : read;
+}
+
+const NO_CHARGE_REFUSED = "قرار «بلا رسوم» لشدّة خارج الاتفاق للمالك، ولطبيب حالة التقويم المسؤول عنها بصلاحية تعديل التقويم إذا فعّل المالك ذلك في الإعدادات.";
+
+async function sign(
+  client: DbClient, handle: Parameters<typeof staffOperationCapabilities>[1], visitId: number,
+  visit: { patient_id: number | null }, body: Record<string, unknown>, clinician: number | null, owner: boolean,
+  identity: { userId: number; username: string; role: string },
+): Promise<Record<string, unknown>> {
+  const held = await staffOperationCapabilities(client, handle, "clinical.visits.document",
+    ["clinical.visits.sign", "clinical.ortho.edit", "finance.invoices.view"] as const);
+  if (!owner && !held.has("clinical.visits.sign")) throw refuse("visit_sign_not_granted", 403, "توقيع الزيارة يحتاج صلاحية توقيع الزيارات.");
+  const full = clinician !== null || owner;
+  const orthoEdit = owner || held.has("clinical.ortho.edit");
+  const hasOrthoSession = body.orthoSession !== undefined && body.orthoSession !== null;
+  if (hasOrthoSession && !(full && orthoEdit)) {
+    throw refuse("ortho_session_not_granted", 403, "تسجيل شدّة التقويم عند التوقيع لطبيبٍ مرتبط بصلاحية تعديل التقويم، أو للمالك.");
+  }
+  const rawDecision = body.outsideContractDecision ?? null;
+  let decision: { decision: "no_charge"; reason: string } | null = null;
+  let basis: "owner" | "case_doctor" | null = null;
+  if (rawDecision !== null) {
+    // Authority before validation: the owner always; otherwise the setting, the clinician
+    // link and clinical.ortho.edit now, and the exact case below (inside the locked body).
+    if (!owner) {
+      const settings = await getSettingsWith(client);
+      if (settings["ortho.case_doctor_no_charge"] !== "true" || clinician === null || !held.has("clinical.ortho.edit")) {
+        throw refuse("no_charge_not_granted", 403, NO_CHARGE_REFUSED);
+      }
+    }
+    const candidate = rawDecision as { decision?: unknown; reason?: unknown };
+    if (typeof rawDecision !== "object" || candidate.decision !== "no_charge" || typeof candidate.reason !== "string") {
+      throw refuse("invalid_decision", 400, "قرار الشدّة غير صالح — «بلا رسوم» مع سببٍ مكتوب.");
+    }
+    decision = { decision: "no_charge", reason: candidate.reason };
+    basis = owner ? "owner" : "case_doctor";
+  }
+  const orthoSession = checkOrthoSessionDraft(body.orthoSession);
+  if (!orthoSession.ok) throw refuse("invalid_ortho_session", 400, orthoSession.message);
+  if (visit.patient_id === null) throw refuse("visit_unlinked", 409, "اربط الزيارة بملف مريض أو افتح له ملفًا قبل التوقيع — الفاتورة تدخل كشف حسابه.");
+  const existing = await getClinicalVisitWith(client, visitId, { actorPartyId: clinician });
+  if (!existing) throw refuse("visit_not_found", 404, VISIT_MISSING);
+  let outcome: Awaited<ReturnType<typeof signClinicalVisitLockedOn>>;
+  try {
+    outcome = await signClinicalVisitLockedOn(client, {
+      visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: identity.username,
+      // The legacy finisher rule: an account without a clinician link is never the default treating doctor.
+      signerDoctorPartyId: clinician,
+      dependencyOverrideReason: typeof body.dependencyOverrideReason === "string" ? body.dependencyOverrideReason : null,
+      orthoSession: orthoSession.value, outsideContractDecision: decision,
+      signerRole: identity.role,
+      labSignVersion: typeof body.labSignVersion === "string" ? body.labSignVersion : null,
+      authorizeNoCharge: async caseId => {
+        if (owner) return;
+        const { rows: [kase] } = caseId === null ? { rows: [] as { responsible_doctor_id: number | null }[] }
+          : await client.query<{ responsible_doctor_id: number | null }>("SELECT responsible_doctor_id FROM ortho_cases WHERE id = $1 AND patient_id = $2 FOR SHARE", [caseId, visit.patient_id]);
+        if (!kase || kase.responsible_doctor_id === null || kase.responsible_doctor_id !== clinician) throw refuse("no_charge_not_case_doctor", 403, NO_CHARGE_REFUSED);
+      },
+    }, existing);
+  } catch (error) {
+    if (error instanceof LabWorkIntentError && error.code === "unauthorized") {
+      throw refuse("lab_sign_not_canonical", 409, "تحمل هذه الزيارة عمل مختبر بهوية محفوظة؛ توقيعها من الحساب الموحّد لم يُفعَّل بعد. لم يُوقَّع شيء.");
+    }
+    throw error;
+  }
+  if (!outcome.commit) {
+    const reason = outcome.result.reason ?? "not_found";
+    const status = reason === "invalid_override_reason" || reason === "invalid_decision_reason" ? 400 : 409;
+    throw new CanonicalVisitDocumentRefusal(reason, status, CLINICAL_SIGN_MESSAGES[reason] ?? "تعذّر توقيع الزيارة.", {
+      ...(outcome.result.unmetRequirements ? { unmetRequirements: outcome.result.unmetRequirements } : {}),
+      ...(outcome.result.sessionConflicts ? { sessionConflicts: outcome.result.sessionConflicts } : {}),
+    });
+  }
+  const result = outcome.result;
+  await insertAuditRow(client, {
+    action: "visit.sign", entity: "visit", entityId: visitId, entityLabel: existing.patientName,
+    details: {
+      الإجراءات: existing.procedures.length,
+      الإجمالي: result.duesMinor,
+      الفاتورة: result.invoiceId,
+      عملة_الفاتورة: result.invoiceCurrency,
+      تحديثات_المخطط: result.chartUpdates,
+      بنود_اكتملت: result.planItemsDone,
+      جلسات_منجزة: result.sessionsCompleted,
+      طلبات_معمل_تلقائية: result.labOrdersCreated,
+      حركات_مستهلكات: result.materialsDeducted,
+      الجلسة_القادمة: result.nextPlannedVisit?.title ?? null,
+      شدّة_التقويم: result.orthoAdjustmentId,
+      تصنيف_فوترة_الشدّة: result.orthoBillingClass,
+      المنهي: identity.username,
+      دور_المنهي: identity.role,
+      الطبيب_المعالج: existing.doctorId ?? null,
+      ...(decision ? {
+        قرار_الشدّة: result.orthoBillingDecision === "billed" ? "فوتِرت" : "بلا رسوم",
+        سبب_القرار: decision.reason.trim(),
+        متخذ_القرار: identity.username,
+        أساس_القرار: basis === "owner" ? "المالك" : "طبيب الحالة (إعداد المالك مفعّل)",
+      } : {}),
+    },
+    actor: identity.username, actorRole: identity.role,
+  });
+  const money = owner || held.has("finance.invoices.view");
+  return {
+    sessionsCompleted: result.sessionsCompleted,
+    nextPlannedVisit: result.nextPlannedVisit,
+    labOrdersCreated: result.labOrdersCreated,
+    materialsDeducted: result.materialsDeducted,
+    orthoAdjustmentId: result.orthoAdjustmentId,
+    ...(money ? {
+      invoiceId: result.invoiceId, invoiceCurrency: result.invoiceCurrency, duesMinor: result.duesMinor,
+      orthoBillingClass: result.orthoBillingClass,
+    } : {}),
+  };
 }
 
 async function addendum(client: DbClient, visitId: number, body: Record<string, unknown>, identity: { userId: number; username: string; role: string }) {
@@ -209,8 +346,12 @@ async function save(
 
 export function canonicalVisitDocumentFailure(error: unknown): NextResponse {
   if (error instanceof CanonicalVisitDocumentRefusal) {
-    return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+    return NextResponse.json({ code: error.code, message: error.message, ...error.extra }, { status: error.status, headers: NO_STORE });
   }
+  if (error instanceof InventoryBusy || error instanceof InventoryTrackingRequired) {
+    return NextResponse.json({ code: error.code, message: error.message }, { status: 409, headers: NO_STORE });
+  }
+  if (error instanceof InventoryShortage) return NextResponse.json({ code: "inventory_shortage", message: error.message }, { status: 409, headers: NO_STORE });
   if (error instanceof ProcedurePriceRejected) return NextResponse.json({ code: "price_authority", message: error.message }, { status: 409, headers: NO_STORE });
   if (error instanceof ClinicalPlanConflict || error instanceof ClinicalDoctorIdentityConflict) {
     return NextResponse.json({ code: error instanceof ClinicalDoctorIdentityConflict ? error.code : "clinical_plan_conflict", message: error.message }, { status: 409, headers: NO_STORE });

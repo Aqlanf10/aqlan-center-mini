@@ -14,7 +14,11 @@ import { useSession } from "@/components/SessionProvider";
  * التوثيق لحامل clinical.visits.document: الملاحظات وحدها، والإجراءات (من العلاج المتبقّي،
  * والحذف) بلا أسعار — السطر غير المتغيّر يبقى بسعره المحفوظ، والجديد بسعر الخادم. والملحق
  * على الزيارة الموقَّعة. الخادم يقرّر كل شيء (الطبيب المرتبط أو المالك، أو زيارات اليوم
- * للملاحظات فقط)، والتوقيع لم يُفعَّل بعد على الحساب الموحّد.
+ * للملاحظات فقط).
+ *
+ * التوقيع (M2 slice 86) لحامل clinical.visits.sign أو المالك: يصدر الفاتورة ويُنجز الجلسات
+ * ويخصم المواد في معاملة واحدة على الخادم. «بلا رسوم» لشدّة التقويم يُعرض لمن يملك تعديل
+ * التقويم أو المالك فقط، والخادم وحده يقرّر (طبيب الحالة المسؤول بإعداد المالك، أو المالك).
  */
 type Line = {
   id: number; serviceId: number; serviceName: string; toothCode: number | null; surfaces: string | null; quantity: number;
@@ -35,7 +39,7 @@ type CockpitVisit = {
   activeCases: { id: number | null; kind: string; title: string; status: string; nextStep: string | null }[];
   labOrders: { id: number; workType: string; toothCode: number | null; status: string; labName: string }[];
   referral: { fromName: string | null; reason: string } | null;
-  ortho?: { appliance: string; phase: string; upperWire: string | null; lowerWire: string | null; lastAdjustment: string | null } | null;
+  ortho?: { appliance: string; phase: string; upperWire: string | null; lowerWire: string | null; lastAdjustment: string | null; visitAdjustmentId?: number | null; adjustmentBillingClass?: string } | null;
   totalMinor?: number; billingCurrency?: Currency | null; invoiceId?: number | null;
 };
 type NoteKey = "chiefComplaint" | "examination" | "diagnosis" | "treatmentDone" | "nextPlan";
@@ -54,7 +58,10 @@ const newKey = (prefix: string) => `${prefix}-${typeof crypto !== "undefined" &&
 
 export function CanonicalVisitClinical({ visitId }: { visitId: number }) {
   const session = useSession();
-  const canDocument = session?.isOwner === true || (session?.capabilities ?? []).includes("clinical.visits.document");
+  const capabilities = session?.capabilities ?? [];
+  const canDocument = session?.isOwner === true || capabilities.includes("clinical.visits.document");
+  const canSign = session?.isOwner === true || capabilities.includes("clinical.visits.sign");
+  const orthoEdit = session?.isOwner === true || capabilities.includes("clinical.ortho.edit");
   const [visit, setVisit] = useState<CockpitVisit | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -64,6 +71,10 @@ export function CanonicalVisitClinical({ visitId }: { visitId: number }) {
   const [addendumKey, setAddendumKey] = useState(() => newKey("visit-addendum"));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [noCharge, setNoCharge] = useState(false);
+  const [noChargeReason, setNoChargeReason] = useState("");
+  const [unmet, setUnmet] = useState<string[]>([]);
+  const [overrideReason, setOverrideReason] = useState("");
 
   const apply = (payload: CockpitVisit) => { setVisit(payload); setNotes(notesOf(payload)); setDrafts(draftsOf(payload)); setError(null); };
   useEffect(() => {
@@ -85,11 +96,13 @@ export function CanonicalVisitClinical({ visitId }: { visitId: number }) {
       const response = await fetch(`/api/visits/${visitId}/clinical`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
-      const payload = await response.json().catch(() => null) as (CockpitVisit & { message?: string }) | null;
+      const payload = await response.json().catch(() => null) as (CockpitVisit & { message?: string; unmetRequirements?: unknown }) | null;
       if (!response.ok || !payload || payload.id !== visitId) {
         setNotice({ ok: false, text: typeof payload?.message === "string" ? payload.message : "تعذّر حفظ الزيارة." });
+        if (Array.isArray(payload?.unmetRequirements)) setUnmet(payload.unmetRequirements.filter((line): line is string => typeof line === "string"));
         return false;
       }
+      setUnmet([]);
       apply(payload); setNotice({ ok: true, text: done });
       return true;
     } catch {
@@ -131,7 +144,6 @@ export function CanonicalVisitClinical({ visitId }: { visitId: number }) {
         </div>
         {visit.patientId === null ? <p className="mt-1 text-xs text-slate-600">زيارة غير مربوطة بملف مريض.</p> : null}
         {visit.referral ? <p className="mt-2 rounded-xl bg-sky-50 p-2 text-xs text-sky-900">محال{visit.referral.fromName ? ` من ${visit.referral.fromName}` : ""}: {visit.referral.reason}</p> : null}
-        {!signed ? <p className="mt-2 text-xs text-slate-500">توقيع الزيارة من الحساب الموحّد لم يُفعَّل بعد.</p> : null}
       </section>
 
       {notice ? (
@@ -218,6 +230,45 @@ export function CanonicalVisitClinical({ visitId }: { visitId: number }) {
             className="mt-2 min-h-11 w-full rounded-xl bg-navy-900 px-4 text-sm font-bold text-white disabled:opacity-50">حفظ الإجراءات</button>
         ) : null}
       </section>
+
+      {!signed && canSign ? (
+        <section className="rounded-2xl border border-navy-200 bg-white p-4" data-testid="canonical-visit-sign">
+          <h3 className="mb-1 text-sm font-bold text-navy-900">توقيع الزيارة</h3>
+          <p className="text-xs text-slate-600">التوقيع يُصدر الاستحقاق ويُنجز جلسات الخطة ويخصم المواد، ولا تُعدَّل الزيارة بعده إلا بملحق.</p>
+          {orthoEdit && visit.ortho?.visitAdjustmentId != null ? (
+            <div className="mt-2 grid gap-2 rounded-xl bg-slate-50 p-2">
+              <label className="flex items-center gap-2 text-sm font-bold text-navy-900">
+                <input type="checkbox" checked={noCharge} onChange={event => setNoCharge(event.target.checked)} />
+                «بلا رسوم» لشدّة هذه الزيارة إن كانت خارج الاتفاق
+              </label>
+              {noCharge ? (
+                <label className="grid gap-1 text-xs font-bold text-slate-600">سبب «بلا رسوم» (يُسجَّل في التدقيق)
+                  <textarea value={noChargeReason} maxLength={300} rows={2} onChange={event => setNoChargeReason(event.target.value)}
+                    className="w-full rounded-xl border border-slate-300 p-2 text-sm font-normal text-navy-900" />
+                </label>
+              ) : null}
+            </div>
+          ) : null}
+          {unmet.length > 0 ? (
+            <div className="mt-2 grid gap-1 rounded-xl bg-amber-50 p-2 text-sm text-amber-900" data-testid="canonical-visit-unmet">
+              <p className="font-bold">متطلبات لم تتحقق:</p>
+              <ul className="list-inside list-disc">{unmet.map(line => <li key={line}>{line}</li>)}</ul>
+              <label className="grid gap-1 text-xs font-bold">سبب المتابعة رغمها
+                <textarea value={overrideReason} maxLength={300} rows={2} onChange={event => setOverrideReason(event.target.value)}
+                  className="w-full rounded-xl border border-amber-300 p-2 text-sm font-normal text-navy-900" />
+              </label>
+            </div>
+          ) : null}
+          <button type="button" disabled={busy || draftsChanged || (noCharge && noChargeReason.trim().length < 3)}
+            onClick={() => void submit({
+              action: "sign",
+              ...(noCharge ? { outsideContractDecision: { decision: "no_charge", reason: noChargeReason } } : {}),
+              ...(unmet.length > 0 && overrideReason.trim() ? { dependencyOverrideReason: overrideReason } : {}),
+            }, "وُقّعت الزيارة.")}
+            className="mt-2 min-h-11 w-full rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-50">توقيع الزيارة</button>
+          {draftsChanged ? <p className="mt-1 text-xs text-amber-800">احفظ الإجراءات أولًا قبل التوقيع.</p> : null}
+        </section>
+      ) : null}
 
       {visit.outstanding.length > 0 ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4" data-testid="canonical-visit-outstanding">

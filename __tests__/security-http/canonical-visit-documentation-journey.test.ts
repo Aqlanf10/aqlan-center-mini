@@ -3,8 +3,9 @@
  * server. Synthetic data only.
  *
  * HTTP: the clinician saves notes (no money in the response, no-store); an account
- * without a clinician link is refused on an older visit (403, Arabic); signing, a
- * currency change and a lab draft are refused (409, Arabic) and nothing is signed; a
+ * without a clinician link is refused on an older visit (403, Arabic); signing without
+ * its grant is refused (403); a currency change and a lab draft are refused (409,
+ * Arabic) and nothing is signed; a
  * discount without the grant is refused (409). Browser at 390px: the clinician edits the
  * diagnosis, adds a planned item from the remaining work, saves it without seeing a
  * price, then adds an addendum to a signed visit. No DDL.
@@ -62,7 +63,10 @@ it("HTTP: save, the actor rule, and the refusals that never guess", async () => 
   expect(old.status).toBe(403);
   expect((await old.json()).message).toMatch(ARABIC);
 
-  for (const refused of [{ action: "sign" }, { action: "save", billingCurrency: "USD" }, { action: "save", labRequestKey: "journey-lab-key-0001", procedures: [] }]) {
+  const unsignable = await post(ids.today, doctor.cookie, { action: "sign" });
+  expect(unsignable.status).toBe(403); // slice 86: signing needs clinical.visits.sign
+  expect((await unsignable.json()).message).toMatch(ARABIC);
+  for (const refused of [{ action: "save", billingCurrency: "USD" }, { action: "save", labRequestKey: "journey-lab-key-0001", procedures: [] }]) {
     const response = await post(ids.today, doctor.cookie, refused);
     expect(response.status).toBe(409);
     expect((await response.json()).message).toMatch(ARABIC);

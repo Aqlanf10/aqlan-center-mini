@@ -19533,7 +19533,7 @@ async function assertLegacyCaseSignable(client: DbClient, patientId: number, cli
   }
 }
 
-export async function signClinicalVisit(input: {
+export type SignClinicalVisitInput = {
   visitId: number;
   baseCurrency: Currency;
   signedBy: string;
@@ -19548,7 +19548,11 @@ export async function signClinicalVisit(input: {
   labSignVersion?: string | null;
   /** (P1-C) قرار الشدّة خارج العقد عند التوقيع: «بلا رسوم» بسببٍ مكتوب. والفوترة تكون بسطر خدمة تقويم. */
   outsideContractDecision?: { decision: "no_charge"; reason: string } | null;
-}): Promise<{
+  /** (M2 slice 86, owner decision 6629149113) Canonical callers: proves who may waive this
+   * visit's adjustment, on its exact case (null: no adjustment); throws to refuse. */
+  authorizeNoCharge?: (adjustmentCaseId: number | null) => Promise<void>;
+};
+export type SignClinicalVisitResult = {
   visit: ClinicalVisit | null;
   invoiceId: number | null;
   /* (TD-05 owner review — Finding 1) عملة الفاتورة التي وُلدت فعلًا — الشبّاك
@@ -19582,7 +19586,9 @@ export async function signClinicalVisit(input: {
     | "ortho_case_invalid" | "ortho_adjustments_ambiguous" | "plan_session_unlinked" | "amended_plan_session_unlinked" | "invalid_decision_reason" | null;
   /** (P1-D) إجراءاتٌ حرّة تطابق بنود خطةٍ متعددة الجلسات — مع جلستها المنتظرة. */
   sessionConflicts?: string[];
-}> {
+};
+
+export async function signClinicalVisit(input: SignClinicalVisitInput): Promise<SignClinicalVisitResult> {
   const existing = await getClinicalVisit(input.visitId);
   const emptyResult = (
     reason:
@@ -19623,6 +19629,47 @@ export async function signClinicalVisit(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const outcome = await signClinicalVisitLockedOn(client, input, existing);
+    if (!outcome.commit) {
+      await client.query("ROLLBACK");
+      return outcome.result;
+    }
+    await client.query("COMMIT");
+    return { ...outcome.result, visit: await getClinicalVisit(input.visitId) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The signing body under the caller's transaction (M2 slice 86): from the patient-first
+ * locks to the visit's signed stamp. `commit: false` leaves nothing to keep — the legacy
+ * wrapper rolls back, the canonical caller refuses (which rolls back). `result.visit` is
+ * the pre-sign snapshot on refusals and null on success (read after commit).
+ */
+export async function signClinicalVisitLockedOn(
+  client: DbClient, input: SignClinicalVisitInput, existing: ClinicalVisit,
+): Promise<{ commit: false; result: SignClinicalVisitResult } | { commit: true; result: SignClinicalVisitResult }> {
+  const { hasMeaningfulEndoVisit } = await import("./endodontics-db");
+  const emptyResult = (
+    reason:
+      | "not_found" | "already_signed" | "empty" | "no_patient"
+      | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
+      | "ortho_case_invalid" | "ortho_adjustments_ambiguous" | "plan_session_unlinked" | "amended_plan_session_unlinked" | "invalid_decision_reason" | null,
+    extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[]; sessionConflicts?: string[] },
+  ) => ({
+    visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
+    invoiceCurrency: input.baseCurrency,
+    chartUpdates: 0, planItemsDone: 0, duesMinor: 0, sessionsCompleted: 0,
+    nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0,
+    orthoAdjustmentId: null, orthoBillingClass: null, reason,
+    ...(extra?.unmetRequirements ? { unmetRequirements: extra.unmetRequirements } : {}),
+    ...(extra?.sessionConflicts ? { sessionConflicts: extra.sessionConflicts } : {}),
+  });
+  {
     const lockedPatientId = await lockVisitPatientFirst(client, input.visitId);
 
     const { rows: locked } = await client.query<{
@@ -19637,8 +19684,7 @@ export async function signClinicalVisit(input: {
       [input.visitId],
     );
     if (!locked[0]) {
-      await client.query("ROLLBACK");
-      return emptyResult("already_signed", { visit: existing });
+      return { commit: false as const, result: emptyResult("already_signed", { visit: existing }) };
     }
 
     /*
@@ -19701,8 +19747,7 @@ export async function signClinicalVisit(input: {
       diagnosis: locked[0].diagnosis, treatmentDone: locked[0].treatment_done,
       hasOrthoSession: Boolean(input.orthoSession) || visitAdjustments.length > 0,
       hasEndoRecord: hasLockedEndoRecord }).ok) {
-      await client.query("ROLLBACK");
-      return emptyResult("empty", { visit: existing });
+      return { commit: false as const, result: emptyResult("empty", { visit: existing }) };
     }
     // Validate every explicit performer under the visit lock before side effects.
     // Keep party kind stable until sign commits; fallback candidates use the same locks.
@@ -19747,8 +19792,7 @@ export async function signClinicalVisit(input: {
         [line.id, defaultDoctorId]);
     }
     if (existing.procedures.some((line) => line.doctorId === null && !includedLineIds.has(line.id) && line.totalMinor > 0)) {
-      await client.query("ROLLBACK");
-      return emptyResult("no_treating_doctor", { visit: existing });
+      return { commit: false as const, result: emptyResult("no_treating_doctor", { visit: existing }) };
     }
 
     /*
@@ -19767,8 +19811,7 @@ export async function signClinicalVisit(input: {
         source: "visit_sign",
       });
       if (!written.ok) {
-        await client.query("ROLLBACK");
-        return emptyResult("ortho_case_invalid", { visit: existing });
+        return { commit: false as const, result: emptyResult("ortho_case_invalid", { visit: existing }) };
       }
       orthoAdjustmentId = written.id;
     }
@@ -19782,8 +19825,7 @@ export async function signClinicalVisit(input: {
       const { resolveExplicitFollowupCoverage } = await import("./ortho-followup-coverage-db");
       for (const adjustment of adjustmentRows) {
         if ((await resolveExplicitFollowupCoverage(client, adjustment.case_id, patientId, true)).state !== "absent") {
-          await client.query("ROLLBACK");
-          return emptyResult("ortho_adjustments_ambiguous", { visit: existing });
+          return { commit: false as const, result: emptyResult("ortho_adjustments_ambiguous", { visit: existing }) };
         }
       }
     }
@@ -19793,12 +19835,12 @@ export async function signClinicalVisit(input: {
       ? await orthoAdjustmentCoverage(client, adjustmentCase.case_id, patientId, true)
       : null;
     const orthoBillingClass = orthoCoverage?.classification ?? null;
+    if (input.outsideContractDecision && input.authorizeNoCharge) await input.authorizeNoCharge(adjustmentCase?.case_id ?? null);
     /* (P1-C) «بلا رسوم» قرارٌ مسبَّب: سببٌ من ثلاثة أحرف إلى ٣٠٠ — وإلا لا توقيع. */
     const noChargeReason = input.outsideContractDecision?.decision === "no_charge"
       ? input.outsideContractDecision.reason.trim() : null;
     if (noChargeReason !== null && (noChargeReason.length < 3 || noChargeReason.length > 300)) {
-      await client.query("ROLLBACK");
-      return emptyResult("invalid_decision_reason", { visit: existing });
+      return { commit: false as const, result: emptyResult("invalid_decision_reason", { visit: existing }) };
     }
 
     /*
@@ -19814,9 +19856,8 @@ export async function signClinicalVisit(input: {
     /* (P1-D) علاج العصب بندٌ واحد بثلاث جلسات — لا يُفوتَر ثلاث مرات بإجراءٍ حرّ في كل زيارة. */
     const sessionConflicts = await unlinkedPlanSessionConflicts(client, patientId, existing.procedures);
     if (sessionConflicts.messages.length > 0) {
-      await client.query("ROLLBACK");
-      return emptyResult(sessionConflicts.amendedService ? "amended_plan_session_unlinked" : "plan_session_unlinked",
-        { visit: existing, sessionConflicts: sessionConflicts.messages });
+      return { commit: false as const, result: emptyResult(sessionConflicts.amendedService ? "amended_plan_session_unlinked" : "plan_session_unlinked",
+        { visit: existing, sessionConflicts: sessionConflicts.messages }) };
     }
 
     const sessionOutcome = await progressTreatmentSessions({
@@ -19910,12 +19951,10 @@ export async function signClinicalVisit(input: {
       });
       const overrideReason = input.dependencyOverrideReason?.trim() ?? "";
       if (overrideReason.length < 3) {
-        await client.query("ROLLBACK");
-        return emptyResult("unmet_dependency", { visit: existing, unmetRequirements: lines });
+        return { commit: false as const, result: emptyResult("unmet_dependency", { visit: existing, unmetRequirements: lines }) };
       }
       if (overrideReason.length > 300) {
-        await client.query("ROLLBACK");
-        return emptyResult("invalid_override_reason", { visit: existing });
+        return { commit: false as const, result: emptyResult("invalid_override_reason", { visit: existing }) };
       }
       await insertAuditRow(client, {
         action: "plan.dependency_override", entity: "visit", entityId: input.visitId, entityLabel: locked[0].patient_name,
@@ -19982,12 +20021,10 @@ export async function signClinicalVisit(input: {
         if (planCurrency === visitCurrency || linkedCount === billable.length) {
           invoiceCurrency = planCurrency;
         } else {
-          await client.query("ROLLBACK");
-          return emptyResult("mixed_plan_currencies", { visit: existing });
+          return { commit: false as const, result: emptyResult("mixed_plan_currencies", { visit: existing }) };
         }
       } else if (distinct.length > 1) {
-        await client.query("ROLLBACK");
-        return emptyResult("mixed_plan_currencies", { visit: existing });
+        return { commit: false as const, result: emptyResult("mixed_plan_currencies", { visit: existing }) };
       }
       const { rows: invoiceRows } = await client.query<{ id: number }>(
         `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, note, created_by)
@@ -20142,19 +20179,13 @@ export async function signClinicalVisit(input: {
       followupProof ? [input.visitId, input.signedBy, linkedInvoiceId, JSON.stringify(followupProof)] : [input.visitId, input.signedBy, linkedInvoiceId],
     );
 
-    await client.query("COMMIT");
-    return {
-      visit: await getClinicalVisit(input.visitId),
+    return { commit: true as const, result: {
+      visit: null,
       invoiceId, invoiceCurrency, chartUpdates, planItemsDone,
       duesMinor, sessionsCompleted: sessionOutcome.sessionsCompleted,
       nextPlannedVisit, labOrdersCreated, materialsDeducted,
       orthoAdjustmentId, orthoBillingClass, orthoBillingDecision, reason: null,
-    };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+    } };
   }
 }
 

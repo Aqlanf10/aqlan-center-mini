@@ -43,6 +43,7 @@ export type SettingKey =
   | "followup.proposal_days"
   | "documents.max_megabytes"
   | "workflow.doctor_financial_view"
+  | "ortho.case_doctor_no_charge"
   | "display.privacy_mode"
   | "display.voice_uri"
   | "display.voice_rate"
@@ -142,6 +143,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // والمال ليس عمله (راجع أدوار النظام). الإدارة تفعّله إن شاءت من الإعدادات —
   // والفحص في الخادم لا في الشاشة.
   "workflow.doctor_financial_view": "false",
+  // (قرار المالك 6629149113) «بلا رسوم» لشدّة تقويم خارج الاتفاق: للمالك دائمًا، ولطبيب
+  // الحالة المسؤول المخوّل بالتقويم فقط إذا فعّله المالك هنا. مغلق افتراضيًا: لا منح تلقائي.
+  "ortho.case_doctor_no_charge": "false",
   // عشرون ميغابايت تكفي أشعةً بانورامية بجودةٍ عالية، وتردّ ملفًّا رُفع بالخطأ
   // — مقطعَ فيديو مثلًا — قبل أن يملأ القرص.
   "documents.max_megabytes": "20",

@@ -82,6 +82,8 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   // Authority semantics: the value decides who may do what.
   "workflow.doctor_financial_view": k("authority"),
   "finance.reception_adds_opening_balance": k("authority"),
+  // Owner decision 6629149113: who besides the owner may waive an outside-contract ortho adjustment.
+  "ortho.case_doctor_no_charge": k("authority"),
   // Integrations: the value sends data out of the clinic.
   // Main adds external/public identity controls. Keep the existing owner-only
   // integration boundary; a generic operational grant must not publish identity.

@@ -395,6 +395,14 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     scope: "clinic", sensitivity: "normal", permission: "settings.manage_permissions",
     requiresReason: true,
     impact: "يغيّر ما يراه الأطباء من أرقام المرضى الماليّة." }),
+  def({ key: "ortho.case_doctor_no_charge", keywords: ["تقويم", "شدّة", "بلا رسوم", "اتفاق", "طبيب الحالة", "ortho", "no charge"],
+    category: "staff",
+    label: "«بلا رسوم» لشدّة خارج الاتفاق بقرار طبيب الحالة", type: "BOOLEAN",
+    defaultValue: SETTING_DEFAULTS["ortho.case_doctor_no_charge"], order: 20,
+    scope: "clinic", sensitivity: "normal", permission: "settings.manage_permissions",
+    requiresReason: true,
+    help: "قرار المالك: «بلا رسوم» لشدّة تقويم خارج الاتفاق قرارٌ للمالك دائمًا. مفعَّلًا: يجوز أيضًا لطبيب حالة التقويم المسؤول عنها وحده، إن كان يملك صلاحية تعديل التقويم. لا يكفي إنشاء الفواتير ولا إدارة الاتفاقات.",
+    impact: "يحدد من يقرر إعفاء الشدّة من الرسوم عند التوقيع؛ السبب ومتخذ القرار يُسجَّلان في سجل التدقيق دائمًا." }),
 
   // ── شاشة الصالة ──────────────────────────────────────────────────────────
   def({ key: "display.privacy_mode", keywords: ["شاشة", "خصوصية", "الصالة", "display", "privacy"],

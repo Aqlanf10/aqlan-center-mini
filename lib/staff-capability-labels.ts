@@ -18,6 +18,16 @@ export const STAFF_CAPABILITY_GROUPS = [
 ] as const;
 export type StaffCapabilityGroup = typeof STAFF_CAPABILITY_GROUPS[number]["key"];
 
+/** What a capability does and does not reveal or decide, where the owner fixed it (owner
+ * decision 6629149113). Shown under the capability in the staff editor; never grants. */
+export const STAFF_CAPABILITY_NOTES: Readonly<Partial<Record<StaffCapability, string>>> = Object.freeze({
+ "finance.invoices.view": "يُظهر أسعار الزيارة ومجاميعها وعملتها ومرجع فاتورتها في شاشة الزيارة. لا يكشف كشف حساب المريض؛ تلك صلاحية مستقلة.",
+ "finance.patient-ledger.view": "كشف حساب المريض وأرصدته. لا يكشف أسعار الزيارة ولا مرجع فاتورتها؛ عرض الفواتير صلاحية مستقلة.",
+ "clinical.ortho.edit": "توثيق التقويم. قرار «بلا رسوم» لشدّة خارج الاتفاق للمالك، ولطبيب الحالة المسؤول عنها بهذه الصلاحية فقط إذا فعّل المالك ذلك في الإعدادات.",
+ "finance.invoices.create": "لا يمنح قرار «بلا رسوم» لشدّة التقويم خارج الاتفاق.",
+ "finance.agreements.manage": "لا يمنح قرار «بلا رسوم» لشدّة التقويم خارج الاتفاق.",
+});
+
 export const STAFF_CAPABILITY_LABELS: Readonly<Record<StaffCapability, string>> = Object.freeze({
  "patients.create": "إضافة مريض",
  "patients.edit": "تعديل بيانات المريض",

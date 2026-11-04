@@ -1,5 +1,5 @@
 import "server-only";
-import { decideOrthoAdjustmentBillingInTransaction, doctorOwnsPatient, getPool, patientInDoctorScopeWith } from "./db";
+import { decideOrthoAdjustmentBillingInTransaction, doctorOwnsPatient, getPool, getSettingsWith, patientInDoctorScopeWith } from "./db";
 import { orthoDecisionVersion } from "./canonical-ortho-decision-version";
 import { JSON_BODY_LIMIT_BYTES } from "./security-limits";
 import type { VerifiedDurableSession } from "./staff-durable-session";
@@ -12,7 +12,7 @@ export class CanonicalOrthoDecisionRefusal extends Error {
 }
 const missing = () => new CanonicalOrthoDecisionRefusal("ortho_decision_not_found", 404, "الشدّة غير متاحة ضمن مرضاك.");
 const conflict = () => new CanonicalOrthoDecisionRefusal("ortho_decision_conflict", 409, "تغيّرت الشدّة أو تعذّر تثبيت مرجعها. راجع الحالة والفاتورة قبل طلب جديد.");
-const responsibility = () => new CanonicalOrthoDecisionRefusal("ortho_decision_responsibility_denied", 403, "قرار «بلا رسوم» للطبيب المسؤول عن الحالة أو المالك.");
+const responsibility = () => new CanonicalOrthoDecisionRefusal("ortho_decision_responsibility_denied", 403, "قرار «بلا رسوم» للمالك، ولطبيب حالة التقويم المسؤول عنها بصلاحية تعديل التقويم إذا فعّل المالك ذلك في الإعدادات.");
 const validId = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= 2147483647;
 export function parseCanonicalOrthoDecision(rawId: string, body: unknown) {
   const invalid = () => new CanonicalOrthoDecisionRefusal("invalid_ortho_decision", 400, "راجع الشدّة والمريض والحالة المرصودة؛ «بلا رسوم» يحتاج سببًا من 3 إلى 300 حرف، و«فوتِرت» يحتاج رقم فاتورة قائمة.");
@@ -56,8 +56,11 @@ export async function commandCanonicalOrthoDecision(session: VerifiedDurableSess
          FROM ortho_cases WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT`, [adjustment.caseId, input.patientId]);
       if (!ortho) throw missing();
       if (scope.kind === "own" && !await doctorOwnsPatient(scope.clinicianPartyId, input.patientId, client, "nowait")) throw missing();
+      // Owner decision 6629149113: the owner, or the responsible case doctor (clinical.ortho.edit,
+      // the admitted action) only while the owner-only setting ortho.case_doctor_no_charge is on.
       if (input.decision === "no_charge" && !await staffOperationIsProtectedOwner(client, handle, action)
-        && (ortho.responsible_doctor_id === null || ortho.responsible_doctor_id !== await staffOperationClinician(client, handle, action))) throw responsibility();
+        && ((await getSettingsWith(client))["ortho.case_doctor_no_charge"] !== "true"
+          || ortho.responsible_doctor_id === null || ortho.responsible_doctor_id !== await staffOperationClinician(client, handle, action))) throw responsibility();
       if (adjustment.visitId !== null) {
         const linked = await client.query("SELECT id FROM visits WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT", [adjustment.visitId, input.patientId]);
         if (linked.rows.length !== 1) throw conflict();

@@ -2928,7 +2928,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 52, implemented locally with acceptance pending: independent mapped no_charge clinical.ortho.edit plus native responsible clinician or protected owner; billed finance.invoices.create plus patient scope. Patient/adjustment/case/visit/invoice witnesses, fresh post-wait authority, opaque observed version, original atomic writer/audit. No new invoice, amount, currency, coverage policy or permanent request receipt. Unknown results require fresh review and explicit new intent.",
+  "note": "M2 slice 52, implemented locally with acceptance pending: independent mapped no_charge clinical.ortho.edit plus native responsible clinician or protected owner; billed finance.invoices.create plus patient scope. Patient/adjustment/case/visit/invoice witnesses, fresh post-wait authority, opaque observed version, original atomic writer/audit. No new invoice, amount, currency, coverage policy or permanent request receipt. Unknown results require fresh review and explicit new intent. Owner decision 6629149113 (M2 slice 86): the responsible case doctor's no_charge also needs the owner-only setting ortho.case_doctor_no_charge on (default off); the owner always.",
   "branches": {
    "discriminator": "decision",
    "values": {
@@ -2976,7 +2976,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 51: mapped clinical.ortho.view and current patient scope in one owning fenced RR read-only snapshot. Reads saved pending classification without computing coverage or granting a decision. Own scope filters before oldest 300/hasMore; 1 MiB whole-response bound and same-patient visit/doctor witnesses fail closed. Explicit summary omits visit links, finance, care notes and decision controls. Current UI clears hidden/late/failed/revoked content. Legacy reader and all decision writers remain unchanged. Slice 52 adds a same-snapshot minimal decisionContext preview (opaque version and independently allowed choices); never invoice/care data or reusable authority.",
+  "note": "M2 slice 51: mapped clinical.ortho.view and current patient scope in one owning fenced RR read-only snapshot. Reads saved pending classification without computing coverage or granting a decision. Own scope filters before oldest 300/hasMore; 1 MiB whole-response bound and same-patient visit/doctor witnesses fail closed. Explicit summary omits visit links, finance, care notes and decision controls. Current UI clears hidden/late/failed/revoked content. Legacy reader and all decision writers remain unchanged. Slice 52 adds a same-snapshot minimal decisionContext preview (opaque version and independently allowed choices); never invoice/care data or reusable authority. Owner decision 6629149113 (M2 slice 86): the offered no_charge choice follows the same rule (the owner, or the responsible case doctor while ortho.case_doctor_no_charge is on).",
   "projection": {
    "legacy": "Admin/reception read all; doctor sees their visit or responsible case. No amount payload.",
    "groups": {
@@ -6387,8 +6387,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Signing additionally requires clinical.visits.sign. M2 slice 85 (save and addendum canonical; sign pending slice 86): one admitted clinical.visits.document transaction; the visit inside the scope by the queue read's condition (outside 404); a clinician-linked actor or the protected owner documents any day (notes, treating doctor, procedures), any other documenting account today's visits only and notes only (doctor and procedures unchanged, 403); setVisitProceduresOn (the legacy body) with price authority by grants per the priceOverrides fields below (a missing price is the server price: an unchanged saved line keeps its saved price, a new line the catalogue price; a manual price for an unpriced service needs finance.price-increases.apply), each override audited in the same transaction; the addendum appends to a signed visit, audited in the same transaction, optional requestKey replay; sign, a billing-currency change (financial group 4) and a lab draft inside the save refuse (409). The response is the projected cockpit read.",
+  "status": "canonical-done",
+  "note": "Signing additionally requires clinical.visits.sign. M2 slices 85–86 (save, addendum and sign canonical): one admitted clinical.visits.document transaction; the visit inside the scope by the queue read's condition (outside 404); a clinician-linked actor or the protected owner documents any day (notes, treating doctor, procedures), any other documenting account today's visits only and notes only (doctor and procedures unchanged, 403); setVisitProceduresOn (the legacy body) with price authority by grants per the priceOverrides fields below (a missing price is the server price: an unchanged saved line keeps its saved price, a new line the catalogue price; a manual price for an unpriced service needs finance.price-increases.apply), each override audited in the same transaction; the addendum appends to a signed visit, audited in the same transaction, optional requestKey replay; a billing-currency change (financial group 4) and a lab draft inside the save refuse (409). Sign (slice 86): the same admitted transaction runs signClinicalVisitLockedOn (invoice, sessions, inventory, ortho adjustment); clinical.visits.sign or the protected owner; a signer without a clinician link finishes today's visits only, without orthoSession or a billing decision, never the default treating doctor; the visit must be linked to a file (409); visit.sign audited in the same transaction; the sign summary's amounts only with finance.invoices.view or the owner; a visit carrying a durable lab identity refuses (409) until the lab identity layer accepts a canonical actor. The response is the projected cockpit read.",
   "branches": {
    "discriminator": "action",
    "values": {
@@ -6424,6 +6424,13 @@
       "clinical.ortho.edit"
      ],
      "note": "Orthodontic session data."
+    },
+    {
+     "field": "outsideContractDecision=no_charge",
+     "need": [
+      "clinical.ortho.edit"
+     ],
+     "note": "Owner decision 6629149113: the protected owner, or the adjustment case's responsible doctor (validated clinician link = ortho_cases.responsible_doctor_id) holding clinical.ortho.edit while the owner-only setting ortho.case_doctor_no_charge (authority class, default off) is on. finance.invoices.create and finance.agreements.manage never substitute. A 3-300 character reason; the reason, the decider and the basis are written to the visit.sign audit row in the same transaction."
     }
    ]
   }

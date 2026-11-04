@@ -18,7 +18,10 @@ const ACCOUNTS = {
 } as const;
 type Key = keyof typeof ACCOUNTS;
 let fx: CanonicalInventoryDatabase<Key>, side: Pool, seq = 0;
-beforeAll(async () => { fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner"); side = new Pool({ connectionString: fx.pool.options.connectionString, max: 4 }); }, 180000);
+// Owner decision 6629149113: the case doctor decides "no charge" only while the owner turns
+// ortho.case_doctor_no_charge on; these scenarios run with the owner's setting on.
+const caseDoctorSetting = (value: "true" | "false") => fx.pool.query("INSERT INTO settings(key,value) VALUES('ortho.case_doctor_no_charge',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", [value]);
+beforeAll(async () => { fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner"); side = new Pool({ connectionString: fx.pool.options.connectionString, max: 4 }); await caseDoctorSetting("true"); }, 180000);
 afterAll(async () => { await side?.end(); await fx?.close(); });
 async function scenario(assigned: "own" | "billOwn" | null = "own") {
   const patientId = (await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,$1,$2) RETURNING id", [`SYN-ODW-${++seq}`, assigned ? fx.parties[assigned] : null])).rows[0].id as number;
@@ -40,6 +43,16 @@ async function invoice(s: Scenario, status = "open") {
 }
 it("the native responsible clinician and unlinked protected owner may make the existing no-charge decision", async () => {
   for (const key of ["own", "owner"] as const) { const s = await scenario(key === "owner" ? null : "own"), body = await draft(s); expect(await command(key, s, body)).toEqual({ ok: true, adjustmentId: s.adjustmentId, decision: "no_charge" }); expect(await audit(s)).toEqual([{ actor: ACCOUNTS[key].username, details: { القرار: "بلا رسوم", السبب: body.reason } }]); }
+});
+it("with the owner's setting off, the responsible case doctor is refused and the owner still decides", async () => {
+  await caseDoctorSetting("false");
+  try {
+    const s = await scenario("own"), before = await state(s);
+    await expect(command("own", s, await draft(s))).rejects.toMatchObject({ code: "ortho_decision_responsibility_denied", status: 403 });
+    expect(await state(s)).toEqual(before); expect(await audit(s)).toEqual([]);
+    const o = await scenario(null), body = await draft(o);
+    expect(await command("owner", o, body)).toEqual({ ok: true, adjustmentId: o.adjustmentId, decision: "no_charge" });
+  } finally { await caseDoctorSetting("true"); }
 });
 it.each(["viewer", "none", "unlinked"] as const)("%s cannot inherit mutation from a legacy role or appointment scope", async key => { const s = await scenario(), before = await state(s); await expect(command(key, s, await draft(s))).rejects.toThrow(/CAPABILITY|SCOPE|UNLINKED/); expect(await state(s)).toEqual(before); expect(await audit(s)).toEqual([]); });
 it("a delegated doctor-manager with all scope still needs native case responsibility", async () => {
