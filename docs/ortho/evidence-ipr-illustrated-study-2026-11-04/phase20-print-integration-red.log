@@ -1,0 +1,40 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+ ❯ __tests__/print-watermark-coverage.test.tsx (6 tests | 1 failed) 23ms
+     × covers all 26 dedicated routes through their existing shared identity renderers 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/print-watermark-coverage.test.tsx > one shared print-document watermark across all paper families > covers all 26 dedicated routes through their existing shared identity renderers
+AssertionError: expected [ …(27) ] to have a length of 26 but got 27
+
+- Expected
++ Received
+
+- 26
++ 27
+
+ ❯ __tests__/print-watermark-coverage.test.tsx:29:19
+     27|     } }
+     28|     visit(new URL("../app/print", import.meta.url).pathname);
+     29|     expect(pages).toHaveLength(26);
+       |                   ^
+     30|     for (const page of pages) expect(readFileSync(page, "utf8")).toMat…
+     31|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 827 passed (828)
+      Tests  1 failed | 14112 passed (14113)
+   Start at  04:05:51
+   Duration  552.26s (transform 20.34s, setup 0ms, import 95.92s, tests 343.70s, environment 99ms)
+

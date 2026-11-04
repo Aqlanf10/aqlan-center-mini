@@ -1,0 +1,1 @@
+convert /workspace/ortho-panorama-flow/.settings-ui-artifacts/ortho-illustrated-study.pptx as a Impress document -> /workspace/ortho-evidence/phase20-libreoffice-final/ortho-illustrated-study.pdf using filter : impress_pdf_Export

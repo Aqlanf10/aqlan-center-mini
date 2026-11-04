@@ -1,0 +1,62 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-space-ledger-browser.test.ts __tests__/security-http/ortho-study-image-browser.test.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/patient-cockpit-real-contract-ui.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts (2 tests | 2 failed) 19456ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390 8935ms
+   × saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280 8391ms
+ ❯ __tests__/security-http/ortho-study-image-browser.test.ts (5 tests | 1 failed) 29540ms
+   × selects, previews, rotates, saves and reloads the same image use at 1280px without changing its original 7038ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 390
+ FAIL  __tests__/security-http/ortho-space-ledger-browser.test.ts > saves a linked space plan, documents IPR in two actual sessions and reconciles an interrupted reply without duplicate enamel at width 1280
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ __tests__/security-http/ortho-space-ledger-browser.test.ts:157:118
+    155|     expect(xml).toContain('0.25');expect(xml).toContain('سجل IPR المنف…
+    156|     const illustratedHref=await study.getByRole('link',{name:'PowerPoi…
+    157|     const illustrated=await context.request.get(new URL(illustratedHre…
+       |                                                                                                                      ^
+    158|     const illustratedZip=await JSZip.loadAsync(await illustrated.body(…
+    159|     const illustratedXml=(await Promise.all(Object.keys(illustratedZip…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/security-http/ortho-study-image-browser.test.ts > selects, previews, rotates, saves and reloads the same image use at 1280px without changing its original
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ __tests__/security-http/ortho-study-image-browser.test.ts:69:100
+     67|   if(width===1280){
+     68|    const href=await study.getByRole('link',{name:'PowerPoint مصور قابل…
+     69|    const exported=await context.request.get(new URL(href!,baseUrl).hre…
+       |                                                                                                    ^
+     70|    const pptxBytes=await exported.body();await writeFile('.settings-ui…
+     71|    const zip=await JSZip.loadAsync(pptxBytes);const media=await Promis…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  2 failed | 2 passed (4)
+      Tests  3 failed | 8 passed (11)
+   Start at  04:03:20
+   Duration  72.52s (transform 248ms, setup 0ms, import 851ms, tests 65.34s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

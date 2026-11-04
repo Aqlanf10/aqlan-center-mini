@@ -1,0 +1,87 @@
+{
+  "sourceSha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+  "applicationCommit": "1d18ac6e4debf89624a636143e565a2814027a60",
+  "scope": "Scoped partial acceptance only",
+  "requirements": [
+    {
+      "id": "V2R266",
+      "status": "موجود ومتحقق جزئياً",
+      "evidence": "Performed events and correction lineage captured; current-only cumulative IPR; unknown remains null."
+    },
+    {
+      "id": "V2R403",
+      "status": "موجود ومتحقق جزئياً",
+      "evidence": "Saved-version export with audit and fail-closed current authority, partial scope."
+    },
+    {
+      "id": "V2R438",
+      "status": "موجود ومتحقق جزئياً",
+      "evidence": "Identical selected-image recipe/frame in saved review/PPTX/browser PDF; byte-verified PNG."
+    },
+    {
+      "id": "V2R473",
+      "status": "موجود ومتحقق جزئياً",
+      "evidence": "Native editable text and derived PNG; native tables incomplete."
+    },
+    {
+      "id": "V2R474",
+      "status": "موجود ومتحقق جزئياً",
+      "evidence": "Actual LibreOffice opening; native desktop PowerPoint unverified."
+    },
+    {
+      "id": "V2R476",
+      "status": "موجود ومتحقق جزئياً",
+      "evidence": "Source/recipe/rendition witnesses in notes; final archive manifest incomplete."
+    },
+    {
+      "id": "V2R477",
+      "status": "موجود ومتحقق جزئياً",
+      "evidence": "Immutable source capture retained after corrections and patient merge."
+    },
+    {
+      "id": "V2R481",
+      "status": "ناقص",
+      "evidence": "Server jobs and persistent export archive incomplete."
+    },
+    {
+      "id": "V2R482",
+      "status": "ناقص",
+      "evidence": "Current source permissions rechecked; independent export permission incomplete."
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "O04",
+      "status": "جزئي ضمن النطاق"
+    },
+    {
+      "id": "O16",
+      "status": "جزئي ضمن النطاق"
+    },
+    {
+      "id": "O22",
+      "status": "جزئي ضمن النطاق"
+    },
+    {
+      "id": "O35",
+      "status": "جزئي ضمن النطاق"
+    },
+    {
+      "id": "O51",
+      "status": "جزئي ضمن النطاق"
+    },
+    {
+      "id": "O52",
+      "status": "جزئي ضمن النطاق"
+    }
+  ],
+  "notAccepted": [
+    "O21",
+    "O23",
+    "O25",
+    "O35 full",
+    "O51 full",
+    "O52 full"
+  ],
+  "evidence": "evidence-ipr-illustrated-study-2026-11-04/manifest.json"
+}

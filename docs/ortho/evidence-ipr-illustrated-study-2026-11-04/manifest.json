@@ -1,0 +1,213 @@
+{
+  "applicationCommit": "1d18ac6e4debf89624a636143e565a2814027a60",
+  "baseCommit": "488e3cf1b1308b89c78786fce2d851701081ae4c",
+  "buildId": "Zw6F11XCCDlb3BuIN_HGM",
+  "recordedAtUtc": "2026-11-04T04:28:36.767305+00:00",
+  "scope": "Performed IPR snapshots and illustrated clinical review export; partial acceptance, synthetic data only; no schema change or deployment.",
+  "tests": {
+    "allUnit": {
+      "passed": 14113,
+      "files": 828,
+      "seconds": 584.86
+    },
+    "focusedUnit": {
+      "passed": 47,
+      "files": 6
+    },
+    "postgresDistinct": {
+      "passed": 22,
+      "files": 3
+    },
+    "httpDistinct": {
+      "passed": 11,
+      "files": 4,
+      "detail": "Final 4-file run 10 passed/1 logo-selector failure; corrected image test rerun 5/5 on same build. No double counting."
+    },
+    "buildAndTypecheck": "passed",
+    "runtimeBraces": "passed",
+    "runtimeLintInputs": "passed",
+    "lint": "0 errors; full run 352 existing warnings, final changed-file run 4 existing warnings",
+    "visual": "17 pages browser PDF and LibreOffice-rendered PPTX; native PowerPoint unavailable"
+  },
+  "ciAtCapture": {
+    "runId": 41768756212,
+    "head": "488e3cf1",
+    "quality": "success",
+    "postgres": "success",
+    "print": "success",
+    "http": "in_progress",
+    "notAttributedToThisCommit": true
+  },
+  "files": [
+    {
+      "path": "phase20-focused-final.log",
+      "bytes": 217,
+      "sha256": "f4e0707189920eb4bf48bedafec827dc2ba62cc903e60e3048d2541f7faff0de",
+      "rawSha256": "f4e0707189920eb4bf48bedafec827dc2ba62cc903e60e3048d2541f7faff0de",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-full-unit-accepted.log",
+      "bytes": 439,
+      "sha256": "746065fd8f677fef4c7f13d2b1bb3e1a5fa2289be37f9d4e65214a04c141ca86",
+      "rawSha256": "746065fd8f677fef4c7f13d2b1bb3e1a5fa2289be37f9d4e65214a04c141ca86",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-pg-accepted.log",
+      "bytes": 559,
+      "sha256": "c977aef7b81160351381184c2854b521b448dc36657c80649958cc35a4e18ccb",
+      "rawSha256": "c977aef7b81160351381184c2854b521b448dc36657c80649958cc35a4e18ccb",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-build-accepted.log",
+      "bytes": 13421,
+      "sha256": "fb6cc7dc6bb15fd9293800219e98d3c28fa65ef21ac5e959761b42be030626c9",
+      "rawSha256": "cd3301a20c1661f0571941f7ce478a53ad118058897e8666d40dc244c0f15e00",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-http-accepted.log",
+      "bytes": 2038,
+      "sha256": "faf80fa40f34a045a529c82a3f3068192607d8faca86cc23d307b85c0c8e0ad1",
+      "rawSha256": "faf80fa40f34a045a529c82a3f3068192607d8faca86cc23d307b85c0c8e0ad1",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-image-http-accepted.log",
+      "bytes": 562,
+      "sha256": "99b708982d23095278191223ab1678129f017cc0eee40c562fde21f9ee94c202",
+      "rawSha256": "99b708982d23095278191223ab1678129f017cc0eee40c562fde21f9ee94c202",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-preflight-accepted.log",
+      "bytes": 789,
+      "sha256": "cca461df9904ea83ecf2cec81ecb750730c34cf73f7d0e5dec7844e4591ded16",
+      "rawSha256": "cca461df9904ea83ecf2cec81ecb750730c34cf73f7d0e5dec7844e4591ded16",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-runtime-braces-accepted.log",
+      "bytes": 108,
+      "sha256": "5dcce2656b27add60a477c8b6aa318707c2512cea9c5d8b26d62e5c8647f2d98",
+      "rawSha256": "5dcce2656b27add60a477c8b6aa318707c2512cea9c5d8b26d62e5c8647f2d98",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-runtime-lint-accepted.log",
+      "bytes": 137,
+      "sha256": "3c576a736d2fe8188a29f5470fa3463e3fd157bdaf2c6bcb267917b4b8ed7020",
+      "rawSha256": "3c576a736d2fe8188a29f5470fa3463e3fd157bdaf2c6bcb267917b4b8ed7020",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-lint-final.log",
+      "bytes": 272244,
+      "sha256": "702f1f3e400a63972e76d3a5c9764ca4562e2f664cf9ea68068aed2f8a268b24",
+      "rawSha256": "702f1f3e400a63972e76d3a5c9764ca4562e2f664cf9ea68068aed2f8a268b24",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-display-eslint.log",
+      "bytes": 6130,
+      "sha256": "a0be76067050d106d527e926b534bed3eb5879736c1928f60361cf22429cd0a4",
+      "rawSha256": "a0be76067050d106d527e926b534bed3eb5879736c1928f60361cf22429cd0a4",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-body-scan.log",
+      "bytes": 197,
+      "sha256": "fddd3a7cf2e0cb3f7b0a72b2a1665ff311e92de5a52d2a5c48eab23337d4dd17",
+      "rawSha256": "fddd3a7cf2e0cb3f7b0a72b2a1665ff311e92de5a52d2a5c48eab23337d4dd17",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-libreoffice-final.log",
+      "bytes": 230,
+      "sha256": "b07d35da79f7aaefdd06854d8d7f989060cc413e7d4011f046e5abb28e8ee405",
+      "rawSha256": "b07d35da79f7aaefdd06854d8d7f989060cc413e7d4011f046e5abb28e8ee405",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-http-route-red.log",
+      "bytes": 3564,
+      "sha256": "1e6ef91440000ac7405729a03cc08476044e36e0d1ab518004e9dc15aa00b702",
+      "rawSha256": "1e6ef91440000ac7405729a03cc08476044e36e0d1ab518004e9dc15aa00b702",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "phase20-print-integration-red.log",
+      "bytes": 1388,
+      "sha256": "c7d7665cceec60af12eaefe7ff5e026318dec17cbea3b2bc1cb0d817e383c5c7",
+      "rawSha256": "c7d7665cceec60af12eaefe7ff5e026318dec17cbea3b2bc1cb0d817e383c5c7",
+      "normalization": "ANSI removed; CR and trailing whitespace normalized"
+    },
+    {
+      "path": "ci-base-488e3cf1.json",
+      "bytes": 23172,
+      "sha256": "68c8fd0543d4dd254c8289662afdaa966488868817692c8402149f7dae3c3692"
+    },
+    {
+      "path": "visual-artifacts.json",
+      "bytes": 1976,
+      "sha256": "9125c4dfb568c7648330a9c6fc412ab67212b7200514fee1164de42165362a8b"
+    },
+    {
+      "path": "synthetic-illustrated-study.pptx",
+      "bytes": 201871,
+      "sha256": "1dfac2bd439b3939407017116047d0224d3ae8163c39e45afc9e992fc9feb99d"
+    },
+    {
+      "path": "synthetic-browser-study.pdf",
+      "bytes": 302125,
+      "sha256": "0e9e0bd41402d76e186e6ed1650f9d3d1153fbf88cf80e06dc9d907dc24e2c93"
+    },
+    {
+      "path": "synthetic-browser-pdf.png",
+      "bytes": 52921,
+      "sha256": "fa9b9937f4ba86f7d516e65beca2bb48dc80f162b5628049e9d3e8fe4c7339f2"
+    },
+    {
+      "path": "synthetic-libreoffice-image.png",
+      "bytes": 25820,
+      "sha256": "3c198bcf8ec8ec95e2b59167558a73158dac68e12a43d2163936324ffd1eb3e9"
+    },
+    {
+      "path": "synthetic-libreoffice-text.png",
+      "bytes": 43811,
+      "sha256": "b6f17a5ce2c2882d9aff9aecd6d04c13006e5c594028ff8c2c1d1e356596aa38"
+    }
+  ],
+  "sourceHashes": {
+    "__tests__/ortho-study-illustrated.test.ts": "ebc7e427bc0960e462d434a997ff8dec9db55e342133ff9273b389618891ec4d",
+    "__tests__/ortho-study-ipr.test.ts": "3459857c923428fa7dc44d8869ec4b992b44f509c2816c5773a3bee6d431f641",
+    "__tests__/postgres/ortho-space-ledger.test.ts": "5228cb96b9b394018284dcce71a8d145716c6bc0c188730a477e24b595a046c1",
+    "__tests__/postgres/ortho-study-image.test.ts": "cf557323e6d5f11960c981adef41a6afdec66f995226a09788f571ea7abfa6df",
+    "__tests__/security-http/ortho-space-ledger-browser.test.ts": "9f4dced82fbfc55997e240216637520f649fc0e9926249b980c5d5b507b856ea",
+    "__tests__/security-http/ortho-study-image-browser.test.ts": "351289f0aff8f845902be9358ed6786ab2f39674408a6484f808124f7b143809",
+    "app/api/ortho/[id]/case-study/illustrated-pptx/route.ts": "939b8e322f0a0e86a3292c237c8b831332d926f3afb3ab027bed3cde40d52518",
+    "app/print/ortho-study/[id]/page.tsx": "68708545c720b53419dc0db0e547ecaa443edd3f6251bb599ae472cd9283153e",
+    "components/OrthoCaseStudy.tsx": "9ba600a3b35af3a0c1951cd6d71a33334f7bd162e5242cdfd500f8ec5a3fc7e7",
+    "components/OrthoIllustratedStudyPrint.tsx": "58b4c3acb68fc50ee2cf9dba6ad7d84af766650b842e899997f1b7d8f6c6aa2a",
+    "lib/audit.ts": "afe72f51c517bd7cb575abed55400d3f3f4336ca50e09f36ea7339b16351a78a",
+    "lib/http-permissions.ts": "5dbe98dc6c7f5e1022bb8a03e425c3857bfc1f617557d44f13ac0d6949c4e7bc",
+    "lib/ortho-case-presentation-i18n.ts": "27fa20e1593eda814a137bc0e1eb957a4b7895f64484e2e93a52f207294998fb",
+    "lib/ortho-case-study-access.ts": "604293cb45b35f30494ba0608d3c1f320b91eb1b14811f44a253add75faeb0ba",
+    "lib/ortho-case-study-capture.ts": "5ce938d2aa7201a340ca8a2f55e7b1f9f4bd1eb54c5b3f158ee78b4c9bfe1a1c",
+    "lib/ortho-case-study-inventory-client.ts": "fb359574db15131bc79b6ab0750f6586a95d2b2049e8c089e53a41c001ca08f9",
+    "lib/ortho-case-study-inventory.ts": "bff4bc53e7602d2c5111e54eefa63813e6118d1e4daaecb09ea8919df26ef805",
+    "lib/ortho-case-study-recorded-facts.ts": "6f0e8a0813f7f96f2faa87263055908b7e69ea05b1fbe1cbd8e856b3947b2b13",
+    "lib/ortho-case-study-source-union.ts": "d039e02e88673bbd817aa9e4b8d5a67d13d98d2314882ee7979f330214f84d30",
+    "lib/ortho-case-study-sources.ts": "309cb2f8812b9f1a64fc8041e92f6d97b588be11aa1fb6e7deb4076f17570bc1",
+    "lib/ortho-case-study.ts": "01bd106301e8409003c44e8057c3df1237634357da64c7d9ec16467046c207b4",
+    "lib/ortho-study-illustrated-pptx.ts": "6d35ad59896714460eb0bd9c55510d2a4f8fe05920badc076f48cc5d70762efb",
+    "lib/ortho-study-illustrated-store.ts": "6b9c2860bb8991a171bc69c96a0d5a55a595d77ec6f218ff1c340f9ead8065ec",
+    "lib/ortho-study-illustrated.ts": "3dcef0ce6beed4666d0817ecf5010937ea2e0f7161c713bb37347b2e0717af61",
+    "lib/ortho-study-ipr-store.ts": "cc5e650c4053e5e3e437ac30a1a8a9490ab8536bf154bc01a43defe21a826500",
+    "lib/ortho-study-ipr.ts": "9e5b1325bba7f29912dddc6196aee777c73db3974453af7e61b30b86f8ebd108",
+    "lib/ortho-study-space-plan-store.ts": "65753e951359f9f22bf21d54f6896fc70aa3c8822fc19b45cb8ef971f7474cdb",
+    "lib/ortho-study-text-export.ts": "ef7dd2441647f15557bab31f4ddfc512113a6504be01619ae71f7797295960b8"
+  }
+}

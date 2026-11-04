@@ -1,0 +1,39 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-space-ledger-browser.test.ts __tests__/security-http/ortho-study-image-browser.test.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/patient-cockpit-real-contract-ui.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-study-image-browser.test.ts (5 tests | 1 failed) 31656ms
+   × selects, previews, rotates, saves and reloads the same image use at 1280px without changing its original 7969ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-study-image-browser.test.ts > selects, previews, rotates, saves and reloads the same image use at 1280px without changing its original
+AssertionError: expected [ …(19) ] to have a length of 2 but got 19
+
+- Expected
++ Received
+
+- 2
++ 19
+
+ ❯ __tests__/security-http/ortho-study-image-browser.test.ts:80:134
+     78|    expect(await printed.locator('.study-sheet img.print-watermark-prot…
+     79|    await printed.evaluate(async()=>{await document.fonts.ready;await P…
+     80|    const pngs=await printed.locator('.study-sheet img').evaluateAll(im…
+       |                                                                                                                                      ^
+     81|    for(const src of pngs)expect(media.some(b=>b.equals(Buffer.from(src…
+     82|    const pdfPath='.settings-ui-artifacts/ortho-illustrated-study.pdf';…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 10 passed (11)
+   Start at  04:19:14
+   Duration  74.99s (transform 248ms, setup 0ms, import 868ms, tests 67.76s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

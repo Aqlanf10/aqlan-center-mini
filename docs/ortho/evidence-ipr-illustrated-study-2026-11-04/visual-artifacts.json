@@ -1,0 +1,66 @@
+{
+  "buildId": "Zw6F11XCCDlb3BuIN_HGM",
+  "syntheticOnly": true,
+  "files": [
+    {
+      "path": "/workspace/ortho-panorama-flow/.settings-ui-artifacts/ortho-illustrated-study.pptx",
+      "bytes": 201871,
+      "sha256": "1dfac2bd439b3939407017116047d0224d3ae8163c39e45afc9e992fc9feb99d"
+    },
+    {
+      "path": "/workspace/ortho-panorama-flow/.settings-ui-artifacts/ortho-illustrated-study.pdf",
+      "bytes": 302125,
+      "sha256": "0e9e0bd41402d76e186e6ed1650f9d3d1153fbf88cf80e06dc9d907dc24e2c93"
+    },
+    {
+      "path": "/workspace/ortho-panorama-flow/.settings-ui-artifacts/ortho-illustrated-image.png",
+      "bytes": 49875,
+      "sha256": "a84e3a321b66d80079d42133481bc790fcfd158362d2b79e3c41607d9219c009"
+    },
+    {
+      "path": "/workspace/ortho-panorama-flow/.settings-ui-artifacts/ortho-illustrated-pdf-image.png",
+      "bytes": 52921,
+      "sha256": "fa9b9937f4ba86f7d516e65beca2bb48dc80f162b5628049e9d3e8fe4c7339f2"
+    },
+    {
+      "path": "/workspace/ortho-evidence/phase20-libreoffice-final/ortho-illustrated-study.pdf",
+      "bytes": 92194,
+      "sha256": "d168feea80fe2eb51ab65a3ceef56cc7223e30384cfd87c709f57c2e756c3083"
+    }
+  ],
+  "media": [
+    {
+      "path": "ppt/media/image-5-1.png",
+      "sha256": "71cea4c03c3484042b7f168da03880faa4ffb3ed825b41f18d0dffea8f313f3a",
+      "bytes": 2950,
+      "dimensions": [
+        372,
+        439
+      ],
+      "pngChunks": [
+        "IHDR",
+        "pHYs",
+        "IDAT",
+        "IEND"
+      ]
+    },
+    {
+      "path": "ppt/media/image-7-1.png",
+      "sha256": "86cc0d2aa93d2027d45730e2b71af2afad8dec77959da635c55341ff163d03d6",
+      "bytes": 3228,
+      "dimensions": [
+        372,
+        439
+      ],
+      "pngChunks": [
+        "IHDR",
+        "pHYs",
+        "IDAT",
+        "IEND"
+      ]
+    }
+  ],
+  "embeddings": [],
+  "slides": 17,
+  "visualReview": "Browser PDF image/header/ISO/page count; LibreOffice text and image pages reviewed. Native PowerPoint unavailable."
+}
