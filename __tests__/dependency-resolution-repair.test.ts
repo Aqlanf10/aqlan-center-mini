@@ -21,7 +21,10 @@ describe.each(["", "scripts/dependency-review/consumer-fixture/"])("official dep
     expect(lock.packages[""].devDependencies.tailwindcss).toBe("3.4.19");
     expect(lock.packages["node_modules/tailwindcss"].version).toBe("3.4.19");
     expect(lock.packages["node_modules/postcss-nested"].version).toBe("6.2.0");
-    expect(manifest.overrides).toEqual(overrides);
+    expect(manifest.overrides).toEqual(prefix ? overrides : {
+      ...overrides,
+      "@typescript-eslint/typescript-estree@8.70.0": { minimatch: "11.0.3" },
+    });
   });
   it("contains only the two exact official patched parser copies", () => {
     const copies = Object.keys(lock.packages).filter(path => path.endsWith("/postcss-selector-parser"));

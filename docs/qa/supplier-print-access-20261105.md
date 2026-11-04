@@ -22,3 +22,24 @@ Synthetic data only; no Production requests or changes.
 Commands use Node 22.23.3 and `npm ci --ignore-scripts` from this checkout's exact lockfile. Vitest runs use `--maxWorkers=1 --no-file-parallelism` to stay within shared execution capacity. A first combined focused-test/typecheck attempt was interrupted to relieve shared memory pressure; the completed sequential runs above are the reported test evidence.
 
 Full typecheck, full suite/build, CI, deployment, and live HTTP validation are separate checks and are not claimed by this report.
+
+## Published CI and scoped dependency follow-up
+
+Initial published head `0f753b940385edf5bfbe4c6b2c6d77314de74d08` passed full
+TypeScript, lint, 12,841 unit tests across 731 files, and synthetic print/watermark
+CI. Its dependency audit failed on the main branch's unchanged development-only
+`minimatch@10.2.6` copy under TypeScript-ESLint. The build and dependent HTTP job
+therefore did not run. No audit failure was suppressed.
+
+The separately reviewed dependency repair `e514b3f17adbb5e652c3c6d420cf9ffaa048da72`
+was applied on top of the published supplier fix. It pins only the affected
+TypeScript-ESLint consumer to the official patched minimatch version and retains
+the existing lint toolchain. See `minimatch-audit-repair-20261105.md` for provenance
+and compatibility analysis.
+
+On the combined tree, a fresh locked installation passed, 254 focused supplier,
+route, dependency, compatibility, and audit tests passed across nine suites, and
+`npm run ci:audit` passed with zero vulnerabilities in both raw full and
+production-only reports. The installed dependency and official withdrawal proofs
+also passed. Exact-head full CI, build/runtime proof, and HTTP/browser checks must
+complete on the refreshed PR before merge eligibility is asserted.
