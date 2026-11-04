@@ -1,0 +1,20 @@
+{
+  "baseHead": "e22cf21dd6524b30f7cd84408af5640914c16231",
+  "buildId": "-HS07rcVyPraLKpfTCVvJ",
+  "files": {
+    "__tests__/ortho-study-image-processor.test.ts": "d9fa21d2ecddd50b42d903da883b9960125b89b32a227ad7a043d39c0d8e20b1",
+    "__tests__/ortho-study-image-selection.test.ts": "3623c1b5839a019ef3c71f6eca0fc17fdcf622f1f34607f5ff00bb39c668102b",
+    "__tests__/postgres/ortho-study-image.test.ts": "3ba658da62cf0d99d3803cd4ec62436c5bdb88c2a640bb601d5fc34a4580e297",
+    "__tests__/security-http/ortho-study-image-browser.test.ts": "0da89f1eb3d561bfdc1a7f1ef0b7200421d7cc0116580d3c41a02731fd7d4e16",
+    "app/api/ortho/[id]/case-study/media/route.ts": "c619fda80542face97baba23924bbf193b7fbeb66750200a05ad708b3d792fa9",
+    "components/OrthoCaseStudy.tsx": "922763ac618a95433e32c7482c286d5a00deb3dcf5254cf47102c70c3174107b",
+    "components/OrthoStudyImageEditor.tsx": "1a432e92bcbf40ecaea6922a90f5154b23d95cbb06b45a00a7112db3e93327ec",
+    "components/OrthoStudyImagePicker.tsx": "27a37cc4d733c5dae35bbf31613e5cd0870bf45d34a4979f31eb71e15769c292",
+    "lib/http-permissions.ts": "785fd7ae22c94d4c436e30690268b902b43548968a4474804846123a39feda44",
+    "lib/ortho-study-image-client.ts": "aab34743979c4d457edc5b5451555fe40aabf718a30494d72507e4df0be59fa2",
+    "lib/ortho-study-image-contract.ts": "b0d297cd1b42e2566d7539638ee655d27cd36f083a1ccc54c8b18a17263e5a70",
+    "lib/ortho-study-image-processor.ts": "ab0d2e5312108ecdd9b0a42e18f1f6cdc9ee7bfee9223c347988e4e8bd3214b0",
+    "lib/ortho-study-image-selection.ts": "c362f5c70b72155c149792763f1e46488736a39a95552a0d148fa94c304e9e96",
+    "lib/ortho-study-image-store.ts": "f30072944b4221156e8598106646db1a580733f55286528157fb3db0ad2cd427"
+  }
+}

@@ -1,0 +1,63 @@
+
+/workspace/ortho-panorama-flow/components/OrthoCaseStudy.tsx
+   41:11  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-panorama-flow/components/OrthoCaseStudy.tsx:41:11
+  39 |   const t = (message: StudyMessage) => studyText(locale, message);
+  40 |   useEffect(() => {
+> 41 |     try { setLocale(readStudyDisplayLocale(localStorage.getItem(STUDY_DISPLAY_LOCALE_KEY))); } catch { /* Display still works without browser storage. */ }
+     |           ^^^^^^^^^ Avoid calling setState() directly within an effect
+  42 |   }, []);
+  43 |   const changeLocale = (value: string) => {
+  44 |     const next = readStudyDisplayLocale(value); setLocale(next);                                                                                                                                                                                                                          react-hooks/set-state-in-effect
+   57:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-panorama-flow/components/OrthoCaseStudy.tsx:57:5
+  55 |     let live = true; const abort = new AbortController();
+  56 |     const current = () => live && owner.active() && owner.readVersion === readVersion;
+> 57 |     setView({ owner, readVersion, selected, state: "loading" });
+     |     ^^^^^^^ Avoid calling setState() directly within an effect
+  58 |     void (async () => {
+  59 |       try {
+  60 |         const query = new URLSearchParams({ patientId: String(patientId) }); if (selected !== null) query.set("revisionId", String(selected));                                                                                                                                                                                                        react-hooks/set-state-in-effect
+  222:99  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/ortho-panorama-flow/components/OrthoCaseStudy.tsx:222:99
+  220 |   const key = JSON.stringify([kind, after, props.owner.readVersion]);
+  221 |   useEffect(() => {
+> 222 |     let active = true; const abort = new AbortController(), generation = props.owner.readVersion; setError(null);
+      |                                                                                                   ^^^^^^^^ Avoid calling setState() directly within an effect
+  223 |     const currentOwner = () => active && props.owner.active() && props.owner.readVersion === generation;
+  224 |     void (async () => { try {
+  225 |       const query = new URLSearchParams({ patientId: String(props.patientId), kind }); if (after !== null) query.set("afterId", String(after));  react-hooks/set-state-in-effect
+  234:6   warning  React Hook useEffect has a missing dependency: 'props'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         react-hooks/exhaustive-deps
+
+/workspace/ortho-panorama-flow/components/OrthoStudyImageEditor.tsx
+  136:6  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+✖ 5 problems (0 errors, 5 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

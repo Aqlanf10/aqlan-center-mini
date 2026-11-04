@@ -1,0 +1,79 @@
+{
+  "phase": 16,
+  "approvedSpecificationSha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+  "buildId": "-HS07rcVyPraLKpfTCVvJ",
+  "acceptance": [
+    {
+      "id": "O26",
+      "status": "partially_verified",
+      "evidenceLimit": "Current image permission, case scope, active user and bytes checked by the private preview service; no export job or download capability yet.",
+      "files": [
+        "lib/ortho-study-image-store.ts",
+        "__tests__/postgres/ortho-study-image.test.ts",
+        "__tests__/security-http/ortho-study-image-browser.test.ts"
+      ]
+    },
+    {
+      "id": "O31",
+      "status": "partial",
+      "evidenceLimit": "Existing layout slots receive selected document uses. Full slide template and illustrated export remain incomplete.",
+      "files": [
+        "components/OrthoStudyImagePicker.tsx",
+        "lib/ortho-study-image-selection.ts"
+      ]
+    },
+    {
+      "id": "O33",
+      "status": "partially_verified",
+      "evidenceLimit": "All eight EXIF orientations verified on actual pixels; browser saves and reloads rotation/crop. Browser fixture is orientation1; combined non1 EXIF plus browser persistence remains unverified.",
+      "files": [
+        "__tests__/ortho-study-image-processor.test.ts",
+        "__tests__/security-http/ortho-study-image-browser.test.ts"
+      ]
+    },
+    {
+      "id": "O34",
+      "status": "partially_verified",
+      "evidenceLimit": "Independent uses and occupied-slot refusal verified in domain test; two different crops of the same source through the full browser journey remain to test.",
+      "files": [
+        "lib/ortho-study-image-selection.ts",
+        "__tests__/ortho-study-image-selection.test.ts"
+      ]
+    },
+    {
+      "id": "O35",
+      "status": "incomplete",
+      "evidenceLimit": "Private preview is implemented. Existing PPTX/PDF remains text-only; no image export parity claim.",
+      "files": [
+        "lib/ortho-study-image-processor.ts",
+        "lib/ortho-study-text-export.ts"
+      ]
+    },
+    {
+      "id": "O36",
+      "status": "partially_verified",
+      "evidenceLimit": "Preview path has no clinical writes and preserves original bytes. A previously approved ceph plus presentation crop end-to-end is not yet tested.",
+      "files": [
+        "lib/ortho-study-image-store.ts",
+        "__tests__/postgres/ortho-study-image.test.ts"
+      ]
+    },
+    {
+      "id": "O37",
+      "status": "partially_verified",
+      "evidenceLimit": "Default contain preserves all content without automatic crop; explicit cover and manual crop tested mathematically. No automated clinical region detector.",
+      "files": [
+        "lib/ortho-study-image-selection.ts",
+        "lib/ortho-study-image-processor.ts"
+      ]
+    },
+    {
+      "id": "O51",
+      "status": "partially_verified",
+      "evidenceLimit": "Saved image-use recipe is restored after page reload. Unsaved browser-close recovery, second-device and later illustrated export are not accepted by this phase.",
+      "files": [
+        "__tests__/security-http/ortho-study-image-browser.test.ts"
+      ]
+    }
+  ]
+}

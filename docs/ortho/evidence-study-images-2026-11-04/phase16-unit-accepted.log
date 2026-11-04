@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+
+ Test Files  8 passed (8)
+      Tests  146 passed (146)
+   Start at  02:42:12
+   Duration  4.85s (transform 966ms, setup 0ms, import 1.41s, tests 2.23s, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
