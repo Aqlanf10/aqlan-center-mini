@@ -37,6 +37,7 @@ export const CANONICAL_PAGES: readonly CanonicalPage[] = Object.freeze([
  { href: "/patients", label: "المرضى", anyOf: [], record: "patient", exact: true, description: "البحث عن المرضى وتصفّح قائمتهم ضمن نطاق مرضاك المسموح." },
  { href: "/ortho", label: "متابعة التقويم", anyOf: ["clinical.ortho.view"], record: "patient", exact: true, description: "حالات المتابعة ضمن نطاق مرضاك؛ تفاصيل المواعيد حسب نطاق مواعيدك المستقل." },
  { href: "/lab", label: "المختبر", anyOf: ["clinical.lab.view"], record: "patient", exact: true, description: "أعمال المختبر ضمن نطاق مرضاك: المتأخر والمستحق اليوم وما وصل ولم يُركّب؛ والمتابعة الشاملة لمن نطاقه كل المرضى." },
+ { href: "/my-work", label: "عملي السريري", anyOf: ["clinical.referrals.manage"], record: "patient", exact: true, description: "الإحالات إليك ومنك وما عاد إليك ضمن نطاق مرضاك، وجدول مواعيدك اليوم؛ لحساب مرتبط بطبيب." },
  { href: "/finance", label: "الصندوق والورديات", anyOf: ["finance.shifts.view"], exact: true, description: "إجماليات الصندوق، تفاصيل الحركات المسموحة، وفتح الوردية وإقفالها بحسب صلاحياتك." },
  { href: "/patients/[id]", label: "ملف المريض", anyOf: [], record: "patient", pattern: /^\/patients\/[1-9][0-9]{0,9}$/, description: "ملف مريضٍ ضمن نطاق مرضاك." },
  { href: "/staff-access", label: "صلاحيات الطاقم", anyOf: ["staff.view"], description: "دليل الطاقم وتعديل صلاحيات كل موظف بمراجعة وتدقيق." },

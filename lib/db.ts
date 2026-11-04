@@ -28883,6 +28883,66 @@ export async function getReferral(id: number): Promise<Referral | null> {
   return rows[0] ? toReferral(rows[0]) : null;
 }
 
+/** (M2 slice 73) The same read on the caller's snapshot or transaction. */
+export async function getReferralWith(q: Pick<DbClient, "query">, id: number): Promise<Referral | null> {
+  const { rows } = await q.query<ReferralRow>(`${REFERRAL_SELECT} WHERE r.id = $1`, [id]);
+  return rows[0] ? toReferral(rows[0]) : null;
+}
+
+/**
+ * (M2 slice 73) The external referral letter on the caller's transaction: the same INSERT
+ * as `createReferral`, with its audit row in the SAME transaction (the legacy writer
+ * records it after the insert). `receipt` (canonical request key) joins the audit row.
+ */
+export async function createReferralOn(client: DbClient, input: ReferralDraft & {
+  patientId: number; doctorPartyId: number | null; actor: string; actorRole?: string | null;
+}, receipt?: Readonly<Record<string, string>>): Promise<Referral | null> {
+  const { rows } = await client.query<{ id: number }>(
+    `INSERT INTO patient_referrals (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by)
+     SELECT $1, $2, $3, $4, $5, $6, $7, (SELECT name FROM parties WHERE id = $7), $8
+      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+     RETURNING id`,
+    [input.patientId, input.toName, input.toSpecialty, input.reason, input.teeth, input.urgency,
+      input.doctorPartyId, input.actor],
+  );
+  if (!rows[0]) return null;
+  await insertAuditRow(client, {
+    action: "referral.create", entity: "patient", entityId: input.patientId,
+    entityLabel: `${input.toName}`,
+    details: {
+      الإحالة: rows[0].id, إلى: input.toName, التخصص: input.toSpecialty, السبب: input.reason, الأسنان: input.teeth ?? "—", الاستعجال: input.urgency,
+      ...(receipt ?? {}),
+    },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return getReferralWith(client, rows[0].id);
+}
+
+/** (M2 slice 73) `closeReferral` on the caller's transaction, its audit row included. */
+export async function closeReferralOn(client: DbClient, input: {
+  id: number; status: "completed" | "cancelled"; note: string | null; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "not_found" | "already_closed" | "internal" }> {
+  const { rows } = await client.query<{ id: number; patient_id: number; to_name: string }>(
+    `UPDATE patient_referrals
+        SET status = $2, outcome_note = $3, closed_by = $4, closed_at = NOW()
+      WHERE id = $1 AND status = 'sent' AND kind = 'external'
+      RETURNING id, patient_id, to_name`,
+    [input.id, input.status, input.note, input.actor],
+  );
+  if (!rows[0]) {
+    const existing = await getReferralWith(client, input.id);
+    if (!existing) return { ok: false, reason: "not_found" };
+    return { ok: false, reason: existing.kind === "internal" ? "internal" : "already_closed" };
+  }
+  await insertAuditRow(client, {
+    action: input.status === "completed" ? "referral.complete" : "referral.cancel",
+    entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].to_name,
+    details: { الإحالة: input.id, الملاحظة: input.note ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true, referral: (await getReferralWith(client, input.id))! };
+}
+
 export async function createReferral(input: ReferralDraft & {
   patientId: number; doctorPartyId: number | null; actor: string; actorRole?: string | null;
 }): Promise<Referral | null> {
@@ -30393,53 +30453,64 @@ export async function createInternalReferral(input: InternalReferralDraft & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
-    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
-    const { rows: receiver } = await client.query<{ name: string }>(
-      `SELECT name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.toPartyId]);
-    if (!receiver[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_receiver" }; }
-    if (input.doctorPartyId !== null && input.doctorPartyId === input.toPartyId) {
-      await client.query("ROLLBACK"); return { ok: false, reason: "self" };
-    }
-    for (const caseId of [input.caseId, input.blocksCaseId]) {
-      if (caseId === null) continue;
-      const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [caseId, input.patientId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
-    }
-    if (input.planItemId !== null) {
-      const { rows } = await client.query(
-        `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 AND t.patient_id = $2`,
-        [input.planItemId, input.patientId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
-    }
-    if (input.requestedServiceId !== null) {
-      const { rows } = await client.query(`SELECT 1 FROM services WHERE id = $1 AND is_active`, [input.requestedServiceId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
-    }
-    const { rows: [created] } = await client.query<{ id: number }>(
-      `INSERT INTO patient_referrals
-         (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by,
-          kind, to_party_id, workflow_state, case_id, blocks_case_id, plan_item_id, return_to_party_id, requested_service_id)
-       VALUES ($1, $2, $3, $4, $5::text, $6, $7::int, (SELECT name FROM parties WHERE id = $7::int), $8,
-               'internal', $9, 'requested', $10::int, $11::int, $12::int, $7::int, $13::int)
-       RETURNING id`,
-      [input.patientId, receiver[0].name, input.toSpecialty, input.reason, input.teeth, input.urgency,
-        input.doctorPartyId, input.actor, input.toPartyId, input.caseId, input.blocksCaseId, input.planItemId,
-        input.requestedServiceId],
-    );
-    await insertAuditRow(client, {
-      action: "referral.create", entity: "patient", entityId: input.patientId, entityLabel: receiver[0].name,
-      details: { الإحالة: created.id, النوع: "داخلية", إلى: receiver[0].name, التخصص: input.toSpecialty, السبب: input.reason, الأسنان: input.teeth ?? "—", الاستعجال: input.urgency },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
+    const result = await createInternalReferralOn(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
-    return { ok: true, referral: (await getReferral(created.id))! };
+    return { ok: true, referral: (await getReferral(result.id))! };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
+}
+
+/** The body of `createInternalReferral` on the caller's transaction (M2 slice 73); the
+ * refusals write nothing. `receipt` (canonical request key) joins the audit row. */
+export async function createInternalReferralOn(client: DbClient, input: InternalReferralDraft & {
+  patientId: number; doctorPartyId: number | null; actor: string; actorRole?: string | null;
+}, receipt?: Readonly<Record<string, string>>): Promise<{ ok: true; id: number } | { ok: false; reason: "no_patient" | "bad_receiver" | "self" | "bad_link" }> {
+  const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+  if (!patient[0]) return { ok: false, reason: "no_patient" };
+  const { rows: receiver } = await client.query<{ name: string }>(
+    `SELECT name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.toPartyId]);
+  if (!receiver[0]) return { ok: false, reason: "bad_receiver" };
+  if (input.doctorPartyId !== null && input.doctorPartyId === input.toPartyId) return { ok: false, reason: "self" };
+  for (const caseId of [input.caseId, input.blocksCaseId]) {
+    if (caseId === null) continue;
+    const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [caseId, input.patientId]);
+    if (!rows[0]) return { ok: false, reason: "bad_link" };
+  }
+  if (input.planItemId !== null) {
+    const { rows } = await client.query(
+      `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 AND t.patient_id = $2`,
+      [input.planItemId, input.patientId]);
+    if (!rows[0]) return { ok: false, reason: "bad_link" };
+  }
+  if (input.requestedServiceId !== null) {
+    const { rows } = await client.query(`SELECT 1 FROM services WHERE id = $1 AND is_active`, [input.requestedServiceId]);
+    if (!rows[0]) return { ok: false, reason: "bad_link" };
+  }
+  const { rows: [created] } = await client.query<{ id: number }>(
+    `INSERT INTO patient_referrals
+       (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by,
+        kind, to_party_id, workflow_state, case_id, blocks_case_id, plan_item_id, return_to_party_id, requested_service_id)
+     VALUES ($1, $2, $3, $4, $5::text, $6, $7::int, (SELECT name FROM parties WHERE id = $7::int), $8,
+             'internal', $9, 'requested', $10::int, $11::int, $12::int, $7::int, $13::int)
+     RETURNING id`,
+    [input.patientId, receiver[0].name, input.toSpecialty, input.reason, input.teeth, input.urgency,
+      input.doctorPartyId, input.actor, input.toPartyId, input.caseId, input.blocksCaseId, input.planItemId,
+      input.requestedServiceId],
+  );
+  await insertAuditRow(client, {
+    action: "referral.create", entity: "patient", entityId: input.patientId, entityLabel: receiver[0].name,
+    details: {
+      الإحالة: created.id, النوع: "داخلية", إلى: receiver[0].name, التخصص: input.toSpecialty, السبب: input.reason, الأسنان: input.teeth ?? "—", الاستعجال: input.urgency,
+      ...(receipt ?? {}),
+    },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true, id: created.id };
 }
 
 const REFERRAL_ACTION_AUDIT = {
@@ -30560,6 +30631,51 @@ export async function transitionInternalReferral(input: InternalReferralTransiti
  * «عملي السريري» من جهة الإحالات: ما أُحيل إليّ ولم يكتمل، وما أحلتُه ولم يعد، وما عاد إليّ ولم
  * أطّلع عليه. مرشّحٌ على بياناتٍ قائمة، لا وحدةٌ جديدة.
  */
+/**
+ * (M2 slice 73) The clinician's referral lists on the caller's snapshot, one query at a
+ * time. With `scopeDoctorPartyId` (an `own` patient scope) only patients inside that
+ * scope are listed.
+ */
+export async function listMyReferralsWith(q: Pick<DbClient, "query">, partyId: number, scopeDoctorPartyId: number | null): Promise<{
+  toMe: (Referral & { patientName: string })[];
+  sentOpen: (Referral & { patientName: string })[];
+  returnedToMe: (Referral & { patientName: string })[];
+}> {
+  const inScope = scopeDoctorPartyId === null ? "TRUE" : DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2");
+  const query = async (where: string) => {
+    const { rows } = await q.query<ReferralRow & { patient_name: string }>(
+      `SELECT x.*, patients.full_name AS patient_name FROM (${REFERRAL_SELECT}) x JOIN patients ON patients.id = x.patient_id
+        WHERE x.kind = 'internal' AND ${where} AND ${inScope}
+        ORDER BY x.created_at, x.id LIMIT 200`, scopeDoctorPartyId === null ? [partyId] : [partyId, scopeDoctorPartyId]);
+    return rows.map((row) => ({ ...toReferral(row), patientName: row.patient_name }));
+  };
+  return {
+    toMe: await query(`x.to_party_id = $1 AND x.status = 'sent'`),
+    sentOpen: await query(`x.doctor_party_id = $1 AND x.status = 'sent'`),
+    returnedToMe: await query(`COALESCE(x.return_to_party_id, x.doctor_party_id) = $1 AND x.workflow_state = 'completed'`),
+  };
+}
+
+/** (M2 slice 73) The clinician's appointments today with their referral context. */
+export async function myClinicalTodayWith(q: Pick<DbClient, "query">, partyId: number, todayDate: string): Promise<MyClinicalWorkToday[]> {
+  const { rows } = await q.query<{
+    id: number; patient_id: number; full_name: string; time: string; status: string;
+    referral_id: number | null; reason: string | null; doctor_name: string | null;
+  }>(
+    `SELECT a.id, a.patient_id, p.full_name, to_char(a.scheduled_time, 'HH24:MI') AS time, a.status,
+            r.id AS referral_id, r.reason, r.doctor_name
+       FROM appointments a JOIN patients p ON p.id = a.patient_id
+       LEFT JOIN patient_referrals r ON r.id = a.referral_id AND r.kind = 'internal'
+      WHERE a.doctor_id = $1 AND a.scheduled_date = $2::date AND a.status <> 'cancelled'
+      ORDER BY a.scheduled_time, a.id LIMIT 200`,
+    [partyId, todayDate],
+  );
+  return rows.map((row) => ({
+    appointmentId: row.id, patientId: row.patient_id, patientName: row.full_name, time: row.time, status: row.status,
+    referralId: row.referral_id, referralReason: row.reason, referredBy: row.doctor_name,
+  }));
+}
+
 export async function listMyReferrals(partyId: number): Promise<{
   toMe: (Referral & { patientName: string })[];
   sentOpen: (Referral & { patientName: string })[];

@@ -8,6 +8,7 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { checkInternalReferralDraft, checkReferralDraft } from "@/lib/referrals";
 import { requireSession } from "@/lib/session";
+import { canonicalReferralRoute, commandCanonicalReferralCreate } from "@/lib/canonical-referrals";
 
 export const dynamic = "force-dynamic";
 
@@ -43,9 +44,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
  * (الفحص المركزي نفسه الذي يحرس الوصفات). الاستقبال يسجّل النتيجة ولا يصدر الخطاب.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  /* M2 slice 73: clinical.referrals.manage, the clinician link as issuer, patient scope, requestKey. */
+  const { id } = await params;
+  const canonical = await canonicalReferralRoute(request, (handle, body) => commandCanonicalReferralCreate(handle, id, body), "تعذّر حفظ الإحالة. أعد المحاولة.", 201);
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
-  const patientId = patientIdOf((await params).id);
+  const patientId = patientIdOf(id);
   if (!patientId) return NextResponse.json({ message: "رقم مريض غير صالح." }, { status: 400 });
 
   const user = await findUserByUsername(session.username).catch(() => null);

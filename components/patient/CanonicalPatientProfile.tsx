@@ -7,6 +7,7 @@ import { CanonicalClinicalPlans } from "./CanonicalClinicalPlans";
 import { CanonicalPatientCases } from "./CanonicalPatientCases";
 import { CanonicalOrthoCases } from "./CanonicalOrthoCases";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
+import { CanonicalReferralWork, type ReferralRow } from "./CanonicalReferralWork";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -15,7 +16,6 @@ import { clinicDateString, type Appointment } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { PROBLEM_STATUS_LABEL, type ProblemStatus } from "@/lib/cases";
 import { TIMELINE_KIND_LABEL, type TimelineKind } from "@/lib/workflow";
-import { REFERRAL_SPECIALTY_LABEL, REFERRAL_STATUS_LABEL, type ReferralSpecialty, type ReferralStatus } from "@/lib/referrals";
 import { CONSENT_CHANNEL_LABEL, CONSENT_SOURCE_LABEL, MANUAL_CONSENT_SOURCES, type ConsentChannel, type ConsentSource, type ConsentState } from "@/lib/patient-identity";
 
 /**
@@ -180,7 +180,9 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         ? <CanonicalCephStudies key={JSON.stringify([session.username, session.patientScope, session.capabilities, patientId])} patientId={patientId} ownerKey={session.username} canAnalyze={session.isOwner === true || !!session.capabilities?.includes("clinical.ceph.analyze")} canCreate={session.isOwner === true || !!session.capabilities?.includes("clinical.xrays.upload")} /> : null}
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.plans.view") && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalClinicalPlans key={`${session.username}:${session.patientScope}:${patientId}`} patientId={patientId} /> : null}
-      {projection.care ? <ClinicalPanels patientId={patientId} /> : null}
+      {projection.care ? <ClinicalPanels patientId={patientId}
+        canManageReferrals={session?.isOwner === true || (session?.capabilities ?? []).includes("clinical.referrals.manage")}
+        appointments={(file.appointments ?? []).map(item => ({ id: item.id, date: item.scheduledDate, time: item.scheduledTime, status: item.status }))} /> : null}
       {session?.isOwner === true || (session?.capabilities?.some(c => ["clinical.plans.view", "clinical.visits.document", "clinical.xrays.view"].includes(c)) && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalPatientCases key={JSON.stringify([session.username, session.patientScope, session.capabilities, patientId])} patientId={patientId}
           ownerKey={session.username} canDocument={session.isOwner === true || !!session.capabilities?.includes("clinical.visits.document")} canEdit={session.isOwner === true || !!session.capabilities?.includes("clinical.plans.edit")} /> : null}
@@ -204,7 +206,7 @@ function Detail({ label, value, ltr }: { label: string; value: string | null; lt
 }
 
 /** قراءةٌ واحدة لقسمٍ من الملف عبر مساره الموحّد؛ الخطأ يُعرض نصًّا عربيًّا محدودًا. */
-function usePatientSection<T>(url: string | null): { data: T | null; error: string | null } {
+function usePatientSection<T>(url: string | null, version = 0): { data: T | null; error: string | null } {
   const [state, setState] = useState<{ data: T | null; error: string | null }>({ data: null, error: null });
   useEffect(() => {
     if (!url) return;
@@ -220,7 +222,7 @@ function usePatientSection<T>(url: string | null): { data: T | null; error: stri
       }
     })();
     return () => { cancelled = true; };
-  }, [url]);
+  }, [url, version]);
   return state;
 }
 
@@ -233,11 +235,14 @@ interface MedicalHistoryView {
 interface ProblemView { id: number; label: string; site: string | null; status: ProblemStatus; caseTitle: string | null }
 
 /** الأقسام السريرية: لمن أسقط له الخادم المجموعة العلاجية فقط (المسار يفرضها أيضًا). */
-function ClinicalPanels({ patientId }: { patientId: string }) {
+function ClinicalPanels({ patientId, canManageReferrals, appointments }: {
+  patientId: string; canManageReferrals: boolean; appointments: { id: number; date: string; time: string | null; status: string }[];
+}) {
+  const [referralVersion, setReferralVersion] = useState(0);
   const id = encodeURIComponent(patientId);
   const history = usePatientSection<MedicalHistoryView>(`/api/patients/${id}/medical-history`);
   const problems = usePatientSection<ProblemView[]>(`/api/patients/${id}/problems`);
-  const referrals = usePatientSection<ReferralView[]>(`/api/patients/${id}/referrals`);
+  const referrals = usePatientSection<ReferralRow[]>(`/api/patients/${id}/referrals`, referralVersion);
   const latestVitals = history.data?.vitals[0] ?? null;
   return (
     <>
@@ -279,22 +284,13 @@ function ClinicalPanels({ patientId }: { patientId: string }) {
       <section aria-labelledby="canonical-patient-referrals" className="rounded-2xl border border-slate-200 bg-white p-4">
         <h2 id="canonical-patient-referrals" className="mb-2 text-sm font-bold text-navy-900">الإحالات</h2>
         {referrals.error ? <p role="alert" className="text-sm text-red-700">{referrals.error}</p> : !referrals.data ? <p className="text-sm text-slate-500">جارٍ التحميل…</p>
-          : referrals.data.length === 0 ? <p className="text-sm text-slate-500">لا إحالات.</p> : (
-            <ul className="divide-y divide-slate-100 text-sm">
-              {referrals.data.map(referral => (
-                <li key={referral.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                  <span className="font-semibold text-slate-800 [overflow-wrap:anywhere]">{referral.toName} — {REFERRAL_SPECIALTY_LABEL[referral.toSpecialty] ?? referral.toSpecialty}</span>
-                  <span className="rounded-lg bg-slate-50 px-2 py-0.5 text-xs font-bold text-slate-600">{REFERRAL_STATUS_LABEL[referral.status] ?? referral.status}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          : <CanonicalReferralWork patientId={patientId} referrals={referrals.data} appointments={appointments} canManage={canManageReferrals}
+            onChanged={() => setReferralVersion(version => version + 1)} />}
       </section>
     </>
   );
 }
 
-interface ReferralView { id: number; toName: string; toSpecialty: ReferralSpecialty; status: ReferralStatus }
 interface ConsentView { mode: "opt_in" | "opt_out"; states?: Record<ConsentChannel, ConsentState> }
 const CONSENT_STATE_LABEL: Record<ConsentState, string> = { granted: "موافق", withdrawn: "سحب موافقته", unknown: "غير مسجّل" };
 

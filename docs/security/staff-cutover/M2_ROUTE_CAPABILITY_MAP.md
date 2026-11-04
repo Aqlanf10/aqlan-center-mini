@@ -687,6 +687,24 @@ The read-only patient panel clears stale or failed responses and has no action o
   - PG `families-canonical` (9): projection with and without the ledger grant, own scope (members, hidden guarantor, missing family, patient panel), search and suggestions inside the scope, concurrent double create, key reuse, own-scope writes refused outside, legacy rules and audit, concurrent link race, grant, scope and revocation. Legacy `patient-families` (12) unchanged.
   - Built journey `canonical-families-journey` (2, portOffset 120). The patients journey now expects the family read on the file; the entry journey's not-yet-canonical example is now `/api/executive`.
 
+### Slice 73 — referrals (group 3: `POST /api/patients/[id]/referrals`, `PATCH /api/referrals/[id]`, `POST /api/referrals/[id]/transition`, `GET /api/referrals/mine`)
+- **Admission:** one admitted `clinical.referrals.manage` operation each (new runtime action), inside the actor's patient scope. A referral or patient outside the scope answers like a missing one, before the workflow writer runs, so its kind and state are never disclosed.
+- **Role labels translated, never widened:**
+
+  | Step | Legacy (labels) | Canonical |
+  |---|---|---|
+  | Issue a letter / internal referral | doctor, or admin linked to a doctor party; reception refused | the actor's validated clinician link; none → 403 |
+  | Close an external referral | any role with access to the patient | `clinical.referrals.manage` inside the scope (narrower) |
+  | Accept, decline, complete | the receiving doctor, or admin | the receiving clinician, or the protected owner |
+  | Cancel, acknowledge | the referring doctor, or admin | the referring clinician, or the protected owner |
+  | Schedule (link an appointment) | reception, the receiving doctor, or admin | the receiving clinician, the whole appointment scope (the accepted slice-23 translation of the reception label), or the protected owner |
+  | Mine | doctor or admin labels | the clinician link; patients inside the scope; today only with an appointment scope |
+
+- **Writers:** the internal create (`createInternalReferralOn`, extracted unchanged) and the workflow step (`transitionInternalReferralOnClient`, unchanged, with its lock order) on the admitted transaction. The external letter and its close (`createReferralOn`, `closeReferralOn`) now write their audit rows in the same transaction; the legacy writers are unchanged.
+- **Duplicate prevention:** create needs a `requestKey`; advisory lock on (actor, key) and the receipt in the same-transaction `referral.create` audit row; same request → the first referral (`replayed`), another request → 409.
+- **Screens:** the canonical patient file lists referrals with their valid steps and an issue form (receivers from the canonical «mine» read: active doctors, names only); `/my-work` («عملي السريري») is now a canonical page (`clinical.referrals.manage`, patient scope). No money anywhere.
+- **Tests:** PG `referrals-canonical` (8): issue by the clinician link, double press, key reuse, no link / outside scope / self refused without writing, external letter and close with audit, workflow sides, desk scheduling only with the whole appointment scope, outside scope 404, concurrent accepts, owner, revocation, mine. Legacy referral suites 48/48 unchanged. Built journey `canonical-referrals-journey` (2, portOffset 122).
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

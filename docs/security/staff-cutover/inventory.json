@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "9618ca1a1ab83513e094cfaa0a5ff7309ff3a83c004c6a856695e56317304b8a",
+  "sourceDigest": "f857697ab2c5a10e94cbc4d138be217336585a355f1b358e896d3a75dc61140e",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -57,7 +57,8 @@
     "clinical.lab.view",
     "clinical.laboratories.manage",
     "finance.lab-prices.edit",
-    "finance.payables.record"
+    "finance.payables.record",
+    "clinical.referrals.manage"
   ],
   "summary": {
     "routeMethods": 420,
@@ -2668,11 +2669,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 27
+          "line": 28
         },
         {
           "symbol": "requireSession",
-          "line": 46
+          "line": 51
         },
         {
           "symbol": "findUserByUsername",
@@ -2680,7 +2681,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 51
+          "line": 56
         }
       ]
     },
@@ -3262,7 +3263,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 21
         }
       ]
     },
@@ -3275,7 +3276,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 18
+          "line": 24
         },
         {
           "symbol": "findUserByUsername",
@@ -3283,7 +3284,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 37
+          "line": 43
         }
       ]
     },
@@ -3296,7 +3297,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 16
         },
         {
           "symbol": "findUserByUsername",
@@ -3304,7 +3305,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 17
+          "line": 21
         }
       ]
     },
@@ -11229,11 +11230,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 27
+          "line": 28
         },
         {
           "symbol": "requireSession",
-          "line": 46
+          "line": 51
         },
         {
           "symbol": "findUserByUsername",
@@ -11241,7 +11242,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 51
+          "line": 56
         }
       ]
     },
@@ -11264,11 +11265,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 27
+          "line": 28
         },
         {
           "symbol": "requireSession",
-          "line": 46
+          "line": 51
         },
         {
           "symbol": "findUserByUsername",
@@ -11276,7 +11277,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 51
+          "line": 56
         }
       ]
     },
@@ -12770,7 +12771,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 21
         }
       ]
     },
@@ -12794,7 +12795,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 18
+          "line": 24
         },
         {
           "symbol": "findUserByUsername",
@@ -12802,7 +12803,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 37
+          "line": 43
         }
       ]
     },
@@ -12825,7 +12826,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 16
         },
         {
           "symbol": "findUserByUsername",
@@ -12833,7 +12834,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 17
+          "line": 21
         }
       ]
     },

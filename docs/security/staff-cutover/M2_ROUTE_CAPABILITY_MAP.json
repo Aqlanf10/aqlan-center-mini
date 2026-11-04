@@ -4118,8 +4118,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 73: one admitted clinical.referrals.manage transaction; the issuer is the actor's validated clinician link (none: refused, as legacy reception); the patient inside the scope (404 like missing); idempotent by requestKey (receipt in the same-transaction referral.create audit row); internal writer body unchanged, the external letter's audit now in the same transaction."
  },
  {
   "route": "/api/patients/[id]/responsibility",
@@ -4997,8 +4997,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 73: clinical.referrals.manage (legacy: any role with patient access — narrower); the referral row locked and its patient inside the scope (404 like missing); close and audit in one transaction; internal referrals keep their workflow (409)."
  },
  {
   "route": "/api/referrals/[id]/transition",
@@ -5013,8 +5013,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 73: clinical.referrals.manage; canActOnReferral translated without widening: accept/decline/complete by the receiving clinician, cancel/acknowledge by the referring clinician, schedule by the receiving clinician or the whole appointment scope (slice-23 translation of the reception label), every step by the protected owner only. A referral outside the scope is 404 before the writer runs; the writer body, lock order and audit unchanged."
  },
  {
   "route": "/api/referrals/mine",
@@ -5028,8 +5028,17 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": "Own clinician referrals."
+  "status": "canonical-done",
+  "note": "M2 slice 73: read under clinical.referrals.manage in one owning snapshot; lists by the clinician link, patients inside the patient scope; today's appointments only with an appointment scope; the issue form's receivers (active doctors, names only). No link: empty lists.",
+  "projection": {
+   "legacy": "doctor and admin labels; lists by the account's doctor party for every patient; no patient-access filter; today's appointments always.",
+   "groups": {
+    "lists": "internal referrals to, from and returned to the actor's clinician link — patients inside the patient scope",
+    "today": "the clinician's appointments today with their referral context — only with an appointment scope",
+    "receivers": "active doctors, names only (the issue form's directory)"
+   },
+   "rows": "patient scope all: every patient; own: patients inside DOCTOR_PATIENT_CONDITION; no clinician link: empty lists"
+  }
  },
  {
   "route": "/api/report",
