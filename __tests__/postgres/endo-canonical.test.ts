@@ -104,6 +104,11 @@ describe("refusals, reads and revocation", () => {
     const before = (await q("SELECT count(*)::int AS n FROM endo_treatments"))[0].n;
     expect(await refusal(endo.commandCanonicalEndoOpen(await fx.session("nurse"), String(ids.mine), { caseId: ids.caseMine, toothCode: 46 })))
       .toMatchObject({ code: "endo_clinician_required", status: 403 });
+    // The role-level check comes before validation (as legacy): an invalid body still reads 403.
+    expect(await refusal(endo.commandCanonicalEndoStatus(await fx.session("nurse"), String(ids.mine), String(ids.treatment), { status: "abandoned" })))
+      .toMatchObject({ code: "endo_clinician_required", status: 403 });
+    expect(await refusal(endo.commandCanonicalEndoAddendum(await fx.session("plain"), String(ids.mine), String(ids.treatment), "1", {})))
+      .toMatchObject({ code: "endo_sign_required", status: 403 });
     await expect(endo.commandCanonicalEndoOpen(await fx.session("viewer"), String(ids.mine), { caseId: ids.caseMine, toothCode: 46 })).rejects.toThrow("CAPABILITY_DENIED");
     expect(await refusal(endo.commandCanonicalEndoOpen(await fx.session("doctor"), String(ids.other), { caseId: ids.caseOther, toothCode: 46 })))
       .toMatchObject({ code: "patient_not_found", status: 404 });

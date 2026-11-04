@@ -285,19 +285,30 @@ function toothConditionInput(body: Record<string, unknown>) {
  */
 export async function commandCanonicalToothCondition(session: VerifiedDurableSession, rawPatientId: string, body: Record<string, unknown>, pool = getPool()) {
   const patientId = positiveId(rawPatientId);
-  const requestKey = body.requestKey === undefined ? null : requestKeyOf(body);
-  const input = toothConditionInput(body);
+  // The body is validated only after the clinician/owner check, as the legacy route checked
+  // the role before reading the body: a refused actor never sees validation messages.
+  let parseError: unknown = null;
+  let requestKey: string | null = null;
+  let input = null as ReturnType<typeof toothConditionInput> | null;
+  try {
+    requestKey = body.requestKey === undefined ? null : requestKeyOf(body);
+    input = toothConditionInput(body);
+  } catch (error) { parseError = error; }
   try {
     return await clinicalWrite(session, patientId, "chart.record", requestKey, fingerprintOf({ patientId, ...input }), "السجل", pool, ({ client, handle, actor }) => ({
-      authorize: () => requireClinicianOrOwner(client, handle, "chart_clinician_required", "المخطط السني للطبيب المرتبط بجهة طبيب أو للمالك."),
+      authorize: async () => {
+        await requireClinicianOrOwner(client, handle, "chart_clinician_required", "المخطط السني للطبيب المرتبط بجهة طبيب أو للمالك.");
+        if (parseError) throw parseError;
+      },
       replay: id => getToothRecordWith(client, id),
       write: async stamp => {
-        const record = await recordToothConditionOn(client, { patientId, ...input, recordedBy: actor.actor });
+        const valid = input!;
+        const record = await recordToothConditionOn(client, { patientId, ...valid, recordedBy: actor.actor });
         if (!record) throw patientMissing();
         await insertAuditRow(client, {
           action: "chart.record", entity: "patient", entityId: patientId,
-          entityLabel: `${toothName(input.toothCode)} — ${CONDITION_LABEL[input.condition]} (${STAGE_LABEL[input.stage]})`,
-          details: { السن: input.toothCode, الحالة: input.condition, المرحلة: input.stage, الأسطح: record.surfaces, السجل: record.id, ...stamp },
+          entityLabel: `${toothName(valid.toothCode)} — ${CONDITION_LABEL[valid.condition]} (${STAGE_LABEL[valid.stage]})`,
+          details: { السن: valid.toothCode, الحالة: valid.condition, المرحلة: valid.stage, الأسطح: record.surfaces, السجل: record.id, ...stamp },
           ...actor,
         });
         return record;

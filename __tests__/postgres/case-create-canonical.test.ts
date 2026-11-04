@@ -66,6 +66,9 @@ describe("open a case", () => {
     const before = [await count(ids.mine), await count(ids.far)];
     expect(await refusal(cases.commandCanonicalCaseCreate(await fx.session("planner"), String(ids.mine), { requestKey: key(), specialty: "endodontics", title: "بلا طبيب" })))
       .toMatchObject({ code: "case_create_clinician_required", status: 403 });
+    // The role-level check comes before validation (as legacy): an invalid body still reads 403.
+    expect(await refusal(cases.commandCanonicalCaseCreate(await fx.session("planner"), String(ids.mine), { specialty: "nope" })))
+      .toMatchObject({ code: "case_create_clinician_required", status: 403 });
     await expect(cases.commandCanonicalCaseCreate(await fx.session("viewer"), String(ids.mine), { requestKey: key(), specialty: "endodontics", title: "بلا صلاحية" })).rejects.toThrow("CAPABILITY_DENIED");
     expect(await refusal(cases.commandCanonicalCaseCreate(await fx.session("doctor"), String(ids.far), { requestKey: key(), specialty: "endodontics", title: "خارج النطاق" })))
       .toMatchObject({ code: "patient_not_found", status: 404 });

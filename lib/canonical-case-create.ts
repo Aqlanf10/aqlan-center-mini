@@ -45,10 +45,12 @@ export async function commandCanonicalCaseCreate(session: VerifiedDurableSession
   if (!/^[1-9][0-9]{0,9}$/.test(rawPatientId) || Number(rawPatientId) > 2147483647) throw invalid("رقم مريض غير صالح.");
   const patientId = Number(rawPatientId);
   const requestKey = typeof body.requestKey === "string" ? body.requestKey : "";
-  if (!KEY_PATTERN.test(requestKey)) throw invalid("مفتاح الطلب مفقود أو غير صالح؛ أعد فتح النموذج.");
   const draft = checkCaseDraft(body);
-  if (!draft.ok) throw invalid(draft.message);
-  const fingerprint = createHash("sha256").update(stableJson({ patientId, ...draft.value })).digest("hex");
+  // The body is validated only after the clinician/owner check (below), as the legacy route
+  // checked the role before reading the body: a refused actor never sees validation messages.
+  const parseError = !KEY_PATTERN.test(requestKey) ? invalid("مفتاح الطلب مفقود أو غير صالح؛ أعد فتح النموذج.")
+    : !draft.ok ? invalid(draft.message) : null;
+  const fingerprint = createHash("sha256").update(stableJson({ patientId, ...(draft.ok ? draft.value : {}) })).digest("hex");
   const action = "clinical.plans.edit" as const;
   return withStaffOperation(pool, session, action, async (client, handle) => {
     const scope = await staffOperationPatientScope(client, handle, action);
@@ -56,6 +58,7 @@ export async function commandCanonicalCaseCreate(session: VerifiedDurableSession
     const clinician = await staffOperationClinician(client, handle, action);
     const owner = await staffOperationIsProtectedOwner(client, handle, action);
     if (clinician === null && !owner) throw new CanonicalCaseCreateRefusal("case_create_clinician_required", 403, "فتح الحالات للطبيب المرتبط بجهة طبيب أو للمالك.");
+    if (parseError || !draft.ok) throw parseError ?? invalid("طلب غير صالح.");
     const held = await staffOperationCapabilities(client, handle, action, ["clinical.ortho.view"] as const);
     if ((draft.value.specialty === "orthodontics" || draft.value.orthoCaseId !== null) && !held.has("clinical.ortho.view")) {
       throw new CanonicalCaseCreateRefusal("case_create_ortho_denied", 403, "حالة التقويم تحتاج صلاحية عرض التقويم المستقلة.");

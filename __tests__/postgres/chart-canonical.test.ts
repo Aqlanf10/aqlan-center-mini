@@ -66,6 +66,9 @@ describe("record", () => {
     const beforeOther = await events(ids.other);
     expect(await refusal(rec.commandCanonicalToothCondition(await fx.session("nurse"), String(ids.mine), { toothCode: 21, condition: "caries" })))
       .toMatchObject({ code: "chart_clinician_required", status: 403 });
+    // The role-level check comes before validation (as legacy): an invalid body still reads 403.
+    expect(await refusal(rec.commandCanonicalToothCondition(await fx.session("nurse"), String(ids.mine), { toothCode: 99, condition: "nope", requestKey: "x" })))
+      .toMatchObject({ code: "chart_clinician_required", status: 403 });
     await expect(rec.commandCanonicalToothCondition(await fx.session("viewer"), String(ids.mine), { toothCode: 21, condition: "caries" })).rejects.toThrow("CAPABILITY_DENIED");
     expect(await refusal(rec.commandCanonicalToothCondition(await fx.session("doctor"), String(ids.other), { toothCode: 21, condition: "caries" })))
       .toMatchObject({ code: "patient_not_found", status: 404 });

@@ -76,7 +76,7 @@ type BodyResult = { ok: true; treatment: EndoTreatmentView; created?: boolean } 
 /** One admitted endo write: clinician link or owner, extra grants, scope (no row lock), the body. */
 async function endoWrite(
   session: VerifiedDurableSession, patientId: number, pool: ReturnType<typeof getPool>,
-  options: { needSign?: boolean; preflight?: (held: Held) => void },
+  options: { needSign?: boolean; validate?: () => void; preflight?: (held: Held) => void },
   body: (ctx: EndoContext) => Promise<BodyResult>,
 ): Promise<{ treatment: EndoTreatmentView; status: 200 | 201 }> {
   return withStaffOperation(pool, session, "clinical.visits.document", async (client, handle) => {
@@ -91,6 +91,9 @@ async function endoWrite(
     if (options.needSign && !held.has("clinical.visits.sign")) {
       throw new CanonicalEndoRefusal("endo_sign_required", 403, "الملحق على زيارة موقَّعة يتطلب صلاحية توقيع الزيارات.");
     }
+    // The body is validated only after the role-level checks, as the legacy routes did:
+    // a refused actor never sees validation messages.
+    options.validate?.();
     options.preflight?.(held);
     if (scope.kind !== "all" && !await patientInDoctorScopeWith(client, scope.clinicianPartyId, patientId)) throw patientMissing();
     const result = await body({ client, actor: { actor: identity.username, actorRole: identity.role }, clinicianPartyId, held });
@@ -102,10 +105,10 @@ async function endoWrite(
 
 export async function commandCanonicalEndoOpen(session: VerifiedDurableSession, rawPatientId: string, body: Record<string, unknown>, pool = getPool()) {
   const patientId = positiveId(rawPatientId, "رقم مريض غير صالح.");
-  const draft = checkEndoTreatmentDraft(body);
-  if (!draft.ok) throw invalid(draft.message);
-  const result = await endoWrite(session, patientId, pool, {}, async ({ client, actor }) => {
-    const opened = await openEndoTreatmentOn(client, { patientId, ...draft.value, ...actor });
+  let draft: Extract<ReturnType<typeof checkEndoTreatmentDraft>, { ok: true }>["value"];
+  const validate = () => { const checked = checkEndoTreatmentDraft(body); if (!checked.ok) throw invalid(checked.message); draft = checked.value; };
+  const result = await endoWrite(session, patientId, pool, { validate }, async ({ client, actor }) => {
+    const opened = await openEndoTreatmentOn(client, { patientId, ...draft, ...actor });
     if (opened.ok) return { ok: true, treatment: opened.treatment, created: true };
     const status = opened.reason === "no_patient" ? 404 : opened.reason === "bad_tooth" || opened.reason === "bad_case" ? 400 : 409;
     return { ok: false, refusal: new CanonicalEndoRefusal(`endo_${opened.reason}`, status, OPEN_ENDO_MESSAGE[opened.reason]) };
@@ -116,11 +119,11 @@ export async function commandCanonicalEndoOpen(session: VerifiedDurableSession, 
 export async function commandCanonicalEndoStatus(session: VerifiedDurableSession, rawPatientId: string, rawTreatmentId: string, body: Record<string, unknown>, pool = getPool()) {
   const patientId = positiveId(rawPatientId);
   const treatmentId = positiveId(rawTreatmentId);
-  const change = checkEndoStatusChange(body);
-  if (!change.ok) throw invalid(change.message);
-  const result = await endoWrite(session, patientId, pool, {}, async ({ client, actor }) => {
+  let change: Extract<ReturnType<typeof checkEndoStatusChange>, { ok: true }>["value"];
+  const validate = () => { const checked = checkEndoStatusChange(body); if (!checked.ok) throw invalid(checked.message); change = checked.value; };
+  const result = await endoWrite(session, patientId, pool, { validate }, async ({ client, actor }) => {
     const moved = await changeEndoStatusOn(client, {
-      patientId, treatmentId, status: change.value.status as "completed" | "abandoned", outcome: change.value.outcome, ...actor,
+      patientId, treatmentId, status: change.status as "completed" | "abandoned", outcome: change.outcome, ...actor,
     });
     if (moved.ok) return { ok: true, treatment: moved.treatment };
     if (moved.reason === "not_ready") return { ok: false, refusal: new CanonicalEndoRefusal("endo_not_ready", 409, moved.message ?? "علاج الجذور غير جاهز للإكمال.") };
@@ -134,18 +137,20 @@ export async function commandCanonicalEndoCrown(session: VerifiedDurableSession,
   const treatmentId = positiveId(rawTreatmentId);
   const crownItem = optionalId(body.crownPlanItemId);
   const rctItem = optionalId(body.rctPlanItemId);
-  if (typeof body.crownRequired !== "boolean") throw invalid("حدّد هل التاج لازم أم لا.");
-  if (!crownItem.ok || !rctItem.ok) throw invalid("بند الخطة غير صالح.");
-  const crownRequired = body.crownRequired;
-  const linksPlan = crownItem.value !== null || rctItem.value !== null;
+  const crownRequired = body.crownRequired === true;
+  const linksPlan = crownItem.ok && rctItem.ok && (crownItem.value !== null || rctItem.value !== null);
   const result = await endoWrite(session, patientId, pool, {
+    validate: () => {
+      if (typeof body.crownRequired !== "boolean") throw invalid("حدّد هل التاج لازم أم لا.");
+      if (!crownItem.ok || !rctItem.ok) throw invalid("بند الخطة غير صالح.");
+    },
     // Linking a plan item touches the plan: the plan-edit grant, never a back door around it.
     preflight: held => {
       if (linksPlan && !held.has("clinical.plans.edit")) throw new CanonicalEndoRefusal("endo_plan_edit_required", 403, "تعديل خطط العلاج غير مفعّل لحسابك.");
     },
   }, async ({ client, actor, held }) => {
     const decided = await setEndoCrownOn(client, {
-      patientId, treatmentId, crownRequired, crownPlanItemId: crownItem.value, rctPlanItemId: rctItem.value,
+      patientId, treatmentId, crownRequired, crownPlanItemId: crownItem.ok ? crownItem.value : null, rctPlanItemId: rctItem.ok ? rctItem.value : null,
       canEditPlanLinks: held.has("clinical.plans.edit"), ...actor,
     });
     if (decided.ok) return { ok: true, treatment: decided.treatment };
@@ -163,20 +168,25 @@ const VISIT_STATUS: Record<SaveEndoVisitRefusal, 400 | 404 | 409> = {
 export async function commandCanonicalEndoVisit(session: VerifiedDurableSession, rawPatientId: string, rawTreatmentId: string, body: Record<string, unknown>, pool = getPool()) {
   const patientId = positiveId(rawPatientId);
   const treatmentId = positiveId(rawTreatmentId);
-  const visitRaw = String(body.visitId ?? "");
-  if (!/^[1-9][0-9]{0,9}$/.test(visitRaw) || Number(visitRaw) > 2147483647) throw invalid("اختر الزيارة التي يُسجَّل عليها علاج الجذور.");
-  const visitId = Number(visitRaw);
+  let visitId = 0;
   let expectedVersion: number | null = null;
-  if (body.expectedVersion !== undefined && body.expectedVersion !== null) {
-    const version = Number(body.expectedVersion);
-    if (!Number.isInteger(version) || version < 1) throw invalid("رقم إصدار السجل غير صالح.");
-    expectedVersion = version;
-  }
-  const draft = checkEndoVisitDraft(body);
-  if (!draft.ok) throw invalid(draft.message);
-  return endoWrite(session, patientId, pool, {}, async ({ client, actor, clinicianPartyId }) => {
+  let draft: Extract<ReturnType<typeof checkEndoVisitDraft>, { ok: true }>["value"];
+  const validate = () => {
+    const visitRaw = String(body.visitId ?? "");
+    if (!/^[1-9][0-9]{0,9}$/.test(visitRaw) || Number(visitRaw) > 2147483647) throw invalid("اختر الزيارة التي يُسجَّل عليها علاج الجذور.");
+    visitId = Number(visitRaw);
+    if (body.expectedVersion !== undefined && body.expectedVersion !== null) {
+      const version = Number(body.expectedVersion);
+      if (!Number.isInteger(version) || version < 1) throw invalid("رقم إصدار السجل غير صالح.");
+      expectedVersion = version;
+    }
+    const checked = checkEndoVisitDraft(body);
+    if (!checked.ok) throw invalid(checked.message);
+    draft = checked.value;
+  };
+  return endoWrite(session, patientId, pool, { validate }, async ({ client, actor, clinicianPartyId }) => {
     const saved = await saveEndoVisitOn(client, {
-      patientId, treatmentId, visitId, draft: draft.value, expectedVersion, actorPartyId: clinicianPartyId, ...actor,
+      patientId, treatmentId, visitId, draft, expectedVersion, actorPartyId: clinicianPartyId, ...actor,
     });
     if (saved.ok) return { ok: true, treatment: saved.treatment, created: saved.created };
     return { ok: false, refusal: new CanonicalEndoRefusal(`endo_${saved.reason}`, VISIT_STATUS[saved.reason], SAVE_ENDO_VISIT_MESSAGE[saved.reason]) };
@@ -187,12 +197,16 @@ export async function commandCanonicalEndoAddendum(session: VerifiedDurableSessi
   const patientId = positiveId(rawPatientId);
   const treatmentId = positiveId(rawTreatmentId);
   const endoVisitId = positiveId(rawEndoVisitId);
-  const text = checkEndoAddendum(body);
-  if (!text.ok) throw invalid(text.message);
-  const requestKey = body.requestKey;
-  if (typeof requestKey !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) throw invalid("مفتاح إعادة محاولة الملحق غير صالح.");
-  return endoWrite(session, patientId, pool, { needSign: true }, async ({ client, actor }) => {
-    const added = await addEndoAddendumOn(client, { patientId, treatmentId, endoVisitId, text: text.value, requestKey, ...actor });
+  let text = "";
+  const requestKey = typeof body.requestKey === "string" ? body.requestKey : "";
+  const validate = () => {
+    const checked = checkEndoAddendum(body);
+    if (!checked.ok) throw invalid(checked.message);
+    text = checked.value;
+    if (!IDEMPOTENCY_KEY_PATTERN.test(requestKey)) throw invalid("مفتاح إعادة محاولة الملحق غير صالح.");
+  };
+  return endoWrite(session, patientId, pool, { needSign: true, validate }, async ({ client, actor }) => {
+    const added = await addEndoAddendumOn(client, { patientId, treatmentId, endoVisitId, text, requestKey, ...actor });
     if (added.ok) return { ok: true, treatment: added.treatment, created: added.created };
     const status = added.reason === "not_found" ? 404 : ["bad_key", "bad_text"].includes(added.reason) ? 400 : 409;
     return { ok: false, refusal: new CanonicalEndoRefusal(`endo_${added.reason}`, status, ENDO_ADDENDUM_MESSAGE[added.reason]) };
