@@ -1,0 +1,11 @@
+
+/workspace/ortho-panorama-flow/__tests__/ceph-ai.test.ts
+  5:8  warning  'LandmarkCode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/ortho-panorama-flow/components/CephTracer.tsx
+  1118:16  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+  1355:18  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+✖ 3 problems (0 errors, 3 warnings)
+  0 errors and 2 warnings potentially fixable with the `--fix` option.
+

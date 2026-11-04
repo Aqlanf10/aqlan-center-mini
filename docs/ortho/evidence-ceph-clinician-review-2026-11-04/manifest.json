@@ -1,0 +1,126 @@
+{
+  "scope": "Retire clinical inference entrypoints, preserve manual diagnosis and correct missing-data defaults in legacy helper",
+  "baseCommit": "bf8377008a9e218a2b0a32c723d233348ef900fd",
+  "generatedAtUtc": "2026-11-04T00:09:44.763571+00:00",
+  "applicationCommit": "53d2148c6325ec7f9639bbd9268fbf45e8c612cc",
+  "buildId": "QeNkS8BJKHNaspapFY615",
+  "tests": {
+    "focusedUnit": {
+      "passed": 104,
+      "files": 6,
+      "seconds": 2.63
+    },
+    "postgres18": {
+      "passed": 26,
+      "files": 2,
+      "seconds": 7.25
+    },
+    "browserHttp": {
+      "passed": 37,
+      "files": 7,
+      "seconds": 139.4
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 3
+    },
+    "build": "passed",
+    "preflight": "passed",
+    "unitAll": {
+      "passed": 14017,
+      "files": 821,
+      "seconds": 512.49,
+      "exitCode": 0
+    },
+    "hostedCurrentHead": "not_pushed"
+  },
+  "sourceFiles": [
+    {
+      "path": "lib/ceph.ts",
+      "sha256": "97d990a6f8dc6d445305ac4b78c77e786c8d252744a7f2cc3dbec1140619807b"
+    },
+    {
+      "path": "components/CephTracer.tsx",
+      "sha256": "006f34d1829f1910e5f54276a7b4a0be450afd531b5124beda642aa99802f659"
+    },
+    {
+      "path": "app/api/ceph/[id]/ai-analyze/route.ts",
+      "sha256": "9194724caa8ef6e5854931e7f22649ede190efb3fa19eba4c4ae72dc80d139f1"
+    },
+    {
+      "path": "__tests__/ceph-ai.test.ts",
+      "sha256": "129251330a2337cecd6721d043d0869b83fabe1aeffb51c923c1baa161f570fb"
+    },
+    {
+      "path": "__tests__/ceph-clinician-review.test.ts",
+      "sha256": "404b06847a99ea788686e511ed72d43a699184cfdbda590ec912ad7f4ec420b2"
+    },
+    {
+      "path": "__tests__/security-http/ceph-clinician-review-browser.test.ts",
+      "sha256": "27f137820294f7d624b676a597cd8aca624af35e42e25a3aafbcf6253040c2f4"
+    }
+  ],
+  "visualReview": [
+    "ceph-clinician-review-390.png",
+    "ceph-clinician-review-1280.png"
+  ],
+  "limits": [
+    "No migration, production, staging or real patient change",
+    "Legacy landmark suggestion authorization and hidden fallback remain a separate unresolved gap",
+    "Historic heuristic classification/ref norms are not clinically validated by this change",
+    "No new AI/Dot features; generation endpoint closes old-client requests",
+    "No claim that all52 scenarios or the entire module are complete"
+  ],
+  "evidenceFiles": [
+    {
+      "path": "browser.txt",
+      "bytes": 945,
+      "sha256": "c195ed3e2f74cc3294eb1b267a23c7c3d049e2127d4b652ba2c50a826ca109d5"
+    },
+    {
+      "path": "build-final.txt",
+      "bytes": 13522,
+      "sha256": "be7f621b3ba10c9cad998f8072b2af29dbc22a35833aaa68bc21fe24dbe8d9d9"
+    },
+    {
+      "path": "ceph-clinician-review-1280.png",
+      "bytes": 146730,
+      "sha256": "616c050447b7695ef88c7597f9ced2695748586bee1327272cf874aff990efa0"
+    },
+    {
+      "path": "ceph-clinician-review-390.png",
+      "bytes": 59628,
+      "sha256": "d1af6acf37ab541de61a720fa170cb33b8f430fcd92566cbf7a17b3fcd15642f"
+    },
+    {
+      "path": "empty-input-after.json",
+      "bytes": 3067,
+      "sha256": "272e0a5afa34ba858925008d6d49fea689549036f3bc02c87da98a1b19ba8a1f"
+    },
+    {
+      "path": "lint-final.txt",
+      "bytes": 583,
+      "sha256": "585d7a51f71a4dc8ce0cb5ec8bf4094c83b1277a84092a5de93aab7161dd147f"
+    },
+    {
+      "path": "postgres.txt",
+      "bytes": 508,
+      "sha256": "e1b197061c00437e9d29c398f7b17efcb88168d8df5c88201c598511917d416e"
+    },
+    {
+      "path": "preflight.txt",
+      "bytes": 789,
+      "sha256": "b3cde5b936a6b5943239c80f48f74762dd2213aff42de9959b8c37577213e696"
+    },
+    {
+      "path": "unit-all.txt",
+      "bytes": 437,
+      "sha256": "179b1cd346d5ea00eb461185b92ac77e7e515619a6e7870c2f648f7ff93c7de9"
+    },
+    {
+      "path": "unit-final.txt",
+      "bytes": 219,
+      "sha256": "e23475983f909fe0426e1994d67d29df22cadc59ee45a0fd26dec8933aee98ef"
+    }
+  ]
+}

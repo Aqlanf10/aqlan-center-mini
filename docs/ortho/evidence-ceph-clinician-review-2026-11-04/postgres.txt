@@ -1,0 +1,14 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ceph-versioned-planes.test.ts __tests__/postgres/ceph-calendar-date.test.ts
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  2 passed (2)
+      Tests  26 passed (26)
+   Start at  23:57:28
+   Duration  7.25s (transform 1.73s, setup 0ms, import 332ms, tests 6.21s, environment 0ms)
+

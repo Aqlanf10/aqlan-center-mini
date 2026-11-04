@@ -1,0 +1,16 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/ortho-panorama-flow
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+
+ Test Files  821 passed (821)
+      Tests  14017 passed (14017)
+   Start at  00:00:39
+   Duration  512.49s (transform 18.73s, setup 0ms, import 89.26s, tests 315.76s, environment 97ms)
+

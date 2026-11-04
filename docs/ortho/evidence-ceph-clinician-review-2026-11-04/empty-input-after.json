@@ -1,0 +1,54 @@
+{
+  "input": [],
+  "sourceSha256": "97d990a6f8dc6d445305ac4b78c77e786c8d252744a7f2cc3dbec1140619807b",
+  "result": {
+    "sagittalSkeletal": {
+      "classification": "Indeterminate",
+      "severity": "unknown",
+      "descriptionAr": "تعذر تحديد العلاقة الهيكلية السهمية بدقة",
+      "detailsAr": [],
+      "maxilla": "unknown",
+      "mandible": "unknown"
+    },
+    "verticalSkeletal": {
+      "pattern": "Indeterminate",
+      "descriptionAr": "العلاقة العمودية غير محددة لعدم كفاية القياسات",
+      "detailsAr": [],
+      "growthTendencyAr": "لم يُقيّم النمو سريرياً — يحتاج مراجعة السجلات الزمنية"
+    },
+    "dentalAnalysis": {
+      "descriptionAr": "ميل القاطع العلوي غير مقاس · ميل القاطع السفلي غير مقاس",
+      "detailsAr": [
+        "ميل القاطع العلوي غير مقاس",
+        "ميل القاطع السفلي غير مقاس"
+      ],
+      "upperIncisor": "unknown",
+      "lowerIncisor": "unknown",
+      "compensationAr": "التعويض السني السنخي يحتاج مراجعة الطبيب",
+      "interincisalAr": "الزاوية القاطعية غير مقاسة"
+    },
+    "aestheticProfile": {
+      "profileTypeAr": "البروفايل غير محدد",
+      "lipCompetenceAr": "انطباق الشفاه يحتاج فحصاً سريرياً",
+      "nasolabialAr": "الزاوية الأنفية الشفوية غير مقاسة بعد",
+      "eLineAr": "خط ريكتس الجمالي غير مقاس بعد",
+      "summaryAr": "البروفايل غير محدد · الزاوية الأنفية الشفوية غير مقاسة بعد · خط ريكتس الجمالي غير مقاس بعد"
+    },
+    "treatmentRecommendations": {
+      "extractionDecision": "not-specified",
+      "extractionRationaleAr": "قرار العلاج يحدده الطبيب بعد مراجعة الحالة والسجلات كاملة",
+      "growthModification": null,
+      "expansion": null,
+      "anchorageOrTADs": null,
+      "orthognathicSurgery": null,
+      "narrativePlanAr": ""
+    },
+    "formatted": {
+      "skeletal": "تعذر تحديد العلاقة الهيكلية السهمية بدقة · العلاقة العمودية غير محددة لعدم كفاية القياسات",
+      "dental": "ميل القاطع العلوي غير مقاس · ميل القاطع السفلي غير مقاس · التعويض السني السنخي يحتاج مراجعة الطبيب",
+      "softTissue": "البروفايل غير محدد · الزاوية الأنفية الشفوية غير مقاسة بعد · خط ريكتس الجمالي غير مقاس بعد",
+      "finalDx": "تعذر تحديد العلاقة الهيكلية السهمية بدقة · العلاقة العمودية غير محددة لعدم كفاية القياسات · البروفايل غير محدد",
+      "recommendationsText": ""
+    }
+  }
+}
