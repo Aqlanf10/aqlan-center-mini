@@ -27,7 +27,7 @@
     "runtimeBraces": "passed",
     "runtimeLintInputs": "passed",
     "lint": "0 errors; full run 352 existing warnings, final changed-file run 4 existing warnings",
-    "visual": "17 pages browser PDF and LibreOffice-rendered PPTX; native PowerPoint unavailable"
+    "visual": "All 17 pages from browser PDF and LibreOffice-rendered PPTX reviewed as contact sheets; text bounding boxes within pages in both files; native PowerPoint unavailable. This synthetic image case has missing clinical sections; not full clinical-content/layout acceptance."
   },
   "ciAtCapture": {
     "runId": 41768756212,
@@ -178,6 +178,16 @@
       "path": "synthetic-libreoffice-text.png",
       "bytes": 43811,
       "sha256": "b6f17a5ce2c2882d9aff9aecd6d04c13006e5c594028ff8c2c1d1e356596aa38"
+    },
+    {
+      "path": "synthetic-browser-all-pages.png",
+      "bytes": 308459,
+      "sha256": "bb8c1e50b98e8b4515a0ea92a062ea42f1bc26eb4fbc4d40aa8b1a0ef5054772"
+    },
+    {
+      "path": "synthetic-libreoffice-all-pages.png",
+      "bytes": 167440,
+      "sha256": "0e7fc20c46f53321fba59dc7d38b94fc1547521f464d32fdfcafa1bcb6ee0e01"
     }
   ],
   "sourceHashes": {
