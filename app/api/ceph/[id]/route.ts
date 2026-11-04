@@ -57,6 +57,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "doctor" && session.role !== "admin") {
+    return NextResponse.json({ message: "تعديل التحليل السيفالومتري واعتماده للطبيب والمدير فقط." }, { status: 403 });
+  }
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم التحليل غير صالح." }, { status: 400 });
 
@@ -129,6 +132,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "doctor" && session.role !== "admin") {
+    return NextResponse.json({ message: "تعديل التحليل السيفالومتري واعتماده للطبيب والمدير فقط." }, { status: 403 });
+  }
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم التحليل غير صالح." }, { status: 400 });
 

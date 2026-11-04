@@ -5,7 +5,7 @@ import Link from "next/link";
 import { formatClinicTimestamp } from "@/lib/clinic-clock";
 import {
   CEPH_SCHOOLS, computeAll, enrichWithRefs, LANDMARK_ORDER, landmarkDef, projectCephStampedValues, projectOnLine, REQUIRED_LANDMARKS, round1,
-  suggestLandmarks, summarize,
+  summarize,
   type CephSchool, type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
 } from "@/lib/ceph";
 
@@ -140,6 +140,7 @@ interface DxState {
 }
 
 export function CephTracer({
+  canWrite,
   clinicTimeZone,
   patientName,
   patientBirthYear,
@@ -150,6 +151,7 @@ export function CephTracer({
   refSetName,
   diagnosis,
 }: {
+  canWrite: boolean;
   clinicTimeZone: string;
   patientName: string;
   patientBirthYear: number | null;
@@ -161,6 +163,7 @@ export function CephTracer({
   diagnosis: DiagnosisProp | null;
 }) {
   const completed = analysis.status === "completed";
+  const editable = canWrite && !completed;
   const [points, setPoints] = useState<LandmarkMap>(() => {
     const map: LandmarkMap = {};
     for (const lm of initialLandmarks) map[lm.code] = { x: lm.x, y: lm.y };
@@ -171,13 +174,21 @@ export function CephTracer({
     for (const lm of initialLandmarks) map[lm.code] = lm.source;
     return map;
   });
-  const [aiLoading, setAiLoading] = useState(false);
   const [scale, setScale] = useState<number | null>(analysis.mmPerPixel);
   const [calibration, setCalibration] = useState<AnalysisProp["calibration"]>(analysis.calibration);
   const [active, setActive] = useState<LandmarkCode | null>(null);
   const [selected, setSelected] = useState<LandmarkCode | null>(null);
   const [zoom, setZoom] = useState(1);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const readImageDimensions = useCallback((element: HTMLImageElement) => {
+    const w = element.naturalWidth, h = element.naturalHeight;
+    if (w > 0 && h > 0) setNatural(current => current?.w === w && current.h === h ? current : { w, h });
+  }, []);
+  // The protected image may finish loading in the server-rendered page before
+  // hydration attaches onLoad. Read its already decoded dimensions on attach too.
+  const attachImage = useCallback((element: HTMLImageElement | null) => {
+    if (element?.complete) readImageDimensions(element);
+  }, [readImageDimensions]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [calMode, setCalMode] = useState<{ p1: Pt | null; p2: Pt | null } | null>(null);
@@ -221,6 +232,19 @@ export function CephTracer({
   // Event-time pointer ownership and its rendered indicator are separate.
   const [draggingPoint, setDraggingPoint] = useState<LandmarkCode | null>(null);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const writeLifetime = useRef({ id: analysis.id, writable: canWrite, completed });
+  useEffect(() => {
+    const lifetime = { id: analysis.id, writable: canWrite, completed };
+    writeLifetime.current = lifetime;
+    return () => {
+      lifetime.writable = false;
+      if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+    };
+  }, [analysis.id, canWrite, completed]);
+  const canWriteNow = useCallback((requireDraft = true) => {
+    const lifetime = writeLifetime.current;
+    return lifetime.id === analysis.id && lifetime.writable && (!requireDraft || !lifetime.completed);
+  }, [analysis.id]);
 
   const [dx, setDx] = useState<DxState>(() => ({
     skeletal: diagnosis?.skeletal ?? "",
@@ -233,6 +257,7 @@ export function CephTracer({
 
   /** حفظ نقطة واحدة — كتابةٌ فوقية برمزها، والخادم يرفض إن كان المعتمد. */
   const savePoint = useCallback(async (code: LandmarkCode, pt: Pt) => {
+    if (!editable || !canWriteNow()) return;
     setSaving(true);
     setSources((s) => ({ ...s, [code]: "manual" }));
     try {
@@ -250,7 +275,7 @@ export function CephTracer({
     } finally {
       setSaving(false);
     }
-  }, [analysis.id]);
+  }, [analysis.id, editable, canWriteNow]);
 
   const pushHistory = useCallback((snap: LandmarkMap) => {
     setHistory((h) => [...h.slice(-39), snap]);
@@ -258,6 +283,7 @@ export function CephTracer({
   }, []);
 
   const placePoint = useCallback((code: LandmarkCode, pt: Pt) => {
+    if (!editable || !canWriteNow()) return;
     const snapped = { x: round1(pt.x), y: round1(pt.y) };
     pushHistory(points);
     const next = { ...points, [code]: snapped };
@@ -265,7 +291,7 @@ export function CephTracer({
     setSelected(code);
     if (!completed) setResults(computeAll(next, scale ?? NaN));
     if (!completed) void savePoint(code, snapped);
-  }, [completed, points, pushHistory, savePoint, scale]);
+  }, [completed, editable, canWriteNow, points, pushHistory, savePoint, scale]);
 
   /** تحويل إحداثيات النقر إلى إحداثيات الصورة الطبيعية. */
   const imagePoint = (e: React.MouseEvent): Pt | null => {
@@ -279,7 +305,7 @@ export function CephTracer({
   };
 
   const onSurfaceClick = (e: React.MouseEvent) => {
-    if (completed || !natural) return;
+    if (!editable || !natural) return;
     const pt = imagePoint(e);
     if (!pt) return;
     // وضع المعايرة يسبق وضع المعالم — حتى تُعرض الأطوال بالمليمتر منذ أول نقطة.
@@ -296,7 +322,7 @@ export function CephTracer({
   };
 
   const onPointerDown = (code: LandmarkCode) => (e: React.PointerEvent) => {
-    if (completed || calMode) return;
+    if (!editable || calMode) return;
     pushHistory(points);
     dragging.current = code;
     setDraggingPoint(code);
@@ -317,7 +343,7 @@ export function CephTracer({
       x: ((e.clientX - rect.left) / rect.width) * natural.w,
       y: ((e.clientY - rect.top) / rect.height) * natural.h,
     };
-    if (code) {
+    if (code && editable) {
       const next = { ...points, [code]: pt };
       setPoints(next);
       if (!completed) setResults(computeAll(next, scale ?? NaN));
@@ -369,6 +395,7 @@ export function CephTracer({
 
   /** تحريك دقيق بالأسهم — خطوة بكسل، ومع Shift عشرة أضعافها، وحفظٌ مؤجَّل. */
   const nudge = useCallback((code: LandmarkCode, dxPx: number, dyPx: number) => {
+    if (!editable || !canWriteNow()) return;
     const current = points[code];
     if (!current) return;
     pushHistory(points);
@@ -380,7 +407,7 @@ export function CephTracer({
       const pt = next[code];
       if (pt) void savePoint(code, pt);
     }, 500);
-  }, [completed, points, pushHistory, savePoint, scale]);
+  }, [completed, editable, canWriteNow, points, pushHistory, savePoint, scale]);
 
   /** التراجع والإعادة — ويكتب الفرقُ في القاعدة كي لا يختلّ ما رآه الخادم. */
   const persistDiff = useCallback((before: LandmarkMap, after: LandmarkMap) => {
@@ -395,28 +422,28 @@ export function CephTracer({
   }, [savePoint]);
 
   const undo = useCallback(() => {
-    if (completed || history.length === 0) return;
+    if (!editable || history.length === 0) return;
     const prev = history[history.length - 1];
     setHistory((h) => h.slice(0, -1));
     setFuture((f) => [points, ...f].slice(0, 40));
     setPoints(prev);
     setResults(computeAll(prev, scale ?? NaN));
     persistDiff(points, prev);
-  }, [completed, history, persistDiff, points, scale]);
+  }, [editable, history, persistDiff, points, scale]);
 
   const redo = useCallback(() => {
-    if (completed || future.length === 0) return;
+    if (!editable || future.length === 0) return;
     const nextMap = future[0];
     setFuture((f) => f.slice(1));
     setHistory((h) => [...h.slice(-39), points]);
     setPoints(nextMap);
     setResults(computeAll(nextMap, scale ?? NaN));
     persistDiff(points, nextMap);
-  }, [completed, future, persistDiff, points, scale]);
+  }, [editable, future, persistDiff, points, scale]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (completed) return;
+      if (!editable) return;
       const target = e.target as HTMLElement | null;
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       const mod = e.ctrlKey || e.metaKey;
@@ -443,9 +470,10 @@ export function CephTracer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [completed, nudge, points, redo, selected, undo]);
+  }, [editable, nudge, points, redo, selected, undo]);
 
   const saveCalibration = async () => {
+    if (!editable || !canWriteNow()) return;
     if (!calMode?.p1 || !calMode?.p2) return;
     const mm = Number(calMm);
     if (!Number.isFinite(mm) || mm <= 0) { setMessage("أدخل المسافة الحقيقية بالمليمتر."); return; }
@@ -486,11 +514,12 @@ export function CephTracer({
 
   const requiredMissing = REQUIRED_LANDMARKS.filter((c) => points[c] == null);
   const missing = LANDMARK_ORDER.filter((c) => points[c] == null);
-  const canComplete = !completed && scale != null && requiredMissing.length === 0;
+  const canComplete = editable && scale != null && requiredMissing.length === 0;
   const completionPct = Math.round(((REQUIRED_LANDMARKS.length - requiredMissing.length) / REQUIRED_LANDMARKS.length) * 100);
   const optionalMissing = LANDMARK_ORDER.filter((c) => points[c] == null && !REQUIRED_LANDMARKS.includes(c));
 
   const complete = async () => {
+    if (!editable || !canWriteNow()) return;
     if (!window.confirm("اعتماد التحليل يقفل التعديل ويختم القياسات والتشخيص. هل تريد الاعتماد؟")) return;
     setSaving(true);
     try {
@@ -509,6 +538,7 @@ export function CephTracer({
   };
 
   const duplicate = async () => {
+    if (!canWrite || !completed || !canWriteNow(false)) return;
     if (!window.confirm("فتح نسخة تصحيح عن هذا التحليل المعتمد؟")) return;
     try {
       const res = await fetch(`/api/ceph/${analysis.id}/duplicate`, { method: "POST" });
@@ -521,6 +551,7 @@ export function CephTracer({
   };
 
   const discard = async () => {
+    if (!editable || !canWriteNow()) return;
     const note = window.prompt("سبب رفض المسودة (يُوثَّق باسمك):");
     if (note === null) return;
     try {
@@ -548,6 +579,7 @@ export function CephTracer({
   const summary = useMemo(() => (table ? summarize(table) : null), [table]);
 
   const saveDiagnosis = async () => {
+    if (!editable || !canWriteNow()) return;
     if (!dx.finalDx.trim()) { setMessage("الاستنتاج السيفالومتري لا يُترك فارغًا — حرّره ثم احفظ."); return; }
     setSaving(true);
     try {
@@ -570,64 +602,14 @@ export function CephTracer({
     }
   };
 
-  const autoLocateAi = async () => {
-    if (completed) return;
-    setAiLoading(true);
-    setMessage("جاري استقراء واقتراح المعالم بالذكاء الاصطناعي وفق المعايير السيفالومترية…");
-    try {
-      const w = natural?.w || 1600;
-      const h = natural?.h || 1600;
-      const res = await fetch(`/api/ceph/${analysis.id}/ai-analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "suggest-landmarks", imageWidth: w, imageHeight: h, save: true }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const nextPoints: LandmarkMap = { ...points };
-        const nextSources: Record<string, "manual" | "suggested"> = { ...sources };
-        for (const lm of data.landmarks) {
-          nextPoints[lm.code as LandmarkCode] = { x: lm.x, y: lm.y };
-          nextSources[lm.code] = "suggested";
-        }
-        pushHistory(points);
-        setPoints(nextPoints);
-        setSources(nextSources);
-        setResults(computeAll(nextPoints, scale ?? NaN));
-        setMessage("🔮 تم اقتراح المعالم بنجاح (ZONE_B: المعالم مقترحة بلون بنفسجي للمراجعة والاعتماد).");
-      } else {
-        const suggested = suggestLandmarks(w, h, points);
-        const nextPoints = { ...suggested };
-        const nextSources: Record<string, "manual" | "suggested"> = { ...sources };
-        for (const code of Object.keys(suggested) as LandmarkCode[]) {
-          if (!sources[code]) nextSources[code] = "suggested";
-        }
-        pushHistory(points);
-        setPoints(nextPoints);
-        setSources(nextSources);
-        setResults(computeAll(nextPoints, scale ?? NaN));
-        setMessage("🔮 تم استقراء المعالم وفق النسب التشريحية القياسية للشععة.");
-      }
-    } catch {
-      const w = natural?.w || 1600;
-      const h = natural?.h || 1600;
-      const suggested = suggestLandmarks(w, h, points);
-      pushHistory(points);
-      setPoints(suggested);
-      setResults(computeAll(suggested, scale ?? NaN));
-      setMessage("🔮 تم وضع المعالم المقترحة (الذكاء الاصطناعي يقترح ولا يعتمد).");
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  const nextToPlace = completed ? null : (active ?? missing[0] ?? null);
+  const nextToPlace = !editable ? null : (active ?? missing[0] ?? null);
   const ageAtXray = analysis.xrayDate && patientBirthYear
     ? new Date(analysis.xrayDate).getUTCFullYear() - patientBirthYear
     : null;
 
   return (
     <div className="space-y-3">
+      {!canWrite && <p role="status" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">عرض التحليل فقط — التعديل والاعتماد يتطلبان صلاحية الطبيب.</p>}
       {/* الشريط العلوي */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
         <Link href={`/patients/${analysis.patientId}?tab=ceph`} className="text-sm text-blue-700 hover:underline">
@@ -653,18 +635,8 @@ export function CephTracer({
           المقياس: {scale != null ? `${(1 / scale).toFixed(1)} بكسل/مم` : "غير معايَر — القياسات الطولية معطّلة"}
         </span>
         <div className="grow" />
-        {!completed && (
+        {editable && (
           <>
-            <button
-              type="button"
-              onClick={() => void autoLocateAi()}
-              disabled={aiLoading || saving}
-              className="rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-40 inline-flex items-center gap-1"
-              title="يقترح مواقع المعالم الـ 25 بالذكاء الاصطناعي مع وسمها بـ 'suggested' (ZONE_B: اقتراح يتطلب تدقيق الطبيب)"
-            >
-              <span>🔮</span>
-              <span>{aiLoading ? "جاري الاقتراح…" : "اقتراح المعالم الذكي (AI Auto-Locate)"}</span>
-            </button>
             <button
               type="button"
               onClick={() => setCalMode(calMode ? null : { p1: null, p2: null })}
@@ -699,7 +671,7 @@ export function CephTracer({
           <span>🖨️</span>
           <span>طباعة التقرير الرسمي</span>
         </Link>
-        {completed && (
+        {completed && canWrite && (
           <button
             type="button"
             onClick={() => void duplicate()}
@@ -860,7 +832,7 @@ export function CephTracer({
                 <span>🖨️</span>
                 <span>فتح وطباعة التقرير الرسمي A4</span>
               </Link>
-              {!completed && (
+              {editable && (
                 <button
                   type="button"
                   onClick={() => void complete()}
@@ -1000,7 +972,7 @@ export function CephTracer({
               <input type="checkbox" checked={showLoupe} onChange={(e) => setShowLoupe(e.target.checked)} />
               🔍 عدسة التكبير (Loupe)
             </label>
-            {!completed && (
+            {editable && (
               <>
                 <button
                   type="button"
@@ -1117,15 +1089,13 @@ export function CephTracer({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
+                ref={attachImage}
                 src={`/api/documents/${analysis.documentId}`}
                 alt="الشععة السيفالومترية"
                 className="absolute inset-0 h-full w-full select-none transition-[filter] duration-100"
                 style={{ filter: imageFilterStyle }}
                 draggable={false}
-                onLoad={(e) => {
-                  const el = e.currentTarget;
-                  setNatural({ w: el.naturalWidth, h: el.naturalHeight });
-                }}
+                onLoad={(e) => readImageDimensions(e.currentTarget)}
               />
               {natural && (
                 <svg
@@ -1322,7 +1292,7 @@ export function CephTracer({
                           fill={pointFill}
                           stroke="#ffffff"
                           strokeWidth={Math.max(1, 1.5 / zoom)}
-                          className={completed ? "" : "cursor-grab"}
+                          className={!editable ? "" : "cursor-grab"}
                           onPointerDown={onPointerDown(code)}
                         />
                         <text
@@ -1381,7 +1351,7 @@ export function CephTracer({
               </div>
             </div>
           )}
-          {!completed && (
+          {editable && (
             <div className="mt-2 space-y-1">
               <p className="text-sm">
                 <span className="text-slate-500">المعلم التالي: </span>
@@ -1400,7 +1370,7 @@ export function CephTracer({
               </p>
             </div>
           )}
-          {!completed && (
+          {editable && (
             <div className="mt-2 flex flex-wrap gap-1">
               {LANDMARK_ORDER.map((code) => {
                 const isSuggested = sources[code] === "suggested";
@@ -1427,7 +1397,7 @@ export function CephTracer({
               })}
             </div>
           )}
-          {optionalMissing.length > 0 && !completed && (
+          {optionalMissing.length > 0 && editable && (
             <p className="mt-1 text-xs text-slate-400">
               اختيارية لم توضع بعد: {optionalMissing.join("، ")} — تخدم تحاليل موسّعة (SND، McNamara، الحنكي).
             </p>
@@ -1735,7 +1705,7 @@ export function CephTracer({
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-slate-700">التشخيص السيفالومتري المنظم</p>
               </div>
-              {completed ? (
+              {!editable ? (
                 diagnosis ? (
                   <div className="space-y-1 text-xs text-slate-600">
                     {diagnosis.skeletal && <p><b className="text-slate-500">هيكلي: </b>{diagnosis.skeletal}</p>}
@@ -1746,42 +1716,52 @@ export function CephTracer({
                     <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {formatClinicTimestamp(diagnosis.updatedAt, clinicTimeZone)}</p>
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400">لم يُكتب تشخيص منظم قبل الاعتماد.</p>
+                  <p className="text-xs text-slate-400">لم يُسجل تشخيص منظم لهذا التحليل.</p>
                 )
               ) : (
                 <div className="space-y-2">
                   <p className="rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-500">
                     راجع القياسات والسجلات ثم دوّن تقييمك السريري. التشخيص وخطة العلاج من اختيار الطبيب، والحفظ يبقي التحليل مسودة حتى اعتماده.
                   </p>
+                  <label htmlFor={`ceph-${analysis.id}-skeletal`} className="block text-xs font-medium text-slate-700">التقييم الهيكلي</label>
                   <textarea
+                    id={`ceph-${analysis.id}-skeletal`}
                     value={dx.skeletal}
                     onChange={(e) => { setDx({ ...dx, skeletal: e.target.value }); setDxDirty(true); }}
                     placeholder="هيكلي…"
                     rows={2}
                     className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
                   />
+                  <label htmlFor={`ceph-${analysis.id}-dental`} className="block text-xs font-medium text-slate-700">تقييم الأسنان</label>
                   <textarea
+                    id={`ceph-${analysis.id}-dental`}
                     value={dx.dental}
                     onChange={(e) => { setDx({ ...dx, dental: e.target.value }); setDxDirty(true); }}
                     placeholder="أسنان…"
                     rows={2}
                     className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
                   />
+                  <label htmlFor={`ceph-${analysis.id}-softTissue`} className="block text-xs font-medium text-slate-700">تقييم الأنسجة الرخوة</label>
                   <textarea
+                    id={`ceph-${analysis.id}-softTissue`}
                     value={dx.softTissue}
                     onChange={(e) => { setDx({ ...dx, softTissue: e.target.value }); setDxDirty(true); }}
                     placeholder="أنسجة رخوة…"
                     rows={2}
                     className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
                   />
+                  <label htmlFor={`ceph-${analysis.id}-finalDx`} className="block text-xs font-medium text-slate-700">الاستنتاج السيفالومتري</label>
                   <textarea
+                    id={`ceph-${analysis.id}-finalDx`}
                     value={dx.finalDx}
                     onChange={(e) => { setDx({ ...dx, finalDx: e.target.value }); setDxDirty(true); }}
                     placeholder="الاستنتاج السيفالومتري (مطلوب)…"
                     rows={2}
                     className="w-full rounded-lg border border-slate-400 px-2 py-1 text-xs"
                   />
+                  <label htmlFor={`ceph-${analysis.id}-note`} className="block text-xs font-medium text-slate-700">ملاحظات الطبيب</label>
                   <textarea
+                    id={`ceph-${analysis.id}-note`}
                     value={dx.note}
                     onChange={(e) => { setDx({ ...dx, note: e.target.value }); setDxDirty(true); }}
                     placeholder="ملاحظات الطبيب (اختياري)…"

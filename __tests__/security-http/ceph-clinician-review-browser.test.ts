@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { Client } from "pg";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -42,13 +42,36 @@ describe("ceph diagnosis remains clinician-authored", () => {
       const opened = await authedMutation(`/api/patients/${patientId}/ceph`, h.sessions.doctorA, "POST", JSON.stringify({ documentId, phase: "pretreatment", xrayDate: null }));
       expect(opened.status).toBe(201); const id = (await opened.json()).id;
       const saved = async () => (await db.query("SELECT skeletal,dental,soft_tissue,final_dx,note,created_by FROM ceph_diagnoses WHERE analysis_id=$1", [id])).rows;
+      const imageRead = page.waitForResponse(r => r.url().endsWith(`/api/documents/${documentId}`));
       expect((await page.goto(`${baseUrl}/ceph/${id}`))?.status()).toBe(200);
+      const imageResponse = await imageRead;
+      expect(imageResponse.status(), imageResponse.ok() ? "synthetic image loaded" : await imageResponse.text()).toBe(200);
+      expect(imageResponse.headers()["content-type"]).toBe("image/png");
       const section = page.locator("div.border-t").filter({ has: page.getByText("التشخيص السيفالومتري المنظم", { exact: true }) });
       await section.getByPlaceholder("هيكلي…", { exact: true }).waitFor();
       expect(await page.getByRole("button", { name: "توليد التشخيص الذكي", exact: true }).count()).toBe(0);
       expect(await page.getByRole("button", { name: "تعبئة أساسية", exact: true }).count()).toBe(0);
+      expect(await page.getByRole("button", { name: /AI Auto-Locate/ }).count()).toBe(0);
       for (const field of await section.locator("textarea").all()) expect(await field.inputValue()).toBe("");
       expect(await saved()).toEqual([]);
+
+      // Put an actual point through the built page, not by seeding a DB value.
+      const surface = page.getByAltText("الشععة السيفالومترية", { exact: true }).locator("..");
+      await surface.locator("svg").waitFor();
+      await page.getByRole("button", { name: "S", exact: true }).click();
+      const pointWrite = page.waitForResponse(r => r.url().endsWith(`/api/ceph/${id}`) && r.request().method() === "PATCH");
+      // The right side remains visible in the RTL horizontally scrollable image
+      // at both supported viewport widths, without an off-screen forced click.
+      await surface.click({ position: { x: 400, y: 80 } });
+      expect((await pointWrite).status()).toBe(200);
+      const points = async () => (await db.query("SELECT code,x,y,source,confirmed_by FROM ceph_landmarks WHERE analysis_id=$1 ORDER BY code", [id])).rows;
+      const manualPoints = await points();
+      expect(manualPoints).toEqual([{ code: "S", x: 400, y: 80, source: "manual", confirmed_by: TEST_USERS.doctorA.username }]);
+      for (const save of [false, true]) {
+        const retired = await authedMutation(`/api/ceph/${id}/ai-analyze`, h.sessions.doctorA, "POST", JSON.stringify({ action: "suggest-landmarks", imageWidth: 500, imageHeight: 300, save }));
+        expect(retired.status).toBe(409); expect(await retired.json()).toMatchObject({ code: "manual_landmark_review_required" });
+        expect(await points()).toEqual(manualPoints);
+      }
 
       for (const flags of [{}, { useAiChat: true, save: true, saveToDiagnosis: true }]) {
         const response = await authedMutation(`/api/ceph/${id}/ai-analyze`, h.sessions.doctorA, "POST", JSON.stringify({ action: "generate-diagnosis", ...flags }));
@@ -61,6 +84,8 @@ describe("ceph diagnosis remains clinician-authored", () => {
       const authored = ["تقييم هيكلي كتبه الطبيب للاختبار", "مراجعة القواطع لاحقاً", "الفحص السريري مطلوب", "الاستنتاج الاصطناعي للطبيب", "قرار علاجي مؤجل حتى اكتمال السجلات"];
       const fields = section.locator("textarea");
       expect(await fields.count()).toBe(5);
+      for (const label of ["التقييم الهيكلي", "تقييم الأسنان", "تقييم الأنسجة الرخوة", "الاستنتاج السيفالومتري", "ملاحظات الطبيب"])
+        expect(await section.getByLabel(label, { exact: true }).count()).toBe(1);
       for (let i = 0; i < authored.length; i++) await fields.nth(i).fill(authored[i]);
       const wrote = page.waitForResponse(r => r.url().endsWith(`/api/ceph/${id}`) && r.request().method() === "PATCH");
       await section.getByRole("button", { name: "حفظ التشخيص", exact: true }).click();
@@ -82,6 +107,28 @@ describe("ceph diagnosis remains clinician-authored", () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
       await page.screenshot({ path: `.settings-ui-artifacts/ceph-clinician-review-${width}.png` });
 
+      const reception = await browser.newContext({ viewport: { width, height: 900 }, locale: "ar-YE" });
+      try {
+        const [receptionName, ...receptionValue] = h.sessions.reception.cookie.split("=");
+        await reception.addCookies([{ name: receptionName, value: receptionValue.join("="), url: baseUrl }]);
+        const reader = await reception.newPage();
+        expect((await reader.goto(`${baseUrl}/ceph/${id}`))?.status()).toBe(200);
+        await reader.getByRole("status").filter({ hasText: "عرض التحليل فقط" }).waitFor();
+        expect(await reader.locator("textarea").count()).toBe(0);
+        expect(await reader.getByRole("button", { name: "اعتماد التحليل", exact: true }).count()).toBe(0);
+        expect(await reader.getByRole("button", { name: "حفظ التشخيص", exact: true }).count()).toBe(0);
+        for (const [path, method, body] of [
+          [`/api/ceph/${id}`, "PATCH", { diagnosis: { finalDx: "blocked reception edit" } }],
+          [`/api/ceph/${id}`, "PATCH", { landmarks: [{ code: "N", x: 200, y: 80, source: "manual" }] }],
+          [`/api/ceph/${id}`, "DELETE", { note: "blocked reception discard" }],
+          [`/api/ceph/${id}/complete`, "POST", {}],
+          [`/api/ceph/${id}/duplicate`, "POST", {}],
+        ] as const) expect((await authedMutation(path, h.sessions.reception, method, JSON.stringify(body))).status).toBe(403);
+        expect(await saved()).toEqual(before); expect(await points()).toEqual(manualPoints);
+        await reader.getByText(authored[3], { exact: false }).scrollIntoViewIfNeeded();
+        await reader.screenshot({ path: `.settings-ui-artifacts/ceph-read-only-${width}.png` });
+      } finally { await reception.close(); }
+
       // Fixture-only historical status, with explicit author; no production record
       // is touched and no claim is made that incomplete landmarks were completed.
       await db.query("UPDATE ceph_analyses SET status='completed',completed_by='synthetic archive',completed_at=NOW() WHERE id=$1", [id]);
@@ -90,6 +137,14 @@ describe("ceph diagnosis remains clinician-authored", () => {
       expect(await saved()).toEqual(before);
       expect(await section.innerText()).toContain(authored[4]);
       expect(errors).toEqual([]);
+    } catch (error) {
+      await page.screenshot({ path: `.settings-ui-artifacts/ceph-clinician-review-failure-${width}.png`, fullPage: true });
+      await writeFile(`.settings-ui-artifacts/ceph-clinician-review-failure-${width}.json`, JSON.stringify({
+        errors, body: await page.locator("body").innerText(),
+        images: await page.locator("img").evaluateAll(images => images.filter((image): image is HTMLImageElement => image instanceof HTMLImageElement)
+          .map(image => ({ src: image.getAttribute("src"), complete: image.complete, width: image.naturalWidth, height: image.naturalHeight }))),
+      }, null, 2));
+      throw error;
     } finally {
       await db.query("UPDATE users SET permissions=$1 WHERE username=$2", [doctor.permissions, TEST_USERS.doctorA.username]);
       await context.close();

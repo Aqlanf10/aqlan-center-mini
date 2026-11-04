@@ -104,6 +104,16 @@ describe("retired ceph generation endpoint", () => {
     expect(mocks.diagnosisWrite).not.toHaveBeenCalled();
     expect(mocks.ai).not.toHaveBeenCalled();
   });
+  it.each([false, true])("refuses unvalidated landmark templates with save=%s without touching existing points", async save => {
+    const manual = { code: "S", x: 30, y: 40, source: "manual" };
+    const study = { analysis: { patientId: 11, status: "draft" }, landmarks: [manual] };
+    mocks.study.mockResolvedValue(study);
+    const res = await request({ action: "suggest-landmarks", imageWidth: 500, imageHeight: 300, save });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "manual_landmark_review_required" });
+    expect(study.landmarks).toEqual([manual]);
+    for (const fn of [mocks.ai, mocks.diagnosisWrite, mocks.landmarkWrite, mocks.patient]) expect(fn).not.toHaveBeenCalled();
+  });
   it.each([null, [], 4, "generate-diagnosis"])("rejects malformed body %j", async body => {
     expect((await request(body)).status).toBe(400);
     expect(mocks.study).not.toHaveBeenCalled();

@@ -19,6 +19,9 @@ const denied = () =>
 export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "doctor" && session.role !== "admin") {
+    return NextResponse.json({ message: "تعديل التحليل السيفالومتري واعتماده للطبيب والمدير فقط." }, { status: 403 });
+  }
   const { id: raw } = await context.params;
   const id = Number(raw);
   if (!Number.isInteger(id) || id <= 0) {

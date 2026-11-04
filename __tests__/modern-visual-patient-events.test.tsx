@@ -34,9 +34,18 @@ const analysis: Parameters<typeof CephTracer>[0]["analysis"] = {
 };
 
 describe("modern visual patient event ownership", () => {
+  it("enables the tracing surface when the image finished loading before hydration", () => {
+    const component = () => CephTracer({ canWrite: true, clinicTimeZone: "Asia/Aden", patientName: "Synthetic", patientBirthYear: null, analysis,
+      initialLandmarks: [], stamped: null, refValues: null, refSetName: null, diagnosis: null });
+    let tree = render(component);
+    expect(nodes(tree).some(node => node.type === "svg")).toBe(false);
+    nodes(tree).find(node => node.type === "img")!.props.ref({ complete: true, naturalWidth: 500, naturalHeight: 300 });
+    tree = render(component);
+    expect(nodes(tree).find(node => node.type === "svg")!.props.viewBox).toBe("0 0 500 300");
+  });
   it("renders drag state without moving a landmark, resets on release, and saves the original coordinates", async () => {
     const fetch = vi.fn(async (_url: string, _request: RequestInit) => ({ ok: true, json: async () => ({}) })); vi.stubGlobal("fetch", fetch);
-    const component = () => CephTracer({ clinicTimeZone: "Asia/Aden", patientName: "Synthetic", patientBirthYear: null, analysis, initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: null, refValues: null, refSetName: null, diagnosis: null });
+    const component = () => CephTracer({ canWrite: true, clinicTimeZone: "Asia/Aden", patientName: "Synthetic", patientBirthYear: null, analysis, initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: null, refValues: null, refSetName: null, diagnosis: null });
     let tree = render(component);
     nodes(tree).find(node => node.type === "img")!.props.onLoad({ currentTarget: { naturalWidth: 400, naturalHeight: 400 } });
     tree = render(component);
@@ -50,11 +59,43 @@ describe("modern visual patient event ownership", () => {
   });
   it("does not allow pointer dragging or saving approved landmarks", () => {
     const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
-    const component = () => CephTracer({ clinicTimeZone: "Asia/Aden", patientName: "Synthetic", patientBirthYear: null, analysis: { ...analysis, status: "completed" }, initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: [], refValues: null, refSetName: null, diagnosis: null });
+    const component = () => CephTracer({ canWrite: true, clinicTimeZone: "Asia/Aden", patientName: "Synthetic", patientBirthYear: null, analysis: { ...analysis, status: "completed" }, initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: [], refValues: null, refSetName: null, diagnosis: null });
     let tree = render(component); nodes(tree).find(node => node.type === "img")!.props.onLoad({ currentTarget: { naturalWidth: 400, naturalHeight: 400 } }); tree = render(component);
     const circle = nodes(tree).find(node => node.type === "circle" && node.props.onPointerDown)!;
     const capture = vi.fn(); circle.props.onPointerDown({ currentTarget: { setPointerCapture: capture } });
     expect(capture).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
+  });
+  it("does not expose a diagnosis editor or allow pointer writes with read-only access", () => {
+    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    const component = () => CephTracer({ canWrite: false, clinicTimeZone: "Asia/Aden", patientName: "Synthetic", patientBirthYear: null, analysis,
+      initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: null, refValues: null, refSetName: null, diagnosis: null });
+    let tree = render(component); nodes(tree).find(node => node.type === "img")!.props.onLoad({ currentTarget: { naturalWidth: 400, naturalHeight: 400 } }); tree = render(component);
+    expect(nodes(tree).filter(node => node.type === "textarea")).toHaveLength(0);
+    const capture = vi.fn();
+    nodes(tree).find(node => node.type === "circle" && node.props.onPointerDown)!.props.onPointerDown({ currentTarget: { setPointerCapture: capture } });
+    nodes(tree).find(node => node.props.onSurfaceClick || node.props.onClick && node.props.onPointerMove)!.props.onClick({});
+    expect(capture).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each(["unmount", "permission", "owner"])("cancels an unsent keyboard landmark save on %s change", async mode => {
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({}) })); vi.stubGlobal("fetch", fetch);
+    let canWrite = true, currentAnalysis = analysis;
+    const component = () => CephTracer({ canWrite, clinicTimeZone: "Asia/Aden", patientName: "Synthetic", patientBirthYear: null, analysis: currentAnalysis,
+      initialLandmarks: [{ code: "S", x: 10, y: 20, source: "manual" }], stamped: null, refValues: null, refSetName: null, diagnosis: null });
+    let tree = render(component); nodes(tree).find(node => node.type === "img")!.props.onLoad({ currentTarget: { naturalWidth: 400, naturalHeight: 400 } }); tree = render(component);
+    nodes(tree).find(node => node.type === "circle" && node.props.onPointerDown)!.props.onPointerDown({ currentTarget: { setPointerCapture: vi.fn() } });
+    tree = render(component);
+    const staleRelease = nodes(tree).find(node => node.props.onPointerUp)!.props.onPointerUp;
+    window.dispatchEvent(Object.assign(new Event("keydown"), { key: "ArrowRight" }));
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    if (mode === "unmount") cleanup();
+    else {
+      if (mode === "permission") canWrite = false;
+      else currentAnalysis = { ...analysis, id: 72, patientId: 12 };
+      tree = render(component);
+    }
+    await vi.advanceTimersByTimeAsync(1000);
+    staleRelease();
+    expect(fetch).not.toHaveBeenCalled();
   });
   it("cancels a pending consent-canvas reset when closed and resets only the new opening", async () => {
     const props = { isOpen: true, onClose: vi.fn(), patientId: 11, patientName: "Synthetic" };

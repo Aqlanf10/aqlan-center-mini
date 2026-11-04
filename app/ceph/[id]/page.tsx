@@ -1,5 +1,6 @@
 import { CLINIC_TIME_ZONE, getCephReferenceSet, getCephStudy, getPatient } from "@/lib/db";
 import { CephTracer } from "@/components/CephTracer";
+import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import { getAccessibleCephPatientId } from "@/lib/ceph-page-access";
 import { notFound, redirect } from "next/navigation";
@@ -32,6 +33,8 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
   }
   const patient = await getPatient(study.analysis.patientId);
   const refSet = await getCephReferenceSet(study.analysis.refSet);
+  const canWrite = (session.role === "admin" || session.role === "doctor")
+    && await canAccessPatient(session, patientId, "canUploadXrays");
 
   return (
     <div className="mx-auto max-w-[1400px] p-4">
@@ -43,6 +46,8 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
         المعالم تُحفَظ لحظة نقرها وسحبها، والاعتماد يختم القياسات والتشخيص ويقفل التحليل.
       </p>
       <CephTracer
+        key={study.analysis.id}
+        canWrite={canWrite}
         clinicTimeZone={CLINIC_TIME_ZONE}
         patientName={patient?.fullName ?? ""}
         patientBirthYear={patient?.birthYear ?? null}

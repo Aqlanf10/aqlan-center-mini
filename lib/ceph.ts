@@ -1403,7 +1403,8 @@ export function generateCephExpertDiagnosis(
 }
 
 /**
- * اقتراح المعالم التشريحية بناءً على أبعاد الصورة والمعالم الموضوعة مسبقًا.
+ * @deprecated Legacy unvalidated coordinate template; not exposed in the product.
+ * It consumes image dimensions and known points, not image pixels.
  *
  * يعتمد على النسب التشريحية القياسية للشععة السيفالومترية الرأسية الجانبية
  * (الوجه يتجه يمينًا +x والأسفل +y). إذا كانت نقطتا S و N موضوعتين مسبقًا،
@@ -1419,8 +1420,8 @@ export function suggestLandmarks(
   const w = Math.max(100, imageWidth);
   const h = Math.max(100, imageHeight);
 
-  // إحداثيات قياسية موحّدة ومعايرة بدقة متناهية وفق معايير WebCeph المستخرجة من 15 حالة سريرية حقيقية
-  // من مركز عقلان على منصة WebCeph (متوسطات وتوزيعات تشريحية حقيقية)
+  // Legacy offsets. No source cohort, measurement protocol or clinical accuracy
+  // was verified for these constants; do not use them as patient observations.
   const canonicalNorm: Record<LandmarkCode, Pt> = {
     S: { x: 0.3694, y: 0.3918 },     // مركز السرج التركي (Sella)
     N: { x: 0.6804, y: 0.3410 },     // درز العظم الأنفي الجبهي (Nasion)
