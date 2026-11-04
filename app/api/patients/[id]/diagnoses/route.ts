@@ -1,6 +1,7 @@
 import { canonicalPatientGet } from "@/lib/canonical-patient-http";
 import { readCanonicalDiagnoses, CanonicalPatientReadRefusal } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
+import { canonicalClinicalRecordRoute, commandCanonicalDiagnosis } from "@/lib/canonical-clinical-records";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
@@ -71,6 +72,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
  * بعد سنوات ما رأى الطبيب ومتى، لا آخرُ كلامٍ صيغ بأثر رجعي.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 74: one admitted clinical.visits.document transaction inside the patient scope,
+     idempotent by requestKey, the audit row with the record. */
+  const canonical = await canonicalClinicalRecordRoute(request, async (handle, body) => commandCanonicalDiagnosis(handle, (await context.params).id, body), "تعذّر حفظ التشخيص. أعد المحاولة.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (session.role !== "doctor" && session.role !== "admin") {

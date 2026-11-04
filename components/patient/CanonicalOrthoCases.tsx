@@ -1,5 +1,6 @@
 "use client";
 
+import { PatientDiagnosis } from "@/components/PatientDiagnosis";
 import { makeCanonicalCoverageDraft, type CanonicalCoverageDraft } from "@/lib/canonical-ortho-coverage-draft";
 import { makeCanonicalStrategyOwner, type CanonicalStrategyOwner } from "@/lib/canonical-ortho-strategy-owner";
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
@@ -10,7 +11,7 @@ import { APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, PHASE_LABEL, usesArch
 /** Clinical summary with independently authorized native lifecycle actions.
  * Opening this section never mounts legacy editors or requests
  * their plan, image, assessment or financial endpoints. */
-export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canReadCoverage = false }: { patientId: string; ownerKey: string; canEdit?: boolean; canReadCoverage?: boolean }) {
+export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canReadCoverage = false, canDocument = false }: { patientId: string; ownerKey: string; canEdit?: boolean; canReadCoverage?: boolean; canDocument?: boolean }) {
   const regionId = useId();
   const [notice, setNotice] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -155,6 +156,8 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
             </dl>
             {row.baselineKind === "legacy" ? <p className="mt-2 text-xs text-slate-600">علاج بدأ قبل النظام</p> : null}
             <CanonicalOrthoDetail patientId={patientId} caseId={row.id} ownerKey={ownerKey} canEdit={canEdit} canReadCoverage={canReadCoverage} assessmentOwnerFor={canEdit ? assessmentOwnerFor : undefined} strategyOwnerFor={canEdit ? strategyOwnerFor : undefined} coverageOwnerFor={canReadCoverage ? coverageOwnerFor : undefined} onChanged={() => { setNotice("حُفظ تحديث حالة التقويم وسُجّل أثره."); setFeed(null); setRefresh(value => value + 1); }} />
+            {/* M2 slice 74: the case diagnosis (versions; a new version by a linked clinician or the owner). */}
+            {canDocument ? <div className="mt-3"><PatientDiagnosis patientId={Number(patientId)} orthoCaseId={row.id} onError={message => setNotice(message)} /></div> : null}
           </li>)}</ul>}
       {feed?.hasMore ? <p role="status" className="text-sm text-amber-800">تظهر أحدث 300 حالة فقط؛ هذه ليست القائمة الكاملة.</p> : null}
     </div> : null}

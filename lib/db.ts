@@ -24996,49 +24996,63 @@ export async function recordPatientDiagnosis(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // Dedicated two-integer namespace; all diagnosis versions share this lock,
-    // whether standalone or attached to one of the patient's historical cases.
-    await client.query(`SELECT pg_advisory_xact_lock(73127, $1::int)`, [input.patientId]);
-    const { rows: patients } = await client.query(
-      `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId],
-    );
-    if (!patients[0]) throw new DiagnosisAssociationError();
-    if (input.visitId !== null) {
-      const { rows } = await client.query<{ patient_id: number | null }>(
-        `SELECT patient_id FROM visits WHERE id = $1 FOR SHARE`, [input.visitId],
-      );
-      if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
-    }
-    if (input.orthoCaseId !== null) {
-      const { rows } = await client.query<{ patient_id: number }>(
-        `SELECT patient_id FROM ortho_cases WHERE id = $1 FOR SHARE`, [input.orthoCaseId],
-      );
-      if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
-    }
-    const { rows: latest } = await client.query<{ id: number; version: number }>(
-      `SELECT id, version FROM patient_diagnoses WHERE patient_id = $1
-        ORDER BY id DESC LIMIT 1 FOR UPDATE`,
-      [input.patientId],
-    );
-    const nextVersion = (latest[0]?.version ?? 0) + 1;
-    const { rows } = await client.query<{ id: number; version: number }>(
-      `INSERT INTO patient_diagnoses
-         (patient_id, version, content, label, ortho_case_id, visit_id, supersedes, created_by)
-       VALUES ($1, $2, $3::jsonb, $4::text, $5::int, $6::int, $7::int, $8)
-       RETURNING id, version`,
-      [
-        input.patientId, nextVersion, JSON.stringify(input.content), input.label,
-        input.orthoCaseId, input.visitId, latest[0]?.id ?? null, input.createdBy,
-      ],
-    );
+    const saved = await recordPatientDiagnosisOn(client, input);
     await client.query("COMMIT");
-    return { id: rows[0].id, version: rows[0].version };
+    return saved;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+/** The body of `recordPatientDiagnosis` on the caller's transaction (M2 slice 74): the
+ * per-patient advisory lock first, then the patient, visit and case, then the latest
+ * version. Throws DiagnosisAssociationError on a foreign link. */
+export async function recordPatientDiagnosisOn(client: DbClient, input: {
+  patientId: number; content: Record<string, unknown>; label: string | null; orthoCaseId: number | null; visitId: number | null; createdBy: string;
+}): Promise<{ id: number; version: number }> {
+  if (!validDiagnosisId(input.patientId)
+    || [input.orthoCaseId, input.visitId].some(id => id !== null && !validDiagnosisId(id))) {
+    throw new DiagnosisAssociationError();
+  }
+  // Dedicated two-integer namespace; all diagnosis versions share this lock,
+  // whether standalone or attached to one of the patient's historical cases.
+  await client.query(`SELECT pg_advisory_xact_lock(73127, $1::int)`, [input.patientId]);
+  const { rows: patients } = await client.query(
+    `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId],
+  );
+  if (!patients[0]) throw new DiagnosisAssociationError();
+  if (input.visitId !== null) {
+    const { rows } = await client.query<{ patient_id: number | null }>(
+      `SELECT patient_id FROM visits WHERE id = $1 FOR SHARE`, [input.visitId],
+    );
+    if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
+  }
+  if (input.orthoCaseId !== null) {
+    const { rows } = await client.query<{ patient_id: number }>(
+      `SELECT patient_id FROM ortho_cases WHERE id = $1 FOR SHARE`, [input.orthoCaseId],
+    );
+    if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
+  }
+  const { rows: latest } = await client.query<{ id: number; version: number }>(
+    `SELECT id, version FROM patient_diagnoses WHERE patient_id = $1
+      ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+    [input.patientId],
+  );
+  const nextVersion = (latest[0]?.version ?? 0) + 1;
+  const { rows } = await client.query<{ id: number; version: number }>(
+    `INSERT INTO patient_diagnoses
+       (patient_id, version, content, label, ortho_case_id, visit_id, supersedes, created_by)
+     VALUES ($1, $2, $3::jsonb, $4::text, $5::int, $6::int, $7::int, $8)
+     RETURNING id, version`,
+    [
+      input.patientId, nextVersion, JSON.stringify(input.content), input.label,
+      input.orthoCaseId, input.visitId, latest[0]?.id ?? null, input.createdBy,
+    ],
+  );
+  return { id: rows[0].id, version: rows[0].version };
 }
 
 /* ═══════════════════════════════ السيفالومتري ═══════════════════════════════
@@ -26905,6 +26919,25 @@ export async function createIntakeForm(
         details: { conditions: answers.conditions.length, hasNote: Boolean(answers.note) },
         actor: "بوابة المريض",
       });
+  return { id: rows[0].id, createdAt: rows[0].created_at.toISOString() };
+}
+
+/** (M2 slice 74) A staff-recorded intake version on the caller's transaction, its
+ * `intake.staff` audit row (and the canonical receipt) in the same transaction. */
+export async function createIntakeFormOn(
+  client: DbClient, patientId: number, answers: IntakeAnswers, recordedBy: { actor: string; actorRole: string },
+  receipt?: Readonly<Record<string, string>>,
+): Promise<{ id: number; createdAt: string }> {
+  const { rows } = await client.query<{ id: number; created_at: Date }>(
+    `INSERT INTO patient_intake_forms (patient_id, answers) VALUES ($1, $2::jsonb)
+      RETURNING id, created_at`,
+    [patientId, JSON.stringify(answers)],
+  );
+  await insertAuditRow(client, {
+    action: "intake.staff", entity: "patient", entityId: patientId,
+    details: { الاستمارة: rows[0].id, الحالات: answers.conditions.length, ملاحظة: Boolean(answers.note), ...(receipt ?? {}) },
+    actor: recordedBy.actor, actorRole: recordedBy.actorRole,
+  });
   return { id: rows[0].id, createdAt: rows[0].created_at.toISOString() };
 }
 
@@ -29190,6 +29223,26 @@ export async function saveMedicalHistory(patientId: number, input: MedicalHistor
   return rows[0] ? toMedicalHistory(rows[0]) : null;
 }
 
+/** (M2 slice 74) The same INSERT on the caller's transaction. */
+export async function saveMedicalHistoryOn(client: DbClient, patientId: number, input: MedicalHistoryInput, recordedBy: string): Promise<MedicalHistoryRecord | null> {
+  const { rows } = await client.query<MedicalHistoryRow>(
+    `INSERT INTO patient_medical_history
+       (patient_id, answers, allergies, medications, asa_class, blood_group, notes, patient_confirmed, recorded_by)
+     SELECT $1, $2::jsonb, $3::jsonb, $4::jsonb, $5::text, $6::text, $7::text, $8, $9
+      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+     RETURNING *`,
+    [patientId, JSON.stringify(input.answers), JSON.stringify(input.allergies), JSON.stringify(input.medications),
+      input.asaClass, input.bloodGroup, input.notes, input.patientConfirmed, recordedBy],
+  );
+  return rows[0] ? toMedicalHistory(rows[0]) : null;
+}
+
+/** (M2 slice 74) One saved version by id (an idempotent replay re-reads it). */
+export async function getMedicalHistoryWith(q: Pick<DbClient, "query">, id: number): Promise<MedicalHistoryRecord | null> {
+  const { rows } = await q.query<MedicalHistoryRow>(`SELECT * FROM patient_medical_history WHERE id = $1`, [id]);
+  return rows[0] ? toMedicalHistory(rows[0]) : null;
+}
+
 /** آخر نسخ التاريخ الطبي (الأحدث أولًا). */
 export async function listMedicalHistory(patientId: number, limit = 20): Promise<MedicalHistoryRecord[]> {
   await ensureSchema();
@@ -29235,35 +29288,48 @@ export async function recordVitals(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const patient = await client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [patientId]);
-    if (!patient.rowCount) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-    const { rows } = await client.query<VitalsRow>(
-    `INSERT INTO patient_vitals
-       (patient_id, visit_id, bp_systolic, bp_diastolic, pulse, temperature, spo2, glucose, weight_kg, recorded_by, recorded_at)
-     SELECT $1,
-            (SELECT v.id FROM visits v WHERE v.patient_id = $1 AND v.signed_at IS NULL
-                AND (v.arrived_at AT TIME ZONE $10)::date = COALESCE($11::date, (NOW() AT TIME ZONE $10)::date)
-              ORDER BY v.id DESC LIMIT 1),
-            $2, $3, $4, $5, $6, $7, $8, $9,
-            CASE WHEN $11::date IS NULL THEN NOW() ELSE ($11::date::timestamp AT TIME ZONE $10) END
-     RETURNING *`,
-    [patientId, input.bpSystolic, input.bpDiastolic, input.pulse, input.temperature, input.spo2, input.glucose,
-      input.weightKg, recordedBy, CLINIC_TIME_ZONE, options.recordedDate ?? null],
-    );
-    if (options.medicalAlert !== undefined) {
-      await client.query("UPDATE patients SET medical_alert = $2 WHERE id = $1", [patientId, options.medicalAlert]);
-    }
-    await client.query("COMMIT");
-    return toVitals(rows[0]);
+    const saved = await recordVitalsOn(client, patientId, input, recordedBy, options);
+    await client.query(saved ? "COMMIT" : "ROLLBACK");
+    return saved;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
   }
+}
+
+/** The body of `recordVitals` on the caller's transaction (M2 slice 74): the patient row
+ * locked first, the reading linked to today's open visit, the alert in the same write. */
+export async function recordVitalsOn(
+  client: DbClient, patientId: number, input: VitalsInput, recordedBy: string,
+  options: { recordedDate?: string; medicalAlert?: string | null } = {},
+): Promise<VitalsRecord | null> {
+  const patient = await client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [patientId]);
+  if (!patient.rowCount) return null;
+  const { rows } = await client.query<VitalsRow>(
+  `INSERT INTO patient_vitals
+     (patient_id, visit_id, bp_systolic, bp_diastolic, pulse, temperature, spo2, glucose, weight_kg, recorded_by, recorded_at)
+   SELECT $1,
+          (SELECT v.id FROM visits v WHERE v.patient_id = $1 AND v.signed_at IS NULL
+              AND (v.arrived_at AT TIME ZONE $10)::date = COALESCE($11::date, (NOW() AT TIME ZONE $10)::date)
+            ORDER BY v.id DESC LIMIT 1),
+          $2, $3, $4, $5, $6, $7, $8, $9,
+          CASE WHEN $11::date IS NULL THEN NOW() ELSE ($11::date::timestamp AT TIME ZONE $10) END
+   RETURNING *`,
+  [patientId, input.bpSystolic, input.bpDiastolic, input.pulse, input.temperature, input.spo2, input.glucose,
+    input.weightKg, recordedBy, CLINIC_TIME_ZONE, options.recordedDate ?? null],
+  );
+  if (options.medicalAlert !== undefined) {
+    await client.query("UPDATE patients SET medical_alert = $2 WHERE id = $1", [patientId, options.medicalAlert]);
+  }
+  return toVitals(rows[0]);
+}
+
+/** (M2 slice 74) One reading by id (an idempotent replay re-reads it). */
+export async function getVitalsWith(q: Pick<DbClient, "query">, id: number): Promise<VitalsRecord | null> {
+  const { rows } = await q.query<VitalsRow>(`SELECT * FROM patient_vitals WHERE id = $1`, [id]);
+  return rows[0] ? toVitals(rows[0]) : null;
 }
 
 export async function listVitals(patientId: number, limit = 10): Promise<VitalsRecord[]> {

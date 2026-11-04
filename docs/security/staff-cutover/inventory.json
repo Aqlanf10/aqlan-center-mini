@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "f857697ab2c5a10e94cbc4d138be217336585a355f1b358e896d3a75dc61140e",
+  "sourceDigest": "fab8e9971955d770a56912ff39abf490013bfcc116227e39555947378bb6cc4b",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -2344,15 +2344,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 44
         },
         {
           "symbol": "requireSession",
-          "line": 74
+          "line": 79
         }
       ]
     },
@@ -2434,11 +2434,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 24
         }
       ]
     },
@@ -2579,15 +2579,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 29
+          "line": 30
         },
         {
           "symbol": "requireSession",
-          "line": 56
+          "line": 61
         }
       ]
     },
@@ -2792,15 +2792,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 26
+          "line": 27
         },
         {
           "symbol": "requireSession",
-          "line": 41
+          "line": 46
         }
       ]
     },
@@ -10283,15 +10283,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 44
         },
         {
           "symbol": "requireSession",
-          "line": 74
+          "line": 79
         }
       ]
     },
@@ -10311,15 +10311,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 44
         },
         {
           "symbol": "requireSession",
-          "line": 74
+          "line": 79
         }
       ]
     },
@@ -10604,11 +10604,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 24
         }
       ]
     },
@@ -10628,11 +10628,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 24
         }
       ]
     },
@@ -10996,15 +10996,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 29
+          "line": 30
         },
         {
           "symbol": "requireSession",
-          "line": 56
+          "line": 61
         }
       ]
     },
@@ -11024,15 +11024,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 29
+          "line": 30
         },
         {
           "symbol": "requireSession",
-          "line": 56
+          "line": 61
         }
       ]
     },
@@ -11439,15 +11439,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 26
+          "line": 27
         },
         {
           "symbol": "requireSession",
-          "line": 41
+          "line": 46
         }
       ]
     },
@@ -11467,15 +11467,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 26
+          "line": 27
         },
         {
           "symbol": "requireSession",
-          "line": 41
+          "line": 46
         }
       ]
     },

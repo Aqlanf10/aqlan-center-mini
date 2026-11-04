@@ -8,6 +8,7 @@ import { CanonicalPatientCases } from "./CanonicalPatientCases";
 import { CanonicalOrthoCases } from "./CanonicalOrthoCases";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { CanonicalReferralWork, type ReferralRow } from "./CanonicalReferralWork";
+import { CanonicalClinicalDocumentation } from "./CanonicalClinicalDocumentation";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -50,6 +51,8 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
   const [file, setFile] = useState<PatientFileView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [clinicalVersion, setClinicalVersion] = useState(0);
+  const canDocument = session?.isOwner === true || (session?.capabilities ?? []).includes("clinical.visits.document");
 
   useEffect(() => {
     let cancelled = false;
@@ -175,14 +178,18 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
       {/* M2 slice 72: family members inside the patient scope; balances only with the ledger grant (server-enforced). */}
       <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone ?? null} />
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.ortho.view") && (session.patientScope === "own" || session.patientScope === "all"))
-        ? <CanonicalOrthoCases key={`${session.username}:${session.patientScope}:${session.capabilities?.join(",")}:${patientId}`} patientId={patientId} ownerKey={session.username} canEdit={session.isOwner === true || !!session.capabilities?.includes("clinical.ortho.edit")} canReadCoverage={session.isOwner === true || session.capabilities?.includes("finance.agreements.manage") === true} /> : null}
+        ? <CanonicalOrthoCases key={`${session.username}:${session.patientScope}:${session.capabilities?.join(",")}:${patientId}`} patientId={patientId} ownerKey={session.username} canDocument={canDocument} canEdit={session.isOwner === true || !!session.capabilities?.includes("clinical.ortho.edit")} canReadCoverage={session.isOwner === true || session.capabilities?.includes("finance.agreements.manage") === true} /> : null}
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.xrays.view") && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalCephStudies key={JSON.stringify([session.username, session.patientScope, session.capabilities, patientId])} patientId={patientId} ownerKey={session.username} canAnalyze={session.isOwner === true || !!session.capabilities?.includes("clinical.ceph.analyze")} canCreate={session.isOwner === true || !!session.capabilities?.includes("clinical.xrays.upload")} /> : null}
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.plans.view") && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalClinicalPlans key={`${session.username}:${session.patientScope}:${patientId}`} patientId={patientId} /> : null}
-      {projection.care ? <ClinicalPanels patientId={patientId}
+      {projection.care ? <ClinicalPanels key={clinicalVersion} patientId={patientId}
         canManageReferrals={session?.isOwner === true || (session?.capabilities ?? []).includes("clinical.referrals.manage")}
         appointments={(file.appointments ?? []).map(item => ({ id: item.id, date: item.scheduledDate, time: item.scheduledTime, status: item.status }))} /> : null}
+      {projection.care && canDocument ? (
+        <CanonicalClinicalDocumentation patientId={patient.id} patientName={patient.fullName} medicalAlert={patient.medicalAlert ?? null}
+          onChanged={() => setClinicalVersion(version => version + 1)} />
+      ) : null}
       {session?.isOwner === true || (session?.capabilities?.some(c => ["clinical.plans.view", "clinical.visits.document", "clinical.xrays.view"].includes(c)) && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalPatientCases key={JSON.stringify([session.username, session.patientScope, session.capabilities, patientId])} patientId={patientId}
           ownerKey={session.username} canDocument={session.isOwner === true || !!session.capabilities?.includes("clinical.visits.document")} canEdit={session.isOwner === true || !!session.capabilities?.includes("clinical.plans.edit")} /> : null}

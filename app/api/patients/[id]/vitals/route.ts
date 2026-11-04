@@ -1,6 +1,7 @@
 import { canonicalPatientGet } from "@/lib/canonical-patient-http";
 import { readCanonicalVitals } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
+import { canonicalClinicalRecordRoute, commandCanonicalVitals } from "@/lib/canonical-clinical-records";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, listVitals, recordAudit, recordVitals } from "@/lib/db";
@@ -38,6 +39,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 74: one admitted clinical.visits.document transaction inside the patient scope,
+     idempotent by requestKey, the audit row with the record. */
+  const canonical = await canonicalClinicalRecordRoute(request, async (handle, body) => commandCanonicalVitals(handle, (await context.params).id, body), "تعذّر حفظ العلامات الحيوية.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
