@@ -49,6 +49,10 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   /** GET /api/patients/[id]/ledger and the patient account reads (M2 slice 88): the
    * patient's whole financial account inside the patient scope; finance.patient-ledger.view. */
   "read:patients.ledger": Object.freeze({ record: "patient", need: Object.freeze(["finance.patient-ledger.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/invoices (?patientId), /api/invoices/[id], /api/invoices/archive and
+   * /api/invoices/[id]/archive: invoices inside the patient scope; finance.invoices.view
+   * (M2 slice 92). The ledger grant never substitutes (owner decision 6629149113). */
+  "read:invoices.patient": Object.freeze({ record: "patient", need: Object.freeze(["finance.invoices.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/finance/debts: the debtors list, rows inside the actor's patient scope (M2 slice 88). */
   "read:finance.debts": Object.freeze({ record: "patient", need: Object.freeze(["finance.patient-ledger.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]: one patient's file, only inside the actor's patient scope. */

@@ -91,6 +91,12 @@ Nothing here changes behaviour until the slices land.
   - or a clinical grant the owner names (for example `clinical.plans.edit`); never a finance grant alone.
 - *Until decided:* canonical sessions are refused on this route (slice 88 leaves it on legacy).
 
+**G4-8 — Invoice reads and the patient scope.**
+- *The map:* lists the invoice reads (`GET invoices`, `[id]`, `archive`) with no record scope.
+- *In force since slice 92:* the canonical reads keep them inside the actor's patient scope, the same as the patient account. An `own`-scoped actor granted `finance.invoices.view` reads only its patients' invoices.
+- *Why:* a scope-free invoice read would let an invoice grant bypass the case-doctor patient scope (decision 6629149113, point 3).
+- *Question:* should finance-only roles read invoices without a patient scope, or is patient scope `all` the explicit way to grant it, as in force?
+
 ## 4. Slices (each after its decision where one is listed)
 
 | Slice | Content | Waits on |
@@ -100,7 +106,7 @@ Nothing here changes behaviour until the slices land.
 | 89 | Visit money reads (billing preview, financial context, walkout) | G4-4 |
 | 90 | Payment reads and collection (payments, attempts retire, defer) with the shift rule and request keys | G4-4 |
 | 91 | Payment correction/void; debt repayment arrangements and collection — **done** | — |
-| 92 | Invoice reads and archive | — |
+| 92 | Invoice reads and archive reads — **done** (patient-scoped; G4-8) | — |
 | 93 | Invoice writes (create, patch, add-service, clinical preview), cancel, correct | — |
 | 94 | Plan money reads and writes, financial approval, amendment, reconcile | G4-1 |
 | 95 | Historical onboarding and documents | G4-2 |

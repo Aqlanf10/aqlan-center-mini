@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalInvoiceArchive } from "@/lib/canonical-invoice-reads";
 import { readInvoiceArchive, changeInvoiceArchive } from "@/lib/invoice-archive-db";
 import { InvoiceArchiveError } from "@/lib/invoice-archive";
 
@@ -21,6 +24,13 @@ async function owner(context: Context) {
   return { id, session };
 }
 export async function GET(_request: Request, context: Context) {
+  // M2 slice 92: finance.invoices.view; an invoice outside the patient scope reads like a missing one.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalInvoiceArchive(selected.handle, Number((await context.params).id)), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل حالة أرشفة الفاتورة."); }
+  }
   try { const { id, session } = await owner(context); return NextResponse.json(await readInvoiceArchive(id, session)); }
   catch (error) { return failure(error); }
 }

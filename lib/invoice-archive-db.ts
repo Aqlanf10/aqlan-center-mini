@@ -112,20 +112,28 @@ export async function readInvoiceArchive(invoiceId: number, session: SessionPayl
   return readOnly(session, async client => {
     const invoice = await getInvoice(invoiceId, client);
     if (!invoice) throw new InvoiceArchiveError("missing", "الفاتورة غير موجودة.");
-    return view(client, invoice, await invoiceArchiveReady(client));
+    return invoiceArchiveViewWith(client, invoice);
   });
 }
-export async function listInvoiceArchive(patientId: number, session: SessionPayload): Promise<{
+/** One invoice's archive state from an already-read invoice, on the caller's read-only
+ * snapshot (the legacy reader above and the canonical read, M2 slice 92). */
+export async function invoiceArchiveViewWith(client: DbClient, invoice: Invoice): Promise<InvoiceArchiveView> {
+  return view(client, invoice, await invoiceArchiveReady(client));
+}
+export type InvoiceArchiveList = {
   readiness: "ready" | "migration_pending"; invoices: InvoiceArchiveView[]; archivedInvoices: { invoice: Invoice; archive: InvoiceArchiveView }[];
-}> {
+};
+export async function listInvoiceArchive(patientId: number, session: SessionPayload): Promise<InvoiceArchiveList> {
   if (!positiveId(patientId)) throw new InvoiceArchiveError("invalid", "رقم المريض غير صالح.");
-  return readOnly(session, async client => {
-    const ready = await invoiceArchiveReady(client), documents = await listPatientInvoices(patientId, client);
-    const states: InvoiceArchiveView[] = [];
-    for (const invoice of documents) states.push(await view(client, invoice, ready));
-    return { readiness: ready ? "ready" : "migration_pending", invoices: states,
-      archivedInvoices: states.flatMap((state, index) => state.archived ? [{ invoice: documents[index], archive: state }] : []) };
-  });
+  return readOnly(session, client => listInvoiceArchiveWith(client, patientId));
+}
+/** The patient's archive list on the caller's read-only snapshot (M2 slice 92). */
+export async function listInvoiceArchiveWith(client: DbClient, patientId: number): Promise<InvoiceArchiveList> {
+  const ready = await invoiceArchiveReady(client), documents = await listPatientInvoices(patientId, client);
+  const states: InvoiceArchiveView[] = [];
+  for (const invoice of documents) states.push(await view(client, invoice, ready));
+  return { readiness: ready ? "ready" : "migration_pending", invoices: states,
+    archivedInvoices: states.flatMap((state, index) => state.archived ? [{ invoice: documents[index], archive: state }] : []) };
 }
 
 /** Documentary transitions only. The immutable financial and clinical graph is never rewritten. */

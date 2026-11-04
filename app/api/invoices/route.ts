@@ -16,6 +16,9 @@ import { parseInvoiceCommand, invoiceCommandFingerprint, invoiceTemplateRequestF
 import { InvoiceTemplateAuthorityError, InvoiceTemplateBusyError, InvoiceTemplateAuthorizationError } from "@/lib/invoice-template-db";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalPatientInvoices } from "@/lib/canonical-invoice-reads";
 import { DebtRepaymentError, invoiceDebtRepaymentReceipt } from "@/lib/debt-installments-db";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +27,13 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  // M2 slice 92: finance.invoices.view inside the patient scope, one snapshot.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalPatientInvoices(selected.handle, Number(new URL(request.url).searchParams.get("patientId"))), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل الفواتير."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewMoney(session.role)) {
