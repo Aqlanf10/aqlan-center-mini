@@ -13,6 +13,7 @@ import { PatientDocuments } from "@/components/PatientDocuments";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientEndo } from "@/components/PatientEndo";
 import { PatientNumberEditor } from "@/components/patient/PatientNumberEditor";
+import { CanonicalPatientLifecycle } from "./CanonicalPatientLifecycle";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -249,6 +250,11 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
           openVisitId={(file.visits ?? []).find(visit => visit.status !== "done")?.id ?? null} />
       ) : null}
       <TimelinePanel patientId={patientId} />
+      {/* M2 slice 79: merge and delete by their own grants (server-enforced). */}
+      <CanonicalPatientLifecycle patientId={patient.id} patientNumber={patient.patientNumber}
+        canMerge={session?.isOwner === true || (session?.capabilities ?? []).includes("patients.merge")}
+        canDelete={session?.isOwner === true || (session?.capabilities ?? []).includes("patients.delete")}
+        onMerged={() => setFileVersion(version => version + 1)} onDeleted={() => { window.location.assign("/patients"); }} />
 
       <p className="text-xs text-slate-600">بقية تفاصيل الملف والخطط والحساب والمستندات تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>
       <a href="/patients" className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-navy-800">العودة إلى المرضى</a>

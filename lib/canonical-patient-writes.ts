@@ -154,8 +154,8 @@ export async function commandCanonicalPatientUpdate(session: VerifiedDurableSess
     return projectWritten(updated, care, operational);
   });
 }
-/** The saved record as the actor may see it (same groups as the file read). */
-function projectWritten(patient: Patient, care: boolean, operational: boolean) {
+/** The saved record as the actor may see it (same groups as the file read); shared with the merge (M2 slice 79). */
+export function projectWritten(patient: Patient, care: boolean, operational: boolean) {
   const out: Record<string, unknown> = {};
   for (const field of ["id", "patientNumber", ...IDENTITY_WRITE_FIELDS, "createdAt"] as const) out[field] = (patient as unknown as Record<string, unknown>)[field] ?? null;
   if (care) for (const field of CARE_WRITE_FIELDS) out[field] = (patient as unknown as Record<string, unknown>)[field] ?? null;

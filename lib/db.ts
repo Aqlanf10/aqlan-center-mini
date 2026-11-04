@@ -5582,123 +5582,149 @@ export async function mergeDuplicatePatient(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: locked } = await client.query<PatientRow>(
-      `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
-      [[sourceId, targetId]],
-    );
-    const source = locked.find((row) => row.id === sourceId);
-    const target = locked.find((row) => row.id === targetId);
-    if (!source || !target) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
-    }
-
-    const { rows: [footprint] } = await client.query<{
-      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number; collection_attempts: number;
-    }>(
-      `SELECT (SELECT COUNT(*)::int FROM payments WHERE patient_id = $1) AS payments,
-              /* (0068) A retired collection key is permanent proof bound to this patient: it never moves. */
-              (SELECT COUNT(*)::int FROM collection_attempt_retirements WHERE patient_id = $1) AS collection_attempts,
-              (SELECT COUNT(*)::int FROM inventory_movements
-                WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
-              (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening,
-              (SELECT COUNT(*)::int FROM legacy_treatments WHERE patient_id = $1)
-                + (SELECT COUNT(*)::int FROM legacy_treatment_agreements WHERE patient_id = $1) AS legacy_treatments,
-              (SELECT COUNT(*)::int FROM legacy_payments WHERE patient_id = $1) AS legacy_payments`,
-      [sourceId],
-    );
-    if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0
-      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0 || footprint.collection_attempts > 0) {
-      await client.query("ROLLBACK");
-      return {
-        ok: false, reason: "source_has_financial_history",
-        counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening,
-          legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments,
-          ...(footprint.collection_attempts > 0 ? { collectionAttempts: footprint.collection_attempts } : {}) },
-      };
-    }
-
-    /* كل عمودٍ يشير إلى patients(id) بمفتاحٍ أجنبي — من فهرس القاعدة نفسها. */
-    const { rows: references } = await client.query<{ tbl: string; col: string }>(
-      `SELECT c.conrelid::regclass::text AS tbl, a.attname AS col
-         FROM pg_constraint c
-         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
-        WHERE c.contype = 'f' AND c.confrelid = 'patients'::regclass
-        ORDER BY 1, 2`,
-    );
-    const moved: Record<string, number> = {};
-    for (const { tbl, col } of references) {
-      if (!/^[a-z_][a-z0-9_]*$/.test(tbl) || !/^[a-z_][a-z0-9_]*$/.test(col)) continue;
-      const result = await client.query(
-        `UPDATE ${tbl} SET ${col} = $1 WHERE ${col} = $2`, [targetId, sourceId],
-      );
-      if (result.rowCount) moved[`${tbl}.${col}`] = result.rowCount;
-    }
-
-    /* (PAT-4) عائلة المكرر: الضامن ينتقل أعلاه مع المفاتيح الأجنبية؛ والعضوية عمودٌ في صفّ المريض
-       نفسه — فتُورَّث للأصل إن لم تكن له عائلة (عائلته القائمة لا تُستبدل صامتةً). */
-    const { rows: [sourceFamily] } = await client.query<{ family_id: number | null; family_role: string | null; target_family: number | null }>(
-      `SELECT s.family_id, s.family_role, t.family_id AS target_family
-         FROM patients s, patients t WHERE s.id = $1 AND t.id = $2`,
-      [sourceId, targetId],
-    );
-    if (sourceFamily?.family_id != null && sourceFamily.target_family === null) moved["patients.family_id"] = 1;
-
-    /* فراغات الهدف تُملأ من المصدر، والتنبيهان الطبيّان يُضمّان — حساسيةٌ في الملف
-       المكرر لا تضيع بدمجه. */
-    const alerts = [target.medical_alert, source.medical_alert]
-      .map((value) => (value ?? "").trim()).filter(Boolean);
-    const mergedAlert = [...new Set(alerts)].join("؛ ").slice(0, 800) || null;
-    const { rows: updated } = await client.query<PatientRow>(
-      `UPDATE patients SET
-         phone         = COALESCE(phone, $2),
-         alt_phone     = COALESCE(alt_phone, $3),
-         birth_year    = COALESCE(birth_year, $4::int),
-         address       = COALESCE(address, $5),
-         medical_alert = $6::text,
-         gender        = CASE WHEN gender = 'unknown' THEN $7 ELSE gender END,
-         note          = CASE WHEN $8::text IS NULL THEN note
-                              WHEN note IS NULL THEN $8
-                              ELSE LEFT(note || E'\n' || $8, 2000) END,
-         /* (P2-8) تاريخ الميلاد ووليّ الأمر والهوية تُملأ من المكرر إن خلت — والتاريخ
-            لا يُنقل إن ناقض سنة ميلاد الأصل. */
-         birth_date     = COALESCE(birth_date, CASE WHEN birth_year IS NULL
-                                    OR birth_year = EXTRACT(YEAR FROM $9::date)::int THEN $9::date END),
-         guardian_name  = COALESCE(guardian_name, $10),
-         guardian_phone = COALESCE(guardian_phone, $11),
-         national_id    = COALESCE(national_id, $12),
-         /* (P3-8ب) مصدر المريض ومن أحاله: الأصل أولى، والمكرر يملأ الفراغ فقط. */
-         referral_source = COALESCE(referral_source, $13),
-         referred_by     = COALESCE(referred_by, $14),
-         /* (PAT-3) البريد والقناة والصورة تملأ الفراغ، والأعلام تُضمّ — علَمٌ على المكرر لا يضيع. */
-         email             = COALESCE(email, $15),
-         preferred_channel = COALESCE(preferred_channel, $16),
-         photo_document_id = COALESCE(photo_document_id, $17::int),
-         flags             = ARRAY(SELECT f FROM unnest(flags || $18::text[]) WITH ORDINALITY AS t(f, n)
-                                    GROUP BY f ORDER BY min(n)),
-         family_role       = CASE WHEN family_id IS NULL THEN $20::text ELSE family_role END,
-         family_id         = COALESCE(family_id, $19::int)
-       WHERE id = $1
-       RETURNING ${PATIENT_COLUMNS}`,
-      [
-        targetId, source.phone,
-        /* رقم المصدر المختلف يبقى رقمًا بديلًا للهدف إن خلا بديله — لا يضيع هاتف. */
-        source.phone && target.phone && source.phone !== target.phone ? source.phone : source.alt_phone,
-        source.birth_year, source.address, mergedAlert, source.gender, source.note,
-        source.birth_date == null ? null : String(source.birth_date).slice(0, 10),
-        source.guardian_name, source.guardian_phone, source.national_id,
-        source.referral_source, source.referred_by,
-        source.email ?? null, source.preferred_channel ?? null, source.photo_document_id ?? null,
-        source.flags ?? [],
-        sourceFamily?.family_id ?? null, sourceFamily?.family_id != null ? sourceFamily.family_role : null,
-      ],
-    );
-    await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
+    const result = await mergeDuplicatePatientOn(client, sourceId, targetId, ctx);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
-
     /* مُنتظَر لا «أطلق وانسَ»: دمجٌ يحذف ملفًّا يجب أن يكون أثره مكتوبًا قبل الرد
        (recordAudit لا يرمي أبدًا). */
-    await recordAudit({
+    await recordAudit(result.audit);
+    return { ok: true, moved: result.moved, target: result.target };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    const code = (error as { code?: string } | null)?.code;
+    if (code === "23505" || code === "23P01") return { ok: false, reason: "conflict" };
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The merge body on the caller's transaction (M2 slice 79). A refusal must be rolled back
+ * by the caller; a unique/exclusion violation (23505/23P01) is the legacy `conflict`. The
+ * audit row is returned: the legacy wrapper writes it after the commit as before, the
+ * canonical command inside the same transaction.
+ */
+export async function mergeDuplicatePatientOn(
+  client: DbClient,
+  sourceId: number,
+  targetId: number,
+  ctx: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<(PatientMergeResult & { ok: false }) | { ok: true; moved: Record<string, number>; target: Patient; audit: AuditInput }> {
+  if (sourceId === targetId) return { ok: false, reason: "same_patient" };
+  const { rows: locked } = await client.query<PatientRow>(
+    `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
+    [[sourceId, targetId]],
+  );
+  const source = locked.find((row) => row.id === sourceId);
+  const target = locked.find((row) => row.id === targetId);
+  if (!source || !target) {
+    return { ok: false, reason: "not_found" };
+  }
+
+  const { rows: [footprint] } = await client.query<{
+    payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number; collection_attempts: number;
+  }>(
+    `SELECT (SELECT COUNT(*)::int FROM payments WHERE patient_id = $1) AS payments,
+            /* (0068) A retired collection key is permanent proof bound to this patient: it never moves. */
+            (SELECT COUNT(*)::int FROM collection_attempt_retirements WHERE patient_id = $1) AS collection_attempts,
+            (SELECT COUNT(*)::int FROM inventory_movements
+              WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
+            (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening,
+            (SELECT COUNT(*)::int FROM legacy_treatments WHERE patient_id = $1)
+              + (SELECT COUNT(*)::int FROM legacy_treatment_agreements WHERE patient_id = $1) AS legacy_treatments,
+            (SELECT COUNT(*)::int FROM legacy_payments WHERE patient_id = $1) AS legacy_payments`,
+    [sourceId],
+  );
+  if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0
+    || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0 || footprint.collection_attempts > 0) {
+    return {
+      ok: false, reason: "source_has_financial_history",
+      counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening,
+        legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments,
+        ...(footprint.collection_attempts > 0 ? { collectionAttempts: footprint.collection_attempts } : {}) },
+    };
+  }
+
+  /* كل عمودٍ يشير إلى patients(id) بمفتاحٍ أجنبي — من فهرس القاعدة نفسها. */
+  const { rows: references } = await client.query<{ tbl: string; col: string }>(
+    `SELECT c.conrelid::regclass::text AS tbl, a.attname AS col
+       FROM pg_constraint c
+       JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+      WHERE c.contype = 'f' AND c.confrelid = 'patients'::regclass
+      ORDER BY 1, 2`,
+  );
+  const moved: Record<string, number> = {};
+  for (const { tbl, col } of references) {
+    if (!/^[a-z_][a-z0-9_]*$/.test(tbl) || !/^[a-z_][a-z0-9_]*$/.test(col)) continue;
+    const result = await client.query(
+      `UPDATE ${tbl} SET ${col} = $1 WHERE ${col} = $2`, [targetId, sourceId],
+    );
+    if (result.rowCount) moved[`${tbl}.${col}`] = result.rowCount;
+  }
+
+  /* (PAT-4) عائلة المكرر: الضامن ينتقل أعلاه مع المفاتيح الأجنبية؛ والعضوية عمودٌ في صفّ المريض
+     نفسه — فتُورَّث للأصل إن لم تكن له عائلة (عائلته القائمة لا تُستبدل صامتةً). */
+  const { rows: [sourceFamily] } = await client.query<{ family_id: number | null; family_role: string | null; target_family: number | null }>(
+    `SELECT s.family_id, s.family_role, t.family_id AS target_family
+       FROM patients s, patients t WHERE s.id = $1 AND t.id = $2`,
+    [sourceId, targetId],
+  );
+  if (sourceFamily?.family_id != null && sourceFamily.target_family === null) moved["patients.family_id"] = 1;
+
+  /* فراغات الهدف تُملأ من المصدر، والتنبيهان الطبيّان يُضمّان — حساسيةٌ في الملف
+     المكرر لا تضيع بدمجه. */
+  const alerts = [target.medical_alert, source.medical_alert]
+    .map((value) => (value ?? "").trim()).filter(Boolean);
+  const mergedAlert = [...new Set(alerts)].join("؛ ").slice(0, 800) || null;
+  const { rows: updated } = await client.query<PatientRow>(
+    `UPDATE patients SET
+       phone         = COALESCE(phone, $2),
+       alt_phone     = COALESCE(alt_phone, $3),
+       birth_year    = COALESCE(birth_year, $4::int),
+       address       = COALESCE(address, $5),
+       medical_alert = $6::text,
+       gender        = CASE WHEN gender = 'unknown' THEN $7 ELSE gender END,
+       note          = CASE WHEN $8::text IS NULL THEN note
+                            WHEN note IS NULL THEN $8
+                            ELSE LEFT(note || E'\n' || $8, 2000) END,
+       /* (P2-8) تاريخ الميلاد ووليّ الأمر والهوية تُملأ من المكرر إن خلت — والتاريخ
+          لا يُنقل إن ناقض سنة ميلاد الأصل. */
+       birth_date     = COALESCE(birth_date, CASE WHEN birth_year IS NULL
+                                  OR birth_year = EXTRACT(YEAR FROM $9::date)::int THEN $9::date END),
+       guardian_name  = COALESCE(guardian_name, $10),
+       guardian_phone = COALESCE(guardian_phone, $11),
+       national_id    = COALESCE(national_id, $12),
+       /* (P3-8ب) مصدر المريض ومن أحاله: الأصل أولى، والمكرر يملأ الفراغ فقط. */
+       referral_source = COALESCE(referral_source, $13),
+       referred_by     = COALESCE(referred_by, $14),
+       /* (PAT-3) البريد والقناة والصورة تملأ الفراغ، والأعلام تُضمّ — علَمٌ على المكرر لا يضيع. */
+       email             = COALESCE(email, $15),
+       preferred_channel = COALESCE(preferred_channel, $16),
+       photo_document_id = COALESCE(photo_document_id, $17::int),
+       flags             = ARRAY(SELECT f FROM unnest(flags || $18::text[]) WITH ORDINALITY AS t(f, n)
+                                  GROUP BY f ORDER BY min(n)),
+       family_role       = CASE WHEN family_id IS NULL THEN $20::text ELSE family_role END,
+       family_id         = COALESCE(family_id, $19::int)
+     WHERE id = $1
+     RETURNING ${PATIENT_COLUMNS}`,
+    [
+      targetId, source.phone,
+      /* رقم المصدر المختلف يبقى رقمًا بديلًا للهدف إن خلا بديله — لا يضيع هاتف. */
+      source.phone && target.phone && source.phone !== target.phone ? source.phone : source.alt_phone,
+      source.birth_year, source.address, mergedAlert, source.gender, source.note,
+      source.birth_date == null ? null : String(source.birth_date).slice(0, 10),
+      source.guardian_name, source.guardian_phone, source.national_id,
+      source.referral_source, source.referred_by,
+      source.email ?? null, source.preferred_channel ?? null, source.photo_document_id ?? null,
+      source.flags ?? [],
+      sourceFamily?.family_id ?? null, sourceFamily?.family_id != null ? sourceFamily.family_role : null,
+    ],
+  );
+  await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
+  return {
+    ok: true, moved, target: toPatient(updated[0]),
+    audit: {
       action: "patient.merge", entity: "patient", entityId: targetId,
       entityLabel: target.full_name,
       details: {
@@ -5708,16 +5734,8 @@ export async function mergeDuplicatePatient(
         ...(ctx.reason ? { السبب: ctx.reason } : {}),
       },
       actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-    });
-    return { ok: true, moved, target: toPatient(updated[0]) };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    const code = (error as { code?: string } | null)?.code;
-    if (code === "23505" || code === "23P01") return { ok: false, reason: "conflict" };
-    throw error;
-  } finally {
-    client.release();
-  }
+    },
+  };
 }
 
 export async function updatePatient(
@@ -5944,265 +5962,277 @@ export async function deletePatientCascade(
 ): Promise<{ ok: boolean; reason?: "not_found" | "has_financial_history" | "has_clinical_history"; counts?: Record<string, number> }> {
   await ensureSchema();
   const client = await getPool().connect();
-  let snapshot: Record<string, unknown> | null = null;
+  let audit: AuditInput;
   try {
     await client.query("BEGIN");
-
-    const { rows: patientRows } = await client.query<PatientRow>(
-      `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = $1 FOR UPDATE`,
-      [id],
-    );
-    if (!patientRows[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
-    }
-    const patient = toPatient(patientRows[0]);
-
-    // عُدّ ما سيُمحى — صورة الحذف في سجل التدقيق وإحصاءاته في رسالة التأكيد.
-    const countOf = async (table: string, where: string, args: unknown[]): Promise<number> => {
-      const { rows } = await client.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM ${table} WHERE ${where}`,
-        args,
-      );
-      return Number(rows[0]?.count ?? 0);
-    };
-    const [visitsN, appointmentsN, invoicesN, paymentsN, plansN, labOrdersN,
-      documentsN, cephN, orthoN, diagnosesN] = await Promise.all([
-      countOf("visits", "patient_id = $1", [id]),
-      countOf("appointments", "patient_id = $1", [id]),
-      countOf("invoices", "patient_id = $1", [id]),
-      countOf("payments", "patient_id = $1", [id]),
-      countOf("treatment_plans", "patient_id = $1", [id]),
-      countOf("lab_orders", "patient_id = $1", [id]),
-      countOf("patient_documents", "patient_id = $1", [id]),
-      countOf("ceph_analyses", "patient_id = $1", [id]),
-      countOf("ortho_cases", "patient_id = $1", [id]),
-      countOf("patient_diagnoses", "patient_id = $1", [id]),
-    ]);
-    const counts = {
-      visits: visitsN, appointments: appointmentsN, invoices: invoicesN,
-      payments: paymentsN, plans: plansN, labOrders: labOrdersN,
-      documents: documentsN, ceph: cephN, ortho: orthoN, diagnoses: diagnosesN,
-    };
-
-    /* (P1-FINAL-1) حارس الأثر المالي المركزي — قبل أي DELETE وبصمام واحد:
-       أي أثر مالي يعني أن الملف شاهدٌ على مالٍ دخل أو خرج أو استُحق، فلا يُمحى
-       السجل الذي يحمله. الفحص يشمل:
-        - payments: الدفعات والردود (كان محفوظًا من قبل).
-        - invoices: مدفوعةً أو غير مدفوعة — الفاتورة غير المدفوعة دَينٌ قائم
-          بذاته؛ محوها محوُ دَينٍ لم يُسدَّد.
-        - patient_opening_balances: رصيدٌ سابقٌ على النظام — مالٌ واجب التتبع.
-        - inventory_movements: حركات المخزون المرتبطة بالمريض أو زياراته.
-        - lab orders ذات أثر مالي: مربوطة بالتزام (payable) أو لها تكلفة مسجَّلة
-          أو يشير إليها التزام عبر payables.lab_order_id.
-        - payables المرتبطة بأعمال المريض/المعمل — بالاتجاهين (lab_orders.payable_id
-          وpayables.lab_order_id): ما كان سيُمحى أو يُفصل عن سياقه.
-        - financialLinks: صرفُ المصروفات المرتبط بتلك الالتزامات (expenses.payable_id)
-          — السجلات التي كان الحذف سيقطع صلتها بالتزام المريض.
-       الحساب كله داخل المعاملة نفسها، والرفض يتراجع بكل شيء: لا حذف جزئيًّا
-       أبدًا (اختبار E). */
-    const { rows: footprintRows } = await client.query<{
-      payments: string; invoices: string; opening_balances: string;
-      inventory_movements: string; lab_orders: string; payables: string;
-      financial_links: string;
-    }>(
-      `SELECT
-         /* (0068) Retired collection keys are permanent proof for this patient, like receipts. */
-         (SELECT COUNT(*) FROM payments WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM collection_attempt_retirements WHERE patient_id = $1) AS payments,
-         (SELECT COUNT(*) FROM invoices WHERE patient_id = $1) AS invoices,
-         /* (P1-5ج) معالجات النظام القديم ودفعاته أثرٌ ماليٌّ تاريخي كالرصيد الافتتاحي. */
-         (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM legacy_treatments WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM legacy_payments WHERE patient_id = $1)
-           /* (INV-LEGACY) الاتفاق التاريخي لعلاجٍ بدأ قبل النظام شاهدٌ ماليّ كذلك. */
-           + (SELECT COUNT(*) FROM legacy_treatment_agreements WHERE patient_id = $1) AS opening_balances,
-         (SELECT COUNT(*) FROM inventory_movements
-           WHERE patient_id = $1
-              OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS inventory_movements,
-         (SELECT COUNT(*) FROM lab_orders
-           WHERE patient_id = $1
-             AND (payable_id IS NOT NULL
-                  OR cost_minor IS NOT NULL
-                  OR EXISTS (SELECT 1 FROM payables pay WHERE pay.lab_order_id = lab_orders.id))) AS lab_orders,
-         (SELECT COUNT(*) FROM payables
-           WHERE id IN (SELECT payable_id FROM lab_orders
-                          WHERE patient_id = $1 AND payable_id IS NOT NULL)
-              OR lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1)) AS payables,
-         (SELECT COUNT(*) FROM expenses
-           WHERE payable_id IN (
-             SELECT payable_id FROM lab_orders
-              WHERE patient_id = $1 AND payable_id IS NOT NULL
-             UNION
-             SELECT pay.id FROM payables pay
-              WHERE pay.lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1))) AS financial_links`,
-      [id],
-    );
-    const footprint = footprintRows[0]
-      ? {
-        payments: Number(footprintRows[0].payments),
-        invoices: Number(footprintRows[0].invoices),
-        openingBalances: Number(footprintRows[0].opening_balances),
-        inventoryMovements: Number(footprintRows[0].inventory_movements),
-        labOrders: Number(footprintRows[0].lab_orders),
-        payables: Number(footprintRows[0].payables),
-        financialLinks: Number(footprintRows[0].financial_links),
-      }
-      : {
-        payments: 0, invoices: 0, openingBalances: 0, inventoryMovements: 0,
-        labOrders: 0, payables: 0, financialLinks: 0,
-      };
-    const hasFinancialHistory =
-      footprint.payments > 0 || footprint.invoices > 0 || footprint.openingBalances > 0
-      || footprint.inventoryMovements > 0 || footprint.labOrders > 0
-      || footprint.payables > 0 || footprint.financialLinks > 0;
-    if (hasFinancialHistory) {
-      await client.query("ROLLBACK");
-      return {
-        ok: false,
-        reason: "has_financial_history",
-        counts: { ...counts, ...footprint },
-      };
-    }
-
-    /* (P2-6) حارس السجل السريري — بعد المالي وبالصمام نفسه: زيارةٌ موقّعة أو صورة
-       أشعة أو تحليل سيفالو أو حالة تقويم أو تشخيص أو وصفة سجلٌّ طبيٌّ يجب حفظه،
-       والحذف كان يمحوه كله بلا أثر إلا سطر التدقيق. يبقى الحذف متاحًا لملفٍّ سُجّل
-       خطأً (مواعيد أو زيارات غير موقّعة فقط). */
-    const { rows: clinicalRows } = await client.query<{
-      signed_visits: string; documents: string; ceph: string; ortho: string;
-      diagnoses: string; prescriptions: string; referrals: string; medical_history: string;
-    }>(
-      `SELECT
-         (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL) AS signed_visits,
-         (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1) AS documents,
-         (SELECT COUNT(*) FROM ceph_analyses WHERE patient_id = $1) AS ceph,
-         (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1) AS ortho,
-         (SELECT COUNT(*) FROM patient_diagnoses WHERE patient_id = $1) AS diagnoses,
-         (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1) AS prescriptions,
-         (SELECT COUNT(*) FROM patient_referrals WHERE patient_id = $1) AS referrals,
-         /* (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية سجلٌّ طبيٌّ كذلك. */
-         (SELECT COUNT(*) FROM patient_medical_history WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM patient_vitals WHERE patient_id = $1) AS medical_history`,
-      [id],
-    );
-    const clinical = {
-      signedVisits: Number(clinicalRows[0]?.signed_visits ?? 0),
-      clinicalDocuments: Number(clinicalRows[0]?.documents ?? 0),
-      cephAnalyses: Number(clinicalRows[0]?.ceph ?? 0),
-      orthoCases: Number(clinicalRows[0]?.ortho ?? 0),
-      clinicalDiagnoses: Number(clinicalRows[0]?.diagnoses ?? 0),
-      prescriptions: Number(clinicalRows[0]?.prescriptions ?? 0),
-      referrals: Number(clinicalRows[0]?.referrals ?? 0),
-      medicalHistory: Number(clinicalRows[0]?.medical_history ?? 0),
-    };
-    if (Object.values(clinical).some((count) => count > 0)) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "has_clinical_history", counts: { ...counts, ...clinical } };
-    }
-
-    snapshot = {
-      patient: {
-        id: patient.id, patientNumber: patient.patientNumber,
-        fullName: patient.fullName, phone: patient.phone,
-      },
-      counts,
-      reason: context.reason ?? null,
-    };
-
-    /* ١) فرَّغ روابط الإشارة اللينة بين الوحدات — الحذف بعدها يسير بلا حلقات. */
-    await client.query(
-      `UPDATE visits SET invoice_id = NULL, planned_visit_id = NULL WHERE patient_id = $1`,
-      [id],
-    );
-    await client.query(
-      `UPDATE appointments SET planned_visit_id = NULL WHERE patient_id = $1`,
-      [id],
-    );
-    await client.query(`UPDATE invoices SET plan_id = NULL WHERE patient_id = $1`, [id]);
-    await client.query(`UPDATE ortho_cases SET plan_id = NULL WHERE patient_id = $1`, [id]);
-    await client.query(
-      `UPDATE tooth_conditions SET visit_id = NULL WHERE patient_id = $1`,
-      [id],
-    );
-
-    /* (P1-FIX-3) الدفعات لم تعد تُحذف هنا أبدًا: مريض له دفعات مُنع أعلاه،
-          وحارس DELETE على مستوى القاعدة شبكة الأمان الدائمة. */
-
-    /* ٣) السيفالو قبل مستنداته (مفتاحه المقيِّد RESTRICT) وقبل حالات التقويم. */
-    await client.query(`DELETE FROM ceph_analyses WHERE patient_id = $1`, [id]);
-
-    /* ٤) المستندات قبل حالات التقويم (إشارتها إليها بلا تتالٍ). */
-    await client.query(`DELETE FROM patient_documents WHERE patient_id = $1`, [id]);
-
-    /* ٥) حالات التقويم (تعديلاتها تتالي) قبل الخطط (تشير إليها بلا تتالٍ). */
-    await client.query(`DELETE FROM ortho_cases WHERE patient_id = $1`, [id]);
-
-    /* ٦) خطط العلاج: بنودها وأقساطها وجلساتها تتالى معها. */
-    await client.query(`DELETE FROM treatment_plans WHERE patient_id = $1`, [id]);
-
-    /* ٧) حالات الأسنان ثم إجراءات الزيارات ثم الزيارات نفسها. */
-    await client.query(`DELETE FROM tooth_conditions WHERE patient_id = $1`, [id]);
-    await client.query(
-      `DELETE FROM visit_procedures WHERE visit_id IN (SELECT id FROM visits WHERE patient_id = $1)`,
-      [id],
-    );
-    await client.query(`DELETE FROM visits WHERE patient_id = $1`, [id]);
-
-    /* ٨) الفواتير (بنودها تتالي) والمواعيد والزيارات المخططة. */
-    await client.query(`DELETE FROM invoices WHERE patient_id = $1`, [id]);
-    await client.query(`DELETE FROM appointments WHERE patient_id = $1`, [id]);
-    await client.query(`DELETE FROM planned_visits WHERE patient_id = $1`, [id]);
-
-    /* ٩) أعمال المعمل: (P1-FINAL-1) الحارس أعلاه يمنع أي التزام مرتبط، فما بعد
-          هذا نقطة لا يبلغها الالتزامات أبدًا — التنظيف يبقى شبكة أمان دفاعية:
-          لو أفلت التزام من الفحص يومًا فالإحصاء أعلاه كشفه أولًا، وهنا لا يُحذف
-          التزام ثم يُفصل صرفه ثم تُعتبر العملية سليمة: الحذف نفسه مرفوض أصلًا.
-          سندات الصرف تشير للالتزام بلا مفتاح أجنبي (تاريخٌ يُقرأ لا يُدار). */
-    const { rows: payRows } = await client.query<{ payable_id: number }>(
-      `SELECT DISTINCT payable_id FROM lab_orders WHERE patient_id = $1 AND payable_id IS NOT NULL`,
-      [id],
-    );
-    const payableIds = payRows.map((r) => r.payable_id);
-    if (payableIds.length > 0) {
-      await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = ANY($1::int[])`, [
-        payableIds,
-      ]);
-      await client.query(`DELETE FROM payables WHERE id = ANY($1::int[])`, [payableIds]);
-    }
-    await client.query(`DELETE FROM lab_orders WHERE patient_id = $1`, [id]);
-
-    /* ١٠) صف المريض نفسه — الاستمارات والطلبات والتشخيصات والأرصدة الافتتاحية
-           والرسائل تتالى معه. */
-    const { rows: deleted } = await client.query<{ id: number }>(
-      `DELETE FROM patients WHERE id = $1 RETURNING id`,
-      [id],
-    );
-    if (!deleted[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
-    }
+    const result = await deletePatientCascadeOn(client, id, context);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
+    audit = result.audit;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
-  await recordAudit({
-    action: "patient.delete",
-    entity: "patient",
-    entityId: id,
-    entityLabel: snapshot
-      ? `${(snapshot.patient as { fullName?: string }).fullName ?? ""} (${
-          (snapshot.patient as { patientNumber?: string }).patientNumber ?? ""
-        })`
-      : `#${id}`,
-    details: snapshot,
-    actor: context.actor,
-    actorRole: context.actorRole ?? null,
-  });
+  await recordAudit(audit);
   return { ok: true };
+}
+
+/**
+ * The delete body on the caller's transaction (M2 slice 79): the financial and clinical
+ * guards, then the cascade. A refusal must be rolled back by the caller. The audit row is
+ * returned: the legacy wrapper writes it after the commit as before, the canonical command
+ * inside the same transaction.
+ */
+export async function deletePatientCascadeOn(
+  client: DbClient,
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: false; reason: "not_found" | "has_financial_history" | "has_clinical_history"; counts?: Record<string, number> } | { ok: true; audit: AuditInput }> {
+
+  const { rows: patientRows } = await client.query<PatientRow>(
+    `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  if (!patientRows[0]) {
+    return { ok: false, reason: "not_found" };
+  }
+  const patient = toPatient(patientRows[0]);
+
+  // عُدّ ما سيُمحى — صورة الحذف في سجل التدقيق وإحصاءاته في رسالة التأكيد.
+  const countOf = async (table: string, where: string, args: unknown[]): Promise<number> => {
+    const { rows } = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM ${table} WHERE ${where}`,
+      args,
+    );
+    return Number(rows[0]?.count ?? 0);
+  };
+  const [visitsN, appointmentsN, invoicesN, paymentsN, plansN, labOrdersN,
+    documentsN, cephN, orthoN, diagnosesN] = await Promise.all([
+    countOf("visits", "patient_id = $1", [id]),
+    countOf("appointments", "patient_id = $1", [id]),
+    countOf("invoices", "patient_id = $1", [id]),
+    countOf("payments", "patient_id = $1", [id]),
+    countOf("treatment_plans", "patient_id = $1", [id]),
+    countOf("lab_orders", "patient_id = $1", [id]),
+    countOf("patient_documents", "patient_id = $1", [id]),
+    countOf("ceph_analyses", "patient_id = $1", [id]),
+    countOf("ortho_cases", "patient_id = $1", [id]),
+    countOf("patient_diagnoses", "patient_id = $1", [id]),
+  ]);
+  const counts = {
+    visits: visitsN, appointments: appointmentsN, invoices: invoicesN,
+    payments: paymentsN, plans: plansN, labOrders: labOrdersN,
+    documents: documentsN, ceph: cephN, ortho: orthoN, diagnoses: diagnosesN,
+  };
+
+  /* (P1-FINAL-1) حارس الأثر المالي المركزي — قبل أي DELETE وبصمام واحد:
+     أي أثر مالي يعني أن الملف شاهدٌ على مالٍ دخل أو خرج أو استُحق، فلا يُمحى
+     السجل الذي يحمله. الفحص يشمل:
+      - payments: الدفعات والردود (كان محفوظًا من قبل).
+      - invoices: مدفوعةً أو غير مدفوعة — الفاتورة غير المدفوعة دَينٌ قائم
+        بذاته؛ محوها محوُ دَينٍ لم يُسدَّد.
+      - patient_opening_balances: رصيدٌ سابقٌ على النظام — مالٌ واجب التتبع.
+      - inventory_movements: حركات المخزون المرتبطة بالمريض أو زياراته.
+      - lab orders ذات أثر مالي: مربوطة بالتزام (payable) أو لها تكلفة مسجَّلة
+        أو يشير إليها التزام عبر payables.lab_order_id.
+      - payables المرتبطة بأعمال المريض/المعمل — بالاتجاهين (lab_orders.payable_id
+        وpayables.lab_order_id): ما كان سيُمحى أو يُفصل عن سياقه.
+      - financialLinks: صرفُ المصروفات المرتبط بتلك الالتزامات (expenses.payable_id)
+        — السجلات التي كان الحذف سيقطع صلتها بالتزام المريض.
+     الحساب كله داخل المعاملة نفسها، والرفض يتراجع بكل شيء: لا حذف جزئيًّا
+     أبدًا (اختبار E). */
+  const { rows: footprintRows } = await client.query<{
+    payments: string; invoices: string; opening_balances: string;
+    inventory_movements: string; lab_orders: string; payables: string;
+    financial_links: string;
+  }>(
+    `SELECT
+       /* (0068) Retired collection keys are permanent proof for this patient, like receipts. */
+       (SELECT COUNT(*) FROM payments WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM collection_attempt_retirements WHERE patient_id = $1) AS payments,
+       (SELECT COUNT(*) FROM invoices WHERE patient_id = $1) AS invoices,
+       /* (P1-5ج) معالجات النظام القديم ودفعاته أثرٌ ماليٌّ تاريخي كالرصيد الافتتاحي. */
+       (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM legacy_treatments WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM legacy_payments WHERE patient_id = $1)
+         /* (INV-LEGACY) الاتفاق التاريخي لعلاجٍ بدأ قبل النظام شاهدٌ ماليّ كذلك. */
+         + (SELECT COUNT(*) FROM legacy_treatment_agreements WHERE patient_id = $1) AS opening_balances,
+       (SELECT COUNT(*) FROM inventory_movements
+         WHERE patient_id = $1
+            OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS inventory_movements,
+       (SELECT COUNT(*) FROM lab_orders
+         WHERE patient_id = $1
+           AND (payable_id IS NOT NULL
+                OR cost_minor IS NOT NULL
+                OR EXISTS (SELECT 1 FROM payables pay WHERE pay.lab_order_id = lab_orders.id))) AS lab_orders,
+       (SELECT COUNT(*) FROM payables
+         WHERE id IN (SELECT payable_id FROM lab_orders
+                        WHERE patient_id = $1 AND payable_id IS NOT NULL)
+            OR lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1)) AS payables,
+       (SELECT COUNT(*) FROM expenses
+         WHERE payable_id IN (
+           SELECT payable_id FROM lab_orders
+            WHERE patient_id = $1 AND payable_id IS NOT NULL
+           UNION
+           SELECT pay.id FROM payables pay
+            WHERE pay.lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1))) AS financial_links`,
+    [id],
+  );
+  const footprint = footprintRows[0]
+    ? {
+      payments: Number(footprintRows[0].payments),
+      invoices: Number(footprintRows[0].invoices),
+      openingBalances: Number(footprintRows[0].opening_balances),
+      inventoryMovements: Number(footprintRows[0].inventory_movements),
+      labOrders: Number(footprintRows[0].lab_orders),
+      payables: Number(footprintRows[0].payables),
+      financialLinks: Number(footprintRows[0].financial_links),
+    }
+    : {
+      payments: 0, invoices: 0, openingBalances: 0, inventoryMovements: 0,
+      labOrders: 0, payables: 0, financialLinks: 0,
+    };
+  const hasFinancialHistory =
+    footprint.payments > 0 || footprint.invoices > 0 || footprint.openingBalances > 0
+    || footprint.inventoryMovements > 0 || footprint.labOrders > 0
+    || footprint.payables > 0 || footprint.financialLinks > 0;
+  if (hasFinancialHistory) {
+    return {
+      ok: false,
+      reason: "has_financial_history",
+      counts: { ...counts, ...footprint },
+    };
+  }
+
+  /* (P2-6) حارس السجل السريري — بعد المالي وبالصمام نفسه: زيارةٌ موقّعة أو صورة
+     أشعة أو تحليل سيفالو أو حالة تقويم أو تشخيص أو وصفة سجلٌّ طبيٌّ يجب حفظه،
+     والحذف كان يمحوه كله بلا أثر إلا سطر التدقيق. يبقى الحذف متاحًا لملفٍّ سُجّل
+     خطأً (مواعيد أو زيارات غير موقّعة فقط). */
+  const { rows: clinicalRows } = await client.query<{
+    signed_visits: string; documents: string; ceph: string; ortho: string;
+    diagnoses: string; prescriptions: string; referrals: string; medical_history: string;
+  }>(
+    `SELECT
+       (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL) AS signed_visits,
+       (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1) AS documents,
+       (SELECT COUNT(*) FROM ceph_analyses WHERE patient_id = $1) AS ceph,
+       (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1) AS ortho,
+       (SELECT COUNT(*) FROM patient_diagnoses WHERE patient_id = $1) AS diagnoses,
+       (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1) AS prescriptions,
+       (SELECT COUNT(*) FROM patient_referrals WHERE patient_id = $1) AS referrals,
+       /* (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية سجلٌّ طبيٌّ كذلك. */
+       (SELECT COUNT(*) FROM patient_medical_history WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM patient_vitals WHERE patient_id = $1) AS medical_history`,
+    [id],
+  );
+  const clinical = {
+    signedVisits: Number(clinicalRows[0]?.signed_visits ?? 0),
+    clinicalDocuments: Number(clinicalRows[0]?.documents ?? 0),
+    cephAnalyses: Number(clinicalRows[0]?.ceph ?? 0),
+    orthoCases: Number(clinicalRows[0]?.ortho ?? 0),
+    clinicalDiagnoses: Number(clinicalRows[0]?.diagnoses ?? 0),
+    prescriptions: Number(clinicalRows[0]?.prescriptions ?? 0),
+    referrals: Number(clinicalRows[0]?.referrals ?? 0),
+    medicalHistory: Number(clinicalRows[0]?.medical_history ?? 0),
+  };
+  if (Object.values(clinical).some((count) => count > 0)) {
+    return { ok: false, reason: "has_clinical_history", counts: { ...counts, ...clinical } };
+  }
+
+  const snapshot = {
+    patient: {
+      id: patient.id, patientNumber: patient.patientNumber,
+      fullName: patient.fullName, phone: patient.phone,
+    },
+    counts,
+    reason: context.reason ?? null,
+  };
+
+  /* ١) فرَّغ روابط الإشارة اللينة بين الوحدات — الحذف بعدها يسير بلا حلقات. */
+  await client.query(
+    `UPDATE visits SET invoice_id = NULL, planned_visit_id = NULL WHERE patient_id = $1`,
+    [id],
+  );
+  await client.query(
+    `UPDATE appointments SET planned_visit_id = NULL WHERE patient_id = $1`,
+    [id],
+  );
+  await client.query(`UPDATE invoices SET plan_id = NULL WHERE patient_id = $1`, [id]);
+  await client.query(`UPDATE ortho_cases SET plan_id = NULL WHERE patient_id = $1`, [id]);
+  await client.query(
+    `UPDATE tooth_conditions SET visit_id = NULL WHERE patient_id = $1`,
+    [id],
+  );
+
+  /* (P1-FIX-3) الدفعات لم تعد تُحذف هنا أبدًا: مريض له دفعات مُنع أعلاه،
+        وحارس DELETE على مستوى القاعدة شبكة الأمان الدائمة. */
+
+  /* ٣) السيفالو قبل مستنداته (مفتاحه المقيِّد RESTRICT) وقبل حالات التقويم. */
+  await client.query(`DELETE FROM ceph_analyses WHERE patient_id = $1`, [id]);
+
+  /* ٤) المستندات قبل حالات التقويم (إشارتها إليها بلا تتالٍ). */
+  await client.query(`DELETE FROM patient_documents WHERE patient_id = $1`, [id]);
+
+  /* ٥) حالات التقويم (تعديلاتها تتالي) قبل الخطط (تشير إليها بلا تتالٍ). */
+  await client.query(`DELETE FROM ortho_cases WHERE patient_id = $1`, [id]);
+
+  /* ٦) خطط العلاج: بنودها وأقساطها وجلساتها تتالى معها. */
+  await client.query(`DELETE FROM treatment_plans WHERE patient_id = $1`, [id]);
+
+  /* ٧) حالات الأسنان ثم إجراءات الزيارات ثم الزيارات نفسها. */
+  await client.query(`DELETE FROM tooth_conditions WHERE patient_id = $1`, [id]);
+  await client.query(
+    `DELETE FROM visit_procedures WHERE visit_id IN (SELECT id FROM visits WHERE patient_id = $1)`,
+    [id],
+  );
+  await client.query(`DELETE FROM visits WHERE patient_id = $1`, [id]);
+
+  /* ٨) الفواتير (بنودها تتالي) والمواعيد والزيارات المخططة. */
+  await client.query(`DELETE FROM invoices WHERE patient_id = $1`, [id]);
+  await client.query(`DELETE FROM appointments WHERE patient_id = $1`, [id]);
+  await client.query(`DELETE FROM planned_visits WHERE patient_id = $1`, [id]);
+
+  /* ٩) أعمال المعمل: (P1-FINAL-1) الحارس أعلاه يمنع أي التزام مرتبط، فما بعد
+        هذا نقطة لا يبلغها الالتزامات أبدًا — التنظيف يبقى شبكة أمان دفاعية:
+        لو أفلت التزام من الفحص يومًا فالإحصاء أعلاه كشفه أولًا، وهنا لا يُحذف
+        التزام ثم يُفصل صرفه ثم تُعتبر العملية سليمة: الحذف نفسه مرفوض أصلًا.
+        سندات الصرف تشير للالتزام بلا مفتاح أجنبي (تاريخٌ يُقرأ لا يُدار). */
+  const { rows: payRows } = await client.query<{ payable_id: number }>(
+    `SELECT DISTINCT payable_id FROM lab_orders WHERE patient_id = $1 AND payable_id IS NOT NULL`,
+    [id],
+  );
+  const payableIds = payRows.map((r) => r.payable_id);
+  if (payableIds.length > 0) {
+    await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = ANY($1::int[])`, [
+      payableIds,
+    ]);
+    await client.query(`DELETE FROM payables WHERE id = ANY($1::int[])`, [payableIds]);
+  }
+  await client.query(`DELETE FROM lab_orders WHERE patient_id = $1`, [id]);
+
+  /* ١٠) صف المريض نفسه — الاستمارات والطلبات والتشخيصات والأرصدة الافتتاحية
+         والرسائل تتالى معه. */
+  const { rows: deleted } = await client.query<{ id: number }>(
+    `DELETE FROM patients WHERE id = $1 RETURNING id`,
+    [id],
+  );
+  if (!deleted[0]) return { ok: false, reason: "not_found" };
+  return {
+    ok: true,
+    audit: {
+      action: "patient.delete",
+      entity: "patient",
+      entityId: id,
+      entityLabel: `${(snapshot.patient as { fullName?: string }).fullName ?? ""} (${
+        (snapshot.patient as { patientNumber?: string }).patientNumber ?? ""
+      })`,
+      details: snapshot,
+      actor: context.actor,
+      actorRole: context.actorRole ?? null,
+    },
+  };
 }
 
 // ─── أعمال المختبر ───────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { canonicalPatientLifecycleRoute, commandCanonicalPatientDelete, parseCanonicalDelete } from "@/lib/canonical-patient-lifecycle";
 import { patientAppointmentsResponse } from "@/lib/patient-appointments-response";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -229,6 +230,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
  * والفواتير والدفعات والخطط والأشعة وأعمال المعمل في معاملة واحدة، ويترك
  * صورةً كاملة في سجل التدقيق. التأكيد بالإجابة برقم الملف نفسه من الواجهة. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 79: one admitted patients.delete transaction inside the patient scope; the
+     confirmation on the locked row; the legacy guards and cascade with their audit. */
+  const canonical = await canonicalPatientLifecycleRoute(request, async (handle, body) =>
+    commandCanonicalPatientDelete(handle, (await context.params).id, parseCanonicalDelete(body)), "تعذّر حذف الملف — أعد المحاولة أو راجع سجل التدقيق.", { emptyBody: true });
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {
