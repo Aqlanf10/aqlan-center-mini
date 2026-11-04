@@ -57,3 +57,14 @@ it('refuses removed files and rechecks actual file digest rather than trusting d
   const q=await image(); await f.pool.query('UPDATE patient_documents SET sha256=$1 WHERE id=$2',['b'.repeat(64),q.documentId]);
   expect(await getStudyImagePreview({...q.scope,command:{...q.command,sha256:'b'.repeat(64)}})).toMatchObject({ok:false,status:409});
 });
+it('rechecks a doctor image permission on every basis and preview request, independently of patient access',async()=>{
+ const p=await image(),password='synthetic-image-permission';
+ const user=(await f.pool.query("INSERT INTO users(username,display_name,password_hash,role,permissions) VALUES('study-image-doctor','Synthetic image doctor',$1,'doctor',$2) RETURNING id",[password,JSON.stringify({canViewAllPatients:true,canViewXrays:false})])).rows[0];
+ const actor:SessionPayload={userId:user.id,username:'study-image-doctor',role:'doctor',credentialVersion:sessionCredentialVersion(password),expiresAt:Date.now()+600000};request.token=createSessionToken(actor);
+ const scope={...p.scope,session:actor};
+ expect(await getStudyImageBasis({...scope,documentId:p.documentId,sha256:p.stored.sha256})).toMatchObject({ok:false,status:403});
+ await f.pool.query('UPDATE users SET permissions=$1 WHERE id=$2',[JSON.stringify({canViewAllPatients:true,canViewXrays:true}),user.id]);
+ expect(await getStudyImagePreview({...scope,command:p.command})).toMatchObject({ok:true});
+ await f.pool.query('UPDATE users SET permissions=$1 WHERE id=$2',[JSON.stringify({canViewAllPatients:true,canViewXrays:false}),user.id]);
+ expect(await getStudyImagePreview({...scope,command:p.command})).toMatchObject({ok:false,status:403});
+});

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import OrthoSavedStudyImages from "@/components/OrthoSavedStudyImages";
 import type { StudyOwner } from "@/lib/ortho-case-study-owner";
 import type { StudyEditorRevision } from "@/lib/ortho-case-study-editor-contract";
 import { studyLayoutTitle, studyText, type StudyDisplayLocale, type StudyMessage } from "@/lib/ortho-case-presentation-i18n";
@@ -60,7 +61,8 @@ function SavedPanel({ owner, readVersion, revision, panelId, locale = "ar" }: Pr
     {value.panelState === "available" && !value.blocks.length && !value.unavailable.length && !value.unmapped.length && <p>{t("لا توجد حقائق نصية مسجلة ومطابقة لهذا القسم. لا تُفترض نتائج طبيعية.")}</p>}
     {!!value.unavailable.length && <div role="status"><p>{t("مصادر غير متاحة في الالتقاط المحفوظ:")}</p><ul>{value.unavailable.map(issue => <li key={issue.sourceKey}>{issue.sourceKey} — {issue.reason}</li>)}</ul></div>}
     {!!value.unmapped.length && <div role="status"><p>{t("مصادر محفوظة لم يكتمل عرضها في هذا القسم:")}</p><ul>{value.unmapped.map(issue => <li key={issue.sourceKey}>{issue.sourceKey} — {issue.reason}</li>)}</ul></div>}
-    {!!value.pendingMediaCount && value.panelState === "available" && <p role="status">{t("الصور المختارة لهذا القسم:")} {value.pendingMediaCount}. {t("المعاينة المتحققة غير متاحة هنا بعد؛ لم تُستبدل الصور بصور افتراضية.")}</p>}
+    {!!value.pendingMediaCount && value.panelState === "available" && <p role="status">{t("الصور المختارة لهذا القسم:")} {value.pendingMediaCount}. </p>}
+    {!!value.pendingMediaCount && value.panelState === "available" && <OrthoSavedStudyImages owner={owner} readVersion={readVersion} revision={revision} panelId={panelId} />}
     {!!value.pendingMediaCount && value.panelState !== "available" && <p>{t("مراجع الصور المحتفظ بها دون عرض:")} {value.pendingMediaCount}.</p>}
     {!!value.comments.length && <aside><h5>{t("تعليقات مؤلف الدراسة المحفوظة")}</h5>{value.comments.map((comment, index) => <p key={index} dir="auto" className="whitespace-pre-wrap break-words">{comment}</p>)}</aside>}
   </div>;
