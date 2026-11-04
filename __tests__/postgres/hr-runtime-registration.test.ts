@@ -1,4 +1,6 @@
 import { PRESCRIPTION_ISSUANCE_SQL } from "../../lib/prescription-issuance-schema";
+import { APPOINTMENT_PURPOSE_MIGRATION } from "../../lib/appointment-purpose-migration-guard";
+import { APPOINTMENT_BOOKING_MIGRATION } from "../../lib/appointment-booking-schema";
 import { BOOKING_REQUEST_PREFERENCES_SQL } from "../../lib/prescription-migration-lineage";
 import { PRESCRIBING_DOCTOR_SNAPSHOT_SQL, PRESCRIBING_DOCTOR_IDENTITY_SQL } from "../../lib/prescribing-doctor-schema";
 import { LAB_SHADE_SPECIFICATION_SQL } from "../../lib/lab-shade-schema";
@@ -53,6 +55,7 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0091", name: "prescribing_doctor_identity", checksum: createHash("sha256").update(PRESCRIBING_DOCTOR_IDENTITY_SQL).digest("hex") },
     { version: "0092", name: "prescribing_doctor_snapshot", checksum: createHash("sha256").update(PRESCRIBING_DOCTOR_SNAPSHOT_SQL).digest("hex") },
     { version: "0093", name: "prescription_issuance_commands", checksum: createHash("sha256").update(PRESCRIPTION_ISSUANCE_SQL).digest("hex") },
+    APPOINTMENT_PURPOSE_MIGRATION, APPOINTMENT_BOOKING_MIGRATION,
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts', 'prescription_issuance_commands']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);

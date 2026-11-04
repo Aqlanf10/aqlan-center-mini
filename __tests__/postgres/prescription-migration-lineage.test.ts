@@ -19,8 +19,8 @@ it('pins original booking bytes, preserves historic0090 and adds independent0091
  expect(await applyRuntimeMigrationFiles(fixture.source,lineage)).toEqual([]);
  const files=await loadMigrationFiles();await migrate(fixture.sqlTarget,{apply:true,files});
  expect((await migrate(fixture.sqlTarget,{apply:true,files})).appliedVersions).toEqual([]);
- expect((await fixture.sqlTarget.query("SELECT version,name,checksum,adopted FROM schema_migrations WHERE version>='0090' AND version<='0092' ORDER BY version")).rows)
-  .toEqual(lineage.map(({version,name,checksum})=>({version,name,checksum,adopted:false})));
+ expect((await fixture.sqlTarget.query("SELECT version,name,checksum,adopted FROM schema_migrations WHERE version>='0090' ORDER BY version")).rows)
+  .toEqual(files.filter(file=>file.version>='0090').map(({version,name,checksum})=>({version,name,checksum,adopted:false})));
 });
 it.each(['checksum','old_rx0090','adopted'])('rejects %s registry before either pending Rx column is added',async kind=>{
  await base();await applyRuntimeMigrationFiles(fixture.source,[lineage[0]]);

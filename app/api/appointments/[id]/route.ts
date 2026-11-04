@@ -1,3 +1,5 @@
+import { isAppointmentCategory } from "@/lib/appointment-category";
+import { confirmAppointmentByStaff } from "@/lib/appointment-staff-confirmation";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -86,6 +88,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         );
       }
       return NextResponse.json({ ok: true });
+    }
+    if (action === "staff_confirmed" || action === "clinical_category") {
+      const snapshot = readManualReminderSnapshot((body as Record<string, unknown>).snapshot);
+      if (!snapshot || snapshot.status !== "booked") return NextResponse.json({message:"حدّث الموعد قبل التأكيد."},{status:400});
+      const value=(body as Record<string,unknown>).clinicalCategory;
+      const expected=(body as Record<string,unknown>).expectedCategory;
+      if (action === "clinical_category" && (!isAppointmentCategory(value) || (expected !== null && !isAppointmentCategory(expected))))
+        return NextResponse.json({message:"تصنيف الموعد غير صالح."},{status:400});
+      const ok = await confirmAppointmentByStaff(id,allowed.patientId,snapshot,session,
+        action === "clinical_category" ? {value:value as import('@/lib/appointment-category').AppointmentCategory,expected:expected as import('@/lib/appointment-category').AppointmentCategory|null} : undefined);
+      return NextResponse.json(ok ? {ok:true} : {message:"تغيّر الموعد أو صلاحية الوصول. حدّث القائمة قبل التأكيد."},{status:ok ? 200 : 409});
     }
     if (action === "reminded") {
       // إفادة صريحة من الموظف بأنه ذكّر المريض؛ فتح مسودة واتساب لا يستدعي هذا الإجراء.
@@ -206,6 +219,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       if (result.reason === "arrived") {
         return NextResponse.json(
           { message: "صاحب الموعد وصل وتحوّل زيارةً — لا يُحذف، أُنهِ الزيارة أو ألغِ الموعد." },
+          { status: 409 },
+        );
+      }
+      if (result.reason === "classified_history") {
+        return NextResponse.json(
+          { message: "هذا الموعد يحمل قصد حجز مصنّفًا وسجل مصدر تاريخي؛ ألغِ الموعد بدل حذفه." },
           { status: 409 },
         );
       }

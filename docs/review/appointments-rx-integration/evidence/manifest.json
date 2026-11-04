@@ -1,0 +1,62 @@
+{
+  "syntheticOnly": true,
+  "rxBase": "b804d515ca454c15507af94429d31546893f94fc",
+  "appointmentsSource": "f90069176bb428ed3369ece3aa0bb90c8a1df7c0",
+  "candidateState": "isolated local composition; no remote publication",
+  "buildId": "E1VUGnfBQNaQ-Wi0jOr7p",
+  "browser": "Chromium151.0.7922.173",
+  "tests": {
+    "files": 5,
+    "passed": 21,
+    "failed": 0,
+    "durationSeconds": 72.13,
+    "log": "browser.log"
+  },
+  "files": [
+    {
+      "file": "roster-ambiguous-390.png",
+      "bytes": 99549,
+      "sha256": "6a9f1b8da83821b69337476dbf6e6a0e59a431970bc55122fa8bcfe6db820611"
+    },
+    {
+      "file": "roster-ambiguous-warning-1280.png",
+      "bytes": 12530,
+      "sha256": "39e8a4062316d0aa286b176549dc022713aa2057a2c6c095ece44d4a019f903c"
+    },
+    {
+      "file": "roster-ambiguous-warning-390.png",
+      "bytes": 12523,
+      "sha256": "b36fe1ebfa31790aaa3772fcd66d028d01311726308b1958355d98c1a8cf3488"
+    },
+    {
+      "file": "roster-unlinked-390.png",
+      "bytes": 99553,
+      "sha256": "0fae6ae0b5421259d80c3aa4159ba75d4b802b5f503d1b63cfde57658e7b9239"
+    },
+    {
+      "file": "roster-unlinked-warning-1280.png",
+      "bytes": 12530,
+      "sha256": "39e8a4062316d0aa286b176549dc022713aa2057a2c6c095ece44d4a019f903c"
+    },
+    {
+      "file": "roster-unlinked-warning-390.png",
+      "bytes": 12523,
+      "sha256": "b36fe1ebfa31790aaa3772fcd66d028d01311726308b1958355d98c1a8cf3488"
+    },
+    {
+      "file": "saved-rx-1280.png",
+      "bytes": 67998,
+      "sha256": "94ba8a360185aa6d43cc86e4cb5e128549cfbbabd7d859ff382021d2e529db1c"
+    },
+    {
+      "file": "saved-rx-390.png",
+      "bytes": 61716,
+      "sha256": "b134bdb8306e25754c9936bda617ed3ba5bbae0c6dfe62e7a2e52a07f0d6a416"
+    },
+    {
+      "file": "saved-rx-a5.pdf",
+      "bytes": 273629,
+      "sha256": "36e5a98a2373010f25a9b85f37f4397bcfa6912c5c03f80ea931c01b4701cf79"
+    }
+  ]
+}

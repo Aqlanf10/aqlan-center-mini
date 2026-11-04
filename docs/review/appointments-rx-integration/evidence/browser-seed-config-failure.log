@@ -1,0 +1,48 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/doctor-schedule-suggestions-ui.test.ts __tests__/security-http/appointment-rx-integration-journey.test.ts __tests__/security-http/prescription-reprint-journey.test.ts __tests__/security-http/invoice-clinic-continuity-journey.test.ts __tests__/security-http/planned-visit-rebooking-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/appointments-rx-integration
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/prescription-reprint-journey.test.ts (5 tests | 2 failed) 10092ms
+   × built amoxicillin dose-profile picker issues one snapshot, recovers and preserves reception saved printing before and after closure 2983ms
+   × built ibuprofen dose-profile picker issues one snapshot, recovers and preserves reception saved printing before and after closure 2851ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/prescription-reprint-journey.test.ts > built amoxicillin dose-profile picker issues one snapshot, recovers and preserves reception saved printing before and after closure
+AssertionError: expected ')(روشتة طبية وصفة :المريض اصطناعي جرع…' to contain '04-253028'
+
+Expected: "04-253028"
+Received: ")(روشتة طبية وصفة :المريض اصطناعي جرعة مريض :الملف رقم DOSE-RX-1793751809706 :الجنس / العمر محدد غير · ل ّجمس غير العمر :التاريخ 04/11/2026 أربعاءلا Rx #66 · أ أمنلا طبيب :الطبيب :الطبي التشخيص Synthetic dose review ℞ Prescription & Dosage · والجرعات اجيةلالع الوصفة 1. Amoxicillin (250 mg/5 mL) — Oral suspension 5 days Dose: 4 mL (200 mg) 💊Every 8 hours (3 doses/24h) Synthetic review and stop plan :المراجعة خطة :التعليمات Instructions: Review plan: Synthetic review and stop plan Physician · المعالج الطبيب Rx #66 · أ أمنلا طبيب Oral Medicine & Dental Surgery · أسنانلوا الفم وجراحة طب Signature & Stamp · والختم التوقيع"
+
+ ❯ __tests__/security-http/prescription-reprint-journey.test.ts:275:23
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/prescription-reprint-journey.test.ts > built ibuprofen dose-profile picker issues one snapshot, recovers and preserves reception saved printing before and after closure
+AssertionError: expected ')(روشتة طبية وصفة :المريض اصطناعي جرع…' to contain '04-253028'
+
+Expected: "04-253028"
+Received: ")(روشتة طبية وصفة :المريض اصطناعي جرعة مريض :الملف رقم DOSE-RX-1793751812691 :الجنس / العمر محدد غير · ل ّجمس غير العمر :التاريخ 04/11/2026 أربعاءلا Rx #67 · أ أمنلا طبيب :الطبيب :الطبي التشخيص Synthetic dose review ℞ Prescription & Dosage · والجرعات اجيةلالع الوصفة 1. Ibuprofen (100 mg/5 mL) — Oral suspension 5 days Dose: 7.5 mL (150 mg) 💊3 times daily; at least 8 hours apart .الطعام بعد تناوله يفضل Synthetic review and stop plan :المراجعة خطة :التعليمات Instructions: Review plan: Synthetic review and stop plan Preferably after food. Physician · المعالج الطبيب Rx #67 · أ أمنلا طبيب Oral Medicine & Dental Surgery · أسنانلوا الفم وجراحة طب Signature & Stamp · والختم التوقيع"
+
+ ❯ __tests__/security-http/prescription-reprint-journey.test.ts:275:23
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  2 failed | 19 passed (21)
+   Start at  00:22:29
+   Duration  71.78s (transform 193ms, setup 0ms, import 686ms, tests 66.39s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

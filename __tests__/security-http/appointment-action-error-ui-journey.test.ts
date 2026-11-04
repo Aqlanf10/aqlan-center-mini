@@ -374,7 +374,7 @@ describe("سببُ رفض إجراء الموعد يبقى ظاهرًا بعد �
 
     await row(id).locator('[data-action="reschedule"]').click();
     await row(id).locator('input[type="date"]').fill(afterTomorrow);
-    await row(id).locator('input[type="time"]').fill("14:00");
+    await row(id).locator('input[type="time"]').fill("15:30");
     await row(id).locator('[data-field="reschedule-reason"]').fill("نقلٌ أثناء تصفّح يومٍ آخر");
     await row(id).locator('[data-action="reschedule-submit"]').click();
 
@@ -388,7 +388,7 @@ describe("سببُ رفض إجراء الموعد يبقى ظاهرًا بعد �
     expect((await patch).status()).toBe(200);
     await page.waitForTimeout(1_500);
 
-    expect(await statusOf(id)).toMatchObject({ status: "booked", date: afterTomorrow, time: "14:00" });
+    expect(await statusOf(id)).toMatchObject({ status: "booked", date: afterTomorrow, time: "15:30" });
     expect(await page.locator('input[type="date"]').first().inputValue()).toBe(tomorrow);
     expect(await row(tomorrowId).isVisible()).toBe(true);
     expect(await page.getByRole("alert").filter({ hasText: /تعذّر|رفض|غير صالح/ }).count()).toBe(0);

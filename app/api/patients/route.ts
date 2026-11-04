@@ -1,3 +1,4 @@
+import { isAppointmentCategory } from "@/lib/appointment-category";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -23,6 +24,16 @@ export async function GET(request: Request) {
   if (!session) return denied();
   const params = new URL(request.url).searchParams;
   const term = params.get("q") ?? "";
+  const appointmentCategory = params.get("appointmentCategory");
+  if (appointmentCategory !== null) {
+    // Even membership in a clinical category is clinical information.
+    if (!["admin", "reception", "doctor"].includes(session.role)) {
+      return NextResponse.json({ message: "تصنيفات المواعيد ليست ضمن صلاحياتك." }, { status: 403 });
+    }
+    if (!isAppointmentCategory(appointmentCategory)) {
+      return NextResponse.json({ message: "تصنيف الموعد غير صالح." }, { status: 400 });
+    }
+  }
 
   // Match canAccessPatient: use the current doctor account and honor the explicit
   // all-patient grant before requiring its current party link. Null is the SQL
@@ -49,7 +60,9 @@ export async function GET(request: Request) {
       id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName, phone: patient.phone,
     });
     if (term.trim()) {
-      const rows = await searchPatients(term, 20, doctorPartyId);
+      const rows = appointmentCategory
+        ? await searchPatients(term, 20, doctorPartyId, appointmentCategory)
+        : await searchPatients(term, 20, doctorPartyId);
       return NextResponse.json(financeOnly ? rows.map(financeSummary) : rows);
     }
 
@@ -63,6 +76,7 @@ export async function GET(request: Request) {
     const flag = (params.get("flag") ?? "").trim().slice(0, 30) || null;
     const { rows, total } = await browsePatients({
       offset: page * PAGE_SIZE, limit: PAGE_SIZE, filter, sort, doctorPartyId, flag,
+      ...(appointmentCategory ? { appointmentCategory } : {}),
       today: clinicDateString(new Date(), CLINIC_TIME_ZONE),
     });
     return NextResponse.json({

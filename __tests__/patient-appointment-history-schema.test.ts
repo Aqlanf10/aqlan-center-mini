@@ -24,6 +24,8 @@ describe("patient appointment history index provenance", () => {
       "0091_prescribing_doctor_identity.sql",
       "0092_prescribing_doctor_snapshot.sql",
       "0093_prescription_issuance_commands.sql",
+      "0095_appointment_purpose_provenance.sql",
+      "0096_appointment_booking_commands.sql",
     ]);
   });
 

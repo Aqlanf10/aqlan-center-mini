@@ -1,0 +1,168 @@
+{
+  "common": "1b5f3c61df702be1d5283d295a3e1b420196c94b",
+  "rxCandidate": "b804d515ca454c15507af94429d31546893f94fc",
+  "appointments": "f90069176bb428ed3369ece3aa0bb90c8a1df7c0",
+  "appointmentCommits": [
+    "ae45de92bf6b835fce0f7509aa5f1f8605f97769",
+    "b785d75f320a8c8e948f244cccd05998b611a350",
+    "c408777a31e31eb96a95d68ceb4c790675e290d0",
+    "e1dcbf8d433bcf699e169d778ad14007cecae569",
+    "ab5f245ae17431403c926600797ba9750ca5316e",
+    "f90069176bb428ed3369ece3aa0bb90c8a1df7c0"
+  ],
+  "appointmentDeltaPaths": 115,
+  "rxDeltaPaths": 185,
+  "overlap": [
+    "__tests__/migrations.test.ts",
+    "__tests__/patient-appointment-history-schema.test.ts",
+    "__tests__/periodontal-candidate-chain.test.ts",
+    "__tests__/periodontal-schema.test.ts",
+    "__tests__/postgres/_periodontal-fixture.ts",
+    "__tests__/postgres/debt-installments-storage.test.ts",
+    "__tests__/postgres/hr-composed-backup.test.ts",
+    "__tests__/postgres/hr-runtime-registration.test.ts",
+    "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts",
+    "__tests__/postgres/patient-appointment-history-index.test.ts",
+    "__tests__/postgres/periodontal-restore.test.ts",
+    "__tests__/postgres/prescription-lineage-restore.test.ts",
+    "__tests__/postgres/prescription-migration-lineage.test.ts",
+    "__tests__/postgres/schema-ownership.test.ts",
+    "__tests__/schema-preflight-cli.test.ts",
+    "__tests__/security-http/hr-temporal-history-ui.test.ts",
+    "app/api/patients/[id]/merge/route.ts",
+    "app/api/settings/reset/route.ts",
+    "docs/DATABASE_MIGRATIONS.md",
+    "lib/clinic-reset.ts",
+    "lib/db.ts",
+    "lib/http-permissions.ts",
+    "lib/migrations.ts",
+    "lib/settings-definitions.ts",
+    "lib/settings.ts",
+    "schema/current-schema-contract.pg18.json",
+    "schema/preflight-disclosure.pg18.json",
+    "scripts/verify-schema-ownership.ts"
+  ],
+  "approvedDesignManifest": [
+    {
+      "path": "__tests__/prescription-clinic-date.test.tsx",
+      "baseSha256": "ea71552eb19d1f739c7130b0f771e93cd514b36738c8b185f4e8f4160bcc955a",
+      "currentSha256": "ea71552eb19d1f739c7130b0f771e93cd514b36738c8b185f4e8f4160bcc955a",
+      "equal": true
+    },
+    {
+      "path": "__tests__/prescription-compact-render.test.tsx",
+      "baseSha256": "b2c657ff0c197197220cc65c8617c11472845cb54380f81867f234122b24e197",
+      "currentSha256": "b2c657ff0c197197220cc65c8617c11472845cb54380f81867f234122b24e197",
+      "equal": true
+    },
+    {
+      "path": "__tests__/prescription-draft-query.test.tsx",
+      "baseSha256": "22dd01b17f239ef2a36f6a3cabf9df0297d7fd66d06d8d579783633e451af618",
+      "currentSha256": "22dd01b17f239ef2a36f6a3cabf9df0297d7fd66d06d8d579783633e451af618",
+      "equal": true
+    },
+    {
+      "path": "__tests__/prescription-patient-context.test.tsx",
+      "baseSha256": "834f23abb371bc221b781f82112beded22bb7be02ca0915719a98ac80ccf3e48",
+      "currentSha256": "834f23abb371bc221b781f82112beded22bb7be02ca0915719a98ac80ccf3e48",
+      "equal": true
+    },
+    {
+      "path": "__tests__/prescription-reprint-access.test.ts",
+      "baseSha256": "f16f1c00a4620cf2ebfde0186fcfa0296f54dc917a35546177aa42b111413d98",
+      "currentSha256": "f16f1c00a4620cf2ebfde0186fcfa0296f54dc917a35546177aa42b111413d98",
+      "equal": true
+    },
+    {
+      "path": "__tests__/prescription-visit-diagnosis-audit.test.ts",
+      "baseSha256": "3719ebf1acb3e02d2f4ade0438c1cccaedc64af66db8710547f7b7847b53ee57",
+      "currentSha256": "3719ebf1acb3e02d2f4ade0438c1cccaedc64af66db8710547f7b7847b53ee57",
+      "equal": true
+    },
+    {
+      "path": "__tests__/print-visual/compact-print-regressions.test.tsx",
+      "baseSha256": "21e0dadf3ed3031191761980368f22a69396c4331e39a182c5537236050a70d2",
+      "currentSha256": "21e0dadf3ed3031191761980368f22a69396c4331e39a182c5537236050a70d2",
+      "equal": true
+    },
+    {
+      "path": "__tests__/security-http/prescription-diagnosis-ui.test.ts",
+      "baseSha256": "bf2c7efad6d6766ec480e0698f8d00d4f5dde04eb1ef208598e966f24ae5f992",
+      "currentSha256": "bf2c7efad6d6766ec480e0698f8d00d4f5dde04eb1ef208598e966f24ae5f992",
+      "equal": true
+    },
+    {
+      "path": "__tests__/security-http/prescription-reprint-journey.test.ts",
+      "baseSha256": "05760ff2945a565d1a598928685e8d859fe805ee422542bf51a0c01d1e54f246",
+      "currentSha256": "05760ff2945a565d1a598928685e8d859fe805ee422542bf51a0c01d1e54f246",
+      "equal": true
+    },
+    {
+      "path": "__tests__/unified-print-non-table.test.tsx",
+      "baseSha256": "3d25d4d94acb89b2fdc5d373c205eb4b725adae4b43a1130ccc6ee4f82abd008",
+      "currentSha256": "3d25d4d94acb89b2fdc5d373c205eb4b725adae4b43a1130ccc6ee4f82abd008",
+      "equal": true
+    },
+    {
+      "path": "app/print/prescription/[id]/page.tsx",
+      "baseSha256": "a6682da03a5558edd40d4cb121ed699831752d0712ee028c79527745c2902650",
+      "currentSha256": "a6682da03a5558edd40d4cb121ed699831752d0712ee028c79527745c2902650",
+      "equal": true
+    },
+    {
+      "path": "app/print/prescription/[id]/prescription.css",
+      "baseSha256": "1cb8481955e0fb75fe249ecdca4a4e7442cc14b4da71d86bc6d6c18f60e228eb",
+      "currentSha256": "1cb8481955e0fb75fe249ecdca4a4e7442cc14b4da71d86bc6d6c18f60e228eb",
+      "equal": true
+    },
+    {
+      "path": "components/PrescriptionModal.tsx",
+      "baseSha256": "60ea4fb335662ac9514ab25928e9a80cff8f5984413ed1d3dc6436a9ee1f325a",
+      "currentSha256": "60ea4fb335662ac9514ab25928e9a80cff8f5984413ed1d3dc6436a9ee1f325a",
+      "equal": true
+    }
+  ],
+  "generatedArtifacts": "temporarily restored exact Rxbase; root will regenerate from native composed database, not select either parent snapshot",
+  "nativeSchemaSummary": {
+    "applicationSchemaEqual": false,
+    "characterizationOk": true,
+    "knownDifferences": 0,
+    "openConvergenceFindings": 16,
+    "unexpectedDifferences": 0,
+    "openFindingsManifestMatch": true,
+    "openFindingSections": {
+      "columns": 12,
+      "functions": 4
+    }
+  },
+  "migrationCount": 72,
+  "compositionConflicts": 24,
+  "generatedArtifactHashes": {
+    "schema/current-schema-contract.pg18.json": "fbb6cc8f9ecdf24ce23da1d038b95b2c5fb9369bb073d9f6a3cc8246d70927f5",
+    "schema/preflight-disclosure.pg18.json": "054f5e8d9357fadfab9cee8201f5372d9be8228af2dd31e6e1ad6cbc0632a364"
+  },
+  "verifiedRemoteHeadsAtUTC": "2026-11-04T00:25:58.317596+00:00",
+  "stageDeployment": {
+    "id": "ea6d99f0-08df-4b0c-ac4f-0e36a9d8c750",
+    "status": "SUCCESS",
+    "head": "b804d515ca454c15507af94429d31546893f94fc",
+    "metadataOnly": true
+  },
+  "localValidation": {
+    "unit": {
+      "files": 801,
+      "passed": 13935
+    },
+    "nativePostgres": {
+      "files": 317,
+      "passed": 3715
+    },
+    "browser": {
+      "files": 5,
+      "passed": 21
+    },
+    "buildId": "E1VUGnfBQNaQ-Wi0jOr7p",
+    "hostedCI": false,
+    "actualRosterVerified": false
+  }
+}

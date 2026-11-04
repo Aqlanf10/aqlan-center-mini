@@ -12,6 +12,7 @@ import { requireSession } from "@/lib/session";
 import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
 import { withoutPlanPayments } from "@/lib/plan-payment-projection";
 import { projectPlannedVisitRebooking } from "@/lib/planned-visit-projection";
+import { readPatientPlannedVisitPurposes } from "@/lib/appointment-purpose-read";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const patientId = await idFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم ملف غير صالح." }, { status: 400 });
+  // An assistant's generic same-day patient access is not plan authority.
+  if (!["admin", "reception", "doctor"].includes(session.role))
+    return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على خطط هذا المريض." }, { status: 403 });
   if (!(await canAccessPatient(session, patientId, session.role === "doctor" ? "canViewPlans" : undefined))) {
     return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على خطط هذا المريض." }, { status: 403 });
   }
@@ -63,9 +67,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       ? plans
       : plans.map((plan) => withoutPlanPayments(plan));
 
+    const purposes = await readPatientPlannedVisitPurposes(patientId,session);
+    if (!purposes.ok) return NextResponse.json({message:"تغيّرت صلاحية قراءة خطط هذا المريض."},{status:403});
+
     return NextResponse.json({
       plans: visiblePlans,
-      plannedVisits: plannedVisits.map(visit => projectPlannedVisitRebooking(visit, session)),
+      plannedVisits: plannedVisits.map(visit => ({...projectPlannedVisitRebooking(visit, session),
+        appointmentPurpose:purposes.byPlannedVisit.get(visit.id) ?? null})),
       today,
       baseCurrency: base === "SAR" || base === "USD" || base === "YER" ? base : "YER",
       canSeeFinancial: maySeeFinancial,

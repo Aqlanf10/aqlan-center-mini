@@ -34,6 +34,11 @@ import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { HR_STAFF_SQL } from "./hr-schema";
 import HR_TEMPORAL_RUNTIME_MIGRATIONS from './hr-temporal-schema.generated.json';
 import { applyRuntimeMigrationFiles } from './migrations';
+import { APPOINTMENT_BOOKING_MIGRATION } from './appointment-booking-schema';
+import type { AppointmentCategory } from './appointment-category';
+import { APPOINTMENT_PURPOSE_MIGRATION } from './appointment-purpose-migration-guard';
+import { insertAppointmentPurposeProvenance, isAppointmentPurpose, planRequiredForPurpose, type AppointmentPurpose } from './appointment-purpose';
+import type { SessionPayload } from './auth';
 import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
@@ -114,7 +119,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { assertNoPrescriptionIssuanceHistory, AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { assertNoPrescriptionIssuanceHistory, AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedAppointmentPurposeHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -2115,6 +2120,9 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_LINEAGE_MIGRATIONS);
     await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_ISSUANCE_MIGRATIONS);
+    // Registered 0095 file, never an inline ensureSchema extension. The shared
+    // migration lock validates checksum, registry and catalog before DDL.
+    await applyRuntimeMigrationFiles(getPool(), [APPOINTMENT_PURPOSE_MIGRATION, APPOINTMENT_BOOKING_MIGRATION]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -3004,9 +3012,9 @@ export async function createNextSession(
   }
   const client = runOn;
   const { rows: visits } = await client.query<{
-    id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
+    id: number; patient_name: string; patient_phone: string | null; patient_id: number | null; doctor_id: number | null;
   }>(
-    `SELECT id, patient_name, patient_phone, patient_id FROM visits WHERE id = $1 FOR UPDATE`,
+    `SELECT id, patient_name, patient_phone, patient_id, doctor_id FROM visits WHERE id = $1 FOR UPDATE`,
     [input.visitId],
   );
   if (!visits[0]) return null;
@@ -3015,9 +3023,9 @@ export async function createNextSession(
   const patientId = await resolveVisitPatient(client, visit, input.phone ?? visit.patient_phone);
 
   const { rows: created } = await client.query<{ id: number }>(
-    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
-     VALUES ($1, $2, $3, $4, $5::text) RETURNING id`,
-    [patientId, input.date, input.time, input.durationMinutes, input.note],
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note, doctor_id)
+     VALUES ($1, $2, $3, $4, $5::text, $6) RETURNING id`,
+    [patientId, input.date, input.time, input.durationMinutes, input.note, visit.doctor_id],
   );
 
   await client.query(
@@ -3338,6 +3346,7 @@ export async function searchPatients(
   term: string,
   limit = 8,
   doctorPartyId?: number | null,
+  appointmentCategory?: AppointmentCategory | null,
 ): Promise<PatientSummary[]> {
   await ensureSchema();
   const trimmed = term.trim();
@@ -3352,17 +3361,21 @@ export async function searchPatients(
   const doctorFilter = scoped
     ? ` AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${doctorParam}`)}`
     : "";
+  const categoryParam = doctorParam + (scoped ? 1 : 0);
+  const categoryFilter = appointmentCategory
+    ? ` AND EXISTS (SELECT 1 FROM appointments category_appointment WHERE category_appointment.patient_id=patients.id AND category_appointment.clinical_category=$${categoryParam}::text)`
+    : "";
   const { rows } = await getPool().query<PatientRow>(
     `SELECT id, patient_number, full_name, phone, medical_alert FROM patients
       WHERE ${condition.sql}
-      ${doctorFilter}
+      ${doctorFilter}${categoryFilter}
       ORDER BY CASE WHEN lower(patient_number) = lower($2) THEN 0
                     WHEN ${normalizedSql("full_name")} LIKE $3 ESCAPE '!' THEN 1
                     ELSE 2 END,
                full_name
       LIMIT $1`,
     [limit, trimmed, `${tokens[0].replace(/[!%_]/g, (char) => `!${char}`)}%`, ...condition.params,
-      ...(scoped ? [doctorPartyId] : [])],
+      ...(scoped ? [doctorPartyId] : []), ...(appointmentCategory ? [appointmentCategory] : [])],
   );
   return rows.map((row) => ({
     id: row.id,
@@ -3400,6 +3413,8 @@ export async function browsePatients(input: {
   today: string;
   /** (PAT-3) مرضى علَمٍ بعينه — مع أي مرشّح. */
   flag?: string | null;
+  /** Explicit recorded appointment metadata, including history; not a treatment state. */
+  appointmentCategory?: AppointmentCategory | null;
 }): Promise<{ rows: PatientListRow[]; total: number }> {
   await ensureSchema();
   const pool = getPool();
@@ -3449,6 +3464,10 @@ export async function browsePatients(input: {
       where.push(`patients.id = ANY($${params.length}::int[])`);
       break;
     default: break;
+  }
+  if (input.appointmentCategory) {
+    params.push(input.appointmentCategory);
+    where.push(`EXISTS (SELECT 1 FROM appointments category_appointment WHERE category_appointment.patient_id=patients.id AND category_appointment.clinical_category=$${params.length}::text)`);
   }
   if (input.flag) {
     params.push(input.flag);
@@ -4052,6 +4071,9 @@ export async function getPatient(id: number): Promise<Patient | null> {
 }
 
 interface AppointmentRow {
+  clinical_category?: AppointmentCategory | null;
+  staff_confirmed_at?: Date | null;
+  staff_confirmed_by?: string | null;
   id: number;
   patient_id: number;
   full_name: string;
@@ -4063,6 +4085,7 @@ interface AppointmentRow {
   note: string | null;
   status: string;
   reminder_sent_at: Date | null;
+  patient_confirmed_at: Date | null;
   /** جهة الطبيب الموعود لديه (صلاحيات الوكيل المساعد) — null لغير المسند. */
   doctor_id?: number | null;
   doctor_name?: string | null;
@@ -4078,7 +4101,7 @@ interface AppointmentRow {
   is_new_patient?: boolean | null;
 }
 
-function toAppointment(row: AppointmentRow): Appointment {
+export function toAppointment(row: AppointmentRow): Appointment {
   const date = row.scheduled_date;
   return {
     id: row.id,
@@ -4091,9 +4114,13 @@ function toAppointment(row: AppointmentRow): Appointment {
     scheduledTime: String(row.scheduled_time).slice(0, 5),
     durationMinutes: row.duration_minutes,
     appointmentType: row.appointment_type ?? null,
+    clinicalCategory: row.clinical_category ?? null,
+    staffConfirmedAt: row.staff_confirmed_at?.toISOString() ?? null,
+    staffConfirmedBy: row.staff_confirmed_by ?? null,
     note: row.note,
     status: row.status as AppointmentStatus,
     reminderSentAt: row.reminder_sent_at ? row.reminder_sent_at.toISOString() : null,
+    patientConfirmedAt: row.patient_confirmed_at ? row.patient_confirmed_at.toISOString() : null,
     doctorId: row.doctor_id ?? null,
     doctorName: row.doctor_name ?? null,
     arrivedAt: row.arrived_at ? row.arrived_at.toISOString() : null,
@@ -4110,9 +4137,10 @@ function toAppointment(row: AppointmentRow): Appointment {
   };
 }
 
-const APPOINTMENT_SELECT = `
+export const APPOINTMENT_SELECT = `
   SELECT a.id, a.patient_id, p.full_name, p.phone, a.scheduled_date, a.scheduled_time,
-         a.duration_minutes, a.appointment_type, a.note, a.status, a.reminder_sent_at,
+         a.duration_minutes, a.appointment_type, a.clinical_category, a.staff_confirmed_at, a.staff_confirmed_by, a.note, a.status, a.reminder_sent_at,
+         a.patient_confirmed_at,
          a.doctor_id, doc.name AS doctor_name,
          a.arrived_at, a.started_at, a.ended_at, a.cancel_reason,
          a.service_id, a.buffer_before_minutes, a.buffer_after_minutes, a.chair_no,
@@ -4181,6 +4209,15 @@ export async function getAppointment(id: number): Promise<Appointment | null> {
   return rows[0] ? toAppointment(rows[0]) : null;
 }
 
+/** Read the current state of a committed command on its existing recovery
+ * transaction. SHARE waits for a concurrent cancellation/move; no second pool
+ * connection or schema initializer may cross the UUID fence. */
+export async function getAppointmentOnClient(client: DbClient, id: number, nowait = false): Promise<Appointment | null> {
+  const { rows } = await client.query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.id=$1 FOR SHARE OF a${nowait ? ' NOWAIT' : ''}`, [id]);
+  return rows[0] ? toAppointment(rows[0]) : null;
+}
+
 export async function createAppointment(input: {
   patientId: number;
   date: string;
@@ -4229,16 +4266,16 @@ export async function insertAppointmentOnClient(
            /* صفُّ الانتظار الذي وَلَد هذا الموعد — يُكتب **مع** الموعد في
               المعاملة نفسها، فيصير الرابط ثابتًا لحظةَ وجود الموعد لا بعده.
               وهو ما يجعل إعادةَ المحاولة تجد الموعد بدل أن تكتب ثانيًا. */
-           waitingListId?: number | null },
+           waitingListId?: number | null; clinicalCategory?: AppointmentCategory | null },
 ): Promise<Appointment | null> {
   const { rows } = await client.query<{ id: number }>(
     `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note, doctor_id,
                                service_id, buffer_before_minutes, buffer_after_minutes, chair_no,
-                               occupies_chair, is_new_patient, waiting_list_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+                               occupies_chair, is_new_patient, waiting_list_id, clinical_category)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
     [input.patientId, input.date, input.time, input.durationMinutes, input.appointmentType ?? null, input.note, input.doctorId ?? null,
      input.serviceId ?? null, input.bufferBeforeMinutes ?? 0, input.bufferAfterMinutes ?? 0, input.chairNo ?? null,
-     input.occupiesChair ?? true, input.isNewPatient ?? false, input.waitingListId ?? null],
+     input.occupiesChair ?? true, input.isNewPatient ?? false, input.waitingListId ?? null, input.clinicalCategory ?? null],
   );
   const { rows: full } = await client.query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.id = $1`, [rows[0].id],
@@ -4256,7 +4293,7 @@ export async function insertAppointmentOnClient(
 export async function deleteAppointment(
   id: number,
   context: { actor: string; actorRole?: string | null; reason?: string | null },
-): Promise<{ ok: boolean; reason?: "not_found" | "arrived" }> {
+): Promise<{ ok: boolean; reason?: "not_found" | "arrived" | "classified_history" }> {
   await ensureSchema();
   const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
@@ -4279,6 +4316,14 @@ export async function deleteAppointment(
     if (current.arrived_at) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "arrived" };
+    }
+    // 0095 is historical intent, not a mutable appointment label. Cancellation
+    // preserves it; physical deletion must not erase its appointment FK.
+    const { rows: [classified] } = await client.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM appointment_purpose_provenance WHERE appointment_id = $1) OR EXISTS (SELECT 1 FROM appointment_booking_commands WHERE appointment_id = $1) AS exists", [id]);
+    if (classified.exists) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "classified_history" };
     }
     /* (REF-2) حذف موعد إحالةٍ محجوزة يعيدها لانتظار الحجز (كالإلغاء). */
     await referralOnAppointmentReleased(client, {
@@ -4325,17 +4370,32 @@ export async function deleteAppointment(
  */
 export async function writeAppointmentInDay<T>(input: {
   date: string;
+  /** A command-specific prelude before the day lock. Its explicit tagged result
+   * permits a committed receipt replay without re-running mutable capacity or
+   * the INSERT. Legacy callers omit it and retain their exact lock order. */
+  prelude?: (client: DbClient) => Promise<
+    { kind: "continue" } | { kind: "replayed"; value: T } | { kind: "rejected"; conflict: unknown }
+  >;
   /** Optional composed-writer fence, before day or table locks. */
   beforeLocks?: (client: DbClient) => Promise<void>;
   judge: (day: Appointment[], client: DbClient) =>
     | ({ ok: true } | { ok: false; conflict: unknown })
     | Promise<{ ok: true } | { ok: false; conflict: unknown }>;
   commit: (client: DbClient) => Promise<T>;
-}): Promise<{ ok: true; value: T } | { ok: false; conflict: unknown }> {
+}): Promise<{ ok: true; value: T; replayed?: boolean } | { ok: false; conflict: unknown }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const prelude = await input.prelude?.(client);
+    if (prelude?.kind === "replayed") {
+      await client.query("COMMIT");
+      return { ok: true, value: prelude.value, replayed: true };
+    }
+    if (prelude?.kind === "rejected") {
+      await client.query("ROLLBACK");
+      return { ok: false, conflict: prelude.conflict };
+    }
     await input.beforeLocks?.(client);
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`,
@@ -4459,7 +4519,9 @@ export async function moveAppointmentOnClient(
             reminder_sent_at = CASE WHEN scheduled_date = $2::date AND scheduled_time = $3::time
                                     THEN reminder_sent_at END,
             patient_confirmed_at = CASE WHEN scheduled_date = $2::date AND scheduled_time = $3::time
-                                        THEN patient_confirmed_at END
+                                        THEN patient_confirmed_at END,
+            staff_confirmed_at = CASE WHEN scheduled_date = $2::date AND scheduled_time = $3::time THEN staff_confirmed_at END,
+            staff_confirmed_by = CASE WHEN scheduled_date = $2::date AND scheduled_time = $3::time THEN staff_confirmed_by END
       WHERE id = $1
         AND status = 'booked'
         AND scheduled_date = $12::date
@@ -5267,7 +5329,7 @@ export async function findPatientIdByNumber(patientNumber: string): Promise<numb
 
 export type PatientMergeResult =
   | { ok: true; moved: Record<string, number>; target: Patient }
-  | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "source_has_prescription_history" | "conflict"; counts?: Record<string, number> };
+  | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "source_has_prescription_history" | "source_has_classified_history" | "conflict"; counts?: Record<string, number> };
 
 /**
  * (P2-7) دمج ملفٍّ مكرَّر (المصدر) في الملف الأصلي (الهدف) — معاملةٌ واحدة.
@@ -5309,6 +5371,14 @@ export async function mergeDuplicatePatient(
     if (prescriptionHistory.count > 0) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "source_has_prescription_history", counts: { prescriptionCommands: prescriptionHistory.count } };
+    }
+    // Only the disappearing source is blocked. Classified history on the
+    // surviving target is unchanged and must not prohibit a safe merge.
+    const { rows: [sourceHistory] } = await client.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM appointment_purpose_provenance WHERE patient_id = $1) OR EXISTS (SELECT 1 FROM appointment_booking_commands WHERE patient_id = $1) AS exists", [sourceId]);
+    if (sourceHistory.exists) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "source_has_classified_history" };
     }
 
     const { rows: [footprint] } = await client.query<{
@@ -5635,6 +5705,13 @@ export async function deletePatientCascade(
       return { ok: false, reason: "not_found" };
     }
     const patient = toPatient(patientRows[0]);
+
+    const { rows: [classifiedHistory] } = await client.query<{ count: number }>(
+      "SELECT ((SELECT COUNT(*) FROM appointment_purpose_provenance WHERE patient_id = $1) + (SELECT COUNT(*) FROM appointment_booking_commands WHERE patient_id = $1))::int AS count", [id]);
+    if (classifiedHistory.count > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "has_clinical_history", counts: { classifiedAppointments: classifiedHistory.count } };
+    }
 
     // عُدّ ما سيُمحى — صورة الحذف في سجل التدقيق وإحصاءاته في رسالة التأكيد.
     const countOf = async (table: string, where: string, args: unknown[]): Promise<number> => {
@@ -21618,6 +21695,9 @@ export async function todayPlannedVisits(date: string, doctorPartyId?: number | 
  */
 export async function schedulePlannedVisit(input: {
   plannedVisitId: number;
+  /** Optional new explicit path; omission preserves all legacy scheduling. */
+  appointmentPurpose?: AppointmentPurpose;
+  session?: SessionPayload;
   date: string;
   time: string;
   chairs: number;
@@ -21630,14 +21710,22 @@ export async function schedulePlannedVisit(input: {
    * ويُنفَّذ هنا **داخل قفل اليوم** على اتصال المعاملة نفسه. وغيابه يعني حكمًا
    * أضعف، فلا يُترك في مسار إنتاجيّ.
    */
-  judge?: (day: Appointment[], client: DbClient, durationMinutes: number) =>
+  judge?: (day: Appointment[], client: DbClient, durationMinutes: number, doctorId: number | null) =>
     Promise<{ ok: true } | { ok: false; conflict: unknown }>;
 }): Promise<
   | { ok: true; appointmentId: number; title: string }
-  | { ok: false; reason: "not_found" | "not_schedulable" | "already_scheduled" }
+  | { ok: false; reason: "not_found" | "not_schedulable" | "already_scheduled" | "invalid_purpose" | "session_expired" | "denied" | "source_mismatch" }
   | { ok: false; reason: "conflict"; conflict: { message: string; suggestion?: string; suggestionMessage?: string } }
 > {
+  const purpose = input.appointmentPurpose;
+  if (purpose !== undefined && (!isAppointmentPurpose(purpose) || !planRequiredForPurpose(purpose)))
+    return {ok:false,reason:"invalid_purpose"};
+  if (purpose && !input.session) return {ok:false,reason:"session_expired"};
   await ensureSchema();
+  // Keep db.ts free of static session/patient-access imports: both depend on
+  // this database module. Only the new explicit path needs these authorities.
+  const revalidatePurposeSession = purpose ? (await import('./session')).revalidateSessionInTransaction : null;
+  const canAccessPurposePatient = purpose ? (await import('./patient-access')).canAccessPatient : null;
 
   // قراءة أولية: المدة والحالة والمريض — ليعرف الحكم مدةً صحيحة.
   const { rows: previewRows } = await getPool().query<PlannedVisitRow>(
@@ -21656,8 +21744,30 @@ export async function schedulePlannedVisit(input: {
   try {
     const result = await writeAppointmentInDay({
       date: input.date,
+      beforeLocks: purpose ? async client => {
+        await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))", [PURCHASE_RESET_FENCE]);
+        if (!await revalidatePurposeSession!(input.session!, client)) throw new PlannedVisitRejected("session_expired");
+      } : undefined,
       judge: async (day, client) => {
-        if (input.judge) return await input.judge(day, client, preview.duration_minutes);
+        // Freeze the exact source before evaluating its doctor and duration. A
+        // retargeted source must never be written using a stale capacity verdict.
+        const { rows: sources } = await client.query<PlannedVisitRow>(
+          `SELECT id,status,appointment_id,patient_id,plan_id,title,duration_minutes,doctor_id
+             FROM planned_visits WHERE id=$1 FOR UPDATE NOWAIT`, [input.plannedVisitId]);
+        const source = sources[0];
+        if (!source || source.status === "completed" || source.status === "cancelled")
+          throw new PlannedVisitRejected("not_schedulable");
+        if (source.appointment_id) throw new PlannedVisitRejected("already_scheduled");
+        if (source.patient_id !== preview.patient_id || source.plan_id !== preview.plan_id ||
+            source.doctor_id !== preview.doctor_id || source.duration_minutes !== preview.duration_minutes ||
+            source.title !== preview.title) throw new PlannedVisitRejected("source_mismatch");
+        if (input.judge) return await input.judge(day, client, source.duration_minutes, source.doctor_id);
+        if (source.doctor_id !== null) {
+          const { appointmentDoctorAdmission } = await import('./appointment-doctor-admission');
+          const refusal = await appointmentDoctorAdmission(client, {doctorId:source.doctor_id,
+            date:input.date,time:input.time,durationMinutes:source.duration_minutes,before:0,after:0});
+          if (refusal) return {ok:false as const,conflict:{message:refusal}};
+        }
         const verdict = checkSlot(day, input.date, input.time, preview.duration_minutes, input.chairs);
         if (verdict.allowed) return { ok: true as const };
         const suggestion = nextFreeTime(
@@ -21674,8 +21784,8 @@ export async function schedulePlannedVisit(input: {
       },
       commit: async (client) => {
         // إعادة التحقق تحت القفل: لا تحويل مرتين مهما تزامنت الطلبات.
-        const { rows: locked } = await client.query<{ id: number; status: string; appointment_id: number | null }>(
-          `SELECT id, status, appointment_id FROM planned_visits WHERE id = $1 FOR UPDATE`,
+        const { rows: locked } = await client.query<{ id: number; status: string; appointment_id: number | null; patient_id:number;plan_id:number|null;title:string;duration_minutes:number }>(
+          `SELECT id, status, appointment_id,patient_id,plan_id,title,duration_minutes FROM planned_visits WHERE id = $1 ${purpose ? "FOR UPDATE NOWAIT" : "FOR UPDATE"}`,
           [input.plannedVisitId],
         );
         const current = locked[0];
@@ -21685,19 +21795,42 @@ export async function schedulePlannedVisit(input: {
         if (current.appointment_id) {
           throw new PlannedVisitRejected("already_scheduled");
         }
+        if (purpose) {
+          const session = await revalidatePurposeSession!(input.session!, client);
+          if (!session) throw new PlannedVisitRejected("session_expired");
+          if (current.patient_id!==preview.patient_id || current.plan_id!==preview.plan_id ||
+              current.duration_minutes!==preview.duration_minutes || current.title!==preview.title || !current.plan_id)
+            throw new PlannedVisitRejected("source_mismatch");
+          if (!await canAccessPurposePatient!(session,current.patient_id,"canViewPlans",client,"nowait"))
+            throw new PlannedVisitRejected("denied");
+          const {rows:parents}=await client.query<{id:number}>(
+            `SELECT p.id FROM treatment_plans p JOIN patients patient ON patient.id=p.patient_id
+              WHERE p.id=$1 AND p.patient_id=$2 AND p.status='active' FOR SHARE OF p,patient NOWAIT`,
+            [current.plan_id,current.patient_id]);
+          if (parents.length!==1) throw new PlannedVisitRejected("source_mismatch");
+        }
 
         const { rows: created } = await client.query<{ id: number }>(
           `INSERT INTO appointments
-             (patient_id, scheduled_date, scheduled_time, duration_minutes, note, planned_visit_id)
-           VALUES ($1, $2::date, $3::time, $4, $5::text, $6::int)
+             (patient_id, scheduled_date, scheduled_time, duration_minutes, note, planned_visit_id, doctor_id)
+           VALUES ($1, $2::date, $3::time, $4, $5::text, $6::int, $7::int)
            RETURNING id`,
-          [preview.patient_id, input.date, input.time, preview.duration_minutes,
-           `من خطة العلاج: ${preview.title}`, input.plannedVisitId],
+          [purpose ? current.patient_id : preview.patient_id, input.date, input.time,
+           purpose ? current.duration_minutes : preview.duration_minutes,
+           `من خطة العلاج: ${preview.title}`, input.plannedVisitId, preview.doctor_id],
         );
         await client.query(
           `UPDATE planned_visits SET status = 'scheduled', appointment_id = $2 WHERE id = $1`,
           [input.plannedVisitId, created[0].id],
         );
+        if (purpose) {
+          await insertAppointmentPurposeProvenance(client,{appointmentId:created[0].id,purpose,
+            sourcePlanId:current.plan_id,sourcePlannedVisitId:current.id,recordedBy:input.session!.username});
+          await insertAuditRow(client,{action:"appointment.purpose_recorded",entity:"appointment",entityId:created[0].id,
+            actor:input.session!.username,actorRole:input.session!.role,
+            details:{purpose,patientId:current.patient_id,sourcePlanId:current.plan_id,sourcePlannedVisitId:current.id}});
+          if (!await revalidatePurposeSession!(input.session!,client)) throw new PlannedVisitRejected("session_expired");
+        }
         return { appointmentId: created[0].id, title: preview.title };
       },
     });
@@ -21710,13 +21843,14 @@ export async function schedulePlannedVisit(input: {
     if (error instanceof PlannedVisitRejected) {
       return { ok: false, reason: error.reason };
     }
+    if ((error as {code?:string}).code === "55P03") return {ok:false,reason:"conflict",conflict:{message:"يجري تحديث الموعد أو جدول الطبيب؛ أعد المحاولة."}};
     throw error;
   }
 }
 
 /** رفضٌ داخلي يعبر المعاملة إلى الاستجابة — لا يُفشل السجل كله. */
 class PlannedVisitRejected extends Error {
-  constructor(readonly reason: "not_schedulable" | "already_scheduled") {
+  constructor(readonly reason: "not_schedulable" | "already_scheduled" | "session_expired" | "denied" | "source_mismatch") {
     super(reason);
   }
 }
@@ -26510,9 +26644,10 @@ async function seedAppointmentServicesOnPool(): Promise<number> {
 
 export async function listAppointmentServices(
   options: { includeInactive?: boolean } = {},
+  client?: DbClient,
 ): Promise<AppointmentService[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<AppointmentServiceRow>(
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<AppointmentServiceRow>(
     `${SERVICE_SELECT}
       ${options.includeInactive ? "" : "WHERE is_active = TRUE"}
       ORDER BY sort_order, id`,
@@ -26544,9 +26679,9 @@ export async function lockAppointmentServiceForBooking(client: DbClient, id: num
  * تبقى كما هي — لا تُعاد كتابتها. والجسر `legacy_type` يجعلها تُقرأ باسمها الصحيح
  * وتُحسب بمدّتها الصحيحة.
  */
-export async function resolveServiceByLegacyType(type: string): Promise<AppointmentService | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<AppointmentServiceRow>(
+export async function resolveServiceByLegacyType(type: string, client?: DbClient): Promise<AppointmentService | null> {
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<AppointmentServiceRow>(
     `${SERVICE_SELECT} WHERE legacy_type = $1 OR code = $1 ORDER BY is_active DESC, id LIMIT 1`,
     [type],
   );
@@ -27493,6 +27628,16 @@ export async function resetClinicData<F>(
         `SELECT ${COLLECTION_ATTEMPT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (attemptHistory.exists) throw new ProtectedCollectionAttemptHistoryError();
       await assertNoPrescriptionIssuanceHistory(client);
+      // 0095 is kept history. Freeze issuers before backup or any mutation;
+      // never let a reset erase even one classified appointment or its source.
+      await client.query("LOCK TABLE appointment_purpose_provenance IN EXCLUSIVE MODE");
+      const { rows: [purposeHistory] } = await client.query<{ exists: boolean }>(
+        "SELECT EXISTS (SELECT 1 FROM appointment_purpose_provenance) AS exists");
+      if (purposeHistory.exists) throw new ProtectedAppointmentPurposeHistoryError();
+      await client.query("LOCK TABLE appointment_booking_commands IN EXCLUSIVE MODE");
+      const { rows: [bookingHistory] } = await client.query<{ exists: boolean }>(
+        "SELECT EXISTS (SELECT 1 FROM appointment_booking_commands) AS exists");
+      if (bookingHistory.exists) throw new ProtectedAppointmentPurposeHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
@@ -27510,7 +27655,7 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, prescription_issuance_commands, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, prescription_issuance_commands, appointment_purpose_provenance, appointment_booking_commands, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }

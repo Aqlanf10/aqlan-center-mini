@@ -1,5 +1,8 @@
 "use client";
 
+import { isLateAppointment } from "@/lib/appointment-lateness";
+import { clinicalContextHref } from "@/lib/patient-navigation";
+import { APPOINTMENT_CATEGORY_LABEL, isAppointmentCategory } from "@/lib/appointment-category";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrivalPanel } from "@/components/ArrivalPanel";
 import { AppointmentReminder } from "@/components/AppointmentReminder";
@@ -29,7 +32,7 @@ import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 
 /* اليوم بتوقيت العيادة لا بإزاحة الجهاز: الطرح من `toISOString` يعطي يوم الجهاز،
    وجهازٌ على توقيتٍ آخر كان يفتح جدول يومٍ غير اليوم بلا أن يقول ذلك لأحد. */
-const LINKABLE_FILTERS = ["all", "booked", "arrived", "done", "no_show", "unreminded", "lab"];
+const LINKABLE_FILTERS = ["all", "booked", "arrived", "done", "no_show", "unreminded", "lab", "late"];
 
 /** تاريخ رابط صالح فعلًا، لا مجرد نص يشبه YYYY-MM-DD. */
 function isCalendarDate(value: string): boolean {
@@ -39,6 +42,13 @@ function isCalendarDate(value: string): boolean {
   return parsed.getUTCFullYear() === year
     && parsed.getUTCMonth() === month - 1
     && parsed.getUTCDate() === day;
+}
+
+/** The DB mapper emits exactly this UTC shape. A loose Date.parse would mark garbage confirmed. */
+function isCanonicalInstant(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
 }
 
 function todayLocal(): string {
@@ -106,6 +116,10 @@ export default function AppointmentsPage() {
      حمله نصف حقيقته لأنّ الحساب يفترض يومًا من ١٢ ساعة لم يُهيِّئه أحد. */
   const dayStart = useSetting("clinic.day_start");
   const dayEnd = useSetting("clinic.day_end");
+  const lateSetting = Number(useSetting("ops.late_tolerance_minutes"));
+  const lateTolerance = Number.isFinite(lateSetting) ? lateSetting : 15;
+  const [clock, setClock] = useState(() => new Date());
+  useEffect(() => {const timer=setInterval(()=>setClock(new Date()),60_000);return()=>clearInterval(timer);},[]);
   const today = useMemo(() => todayLocal(), []);
   /* رابطٌ مباشر إلى يومٍ وفلتر: «غدًا · لم يُذكَّر» من بطاقة الشاشة الرئيسية يفتح
      القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
@@ -146,6 +160,9 @@ export default function AppointmentsPage() {
 
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [staffConfirmedOnly, setStaffConfirmedOnly] = useState(false);
+  const [patientConfirmedOnly, setPatientConfirmedOnly] = useState(false);
   const [urlStateReady, setUrlStateReady] = useState(false);
 
   /* لا نقرأ window أثناء الـrender: الخادم والمتصفح يبدآن بالحالة نفسها، ثم
@@ -157,6 +174,7 @@ export default function AppointmentsPage() {
     const requestedFilter = params.get("filter");
     if (requestedDate && isCalendarDate(requestedDate)) setDate(requestedDate);
     if (requestedFilter && LINKABLE_FILTERS.includes(requestedFilter)) setStatusFilter(requestedFilter);
+    if (params.get("patientConfirmed") === "true") setPatientConfirmedOnly(true);
     setUrlStateReady(true);
   }, []);
   const [doctorFilter, setDoctorFilter] = useState<string>("all");
@@ -328,6 +346,8 @@ export default function AppointmentsPage() {
         || typeof item.patientName !== "string" || typeof item.scheduledTime !== "string"
         || toMinutes(item.scheduledTime) === null
         || !Number.isInteger(item.durationMinutes) || item.durationMinutes <= 0
+        || (item.patientConfirmedAt !== undefined && item.patientConfirmedAt !== null
+          && !isCanonicalInstant(item.patientConfirmedAt))
         || typeof item.status !== "string" || !Object.hasOwn(STATUS_LABEL, item.status))) {
         failure = "وصل ردٌّ غير صالح من الخادم أثناء تحديث القائمة.";
         throw new Error(failure);
@@ -444,6 +464,13 @@ export default function AppointmentsPage() {
   };
 
   // إدخال فوري للكرسي وقائمة الانتظار اليومية
+  const classifyAppointment = (item:Appointment,clinicalCategory:string) => {
+    if (!isAppointmentCategory(clinicalCategory)) return;
+    return act(()=>fetch(`/api/appointments/${item.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"clinical_category",clinicalCategory,expectedCategory:item.clinicalCategory ?? null,
+        snapshot:{patientId:item.patientId,patientName:item.patientName,patientPhone:item.patientPhone,
+          scheduledDate:item.scheduledDate,scheduledTime:item.scheduledTime,status:item.status}})}));
+  };
   const handleDirectArrival = async (item: Appointment) => {
     await act(async () => {
       // تحديث حالة الموعد إلى arrived (والذي يفتح زيارة سريرية فورية في الطابور ذرّياً مع طبيبها)
@@ -461,9 +488,13 @@ export default function AppointmentsPage() {
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       const matchStatus = statusFilter === "all"
-        || (statusFilter === "unreminded" ? awaitsReminder(item)
+        || (statusFilter === "late" ? isLateAppointment(item,clock,clinicTimeZone,lateTolerance)
+          : statusFilter === "unreminded" ? awaitsReminder(item)
           : statusFilter === "lab" ? isActiveLabStatus(item.status) && hasPendingLabWork(item.labReadiness)
             : item.status === statusFilter);
+      const matchCategory = categoryFilter === "all" || item.clinicalCategory === categoryFilter;
+      const matchStaffConfirmation = !staffConfirmedOnly || Boolean(item.staffConfirmedAt);
+      const matchPatientConfirmation = !patientConfirmedOnly || Boolean(item.patientConfirmedAt);
       const matchDoctor = doctorFilter === "all" || String(item.doctorId) === doctorFilter;
       const typeLabel = (item.appointmentType && getAppointmentTypeLabel(item.appointmentType)) || "";
       const q = searchQuery.toLowerCase().trim();
@@ -473,10 +504,11 @@ export default function AppointmentsPage() {
         (item.patientPhone ?? "").includes(q) ||
         (item.note ?? "").toLowerCase().includes(q) ||
         (item.doctorName ?? "").toLowerCase().includes(q) ||
-        typeLabel.toLowerCase().includes(q);
-      return matchStatus && matchDoctor && matchSearch;
+        typeLabel.toLowerCase().includes(q) ||
+        (item.clinicalCategory ? APPOINTMENT_CATEGORY_LABEL[item.clinicalCategory]?.includes(q) : false);
+      return matchStatus && matchCategory && matchStaffConfirmation && matchPatientConfirmation && matchDoctor && matchSearch;
     });
-  }, [items, statusFilter, doctorFilter, searchQuery]);
+  }, [items, clock, clinicTimeZone, lateTolerance, statusFilter, categoryFilter, staffConfirmedOnly, patientConfirmedOnly, doctorFilter, searchQuery]);
 
   /* مواعيد اليوم النشطة التي تنتظر عمل مختبر لم يصل — لشريط التنبيه أعلى القائمة. */
   const labPendingCount = useMemo(
@@ -820,6 +852,7 @@ export default function AppointmentsPage() {
           {/* فلترا العمل: من ينتظر تذكيره (جولة المساء على الغد)، ومن ينتظر تركيبته. */}
           {([
             ["unreminded", "💬 لم يُذكَّر", items.filter(awaitsReminder).length],
+            ["late", "متأخر", items.filter(item=>isLateAppointment(item,clock,clinicTimeZone,lateTolerance)).length],
             ["lab", "🧪 تنتظر التركيبة", labPendingCount],
           ] as const).map(([key, label, count]) => (
             <button
@@ -838,6 +871,30 @@ export default function AppointmentsPage() {
               {label} ({ready ? count : "؟"})
             </button>
           ))}
+
+          {/* تأكيد المريض من البوابة مستقل عن الوصول والحالة التشغيلية والتذكير اليدوي. */}
+          <label className="text-xs font-bold">التصنيف السريري
+            <select aria-label="تصفية التصنيف السريري" value={categoryFilter} onChange={event => setCategoryFilter(event.target.value)} className="mx-2 rounded-xl border border-slate-200 bg-white p-2">
+              <option value="all">كل التصنيفات</option>
+              {Object.entries(APPOINTMENT_CATEGORY_LABEL).map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <button type="button" aria-pressed={staffConfirmedOnly} onClick={() => setStaffConfirmedOnly(value => !value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold">
+            تأكيد الموظف ({ready ? items.filter(item => Boolean(item.staffConfirmedAt)).length : "؟"})
+          </button>
+          <button
+            type="button"
+            data-filter="patient-confirmed"
+            aria-pressed={patientConfirmedOnly}
+            onClick={() => setPatientConfirmedOnly((current) => !current)}
+            className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition-all ${
+              patientConfirmedOnly
+                ? "border-navy-800 bg-navy-800 text-white"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            ✓ أكده المريض من البوابة ضمن القائمة اليومية ({ready ? items.filter((item) => Boolean(item.patientConfirmedAt)).length : "؟"})
+          </button>
 
           {doctors.length > 0 && (
             <select
@@ -929,6 +986,18 @@ export default function AppointmentsPage() {
                         >
                           {STATUS_LABEL[item.status] ?? item.status}
                         </span>
+                        {item.clinicalCategory && isAppointmentCategory(item.clinicalCategory) ? <span data-clinical-category={item.clinicalCategory} className="rounded-lg bg-sky-50 px-2 py-1 text-[10px] font-bold text-sky-900">{APPOINTMENT_CATEGORY_LABEL[item.clinicalCategory]}</span> : null}
+                        {isLateAppointment(item,clock,clinicTimeZone,lateTolerance) ? <span className="rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-900">متأخر عن موعده</span> : null}
+                        {item.status === "booked" ? <select aria-label={`تصنيف موعد ${item.patientName}`} value={item.clinicalCategory ?? ""} disabled={busy}
+                          onChange={event=>void classifyAppointment(item,event.target.value)} className="max-w-full rounded-lg border border-slate-200 p-1 text-xs">
+                          <option value="">تصنيف الموعد</option>{Object.entries(APPOINTMENT_CATEGORY_LABEL).map(([value,label])=><option key={value} value={value}>{label}</option>)}
+                        </select> : null}
+                        {item.staffConfirmedAt ? <span className="rounded-lg bg-emerald-50 px-2 py-1 text-[10px] text-emerald-800">أكده الموظف: {item.staffConfirmedBy}</span> : null}
+                        {item.patientConfirmedAt ? (
+                          <span data-patient-confirmed={item.id} className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                            ✓ أكده المريض من البوابة
+                          </span>
+                        ) : null}
                         <LabReadinessChip item={item} />
                       </div>
                       <p className="mt-0.5 text-xs text-slate-500">
@@ -936,6 +1005,7 @@ export default function AppointmentsPage() {
                         {item.patientPhone ? ` · 📞 ${item.patientPhone}` : ""}
                         {item.note ? ` · 📝 ${item.note}` : ""}
                       </p>
+                      <AppointmentClinicalLinks item={item} />
                       <LabReadinessReasons item={item} />
                     </div>
                   </div>
@@ -959,6 +1029,13 @@ export default function AppointmentsPage() {
                           }
                         />
                         {item.status === "booked" && <ConfirmationButton item={item} />}
+                        {item.status === "booked" && !item.staffConfirmedAt && <button type="button" disabled={busy}
+                          onClick={() => void act(() => fetch(`/api/appointments/${item.id}`, {
+                            method:"PATCH",headers:{"Content-Type":"application/json"},
+                            body:JSON.stringify({action:"staff_confirmed",snapshot:{patientId:item.patientId,
+                              patientName:item.patientName,patientPhone:item.patientPhone,scheduledDate:item.scheduledDate,
+                              scheduledTime:item.scheduledTime,status:item.status}}),
+                          }))} className="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-800">تأكيد المريض عبر الموظف</button>}
                       </>
                     ) : null}
 
@@ -1177,6 +1254,18 @@ export default function AppointmentsPage() {
                           >
                             {STATUS_LABEL[item.status] ?? item.status}
                           </span>
+                          {item.clinicalCategory && isAppointmentCategory(item.clinicalCategory) ? <span data-clinical-category={item.clinicalCategory} className="rounded-lg bg-sky-50 px-2 py-1 text-[10px] font-bold text-sky-900">{APPOINTMENT_CATEGORY_LABEL[item.clinicalCategory]}</span> : null}
+                        {isLateAppointment(item,clock,clinicTimeZone,lateTolerance) ? <span className="rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-900">متأخر عن موعده</span> : null}
+                        {item.status === "booked" ? <select aria-label={`تصنيف موعد ${item.patientName}`} value={item.clinicalCategory ?? ""} disabled={busy}
+                          onChange={event=>void classifyAppointment(item,event.target.value)} className="max-w-full rounded-lg border border-slate-200 p-1 text-xs">
+                          <option value="">تصنيف الموعد</option>{Object.entries(APPOINTMENT_CATEGORY_LABEL).map(([value,label])=><option key={value} value={value}>{label}</option>)}
+                        </select> : null}
+                        {item.staffConfirmedAt ? <span className="rounded-lg bg-emerald-50 px-2 py-1 text-[10px] text-emerald-800">أكده الموظف: {item.staffConfirmedBy}</span> : null}
+                        {item.patientConfirmedAt ? (
+                            <span data-patient-confirmed={item.id} className="rounded-md border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                              ✓ أكده المريض من البوابة
+                            </span>
+                          ) : null}
                         </div>
 
                         <a
@@ -1186,7 +1275,8 @@ export default function AppointmentsPage() {
                           {item.patientName}
                         </a>
                         <div className="mt-1 flex flex-wrap gap-1"><LabReadinessChip item={item} /></div>
-                        <LabReadinessReasons item={item} />
+                        <AppointmentClinicalLinks item={item} />
+                      <LabReadinessReasons item={item} />
 
                         {item.appointmentType ? (
                           <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -1316,4 +1406,14 @@ function ConfirmationButton({ item }: { item: Appointment }) {
       📲 تأكيد
     </a>
   );
+}
+
+function AppointmentClinicalLinks({item}:{item:Appointment}) {
+  const links=item.clinicalLinks;
+  if (!links) return null;
+  return <nav aria-label={`روابط موعد ${item.patientName}`} className="mt-2 flex flex-wrap gap-3 text-xs font-bold text-sky-800">
+    {links.visitIds.map(id=><a key={`visit-${id}`} href={`/visits/${id}`}>الزيارة #{id}</a>)}
+    {links.planId && <a href={clinicalContextHref(item.patientId,{planId:links.planId},"plans")}>الخطة #{links.planId}</a>}
+    {links.caseIds.map(id=><a key={`case-${id}`} href={clinicalContextHref(item.patientId,{clinicalCaseId:id},"cases")}>الحالة #{id}</a>)}
+  </nav>;
 }

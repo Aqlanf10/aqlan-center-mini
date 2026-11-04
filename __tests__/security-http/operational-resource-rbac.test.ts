@@ -53,7 +53,7 @@ describe("مواعيد مريضٍ لا يملكه الطبيب", () => {
 
   actions.forEach(({ action, label }, index) => {
     it(`الطبيب أ لا ينفّذ «${label}» على موعد مريض الطبيب ب`, async () => {
-      const id = await appointmentForB(`${String(9 + index).padStart(2, "0")}:00`);
+      const id = await appointmentForB(["09:00", "10:00", "11:00", "12:00", "17:00", "18:00"][index]);
       const response = await authedMutation(
         `/api/appointments/${id}`, h.sessions.doctorA, "PATCH",
         JSON.stringify({ action, reason: "محاولة عبر الحدود",

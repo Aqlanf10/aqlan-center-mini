@@ -10,7 +10,9 @@
  * الذي يحادثه، ويخضع لمحرّك السعة نفسه، وقفل اليوم نفسه، وسجلّ التدقيق نفسه.
  * وقناة الطلب (`channel`) تُسجَّل للتدقيق فقط — لا تغيّر قاعدةً واحدة.
  */
+import { prepareAppointmentDoctorAdmission } from "./appointment-doctor-admission";
 import { isAdmin } from "./roles";
+import type { SessionPayload } from "./auth";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./ortho-booking-intent";
 import { APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE, lockBookableAppointmentDoctor } from "./appointment-doctor";
 import type { Role } from "./roles";
@@ -40,6 +42,9 @@ export interface BookingActor {
   canOverrideCapacity?: boolean;
   /** كيف وصل الطلب — للتدقيق فقط. */
   channel: "ui" | "ai" | "portal" | "visit";
+  /** Signed request admission; required only when the new explicit clinical
+   * purpose is supplied. Existing legacy callers remain unchanged. */
+  session?: SessionPayload;
 }
 
 export interface BookAppointmentInput {
@@ -50,6 +55,8 @@ export interface BookAppointmentInput {
   durationMinutes?: number | null;
   serviceId?: number | null;
   appointmentType?: string | null;
+  /** Explicit purpose must use the durable direct/planned command, never this legacy writer. */
+  appointmentPurpose?: string;
   /** Restricts the untouched board proposal; never grants extra booking authority. */
   bookingIntent?: "ortho_follow_up" | null;
   note?: string | null;
@@ -94,7 +101,7 @@ export type BookingResult =
       /** تنبيهٌ لا خطأ — الحجز تمّ والمستخدم يُخبَر ليتأكّد قبل أن يَعِد المريض. */
       warning: string | null;
     }
-  | { ok: false; status: 400; message: string }
+  | { ok: false; status: 400 | 401 | 403; message: string }
   | { ok: false; status: 409; conflict: BookingConflict };
 
 /** صلاحية التجاوز تُشتقّ من المستخدم لا من القناة — والوكيل الذكي قناة. */
@@ -209,6 +216,28 @@ export async function judgeBookingInDay(input: {
   | { ok: true; verdict: CapacityVerdict; overridden: boolean }
   | { ok: false; verdict: CapacityVerdict; conflict: BookingConflict }
 > {
+  // Serialize against changes to center hours/capacity, including insertion of
+  // a previously absent setting. A preflight snapshot is advisory only.
+  await input.client.query('LOCK TABLE settings IN SHARE MODE NOWAIT');
+  input = {...input, context:await loadCapacityContext(input.client)};
+  // Duty and approved leave are not capacity overrides, including for services
+  // that do not consume provider capacity but attribute a selected doctor.
+  let doctorRefusal: ((time:string)=>string|null) | null = null;
+  if (input.providerId) {
+    doctorRefusal = await prepareAppointmentDoctorAdmission(input.client, {
+      doctorId: input.providerId, date: input.date, time: input.time,
+      durationMinutes: input.durationMinutes,
+      before: input.service?.bufferBeforeMinutes ?? 0, after: input.service?.bufferAfterMinutes ?? 0,
+    });
+    const message = doctorRefusal(input.time);
+    if (message) {
+      const verdict: CapacityVerdict = {state:"OVER_CAPACITY",occupiedChairs:0,chairs:input.context.chairs,
+        dayPercent:0,outsideHours:false,message,reasons:[message]};
+      return {ok:false,verdict,conflict:{message,state:verdict.state,reasons:[message],dayPercent:0,
+        canOverride:false,overrideHint:"جدول الطبيب والإجازة المعتمدة لا يُتجاوزان.",
+        suggestion:null,suggestionMessage:"راجع ربط الطبيب وجدول دوامه، ثم اختر وقتًا متاحًا."}};
+    }
+  }
   /* عددُ الجدد اليوم يُحسب من لقطات مواعيد اليوم نفسها.
      وكان الحدُّ يُقرأ من الإعدادات ويُمرَّر إلى المحرّك، والمحرّك يقارنه بصفرٍ
      دائمًا لأنّ أحدًا لا يحسب العدد — فحدٌّ لا يمنع شيئًا مهما ضُبط. */
@@ -226,6 +255,13 @@ export async function judgeBookingInDay(input: {
     client: input.client,
   });
   const verdict = evaluateAt(input.time);
+  if (verdict.outsideHours) {
+    const message="هذا الوقت خارج فترات عمل المركز أو يمتد إلى فترة الاستراحة. اختر وقتًا داخل الدوام.";
+    return {ok:false,verdict,conflict:{message,state:"OVER_CAPACITY",reasons:[message],dayPercent:verdict.dayPercent,
+      canOverride:false,overrideHint:"فترات عمل المركز لا تُتجاوز.",suggestion:null,
+      suggestionMessage:"اختر وقتًا يسمح بالمدة كاملةً داخل إحدى فترات العمل."}};
+  }
+
   /* (P2-3) المريض لا يكون على كرسيّين في وقتٍ واحد — وهذا ليس «سعة» تُتجاوز بسبب:
      الموعد الثاني خطأ حجزٍ دائمًا، فيُرفض لكل الأدوار ويُعرض الموعد القائم. */
   const clash = input.patientId === null ? null : patientOverlap(
@@ -269,6 +305,7 @@ export async function judgeBookingInDay(input: {
   for (let minute = from; minute < closing; minute++) {
     if (!shifts.some(shift => minute >= shift.start && minute < shift.end)) continue;
     const time = minutesToTime(minute);
+    if (doctorRefusal?.(time)) continue;
     if (input.patientId !== null && patientOverlap(
       input.sameDay, input.patientId, time, input.durationMinutes, input.excludeId,
     )) continue;
@@ -308,6 +345,8 @@ export async function judgeBookingInDay(input: {
 export async function bookAppointment(
   input: BookAppointmentInput, actor: BookingActor,
 ): Promise<BookingResult> {
+  if (input.appointmentPurpose !== undefined)
+    return { ok: false, status: 400, message: "الغرض الصريح يتطلب مسار الحجز المصنّف." };
   const patientId = Number(input.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return { ok: false, status: 400, message: "اختر المريض أولًا." };
@@ -402,7 +441,8 @@ export async function bookAppointment(
       state.overridden = judged.overridden;
       return { ok: true as const };
     },
-    commit: (client) => insertAppointmentOnClient(client, {
+    commit: async (client) => {
+      const appointment = await insertAppointmentOnClient(client, {
       patientId,
       date: input.date,
       time: input.time,
@@ -420,7 +460,9 @@ export async function bookAppointment(
       occupiesChair: service ? service.requiresChair : true,
       isNewPatient: input.isNewPatient ?? false,
       waitingListId: input.waitingListId ?? null,
-    }),
+      });
+      return appointment;
+    },
   });
 
   if (!result.ok) {

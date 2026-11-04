@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { ensureSchema, findUserByUsername, getPool, schedulePlannedVisit } from "@/lib/db";
+import { ensureSchema, findUserByUsername, getPool, lockAppointmentServiceForBooking, schedulePlannedVisit } from "@/lib/db";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
 import type { CapacityVerdict } from "@/lib/capacity";
 import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { isAppointmentPurpose, planRequiredForPurpose, type AppointmentPurpose } from "@/lib/appointment-purpose";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  const hasPurpose = Object.prototype.hasOwnProperty.call(source, "appointmentPurpose");
+  if (hasPurpose && (!isAppointmentPurpose(source.appointmentPurpose) ||
+      !planRequiredForPurpose(source.appointmentPurpose)))
+    return NextResponse.json({message:"هذا المسار يتطلب غرض جلسة مرتبطًا بخطة صالحًا."},{status:400});
+  if (hasPurpose && (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(plannedVisitId)))
+    return NextResponse.json({message:"رقم الزيارة المخططة غير صالح."},{status:400});
+  if (hasPurpose && !(await canAccessPatient(session,rows[0].patient_id,"canViewPlans")))
+    return NextResponse.json({message:"غير مصرّح لك بتوثيق غرض جلسة لهذا المريض."},{status:403});
   const date = typeof source.date === "string" ? source.date : "";
   const time = typeof source.time === "string" ? source.time : "";
   if (!DATE_PATTERN.test(date)) {
@@ -62,12 +71,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     /* محرّك السعة نفسه — يُحقن من هنا لأن استدعاءه داخل `db` يصنع دورة استيراد.
        والمدّة تأتي من الزيارة المخطَّطة نفسها لا من هذا المسار. */
     const capacityContext = await loadCapacityContext();
-    const service = await resolveService({
+    let service = await resolveService({
       serviceId: Number(source.serviceId) > 0 ? Number(source.serviceId) : null,
       appointmentType: typeof source.appointmentType === "string" ? source.appointmentType : null,
     });
     const actorUser = await findUserByUsername(session.username).catch(() => null);
-    const canOverride = actorCanOverride({
+    let canOverride = actorCanOverride({
       username: session.username, role: session.role, channel: "visit",
       canOverrideCapacity: actorUser?.permissions?.canOverrideCapacity === true,
     });
@@ -77,11 +86,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
     const result = await schedulePlannedVisit({
       plannedVisitId, date, time, chairs: capacityContext.chairs,
-      judge: async (day, client, durationMinutes) => {
+      ...(hasPurpose ? {appointmentPurpose:source.appointmentPurpose as AppointmentPurpose,session} : {}),
+      judge: async (day, client, durationMinutes, doctorId) => {
+        if (hasPurpose) {
+          const freshUser=await findUserByUsername(session.username,client);
+          if (!freshUser) return {ok:false,conflict:{message:"تغيّرت صلاحية الحساب؛ حدّث الملف وأعد المحاولة."}};
+          canOverride=actorCanOverride({username:session.username,role:session.role,channel:"visit",
+            canOverrideCapacity:freshUser.permissions?.canOverrideCapacity===true});
+          if (service?.id) {
+            const locked=await lockAppointmentServiceForBooking(client,service.id);
+            if (!locked?.isActive) return {ok:false,conflict:{message:"تغيّرت خدمة الموعد؛ حدّث الملف وأعد المحاولة."}};
+            service=locked;
+          }
+        }
         const judged = await judgeBookingInDay({
           sameDay: day, client, date, time, durationMinutes, service,
           context: capacityContext, canOverride, overrideReason,
-          patientId: rows[0].patient_id,
+          patientId: rows[0].patient_id, providerId:doctorId,
         });
         if (!judged.ok) return { ok: false, conflict: judged.conflict };
         if (judged.overridden) overrideState.verdict = judged.verdict;
@@ -104,6 +125,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (result.reason === "conflict") {
       return NextResponse.json(result.conflict, { status: 409 });
     }
+    if (result.reason === "invalid_purpose") return NextResponse.json({message:"غرض الموعد غير صالح."},{status:400});
+    if (result.reason === "session_expired") return NextResponse.json({message:"انتهت الجلسة أو تغيّرت صلاحيات الحساب."},{status:401});
+    if (result.reason === "denied") return NextResponse.json({message:"غير مصرّح لك بخطة هذا المريض."},{status:403});
+    if (result.reason === "source_mismatch") return NextResponse.json({message:"تغيّرت الخطة أو الزيارة المخططة؛ حدّث الملف وأعد المحاولة."},{status:409});
     const messages: Record<string, string> = {
       not_found: "الزيارة المخطَّطة غير موجودة.",
       not_schedulable: "هذه الزيارة المخطَّطة منجَزة أو ملغاة.",

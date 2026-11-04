@@ -5,17 +5,19 @@ import {
   SHIFTS, SHIFT_LABEL, WEEKDAYS, WEEKDAY_LABEL,
   type PreferredShift, type Weekday,
 } from "@/lib/waiting-list";
+import { APPOINTMENT_CATEGORY_LABEL, type AppointmentCategory } from "@/lib/appointment-category";
+import { PATIENT_CREATE_PENDING_KEY, APPOINTMENT_RECOVERY_KEY, parsePendingAppointmentBooking, isBookingReceipt, type PendingAppointmentBooking } from "@/lib/appointment-booking-recovery";
 import { Modal } from "./Modal";
-import { APPOINTMENT_TYPES } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK, resolveClinicZone } from "@/lib/clinicZone";
+import { clinicDateString, APPOINTMENT_TYPES } from "@/lib/schedule";
 import type { AppointmentService } from "@/lib/appointment-services";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "@/lib/ortho-booking-intent";
 import type { DoctorSlot } from "@/lib/appointment-availability";
 import { parseDoctorAvailabilityResponse } from "@/lib/appointment-availability-contract";
 
-function tomorrow() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+function tomorrow(zone = CLINIC_ZONE_FALLBACK) {
+  const day = clinicDateString(new Date(),zone);
+  return new Date(Date.parse(`${day}T12:00:00Z`)+86400000).toISOString().slice(0,10);
 }
 
 interface PatientMatch {
@@ -49,6 +51,10 @@ export function QuickAppointmentModal({
   onSuccess: () => void;
 }) {
   const formId = useId();
+  const [busy, setBusy] = useState(false);
+  const bookingInFlight = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+
   const initialType = bookingIntent === "ortho_follow_up" ? "follow_up" : "consultation";
   const initialDuration = APPOINTMENT_TYPES.find((type) => type.id === initialType)!.defaultDuration;
   const bookingChoiceEdited = useRef(false);
@@ -63,14 +69,60 @@ export function QuickAppointmentModal({
   const [matches, setMatches] = useState<PatientMatch[]>([]);
   const [phone, setPhone] = useState("");
 
-  const [date, setDate] = useState(tomorrow);
+  const [clinicZone, setClinicZone] = useState(CLINIC_ZONE_FALLBACK);
+  const dateEdited = useRef(false);
+  const [date, setDate] = useState(() => tomorrow());
   const [time, setTime] = useState("16:00");
   const [appointmentType, setAppointmentType] = useState<string>(initialType);
   const [duration, setDuration] = useState(String(initialDuration));
+  const [clinicalCategory, setClinicalCategory] = useState<AppointmentCategory | "">("");
+  const [recoveryReady, setRecoveryReady] = useState(false);
+  const [recoveryMissing, setRecoveryMissing] = useState(false);
+  const [pendingBooking, setPendingBooking] = useState<PendingAppointmentBooking | null>(null);
+  const pendingBookingRef = useRef<PendingAppointmentBooking | null>(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      const raw = sessionStorage.getItem(APPOINTMENT_RECOVERY_KEY);
+      const pending = parsePendingAppointmentBooking(raw);
+      if (raw && !pending) {setRecoveryReady(false);setError("تعذّر قراءة الطلب المحفوظ. لا تبدأ حجزًا جديدًا؛ راجع جدول المريض مع المسؤول لاستعادة معرّف الطلب.");return;}
+      setRecoveryReady(true);
+      pendingBookingRef.current = pending;
+      setPendingBooking(pending);
+    } catch { setRecoveryReady(false); setError("تعذّر فتح سجل التعافي في هذا المتصفح. لا تبدأ حجزًا جديدًا حتى يتاح التخزين."); }
+  }, [isOpen]);
+  const rememberBooking = (pending: PendingAppointmentBooking | null) => {
+    if (pending) sessionStorage.setItem(APPOINTMENT_RECOVERY_KEY, JSON.stringify(pending));
+    else sessionStorage.removeItem(APPOINTMENT_RECOVERY_KEY);
+    pendingBookingRef.current = pending;
+    setPendingBooking(pending);
+    setRecoveryMissing(false);
+  };
+  const finishRecoveredBooking = () => {
+    rememberBooking(null);
+    resetBookingForm();
+    onSuccess();
+    onClose();
+  };
+  const recoverBooking = async (retry = false) => {
+    const pending = pendingBookingRef.current;
+    if (!pending || bookingInFlight.current || (retry && !recoveryMissing)) return;
+    bookingInFlight.current = true;
+    setBusy(true);
+    try {
+      const result = await fetch(retry ? "/api/appointments" : `/api/appointments/commands/${pending.commandId}`, retry
+        ? {method:"POST",headers:{"Content-Type":"application/json"},body:pending.body}
+        : {cache:"no-store"});
+      const data = await result.json().catch(() => null);
+      if (result.ok && isBookingReceipt(data)) { finishRecoveredBooking(); return; }
+      if (!retry) setRecoveryMissing(result.status === 404);
+      setError(result.status === 404
+        ? "لم يُعثر على نتيجة بعد. أعد نفس الطلب من الزر أدناه؛ سيستخدم معرّف الحجز نفسه."
+        : data?.message ?? "لم تتأكد نتيجة الحجز. احتفظ بالطلب وأعد التحقق.");
+    } catch { setError("انقطع الاتصال. الطلب محفوظ؛ أعد التحقق أو أعد نفس الطلب."); }
+    finally {bookingInFlight.current=false;setBusy(false);}
+  };
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const bookingInFlight = useRef(false);
-  const [error, setError] = useState<string | null>(null);
   const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
   const [selectedDoctorId, setSelectedDoctorId] = useState<number | undefined>();
   const [doctorSlots, setDoctorSlots] = useState<DoctorSlot[] | null>(null);
@@ -203,6 +255,9 @@ export function QuickAppointmentModal({
             }
           }
         }
+        const zone = resolveClinicZone(data?.clinicTimeZone);
+        setClinicZone(zone);
+        if (!dateEdited.current && !bookingStarted.current) setDate(tomorrow(zone));
         if (Number.isFinite(data?.chairs)) setChairs(Number(data.chairs));
       } catch {
         /* الكتالوج تعذّر — تبقى الأنواع المدمجة أدناه. */
@@ -311,9 +366,36 @@ export function QuickAppointmentModal({
     }
   };
 
+  function resetBookingForm() {
+      setClinicalCategory("");
+      setConflict(null);
+      setOverrideReason("");
+      setSelectedServiceId(undefined);
+      setChairNo("");
+
+      setSelectedPatientId(patientId);
+      setNewPatientCreated(false);
+      setSelectedPatientName(patientName || "");
+      setPatientQuery("");
+      setMatches([]);
+      setPhone("");
+      setDate(tomorrow(clinicZone));
+      dateEdited.current = false;
+      setTime("16:00");
+      setAppointmentType(initialType);
+      setDuration(String(initialDuration));
+      bookingChoiceEdited.current = false;
+      bookingStarted.current = false;
+      setProtectFollowupIntent(bookingIntent === "ortho_follow_up");
+      durationEdited.current = false;
+      setNote("");
+      setSelectedDoctorId(undefined);
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (bookingInFlight.current || busy || !date || !time) return;
+    if (!recoveryReady || bookingInFlight.current || busy || pendingBookingRef.current || !date || !time) return;
+    if (!clinicalCategory) {setError("اختر التصنيف السريري للموعد.");return;}
     const guardedFollowup = bookingIntent === "ortho_follow_up" && !bookingChoiceEdited.current;
     if (guardedFollowup && !selectedServiceId) {
       setError(FOLLOWUP_SERVICE_REVIEW_MESSAGE);
@@ -333,23 +415,37 @@ export function QuickAppointmentModal({
     setError(null);
 
     try {
+      const identityResponse = await fetch("/api/auth/me",{cache:"no-store"});
+      const identity = await identityResponse.json().catch(()=>null);
+      if (!identityResponse.ok || !Number.isSafeInteger(identity?.id) || identity.id <= 0 || typeof identity.username !== "string") {
+        setError("تعذّر التحقق من الحساب الحالي. حدّث الصفحة قبل الحجز.");return;
+      }
+      const expectedActor = {userId:identity.id as number,username:identity.username as string};
       let targetId = selectedPatientId;
       /* مريضٌ أُنشئ ملفُّه في هذه اللحظة هو مريضٌ جديدٌ بالتعريف — وهذا ما يقيسه
          حدُّ المرضى الجدد اليوميّ. ولا تخمين: من اختير من القائمة له ملفٌ سابق. */
       let isNewPatient = newPatientCreated;
+      if (!targetId && sessionStorage.getItem(PATIENT_CREATE_PENDING_KEY)) {
+        setError("نتيجة إنشاء الملف السابق غير معروفة. ابحث عن المريض واختر ملفه الموجود قبل الحجز؛ لا تُنشئ ملفًا ثانيًا.");return;
+      }
+      if (targetId) sessionStorage.removeItem(PATIENT_CREATE_PENDING_KEY);
       if (!targetId) {
         // Create new patient on the fly
         try {
+          sessionStorage.setItem(PATIENT_CREATE_PENDING_KEY,"pending");
           const pRes = await fetch("/api/patients", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ fullName: name, phone: phone.trim() }),
           });
           if (!pRes.ok) {
+            if (pRes.status >= 400 && pRes.status < 500) sessionStorage.removeItem(PATIENT_CREATE_PENDING_KEY);
             setError("تعذّر إنشاء ملف للمريض الجديد.");
             return;
           }
           const newP = await pRes.json();
+          if (!Number.isSafeInteger(newP?.id) || newP.id <= 0) throw new Error("Invalid patient creation response");
+          sessionStorage.removeItem(PATIENT_CREATE_PENDING_KEY);
           targetId = newP.id;
           isNewPatient = true;
           setNewPatientCreated(true);
@@ -361,15 +457,14 @@ export function QuickAppointmentModal({
           setSelectedPatientId(newP.id);
           setSelectedPatientName(name);
         } catch {
-          setError("تعذّر إنشاء ملف المريض.");
+          setError("لم تتأكد نتيجة إنشاء ملف المريض. ابحث عنه واختر الملف الموجود قبل إعادة الحجز.");
           return;
         }
       }
 
-      const res = await fetch("/api/appointments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const commandId = crypto.randomUUID();
+      const body = JSON.stringify({
+          commandId, clinicalCategory, expectedActor,
           patientId: targetId,
           date,
           time,
@@ -382,10 +477,15 @@ export function QuickAppointmentModal({
           chairNo: chairApplies && chairNo ? Number(chairNo) : undefined,
           isNewPatient,
           overrideReason: overrideReason.trim() || undefined,
-        }),
+        });
+      // Persist before the request. A lost response cannot permit a fresh UUID.
+      rememberBooking({commandId,body});
+      const res = await fetch("/api/appointments", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body,
       });
 
       const data = await res.json().catch(() => null);
+      if (res.status >= 400 && res.status < 500) rememberBooking(null);
       if (res.status === 409 && data) {
         /* ليس خطأ إدخال: اليوم ممتلئ. تُعرض الأسباب والبديل، ويُفتح حقل السبب
            لمن يملك الصلاحية — ولا يُغلق النموذج فيفقد ما كُتب فيه. */
@@ -407,31 +507,16 @@ export function QuickAppointmentModal({
         setError(data?.message ?? "تعذّر حجز الموعد.");
         return;
       }
-      setConflict(null);
-      setOverrideReason("");
-      setSelectedServiceId(undefined);
-      setChairNo("");
-
-      setSelectedPatientId(patientId);
-      setNewPatientCreated(false);
-      setSelectedPatientName(patientName || "");
-      setPatientQuery("");
-      setMatches([]);
-      setPhone("");
-      setDate(tomorrow());
-      setTime("16:00");
-      setAppointmentType(initialType);
-      setDuration(String(initialDuration));
-      bookingChoiceEdited.current = false;
-      bookingStarted.current = false;
-      setProtectFollowupIntent(bookingIntent === "ortho_follow_up");
-      durationEdited.current = false;
-      setNote("");
-      setSelectedDoctorId(undefined);
+      if (!isBookingReceipt(data)) {
+        setError("لم تتأكد نتيجة الحجز. استخدم التحقق من الطلب المحفوظ قبل أي حجز جديد.");
+        return;
+      }
+      rememberBooking(null);
+      resetBookingForm();
       onSuccess();
       onClose();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      setError(pendingBookingRef.current ? "انقطع الاتصال. الطلب محفوظ؛ تحقّق من نتيجته قبل حجز جديد." : "تعذّر الاتصال بالخادم.");
     } finally {
       bookingInFlight.current = false;
       setBusy(false);
@@ -476,7 +561,17 @@ export function QuickAppointmentModal({
           </div>
         )}
 
+        {pendingBooking && (
+          <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs">
+            <p className="font-bold">يوجد طلب حجز لم تتأكد نتيجته. لا تنشئ موعدًا ثانيًا.</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" onClick={() => void recoverBooking()} className="rounded-lg bg-white px-3 py-2 font-bold">تحقّق من نتيجة الحجز</button>
+              <button type="button" disabled={!recoveryMissing} onClick={() => void recoverBooking(true)} className="rounded-lg bg-white px-3 py-2 font-bold">أعد نفس الطلب</button>
+            </div>
+          </div>
+        )}
         {conflict && (
+          <fieldset disabled={!!pendingBooking} className="min-w-0">
           <div role="alert" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
             <p className="font-black">{conflict.message}</p>
             {conflict.reasons.length > 0 && (
@@ -636,9 +731,19 @@ export function QuickAppointmentModal({
               </div>
             )}
           </div>
+          </fieldset>
         )}
 
         <form onSubmit={handleSubmit} aria-describedby={error ? `${formId}-error` : undefined} className="space-y-3.5">
+          <fieldset disabled={!recoveryReady || pendingBooking !== null} className="min-w-0">
+            <label className="mb-3 block text-xs font-bold text-slate-700">التصنيف السريري للموعد
+              <select aria-label="التصنيف السريري للموعد" required value={clinicalCategory} onChange={event => setClinicalCategory(event.target.value as AppointmentCategory | "")} className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2.5">
+                <option value="">اختر التصنيف</option>
+                {Object.entries(APPOINTMENT_CATEGORY_LABEL).map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <span className="mt-1 block font-normal text-slate-500">سبب الحجز؛ لا يغيّر حالة العلاج أو الحضور.</span>
+            </label>
+
           {!patientId && (
             <div className="relative">
               <label htmlFor={`${formId}-patient`} className="mb-1 block text-xs font-bold text-slate-700">المريض</label>
@@ -783,7 +888,7 @@ export function QuickAppointmentModal({
                 type="date"
                 required
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={(e) => {dateEdited.current=true;setDate(e.target.value);}}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-navy-900 outline-none focus:border-navy-800"
               />
             </div>
@@ -848,7 +953,7 @@ export function QuickAppointmentModal({
               </div>
               {slotsLoading || !ownsSlots ? <p role="status" className="text-xs text-slate-600">جارٍ تحميل الأوقات…</p> : null}
               {ownsSlots && slotsError ? <p role="alert" className="text-xs text-rose-700">تعذّر التحقق من الاقتراحات؛ راجع الوقت قبل الحجز اليدوي.</p> : null}
-              {ownsSlots && rosterUnknown ? <p role="status" className="text-xs text-amber-800">جدول دوام الطبيب غير مؤكد؛ راجعه قبل الحجز اليدوي.</p> : null}
+              {ownsSlots && rosterUnknown ? <p role="status" className="text-xs text-amber-800">جدول دوام الطبيب غير مؤكد. لا يمكن تأكيد الحجز قبل مراجعة ربط الطبيب بملف الموظف وجدول دوامه.</p> : null}
               {visibleDoctorSlots && !rosterUnknown && visibleDoctorSlots.length === 0 ? (
                 <p className="text-xs text-slate-600">لا توجد أوقات مقترحة ضمن جدول الدوام وورديات المركز.</p>
               ) : null}
@@ -938,6 +1043,7 @@ export function QuickAppointmentModal({
               {busy ? "جارٍ الحجز…" : "تأكيد الحجز"}
             </button>
           </div>
+        </fieldset>
         </form>
       </fieldset>
     </Modal>

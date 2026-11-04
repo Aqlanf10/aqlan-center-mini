@@ -1,0 +1,122 @@
+
+> aqlan-center@0.1.0 test:contract-print
+> vitest run --config vitest.config.print-visual.mts
+
+
+ RUN  v4.1.12 /workspace/appointments-rx-integration
+
+ ❯ __tests__/print-visual/compact-print-regressions.test.tsx (13 tests | 1 failed) 33266ms
+     × preserves lab paper and field integrity 5007ms
+ ❯ __tests__/print-visual/official-installment-contract.test.tsx (8 tests | 8 failed) 192ms
+     × 'fixed-logo-1' retains fixed physical logo size, money and every installment across printed pages 43ms
+     × 'fixed-logo-2' retains fixed physical logo size, money and every installment across printed pages 12ms
+     × 'fixed-logo-4' retains fixed physical logo size, money and every installment across printed pages 12ms
+     × 'fixed-logo-6' retains fixed physical logo size, money and every installment across printed pages 21ms
+     × 'fixed-logo-12' retains fixed physical logo size, money and every installment across printed pages 15ms
+     × 'fixed-logo-24' retains fixed physical logo size, money and every installment across printed pages 12ms
+     × 'fixed-logo-36' retains fixed physical logo size, money and every installment across printed pages 33ms
+     × 'fixed-logo-60' retains fixed physical logo size, money and every installment across printed pages 43ms
+ ❯ __tests__/print-visual/unified-print-watermark-safety.test.tsx (2 tests | 2 failed) 141ms
+     × prints two actual lab sections without sibling content or duplicate page marks 55ms
+     × leaves overlapping QR, signature and clinical-color pixels exactly unchanged 82ms
+ ❯ __tests__/print-visual/unified-print-document.test.tsx (3 tests | 3 failed) 100ms
+     × 'short' preserves RTL, readable money and all pages 26ms
+     × 'long' preserves RTL, readable money and all pages 20ms
+     × 'missing-logo' preserves RTL, readable money and all pages 51ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/print-visual/compact-print-regressions.test.tsx > native compact print regression witnesses > preserves lab paper and field integrity
+Error: PDF service label must occur in exactly one field block
+ ❯ only __tests__/helpers/lab-dispatch-pdf-fields.ts:12:34
+     10|   .replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+     11| const only = <T>(values: T[], description: string): T => {
+     12|   if (values.length !== 1) throw new Error(`PDF ${description} must oc…
+       |                                  ^
+     13|   return values[0];
+     14| };
+ ❯ Module.assertLabDispatchPdfFields __tests__/helpers/lab-dispatch-pdf-fields.ts:68:24
+ ❯ __tests__/print-visual/compact-print-regressions.test.tsx:153:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
+
+ FAIL  __tests__/print-visual/official-installment-contract.test.tsx > official agreement actual browser and PDF print evidence > 'fixed-logo-1' retains fixed physical logo size, money and every installment across printed pages
+ FAIL  __tests__/print-visual/official-installment-contract.test.tsx > official agreement actual browser and PDF print evidence > 'fixed-logo-2' retains fixed physical logo size, money and every installment across printed pages
+ FAIL  __tests__/print-visual/official-installment-contract.test.tsx > official agreement actual browser and PDF print evidence > 'fixed-logo-4' retains fixed physical logo size, money and every installment across printed pages
+ FAIL  __tests__/print-visual/official-installment-contract.test.tsx > official agreement actual browser and PDF print evidence > 'fixed-logo-6' retains fixed physical logo size, money and every installment across printed pages
+ FAIL  __tests__/print-visual/official-installment-contract.test.tsx > official agreement actual browser and PDF print evidence > 'fixed-logo-12' retains fixed physical logo size, money and every installment across printed pages
+ FAIL  __tests__/print-visual/official-installment-contract.test.tsx > official agreement actual browser and PDF print evidence > 'fixed-logo-24' retains fixed physical logo size, money and every installment across printed pages
+ FAIL  __tests__/print-visual/official-installment-contract.test.tsx > official agreement actual browser and PDF print evidence > 'fixed-logo-36' retains fixed physical logo size, money and every installment across printed pages
+ FAIL  __tests__/print-visual/official-installment-contract.test.tsx > official agreement actual browser and PDF print evidence > 'fixed-logo-60' retains fixed physical logo size, money and every installment across printed pages
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/print-visual/official-installment-contract.test.tsx:110:38
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
+
+ FAIL  __tests__/print-visual/unified-print-document.test.tsx > unified document shared renderer: hosted browser/PDF > 'short' preserves RTL, readable money and all pages
+ FAIL  __tests__/print-visual/unified-print-document.test.tsx > unified document shared renderer: hosted browser/PDF > 'long' preserves RTL, readable money and all pages
+ FAIL  __tests__/print-visual/unified-print-document.test.tsx > unified document shared renderer: hosted browser/PDF > 'missing-logo' preserves RTL, readable money and all pages
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/print-visual/unified-print-document.test.tsx:29:76
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
+
+ FAIL  __tests__/print-visual/unified-print-watermark-safety.test.tsx > hosted watermark isolation and protected-pixel behavior > prints two actual lab sections without sibling content or duplicate page marks
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/print-visual/unified-print-watermark-safety.test.tsx:50:76
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  __tests__/print-visual/unified-print-watermark-safety.test.tsx > hosted watermark isolation and protected-pixel behavior > leaves overlapping QR, signature and clinical-color pixels exactly unchanged
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/print-visual/unified-print-watermark-safety.test.tsx:73:36
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+
+ Test Files  4 failed | 3 passed (7)
+      Tests  14 failed | 31 passed (45)
+   Start at  23:56:46
+   Duration  108.13s (transform 5.73s, setup 0ms, import 14.30s, tests 92.01s, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -55,7 +55,7 @@ async function fixture(width = 1280) {
     }
     if (request.method() === "POST" && url.pathname === "/api/appointments") {
       appointmentWrites.push(request.postDataJSON());
-      await json(route, { id: 92999 }, 201);
+      await json(route, { id: 92999,status:"booked" }, 201);
       return;
     }
     if (request.method() === "GET") {
@@ -71,7 +71,7 @@ async function fixture(width = 1280) {
         }
         case "/api/lab": await json(route, { late: 0 }); return;
         case "/api/messages": await json(route, { unread: 0, urgent: 0 }); return;
-        case "/api/auth/me": await json(route, { username: "secreception", role: "reception" }); return;
+        case "/api/auth/me": await json(route, { id: 1, username: "secreception", role: "reception" }); return;
       }
     }
     unexpected.push(`${request.method()} ${url.pathname}`);
@@ -110,6 +110,7 @@ async function fixture(width = 1280) {
   const open = () => page.getByRole("button", { name: /حجز موعد جديد/ }).click();
   await open();
   const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("التصنيف السريري للموعد",{exact:true}).selectOption("other");
   const query = dialog.getByLabel("المريض", { exact: true });
   const choices = dialog.locator("li > button");
   const submit = dialog.locator('button[type="submit"]');
@@ -149,6 +150,7 @@ describe("quick booking patient search tracks the current query and open session
       expect(await f.choices.allTextContents()).toEqual([expect.stringContaining(bob.patientNumber)]);
       await f.dialog.getByRole("button", { name: new RegExp(bob.patientNumber) }).click();
       expect(await f.dialog.getByRole("heading").textContent()).toContain(bob.fullName);
+      await f.dialog.getByLabel("التصنيف السريري للموعد", { exact: false }).selectOption("other");
       await f.submit.click();
       await expect.poll(() => f.appointmentWrites.length).toBe(1);
       expect(f.patientWrites).toEqual([]);

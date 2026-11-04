@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+import { seedAdvisoryDuty } from "../helpers/advisory-duty-fixture";
 import { mkdir, writeFile } from "node:fs/promises";
 import { Client } from "pg";
 import { chromium, type Browser, type Locator } from "playwright";
@@ -14,6 +16,7 @@ import { baseUrl, harness } from "./_server";
 // request per deliberate attempt is admitted. No Production connection or patient write.
 let h: Awaited<ReturnType<typeof harness>>; let db: Client; let browser: Browser;
 let doctorId: number; let responsibleDoctorId: number;
+let duty: Awaited<ReturnType<typeof seedAdvisoryDuty>>;
 beforeAll(async () => {
   h = await harness();
   const target = new URL(h.seeded.dbUrl);
@@ -24,10 +27,12 @@ beforeAll(async () => {
   doctorId = (await db.query<{ party_id: number }>("SELECT party_id FROM users WHERE username='secdoctora'")).rows[0].party_id;
   responsibleDoctorId = (await db.query<{ party_id: number }>("SELECT party_id FROM users WHERE username='secdoctorb'")).rows[0].party_id;
   expect(doctorId).not.toBe(responsibleDoctorId);
+  duty=await seedAdvisoryDuty(db,doctorId,"2000-01-01","2099-12-31");
+  await db.query("UPDATE hr_work_schedules SET shift_end_time='19:00' WHERE id=$1",[duty.scheduleId]);
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
   await mkdir(".settings-ui-artifacts", { recursive: true });
 }, 240_000);
-afterAll(async () => { await browser?.close(); await db?.end(); });
+afterAll(async () => { await browser?.close(); await duty?.cleanup(); await db?.end(); });
 
 type Feed = { today: string; buckets: Array<{ bucket: string; rows: FollowupRow[] }> };
 async function storedState(patientId: number) {
@@ -81,6 +86,8 @@ describe("orthodontic board booking defaults satisfy its own follow-up classifie
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
     // This independent read confirms the persisted catalogue even when the
     // browser must refuse unavailable metadata before retrying with an explicit ID.
+    const identity = await (await context.request.get(`${baseUrl}/api/auth/me`)).json();
+    const expectedActor={userId:identity.id,username:identity.username};
     const catalogRead = await context.request.get(`${baseUrl}/api/settings/appointment-services`);
     expect(catalogRead.status()).toBe(200);
     const catalog = await catalogRead.json() as { services: AppointmentService[] };
@@ -102,7 +109,9 @@ describe("orthodontic board booking defaults satisfy its own follow-up classifie
       if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
         if (request.method() === "POST" && url.pathname === "/api/appointments" && expected) {
           const payload = request.postDataJSON();
-          if (JSON.stringify(payload) === JSON.stringify(expected)) { writes.push(payload); expected = null; await route.continue(); return; }
+          const {commandId,...intent}=payload;
+          if (typeof commandId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(commandId)
+            && isDeepStrictEqual(intent,expected)) { writes.push(intent); expected = null; await route.continue(); return; }
         }
         unexpected.push(`${request.method()} ${url.pathname}`); await route.abort(); return;
       }
@@ -122,6 +131,7 @@ describe("orthodontic board booking defaults satisfy its own follow-up classifie
       await patient.getByRole("button", { name: "📅 احجز بعد المراجعة", exact: true }).click();
       expect((await catalogResponse).status()).toBe(catalogAvailable ? 200 : 503);
       const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("التصنيف السريري للموعد",{exact:true}).selectOption("orthodontics");
       const service = dialog.locator('[data-service="ORTHO_FOLLOW_UP"]');
       const duration = dialog.getByLabel("المدة المحجوزة على الكرسي", { exact: true });
       if (!catalogAvailable || contraryCatalogue) {
@@ -159,9 +169,10 @@ describe("orthodontic board booking defaults satisfy its own follow-up classifie
       await patient.getByRole("button", { name: "📅 احجز بعد المراجعة", exact: true }).click();
       await expect.poll(() => service.getAttribute("aria-pressed")).toBe("true");
       expect(await duration.inputValue()).toBe(String(requestedDuration));
+      await dialog.getByLabel("التصنيف السريري للموعد",{exact:true}).selectOption("orthodontics");
       await dialog.locator('[id$="-date"]').fill(bookedDate); await dialog.locator('[id$="-time"]').fill("16:00");
       await dialog.locator('[id$="-doctor"]').selectOption(String(doctorId));
-      const expectedPayload = { patientId, date: bookedDate, time: "16:00", durationMinutes: requestedDuration,
+      const expectedPayload = { clinicalCategory:"orthodontics",expectedActor,patientId, date: bookedDate, time: "16:00", durationMinutes: requestedDuration,
         serviceId: periodic.id, appointmentType: "follow_up", bookingIntent: "ortho_follow_up", doctorId, isNewPatient: false };
       if (mode === "stale") {
         // Synthetic fixture only: reproduce an owner-edit after catalogue read.

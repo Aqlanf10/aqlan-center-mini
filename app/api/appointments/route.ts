@@ -1,3 +1,4 @@
+import { withAppointmentClinicalLinks } from "@/lib/appointment-clinical-links";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -7,7 +8,10 @@ import {
 import { labReadinessFor, type LabReadinessItem } from "@/lib/lab-readiness";
 import { clinicDateString, type Appointment } from "@/lib/schedule";
 import { bookAppointment } from "@/lib/book-appointment";
+import { bookDirectPurposeAppointment } from "@/lib/book-direct-purpose";
 import { requireSession } from "@/lib/session";
+import { isAppointmentPurpose, planRequiredForPurpose } from "@/lib/appointment-purpose";
+import type { DirectAppointmentIntent } from "@/lib/appointment-purpose-command";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +32,8 @@ const appointmentListResponse = (list: Appointment[]) => NextResponse.json(list,
  * اليوم لا تسقط أبدًا بسبب معلومةٍ مساعدة. وتُحسب بعد فلترة الطبيب فلا تكشف
  * أعمال مريضٍ لا يراه.
  */
-async function withLabReadiness(list: Appointment[], date: string): Promise<(Appointment & { labReadiness?: LabReadinessItem[] })[]> {
+async function withLabReadiness(list: Appointment[], date: string, session: NonNullable<Awaited<ReturnType<typeof requireSession>>>): Promise<(Appointment & { labReadiness?: LabReadinessItem[] })[]> {
+  list = await withAppointmentClinicalLinks(list,session).catch(() => list);
   const works = await labWorkForPatients(list.map((appointment) => appointment.patientId)).catch(() => null);
   if (!works || works.length === 0) return list;
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
@@ -59,13 +64,13 @@ export async function GET(request: Request) {
           const owned = await doctorOwnedPatientIds(doctorPartyId, candidateIds).catch(() => new Set<number>());
           return appointmentListResponse(await withLabReadiness(
             list.filter((a) => !a.doctorId || a.doctorId === doctorPartyId || owned.has(a.patientId)),
-            date,
+            date, session,
           ));
         }
         return appointmentListResponse([]);
       }
     }
-    return appointmentListResponse(await withLabReadiness(list, date));
+    return appointmentListResponse(await withLabReadiness(list, date, session));
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل مواعيد اليوم." }, { status: 500 });
   }
@@ -78,6 +83,18 @@ export async function POST(request: Request) {
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }); }
 
   const source = (body ?? {}) as Record<string, unknown>;
+  const hasPurpose = Object.prototype.hasOwnProperty.call(source, "appointmentPurpose");
+  const hasCommand = Object.prototype.hasOwnProperty.call(source,'commandId');
+  if (Object.prototype.hasOwnProperty.call(source, 'clinicalCategory') && !hasCommand)
+    return NextResponse.json({message:'تصنيف الموعد يتطلب معرّف أمر الحجز.'},{status:400});
+  if (hasPurpose && !isAppointmentPurpose(source.appointmentPurpose))
+    return NextResponse.json({ message: "غرض الموعد غير صالح." }, { status: 400 });
+  if (hasPurpose && planRequiredForPurpose(source.appointmentPurpose as import('@/lib/appointment-purpose').AppointmentPurpose))
+    return NextResponse.json({ message: "هذا الغرض يتطلب حجز زيارة مخططة من خطة المريض؛ لا يُحجز مباشرةً." }, { status: 400 });
+  // New classified writes reject noncanonical patient IDs; do not rewrite
+  // legacy request parsing while unrelated AI/waiting-list callers rely on it.
+  if (hasPurpose && !(typeof source.patientId === "number" && Number.isSafeInteger(source.patientId) && source.patientId > 0))
+    return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
   const text = (key: string, max: number): string | null => {
     const value = source[key];
     return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
@@ -86,6 +103,37 @@ export async function POST(request: Request) {
     const value = Number(source[key]);
     return Number.isInteger(value) && value > 0 ? value : null;
   };
+
+  // Classified direct bookings have a separate durable command boundary.
+  // Pass raw fields to its strict normalizer; the legacy coercions below must
+  // not collapse two distinct bodies into the same recovery receipt.
+  if (hasPurpose || hasCommand) {
+    if (!['admin','reception','doctor'].includes(session.role))
+      return NextResponse.json({message:'غير مصرّح لك بتوثيق غرض موعد.'},{status:403});
+    try {
+      const result = await bookDirectPurposeAppointment({
+        patientId: source.patientId, date: source.date, time: source.time,
+        durationMinutes: source.durationMinutes, serviceId: source.serviceId,
+        appointmentType: source.appointmentType, note: source.note,
+        doctorId: source.doctorId, chairNo: source.chairNo,
+        overrideReason: source.overrideReason, isNewPatient: source.isNewPatient,
+        bookingIntent: source.bookingIntent, waitingListId: source.waitingListId,
+        appointmentPurpose: source.appointmentPurpose, commandId: source.commandId,
+        clinicalCategory: source.clinicalCategory, expectedActor:source.expectedActor,
+      } as DirectAppointmentIntent & {commandId:string}, {
+        username:session.username,role:session.role,channel:'ui',session,
+      });
+      if (!result.ok) return NextResponse.json(result.conflict??{message:result.message},{status:result.status});
+      if (result.replayed) return NextResponse.json({id:result.appointmentId,status:result.status,replayed:true},{status:200});
+      return NextResponse.json(result.warning ? {...result.appointment,warning:result.warning} : result.appointment,{status:201});
+    } catch (error) {
+      if ((error as Error).message==='APPOINTMENT_PURPOSE_SESSION_EXPIRED')
+        return NextResponse.json({message:'انتهت الجلسة أثناء الحجز؛ لم يُحفظ موعد.'},{status:401});
+      if ((error as {code?:string}).code==='55P03')
+        return NextResponse.json({message:'يجري تحديث بيانات الحجز أو جدول الطبيب. احتفظ بالطلب وأعد المحاولة بعد اكتمال التحديث.'},{status:409});
+      return NextResponse.json({message:'تعذّر حجز الموعد. تحقّق من النتيجة باستخدام معرّف الأمر نفسه قبل إعادة المحاولة.'},{status:500});
+    }
+  }
 
   try {
     /* التجاوز يُقرأ من المستخدم في القاعدة لا من الجلسة: الجلسة كوكي، والصلاحية
@@ -116,14 +164,18 @@ export async function POST(request: Request) {
     if (!result.ok) {
       return result.status === 409
         ? NextResponse.json(result.conflict, { status: 409 })
-        : NextResponse.json({ message: result.message }, { status: 400 });
+        : NextResponse.json({ message: result.message }, { status: result.status });
     }
     /* تنبيهٌ لا خطأ: الموعد حُجز، والاستقبال تُخبَر لتتأكّد قبل أن تَعِد المريض. */
     return NextResponse.json(
       result.warning ? { ...result.appointment, warning: result.warning } : result.appointment,
       { status: 201 },
     );
-  } catch {
+  } catch (error) {
+    if ((error as Error).message === "APPOINTMENT_PURPOSE_SESSION_EXPIRED")
+      return NextResponse.json({message:"انتهت الجلسة أثناء الحجز؛ لم يُحفظ موعد."},{status:401});
+    if ((error as {code?:string}).code === "55P03")
+      return NextResponse.json({message:"يجري تحديث بيانات الحجز أو جدول الطبيب. احتفظ بالطلب وأعد المحاولة بعد اكتمال التحديث."},{status:409});
     return NextResponse.json({ message: "تعذّر حجز الموعد. أعد المحاولة." }, { status: 500 });
   }
 }

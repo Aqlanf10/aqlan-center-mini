@@ -1,0 +1,37 @@
+
+> aqlan-center@0.1.0 test:contract-print
+> vitest run --config vitest.config.print-visual.mts __tests__/print-visual/compact-print-regressions.test.tsx -t preserves lab paper and field integrity
+
+
+ RUN  v4.1.12 /workspace/appointments-rx-baseline-check
+
+ ❯ __tests__/print-visual/compact-print-regressions.test.tsx (13 tests | 1 failed | 12 skipped) 6225ms
+     × preserves lab paper and field integrity 2835ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/print-visual/compact-print-regressions.test.tsx > native compact print regression witnesses > preserves lab paper and field integrity
+Error: PDF service label must occur in exactly one field block
+ ❯ only __tests__/helpers/lab-dispatch-pdf-fields.ts:12:34
+     10|   .replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+     11| const only = <T>(values: T[], description: string): T => {
+     12|   if (values.length !== 1) throw new Error(`PDF ${description} must oc…
+       |                                  ^
+     13|   return values[0];
+     14| };
+ ❯ Module.assertLabDispatchPdfFields __tests__/helpers/lab-dispatch-pdf-fields.ts:68:24
+ ❯ __tests__/print-visual/compact-print-regressions.test.tsx:153:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  23:59:53
+   Duration  9.31s (transform 1.23s, setup 0ms, import 2.60s, tests 6.22s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

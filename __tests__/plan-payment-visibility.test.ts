@@ -5,8 +5,9 @@ import { withoutPlanPayments } from "../lib/plan-payment-projection";
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), user: vi.fn(), owns: vi.fn(), todayVisit: vi.fn(),
-  settings: vi.fn(), plans: vi.fn(), active: vi.fn(), visits: vi.fn(),
+  purposes: vi.fn(), settings: vi.fn(), plans: vi.fn(), active: vi.fn(), visits: vi.fn(),
 }));
+vi.mock("@/lib/appointment-purpose-read", () => ({ readPatientPlannedVisitPurposes: mocks.purposes }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden", findUserByUsername: mocks.user,
@@ -40,6 +41,7 @@ const get = (route: "generic" | "patient", patientId = 201) => route === "generi
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.purposes.mockResolvedValue({ok:true,byPlannedVisit:new Map()});
   mocks.session.mockResolvedValue({ userId: 7, username: "synthetic_doctor", role: "doctor", partyId: 71 });
   mocks.user.mockResolvedValue(doctor());
   mocks.owns.mockResolvedValue(true);
@@ -162,8 +164,16 @@ it.each(["cashier", "accountant"])("keeps %s financial-only projection and no pa
 it("assistant receives no new route or payment authority", async () => {
   mocks.session.mockResolvedValue({ role: "assistant" });
   expect((await get("generic")).status).toBe(403);
-  // Direct handler remains redacted; proxy still blocks this unlisted assistant route.
-  expectHidden(await (await get("patient")).json(), "patient");
+  // The classified-plan reader now enforces the same denial in the handler.
+  expect((await get("patient")).status).toBe(403);
+  expect(mocks.purposes).not.toHaveBeenCalled();
+});
+
+it("denies the patient projection when the purpose reader loses current authority", async () => {
+  mocks.purposes.mockResolvedValue({ok:false});
+  const response = await get("patient");
+  expect(response.status).toBe(403);
+  expect(await response.json()).not.toHaveProperty("plans");
 });
 it("the clinical allowlist excludes future aggregate fields and does not mutate plans", () => {
   const before = structuredClone(plan);

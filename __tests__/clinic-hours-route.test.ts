@@ -26,7 +26,7 @@ describe("clinic hours API whole-batch contract", () => {
   it("allows an explicit whole-tuple reset through the existing audited route", async () => {
     expect((await POST(request({ action: "reset", keys: Object.keys(values), __versions: versions }))).status).toBe(200);
     expect(boundary.saveSettingsAudited).toHaveBeenCalledExactlyOnceWith({
-      values: { "clinic.day_start": "09:00", "clinic.day_end": "21:00", "clinic.shift2_start": "", "clinic.shift2_end": "" },
+      values: { "clinic.day_start": "09:00", "clinic.day_end": "13:00", "clinic.shift2_start": "15:00", "clinic.shift2_end": "19:00" },
       expected: versions, mode: "reset", reason: null, actor: "test-admin", actorRole: "admin",
     });
   });

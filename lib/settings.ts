@@ -107,7 +107,7 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "clinic.address": "تعز — الجمهورية اليمنية",
   "clinic.chairs": "2",
   "clinic.day_start": "09:00",
-  "clinic.day_end": "21:00",
+  "clinic.day_end": "13:00",
   "finance.base_currency": "YER",
   // أسعار الصرف تتغيّر في اليمن أسبوعيًا وأحيانًا يوميًا. القيمة هنا نقطة بداية
   // تُصحَّح من الشاشة في أول يوم عمل — ولا تُستخدم في حساب دفعة سابقة إطلاقًا.
@@ -209,8 +209,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* عتبة التحذير من امتلاء اليوم — محرّك السعة (المرحلة ٤). */
   "scheduling.near_capacity_percent": "80",
   /* (المرحلة ٤ب) الوردية الثانية — فارغةٌ تعني دوامًا متّصلًا لا وردية ثانية. */
-  "clinic.shift2_start": "",
-  "clinic.shift2_end": "",
+  "clinic.shift2_start": "15:00",
+  "clinic.shift2_end": "19:00",
   /* دقائقُ تُحجز للطوارئ في كل وردية. صفرٌ = مُعطَّل، وهو الافتراضيّ عمدًا:
      نشرُ المرحلة ٤ب يجب ألّا يقلّص طاقة الحجز المتاحة اليوم بلا قرارٍ من المالك. */
   "scheduling.emergency_reserve_minutes": "0",
@@ -265,6 +265,18 @@ export function withDefaults(stored: Partial<Record<string, string>>): SettingsM
   for (const key of ALL_SETTING_KEYS) {
     const value = stored[key];
     result[key] = value !== undefined && value !== null && value !== "" ? value : SETTING_DEFAULTS[key];
+  }
+  // Saved continuous hours (including an explicit empty second shift) stay
+  // continuous. New two-session defaults apply only to an unconfigured center.
+  const hasSavedHours = ["clinic.day_start","clinic.day_end","clinic.shift2_start","clinic.shift2_end"]
+    .some(key => Object.prototype.hasOwnProperty.call(stored,key));
+  if (hasSavedHours) {
+    // Settings saves are partial. Preserve the former fallback for a missing
+    // first-shift endpoint in an already configured center.
+    result["clinic.day_start"] = stored["clinic.day_start"] || "09:00";
+    result["clinic.day_end"] = stored["clinic.day_end"] || "21:00";
+    result["clinic.shift2_start"] = stored["clinic.shift2_start"] ?? "";
+    result["clinic.shift2_end"] = stored["clinic.shift2_end"] ?? "";
   }
   return result;
 }

@@ -160,8 +160,15 @@ export async function assertNoPrescriptionIssuanceHistory(client: Pick<DbClient,
   if (!history || history.exists) throw new ProtectedPrescriptionHistoryError();
 }
 
+/** 0095: an explicit appointment purpose is immutable clinical provenance. */
+export class ProtectedAppointmentPurposeHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد تصنيف موعد صراحةً؛ يجب الاحتفاظ بقصد الحجز ومصدر خطته التاريخي. لم يُمسح شيء."); this.name = "ProtectedAppointmentPurposeHistoryError"; }
+}
+
 export const RESET_KEEP_TABLES = [
   "prescription_issuance_commands",
+  "appointment_purpose_provenance",
+  "appointment_booking_commands",
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,

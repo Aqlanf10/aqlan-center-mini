@@ -7,13 +7,26 @@ vi.mock("../lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden",
   listProviderBlocks: vi.fn(),
 }));
+// Isolate capacity/provider-block suggestions from the separately tested HR
+// roster admission transaction; this fixture has no SQL-capable client.
+vi.mock("../lib/appointment-doctor-admission", () => ({ prepareAppointmentDoctorAdmission: async () => () => null }));
+
+vi.mock("../lib/capacity-context", async importOriginal => ({
+  ...await importOriginal<typeof import("../lib/capacity-context")>(),
+  loadCapacityContext: vi.fn(),
+}));
 
 import { listProviderBlocks } from "../lib/db";
-import { judgeBookingInDay } from "../lib/book-appointment";
-import { evaluateCapacity, prepareCapacityEvaluator } from "../lib/capacity-context";
+import { judgeBookingInDay as actualJudgeBookingInDay } from "../lib/book-appointment";
+import { evaluateCapacity, prepareCapacityEvaluator, loadCapacityContext } from "../lib/capacity-context";
 
 const date = "2026-10-27";
-const client = {} as DbClient;
+const client = { query: vi.fn(async () => ({ rows: [] })) } as unknown as DbClient;
+// Preserve each scenario's explicit policy; native tests cover locked settings reads.
+async function judgeBookingInDay(input: Parameters<typeof actualJudgeBookingInDay>[0]) {
+  vi.mocked(loadCapacityContext).mockResolvedValue(input.context);
+  return actualJudgeBookingInDay(input);
+}
 const service: AppointmentService = {
   id: 1, code: "RCT", nameAr: "علاج جذور", nameEn: null, specialty: "endodontics",
   defaultDurationMinutes: 30, bufferBeforeMinutes: 0, bufferAfterMinutes: 0,

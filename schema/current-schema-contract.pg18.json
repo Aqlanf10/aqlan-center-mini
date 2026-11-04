@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6",
+  "generatedOnServerVersion": "18.6 (Debian 18.6-1.pgdg13+2)",
   "counts": {
-    "tables": 134,
-    "columns": 1707,
-    "constraints": 1973,
-    "indexes": 416,
-    "triggers": 103
+    "tables": 136,
+    "columns": 1727,
+    "constraints": 2008,
+    "indexes": 425,
+    "triggers": 107
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -1131,6 +1131,275 @@
       },
       "triggers": {}
     },
+    "appointment_booking_commands": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "appointment_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "command_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "command_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "recorded_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "command_id"
+      ],
+      "unique": [
+        [
+          "appointment_id"
+        ]
+      ],
+      "checks": [
+        "appointment_booking_commands_command_hash_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "appointment_id"
+          ],
+          "refTable": "appointments",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "appointment_id",
+            "patient_id"
+          ],
+          "refTable": "appointments",
+          "refColumns": [
+            "id",
+            "patient_id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "appointment_booking_commands_appointment_id_key": {
+          "columns": [
+            "appointment_id"
+          ],
+          "unique": true
+        },
+        "appointment_booking_commands_pkey": {
+          "columns": [
+            "command_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "appointment_booking_commands_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "appointment_booking_commands_no_nonempty_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "appointment_purpose_provenance": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "appointment_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "command_hash": {
+          "type": "text",
+          "nullable": true
+        },
+        "command_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "purpose": {
+          "type": "text",
+          "nullable": false
+        },
+        "recorded_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "source_plan_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "source_planned_visit_id": {
+          "type": "int4",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "appointment_id"
+      ],
+      "unique": [
+        [
+          "command_id"
+        ]
+      ],
+      "checks": [
+        "appointment_purpose_command_shape",
+        "appointment_purpose_provenance_purpose_check",
+        "appointment_purpose_provenance_recorded_by_check",
+        "appointment_purpose_source_shape"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "appointment_id",
+            "patient_id"
+          ],
+          "refTable": "appointments",
+          "refColumns": [
+            "id",
+            "patient_id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "source_planned_visit_id",
+            "patient_id",
+            "source_plan_id"
+          ],
+          "refTable": "planned_visits",
+          "refColumns": [
+            "id",
+            "patient_id",
+            "plan_id"
+          ]
+        },
+        {
+          "columns": [
+            "source_plan_id",
+            "patient_id"
+          ],
+          "refTable": "treatment_plans",
+          "refColumns": [
+            "id",
+            "patient_id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "appointment_purpose_command_uniq": {
+          "columns": [
+            "command_id"
+          ],
+          "unique": true
+        },
+        "appointment_purpose_patient_time_idx": {
+          "columns": [
+            "patient_id",
+            "recorded_at",
+            "appointment_id"
+          ],
+          "unique": false
+        },
+        "appointment_purpose_plan_time_idx": {
+          "columns": [
+            "source_plan_id",
+            "recorded_at"
+          ],
+          "unique": false
+        },
+        "appointment_purpose_provenance_pkey": {
+          "columns": [
+            "appointment_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "appointment_purpose_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "appointment_purpose_no_nonempty_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
     "appointment_services": {
       "columns": {
         "allows_concurrent_provider_work": {
@@ -1352,6 +1621,10 @@
           "type": "int4",
           "nullable": true
         },
+        "clinical_category": {
+          "type": "text",
+          "nullable": true
+        },
         "created_at": {
           "type": "timestamptz",
           "nullable": false
@@ -1420,6 +1693,14 @@
           "type": "int4",
           "nullable": true
         },
+        "staff_confirmed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "staff_confirmed_by": {
+          "type": "text",
+          "nullable": true
+        },
         "started_at": {
           "type": "timestamptz",
           "nullable": true
@@ -1436,8 +1717,16 @@
       "primaryKey": [
         "id"
       ],
-      "unique": [],
-      "checks": [],
+      "unique": [
+        [
+          "id",
+          "patient_id"
+        ]
+      ],
+      "checks": [
+        "appointments_clinical_category_check",
+        "appointments_staff_confirmation_shape"
+      ],
       "foreignKeys": [
         {
           "columns": [
@@ -1540,6 +1829,13 @@
         "appointments_pkey": {
           "columns": [
             "id"
+          ],
+          "unique": true
+        },
+        "appointments_purpose_identity_uniq": {
+          "columns": [
+            "id",
+            "patient_id"
           ],
           "unique": true
         },
@@ -13648,7 +13944,13 @@
       "primaryKey": [
         "id"
       ],
-      "unique": [],
+      "unique": [
+        [
+          "id",
+          "patient_id",
+          "plan_id"
+        ]
+      ],
       "checks": [
         "planned_visits_after_days_range"
       ],
@@ -13720,6 +14022,14 @@
             "sequence"
           ],
           "unique": false
+        },
+        "planned_visits_purpose_identity_uniq": {
+          "columns": [
+            "id",
+            "patient_id",
+            "plan_id"
+          ],
+          "unique": true
         },
         "planned_visits_status_idx": {
           "columns": [
@@ -14538,7 +14848,12 @@
       "primaryKey": [
         "id"
       ],
-      "unique": [],
+      "unique": [
+        [
+          "id",
+          "patient_id"
+        ]
+      ],
       "checks": [],
       "foreignKeys": [
         {
@@ -14571,6 +14886,13 @@
         "treatment_plans_pkey": {
           "columns": [
             "id"
+          ],
+          "unique": true
+        },
+        "treatment_plans_purpose_identity_uniq": {
+          "columns": [
+            "id",
+            "patient_id"
           ],
           "unique": true
         },

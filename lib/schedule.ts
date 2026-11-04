@@ -58,6 +58,10 @@ export function getAppointmentTypeBadge(type: string | null | undefined): string
 }
 
 export interface Appointment {
+  clinicalLinks?: {planId:number|null;visitIds:number[];caseIds:number[]};
+  clinicalCategory?: import("./appointment-category").AppointmentCategory | null;
+  staffConfirmedAt?: string | null;
+  staffConfirmedBy?: string | null;
   id: number;
   patientId: number;
   patientName: string;
@@ -69,6 +73,8 @@ export interface Appointment {
   note: string | null;
   status: AppointmentStatus;
   reminderSentAt?: string | null;
+  /** تأكيد المريض للموعد من البوابة؛ لا يغيّر حالة الوصول أو الإنجاز. */
+  patientConfirmedAt?: string | null;
   /** جهة «طبيب» الموعد (صلاحيات الوكيل المساعد) — null لغير المسند لطبيب. */
   doctorId?: number | null;
   /** اسم الطبيب المسند إليه الموعد للعرض السريع في الواجهة. */

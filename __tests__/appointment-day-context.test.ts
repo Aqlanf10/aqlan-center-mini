@@ -293,6 +293,68 @@ describe("appointment day result ownership (actual page handlers, synthetic tran
   });
 });
 
+describe("patient portal confirmation is independent of appointment status", () => {
+  const stamp = "2026-10-21T12:34:00.000Z";
+  const confirmationToggle = () => find((node) => node.type === "button" && node.props["data-filter"] === "patient-confirmed");
+  const shownConfirmationIds = () => render().filter((node) => node.props["data-patient-confirmed"] !== undefined)
+    .map((node) => node.props["data-patient-confirmed"]);
+
+  it.each(["garbage", "2026-02-30T12:00:00.000Z", "2026-10-21T12:34:00Z", 42])(
+    "fails the day read closed for malformed portal stamp %s", async (badStamp) => {
+      refresh();
+      reads[1].pending.resolve(response([{ ...appointment, patientConfirmedAt: badStamp }])); await flush();
+      expect(rows()).toEqual([]);
+      expect(render().some((node) => node.props["data-day-load"] === "ready")).toBe(false);
+      expect(text(confirmationToggle().props.children as ReactNode)).toContain("(؟)");
+      expect(writes()).toHaveLength(0);
+    },
+  );
+
+  it("combines portal-confirmed with operational status and search, leaving both badges visible", async () => {
+    refresh();
+    reads[1].pending.resolve(response([
+      { ...appointment, id: 11, patientName: "Synthetic unconfirmed", patientConfirmedAt: null },
+      { ...appointment, id: 12, patientName: "Synthetic arrived", status: "arrived", patientConfirmedAt: stamp },
+      { ...appointment, id: 13, patientName: "Synthetic booked", status: "booked", patientConfirmedAt: stamp },
+      { ...appointment, id: 14, patientName: "Synthetic done", status: "done", patientConfirmedAt: stamp },
+      { ...appointment, id: 15, patientName: "Synthetic cancelled", status: "cancelled", patientConfirmedAt: stamp },
+    ])); await flush();
+    expect(text(confirmationToggle().props.children as ReactNode)).toContain("(4)");
+    (confirmationToggle().props.onClick as () => void)();
+    expect(confirmationToggle().props["aria-pressed"]).toBe(true);
+    expect(rows()).toEqual([12, 13, 14, 15]);
+    expect(shownConfirmationIds()).toEqual([12, 13, 14, 15]);
+    const arrived = find((node) => node.type === "button" && text(node.props.children as ReactNode).startsWith("وصل بالعيادة ("));
+    (arrived.props.onClick as () => void)();
+    expect(rows()).toEqual([12]);
+    const visible = render().map((node) => text(node.props.children as ReactNode)).join(" ");
+    expect(visible).toContain("وصل بالعيادة");
+    expect(visible).toContain("أكده المريض من البوابة");
+    const search = find((node) => node.type === "input" && node.props.type === "search");
+    (search.props.onChange as (event: unknown) => void)({ target: { value: "unconfirmed" } });
+    expect(rows()).toEqual([]);
+    (find((node) => node.type === "input" && node.props.type === "search").props.onChange as (event: unknown) => void)({ target: { value: "arrived" } });
+    expect(rows()).toEqual([12]);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("keeps the independent filter scoped to the current complete day and shows its badge in chairs", async () => {
+    refresh();
+    reads[1].pending.resolve(response([{ ...appointment, id: 15, status: "arrived", patientConfirmedAt: stamp }])); await flush();
+    (confirmationToggle().props.onClick as () => void)();
+    click("🪑 كراسي (3)");
+    expect(shownConfirmationIds()).toContain(15);
+    changeDate(nextDay, false);
+    expect(shownConfirmationIds()).toEqual([]);
+    expect(text(confirmationToggle().props.children as ReactNode)).toContain("(؟)");
+    commitEffects();
+    reads[2].pending.resolve(response([{ ...appointmentB, id: 16, patientConfirmedAt: null }])); await flush();
+    expect(rows()).toEqual([]);
+    expect(text(confirmationToggle().props.children as ReactNode)).toContain("(0)");
+    expect(writes()).toHaveLength(0);
+  });
+});
+
 describe("manual reminder page wiring (shared control, synthetic transport)", () => {
   function reminder() { return find((node) => node.type === AppointmentReminder); }
   function confirmReminder() {

@@ -1,0 +1,21 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/appointments-rx-integration
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+
+ Test Files  801 passed (801)
+      Tests  13935 passed (13935)
+   Start at  23:54:54
+   Duration  598.43s (transform 35.35s, setup 0ms, import 134.44s, tests 354.00s, environment 76ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
