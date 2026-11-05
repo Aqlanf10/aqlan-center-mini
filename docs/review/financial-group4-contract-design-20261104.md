@@ -450,3 +450,37 @@ A stale source still commits its rejection proof before the refusal. The `…On`
 - `own` outside reads like missing on all six methods, the same as a missing plan.
 - A race in which the patient leaves the scope while the amendment waits for the patient row.
 - Revocation between two calls.
+
+## 14. Slice 94e — instalment reminders (G4-8)
+
+This section is written before the code. It covers `POST /api/plans/reminders`: recording that the clinic reminded the patient of a due instalment, for one plan (optionally one instalment) or for up to 500 plans at once. It stamps `last_reminder_at` and writes the `plan.installment_reminder` audit; it sends nothing and changes no money.
+
+| | Legacy | Canonical |
+|---|---|---|
+| Admission | the money labels (admin, reception, cashier, accountant) and the doctor label | `appointments.create` (the map's grant: a reminder belongs to the patient-contact and booking work) |
+| Records | every plan | the plans of the actor's patient scope (`all`, or `own` = the clinician's patients) |
+
+No finance grant substitutes, and the label decides nothing.
+
+### The writer
+
+The writer is unchanged:
+- the deterministic plan row locks (`FOR UPDATE`, ordered by id);
+- the instalment lock when one is named;
+- the timestamps and the audit for each plan, all in one transaction.
+
+It is split into `recordPlanInstallmentRemindersOn(client, input, admit)`; the legacy function keeps its transaction and its lock text. After the plan row locks, the plan's patient is read and `admit(patientId)` decides the scope for each plan:
+- `all` admits every plan;
+- `own` needs a positive ownership witness `FOR SHARE NOWAIT`, held until commit; a lock conflict refuses the whole request with 409 (`patient_scope_conflict`), and nothing is written.
+
+A plan outside the scope is treated exactly like a missing one:
+- in the bulk form it is skipped and not counted, as legacy skips a missing id;
+- for a single plan it answers the legacy 404 "the plan or the instalment does not exist".
+
+### Tests required before the commit
+
+- A single plan, a single instalment and the bulk form, with the timestamps and audit by the actor.
+- Finance grants (`finance.payments.collect`, `finance.invoices.create`), the plan edit grant alone and the label refused.
+- `own` outside reads like missing for a single plan; in the bulk form only the plans inside the scope are stamped and counted.
+- A race in which the patient leaves the scope while the reminder waits for the plan row.
+- Revocation.

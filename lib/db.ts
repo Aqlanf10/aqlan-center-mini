@@ -21900,26 +21900,44 @@ export async function recordProposalContactInTransaction(client: DbClient, input
  * «قسطك مستحق» ثلاث مرات في ثلاثة أيام فيصمّ عن الرسائل كلها. الطابع على الخطة
  * وعلى الأقساط المستحقة والمتأخرة معًا: تذكيرٌ واحد يوثَّق مرة واحدة.
  */
-export async function recordPlanInstallmentReminders(input: {
+export interface PlanInstallmentReminderInput {
   planIds: number[];
   installmentNumber?: number;
   bulk: boolean;
   actor: string;
   actorRole: string | null;
-}): Promise<{ lastReminderAt: string; updatedCount: number }> {
+}
+export async function recordPlanInstallmentReminders(input: PlanInstallmentReminderInput): Promise<{ lastReminderAt: string; updatedCount: number }> {
+  validReminderTargets(input);
+  await ensureSchema();
+  return withTransaction(getPool(), client => recordPlanInstallmentRemindersOn(client, input));
+}
+
+function validReminderTargets(input: PlanInstallmentReminderInput): number[] {
   const planIds = [...new Set(input.planIds)].sort((a, b) => a - b);
   if (!planIds.length || planIds.length > 500 || planIds.some(id => !Number.isSafeInteger(id) || id <= 0 || id > 2147483647)
     || (input.installmentNumber !== undefined && (!Number.isSafeInteger(input.installmentNumber) || input.installmentNumber <= 0 || input.installmentNumber > 2147483647 || planIds.length !== 1))) {
     throw new Error("Invalid reminder targets");
   }
-  await ensureSchema();
+  return planIds;
+}
+
+/** The reminder writer on a caller's transaction (M2 slice 94e). `admit`, when given, decides
+ * each plan's patient scope right after the plan row locks: a plan it refuses is skipped and
+ * not counted, exactly like a missing one. */
+export async function recordPlanInstallmentRemindersOn(client: DbClient, input: PlanInstallmentReminderInput,
+  admit?: (patientId: number) => Promise<boolean>): Promise<{ lastReminderAt: string; updatedCount: number }> {
+  const planIds = validReminderTargets(input);
   const now = new Date();
-  return withTransaction(getPool(), async client => {
     // Lock in deterministic order. The batch, its timestamps and mandatory audit are atomic.
     const { rows: plans } = await client.query<{ id: number }>(
       "SELECT id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE", [planIds]);
     let updatedCount = 0;
     for (const plan of plans) {
+      if (admit) {
+        const { rows: [owner] } = await client.query<{ patient_id: number }>("SELECT patient_id FROM treatment_plans WHERE id = $1", [plan.id]);
+        if (!owner || !await admit(owner.patient_id)) continue;
+      }
       if (input.installmentNumber !== undefined) {
         const { rows } = await client.query(
           "SELECT id FROM plan_installments WHERE plan_id=$1 AND number=$2 FOR UPDATE", [plan.id, input.installmentNumber]);
@@ -21939,7 +21957,6 @@ export async function recordPlanInstallmentReminders(input: {
       updatedCount += 1;
     }
     return { lastReminderAt: now.toISOString(), updatedCount };
-  });
 }
 
 /**

@@ -5033,8 +5033,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94e (G4-8; contract section 14): appointments.create inside the patient scope; the legacy writer recordPlanInstallmentRemindersOn on the admitted operation's transaction; each plan's scope decided right after the plan row locks (own: NOWAIT ownership witness); an outside plan is skipped and not counted, exactly like a missing one (single plan: the legacy 404)."
  },
  {
   "route": "/api/prescriptions",
