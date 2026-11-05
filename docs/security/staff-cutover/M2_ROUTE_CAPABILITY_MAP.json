@@ -4830,8 +4830,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94d-2 (G4-1, G4-8; contract section 13): finance.agreements.manage inside the patient scope; the preview in one read-only snapshot under read:plans.agreement; the plan resolves to its patient there (outside = missing plan)."
  },
  {
   "route": "/api/plans/[id]/agreement-amendment",
@@ -4844,8 +4844,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94d-2 (G4-1, G4-8; contract section 13): finance.agreements.manage inside the patient scope; the legacy writer on the admitted operation's transaction with the slice 91 branded actor re-proving the grant; the scope decided right after the patient row lock; a stale source commits its rejection proof, then the legacy 409."
  },
  {
   "route": "/api/plans/[id]/agreement-amendment",
@@ -4858,8 +4858,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94d-2 (G4-1, G4-8; contract section 13): finance.agreements.manage inside the patient scope; the status of one exact attempt; the patient row held FOR SHARE to decide the scope before any saved attempt is read; writes nothing."
  },
  {
   "route": "/api/plans/[id]/consent",
@@ -4950,8 +4950,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94d-2 (G4-1, G4-8; contract section 13): finance.agreements.manage inside the patient scope; the preview in one read-only snapshot under read:plans.agreement; the plan resolves to its patient there (outside = missing plan)."
  },
  {
   "route": "/api/plans/[id]/reconcile",
@@ -4964,8 +4964,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94d-2 (G4-1, G4-8; contract section 13): finance.agreements.manage inside the patient scope; the legacy writer on the admitted operation's transaction with the slice 91 branded actor re-proving the grant; the scope decided right after the patient row lock; a stale source commits its rejection proof, then the legacy 409."
  },
  {
   "route": "/api/plans/[id]/reconcile",
@@ -4978,8 +4978,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94d-2 (G4-1, G4-8; contract section 13): finance.agreements.manage inside the patient scope; the status of one exact attempt; the patient row held FOR SHARE to decide the scope before any saved attempt is read; writes nothing."
  },
  {
   "route": "/api/plans/proposals",

@@ -406,3 +406,47 @@ It is split into `approveAgreementOn(client, input, afterLocks)`; the legacy wra
 - `own` outside reads like missing.
 - A race in which the patient leaves the scope while the approval waits for the patient row.
 - Revocation.
+
+## 13. Slice 94d-2 — the agreement amendment and the agreement reconciliation (G4-1, G4-8)
+
+This section is written before the code. It covers `GET`, `POST` and `PUT` on `/api/plans/[id]/agreement-amendment` and on `/api/plans/[id]/reconcile`.
+
+| Route | Legacy | Canonical |
+|---|---|---|
+| `GET` (the preview and its source hash) | the administrator label | `finance.agreements.manage` (the map's grant; the catalogue requires `finance.patient-ledger.view` with it), inside the patient scope |
+| `POST` (the amendment's delta invoice, or the reconciliation's unbilled principal) | the administrator label | `finance.agreements.manage`, inside the patient scope |
+| `PUT` (the status of one exact attempt; writes nothing) | the administrator label | `finance.agreements.manage`, inside the patient scope |
+
+No other grant substitutes. `finance.invoices.create`, the ledger view and collect alone never amend or reconcile. The label decides nothing.
+
+### The writers
+
+The writers are unchanged:
+- the request digest bound to the actor's user id;
+- the advisory attempt fence;
+- the committed stale-rejection proof;
+- the patient row, debt-account, plan-item or plan, doctor and policy locks;
+- the snapshot and its source hash;
+- the delta invoice, the event row and the audit, all in the same transaction.
+
+Each is split into an `…On(client, planId, input, actor, afterLocks)` form. The legacy functions keep their own transactions and their messages.
+
+The canonical actor is the slice 91 branded actor. Its re-check re-proves the live operation and `finance.agreements.manage` on the same transaction client, at each point where the writer re-validated the legacy session.
+
+A stale source still commits its rejection proof before the refusal. The `…On` form returns the stale outcome, the operation commits it, and the route then answers the legacy 409 with the legacy message. This is the only refusal that commits; every other refusal rolls the operation back.
+
+### Scope
+
+- The reads run in one read-only snapshot under `read:plans.agreement`. The plan is resolved to its patient in that snapshot. A plan outside the scope reads exactly like a missing one (404, the writer's own missing message).
+- The writes and the status check take an early unlocked look first. Then comes the authoritative decision right after the patient row lock, before the replay under the lock and before any rejection proof or refusal. An `own` actor needs a positive ownership witness `FOR SHARE NOWAIT`, held until commit.
+- On the canonical path the replay before the locks is skipped. An attempt (committed or rejected) is reported only after the scope is decided.
+- The status check (`PUT`) takes the patient row lock `FOR SHARE` only to decide the scope; it still writes nothing.
+
+### Tests required before the commit
+
+- Amendment: the preview, the delta invoice and audit, the replay of the same key, and the stale rejection committed with a 409 and then reported by `PUT`.
+- Reconciliation: the preview, the reconciled receipt, the replay and the stale rejection.
+- `finance.invoices.create`, the ledger view, collect alone and the label refused on all six methods.
+- `own` outside reads like missing on all six methods, the same as a missing plan.
+- A race in which the patient leaves the scope while the amendment waits for the patient row.
+- Revocation between two calls.
