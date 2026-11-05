@@ -1,5 +1,3 @@
-import type { SessionPayload } from "../../lib/auth";
-import { seedLegacyStaffAdmin, signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import { randomUUID } from "node:crypto";
 import { Client, Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -77,7 +75,6 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
   let admin: Client | undefined;
   let client: Client;
   let pool: Pool;
-  let staffAdmin: SessionPayload;
   let created = false;
   let adminConnected = false;
   let files: Awaited<ReturnType<typeof loadMigrationFiles>>;
@@ -136,7 +133,6 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
       initialFk = await doctorFk(client);
       initialAttribution = await visitAttribution(client, startupFixture.visitId);
     }
-    staffAdmin = await seedLegacyStaffAdmin("synthetic-fk-admin");
     expect(initialFk).toMatchObject({
       action: path === "legacy_no_action" ? "a" : "n",
       definition: path === "legacy_no_action"
@@ -205,22 +201,22 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
     expect((await client.query("SELECT party_id, is_active FROM users WHERE id = $1", [user.id])).rows)
       .toEqual([{ party_id: doctor.id, is_active: true }]);
     expect(await db.findUserByUsername("synthetic_fk_account")).not.toBeNull();
-    expect(await db.linkUserDoctor(user.id, doctor.id, undefined, signedLegacyStaffProof(staffAdmin))).toBeNull();
+    expect(await db.linkUserDoctor(user.id, doctor.id)).toBeNull();
     expect((await client.query("SELECT party_id FROM users WHERE id = $1", [user.id])).rows)
       .toEqual([{ party_id: doctor.id }]);
     await preserved();
 
     expect((await db.updateParty(doctor.id, { isActive: true }))?.isActive).toBe(true);
     await preserved();
-    expect((await db.linkUserDoctor(user.id, null, undefined, signedLegacyStaffProof(staffAdmin)))?.partyId).toBeNull();
+    expect((await db.linkUserDoctor(user.id, null))?.partyId).toBeNull();
     await preserved();
-    expect((await db.linkUserDoctor(user.id, doctor.id, undefined, signedLegacyStaffProof(staffAdmin)))?.partyId).toBe(doctor.id);
+    expect((await db.linkUserDoctor(user.id, doctor.id))?.partyId).toBe(doctor.id);
     await preserved();
-    expect(await db.updateUser(user.id, { isActive: false }, undefined, signedLegacyStaffProof(staffAdmin))).toMatchObject({ isActive: false, partyId: doctor.id });
+    expect(await db.updateUser(user.id, { isActive: false })).toMatchObject({ isActive: false, partyId: doctor.id });
     expect(await db.findUserByUsername("synthetic_fk_account")).toBeNull();
     expect((await db.getParty(doctor.id))?.isActive).toBe(true);
     await preserved();
-    expect(await db.updateUser(user.id, { isActive: true }, undefined, signedLegacyStaffProof(staffAdmin))).toMatchObject({ isActive: true, partyId: doctor.id });
+    expect(await db.updateUser(user.id, { isActive: true })).toMatchObject({ isActive: true, partyId: doctor.id });
     expect(await db.findUserByUsername("synthetic_fk_account")).not.toBeNull();
     await preserved();
 

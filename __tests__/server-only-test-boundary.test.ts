@@ -1,9 +1,11 @@
 import { createRequire } from "node:module";
 import { expect, it } from "vitest";
-import { createReferenceTransport } from "../lib/inventory-domain/reference-transport";
+// Staging wave 1 adaptation: the original target (lib/inventory-domain/reference-transport) belongs to
+// the excluded partial inventory recovery; any real `import "server-only"` module proves the alias.
+import { summarizeStaffAuthoritySnapshot } from "../lib/staff-authority-snapshot";
 
 it("loads a real marked server module under the test-only exact alias", () => {
-  expect(typeof createReferenceTransport).toBe("function");
+  expect(typeof summarizeStaffAuthoritySnapshot).toBe("function");
 });
 it("retains the real production client-boundary poison module", () => {
   const require = createRequire(import.meta.url);
