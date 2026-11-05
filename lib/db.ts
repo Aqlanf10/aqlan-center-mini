@@ -10589,11 +10589,18 @@ export async function listShiftPaymentsWith(q: Pick<DbClient, "query">, shiftId:
 
 export async function listPaymentsByDate(date: string): Promise<Payment[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<PaymentRow>(
+  return listPaymentsByDateWith(getPool(), date, null);
+}
+/** The same day list on a caller's snapshot (M2 slice 90a); `patientIds` limits the rows
+ * to those patients (an `own` scope), null for every patient. */
+export async function listPaymentsByDateWith(q: Pick<DbClient, "query">, date: string, patientIds: readonly number[] | null): Promise<Payment[]> {
+  if (patientIds !== null && patientIds.length === 0) return [];
+  const { rows } = await q.query<PaymentRow>(
     `${PAYMENT_SELECT}
       WHERE (y.created_at AT TIME ZONE $1)::date = $2::date
+        AND ($3::int[] IS NULL OR y.patient_id = ANY($3::int[]))
       ORDER BY y.created_at DESC`,
-    [CLINIC_TIME_ZONE, date],
+    [CLINIC_TIME_ZONE, date, patientIds === null ? null : [...patientIds]],
   );
   return rows.map(toPayment);
 }

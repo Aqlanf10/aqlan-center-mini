@@ -14,6 +14,9 @@ import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalDayPayments } from "@/lib/canonical-payment-reads";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +26,13 @@ const denied = () =>
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(request: Request) {
+  // M2 slice 90a (G4-4): finance.payments.view; rows only inside the patient scope.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalDayPayments(selected.handle, new URL(request.url).searchParams.get("date")), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل المقبوضات."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewMoney(session.role)) {

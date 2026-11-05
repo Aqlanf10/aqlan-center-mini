@@ -59,6 +59,9 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   /** GET /api/visits/[id]/financial-context: coverage for documenters, references with the
    * invoice view (M2 slice 89). */
   "read:visits.financial-context": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze(["clinical.visits.document", "finance.invoices.view"] as const) }),
+  /** GET /api/payments (?date): the day's receipts, rows inside the patient scope;
+   * finance.payments.view (M2 slice 90a, G4-4). */
+  "read:payments.day": Object.freeze({ record: "patient", need: Object.freeze(["finance.payments.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/finance/debts: the debtors list, rows inside the actor's patient scope (M2 slice 88). */
   "read:finance.debts": Object.freeze({ record: "patient", need: Object.freeze(["finance.patient-ledger.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]: one patient's file, only inside the actor's patient scope. */
