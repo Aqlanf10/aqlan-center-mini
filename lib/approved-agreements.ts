@@ -2,11 +2,11 @@ import {assertSimilarCollectionReviewed,type SimilarCollectionReview} from "./si
 import {readInvoiceSettlementPosition} from "./invoice-settlement-position";
 import {clinicDateString} from "./schedule";
 import {CLINIC_TIME_ZONE} from "./db";
-import { ensureSchema, getPool, getPayment, getSettingsInTransaction, insertAuditRow, writeDebtCollectionReceipt, type DbClient } from "./db";
+import { ensureSchema, getPool, getPayment, getSettingsInTransaction, insertAuditRow, writeDebtCollectionReceipt, type DbClient, type Payment } from "./db";
 import { canHandleMoney } from "./roles";
 import { revalidateSessionInTransaction } from "./session";
 import type { SessionPayload } from "./auth";
-import { assertDebtSession, DebtRepaymentError, debtRequestHash, readDebtPosition, type DebtTarget } from "./debt-installments-db";
+import { assertDebtSession, DebtRepaymentError, debtRequestHash, isCanonicalDebtActor, readDebtPosition, type DebtActorSource, type DebtTarget } from "./debt-installments-db";
 import { lockDebtAccountForSchedule, debtAccountDue } from "./debt-account-position";
 import { attributeInstallment } from "./plans";
 import { documentNumberSql } from "./document-numbers";
@@ -183,15 +183,35 @@ export async function approvedAgreementPosition(planId:number,today:string, read
     available:position.available&&deltaAvailable&&approvedSourceMatches(position.sourceSnapshot,a.source_snapshot)};
 }
 
-async function assertCollectionSession(client:DbClient,session:SessionPayload) {
+async function assertCollectionSession(client:DbClient,session:DebtActorSource) {
+  // The canonical actor (M2 slice 90c) re-proves its operation and collect grant on this client.
+  if(isCanonicalDebtActor(session)){
+    if(!await session.recheck(client))throw new DebtRepaymentError("unauthorized","انتهت الجلسة أو تغيّرت صلاحية التحصيل.");
+    return;
+  }
   const current=await revalidateSessionInTransaction(session,client);
   if(!current||!canHandleMoney(current.role))throw new DebtRepaymentError("unauthorized","انتهت الجلسة أو تغيّرت صلاحية التحصيل.");
 }
-export async function collectApprovedAgreement(input:{planId:number;amountMinor:number;currency:Currency;method:"cash"|"transfer";note:string|null;idempotencyKey:string;session:SessionPayload},
-  options:{similarityReview?:SimilarCollectionReview}={}) {
+type ApprovedCollectionInput={planId:number;amountMinor:number;currency:Currency;method:"cash"|"transfer";note:string|null;idempotencyKey:string;session:DebtActorSource};
+function approvedCollectionHash(input:ApprovedCollectionInput):string {
   if(!positive(input.planId)||!positive(input.amountMinor)||!isCurrency(input.currency)||!validKey(input.idempotencyKey)||!["cash","transfer"].includes(input.method))fail("راجع بيانات التحصيل.");
-  const hash=debtRequestHash({purpose:"approved-agreement-collection-v1",...input,session:{id:input.session.userId,username:input.session.username}});
-  const receipt=await transaction(async client=>{
+  return debtRequestHash({purpose:"approved-agreement-collection-v1",...input,session:{id:input.session.userId,username:input.session.username}});
+}
+export async function collectApprovedAgreement(input:ApprovedCollectionInput&{session:SessionPayload},
+  options:{similarityReview?:SimilarCollectionReview}={}) {
+  approvedCollectionHash(input);
+  const receipt=await transaction(client=>collectApprovedAgreementOn(client,input,options));
+  return hydrateApprovedCollection(receipt,getPayment);
+}
+/**
+ * The approved-agreement collection on a caller's open transaction (M2 slice 90c): the
+ * same writer, key, fingerprint and locks; `afterLocks` receives the agreement's patient
+ * after the patient fence and the account/shift locks, before the replay under the locks
+ * and every refusal. The caller commits only a result and rolls back on any throw.
+ */
+export async function collectApprovedAgreementOn(client:DbClient,input:ApprovedCollectionInput,
+  options:{similarityReview?:SimilarCollectionReview}={},afterLocks?:(patientId:number)=>Promise<void>) {
+    const hash=approvedCollectionHash(input);
     await assertCollectionSession(client,input.session);
     const replay=async()=>{const p=(await client.query<{id:number;idempotency_request_hash:string}>("SELECT id,idempotency_request_hash FROM payments WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
       if(p&&p.idempotency_request_hash!==hash)throw new DebtRepaymentError("conflict","مفتاح التحصيل مستعمل بطلب مختلف.");return p;};
@@ -217,6 +237,7 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
     const a=await readApprovedAgreement(client,input.planId);if(!a)throw new DebtRepaymentError("missing","لم يُعتمد أصل مالي لهذه الخطة.");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR KEY SHARE",[a.patient_id]);
     await lockDebtAccountForSchedule(client,a.patient_id);
+    await afterLocks?.(a.patient_id);
     const groupedAfterLock=await groupReplay();if(groupedAfterLock)return groupedAfterLock;
     const waited=await replay();if(waited)return {paymentId:waited.id,replayed:true};
     const position=await readDebtPosition(client,target(a),true);
@@ -307,7 +328,10 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
       details:{planId:input.planId,invoiceId:a.invoice_id,openingCurrency:a.opening_currency,settlementMinor:settlement,remainingMinor:position.remainingMinor-settlement}});
     await assertCollectionSession(client,input.session);
     return {paymentId:result.paymentId,replayed:result.kind==="replay"};
-  });
+}
+/** The committed (or, on a canonical transaction, the written) receipts with their checks. */
+export async function hydrateApprovedCollection(receipt:Awaited<ReturnType<typeof collectApprovedAgreementOn>>,
+  getPayment:(id:number)=>Promise<Payment|null>) {
   const payment=await getPayment(receipt.paymentId);
   if(!payment)throw new Error("Committed agreement payment unavailable; retain original key for reconciliation.");
   if("collection" in receipt && receipt.collection) {

@@ -11795,7 +11795,7 @@ async function recoveryReplay(
 
 async function runRecoveryTransaction(
   client: DbClient, input: RecoveryWriteInput, key: string, requestHash: string,
-  similarityReview?: SimilarCollectionReview,
+  similarityReview?: SimilarCollectionReview, admit?: () => Promise<void>,
 ): Promise<RecoveryOutcome> {
   const previous = await recoveryReplay(client, input, key, requestHash);
   if (previous) return previous;
@@ -11838,6 +11838,9 @@ async function runRecoveryTransaction(
     `SELECT id FROM invoices WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [input.patientId]);
   const { rows: lockedPlans } = await client.query<{ id: number }>(
     `SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR SHARE`, [input.patientId]);
+  // Canonical callers (M2 slice 90c): scope decided after every wait of this writer,
+  // before the replay under the locks and every later refusal.
+  await admit?.();
   const afterShiftWait = await recoveryReplay(client, input, key, requestHash);
   if (afterShiftWait) return afterShiftWait;
   const current = (await readRecoveryDocumentStates(client, input.patientId)).find((state) => state.invoiceId === input.invoiceId);
@@ -11905,6 +11908,28 @@ async function runRecoveryTransaction(
     },
   });
   return outcome;
+}
+
+/** The recovery writer on a canonical operation's transaction (M2 slice 90c): the same
+ * validation and fingerprint, `admit` after every lock. The caller rolls back on a refusal. */
+export async function recordReversedInstallmentRecoveryOn(client: DbClient, input: RecoveryWriteInput & { idempotencyKey: string },
+  options: { similarityReview?: SimilarCollectionReview }, admit: () => Promise<void>): Promise<{
+  payment: Payment | null; reason: RecoveryPaymentRefusal | null; replayed?: boolean;
+}> {
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0 || !isCurrency(input.currency)
+    || typeof input.createdBy !== "string" || !input.createdBy.trim()) return { payment: null, reason: "invalid_recovery_request" };
+  const parsed = parseRecoveryIntent({ ...input, amount: toInputAmount(input.amountMinor, input.currency) }, input.idempotencyKey);
+  if (parsed.kind !== "recovery") return { payment: null, reason: "invalid_recovery_request" };
+  const canonical: RecoveryWriteInput = { ...parsed.intent, createdBy: input.createdBy, actorRole: input.actorRole };
+  const requestHash = createHash("sha256").update(recoveryIntentFingerprintSource(canonical, canonical.createdBy), "utf8").digest("hex");
+  let outcome: RecoveryOutcome;
+  try { outcome = await runRecoveryTransaction(client, canonical, parsed.idempotencyKey, requestHash, options.similarityReview, admit); }
+  catch (error) {
+    if (error instanceof FinancialCurrencyIntegrityError) return { payment: null, reason: "recovery_review_required" };
+    throw error;
+  }
+  if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
+  return { payment: await getPaymentWith(client, outcome.paymentId), reason: null, ...(outcome.kind === "replay" ? { replayed: true } : {}) };
 }
 
 /** Explicit, append-only recovery on an already issued invoice. Ordinary receipts
@@ -22493,9 +22518,19 @@ export async function recordPlanInstallmentInTransaction(
   return runPlanInstallmentTransaction(client, input, preparePlanInstallment(input));
 }
 
+/** The installment writer on a canonical operation's transaction (M2 slice 90c): `admit`
+ * decides the actor's scope right after the shift lock, before the replay under the lock
+ * and every refusal. The caller rolls back on any refusal or exception. */
+export async function recordPlanInstallmentOn(
+  client: DbClient, input: PlanInstallmentInput, admit: () => Promise<void>,
+): Promise<PlanInstallmentOutcome> {
+  return runPlanInstallmentTransaction(client, input, preparePlanInstallment(input), admit);
+}
+
 async function runPlanInstallmentTransaction(
   client: DbClient, input: PlanInstallmentInput,
   prepared: ReturnType<typeof preparePlanInstallment>,
+  admit?: () => Promise<void>,
 ): Promise<PlanInstallmentOutcome> {
   const { idempotencyKey, baseAmount, requestHash } = prepared;
   // Resolve old successes before new recovery eligibility or acquiring provenance locks.
@@ -22537,6 +22572,8 @@ async function runPlanInstallmentTransaction(
   const { rows: shifts } = await client.query<{ id: number }>(
     `SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1 FOR UPDATE`,
   );
+  // Canonical callers (M2 slice 90c): scope decided after the origin and shift waits.
+  await admit?.();
   if (!shifts[0]) { return { reason: "no_shift" }; }
 
   /* (FIN-1) فحص الإعادة تحت قفل الوردية: كل تحصيلٍ يتسلسل على صفها (هنا وفي

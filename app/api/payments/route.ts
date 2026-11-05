@@ -17,7 +17,7 @@ import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { readCanonicalDayPayments } from "@/lib/canonical-payment-reads";
-import { CanonicalReceiptOutcome, CanonicalReceiptRefusal, commandCanonicalReceipt } from "@/lib/canonical-receipt-writes";
+import { CanonicalReceiptOutcome, CanonicalReceiptRefusal, commandCanonicalReceipt, commandCanonicalRecovery } from "@/lib/canonical-receipt-writes";
 import type { VerifiedDurableSession } from "@/lib/staff-durable-session";
 
 export const dynamic = "force-dynamic";
@@ -135,6 +135,41 @@ function parseReceiptFields(source: Record<string, unknown>, request: Request, h
   return { fields: { patientId, currency, amountMinor, kind, method, invoiceId, planId, openingCurrency, note, idempotencyKey, reversalOfId } };
 }
 
+/** A recovery refusal as the legacy response (shared by both envelopes). */
+function recoveryReasonResponse(reason: string | null, headers?: HeadersInit): NextResponse {
+  const messages: Record<string, string> = {
+    invalid_recovery_request: "طلب إعادة تحصيل القسط غير صالح.",
+    recovery_review_required: "ربط القسط المعكوس يحتاج مراجعة المدير قبل التحصيل. لا تُصدر قسطًا جديدًا بدلًا منه.",
+    recovery_not_available: "لم تعد هذه الفاتورة متاحة لإعادة التحصيل. حدّث الحساب واختر هدفًا صالحًا.",
+    recovery_exceeds_remaining: "المبلغ يتجاوز المتبقي على الفاتورة الأصلية. حدّث الحساب وراجع المبلغ.",
+    recovery_account_credit_review: "المبلغ يتجاوز المستحق الفعلي على الحساب بهذه العملة أو يوجد رصيد دائن. راجع التسويات مع المدير قبل قبض المال؛ لا تُصدر قسطًا جديدًا.",
+    recovery_target_changed: "تغيّر ربط الفاتورة الأصلية أثناء التحصيل. حدّث الحساب وراجع الهدف.",
+    exchange_rate_required: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية.",
+    idempotency_conflict: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة.",
+    no_shift: "لا توجد وردية مفتوحة. افتح الوردية من شاشة المالية أولًا.",
+    invalid_invoice: "الفاتورة لا تخص المريض أو غير صالحة.",
+    cross_currency_not_supported: "حصّل الفاتورة بعملتها نفسها؛ التسوية بهذه العملة غير مدعومة.",
+  };
+  return NextResponse.json({ reason, message: messages[reason ?? ""] ?? "تعذّرت إعادة تحصيل القسط. راجع الحساب قبل المحاولة." },
+    { status: reason === "invalid_recovery_request" ? 400 : 409, ...(headers ? { headers } : {}) });
+}
+
+/** An instalment refusal as the legacy response (shared by both envelopes). */
+function installmentReasonResponse(reason: string, planCurrency: string, recoveryInvoiceIds?: number[], headers?: HeadersInit): NextResponse {
+  const messages: Record<string, string> = {
+    inactive_plan: "الخطة غير جارية — لا يمكن تسجيل تحصيل جديد عليها.",
+    no_shift: "لا توجد وردية مفتوحة. افتح الوردية من شاشة المالية أولًا.",
+    cross_currency_not_supported: `القسط بعملةٍ مختلفة عن عملة الخطة (${planCurrency}) غير مدعوم — حصّل بعملة الاتفاق نفسها.`,
+    idempotency_conflict: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة.",
+    issued_installment_recovery_required: "يوجد قسط مُصدر عُكس قبضه. اختر إعادة تحصيل الفاتورة الأصلية من الحساب؛ لا تُصدر قسطًا جديدًا.",
+    plan_financial_history_requires_review: "الخطة تحتوي علاجًا ذا سجل مالي أو اتفاق تاريخي؛ لا تُصدر قسطًا جديدًا له. اختر الفاتورة القائمة أو الرصيد السابق وراجع الربط المالي.",
+    installment_recovery_review_required: "يوجد قسط مُصدر يحتاج مراجعة ربطه قبل التحصيل. راجع المدير؛ لا تُصدر فاتورة بديلة.",
+  };
+  if (reason === "exchange_rate_required") return NextResponse.json({ message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." }, { status: 409, ...(headers ? { headers } : {}) });
+  return NextResponse.json({ reason, message: messages[reason] ?? "تعذّر تسجيل القسط. أعد المحاولة.", ...(recoveryInvoiceIds ? { recoveryInvoiceIds } : {}) },
+    { status: 409, ...(headers ? { headers } : {}) });
+}
+
 /** A writer refusal reason as the legacy response (status and Arabic message), or null. */
 function receiptReasonResponse(reason: string, headers?: HeadersInit): NextResponse | null {
   const reply = (body: unknown, init: { status: number }) => NextResponse.json(body, { ...init, ...(headers ? { headers } : {}) });
@@ -246,7 +281,10 @@ async function canonicalReceiptPost(request: Request, handle: VerifiedDurableSes
     return NextResponse.json({ reason: "invalid_recovery_request", message: "طلب إعادة تحصيل القسط غير صالح. اختر الفاتورة الأصلية ومبلغًا ومفتاح إعادة صالحين دون أهداف أو أسعار صرف إضافية." }, { status: 400, headers: NO_STORE });
   }
   if (recovery.kind === "recovery") {
-    return NextResponse.json({ code: "recovery_not_canonical", message: "إعادة تحصيل القسط المعكوس تنتقل في شريحة لاحقة؛ استعملها من الشاشة القديمة الآن." }, { status: 409, headers: NO_STORE });
+    try {
+      const result = await commandCanonicalRecovery(handle, recovery.intent, recovery.idempotencyKey, similarityReview);
+      return NextResponse.json({ ...result.payment, idempotencyKey: recovery.idempotencyKey }, { status: result.replayed ? 200 : 201, headers: NO_STORE });
+    } catch (error) { return canonicalReceiptFailure(error); }
   }
   const parsed = parseReceiptFields(source, request, NO_STORE);
   if ("response" in parsed) return parsed.response;
@@ -255,19 +293,25 @@ async function canonicalReceiptPost(request: Request, handle: VerifiedDurableSes
     return NextResponse.json({ message: "السند المُراد ردّه غير موجود، أو لا يخص المريض، أو ليس دفعة أصلية." }, { status: 409, headers: NO_STORE });
   }
   try {
-    const result = await commandCanonicalReceipt(handle, { ...fields, similarityReview });
-    return NextResponse.json({ ...(result.payment as object), idempotencyKey: fields.idempotencyKey,
-      ...(result.acknowledgmentEvidence ? { acknowledgmentEvidence: result.acknowledgmentEvidence } : {}) }, { status: result.replayed ? 200 : 201, headers: NO_STORE });
-  } catch (error) {
-    if (error instanceof CanonicalReceiptOutcome) {
-      return receiptReasonResponse(error.reason, NO_STORE) ?? NextResponse.json({ reason: error.reason, message: "تعذّر تسجيل الدفعة. راجع الحساب قبل المحاولة." }, { status: 409, headers: NO_STORE });
-    }
-    if (error instanceof CanonicalReceiptRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
-    if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409, headers: NO_STORE });
-    if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409, headers: NO_STORE });
-    if (error instanceof DebtRepaymentError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.code === "unauthorized" ? 403 : error.code === "invalid" ? 400 : 409, headers: NO_STORE });
-    return canonicalPatientReadFailure(error, "تعذّر تسجيل الدفعة. أعد المحاولة.");
+    const { payment, replayed, ...extra } = await commandCanonicalReceipt(handle, { ...fields, similarityReview });
+    // The receipt fields first, then the key, then the evidence or the approved-agreement split, as legacy.
+    return NextResponse.json({ ...(payment as object), idempotencyKey: fields.idempotencyKey, ...extra }, { status: replayed ? 200 : 201, headers: NO_STORE });
+  } catch (error) { return canonicalReceiptFailure(error); }
+}
+
+/** One mapping for every canonical collection refusal (receipt, refund, instalment, approved
+ * agreement, recovery): the legacy messages and statuses, never cached. */
+function canonicalReceiptFailure(error: unknown): NextResponse {
+  if (error instanceof CanonicalReceiptOutcome) {
+    if (error.path === "recovery") return recoveryReasonResponse(error.reason, NO_STORE);
+    if (error.path === "installment") return installmentReasonResponse(error.reason, error.detail.planCurrency ?? "", error.detail.recoveryInvoiceIds, NO_STORE);
+    return receiptReasonResponse(error.reason, NO_STORE) ?? NextResponse.json({ reason: error.reason, message: "تعذّر تسجيل الدفعة. راجع الحساب قبل المحاولة." }, { status: 409, headers: NO_STORE });
   }
+  if (error instanceof CanonicalReceiptRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409, headers: NO_STORE });
+  if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409, headers: NO_STORE });
+  if (error instanceof DebtRepaymentError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.code === "unauthorized" ? 403 : error.code === "invalid" ? 400 : 409, headers: NO_STORE });
+  return canonicalPatientReadFailure(error, "تعذّر تسجيل الدفعة. أعد المحاولة.");
 }
 
 export async function POST(request: Request) {
@@ -308,22 +352,7 @@ export async function POST(request: Request) {
         ...recovery.intent, idempotencyKey: recovery.idempotencyKey,
         createdBy: session.username, actorRole: session.role,
       }, { similarityReview });
-      if (result.reason || !result.payment) {
-        const messages: Record<string, string> = {
-          invalid_recovery_request: "طلب إعادة تحصيل القسط غير صالح.",
-          recovery_review_required: "ربط القسط المعكوس يحتاج مراجعة المدير قبل التحصيل. لا تُصدر قسطًا جديدًا بدلًا منه.",
-          recovery_not_available: "لم تعد هذه الفاتورة متاحة لإعادة التحصيل. حدّث الحساب واختر هدفًا صالحًا.",
-          recovery_exceeds_remaining: "المبلغ يتجاوز المتبقي على الفاتورة الأصلية. حدّث الحساب وراجع المبلغ.",
-          recovery_account_credit_review: "المبلغ يتجاوز المستحق الفعلي على الحساب بهذه العملة أو يوجد رصيد دائن. راجع التسويات مع المدير قبل قبض المال؛ لا تُصدر قسطًا جديدًا.",
-          recovery_target_changed: "تغيّر ربط الفاتورة الأصلية أثناء التحصيل. حدّث الحساب وراجع الهدف.",
-          exchange_rate_required: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية.",
-          idempotency_conflict: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة.",
-          no_shift: "لا توجد وردية مفتوحة. افتح الوردية من شاشة المالية أولًا.",
-          invalid_invoice: "الفاتورة لا تخص المريض أو غير صالحة.",
-          cross_currency_not_supported: "حصّل الفاتورة بعملتها نفسها؛ التسوية بهذه العملة غير مدعومة.",
-        };
-        return NextResponse.json({ reason: result.reason, message: messages[result.reason ?? ""] ?? "تعذّرت إعادة تحصيل القسط. راجع الحساب قبل المحاولة." }, { status: result.reason === "invalid_recovery_request" ? 400 : 409 });
-      }
+      if (result.reason || !result.payment) return recoveryReasonResponse(result.reason);
       return NextResponse.json({ ...result.payment, idempotencyKey:recovery.idempotencyKey }, { status: result.replayed ? 200 : 201 });
     } catch (error) {
       if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
@@ -382,18 +411,7 @@ export async function POST(request: Request) {
             amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
             createdBy: session.username, actorRole: session.role, idempotencyKey, similarityReview,
           });
-          if ("reason" in result) {
-            const messages = {
-              inactive_plan: "الخطة غير جارية — لا يمكن تسجيل تحصيل جديد عليها.",
-              no_shift: "لا توجد وردية مفتوحة. افتح الوردية من شاشة المالية أولًا.",
-              cross_currency_not_supported: `القسط بعملةٍ مختلفة عن عملة الخطة (${plan.baseCurrency}) غير مدعوم — حصّل بعملة الاتفاق نفسها.`,
-              idempotency_conflict: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة.",
-              issued_installment_recovery_required: "يوجد قسط مُصدر عُكس قبضه. اختر إعادة تحصيل الفاتورة الأصلية من الحساب؛ لا تُصدر قسطًا جديدًا.",
-              plan_financial_history_requires_review: "الخطة تحتوي علاجًا ذا سجل مالي أو اتفاق تاريخي؛ لا تُصدر قسطًا جديدًا له. اختر الفاتورة القائمة أو الرصيد السابق وراجع الربط المالي.",
-              installment_recovery_review_required: "يوجد قسط مُصدر يحتاج مراجعة ربطه قبل التحصيل. راجع المدير؛ لا تُصدر فاتورة بديلة.",
-            } as const;
-            return NextResponse.json({ reason: result.reason, message: messages[result.reason], ...("recoveryInvoiceIds" in result ? { recoveryInvoiceIds: result.recoveryInvoiceIds } : {}) }, { status: 409 });
-          }
+          if ("reason" in result) return installmentReasonResponse(result.reason, plan.baseCurrency, "recoveryInvoiceIds" in result ? result.recoveryInvoiceIds : undefined);
           // (TD-06) سطر التدقيق يُكتب داخل recordPlanInstallment في معاملة السند نفسها.
           const payment = await getPayment(result.paymentId);
           return NextResponse.json({ ...payment, idempotencyKey }, { status: result.replayed ? 200 : 201 });

@@ -4524,8 +4524,8 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Requires an open cashier shift. M2 slice 90b (G4-4): the ordinary receipt (finance.payments.collect) and the refund of a receipt (finance.payments.refund) are canonical: one admitted operation on the legacy writer's transaction (patient, origin, shift locks; key, fingerprint, settings-owned rate, similar-receipt review, receipt audit and the replay audit atomic); the patient scope decided after the shift wait and before any target, replay or refusal (own: an ownership witness FOR SHARE NOWAIT; outside = missing 404). Held for slice 90c and refused 409 on the canonical runtime: a receipt on an agreement-funded plan (instalment or approved-agreement split) and the reversed-instalment recovery.",
+  "status": "canonical-done",
+  "note": "Requires an open cashier shift. M2 slices 90b–90c (G4-4): canonical. The ordinary receipt (finance.payments.collect) and the refund of a receipt (finance.payments.refund): one admitted operation on the legacy writer's transaction (patient, origin, shift locks; key, fingerprint, settings-owned rate, similar-receipt review, receipt audit and the replay audit atomic). A receipt on an agreement-funded plan is, as in legacy, the approved agreement's collection (a branded canonical actor re-proves the collect grant where the legacy writer revalidated its session) or the next instalment with its invoice; the reversed-instalment recovery runs its legacy writer; all under finance.payments.collect. Each decides the patient scope after its writer's waits and before any target, replay or refusal (own: an ownership witness FOR SHARE NOWAIT; outside = missing 404), after an early unlocked look.",
   "branches": {
    "discriminator": "kind",
    "values": {
@@ -4533,7 +4533,7 @@
      "need": [
       "finance.payments.collect"
      ],
-     "note": "An ordinary receipt; never a refund, never a read."
+     "note": "An ordinary receipt, an agreement-funded plan collection (instalment or approved agreement) or the reversed-instalment recovery; never a refund, never a read."
     },
     "refund": {
      "need": [

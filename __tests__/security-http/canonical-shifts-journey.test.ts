@@ -167,10 +167,21 @@ it.each([390, 1280])("browser: scoped read at %ipx mounts only the canonical fee
 it("HTTP: canonical sessions cannot turn the legacy print/export/report routes into a detail bypass", async () => {
   for (const key of ["own", "reader", "owner"] as const) {
     const login = await journey.login(key);
-    for (const path of [`/print/receipt/${outsidePayment}`, "/api/export?type=payments", "/api/reports", "/api/payments", "/api/expenses"]) {
+    for (const path of [`/print/receipt/${outsidePayment}`, "/api/export?type=payments", "/api/reports", "/api/expenses"]) {
       const response = await journey.api(path, login.cookie);
       expect([401, 403, 404, 307]).toContain(response.status);
       expect(await response.text()).not.toMatch(/SYN-HIDDEN|SYN-OWN-RECEIPT/);
+    }
+    // GET /api/payments is a reviewed canonical read since M2 slice 90a (owner decision G4-4):
+    // finance.payments.view inside the patient scope, so it can never widen the shift feed.
+    const day = await journey.api("/api/payments", login.cookie);
+    expect(day.headers.get("cache-control")).toBe("private, no-store");
+    if (key === "reader") { expect(day.status).toBe(403); expect(await day.text()).not.toMatch(/SYN-HIDDEN|SYN-OWN-RECEIPT/); }
+    else {
+      expect(day.status).toBe(200);
+      const receipts = ((await day.json()) as { payments: { id: number }[] }).payments;
+      if (key === "own") expect(receipts.map(row => row.id)).toEqual([ownPayment]);
+      else expect(receipts.map(row => row.id)).toEqual(expect.arrayContaining([ownPayment, outsidePayment]));
     }
   }
   expect(await journey.ddlLog()).toEqual([]);

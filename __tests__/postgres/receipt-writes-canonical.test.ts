@@ -3,8 +3,8 @@
  * finance.payments.refund, neither implying the other nor any read; administrative labels
  * and view grants never reach them; inside the patient scope (outside reads like missing,
  * decided after the writer's waits); the legacy writer's controls (shift, key replay with
- * its audit, remaining) roll the whole operation back; agreement-funded plans held (90c);
- * revocation. */
+ * its audit, remaining) roll the whole operation back; revocation. Agreement-funded plans
+ * and the recovery (slice 90c): plan-collections-canonical.test.ts. */
 vi.mock("server-only", () => ({}));
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Pool, type PoolClient } from "pg";
@@ -96,15 +96,6 @@ describe("receipts", () => {
     expect(await auditsOf("payment.refund", row.id)).toEqual([{ actor: "SYN-RW-REF" }]);
     expect(await refusal(rc.commandCanonicalReceipt(await fx.session("refunder"), refund(p, original.id, 1001)))).toMatchObject({ reason: "reversal_exceeds_remaining" });
     expect((await paymentsOf(p)).map(r => r.amount)).toEqual([1610, 610]);
-  });
-
-  it("an agreement-funded plan is held for slice 90c (409), never served by the ordinary writer", async () => {
-    const p = await patient();
-    const plan = (await q("INSERT INTO treatment_plans(patient_id,title,total_minor) VALUES ($1,'SYN plan',90000) RETURNING id", [p]))[0].id as number;
-    await q("INSERT INTO plan_installments(plan_id,number,due_date,amount_minor) VALUES ($1,1,'2026-12-01',90000)", [plan]);
-    expect(await refusal(rc.commandCanonicalReceipt(await fx.session("collector"), { ...receipt(p, 1710), planId: plan })))
-      .toMatchObject({ code: "plan_collection_not_canonical", status: 409 });
-    expect(await paymentsOf(p)).toEqual([]);
   });
 
   it("without an open shift the operation rolls back: no receipt, no audit", async () => {

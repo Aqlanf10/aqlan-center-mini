@@ -30,7 +30,7 @@ export type DebtActorSource = SessionPayload | CanonicalDebtActor;
 export function canonicalDebtActor(identity: { userId: number; username: string; role: string }, recheck: (client: DbClient) => Promise<boolean>): CanonicalDebtActor {
   return Object.freeze({ [CANONICAL_DEBT_ACTOR]: true as const, userId: identity.userId, username: identity.username, role: identity.role, recheck });
 }
-const isCanonicalDebtActor = (source: DebtActorSource): source is CanonicalDebtActor =>
+export const isCanonicalDebtActor = (source: DebtActorSource): source is CanonicalDebtActor =>
   typeof source === "object" && source !== null && (source as Partial<CanonicalDebtActor>)[CANONICAL_DEBT_ACTOR] === true;
 
 export async function assertDebtSession(client: DbClient, session: DebtActorSource): Promise<void> {
