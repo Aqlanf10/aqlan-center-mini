@@ -12,11 +12,25 @@ import { checkInvoiceAuthority } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalInvoiceCreateRefusal, readCanonicalInvoicePreview } from "@/lib/canonical-invoice-create";
 
 export const dynamic = "force-dynamic";
 
 /** Read-only linkage preview uses the exact save parser and price-authority engine. */
 export async function POST(request: Request) {
+  // M2 slice 93b (G4-1): read:invoices.preview (finance.invoices.create) inside the patient scope.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalInvoicePreview(selected.handle, await readJsonBody(request, JSON_BODY_LIMIT_BYTES)), { headers: NO_STORE }); }
+    catch (error) {
+      const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      if (error instanceof CanonicalInvoiceCreateRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّرت معاينة الربط السريري.");
+    }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canHandleMoney(session.role)) return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });

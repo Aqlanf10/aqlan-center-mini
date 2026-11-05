@@ -208,8 +208,8 @@ export async function listDebtRepayments(patientId: number, today: string) {
 }
 
 /** Original immutable terms, even if a later revision/cancellation exists. */
-export async function invoiceDebtRepaymentReceipt(patientId:number,invoiceId:number) {
-  const {rows:[row]}=await getPool().query<{id:number;arrangement_id:number;version:number;terms:DebtRepaymentTerms}>(
+export async function invoiceDebtRepaymentReceipt(patientId:number,invoiceId:number,q:Pick<DbClient,"query">=getPool()) {
+  const {rows:[row]}=await q.query<{id:number;arrangement_id:number;version:number;terms:DebtRepaymentTerms}>(
     `SELECT r.id,r.arrangement_id,r.version,r.terms FROM debt_repayment_revisions r
      JOIN debt_repayment_arrangements a ON a.id=r.arrangement_id
      WHERE a.patient_id=$1 AND a.invoice_id=$2 AND r.idempotency_key=$3`,[patientId,invoiceId,`invoice:${invoiceId}:repayment`]);

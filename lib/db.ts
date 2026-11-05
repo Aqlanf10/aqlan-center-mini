@@ -9504,6 +9504,16 @@ export async function listServices(includeInactive = false): Promise<Service[]> 
   return rows.map(toService);
 }
 
+/** listServices on a caller's client (M2 slice 93b: the canonical operation's own transaction). */
+export async function listServicesWith(q: Pick<DbClient, "query">, includeInactive = false): Promise<Service[]> {
+  const { rows } = await q.query<ServiceRow>(
+    `SELECT ${SERVICE_COLUMNS} FROM services
+      ${includeInactive ? "" : "WHERE is_active"}
+      ORDER BY sort_order, name`,
+  );
+  return rows.map(toService);
+}
+
 /** خدمةٌ واحدة من الدليل — لأن سعرًا يأتي من المتصفّح سعرٌ يمكن تغييره في المتصفّح. */
 export async function getService(id: number): Promise<Service | null> {
   await ensureSchema();

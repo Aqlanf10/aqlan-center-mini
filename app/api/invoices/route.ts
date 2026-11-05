@@ -19,6 +19,7 @@ import { requireSession } from "@/lib/session";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { readCanonicalPatientInvoices } from "@/lib/canonical-invoice-reads";
+import { CanonicalInvoiceCreateRefusal, commandCanonicalInvoiceCreate } from "@/lib/canonical-invoice-create";
 import { DebtRepaymentError, invoiceDebtRepaymentReceipt } from "@/lib/debt-installments-db";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +52,23 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // M2 slice 93b (G4-1, G4-8): finance.invoices.create inside the patient scope; prices by grants.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const created = await commandCanonicalInvoiceCreate(selected.handle, await readJsonBody(request, JSON_BODY_LIMIT_BYTES));
+      return NextResponse.json(created, { status: created.replayed ? 200 : 201, headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      if (error instanceof CanonicalInvoiceCreateRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      if (error instanceof LabWorkIntentError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      if (error instanceof DebtRepaymentError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.code === "unauthorized" ? 401 : error.code === "invalid" ? 400 : 409, headers: NO_STORE });
+      if (error instanceof InvoiceTemplateAuthorizationError) return NextResponse.json({ code: error.code, message: error.message }, { status: 401, headers: NO_STORE });
+      if (error instanceof InvoiceTemplateAuthorityError || error instanceof InvoiceTemplateBusyError) return NextResponse.json({ code: error.code, message: error.message }, { status: 409, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر إنشاء الفاتورة. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role)) {

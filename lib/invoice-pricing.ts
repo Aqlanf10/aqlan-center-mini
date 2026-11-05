@@ -10,7 +10,7 @@
  *  - الخصم على الفاتورة: بسببٍ مكتوب دائمًا، ولغير المدير حتى الحد نفسه من إجمالي البنود.
  * البند اليدوي بلا خدمة يبقى حرًّا — سعرٌ يُكتب لا يُقارن بشيء (ويُدقَّق في invoice.create).
  */
-import { decideProcedurePrice, type PriceOverrideKind } from "./price-authority";
+import { decideProcedurePrice, decideProcedurePriceByGrants, type PriceGrants, type PriceOverrideKind } from "./price-authority";
 import { type ForeignRates, type PricedService } from "./service-pricing";
 import { CLINIC_BASE_CURRENCY, type Currency } from "./money";
 import { invoiceCatalogPrice } from "./invoice-catalog-price";
@@ -51,7 +51,19 @@ export function checkInvoiceAuthority(input: {
   discountReason: string | null;
   /** Invoice catalogue commands only. Plans/visits keep their existing policy. */
   requireInvoiceManualReason?: boolean;
+  /**
+   * Canonical sessions (M2 slice 93b, owner decision G4-1): explicit grants decide in place of
+   * the role label, which is then ignored. A line or invoice discount within
+   * `billing.max_discount_percent` needs `finance.discounts.apply` (or override) with a reason;
+   * beyond it `finance.discounts.override`; a price above the catalogue (or above a configured
+   * zero) `finance.price-increases.apply` with a reason. A service unpriced in this currency
+   * keeps the invoice rule (a written reason), as legacy.
+   */
+  grants?: PriceGrants;
 }): InvoiceAuthorityDecision {
+  const grants = input.grants;
+  const mayIncrease = grants ? grants.increase : input.role === "admin";
+  const mayExceedCeiling = grants ? grants.discountOverride : input.role === "admin";
   const overrides: InvoicePriceOverride[] = [];
   /* مرجع الحد المجمَّع: كل بندٍ بسعر دليله المقرَّر إن كان له، وإلا بسعره المكتوب — فخصم
      البنود وخصم الفاتورة يُقاسان معًا من سعر الدليل ولا يتراكمان فوق الحد. */
@@ -73,22 +85,27 @@ export function checkInvoiceAuthority(input: {
     }
     // An explicit native zero is a configured price, never an unpriced offer.
     if (input.requireInvoiceManualReason && priced.minor === 0 && line.requestedMinor > 0) {
-      if (input.role !== "admin") return { ok: false, message: `سعر «${line.description}» أعلى من سعر الدليل — رفع السعر للمدير وحده.` };
+      if (!mayIncrease) return { ok: false, message: grants
+        ? `سعر «${line.description}» أعلى من سعر الدليل — يحتاج صلاحية تطبيق زيادة السعر.`
+        : `سعر «${line.description}» أعلى من سعر الدليل — رفع السعر للمدير وحده.` };
       if ((line.reason?.trim().length ?? 0) < 3) return { ok: false, message: `اكتب سبب تغيير سعر «${line.description}» عن سعر الدليل.` };
       overrides.push({ description: line.description, kind: "increase", catalogMinor: 0, requestedMinor: line.requestedMinor,
         discountPercent: null, reason: line.reason!.trim().slice(0, 300) });
       referenceMinor += quantity * line.requestedMinor;
       continue;
     }
-    const decision = decideProcedurePrice({
+    const priceInput = {
       serviceName: line.description,
       catalogMinor: priced.minor ?? 0,
       priceConfigured: configured,
       requestedMinor: line.requestedMinor,
-      role: input.role,
       reason: line.reason,
       maxDiscountPercent: input.maxDiscountPercent,
-    });
+    };
+    // An unpriced service never reaches a role or grant decision (the legacy invoice rule).
+    const decision = grants && configured && (priced.minor ?? 0) > 0
+      ? decideProcedurePriceByGrants(priceInput, grants)
+      : decideProcedurePrice({ ...priceInput, role: input.role });
     if (!decision.ok) return decision;
     if (decision.override) overrides.push({ description: line.description, ...decision.override });
     const catalogUnit = configured && (priced.minor ?? 0) > 0 ? priced.minor! : Math.max(0, line.requestedMinor);
@@ -98,22 +115,23 @@ export function checkInvoiceAuthority(input: {
   if (input.discountMinor <= 0) return { ok: true, overrides, discount: null };
   const reason = input.discountReason?.trim() ?? "";
   if (reason.length < 3) return { ok: false, message: "اكتب سبب الخصم على الفاتورة." };
+  if (grants && !grants.discount && !grants.discountOverride) return { ok: false, message: "الخصم على الفاتورة يحتاج صلاحية تطبيق الخصم." };
   const total = Math.max(0, input.totalMinor);
   const percent = total > 0 ? Math.round((Math.min(input.discountMinor, total) / total) * 1000) / 10 : 100;
   const limit = Math.max(0, Number.isFinite(input.maxDiscountPercent) ? input.maxDiscountPercent : 0);
-  if (input.role !== "admin" && percent > limit) {
+  if (!mayExceedCeiling && percent > limit) {
     return {
       ok: false,
-      message: `الخصم على الفاتورة ${percent}٪ يتجاوز الحد المسموح (${limit}٪) — يحتاج موافقة المدير.`,
+      message: `الخصم على الفاتورة ${percent}٪ يتجاوز الحد المسموح (${limit}٪) — ${grants ? "يحتاج صلاحية تجاوز حد الخصم" : "يحتاج موافقة المدير"}.`,
     };
   }
   /* خصم البنود عن الدليل + خصم الفاتورة معًا لا يتجاوزان الحد (لغير المدير). */
   const net = Math.max(0, total - Math.min(input.discountMinor, total));
   const combined = referenceMinor > 0 ? Math.round(((referenceMinor - net) / referenceMinor) * 1000) / 10 : 0;
-  if (input.role !== "admin" && combined > limit) {
+  if (!mayExceedCeiling && combined > limit) {
     return {
       ok: false,
-      message: `مجموع الخصم (على أسعار البنود والفاتورة معًا) ${combined}٪ يتجاوز الحد المسموح (${limit}٪) — يحتاج موافقة المدير.`,
+      message: `مجموع الخصم (على أسعار البنود والفاتورة معًا) ${combined}٪ يتجاوز الحد المسموح (${limit}٪) — ${grants ? "يحتاج صلاحية تجاوز حد الخصم" : "يحتاج موافقة المدير"}.`,
     };
   }
   return { ok: true, overrides, discount: { percent, reason: reason.slice(0, 300) } };

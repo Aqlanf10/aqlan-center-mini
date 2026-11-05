@@ -169,3 +169,64 @@ The owner approved the eight recommendations, under least privilege and with rea
 Every response passes through an allowlist projection, never object spreading.
 
 **Tests:** a field matrix per grant combination, with each derived field refused without any one of its inputs; revocation; outside reads like missing; and no hidden field in the serialized body.
+
+## 7. Slice 93b — creating invoices, adding a service, the clinical preview (G4-1, G4-8)
+
+This section is written before the code. It is the field-by-field contract for the three routes that write prices onto an invoice.
+
+### Admission and scope
+
+| Route | Admission (canonical) | Legacy |
+|---|---|---|
+| `POST /api/invoices` | `finance.invoices.create`. Lines carrying lab work also need `clinical.visits.document` (the map's field rule). Repayment terms also need `finance.payments.collect`, because they create a debt arrangement (slice 91). | Money roles; lab work for doctor or admin |
+| `POST /api/invoices/clinical-preview` | The same as creation (read-only, same parser and price engine) | Money roles; lab work for doctor or admin |
+| `GET`, `PUT`, `POST /api/invoices/[id]/add-service` | `finance.invoices.create`, plus the price controls below. Never wider than legacy, where only the administrator label could do it. | Administrator label only |
+
+Scope rules (G4-8): the patient (for add-service, the invoice's patient) must be inside the actor's patient scope.
+- **Writes:** scope is decided after the writer's locks, with a positive ownership witness `FOR SHARE NOWAIT` held until commit, after an early unlocked look. Outside the scope reads as missing (404).
+- **Preview:** decided once on its own read.
+
+### Price controls (G4-1): role labels replaced by grants, never wider than legacy
+
+The price controls take the same inputs as `checkInvoiceAuthority`. Each legacy role check becomes an explicit grant:
+
+| Price change | Canonical requirement | Legacy |
+|---|---|---|
+| Catalogue line priced below the catalogue, within `billing.max_discount_percent` | `finance.discounts.apply` and a written reason | Same ceiling for non-admins; admin unlimited |
+| Below the catalogue, beyond the ceiling | `finance.discounts.override` and a reason | Admin only |
+| Above the catalogue, or above a configured zero price | `finance.price-increases.apply` and a reason | Admin only |
+| Whole-invoice discount | A reason always. Beyond the ceiling, alone or combined with line discounts: `finance.discounts.override` | Admin beyond the ceiling |
+| Service not priced in this currency, written by hand | A reason (at least 3 characters), with no additional grant | The invoice rule for every money role; kept as is |
+| Manual line without a service | Free (audited in `invoice.create`) | As legacy |
+
+Every override and discount is recorded in the invoice's audit, in the same transaction, as today.
+
+The legacy engine also re-checks the price authority inside the transaction ("صلاحية السعر" in the stale refusal). In the canonical runtime that re-check uses the same grants, read on the operation's client.
+
+### Session-bound writers: branded actors (never from JSON)
+
+The legacy writer revalidates a session at several points. In the canonical runtime each point receives a value minted only by the operation. Each re-proves the live operation and its grant on the same client.
+
+| Writer | Today | Canonical |
+|---|---|---|
+| Invoice template or catalogue authority (`assertInvoiceTemplateSession`, replay recovery) | Session with a money role, matching username and role | Invoice actor: `finance.invoices.create` |
+| Lab work lines (`materializeInvoiceLabWork…`) | Session `userId` | The lab actor of slice 87 |
+| Repayment terms (`saveDebtRepaymentOn`) | Session | The debt actor of slice 91 (`finance.payments.collect`) |
+| Add-service (`authorize`, request fingerprint) | Administrator session; `actor { id, username, role }` | Invoice actor. The fingerprint keeps its shape with the canonical identity, so a key never crosses actors. |
+
+### Responses
+
+Responses keep the legacy bodies. Creation returns the invoice, its clinical links, and lab work, the visit and repayment where requested, with `replayed`. The preview returns lines, plan choices and lab-work support. Every response is marked `no-store`.
+
+No read grant opens any of these writes. The invoice view never offers a price change.
+
+### Tests
+
+The tests required before any commit:
+- the grant matrix per route, including view-only, label-only and revocation cases;
+- each price control: within the ceiling, beyond it, an increase, an unpriced service, and the invoice discount combined with line discounts;
+- lab work lines without `clinical.visits.document`, and repayment terms without `finance.payments.collect`;
+- an outside patient (404, nothing written);
+- replay recovery by the same actor, with another actor refused;
+- a race test shown failing first: the patient leaving the scope during the writer's wait;
+- the legacy suites unchanged.

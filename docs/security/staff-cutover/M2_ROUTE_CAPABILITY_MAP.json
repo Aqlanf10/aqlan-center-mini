@@ -2008,9 +2008,43 @@
    "finance.invoices.create"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 93b (G4-1, G4-8): canonical. One admitted finance.invoices.create transaction on the legacy writer (createLinkedInvoiceInTransaction: locks, key, fingerprints, catalogue/template revalidation under its locks, lab-work and repayment writers, invoice.create audit); the lost-acknowledgement recovery first (recoverLinkedInvoiceOn). Prices by grants (checkInvoiceAuthority with grants, re-checked in the transaction by the branded invoice actor). The patient scope decided right after the writer's patient row lock (own: an ownership witness FOR SHARE NOWAIT; outside = missing 404), after an early unlocked look.",
+  "branches": {
+   "discriminator": "none",
+   "values": {},
+   "fields": [
+    {
+     "field": "lab work lines",
+     "need": [
+      "clinical.visits.document"
+     ],
+     "note": "A clinical lab prescription on the invoice (legacy: doctor or admin label)."
+    },
+    {
+     "field": "repaymentTerms",
+     "need": [
+      "finance.payments.collect"
+     ],
+     "note": "Creates a debt arrangement (slice 91)."
+    },
+    {
+     "field": "line price below the catalogue or an invoice discount",
+     "need": [
+      "finance.discounts.apply"
+     ],
+     "note": "With a written reason within billing.max_discount_percent; beyond it finance.discounts.override."
+    },
+    {
+     "field": "line price above the catalogue",
+     "need": [
+      "finance.price-increases.apply"
+     ],
+     "note": "With a written reason."
+    }
+   ]
+  }
  },
  {
   "route": "/api/invoices/[id]",
@@ -2195,8 +2229,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "",
+  "status": "canonical-done",
+  "note": "M2 slice 93b (G4-1): canonical. The registered read read:invoices.preview (finance.invoices.create) on one snapshot inside the patient scope (outside = missing 404); lab-work lines need clinical.visits.document; the creation parser and the price controls by the same grants, so the preview never promises a price the save would refuse. The legacy body.",
   "branches": {
    "discriminator": "none",
    "values": {},
@@ -2206,7 +2240,7 @@
      "need": [
       "clinical.visits.document"
      ],
-     "note": "Today admin/doctor only."
+     "note": "Legacy: admin/doctor labels; canonical: clinical.visits.document."
     }
    ]
   },
