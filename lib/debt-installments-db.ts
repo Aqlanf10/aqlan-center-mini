@@ -145,10 +145,12 @@ export async function saveDebtRepayment(input: DebtRepaymentWrite) {
   finally { client.release(); }
 }
 /** The same write inside a caller's open transaction (the canonical operation, M2 slice 91). */
-export async function saveDebtRepaymentOn(client: DbClient, input: DebtRepaymentWrite) {
+export async function saveDebtRepaymentOn(client: DbClient, input: DebtRepaymentWrite, afterLocks?: () => Promise<void>) {
   // Serializes creation of an absent target reference and follows invoice management order.
   await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[input.target.patientId]);
   await lockDebtAccountForSchedule(client,input.target.patientId);
+  // Canonical callers decide the patient scope here, after the patient and account locks (M2).
+  await afterLocks?.();
   return writeDebtRepaymentInTransaction(client,input);
 }
 

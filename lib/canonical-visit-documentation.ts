@@ -1,7 +1,7 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import {
-  addVisitAddendumOn, getClinicalVisitWith, getPool, getSettingsWith, insertAuditRow, patientInDoctorScopeWith, saveClinicalNotes,
+  addVisitAddendumOn, doctorOwnsPatient, getClinicalVisitWith, getPool, getSettingsWith, insertAuditRow, lockVisitPatientFirst, saveClinicalNotes,
   setVisitProceduresOn, signClinicalVisitLockedOn, ClinicalPlanConflict, ProcedurePriceRejected, InventoryShortage, CLINIC_TIME_ZONE,
   type DbClient, type ProcedurePriceOverride,
 } from "./db";
@@ -114,6 +114,42 @@ const visitIdOf = (raw: string) => {
   return Number(raw);
 };
 
+/** Lock-order contention while proving scope is a bounded refusal, never a backward wait
+ * (the reviewed mechanism of 2fb7c07c). The whole operation rolls back. */
+async function withoutScopeLockWait<T>(work: () => Promise<T>): Promise<T> {
+  try { return await work(); } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "55P03") {
+      throw refuse("visit_scope_conflict", 409, "تعذّر تثبيت نطاق الزيارة والمريض. حدّث الزيارة وراجع النتيجة قبل طلب جديد.");
+    }
+    throw error;
+  }
+}
+
+/**
+ * Admission after the writers' own locks, held to commit: the visit's patient first
+ * (`lockVisitPatientFirst`, FOR NO KEY UPDATE), then the visit FOR UPDATE, then the scope
+ * decided on the locked row. A doctor's link through this visit holds because the visit is
+ * locked; any other link is a positive ownership witness held FOR SHARE (NOWAIT). A patient
+ * changed while waiting would need its lock after the visit's (the reverse order): refused
+ * (409) instead. Every writer below (save, addendum, sign, lab draft) re-takes the same
+ * locks in the same order.
+ */
+async function admitLockedVisit(client: DbClient, handle: Parameters<typeof staffOperationCapabilities>[1], visitId: number) {
+  const scope = await staffOperationPatientScope(client, handle, "clinical.visits.document");
+  if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+  const lockedPatient = await lockVisitPatientFirst(client, visitId);
+  const { rows: [visit] } = await client.query<{ patient_id: number | null; doctor_id: number | null; arrived_at: Date; billing_currency: string | null }>(
+    "SELECT patient_id, doctor_id, arrived_at, billing_currency FROM visits WHERE id = $1 FOR UPDATE", [visitId]);
+  if (!visit) throw refuse("visit_not_found", 404, VISIT_MISSING);
+  if (visit.patient_id !== null && visit.patient_id !== lockedPatient) {
+    throw refuse("visit_scope_conflict", 409, "تعذّر تثبيت نطاق الزيارة والمريض. حدّث الزيارة وراجع النتيجة قبل طلب جديد.");
+  }
+  const inside = scope.kind === "all" || visit.doctor_id === scope.clinicianPartyId
+    || (visit.patient_id !== null && await withoutScopeLockWait(() => doctorOwnsPatient(scope.clinicianPartyId, visit.patient_id!, client, "nowait")));
+  if (!inside) throw refuse("visit_not_found", 404, VISIT_MISSING);
+  return visit;
+}
+
 export async function commandCanonicalVisitDocument(session: VerifiedDurableSession, rawVisitId: string, rawBody: unknown, pool = getPool()) {
   const visitId = visitIdOf(rawVisitId);
   const body = (rawBody ?? {}) as Record<string, unknown>;
@@ -124,13 +160,7 @@ export async function commandCanonicalVisitDocument(session: VerifiedDurableSess
   let signed: Record<string, unknown> | undefined;
   try {
   signed = await withStaffOperation(pool, session, "clinical.visits.document", async (client, handle): Promise<Record<string, unknown> | undefined> => {
-    const scope = await staffOperationPatientScope(client, handle, "clinical.visits.document");
-    if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
-    const { rows: [visit] } = await client.query<{ patient_id: number | null; doctor_id: number | null; arrived_at: Date; billing_currency: string | null }>(
-      "SELECT patient_id, doctor_id, arrived_at, billing_currency FROM visits WHERE id = $1", [visitId]);
-    const inside = visit !== undefined && (scope.kind === "all" || visit.doctor_id === scope.clinicianPartyId
-      || (visit.patient_id !== null && await patientInDoctorScopeWith(client, scope.clinicianPartyId, visit.patient_id)));
-    if (!inside) throw refuse("visit_not_found", 404, VISIT_MISSING);
+    const visit = await admitLockedVisit(client, handle, visitId);
     const clinician = await staffOperationClinician(client, handle, "clinical.visits.document");
     const owner = await staffOperationIsProtectedOwner(client, handle, "clinical.visits.document");
     const full = clinician !== null || owner;
@@ -205,7 +235,9 @@ async function settleCanonicalLabRejection(pool: ReturnType<typeof getPool>, ses
   return withStaffOperation(pool, session, "clinical.visits.document", async (client, handle) => {
     const scope = await staffOperationPatientScope(client, handle, "clinical.visits.document");
     if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
-    if (scope.kind === "own" && !await patientInDoctorScopeWith(client, scope.clinicianPartyId, command.patientId)) throw refuse("visit_not_found", 404, VISIT_MISSING);
+    if (scope.kind === "own" && !await withoutScopeLockWait(() => doctorOwnsPatient(scope.clinicianPartyId, command.patientId, client, "nowait"))) {
+      throw refuse("visit_not_found", 404, VISIT_MISSING);
+    }
     const clinician = await staffOperationClinician(client, handle, "clinical.visits.document");
     const owner = await staffOperationIsProtectedOwner(client, handle, "clinical.visits.document");
     await requireLabAuthority(client, handle, clinician !== null || owner, owner);

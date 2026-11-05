@@ -17,7 +17,8 @@ export async function collectDebtInstallment(input:DebtCollectionInput,options:{
 /** The collection body on a given client (M2 slice 91). `own`: this call owns the
  * transaction (the legacy wrapper). Otherwise the caller holds an open transaction (the
  * canonical operation) and rolls it back on any throw: BEGIN/COMMIT/ROLLBACK are no-ops. */
-export async function collectDebtInstallmentOn(client:DbClient,input:DebtCollectionInput,options:{similarityReview?:SimilarCollectionReview},own:boolean) {
+export async function collectDebtInstallmentOn(client:DbClient,input:DebtCollectionInput,
+  options:{similarityReview?:SimilarCollectionReview;afterLocks?:()=>Promise<void>},own:boolean) {
   const tx=(statement:"BEGIN"|"COMMIT"|"ROLLBACK")=>own?client.query(statement):Promise.resolve();
   if(![input.patientId,input.arrangementId,input.expectedVersion,input.amountMinor].every(value=>Number.isSafeInteger(value)&&value>0)
     ||!isCurrency(input.currency)||!["cash","transfer"].includes(input.method)||!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey))
@@ -52,6 +53,8 @@ export async function collectDebtInstallmentOn(client:DbClient,input:DebtCollect
         const {rows:[arrangement]}=await client.query<{id:number;currency:Currency;invoice_id:number|null;opening_currency:Currency|null}>(
           "SELECT * FROM debt_repayment_arrangements WHERE id=$1 AND patient_id=$2 FOR UPDATE",[input.arrangementId,input.patientId]);
         if(!arrangement)throw new DebtRepaymentError("missing","جدول السداد لا يخص هذا المريض.");
+        // Canonical callers decide the patient scope here, after every lock above (M2).
+        await options.afterLocks?.();
         const {rows:[revision]}=await client.query<{version:number;status:string;source_snapshot:unknown;settled_snapshot_minor:string}>("SELECT * FROM debt_repayment_revisions WHERE arrangement_id=$1 ORDER BY version DESC LIMIT 1",[arrangement.id]);
         if(!revision||revision.version!==input.expectedVersion||revision.status!=="active")throw new DebtRepaymentError("stale","تغيّر جدول السداد أو أُلغي؛ راجع النسخة الحالية.");
         const target:DebtTarget={patientId:input.patientId,currency:arrangement.currency,invoiceId:arrangement.invoice_id,openingCurrency:arrangement.opening_currency};

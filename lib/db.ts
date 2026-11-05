@@ -18933,7 +18933,9 @@ export interface ProcedurePriceOverride {
   reason: string | null;
 }
 
-async function lockVisitPatientFirst(client: DbClient, visitId: number): Promise<number | null> {
+/** The visit writers' lock order: the visit's patient (or its phone-matched file) first,
+ * FOR NO KEY UPDATE. Exported so a canonical admission takes the same order (M2). */
+export async function lockVisitPatientFirst(client: DbClient, visitId: number): Promise<number | null> {
   const { rows: [visit] } = await client.query<{ patient_id: number | null; patient_phone: string | null }>(
     `SELECT patient_id, patient_phone FROM visits WHERE id = $1`, [visitId]);
   if (!visit) return null;

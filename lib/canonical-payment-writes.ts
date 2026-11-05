@@ -1,5 +1,5 @@
 import "server-only";
-import { correctPaymentOn, getPool, patientInDoctorScopeWith, type CorrectPaymentInput, type CorrectPaymentRefusal, type DbClient } from "./db";
+import { correctPaymentOn, doctorOwnsPatient, getPool, patientInDoctorScopeWith, type CorrectPaymentInput, type CorrectPaymentRefusal, type DbClient } from "./db";
 import { canonicalDebtActor, DebtRepaymentError, saveDebtRepaymentOn, type DebtRepaymentWrite } from "./debt-installments-db";
 import { collectDebtInstallmentOn, type DebtCollectionInput } from "./debt-installment-collection";
 import type { SimilarCollectionReview } from "./similar-collection";
@@ -26,7 +26,8 @@ import type { VerifiedDurableSession } from "./staff-durable-session";
  *    `POST …/debt-repayments/[arrangementId]/collect`: `finance.payments.collect` inside the
  *    patient scope (outside reads like missing). The writers re-check the live operation and
  *    the grant on the same transaction wherever legacy revalidated its session
- *    (`canonicalDebtActor`).
+ *    (`canonicalDebtActor`), and decide the patient scope after all their locks
+ *    (`lockedDebtAdmission`).
  */
 export class CanonicalPaymentRefusal extends Error {
   constructor(readonly code: string, readonly status: 403 | 404 | 409, message: string) { super(message); this.name = "CanonicalPaymentRefusal"; }
@@ -81,6 +82,27 @@ async function admitDebtPatient(client: DbClient, handle: StaffOperationHandle, 
   }
 }
 
+/** The authoritative scope decision, called by the debt writers after all their locks: an
+ * `own` actor needs a positive ownership witness held FOR SHARE to commit (NOWAIT: lock-order
+ * contention is a bounded refusal), the mechanism of the reviewed fix 2fb7c07c. The early
+ * check above only answers missing or outside quickly. */
+function lockedDebtAdmission(client: DbClient, handle: StaffOperationHandle, patientId: number) {
+  return async () => {
+    const scope = await staffOperationPatientScope(client, handle, "finance.payments.collect");
+    if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+    if (scope.kind === "all") return;
+    let inside: boolean;
+    try { inside = await doctorOwnsPatient(scope.clinicianPartyId, patientId, client, "nowait"); }
+    catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "55P03") {
+        throw new CanonicalPaymentRefusal("patient_scope_conflict", 409, "تعذّر تثبيت نطاق المريض. حدّث الحساب وراجع النتيجة قبل طلب جديد.");
+      }
+      throw error;
+    }
+    if (!inside) throw new CanonicalPaymentRefusal("patient_not_found", 404, "المريض غير موجود.");
+  };
+}
+
 /** The canonical actor for the debt writers: bound to this operation's handle and client. */
 async function debtActor(client: DbClient, handle: StaffOperationHandle) {
   const identity = await staffOperationIdentity(client, handle, "finance.payments.collect");
@@ -92,7 +114,7 @@ export async function commandCanonicalDebtRepayment(session: VerifiedDurableSess
   if (!Number.isSafeInteger(input.target.patientId) || input.target.patientId <= 0) throw new DebtRepaymentError("invalid", "رقم المريض غير صالح.");
   return withStaffOperation(pool, session, "finance.payments.collect", async (client, handle) => {
     await admitDebtPatient(client, handle, input.target.patientId);
-    return saveDebtRepaymentOn(client, { ...input, session: await debtActor(client, handle) });
+    return saveDebtRepaymentOn(client, { ...input, session: await debtActor(client, handle) }, lockedDebtAdmission(client, handle, input.target.patientId));
   });
 }
 
@@ -101,6 +123,7 @@ export async function commandCanonicalDebtCollection(session: VerifiedDurableSes
   if (!Number.isSafeInteger(input.patientId) || input.patientId <= 0) throw new DebtRepaymentError("invalid", "رقم المريض غير صالح.");
   return withStaffOperation(pool, session, "finance.payments.collect", async (client, handle) => {
     await admitDebtPatient(client, handle, input.patientId);
-    return collectDebtInstallmentOn(client, { ...input, session: await debtActor(client, handle) }, options, false);
+    return collectDebtInstallmentOn(client, { ...input, session: await debtActor(client, handle) },
+      { ...options, afterLocks: lockedDebtAdmission(client, handle, input.patientId) }, false);
   });
 }
