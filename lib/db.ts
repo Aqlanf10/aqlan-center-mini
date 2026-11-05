@@ -10763,6 +10763,24 @@ export async function recordPayment(input: {
   return { payment: await getPayment(outcome.paymentId), reason: null };
 }
 
+/** The ordinary receipt or refund on a caller's open transaction (the canonical
+ * operation, M2 slice 90b): the same validation and writer, `admit` after the writer's locks.
+ * The caller MUST roll back on any refusal (the writer's ROLLBACKs are no-ops here). */
+export async function recordPaymentOn(client: DbClient, input: Parameters<typeof recordPayment>[0], admit: () => Promise<void>):
+  Promise<Awaited<ReturnType<typeof recordPayment>>> {
+  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) throw new Error("مبلغ السند يجب أن يكون عددًا صحيحًا أكبر من صفر.");
+  const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
+  const reversalOfId = input.reversalOfId ?? null;
+  if (input.kind === "refund" && reversalOfId === null) return { payment: null, reason: "refund_requires_origin" };
+  if (input.kind !== "refund" && reversalOfId !== null) return { payment: null, reason: "invalid_reversal" };
+  const outcome = await runPaymentTransaction(
+    { ...input, planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
+    { idempotencyKey, reversalOfId, receiptAudit: { actorRole: input.actorRole ?? null }, admit,
+      ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}) }, client);
+  if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
+  return { payment: await getPaymentWith(client, outcome.paymentId), reason: null, ...(outcome.kind === "replay" ? { replayed: true } : {}) };
+}
+
 /** Trusted HTTP adapter for an ordinary settings-owned receipt. The settings
  * snapshot comes from the server, never a body rate/mode. Preserve its raw,
  * nullable observation separately from any rounded successful-row snapshot.
@@ -10793,6 +10811,32 @@ export async function recordSettingsOwnedPayment(
   return { payment: await getPayment(outcome.paymentId), reason: null,
     ...(outcome.kind === "replay" ? { replayed: true } : {}),
     ...(outcome.acknowledgmentEvidence ? { acknowledgmentEvidence: outcome.acknowledgmentEvidence } : {}) };
+}
+
+/** The settings-owned receipt on a caller's open transaction (M2 slice 90b): the settings
+ * read in that transaction, `admit` after the writer's locks; the caller rolls back on a
+ * refusal. */
+export async function recordSettingsOwnedPaymentOn(client: DbClient,
+  input: Omit<Parameters<typeof recordPayment>[0], "kind" | "exchangeRate" | "reversalOfId">, settings: SettingsMap, admit: () => Promise<void>,
+): Promise<Awaited<ReturnType<typeof recordSettingsOwnedPayment>>> {
+  const observedExchangeRate = rateFromSettings(settings, input.currency, input.baseCurrency);
+  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) throw new Error("مبلغ السند يجب أن يكون عددًا صحيحًا أكبر من صفر.");
+  const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
+  const outcome = await runPaymentTransaction(
+    { ...input, kind: "payment", exchangeRate: observedExchangeRate, planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
+    { idempotencyKey, reversalOfId: null, settingsOwnedFx: true, receiptAudit: { actorRole: input.actorRole ?? null }, admit,
+      ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}) }, client);
+  if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
+  return { payment: await getPaymentWith(client, outcome.paymentId), reason: null,
+    ...(outcome.kind === "replay" ? { replayed: true } : {}),
+    ...(outcome.acknowledgmentEvidence ? { acknowledgmentEvidence: outcome.acknowledgmentEvidence } : {}) };
+}
+
+/** isPlanFundedByAgreement on a given client (M2 slice 90b). */
+export async function isPlanFundedByAgreementWith(q: Pick<DbClient, "query">, planId: number, patientId: number): Promise<boolean> {
+  const { rows } = await q.query<{ funded: boolean }>(
+    `SELECT ${PLAN_FUNDED_BY_AGREEMENT_SQL} AS funded FROM treatment_plans t WHERE t.id = $1 AND t.patient_id = $2`, [planId, patientId]);
+  return rows[0]?.funded === true;
 }
 
 /**
@@ -11169,6 +11213,9 @@ type PaymentTransactionPrepared = {
   receiptAudit?: { actorRole: string | null };
   /** Human collection entry points only: advisory similar-receipt review (lib/similar-collection). */
   similarityReview?: SimilarCollectionReview;
+  /** Canonical callers (M2 slice 90b): the actor's scope decided after the writer's patient,
+   * origin and shift locks, before the targets, the replay and every later refusal. */
+  admit?: () => Promise<void>;
 };
 type SettingsPaymentOutcome = PaymentOutcome | { kind: "reason"; reason: "exchange_rate_required" };
 // Existing numeric-rate callers retain their outcome contract and cannot enable
@@ -11183,6 +11230,7 @@ function runPaymentTransaction(
   prepared: PaymentTransactionPrepared & {
     settingsOwnedFx: true; reversalOfId: null; requestHashOverride?: never; inheritedTarget?: never;
   },
+  outer?: DbClient,
 ): Promise<SettingsPaymentOutcome>;
 /** A caller-owned correction/debt/recovery transaction owns commit and rollback. */
 async function runPaymentTransaction(
@@ -11277,6 +11325,10 @@ async function runPaymentTransaction(
       `SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`,
     );
     const lockedShiftId = lockedShifts[0]?.id ?? null;
+    // Canonical callers (M2 slice 90b): the actor's scope is decided here, after the waits
+    // for the patient, the origin and the shift, and before any target, replay or refusal
+    // reveals anything; its witness locks are held to commit, so it cannot change later.
+    await prepared.admit?.();
 
     /* هدف التسوية الفعلي: للردود هدف الأصل الموروث؛ للمدفوعات ما قاله المتصل. */
     const effectiveInvoiceId = refundSnapshot ? refundSnapshot.invoiceId : (input.invoiceId ?? null);
