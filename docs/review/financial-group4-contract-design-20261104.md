@@ -245,3 +245,41 @@ The rules:
 - **Session revalidation points:** the slice-91 branded actor re-proves the live operation and its grant at each point where the legacy writer revalidated a session, including the correction's repayment terms through the debt writer.
 - **Durable archive rejections:** these (period locked, policy decision required) still commit their evidence before the refusal.
 - **Prices in a correction:** the legacy correction had no price ceiling (the administrator was unlimited). No new price policy is layered on `finance.invoices.correct` here. Whether a correction should also be bound by the discount, override and increase controls is a question for the owner.
+
+## 9. Slice 94a — the plan list, field by field (G4-1, G4-6, G4-8)
+
+This section is written before the code. It covers `GET /api/plans` (one patient's plans with `?patientId=`, otherwise the active plans).
+
+### Admission
+
+The registered read needs `clinical.plans.view`, `finance.invoices.view` or `finance.patient-ledger.view` (the map's `anyOf`, widened by the ledger read that G4-1 names for totals). The rows stay inside the patient scope:
+- `own`: only the validated clinician's patients;
+- `all`: every plan;
+- without `?patientId=`, the list keeps only in-scope rows.
+
+The legacy `workflow.doctor_financial_view` and the role labels decide nothing (G4-6).
+
+### Projection
+
+The projection is an allowlist; a hidden group is omitted, never nulled or zeroed.
+
+| Group | Fields | Grant |
+|---|---|---|
+| Identity | `id`, `patientId`, `patientName`, `patientPhone`, `status`, `startDate`, `createdAt`, `baseCurrency`; the plan picker's structure as legacy gave every reader (`withoutPlanPayments`): `agreementApproved`, `hasInstallments`, and `installments` as identities only (`{ id }`) | Any admitting grant |
+| Clinical | `title`, `note`; items without money (`id`, `serviceId`, `serviceName`, `category`, `toothCode`, `surfaces`, `quantity`, `status`, `visitId`, `doneAt`, `note`, `plannedVisitNumber`, `sessionCount`, `sessionsCompleted`, `doctorId`, `doctorName`, `caseId`, `caseSite`, `clinicalConsentRecorded`); `itemsProgress.count` and `.doneCount`; `consentAt`, `consentBy`, `consentNote`, `totalFromItems` | `clinical.plans.view` |
+| Agreement total | `totalMinor` | `finance.invoices.view` or `finance.patient-ledger.view` |
+| Prices (G4-1: item prices and invoice details) | each instalment's number, due date and amount (the schedule). On items (present only with the clinical group): `unitPriceMinor`, `totalMinor`, `billingRule`, `billingStatus`, `origin`, `originInvoiceId`, `billedInvoiceId`, `financialReviewRequired` and the legacy agreement fields; `itemsProgress.totalMinor`, `.doneMinor`, `.remainingMinor` | `finance.invoices.view` |
+| Account (G4-1: totals, balance and debt) | `paidMinor`, `progress`, `invoiceFinancial`, `approvedAgreement`, `debtSource`, `lastReminderAt` and each instalment's `lastReminderAt` | `finance.patient-ledger.view` |
+
+The agreement total is both an invoice detail and a ledger total, so either money grant shows it. The account group's `progress` (paid, remaining, overdue, next due date and amount, counts) is the same position the ledger summary of slice 88 (`planLedgerSummary`) already shows with `finance.patient-ledger.view`. This keeps one answer per grant across the two reads. The ortho package link (`OrthoPackageLink`) refuses a plan without an `installments` array, so the identities stay for every reader; a review of the screens before the commit found this. The first draft of this table put the total under prices alone. The PostgreSQL test found that `progress` repeats it, and the table was corrected to the reviewed slice 88 contract rather than hiding a field that the account read already returns.
+
+A finance-only reader (prices or account, without `clinical.plans.view`) gets the title `خطة مالية #<id>`, as legacy finance roles did, and no clinical group.
+
+### Tests
+
+The tests required before any commit:
+- the grant matrix with a distinct sentinel per group (each hidden group absent from the JSON);
+- scope `own` versus `all`, with and without `patientId`;
+- a role label without grants refused;
+- G4-6: the legacy setting has no effect;
+- revocation.

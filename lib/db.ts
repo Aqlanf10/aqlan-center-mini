@@ -21754,6 +21754,13 @@ export async function listPatientPlans(patientId:number,today:string):Promise<Tr
 export async function getPlan(id:number,today:string):Promise<TreatmentPlan|null> {
   return (await readPlans("WHERE t.id=$1",[id],today))[0]??null;
 }
+/** The active plans on a caller's snapshot (M2 slice 94a), filtered in SQL before the legacy
+ * limit to a clinician's patients (the patient-list predicate) when a party is given. */
+export async function listActivePlansWith(q: Pick<DbClient, "query">, today: string, clinicianPartyId: number | null): Promise<TreatmentPlan[]> {
+  const scoped = clinicianPartyId === null ? "" : ` AND t.patient_id IN (SELECT patients.id FROM patients WHERE ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$1")})`;
+  const { rows } = await q.query<PlanRow>(`${PLAN_SELECT} WHERE t.status='active'${scoped} ORDER BY t.created_at DESC LIMIT 300`, clinicianPartyId === null ? [] : [clinicianPartyId]);
+  return hydratePlans(rows, today, q as DbClient);
+}
 export async function listActivePlans(today:string):Promise<TreatmentPlan[]> {
   return readPlans("WHERE t.status='active' ORDER BY t.created_at DESC LIMIT 300",[],today);
 }

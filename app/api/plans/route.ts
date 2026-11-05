@@ -9,6 +9,9 @@ import { requireSession } from "@/lib/session";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { canViewPatientMoney } from "@/lib/patient-access";
 import { withoutPlanPayments } from "@/lib/plan-payment-projection";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalPlanList } from "@/lib/canonical-plan-list";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +19,13 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  // M2 slice 94a (G4-1, G4-6, G4-8): read:plans.list, groups by grant inside the patient scope.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalPlanList(selected.handle, new URL(request.url).searchParams.get("patientId")), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل الخطط."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);

@@ -71,6 +71,8 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   /** GET /api/invoices/[id]/correct: the correction context, the invoice's patient inside the
    * scope (M2 slice 93c, G4-8). */
   "read:invoices.correct": Object.freeze({ record: "patient", need: Object.freeze(["finance.invoices.correct"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/plans: the plan list, its groups by grant (M2 slice 94a, G4-1; contract section 9). */
+  "read:plans.list": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze(["clinical.plans.view", "finance.invoices.view", "finance.patient-ledger.view"] as const) }),
   /** GET /api/finance/debts: the debtors list, rows inside the actor's patient scope (M2 slice 88). */
   "read:finance.debts": Object.freeze({ record: "patient", need: Object.freeze(["finance.patient-ledger.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]: one patient's file, only inside the actor's patient scope. */

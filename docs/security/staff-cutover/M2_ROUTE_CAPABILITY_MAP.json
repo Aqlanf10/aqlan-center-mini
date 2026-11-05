@@ -4755,11 +4755,23 @@
   "need": [],
   "anyOf": [
    "clinical.plans.view",
-   "finance.invoices.view"
+   "finance.invoices.view",
+   "finance.patient-ledger.view"
   ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94a (G4-1, G4-6, G4-8; contract section 9): the registered read read:plans.list on one snapshot; one patient's plans (outside = missing 404) or the active plans filtered in SQL to the scope before the limit; the legacy doctor_financial_view setting and role labels decide nothing.",
+  "projection": {
+   "legacy": "the role labels and the doctor_financial_view setting chose between the whole body and the body without payments.",
+   "groups": {
+    "identity": "id, patient, status, dates, currency, agreement approval and instalment identities (ids only, as legacy gave the plan picker) — any admitting grant",
+    "clinical": "title, note, items without money, item counts, consent — clinical.plans.view (otherwise the title is the neutral finance title)",
+    "total": "the agreement total — finance.invoices.view or finance.patient-ledger.view",
+    "prices": "the instalment schedule (dates and amounts), item prices and billing (items only with the clinical group), item money progress — finance.invoices.view",
+    "account": "paid, progress, reminders, invoice-backed and approved-agreement positions, debt source — finance.patient-ledger.view (as the slice 88 ledger summary)"
+   },
+   "rows": "own: the validated clinician's patients (with or without patientId); all: every plan"
+  }
  },
  {
   "route": "/api/plans",
