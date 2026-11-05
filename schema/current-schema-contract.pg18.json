@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 134,
-    "columns": 1707,
-    "constraints": 1973,
-    "indexes": 416,
-    "triggers": 103
+    "tables": 135,
+    "columns": 1716,
+    "constraints": 1990,
+    "indexes": 418,
+    "triggers": 105
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -14017,6 +14017,117 @@
         }
       },
       "triggers": {}
+    },
+    "radiology_requests": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "actor_username": {
+          "type": "text",
+          "nullable": false
+        },
+        "command_key": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "doctor_party_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "payload_sha256": {
+          "type": "bpchar",
+          "nullable": false
+        },
+        "snapshot": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "visit_id": {
+          "type": "int4",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "command_key"
+      ],
+      "unique": [],
+      "checks": [
+        "radiology_requests_actor_user_id_check",
+        "radiology_requests_actor_username_check",
+        "radiology_requests_payload_sha256_check",
+        "radiology_requests_snapshot_check",
+        "radiology_snapshot_valid"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "doctor_party_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "visit_id"
+          ],
+          "refTable": "visits",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "radiology_requests_patient_history": {
+          "columns": [
+            "patient_id",
+            "created_at",
+            "command_key"
+          ],
+          "unique": false
+        },
+        "radiology_requests_pkey": {
+          "columns": [
+            "command_key"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "radiology_request_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "radiology_request_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "saved_reports": {
       "columns": {

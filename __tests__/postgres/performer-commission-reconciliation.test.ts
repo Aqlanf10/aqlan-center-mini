@@ -156,6 +156,8 @@ describe("doctor report versus payroll settlement", () => {
       const paid = await payroll.disbursePayrollItem(item.id, { components: { commissionMinor: 1200 }, clientRequestId: key }, admin);
       expect(paid.parts).toHaveLength(1);
       expect(paid.parts[0]).toMatchObject({ component: "commission", amountMinor: 1200, payableId: item.commissionPayableId });
+      // Pin this synthetic cash event to the fixed report month rather than the test-run month.
+      await q("UPDATE expenses SET created_at='2026-10-12T07:00:00Z' WHERE id=$1", [paid.parts[0].expenseId]);
       expect((await report()).find(row => row.doctorId === d.id && row.currency === currency))
         .toMatchObject({ earnedMinor: 1200, paidMinor: 1200, dueMinor: 0 });
       const [settlement] = await q<{ remaining: string; voucher_number: string; currency: string; party_id: number; journal_day: string }>(
@@ -166,7 +168,8 @@ describe("doctor report versus payroll settlement", () => {
       expect(settlement).toMatchObject({ remaining: "0", currency, party_id: d.id });
       // Payroll recognition belongs to October; its cash journal belongs to
       // the actual recorded disbursement day in the application's clinic zone.
-      expect(settlement.journal_day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(settlement.journal_day).toBe("2026-10-12");
+      expect((await db.journalEntries(FROM, "2026-10-11")).some(entry => entry.reference === settlement.voucher_number)).toBe(false);
       const entries = await db.journalEntries(settlement.journal_day, settlement.journal_day);
       if (settlement.journal_day < FROM || settlement.journal_day > TO) {
         expect((await db.journalEntries(FROM, TO)).some(entry => entry.reference === settlement.voucher_number)).toBe(false);
@@ -184,6 +187,7 @@ describe("doctor report versus payroll settlement", () => {
         { components: { commissionMinor: 1200 }, clientRequestId: `${key}-duplicate` }, admin)).rejects.toThrow();
       expect(await q("SELECT id FROM expenses WHERE party_id=$1", [d.id])).toEqual(before);
       await payroll.reversePayrollDisbursement(paid.id, { reason: "SYNTHETIC reversal reconciliation" }, admin);
+      await q("UPDATE expenses SET created_at='2026-10-13T07:00:00Z' WHERE reversal_of_id=$1", [paid.parts[0].expenseId]);
       expect((await report()).find(row => row.doctorId === d.id && row.currency === currency))
         .toMatchObject({ earnedMinor: 1200, paidMinor: 0, dueMinor: 1200 });
       expect((await payroll.listPayrollItems(run.id)).find(value => value.id === item.id))
