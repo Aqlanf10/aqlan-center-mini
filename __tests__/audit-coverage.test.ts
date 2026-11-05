@@ -13,6 +13,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/patient-access", () => ({ canViewPatientMoney: vi.fn() }));
 import { POST as retiredPlanPOST } from "../app/api/plans/route";
+import { PATCH as deferredNumberPATCH } from "../app/api/patients/[id]/number/route";
 
 /**
  * (TD-06 / TD-REG-009) كل فعل كتابة يكتب سطر تدقيق — أو مستثنى بسببه.
@@ -128,7 +129,14 @@ function handlerAudits(local: Map<string, string>, handler: string, audited: Set
 // classification. Behavioral checks below and plans-creation-entry.test.ts cover
 // refusal, preserved policy, body limits and no writer/success-audit invocation;
 // plan-creation-entry-http.test.ts covers proxy policy and unchanged DB rows.
+// New-only numbering also retains an authenticated refusal endpoint (403).
+// Its exact handler hash and behavior below prevent a writer inheriting this
+// classification; patient-numbering-new-only-http.test.ts covers real CSRF/DB.
 const REFUSAL_ONLY = {
+  "PATCH /api/patients/[id]/number": {
+    reason: "تعديل الرقم الحالي مؤجل: رفض بعد التحقق من الجلسة والصلاحية، بلا كتابة أو تدقيق نجاح.",
+    sha256: "97ab64b41d579fb1fc9d831eb7b64a4adca386c3f05dc69e7651009e744a08c2",
+  },
   "POST /api/plans": {
     reason: "إنشاء الخطط القديم موقوف: رفض 409 بعد الصلاحيات، بلا كتابة أو تدقيق نجاح.",
     sha256: "cd5aa5ddddd9ccb7aba89bbdb3d060c96113a7a6226e1167f67634612a23ac2e",
@@ -239,5 +247,18 @@ describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
     }
     expect(retired.write).not.toHaveBeenCalled();
   });
+
+  it.each([null, "admin", "doctor", "reception", "assistant", "cashier", "accountant"])(
+    "deferred numbering PATCH: %s never invokes a writer or success audit", async role => {
+      vi.resetAllMocks();
+      retired.session.mockResolvedValue(role ? {role, username: "synthetic-audit"} : null);
+      const response = await deferredNumberPATCH();
+      expect(response.status).toBe(role ? 403 : 401);
+      if (role === "admin") expect(await response.json()).toMatchObject({code: "number_edit_deferred"});
+      expect(retired.write).not.toHaveBeenCalled();
+      expect(retired.user).not.toHaveBeenCalled();
+      expect(retired.owns).not.toHaveBeenCalled();
+    },
+  );
 
 });

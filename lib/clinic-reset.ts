@@ -148,7 +148,13 @@ export class ProtectedCollectionAttemptHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد إثبات إلغاء محاولات تحصيل؛ يجب الاحتفاظ بمفاتيحها حتى لا تُسجَّل محاولة متأخرة بعد إعادة الضبط. لم يُمسح شيء."); this.name = "ProtectedCollectionAttemptHistoryError"; }
 }
 
+export class ProtectedPatientNumberHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط مع وجود ملفات مرضى أو أرقام ملفات سابقة؛ يجب الاحتفاظ بالأرقام السابقة لمنع إعادة استخدامها. لم يُمسح شيء."); this.name = "ProtectedPatientNumberHistoryError"; }
+}
+
 export const RESET_KEEP_TABLES = [
+  "patient_numbering_policy",
+  "retired_patient_numbers",
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,
@@ -190,9 +196,8 @@ export const RESET_KEEP_TABLES = [
   "schema_migrations",
 ] as const;
 
-/** ترقيم المستندات وملفات المرضى — يعود إلى ١ مع البداية الجديدة. */
+/** ترقيم المستندات فقط؛ عدّاد ملفات المرضى محفوظ ولا يعود إلى الخلف. */
 export const RESET_SEQUENCES = [
-  "patient_number_seq",
   "invoice_number_seq",
   "receipt_number_seq",
   "voucher_number_seq",

@@ -1,10 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
- * إعادة الضبط على PostgreSQL 18 الحقيقي: كل جدولٍ مصنَّف، والبيانات التجريبية تُمسح،
- * والإعداد يبقى، والترقيم يعود إلى ١، وسجل التدقيق يبقى ويشهد.
+ * PostgreSQL18 reset: populated patient identities refuse before backup; an empty
+ * patient-free reset preserves numbering high-water, setup and durable history.
  */
 
 assertRealPostgresUrl();
@@ -19,7 +19,8 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
 }
 const count = async (table: string) => Number((await q<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ${table}`))[0].n);
 
-beforeAll(async () => {
+beforeEach(async () => {
+  await resetPoolForTesting();
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
 });
@@ -38,7 +39,7 @@ describe("clinic reset", () => {
     expect([...wipe].filter((table) => !tables.includes(table))).toEqual([]);
   });
 
-  it("wipes demo data, keeps setup and the audit trail, restarts numbering, and returns the files to delete", async () => {
+  it("refuses populated identities before backup and retains every financial row, file reference and sequence", async () => {
     // الإعداد
     await q(`INSERT INTO parties (name, kind) VALUES ('د. التجربة', 'doctor'), ('مختبر التجربة', 'lab')`);
     await q(`INSERT INTO users (username, display_name, password_hash, role) VALUES ('owner-reset', 'المالك', 'x', 'admin')`);
@@ -71,37 +72,32 @@ describe("clinic reset", () => {
     expect(preview.patients).toBe(1);
     expect(preview.payments).toBe(1);
 
-    const result = await resetClinicData(
-      { actor: "owner-reset", actorRole: "admin" },
-      async () => ({ ok: true, backupId: "backup-2026-09-25" }),
-    );
-    if (!result.ok) throw new Error("reset should succeed");
-    expect(result.backupId).toBe("backup-2026-09-25");
-    expect(result.counts).toMatchObject({ patients: 1, appointments: 1, visits: 1, invoices: 1, payments: 1, patient_documents: 1 });
-    expect(result.storageKeys).toEqual(["ab/abcdef.jpg"]);
-
-    for (const table of RESET_WIPE_TABLES) expect(await count(table), table).toBe(0);
-    for (const [table, n] of Object.entries(keptBefore)) expect(await count(table), table).toBe(n);
-
-    for (const sequence of ["patient_number_seq", "invoice_number_seq", "receipt_number_seq", "voucher_number_seq"]) {
-      expect(Number((await q<{ v: string }>(`SELECT nextval('${sequence}')::text AS v`))[0].v), sequence).toBe(1);
+    const snapshots: Record<string, unknown[]> = {};
+    for (const table of [...RESET_WIPE_TABLES, ...RESET_KEEP_TABLES]) {
+      snapshots[table] = await q(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`);
     }
-    const next = await createPatient({
-      fullName: "أول مريض حقيقي", phone: null, altPhone: null, gender: "unknown", birthYear: null,
-      address: null, medicalAlert: null, note: null,
-    });
-    expect(next.id).toBe(1);
-
-    const audit = await q<{ action: string; details: Record<string, unknown> }>(`SELECT action, details FROM audit_log ORDER BY id`);
-    expect(audit.map((row) => row.action)).toEqual(["patient.create", "system.reset"]);
-    expect(audit[1].details).toMatchObject({ patients: 1, payments: 1, "نسخة_قبل_المسح": "backup-2026-09-25" });
+    const sequences: Record<string, unknown[]> = {};
+    for (const sequence of ["patient_number_seq", "invoice_number_seq", "receipt_number_seq", "voucher_number_seq"]) {
+      sequences[sequence] = await q(`SELECT last_value::text,is_called FROM ${sequence}`);
+    }
+    let backupCalled = false;
+    await expect(resetClinicData({actor:"owner-reset",actorRole:"admin"},async()=>{
+      backupCalled=true;return {ok:true,backupId:"synthetic-must-not-run"};
+    })).rejects.toMatchObject({name:"ProtectedPatientNumberHistoryError"});
+    expect(backupCalled).toBe(false);
+    for (const [table, rows] of Object.entries(snapshots)) {
+      expect(await q(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`),table).toEqual(rows);
+    }
+    for (const [sequence, rows] of Object.entries(sequences)) expect(await q(`SELECT last_value::text,is_called FROM ${sequence}`),sequence).toEqual(rows);
+    for (const [table, n] of Object.entries(keptBefore)) expect(await count(table),table).toBe(n);
   });
 
   it("freezes writes from before the backup snapshot until the wipe commits — nothing slips between them", async () => {
-    await createPatient({
-      fullName: "قبل النسخة", phone: null, altPhone: null, gender: "unknown", birthYear: null,
-      address: null, medicalAlert: null, note: null,
-    });
+    // No patient or retirement history exists: this is the supported reset path.
+    await q("SELECT setval('patient_number_seq',9000,true)");
+    for (const sequence of ["invoice_number_seq", "receipt_number_seq", "voucher_number_seq"]) {
+      await q(`SELECT setval('${sequence}',321,true)`);
+    }
     const before = await count("patients");
     const writer = new Client({ connectionString: process.env.DATABASE_URL!, ssl: false });
     await writer.connect();
@@ -125,28 +121,33 @@ describe("clinic reset", () => {
       expect(seenByBackup).toBe(before);
       expect(writeDuringBackup).toBe("55P03");
       expect(await count("patients")).toBe(0);
+      expect(await q("SELECT last_value::text,is_called FROM patient_number_seq")).toEqual([{last_value:"9000",is_called:true}]);
+      for (const sequence of ["invoice_number_seq", "receipt_number_seq", "voucher_number_seq"]) {
+        expect(await q(`SELECT last_value::text,is_called FROM ${sequence}`),sequence).toEqual([{last_value:"1",is_called:false}]);
+      }
+      const resetAudit = await q<{action:string;details:Record<string,unknown>}>("SELECT action,details FROM audit_log WHERE action='system.reset'");
+      expect(resetAudit).toHaveLength(1);
+      expect(resetAudit[0].details).toMatchObject({patients:0,payments:0,"نسخة_قبل_المسح":"b-race"});
     } finally {
       await writer.end();
     }
   });
 
   it("wipes nothing when the backup step fails, and releases the freeze", async () => {
-    await createPatient({
-      fullName: "يبقى", phone: null, altPhone: null, gender: "unknown", birthYear: null,
-      address: null, medicalAlert: null, note: null,
-    });
+    await q("INSERT INTO cashier_shifts(opened_by,status) VALUES('synthetic retained on backup failure','closed')");
     const auditBefore = await count("audit_log");
     const result = await resetClinicData({ actor: "owner-reset", actorRole: "admin" },
       async () => ({ ok: false, failure: "backup-disabled" }));
     expect(result).toEqual({ ok: false, failure: "backup-disabled" });
-    expect(await count("patients")).toBe(1);
+    expect(await count("patients")).toBe(0);
+    expect(await count("cashier_shifts")).toBe(1);
     expect(await count("audit_log")).toBe(auditBefore);
     // لا قفل عالق: الكتابة تعود فورًا.
     await createPatient({
       fullName: "بعد الفشل", phone: null, altPhone: null, gender: "unknown", birthYear: null,
       address: null, medicalAlert: null, note: null,
     });
-    expect(await count("patients")).toBe(2);
+    expect(await count("patients")).toBe(1);
   });
 
   it("the real backup snapshot reads everything under the freeze (no self-deadlock)", async () => {
@@ -155,10 +156,7 @@ describe("clinic reset", () => {
     const path = await import("node:path");
     const { productionBackupBlocksWithClient } = await import("../../lib/productionBackup");
     const { parseTarBytes } = await import("../../lib/restore/archive");
-    await createPatient({
-      fullName: "في النسخة", phone: null, altPhone: null, gender: "unknown", birthYear: null,
-      address: null, medicalAlert: null, note: null,
-    });
+    await q("INSERT INTO cashier_shifts(opened_by,status) VALUES('synthetic backup-visible shift','closed')");
     const documentsDir = await mkdtemp(path.join(tmpdir(), "aqlan-reset-docs-"));
     let sql = "";
     try {
@@ -169,7 +167,8 @@ describe("clinic reset", () => {
         return { ok: true, backupId: "b-real" };
       });
       expect(result.ok).toBe(true);
-      expect(sql).toContain("في النسخة");
+      expect(sql).toContain("synthetic backup-visible shift");
+      expect(await count("cashier_shifts")).toBe(0);
       expect(await count("patients")).toBe(0);
     } finally {
       await rm(documentsDir, { recursive: true, force: true });
