@@ -2095,9 +2095,16 @@
    "finance.invoices.create"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": "Admin-only today; appending to a posted invoice."
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 93b-2 (G4-1, G4-8): the registered read read:invoices.add-service (finance.invoices.create) on one snapshot; the invoice's patient inside the scope (outside = missing 404); the legacy context body (original, account due, active catalogue, doctors, plan choices, source visits).",
+  "projection": {
+   "legacy": "the administrator label read the original, the account due, the catalogue, doctors, plan choices and source visits.",
+   "groups": {
+    "context": "the original invoice's amounts and settlement, the account due in its currency, the active catalogue with prices, doctors, plan choices, source visit ids — finance.invoices.create (the act this form serves)"
+   },
+   "rows": "one invoice; its patient inside the scope (own: the validated clinician's patients)"
+  }
  },
  {
   "route": "/api/invoices/[id]/add-service",
@@ -2109,9 +2116,9 @@
    "finance.invoices.create"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": "Admin-only today; appending to a posted invoice."
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 93b-2 (G4-1, G4-8): canonical. One admitted finance.invoices.create operation on the legacy writer (addInvoiceServiceOn: key lock, replay, lock order, source proof, the invoice writer and both audits); the branded invoice actor re-proves the operation and grants wherever the legacy writer revalidated its session; prices by grants; the scope decided right after the patient row lock (own: an ownership witness FOR SHARE NOWAIT; outside = missing 404); a stale attempt's rejection evidence commits before the refusal. Legacy: the administrator label only; the explicit grant replaces the label."
  },
  {
   "route": "/api/invoices/[id]/add-service",
@@ -2123,9 +2130,9 @@
    "finance.invoices.create"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": "Admin-only today; appending to a posted invoice."
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 93b-2 (G4-1, G4-8): the preview on the same read, with the price controls by the same grants as the save and the actor-bound request fingerprint; nothing written."
  },
  {
   "route": "/api/invoices/[id]/archive",

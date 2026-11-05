@@ -16,7 +16,8 @@ import {effectiveTemplates} from "./specialty-templates";
 import {clinicDateString} from "./schedule";
 import type {Currency} from "./money";
 import {invoiceCatalogPrice} from "./invoice-catalog-price";
-import {InvoiceTemplateAuthorityError,InvoiceTemplateAuthorizationError,InvoiceTemplateBusyError} from "./invoice-template-db";
+import {InvoiceTemplateAuthorityError,InvoiceTemplateAuthorizationError,InvoiceTemplateBusyError,isCanonicalInvoiceActor,type InvoiceActorSource} from "./invoice-template-db";
+import type {PriceGrants} from "./price-authority";
 
 export class InvoiceAddServiceError extends Error {
   constructor(readonly code:string,message:string,readonly terminal=false,readonly idempotencyKey?:string,readonly requestHash?:string){super(message);}
@@ -35,6 +36,8 @@ export interface InvoiceAddServiceReceipt {
   idempotencyKey:string;requestHash:string;createdBy:string;cashMovementMinor:0;
   clinical:{planId:number|null;links:LineLink[]};replayed:boolean;
 }
+/** The command's validation, shared by both envelopes. */
+export function parseInvoiceAddServiceCommand(source:unknown):InvoiceAddServiceCommand {return command(source);}
 function command(source:unknown):InvoiceAddServiceCommand {
   const allowed=["idempotencyKey","expectedSourceHash","reason","serviceId","doctorId","price","priceReason","discount","discountReason","currency","toothCode","surfaces","scope","caseId","existingPlanId"];
   if(!object(source)||Object.keys(source).some(key=>!allowed.includes(key))
@@ -47,8 +50,10 @@ function command(source:unknown):InvoiceAddServiceCommand {
   for(const key of ["priceReason","discountReason","surfaces","scope"]){if(source[key]!==undefined&&source[key]!==null&&(typeof source[key]!=="string"||(source[key] as string).length>300))fail("invalid","تفاصيل الخدمة غير صالحة.");}
   return source as unknown as InvoiceAddServiceCommand;
 }
-const requestHash=(invoiceId:number,body:InvoiceAddServiceCommand,session:SessionPayload)=>debtRequestHash({purpose:"invoice-service-addition-v1",invoiceId,body,actor:{id:session.userId,username:session.username,role:session.role}});
-async function authorize(client:DbClient,session:SessionPayload){
+const requestHash=(invoiceId:number,body:InvoiceAddServiceCommand,session:InvoiceActorSource)=>debtRequestHash({purpose:"invoice-service-addition-v1",invoiceId,body,actor:{id:session.userId,username:session.username,role:session.role}});
+async function authorize(client:DbClient,session:InvoiceActorSource){
+  // The canonical actor (M2 slice 93b-2) re-proves its operation and finance.invoices.create.
+  if(isCanonicalInvoiceActor(session)){if(!(await session.recheck(client)).create)fail("unauthorized","إضافة خدمة إلى فاتورة قائمة تحتاج صلاحية إنشاء الفواتير.");return;}
   const current=await revalidateSessionInTransaction(session,client);
   if(!current||current.role!=="admin"||current.username!==session.username)fail("unauthorized","إضافة خدمة إلى فاتورة قائمة تحتاج جلسة مدير سارية.");
 }
@@ -88,7 +93,7 @@ function checkPeriod(view:Snapshot){
   const issued=clinicDateString(new Date(view.original.createdAt),CLINIC_TIME_ZONE),today=clinicDateString(new Date(),CLINIC_TIME_ZONE);
   if(cutoff&&(issued<cutoff||today<cutoff))fail("locked_period","أصل الفاتورة أو تاريخ المستند الإضافي في فترة مقفلة؛ يلزم قرار مالي معتمد.");
 }
-function prepare(view:Snapshot,body:InvoiceAddServiceCommand,session:SessionPayload){
+function prepare(view:Snapshot,body:InvoiceAddServiceCommand,session:InvoiceActorSource,grants?:PriceGrants){
   if(body.currency!==view.original.currency)fail("invalid","المستند الإضافي بعملة الأصل؛ تغيير العملة ليس إضافة خدمة.");
   const source:Record<string,unknown>={patientId:view.original.patientId,currency:body.currency,idempotencyKey:body.idempotencyKey,
     discount:body.discount,discountReason:body.discountReason??null,existingPlanId:body.existingPlanId??null,
@@ -103,7 +108,7 @@ function prepare(view:Snapshot,body:InvoiceAddServiceCommand,session:SessionPayl
   if(!parsed.ok)fail("invalid",parsed.message);
   const total=parsed.items.reduce((sum,item)=>sum+item.quantity*item.unitPriceMinor,0),net=total-parsed.discountMinor;
   if(!Number.isSafeInteger(net)||net<=0||parsed.discountMinor<0||parsed.discountMinor>total||!Number.isSafeInteger(view.accountDueMinor+net))fail("invalid","إضافة الخدمة تحتاج مبلغًا موجبًا بعد الخصم؛ لا تنشئ تخفيضًا أو استردادًا.");
-  const pricing=checkInvoiceAuthority({requireInvoiceManualReason:true,lines:parsed.authorityLines,currency:parsed.baseCurrency,rates:foreignRatesFromSettings(view.settings),role:session.role,maxDiscountPercent:Number(view.settings["billing.max_discount_percent"]),totalMinor:total,discountMinor:parsed.discountMinor,discountReason:body.discountReason??null});
+  const pricing=checkInvoiceAuthority({requireInvoiceManualReason:true,lines:parsed.authorityLines,currency:parsed.baseCurrency,rates:foreignRatesFromSettings(view.settings),role:session.role,...(grants?{grants}:{}),maxDiscountPercent:Number(view.settings["billing.max_discount_percent"]),totalMinor:total,discountMinor:parsed.discountMinor,discountReason:body.discountReason??null});
   if(!pricing.ok)fail("invalid",pricing.message);
   return {source,parsed,pricing,net};
 }
@@ -114,15 +119,28 @@ async function readTransaction<T>(invoiceId:number,session:SessionPayload,read:(
     unauthorized:()=>new InvoiceAddServiceError("unauthorized","إضافة خدمة إلى فاتورة قائمة تحتاج جلسة مدير سارية."),
   },async client=>{await ready(client);return read(client,await snapshot(client,invoiceId));});
 }
+const readBody=(view:Snapshot)=>({original:view.original,sourceHash:view.sourceHash,accountDueMinor:view.accountDueMinor,
+  services:view.services.filter(service=>service.isActive),doctors:view.doctors,planChoices:view.planChoices,sourceVisitIds:view.sourceVisitIds});
 export async function readInvoiceAddService(invoiceId:number,session:SessionPayload){
-  return readTransaction(invoiceId,session,async(_client,view)=>({original:view.original,sourceHash:view.sourceHash,accountDueMinor:view.accountDueMinor,
-    services:view.services.filter(service=>service.isActive),doctors:view.doctors,planChoices:view.planChoices,sourceVisitIds:view.sourceVisitIds}));
+  return readTransaction(invoiceId,session,async(_client,view)=>readBody(view));
+}
+/** The read and the preview on a caller's read-only snapshot (M2 slice 93b-2, canonical). */
+export async function readInvoiceAddServiceOn(client:DbClient,invoiceId:number){
+  if(!positive(invoiceId))fail("invalid","رقم الفاتورة غير صالح.");
+  await ready(client);return readBody(await snapshot(client,invoiceId));
+}
+export async function previewInvoiceAddServiceOn(client:DbClient,invoiceId:number,source:unknown,session:InvoiceActorSource,grants:PriceGrants){
+  if(!positive(invoiceId))fail("invalid","رقم الفاتورة غير صالح.");
+  const body=command(source);await ready(client);
+  return previewBody(client,invoiceId,await snapshot(client,invoiceId),body,session,grants);
 }
 export async function previewInvoiceAddService(invoiceId:number,source:unknown,session:SessionPayload){
   const body=command(source);
-  return readTransaction(invoiceId,session,async(client,view)=>{
+  return readTransaction(invoiceId,session,(client,view)=>previewBody(client,invoiceId,view,body,session));
+}
+async function previewBody(client:DbClient,invoiceId:number,view:Snapshot,body:InvoiceAddServiceCommand,session:InvoiceActorSource,grants?:PriceGrants){
     checkPeriod(view);if(view.sourceHash!==body.expectedSourceHash)fail("stale","تغيّرت الفاتورة أو السندات أو الخدمات؛ حدّث السياق قبل المعاينة.");
-    const {parsed,net}=prepare(view,body,session);
+    const {parsed,net}=prepare(view,body,session,grants);
     const clinical=await previewInvoiceLinkage({patientId:parsed.patientId,baseCurrency:parsed.baseCurrency,existingPlanId:parsed.existingPlanId,items:parsed.items},client);
     return {original:view.original,sourceHash:view.sourceHash,requestHash:requestHash(invoiceId,body,session),currency:body.currency,
       addedNetMinor:net,accountDueBeforeMinor:view.accountDueMinor,accountDueAfterMinor:view.accountDueMinor+net,sourceVisitIds:view.sourceVisitIds,
@@ -131,10 +149,9 @@ export async function previewInvoiceAddService(invoiceId:number,source:unknown,s
         const effectivePlanId=line.item===null?null:line.item?.mode==="existing"?view.clinicalItems.find(item=>item.id===line.item!.id)?.plan_id??null:body.existingPlanId??(view.planChoices.length===1&&view.planChoices[0].compatible?view.planChoices[0].id:null);
         return {...line,effectivePlanId,refusalMessage:line.refusal?INVOICE_LINKAGE_MESSAGE[line.refusal]:null,effectiveDoctorId,effectiveDoctorName:view.doctors.find(doctor=>doctor.id===effectiveDoctorId)?.name??null};
       }),status:"planned" as const};
-  });
 }
 async function lockAttempt(client:DbClient,key:string){await client.query("SELECT pg_advisory_xact_lock(hashtextextended('aqlan:invoice-service-addition:'||$1::text,0))",[key]);}
-async function replay(client:DbClient,invoiceId:number,body:InvoiceAddServiceCommand,session:SessionPayload,hash:string){
+async function replay(client:DbClient,invoiceId:number,body:InvoiceAddServiceCommand,session:InvoiceActorSource,hash:string){
   const saved=(await client.query<{original_invoice_id:number;actor_id:number;request_hash:string;receipt:InvoiceAddServiceReceipt}>("SELECT original_invoice_id,actor_id,request_hash,receipt FROM invoice_service_additions WHERE idempotency_key=$1",[body.idempotencyKey])).rows[0];
   if(saved){
     if(saved.original_invoice_id!==invoiceId||saved.actor_id!==session.userId||saved.request_hash!==hash)fail("conflict","مفتاح الإضافة يخص طلبًا مختلفًا.");
@@ -146,16 +163,49 @@ async function replay(client:DbClient,invoiceId:number,body:InvoiceAddServiceCom
     throw new InvoiceAddServiceError("stale","هذه المحاولة رُفضت دون إصدار مستند بسبب تغيّر المصدر؛ يمكن تحديث المعاينة بمفتاح جديد.",true,body.idempotencyKey,hash);}
   return null;
 }
+type AddServiceOutcome={kind:"receipt";receipt:InvoiceAddServiceReceipt}|{kind:"rejected";error:InvoiceAddServiceError};
+/** Legacy and canonical failures of the shared writer as the route's InvoiceAddServiceError. */
+export function addServiceFailure(error:unknown):never{
+  if(error instanceof InvoiceLinkageError)fail(error.reason,error.reason==="no_patient"?"المريض غير موجود.":INVOICE_LINKAGE_MESSAGE[error.reason]);
+  if(error instanceof InvoiceTemplateAuthorizationError)fail("unauthorized",error.message);
+  if(error instanceof InvoiceTemplateAuthorityError||error instanceof InvoiceTemplateBusyError)fail("conflict",error.message);
+  throw error;
+}
 export async function addInvoiceService(invoiceId:number,source:unknown,session:SessionPayload):Promise<InvoiceAddServiceReceipt>{
   if(!positive(invoiceId))fail("invalid","رقم الفاتورة غير صالح.");
-  const body=command(source),hash=requestHash(invoiceId,body,session);
+  const body=command(source);
   await ensureSchema();const client=await getPool().connect();let destroy=false,committed=false;
   try{
-    await client.query("BEGIN");await authorize(client,session);await ready(client);await lockAttempt(client,body.idempotencyKey);
+    await client.query("BEGIN");
+    const outcome=await addInvoiceServiceOn(client,invoiceId,body,session);
+    // A stale attempt's rejection evidence is committed before the refusal, as before.
+    await client.query("COMMIT");committed=true;
+    if(outcome.kind==="rejected")throw outcome.error;
+    return outcome.receipt;
+  }catch(error){
+    if(!committed)try{await client.query("ROLLBACK");}catch{destroy=true;}
+    return addServiceFailure(error);
+  }finally{client.release(destroy);}
+}
+/**
+ * The addition on a caller's open transaction (M2 slice 93b-2): the same authorization points
+ * (a canonical actor re-proves its operation and finance.invoices.create there), key lock, replay,
+ * lock order, source proof and writer. A stale attempt returns `rejected` after writing its
+ * rejection evidence: the caller COMMITS and then throws the error. `admit` decides the scope
+ * right after the patient row lock.
+ */
+export async function addInvoiceServiceOn(client:DbClient,invoiceId:number,body:InvoiceAddServiceCommand,session:InvoiceActorSource,
+  admit?:(patientId:number)=>Promise<void>):Promise<AddServiceOutcome>{
+  if(!positive(invoiceId))fail("invalid","رقم الفاتورة غير صالح.");
+  const hash=requestHash(invoiceId,body,session);
+  {
+    await authorize(client,session);await ready(client);await lockAttempt(client,body.idempotencyKey);
     const prior=await replay(client,invoiceId,body,session,hash);
-    if(prior){await authorize(client,session);await client.query("COMMIT");committed=true;return prior;}
+    if(prior){await authorize(client,session);return {kind:"receipt",receipt:prior};}
     const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM invoices WHERE id=$1",[invoiceId])).rows[0];if(!owner)fail("missing","الفاتورة غير موجودة.");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[owner.patient_id]);
+    // Canonical callers (M2 slice 93b-2): the patient scope, decided right after the patient row lock.
+    await admit?.(owner.patient_id);
     await client.query("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id FOR UPDATE");
     await client.query("SELECT id FROM visits WHERE patient_id=$1 ORDER BY id FOR UPDATE",[owner.patient_id]);
     await client.query("SELECT id FROM treatment_plans WHERE patient_id=$1 ORDER BY id FOR UPDATE",[owner.patient_id]);
@@ -165,17 +215,17 @@ export async function addInvoiceService(invoiceId:number,source:unknown,session:
     await client.query("SELECT id FROM invoices WHERE patient_id=$1 ORDER BY id FOR UPDATE",[owner.patient_id]);
     await client.query("LOCK TABLE settings IN SHARE MODE");
     await authorize(client,session);
-    const rejectStale=async(observedHash:string):Promise<never>=>{
+    const rejectStale=async(observedHash:string):Promise<AddServiceOutcome>=>{
       await client.query("INSERT INTO invoice_service_addition_rejections(idempotency_key,original_invoice_id,actor_id,request_hash,expected_source_hash,observed_source_hash) VALUES ($1,$2,$3,$4,$5,$6)",[body.idempotencyKey,invoiceId,session.userId,hash,body.expectedSourceHash,observedHash]);
-      await authorize(client,session);await client.query("COMMIT");committed=true;
-      throw new InvoiceAddServiceError("stale","تغيّرت الفاتورة أو السندات أو الإضافات؛ لم يُصدر مستند لهذه المحاولة. حدّث المعاينة بمفتاح جديد.",true,body.idempotencyKey,hash);
+      await authorize(client,session);
+      return {kind:"rejected",error:new InvoiceAddServiceError("stale","تغيّرت الفاتورة أو السندات أو الإضافات؛ لم يُصدر مستند لهذه المحاولة. حدّث المعاينة بمفتاح جديد.",true,body.idempotencyKey,hash)};
     };
     const status=(await client.query<{status:string}>("SELECT status FROM invoices WHERE id=$1",[invoiceId])).rows[0];
-    if(status?.status==="cancelled")await rejectStale(debtRequestHash({invoiceId,status:"cancelled"}));
+    if(status?.status==="cancelled")return rejectStale(debtRequestHash({invoiceId,status:"cancelled"}));
     const view=await snapshot(client,invoiceId);
-    if(view.sourceHash!==body.expectedSourceHash)await rejectStale(view.sourceHash);
+    if(view.sourceHash!==body.expectedSourceHash)return rejectStale(view.sourceHash);
     checkPeriod(view);
-    const {source:canonical,parsed,pricing,net}=prepare(view,body,session);
+    const {source:canonical,parsed,pricing,net}=prepare(view,body,session,isCanonicalInvoiceActor(session)?(await session.recheck(client)).price:undefined);
     const written=await createLinkedInvoiceInTransaction(client,{patientId:parsed.patientId,baseCurrency:parsed.baseCurrency,existingPlanId:parsed.existingPlanId,
       discountMinor:parsed.discountMinor,note:parsed.note,createdBy:session.username,actorRole:session.role,items:parsed.items,
       templates:effectiveTemplates(view.settings["plans.specialty_templates"]).templates,idempotencyKey:body.idempotencyKey,
@@ -189,12 +239,6 @@ export async function addInvoiceService(invoiceId:number,source:unknown,session:
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,[invoiceId,invoice.id,view.original.patientId,view.original.currency,view.sourceHash,body.idempotencyKey,hash,session.userId,session.username,body.reason.trim(),JSON.stringify(receipt)]);
     await insertAuditRow(client,{action:"invoice.service_add",entity:"invoice",entityId:invoiceId,entityLabel:view.original.invoiceNumber,
       details:{الفاتورة_الإضافية:invoice.invoiceNumber,المستند_الإضافي:invoice.id,السبب:body.reason.trim(),الزيادة:net,العملة:body.currency,زيارات_المصدر:view.sourceVisitIds,حركة_نقدية:0},actor:session.username,actorRole:session.role});
-    await authorize(client,session);await client.query("COMMIT");committed=true;return receipt;
-  }catch(error){
-    if(!committed)try{await client.query("ROLLBACK");}catch{destroy=true;}
-    if(error instanceof InvoiceLinkageError)fail(error.reason,error.reason==="no_patient"?"المريض غير موجود.":INVOICE_LINKAGE_MESSAGE[error.reason]);
-    if(error instanceof InvoiceTemplateAuthorizationError)fail("unauthorized",error.message);
-    if(error instanceof InvoiceTemplateAuthorityError||error instanceof InvoiceTemplateBusyError)fail("conflict",error.message);
-    throw error;
-  }finally{client.release(destroy);}
+    await authorize(client,session);return {kind:"receipt",receipt};
+  }
 }

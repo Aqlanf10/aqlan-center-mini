@@ -20,7 +20,10 @@ import { invoicePricingAudit } from "./invoice-price-settings-db";
  * writer revalidated its session, `recheck` re-proves the live operation on the same client
  * and returns the grants that decide there: the create grant, lab work
  * (`clinical.visits.document`) and the price controls. `lab` and `debt` are the slice-87 and
- * slice-91 actors for the writers this one calls (absent when their grant is not held).
+ * slice-91 actors for the writers this one calls. The lab actor is always present (the writer
+ * materialises lab work, possibly none, for every invoice; whether lab lines are allowed is the
+ * `labWork` grant, checked in the template validation); the debt actor exists only with
+ * `finance.payments.collect`.
  */
 const CANONICAL_INVOICE_ACTOR = Symbol("canonical-invoice-actor");
 export interface InvoiceActorGrants { readonly create: boolean; readonly labWork: boolean; readonly price: PriceGrants }

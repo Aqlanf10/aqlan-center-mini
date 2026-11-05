@@ -180,7 +180,7 @@ This section is written before the code. It is the field-by-field contract for t
 |---|---|---|
 | `POST /api/invoices` | `finance.invoices.create`. Lines carrying lab work also need `clinical.visits.document` (the map's field rule). Repayment terms also need `finance.payments.collect`, because they create a debt arrangement (slice 91). | Money roles; lab work for doctor or admin |
 | `POST /api/invoices/clinical-preview` | The same as creation (read-only, same parser and price engine) | Money roles; lab work for doctor or admin |
-| `GET`, `PUT`, `POST /api/invoices/[id]/add-service` | `finance.invoices.create`, plus the price controls below. Never wider than legacy, where only the administrator label could do it. | Administrator label only |
+| `GET`, `PUT`, `POST /api/invoices/[id]/add-service` | `finance.invoices.create` (the map's rule), plus the price controls below. The explicit grant replaces the administrator label, as in every slice; no label decides. | Administrator label only |
 
 Scope rules (G4-8): the patient (for add-service, the invoice's patient) must be inside the actor's patient scope.
 - **Writes:** scope is decided after the writer's locks, with a positive ownership witness `FOR SHARE NOWAIT` held until commit, after an early unlocked look. Outside the scope reads as missing (404).
