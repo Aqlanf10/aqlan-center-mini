@@ -19507,7 +19507,12 @@ export interface VisitBillingPreview {
  */
 export async function previewVisitBilling(visitId: number): Promise<VisitBillingPreview | null> {
   await ensureSchema();
-  const pool = getPool();
+  const client = await getPool().connect();
+  try { return await previewVisitBillingWith(client, visitId); } finally { client.release(); }
+}
+
+/** The same preview on a given client (a caller's read-only snapshot, M2 slice 89). */
+export async function previewVisitBillingWith(pool: DbClient, visitId: number): Promise<VisitBillingPreview | null> {
   const { rows: [visit] } = await pool.query<{ patient_id: number | null; billing_currency: string | null; doctor_id: number | null }>(
     `SELECT v.patient_id, v.billing_currency,
       (SELECT d.id FROM parties d WHERE d.id = v.doctor_id AND d.kind = 'doctor') AS doctor_id FROM visits v WHERE v.id = $1`, [visitId]);
@@ -19522,13 +19527,8 @@ export async function previewVisitBilling(visitId: number): Promise<VisitBilling
       WHERE p.visit_id = $1 ORDER BY p.id`, [visitId],
   );
   const procedures = procedureRows.map(toProcedureLine);
-  const client = await pool.connect();
-  let decisions: Map<number, { classification: BillingClassification; unitPriceMinor: number }>;
-  try {
-    decisions = await classifyLinkedProcedureLines(client, procedures, visit.patient_id, false, visit.doctor_id);
-  } finally {
-    client.release();
-  }
+  const decisions: Map<number, { classification: BillingClassification; unitPriceMinor: number }> =
+    await classifyLinkedProcedureLines(pool, procedures, visit.patient_id, false, visit.doctor_id);
   const visitCurrency: Currency = isCurrency(visit.billing_currency) ? visit.billing_currency as Currency : CLINIC_BASE_CURRENCY;
   const lines: VisitBillingPreviewLine[] = procedures.map((line) => {
     const decision = decisions.get(line.id);
@@ -19551,7 +19551,7 @@ export async function previewVisitBilling(visitId: number): Promise<VisitBilling
   const billableCurrencies = [...new Set(lines.filter((line) => line.classification === "NEW_BILLABLE").map((line) => line.currency))];
   let orthoAdjustment: BillingClassification | null = null;
   if (visit.patient_id !== null) {
-    const open = await openOrthoCaseFor(visit.patient_id, clinicDateString(new Date(), CLINIC_TIME_ZONE)).catch(() => null);
+    const open = await openOrthoCaseForWith(pool, visit.patient_id, clinicDateString(new Date(), CLINIC_TIME_ZONE)).catch(() => null);
     if (open) orthoAdjustment = await orthoAdjustmentBillingClass(pool, open.id, visit.patient_id);
   }
   const totalDue = Object.values(duesByCurrency).reduce((sum, value) => sum + (value ?? 0), 0);

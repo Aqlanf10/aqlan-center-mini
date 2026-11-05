@@ -6400,8 +6400,15 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 89: read:visits.money (finance.invoices.view) inside the patient scope; the legacy preview body on one snapshot (previewVisitBillingWith).",
+  "projection": {
+   "legacy": "any role with patient access read the preview.",
+   "groups": {
+    "dues": "the whole preview (amounts per line and dues per currency) — finance.invoices.view"
+   },
+   "rows": "one visit inside the patient scope; outside reads like missing"
+  }
  },
  {
   "route": "/api/visits/[id]/clinical",
@@ -6501,13 +6508,19 @@
    "doctor",
    "assistant"
   ],
-  "need": [
-   "finance.invoices.view"
-  ],
-  "anyOf": [],
+  "need": [],
+  "anyOf": ["clinical.visits.document", "finance.invoices.view"],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 89: read:visits.financial-context (clinical.visits.document or finance.invoices.view) inside the patient scope; source references only with finance.invoices.view (redactVisitFinancialContext with the grant in place of the role label).",
+  "projection": {
+   "legacy": "clinical roles with patient access read the redacted body; money roles the full one.",
+   "groups": {
+    "coverage": "coverage state, decisions and reasons — admission",
+    "references": "invoice and agreement source identifiers and links — finance.invoices.view"
+   },
+   "rows": "one visit inside the patient scope; outside reads like missing"
+  }
  },
  {
   "route": "/api/visits/[id]/lab-work-command",
@@ -6593,8 +6606,18 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 89 (G4-1, G4-4, G4-6): read:visits.money (finance.invoices.view) inside the patient scope on one snapshot; the groups by grant per contract section 6, through an allowlist.",
+  "projection": {
+   "legacy": "admin and reception labels, and a doctor through the patient-payments switch, read the whole walkout.",
+   "groups": {
+    "dues": "invoice, line prices, newBillable — finance.invoices.view (admission)",
+    "payments": "the day's receipts, paid on the invoice, payments today — finance.payments.view",
+    "account": "balances, previous/current, legacy suggested/remaining — finance.patient-ledger.view",
+    "derived": "todayRemaining needs invoices+payments; dueNow and the due recommendation need invoices+payments+ledger; the collect action needs finance.payments.collect; the handoff needs visits.manage"
+   },
+   "rows": "one visit inside the patient scope (its clinician or its patient); outside reads like missing"
+  }
  },
  {
   "route": "/api/visits/readiness",
