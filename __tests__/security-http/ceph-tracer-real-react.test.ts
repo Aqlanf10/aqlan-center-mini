@@ -35,6 +35,7 @@ async function open(query = "", touch = false) {
     if (url.origin !== ORIGIN || route.request().method() !== "GET") { forbidden.push(route.request().url()); await route.abort(); return; }
     if (url.pathname === "/") await route.fulfill({ contentType: "text/html", body: `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><style>${css}</style></head><body><main style="width:1100px;max-width:calc(100vw - 40px);margin:20px;transform:translate(3px, 5px)"><div id="root"></div></main><script src="/fixture.js"></script></body></html>` });
     else if (url.pathname === "/fixture.js") await route.fulfill({ contentType: "text/javascript", body: script });
+    else if (url.pathname === "/favicon.ico") await route.fulfill({ status: 204, body: "" });
     else if (url.pathname === "/api/documents/990003") await route.fulfill({ contentType: "image/svg+xml", body: syntheticImage });
     else { forbidden.push(url.pathname); await route.abort(); }
   });
@@ -142,7 +143,7 @@ describe("CephTracer real React native-pixel viewport", () => {
       let a=await position(page,300,250); await page.touchscreen.tap(a.x,a.y);
       await expect.poll(async ()=>(await writes(page)).length).toBe(1);
       const session=await f.context.newCDPSession(page);
-      const touch=async(type:string,x:number,y:number)=>session.send("Input.dispatchTouchEvent",{type,touchPoints:type==="touchEnd"?[]:[{x,y}]});
+      const touch=async(type:"touchStart" | "touchMove" | "touchEnd",x:number,y:number)=>session.send("Input.dispatchTouchEvent",{type,touchPoints:type==="touchEnd"?[]:[{x,y}]});
       let b=await position(page,400,300);
       await touch("touchStart",a.x,a.y); await touch("touchMove",b.x,b.y); await touch("touchEnd",b.x,b.y);
       await expect.poll(async ()=>(await writes(page)).length).toBe(2);
