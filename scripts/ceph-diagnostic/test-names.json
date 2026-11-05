@@ -1,0 +1,13 @@
+[
+  "shows the loupe anywhere before calibration or any landmark",
+  "uses the available digitization width rather than a 570px split panel",
+  "recovers natural dimensions when the cached image loaded before hydration",
+  "renders the actual pixel under the pointer in RTL and a transformed ancestor",
+  "persists native coordinates at fit, zoom, pan and resize",
+  "drags one existing landmark without placing a second on pointer release",
+  "duplicates image filters, guides and calibration inside the lens",
+  "supports touch placement, touch drag and pan without unintended writes",
+  "pinches without placing points and accepts the first tap after the gesture",
+  "persists undo removals and redo coordinates across a real reload",
+  "keeps offline edits pending and persists them only after explicit retry"
+]

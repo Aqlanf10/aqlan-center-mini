@@ -3,7 +3,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 const { PNG } = createRequire(import.meta.url)("pngjs");
@@ -63,12 +63,23 @@ async function place(p: Page, code: string, x: number, y: number) {
   const actual = (await writes(p)).at(-1)!.landmarks![0];
   expect(actual.x).toBeCloseTo(x, 0); expect(actual.y).toBeCloseTo(y, 0);
 }
+// Opt-in diagnostic: exactly two fixed-size synthetic screenshots, never traces,
+// cookies, storage, HTML dumps, external pages or arbitrary output filenames.
+async function diagnosticScreenshot(page: Page, name: "loupe-initial" | "loupe-filtered") {
+  if (process.env.CEPH_DIAGNOSTIC_DIR !== "ceph-diagnostic-output") return;
+  try {
+    if (new URL(page.url()).origin !== ORIGIN || await page.getByText("Synthetic geometry only", { exact: false }).count() === 0) return;
+    mkdirSync("ceph-diagnostic-output", { recursive: true });
+    await page.screenshot({ path: join("ceph-diagnostic-output", name + ".png"), fullPage: false, timeout: 5000 });
+  } catch { /* Screenshot failure must not change the underlying test outcome. */ }
+}
 function rgb(buffer: Buffer, x:number,y:number) { const png = PNG.sync.read(buffer); const i = (Math.floor(y)*png.width+Math.floor(x))*4; return [...png.data.subarray(i,i+3)]; }
 
 describe("CephTracer real React native-pixel viewport", () => {
   it("shows the loupe anywhere before calibration or any landmark", async () => {
     const f=await open(); try {
       await hover(f.page,300,300);
+      await diagnosticScreenshot(f.page, "loupe-initial");
       await expect.poll(() => loupeImage(f.page).isVisible()).toBe(true);
       expect(await writes(f.page)).toEqual([]); f.verify();
     } finally { await f.context.close(); }
@@ -127,6 +138,7 @@ describe("CephTracer real React native-pixel viewport", () => {
       for (const [x,y] of [[250,400],[450,400]]) { const a = await position(f.page,x,y); await f.page.mouse.click(a.x,a.y); }
       await hover(f.page,350,200); await expect.poll(() => loupeImage(f.page).isVisible()).toBe(true);
       expect(await image(f.page).evaluate(el=>getComputedStyle(el).filter)).toBe(await loupeImage(f.page).evaluate(el=>getComputedStyle(el).filter));
+      await diagnosticScreenshot(f.page, "loupe-filtered");
       const lensBounds = await f.page.getByTestId("ceph-loupe").boundingBox();
       expect(rgb(await f.page.screenshot(), lensBounds!.x + lensBounds!.width / 2 + 15, lensBounds!.y + lensBounds!.height / 2 + 15)).toEqual([47, 223, 207]);
       const overlay=f.page.getByTestId("ceph-overlay");
