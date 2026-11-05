@@ -4786,8 +4786,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94b (G4-8; contract section 10): clinical.plans.edit inside the patient scope (outside or missing = 404), then the legacy refusal 409 PLAN_CREATION_ENTRY_REQUIRED in an operation that always rolls back; nothing is written."
  },
  {
   "route": "/api/plans/[id]",
@@ -4801,8 +4801,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94b (G4-8; contract section 10): one admitted operation on the legacy writer setPlanStatusOn (plan row lock, reason rule, audit in the transaction); the scope decided right after the plan row lock (own: an ownership witness FOR SHARE NOWAIT); outside reads like a missing plan."
  },
  {
   "route": "/api/plans/[id]",
@@ -4812,12 +4812,12 @@
    "reception"
   ],
   "need": [
-   "clinical.plans.edit"
+   "finance.payments.collect"
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94b (G4-4, G4-8; contract section 10): the collection on a plan moves money, so finance.payments.collect (the map's former clinical.plans.edit corrected); the slice 90c writers (approved agreement's collection with a branded canonical actor, else the next instalment with its invoice), each deciding the scope after its locks; outside reads like a missing plan."
  },
  {
   "route": "/api/plans/[id]/agreement-amendment",

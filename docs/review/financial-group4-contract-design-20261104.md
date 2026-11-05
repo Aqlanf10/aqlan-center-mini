@@ -283,3 +283,45 @@ The tests required before any commit:
 - a role label without grants refused;
 - G4-6: the legacy setting has no effect;
 - revocation.
+
+## 10. Slice 94b — plan status, the creation entry and the plan collection (G4-4, G4-8)
+
+This section is written before the code.
+
+| Route | Legacy | Canonical |
+|---|---|---|
+| `PATCH /api/plans/[id]` (status) | Money roles (`canHandleMoney`); `setPlanStatus` locks the plan row, requires a written reason to cancel or revive a cancelled plan, and audits in the same transaction. | `clinical.plans.edit` (the map's grant). One admitted operation on the same writer (`setPlanStatusOn`). |
+| `POST /api/plans` (creation entry) | After the role and patient checks, always 409 `PLAN_CREATION_ENTRY_REQUIRED`: new treatment starts from the invoice or the pre-system agreement. | `clinical.plans.edit` inside the scope, then the same 409. Nothing is written. Outside the scope reads like a missing patient (404). |
+| `POST /api/plans/[id]` (collect on a plan) | Money roles. The approved agreement's collection, else the next instalment with its invoice, under the open shift, with the idempotency key and the similar-collection review. | `finance.payments.collect` (G4-4: collection is `payments.collect`). The map entry's `clinical.plans.edit` is corrected to it: this route moves money. The same two writers as slice 90c, with the same response bodies and refusals as the legacy route. |
+
+### Scope and locks
+
+- **Early look:** an unlocked read of the plan's patient. A plan outside the scope gives the same message as a missing plan (`الخطة غير موجودة.`, 404).
+- **Status:** the scope is decided right after the plan row lock (`FOR UPDATE`) and before the status is read or changed. An `own` actor needs a positive ownership witness `FOR SHARE NOWAIT`, held until commit; a lock conflict is 409. The witness is taken before the update, because cancelling the plan can itself end the clinician's scope (an active plan with them as primary doctor is part of the predicate).
+- **Collection:** the scope is decided by each writer's `admit`, after its own locks (slice 90c).
+
+### What decides nothing
+
+- Role labels.
+- `finance.payments.view`, `finance.invoices.view` and the ledger view.
+- `clinical.plans.edit` for a collection, and `finance.payments.collect` for a status change.
+
+### Tests required before the commit
+
+- Status:
+  - change with its audit;
+  - the reason rule;
+  - view grants, the collect grant and the label refused;
+  - `own` inside against outside, reading like missing;
+  - a race in which the patient leaves the scope while the change waits for the plan row;
+  - revocation.
+- Creation entry:
+  - 409 inside the scope;
+  - outside reads like missing;
+  - without the grant, refused.
+- Collection:
+  - the instalment with its invoice and audit, and replay;
+  - the approved agreement's collection;
+  - `clinical.plans.edit` and view grants refused;
+  - outside reads like a missing plan;
+  - revocation.

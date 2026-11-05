@@ -22094,24 +22094,39 @@ export async function setPlanStatus(
   ctx: { actor: string; actorRole: string | null; reason?: string | null },
 ): Promise<PlanStatusResult> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client): Promise<PlanStatusResult> => {
-    const { rows: [plan] } = await client.query<{ status: string; title: string }>(
-      `SELECT status, title FROM treatment_plans WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!plan) return "not_found";
-    if (plan.status === status) return "ok";
-    const reason = ctx.reason?.trim() || null;
-    /* إلغاء الخطة أو إحياء الملغاة قرارٌ مسبَّب — يُحكم عليه تحت قفل الصف نفسه، فطلبٌ متزامن
-       ألغاها للتو لا يُحييه طلبٌ آخر بلا سبب (قرأ حالةً قديمة قبل القفل). */
-    if ((status === "cancelled" || plan.status === "cancelled") && (reason?.length ?? 0) < 3) return "reason_required";
-    await client.query(`UPDATE treatment_plans SET status = $2 WHERE id = $1`, [id, status]);
-    await insertAuditRow(client, {
-      action: "plan.status", entity: "treatment_plans", entityId: id, entityLabel: plan.title,
-      details: { من: plan.status, إلى: status, ...(reason ? { السبب: reason } : {}) },
-      actor: ctx.actor, actorRole: ctx.actorRole,
-    });
-    return "ok";
+  return withTransaction(getPool(), (client) => setPlanStatusOn(client, id, status, ctx));
+}
+
+/** The plan status writer on a caller's transaction (M2 slice 94b): `admit` receives the plan's
+ * patient right after the plan row lock, before the status is read or changed (cancelling the
+ * plan can itself end a clinician's scope). The caller rolls back on any throw. */
+export async function setPlanStatusOn(
+  client: DbClient,
+  id: number,
+  status: PlanStatus,
+  ctx: { actor: string; actorRole: string | null; reason?: string | null },
+  admit: (patientId: number) => Promise<void> = async () => {},
+): Promise<PlanStatusResult> {
+  // The legacy lock statement, byte for byte (lock-wait tests observe it); the patient is read
+  // under the lock it already holds.
+  const { rows: [plan] } = await client.query<{ status: string; title: string }>(
+    `SELECT status, title FROM treatment_plans WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!plan) return "not_found";
+  const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM treatment_plans WHERE id = $1`, [id]);
+  await admit(owner.patient_id);
+  if (plan.status === status) return "ok";
+  const reason = ctx.reason?.trim() || null;
+  /* إلغاء الخطة أو إحياء الملغاة قرارٌ مسبَّب — يُحكم عليه تحت قفل الصف نفسه، فطلبٌ متزامن
+     ألغاها للتو لا يُحييه طلبٌ آخر بلا سبب (قرأ حالةً قديمة قبل القفل). */
+  if ((status === "cancelled" || plan.status === "cancelled") && (reason?.length ?? 0) < 3) return "reason_required";
+  await client.query(`UPDATE treatment_plans SET status = $2 WHERE id = $1`, [id, status]);
+  await insertAuditRow(client, {
+    action: "plan.status", entity: "treatment_plans", entityId: id, entityLabel: plan.title,
+    details: { من: plan.status, إلى: status, ...(reason ? { السبب: reason } : {}) },
+    actor: ctx.actor, actorRole: ctx.actorRole,
   });
+  return "ok";
 }
 
 /* ────────────────── بنود الخطة السريرية وموافقتها ────────────────── */

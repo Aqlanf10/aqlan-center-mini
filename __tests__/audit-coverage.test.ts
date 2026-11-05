@@ -127,10 +127,13 @@ function handlerAudits(local: Map<string, string>, handler: string, audited: Set
 // classification. Behavioral checks below and plans-creation-entry.test.ts cover
 // refusal, preserved policy, body limits and no writer/success-audit invocation;
 // plan-creation-entry-http.test.ts covers proxy policy and unchanged DB rows.
+// M2 slice 94b re-pinned it: the canonical branch admits clinical.plans.edit inside the patient
+// scope and then refuses with the same 409 inside an operation that always rolls back
+// (postgres/plan-writes-canonical.test.ts proves no plan row is written).
 const REFUSAL_ONLY = {
   "POST /api/plans": {
-    reason: "إنشاء الخطط القديم موقوف: رفض 409 بعد الصلاحيات، بلا كتابة أو تدقيق نجاح.",
-    sha256: "cd5aa5ddddd9ccb7aba89bbdb3d060c96113a7a6226e1167f67634612a23ac2e",
+    reason: "إنشاء الخطط القديم موقوف: رفض 409 بعد الصلاحيات (والنطاق على الهوية الموحّدة)، بلا كتابة أو تدقيق نجاح.",
+    sha256: "29db38c8f9146b0ebfd4e5ee400822952da843080ff90eb7ff70ab6a5ef83a02",
   },
 };
 const audited = auditingLibFunctions();
