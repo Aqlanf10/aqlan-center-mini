@@ -1,0 +1,37 @@
+[
+  {
+    "library_file_id": "libfile_f4f305bc1f408191ac6c6b884edc6a97",
+    "file": "coordination/AQLAN-0055-migrations__0055_ortho_clinical_approval_governance.sql.txt",
+    "bytes": 7375,
+    "sha256": "f274d742868744fc6a7fccbd640f72e074b46255bb2c78b7b54cc4eeac48d67c",
+    "method": "Library read full text; no truncation; retained final newline; not applied"
+  },
+  {
+    "library_file_id": "libfile_d39eb16a58a48191a895834dd423f3f2",
+    "file": "coordination/AQLAN-0055-lib__ortho-clinical-grant.ts.txt",
+    "bytes": 7259,
+    "sha256": "aff35c9d1887dd7e4bae46860ba8802b0b1324dd535600fab1bd52565244f79c",
+    "method": "Library read full text; no truncation; retained final newline; not applied"
+  },
+  {
+    "library_file_id": "libfile_b759fae211d481918eb68916205d3c61",
+    "file": "coordination/AQLAN-0055-lib__ortho-clinical-grant-schema.ts.txt",
+    "bytes": 7499,
+    "sha256": "a75a2d9f95cb71a99cf090d91027a7c2828cf16dd7037a79ee52a85ae0577b48",
+    "method": "Library read full text; no truncation; retained final newline; not applied"
+  },
+  {
+    "library_file_id": "libfile_2f87b6886b9c819189a2cc2eafc96a8d",
+    "file": "coordination/AQLAN-0055-__tests____ortho-clinical-grant.test.ts.txt",
+    "bytes": 5438,
+    "sha256": "cf37bee33a2294e0dd87990a0555b54636d414d828b5497476ff2877c18c64bf",
+    "method": "Library read full text; no truncation; retained final newline; not applied"
+  },
+  {
+    "library_file_id": "libfile_7a993f2ed4708191adcfa371aae7b7d0",
+    "file": "coordination/AQLAN-0055-__tests____postgres__ortho-clinical-grant-schema.test.ts.txt",
+    "bytes": 6323,
+    "sha256": "2c3b009cecf6db2c8fc36b62eff67dc53d415466d6a06663b0e1c03dd7f02315",
+    "method": "Library read full text; no truncation; retained final newline; not applied"
+  }
+]

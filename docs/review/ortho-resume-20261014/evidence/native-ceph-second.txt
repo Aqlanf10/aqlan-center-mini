@@ -1,0 +1,63 @@
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-resume
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ceph-versioned-planes-browser.test.ts (2 tests | 2 failed) 4316ms
+     × keeps new and historic stamps distinct at 390px 1466ms
+     × keeps new and historic stamps distinct at 1280px 1702ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ceph-versioned-planes-browser.test.ts > versioned ceph planes in the built browser and print consumer > keeps new and historic stamps distinct at 390px
+Error: locator.screenshot: Element is not attached to the DOM
+Call log:
+[2m  - taking element screenshot[22m
+[2m  - waiting for fonts to load...[22m
+[2m  - fonts loaded[22m
+[2m  - attempting scroll into view action[22m
+[2m    - waiting for element to be stable[22m
+
+ ❯ __tests__/security-http/ceph-versioned-planes-browser.test.ts:69:39
+     67|       expect(current.find(r => r.code === "STEINER_SN_GOGN_V1").value)…
+     68|       expect(current.find(r => r.code === "DOWNS_FH_GOME_V1").value).t…
+     69|       await row("STEINER_SN_GOGN_V1").screenshot({ path: `.settings-ui…
+       |                                       ^
+     70|       const historical = (await db.query(`INSERT INTO ceph_analyses(pa…
+     71|         VALUES($1,$2,'completed','during',NULL,'synthetic archive','sy…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/ceph-versioned-planes-browser.test.ts > versioned ceph planes in the built browser and print consumer > keeps new and historic stamps distinct at 1280px
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "Minified React error #418; visit https://react.dev/errors/418?args[]=text&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings.",
++   "Minified React error #418; visit https://react.dev/errors/418?args[]=text&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings.",
++ ]
+
+ ❯ __tests__/security-http/ceph-versioned-planes-browser.test.ts:88:22
+     86|       expect((await db.query("SELECT code,value FROM ceph_measurements…
+     87|       expect((await db.query("SELECT code,value FROM ceph_measurements…
+     88|       expect(errors).toEqual([]);
+       |                      ^
+     89|     } catch (error) {
+     90|       await page.screenshot({ path: `.settings-ui-artifacts/ceph-versi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  21:25:33
+   Duration  8.07s (transform 50ms, setup 0ms, import 323ms, tests 4.32s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -235,7 +235,7 @@ export interface CephSchoolDef {
 }
 
 export const CEPH_SCHOOLS: CephSchoolDef[] = [
-  { id: "all", nameAr: "الكل", nameEn: "All Analyses", author: "الجميع", descAr: "عرض كافة القياسات السيفالومترية الـ 49 لجميع المدارس" },
+  { id: "all", nameAr: "الكل", nameEn: "All Analyses", author: "الجميع", descAr: "عرض القياسات السيفالومترية المسجلة لجميع المدارس" },
   { id: "webceph", nameAr: "ويب سيف الشامل", nameEn: "WebCeph Comprehensive", author: "WebCeph / AssembleCircle", descAr: "التحليل القياسي الشامل لبرنامج WebCeph متضمناً مؤشرات كيم ومضلع بيورك والبروفايل ومؤشر القلع" },
   { id: "steiner", nameAr: "شتاينر", nameEn: "Steiner Analysis", author: "Cecil C. Steiner (1953)", descAr: "تحليل شتاينر الكلاسيكي للعلاقات الهيكلية السهمية وميل القواطع بالنسبة لقاعدة الجمجمة SN" },
   { id: "tweed", nameAr: "تويد", nameEn: "Tweed Triangle", author: "Charles H. Tweed (1946)", descAr: "مثلث تويد التشخيصي الشهير (FMA + FMIA + IMPA = 180°) لتحديد وضع القاطع السفلي واستقرار الإطباق" },
@@ -263,8 +263,14 @@ export interface MeasurementDef {
    * المعدل المرجعي من الأدبيات — وسيلةُ عيّناتٍ تُعرض للطبيب مرجعًا لا حكمًا.
    * `mean` و`tol` يحصران المدى المتعارف: [mean−tol, mean+tol].
    */
-  mean: number;
-  tol: number;
+  mean: number | null;
+  tol: number | null;
+  /** Explicitly unavailable norms; never borrow a similarly named method's reference. */
+  referencePending?: boolean;
+  /** Read old sealed rows only. New analyses must use a distinct protocol code. */
+  retired?: boolean;
+  /** Versioned definitions retain unrounded geometry in the saved value. */
+  protocolVersion?: number;
   /** كيف وُجد المعدل — يُعرض تحت الجدول بندرةِ المصدر. */
   source: string;
   /** تفسير اتجاه القيمة — يُعرض عند المزاج لمن يحتاجه. */
@@ -297,7 +303,9 @@ export const MEASUREMENTS: MeasurementDef[] = [
   { code: "A_NPERP", ar: "بُعد A عن عمود N", en: "A to N-perpendicular", group: "sagittal", schools: ["mcnamara", "webceph"], unit: "mm", needs: ["N", "Or", "Po", "A"], mean: 0.5, tol: 0.5, source: "McNamara / WebCeph", note: "الأمام موجب — والمنشور (McNamara): من ٠ إلى +١ مم أمام العمود للبالغين" },
   { code: "POG_NPERP", ar: "بُعد Pog عن عمود N", en: "Pog to N-perpendicular", group: "sagittal", schools: ["mcnamara", "webceph"], unit: "mm", needs: ["N", "Or", "Po", "Pog"], mean: -2, tol: 2, source: "McNamara / WebCeph", note: "الأمام موجب — والمنشور (McNamara): من −٤ إلى ٠ مم خلف العمود للبالغين، والإناث −٤ إلى −٢" },
   { code: "FMA", ar: "FMA — FH مع مستوى الفك السفلي", en: "FMA", group: "vertical", schools: ["tweed", "downs", "webceph"], unit: "°", needs: ["Or", "Po", "Me", "Go"], mean: 25, tol: 3, source: "Tweed / WebCeph", note: "الأعلى: نموٌّ مائل للأفقي؛ الأدنى: للعمقي" },
-  { code: "SNGOGN", ar: "SN-GoGn — انحدار الفك", en: "SN-GoGn", group: "vertical", schools: ["steiner", "webceph"], unit: "°", needs: ["S", "N", "Me", "Go"], mean: 32, tol: 5, source: "Steiner" },
+  { code: "SNGOGN", ar: "SN–GoMe — قياس تاريخي بالرمز القديم SNGOGN", en: "Historical SN–GoMe (legacy SNGOGN code)", group: "vertical", schools: ["steiner", "webceph"], unit: "°", needs: ["S", "N", "Me", "Go"], mean: null, tol: null, source: "Legacy implementation; not the Steiner GoGn definition", retired: true, referencePending: true },
+  { code: "STEINER_SN_GOGN_V1", ar: "SN–GoGn — شتاينر", en: "Steiner SN–GoGn", group: "vertical", schools: ["steiner"], unit: "°", needs: ["S", "N", "Go", "Gn"], mean: null, tol: null, source: "Steiner 1960, p.724, GoGn–SN; https://bbo.org.br/bbo/files/bibliografia/artigos/56_The_use_of_cep_halometrics.pdf", referencePending: true, protocolVersion: 1, note: "اتجاه المتجهين S→N وGo→Gn؛ مرجع العينة غير محقق لهذا الإصدار." },
+  { code: "DOWNS_FH_GOME_V1", ar: "FH(Po–Or)–GoMe — داونز", en: "Downs FH(Po–Or)–GoMe", group: "vertical", schools: ["downs"], unit: "°", needs: ["Po", "Or", "Go", "Me"], mean: null, tol: null, source: "Owner-specified landmark protocol; Barbhuiya et al. 2021 Table 1, DOI 10.4103/jos.JOS_28_20; original tangent equivalence unverified", referencePending: true, protocolVersion: 1, note: "اتجاه المتجهين Po→Or وGo→Me؛ لا يفترض تطابق المماس التاريخي أو مرجع عينة." },
   { code: "JARABAK", ar: "نسبة Jarabak — (S-Go)/(N-Me)", en: "Jarabak ratio", group: "vertical", schools: ["jarabak", "webceph"], unit: "%", needs: ["S", "N", "Me", "Go"], mean: 65, tol: 5, source: "Jarabak", note: "الأدنى من ٦٢: اتجاه عمودي؛ الأعلى من ٦٨: اتجاه أفقي تقريبًا" },
   { code: "SADDLE", ar: "زاوية السرج N-S-Ar", en: "Saddle angle (N-S-Ar)", group: "vertical", schools: ["jarabak", "steiner", "webceph"], unit: "°", needs: ["N", "S", "Ar"], mean: 123, tol: 5, source: "Bjork / Jarabak", note: "زاوية قاعدة الجمجمة الخلفية (123°±5°): الزاوية الكبيرة (>128°) ترجع المفصل الفكي للخلف وتزيد من ميل الصنف الثاني" },
   { code: "ARTICULAR", ar: "زاوية الارتكاز المفصلي S-Ar-Go", en: "Articular angle (S-Ar-Go)", group: "vertical", schools: ["jarabak", "webceph"], unit: "°", needs: ["S", "Ar", "Go"], mean: 143, tol: 6, source: "Bjork / Jarabak", note: "زاوية المفصل الفكي (143°±6°): الأكبر تزيد من الطول العمودي للوجه وتدير الفك للأسفل والخلف" },
@@ -366,6 +374,8 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
     }
     case "WITS": {
       if (!has("A", "B", "OcclA", "OcclP")) return NaN;
+      if (!Number.isFinite(mmPerPixel) || mmPerPixel <= 0) return NaN;
+      if (dist(p("OcclA"), p("OcclP")) === 0) return NaN;
       // قدمُ العمود لكلٍّ من A وB على مستوى الإطباق، ثم المسافة بينهما على
       // اتجاه المستوى نفسه موجبًا نحو الأمام. القيم الأكبر نحو الصنف الثاني.
       const fa = projectOnLine(p("A"), p("OcclA"), p("OcclP"));
@@ -373,7 +383,9 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
       let dir = vec(fb, fa);
       if (dir.x < 0) dir = { x: -dir.x, y: -dir.y };
       const len = Math.hypot(dir.x, dir.y);
-      if (len === 0) return NaN;
+      // Coincident AO/BO is a measured zero, provided calibration and the
+      // occlusal axis are valid. Do not erase it as a missing measurement.
+      if (len === 0) return pixelsToMm(0, mmPerPixel);
       const along = ((fa.x - fb.x) * dir.x + (fa.y - fb.y) * dir.y) / len;
       return pixelsToMm(along, mmPerPixel);
     }
@@ -392,6 +404,14 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
     case "SNGOGN": {
       if (!has("S", "N", "Me", "Go")) return NaN;
       return angleBetween(vec(p("S"), p("N")), vec(p("Go"), p("Me")));
+    }
+    case "STEINER_SN_GOGN_V1": {
+      if (!has("S", "N", "Go", "Gn")) return NaN;
+      return angleBetween(vec(p("S"), p("N")), vec(p("Go"), p("Gn")));
+    }
+    case "DOWNS_FH_GOME_V1": {
+      if (!has("Po", "Or", "Go", "Me")) return NaN;
+      return angleBetween(vec(p("Po"), p("Or")), vec(p("Go"), p("Me")));
     }
     case "JARABAK": {
       if (!has("S", "N", "Me", "Go")) return NaN;
@@ -641,7 +661,7 @@ export type MeasurementStatus = "within" | "above" | "below";
 
 /** موضع القيمة من المدى المرجعي — للعرض بالألوان لا للحكم. */
 export function interpret(value: number, def: MeasurementDef): MeasurementStatus | null {
-  if (!Number.isFinite(value)) return null;
+  if (!Number.isFinite(value) || def.referencePending || def.mean === null || def.tol === null) return null;
   if (value > def.mean + def.tol) return "above";
   if (value < def.mean - def.tol) return "below";
   return "within";
@@ -654,8 +674,8 @@ export function interpret(value: number, def: MeasurementDef): MeasurementStatus
  * - نجمتان "**": انحراف ملحوظ (2 to 3 SD)
  * - ثلاث نجوم "***": انحراف شديد (> 3 SD)
  */
-export function getSeverityStars(value: number | null | undefined, mean: number, sd: number): "" | "*" | "**" | "***" {
-  if (value == null || !Number.isFinite(value) || !Number.isFinite(mean) || !Number.isFinite(sd) || sd <= 0) return "";
+export function getSeverityStars(value: number | null | undefined, mean: number | null, sd: number | null): "" | "*" | "**" | "***" {
+  if (value == null || mean === null || sd === null || !Number.isFinite(value) || !Number.isFinite(mean) || !Number.isFinite(sd) || sd <= 0) return "";
   const z = Math.abs(value - mean) / sd;
   if (z <= 1.0) return "";
   if (z <= 2.0) return "*";
@@ -778,9 +798,12 @@ export interface MeasurementResult {
   schools: CephSchool[];
   value: number | null;
   display: string;
-  mean: number;
-  tol: number;
+  mean: number | null;
+  tol: number | null;
+  referencePending?: boolean;
   status: MeasurementStatus | null;
+  /** Historic protocol identity must survive projection into screen/print rows. */
+  retired?: boolean;
   severityStars?: "" | "*" | "**" | "***";
   interpretationEn?: string;
   interpretationAr?: string;
@@ -790,11 +813,15 @@ export interface MeasurementResult {
 
 /** كل القياسات دفعةً واحدة — جداول الشاشة الحية ولقطة الاعتماد على السواء. */
 export function computeAll(L: LandmarkMap, mmPerPixel: number): MeasurementResult[] {
-  return MEASUREMENTS.map((def) => {
+  return MEASUREMENTS.filter(def => !def.retired).map((def) => {
     const value = measure(def.code, L, mmPerPixel);
-    const ok = Number.isFinite(value);
-    const valRounded = ok ? round1(value) : null;
-    const interp = getClinicalInterpretation(def.code, valRounded);
+    return measurementResult(def, def.protocolVersion ? value : round1(value));
+  });
+}
+/** Presentation can round; stored/versioned values and old sealed identities never do. */
+function measurementResult(def: MeasurementDef, value: number): MeasurementResult {
+    const ok = Number.isFinite(value), savedValue = ok ? value : null;
+    const interp = def.referencePending ? { en: "", ar: "" } : getClinicalInterpretation(def.code, savedValue);
     return {
       code: def.code,
       ar: def.ar,
@@ -802,17 +829,26 @@ export function computeAll(L: LandmarkMap, mmPerPixel: number): MeasurementResul
       unit: def.unit,
       group: def.group,
       schools: def.schools,
-      value: valRounded,
-      display: ok ? String(valRounded) : "—",
+      value: savedValue,
+      display: ok ? String(round1(value)) : "—",
       mean: def.mean,
       tol: def.tol,
+      ...(def.referencePending ? { referencePending: true } : {}),
+      ...(def.retired ? { retired: true } : {}),
       status: interpret(value, def),
-      severityStars: getSeverityStars(valRounded, def.mean, def.tol),
+      severityStars: def.referencePending ? "" : getSeverityStars(savedValue, def.mean, def.tol),
       interpretationEn: interp.en,
       interpretationAr: interp.ar,
       source: def.source,
       note: def.note,
     };
+}
+
+/** A completed study is its sealed rows, including retired codes, never a fresh calculation. */
+export function projectCephStampedValues(rows: readonly { code: string; value: number }[]): MeasurementResult[] {
+  return rows.flatMap(row => {
+    const def = MEASUREMENTS.find(candidate => candidate.code === row.code);
+    return def && Number.isFinite(row.value) ? [measurementResult(def, row.value)] : [];
   });
 }
 
@@ -842,7 +878,7 @@ export interface CephSummary {
 export function summarize(results: MeasurementResult[]): CephSummary {
   const anb = results.find((r) => r.code === "ANB")?.value ?? null;
   const fma = results.find((r) => r.code === "FMA")?.value ?? null;
-  const sngogn = results.find((r) => r.code === "SNGOGN")?.value ?? null;
+  const sngogn = results.find((r) => r.code === "SNGOGN" && !r.referencePending)?.value ?? null;
 
   let skeletal = "— أكمل قياس ANB —";
   if (anb != null && Number.isFinite(anb)) {
@@ -851,7 +887,9 @@ export function summarize(results: MeasurementResult[]): CephSummary {
     else skeletal = "علاقة هيكلية صنف أول تقريبًا (ANB داخل المدى)";
   }
 
-  let vertical = "— أكمل قياس FMA —";
+  let vertical = fma != null && Number.isFinite(fma)
+    ? "التفسير العمودي غير متاح: مرجع SN–GoGn لهذا الإصدار غير محقق."
+    : "— أكمل قياس FMA —";
   if (fma != null && Number.isFinite(fma) && sngogn != null && Number.isFinite(sngogn)) {
     if (fma > 31 || sngogn > 39) vertical = "نموّ عمودي مائل للأفقي (زاوية الفك مفتوحة)";
     else if (fma < 19 || sngogn < 27) vertical = "نموّ عمودي مائل للعمقي (زاوية الفك مغمدة)";
@@ -929,10 +967,11 @@ export function enrichWithRefs(
   refs: RefMap | null,
 ): EnrichedMeasurement[] {
   return results.map((r) => {
+    if (r.referencePending) return { ...r, refMean: null, refSd: null, diff: null, z: null, refLabel: null, refSeverity: null };
     const ref = refs?.[r.code];
     const mean = ref ? ref.mean : r.mean;
     const sd = ref ? ref.sd : r.tol;
-    if (r.value == null || !Number.isFinite(mean) || !Number.isFinite(sd) || sd <= 0) {
+    if (r.value == null || mean === null || sd === null || !Number.isFinite(mean) || !Number.isFinite(sd) || sd <= 0) {
       return { ...r, refMean: ref ? ref.mean : r.mean, refSd: ref ? ref.sd : r.tol, diff: null, z: null, refLabel: null, refSeverity: null };
     }
     const reading = classifyZ(zScore(r.value, { mean, sd }));
@@ -961,7 +1000,7 @@ export interface DiagnosisSuggestion {
  * تكتمل معالمه يقول عنه الصدق: غير متاح.
  */
 export function suggestDiagnosis(results: MeasurementResult[]): DiagnosisSuggestion {
-  const get = (code: string): number | null => results.find((r) => r.code === code)?.value ?? null;
+  const get = (code: string): number | null => results.find((r) => r.code === code && !r.referencePending)?.value ?? null;
   const summary = summarize(results);
 
   const parts: string[] = [];
@@ -1072,7 +1111,7 @@ export function generateCephExpertDiagnosis(
   results: MeasurementResult[],
   patientInfo?: { age?: number; gender?: string },
 ): CephExpertDiagnosis {
-  const get = (code: string): number | null => results.find((r) => r.code === code)?.value ?? null;
+  const get = (code: string): number | null => results.find((r) => r.code === code && !r.referencePending)?.value ?? null;
 
   // 1. التحليل الهيكلي السهمي
   const anb = get("ANB");

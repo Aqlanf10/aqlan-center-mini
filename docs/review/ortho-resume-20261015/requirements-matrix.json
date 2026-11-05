@@ -1,0 +1,4252 @@
+{
+  "code_head": "4d6ba3f8c8f3c0e2fd327a85a251545ffc5373e3",
+  "ledger": "../../ORTHO_CEPH_REQUIREMENTS_LEDGER.json",
+  "packets": {
+    "context": {
+      "candidate_paths": [
+        {
+          "path": "AGENTS.md",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "components/PatientOrtho.tsx",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/db.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/http-permissions.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/migrations.ts",
+          "exists_at_resumed_head": true
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "journey": {
+      "candidate_paths": [
+        {
+          "path": "components/PatientOrtho.tsx",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "components/OrthoCaseStudy.tsx",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "components/OrthoAssessmentIntake.tsx",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-case-journey-store.ts",
+          "exists_at_resumed_head": false
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "assessment": {
+      "candidate_paths": [
+        {
+          "path": "components/OrthoAssessmentEditor.tsx",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-assessment.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-assessment-store.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-assessment-schema.ts",
+          "exists_at_resumed_head": false
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "media": {
+      "candidate_paths": [
+        {
+          "path": "components/OrthoStudyImageEditor.tsx",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-study-media.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-study-image-editor.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "app/api/documents/[id]/route.ts",
+          "exists_at_resumed_head": true
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "ceph": {
+      "candidate_paths": [
+        {
+          "path": "lib/ceph.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/cephCompare.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/db.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "components/CephTracer.tsx",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "app/ceph/[id]/page.tsx",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "app/print/ceph/[id]/page.tsx",
+          "exists_at_resumed_head": true
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "strategy": {
+      "candidate_paths": [
+        {
+          "path": "lib/ortho-treatment-strategy.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-treatment-strategy-store.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "components/OrthoTreatmentStrategy.tsx",
+          "exists_at_resumed_head": false
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "visit": {
+      "candidate_paths": [
+        {
+          "path": "components/PatientOrtho.tsx",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/db.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "app/api/ortho/[id]/adjustments/route.ts",
+          "exists_at_resumed_head": false
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "retention": {
+      "candidate_paths": [
+        {
+          "path": "components/OrthoRetention.tsx",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-retention.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-retention-store.ts",
+          "exists_at_resumed_head": false
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "finance": {
+      "candidate_paths": [
+        {
+          "path": "components/PatientLedger.tsx",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/invoice-linkage-db.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/legacy-treatment-document-db.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/debt-repayment-agreement-db.ts",
+          "exists_at_resumed_head": false
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "presentation": {
+      "candidate_paths": [
+        {
+          "path": "components/OrthoCaseStudy.tsx",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-case-study.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-case-study-store.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-case-study-export.ts",
+          "exists_at_resumed_head": false
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "authority": {
+      "candidate_paths": [
+        {
+          "path": "lib/session.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/patient-access.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/ceph-link-authority.ts",
+          "exists_at_resumed_head": false
+        },
+        {
+          "path": "lib/ortho-clinical-grant.ts",
+          "exists_at_resumed_head": false
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "operations": {
+      "candidate_paths": [
+        {
+          "path": "lib/migrations.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/clinic-reset.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "scripts/verify-schema-ownership.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "lib/ortho-assessment-schema.ts",
+          "exists_at_resumed_head": false
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "delivery": {
+      "candidate_paths": [
+        {
+          "path": "docs/ORTHO_CEPH_REQUIREMENTS_LEDGER.json",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "README.md",
+          "exists_at_resumed_head": true
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    },
+    "acceptance": {
+      "candidate_paths": [
+        {
+          "path": "__tests__/postgres/ceph-versioned-planes.test.ts",
+          "exists_at_resumed_head": true
+        },
+        {
+          "path": "__tests__/security-http/ceph-versioned-planes-browser.test.ts",
+          "exists_at_resumed_head": true
+        }
+      ],
+      "note": "Path presence is inventory, not implementation or acceptance. Missing files remain in saved source branches where applicable."
+    }
+  },
+  "requirements": [
+    {
+      "id": "V2R069",
+      "source_line": 69,
+      "packet": "context",
+      "original_proposed_sources": "AGENTS.md; lib/db.ts; migrations; schema",
+      "required_evidence": "source inventory / existing regression suite",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R070",
+      "source_line": 70,
+      "packet": "context",
+      "original_proposed_sources": "AGENTS.md; lib/db.ts; migrations; schema",
+      "required_evidence": "source inventory / existing regression suite",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R071",
+      "source_line": 71,
+      "packet": "context",
+      "original_proposed_sources": "AGENTS.md; lib/db.ts; migrations; schema",
+      "required_evidence": "source inventory / existing regression suite",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R072",
+      "source_line": 72,
+      "packet": "context",
+      "original_proposed_sources": "AGENTS.md; lib/db.ts; migrations; schema",
+      "required_evidence": "source inventory / existing regression suite",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R073",
+      "source_line": 73,
+      "packet": "context",
+      "original_proposed_sources": "AGENTS.md; lib/db.ts; migrations; schema",
+      "required_evidence": "source inventory / existing regression suite",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R074",
+      "source_line": 74,
+      "packet": "context",
+      "original_proposed_sources": "AGENTS.md; lib/db.ts; migrations; schema",
+      "required_evidence": "source inventory / existing regression suite",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R086",
+      "source_line": 86,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R087",
+      "source_line": 87,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R088",
+      "source_line": 88,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R089",
+      "source_line": 89,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R090",
+      "source_line": 90,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R091",
+      "source_line": 91,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R092",
+      "source_line": 92,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R093",
+      "source_line": 93,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R094",
+      "source_line": 94,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R095",
+      "source_line": 95,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R096",
+      "source_line": 96,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R097",
+      "source_line": 97,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R098",
+      "source_line": 98,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R102",
+      "source_line": 102,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R103",
+      "source_line": 103,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R104",
+      "source_line": 104,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R105",
+      "source_line": 105,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R106",
+      "source_line": 106,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R107",
+      "source_line": 107,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R108",
+      "source_line": 108,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R116",
+      "source_line": 116,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R117",
+      "source_line": 117,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R118",
+      "source_line": 118,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R119",
+      "source_line": 119,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R120",
+      "source_line": 120,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R124",
+      "source_line": 124,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R125",
+      "source_line": 125,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R126",
+      "source_line": 126,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R127",
+      "source_line": 127,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R128",
+      "source_line": 128,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R129",
+      "source_line": 129,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R130",
+      "source_line": 130,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R131",
+      "source_line": 131,
+      "packet": "journey",
+      "original_proposed_sources": "components/PatientOrtho.tsx; components/OrthoCaseJourney.tsx; lib/ortho-case-journey.ts",
+      "required_evidence": "O01 O04 O05 O38 O50 O51;390/768/1440 +1280",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R139",
+      "source_line": 139,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R140",
+      "source_line": 140,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R141",
+      "source_line": 141,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R142",
+      "source_line": 142,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R143",
+      "source_line": 143,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R144",
+      "source_line": 144,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R145",
+      "source_line": 145,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R146",
+      "source_line": 146,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R147",
+      "source_line": 147,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R148",
+      "source_line": 148,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R149",
+      "source_line": 149,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R150",
+      "source_line": 150,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R154",
+      "source_line": 154,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R155",
+      "source_line": 155,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R156",
+      "source_line": 156,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R157",
+      "source_line": 157,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R158",
+      "source_line": 158,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R159",
+      "source_line": 159,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R160",
+      "source_line": 160,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R161",
+      "source_line": 161,
+      "packet": "context",
+      "original_proposed_sources": "lib/db.ts; assessment/strategy/journey stores; dedicated proposed media schema",
+      "required_evidence": "O03 O04 O05 O06 O07 O22 O28 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R167",
+      "source_line": 167,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment*.ts; components/OrthoCaseAssessment.tsx; PatientDiagnosis",
+      "required_evidence": "O01 O02 O04 O13 O17 O24",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R168",
+      "source_line": 168,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment*.ts; components/OrthoCaseAssessment.tsx; PatientDiagnosis",
+      "required_evidence": "O01 O02 O04 O13 O17 O24",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R169",
+      "source_line": 169,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment*.ts; components/OrthoCaseAssessment.tsx; PatientDiagnosis",
+      "required_evidence": "O01 O02 O04 O13 O17 O24",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R170",
+      "source_line": 170,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment*.ts; components/OrthoCaseAssessment.tsx; PatientDiagnosis",
+      "required_evidence": "O01 O02 O04 O13 O17 O24",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R171",
+      "source_line": 171,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment*.ts; components/OrthoCaseAssessment.tsx; PatientDiagnosis",
+      "required_evidence": "O01 O02 O04 O13 O17 O24",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R172",
+      "source_line": 172,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment*.ts; components/OrthoCaseAssessment.tsx; PatientDiagnosis",
+      "required_evidence": "O01 O02 O04 O13 O17 O24",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R173",
+      "source_line": 173,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment*.ts; components/OrthoCaseAssessment.tsx; PatientDiagnosis",
+      "required_evidence": "O01 O02 O04 O13 O17 O24",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R174",
+      "source_line": 174,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment*.ts; components/OrthoCaseAssessment.tsx; PatientDiagnosis",
+      "required_evidence": "O01 O02 O04 O13 O17 O24",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R178",
+      "source_line": 178,
+      "packet": "media",
+      "original_proposed_sources": "patient_documents; lib/ortho-records.ts; WebCephRecordsGrid; proposed group/transform store",
+      "required_evidence": "O03 O09 O32 O33 O34 O36 O37",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R179",
+      "source_line": 179,
+      "packet": "media",
+      "original_proposed_sources": "patient_documents; lib/ortho-records.ts; WebCephRecordsGrid; proposed group/transform store",
+      "required_evidence": "O03 O09 O32 O33 O34 O36 O37",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R180",
+      "source_line": 180,
+      "packet": "media",
+      "original_proposed_sources": "patient_documents; lib/ortho-records.ts; WebCephRecordsGrid; proposed group/transform store",
+      "required_evidence": "O03 O09 O32 O33 O34 O36 O37",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R181",
+      "source_line": 181,
+      "packet": "media",
+      "original_proposed_sources": "patient_documents; lib/ortho-records.ts; WebCephRecordsGrid; proposed group/transform store",
+      "required_evidence": "O03 O09 O32 O33 O34 O36 O37",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R182",
+      "source_line": 182,
+      "packet": "media",
+      "original_proposed_sources": "patient_documents; lib/ortho-records.ts; WebCephRecordsGrid; proposed group/transform store",
+      "required_evidence": "O03 O09 O32 O33 O34 O36 O37",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R183",
+      "source_line": 183,
+      "packet": "media",
+      "original_proposed_sources": "patient_documents; lib/ortho-records.ts; WebCephRecordsGrid; proposed group/transform store",
+      "required_evidence": "O03 O09 O32 O33 O34 O36 O37",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R184",
+      "source_line": 184,
+      "packet": "media",
+      "original_proposed_sources": "patient_documents; lib/ortho-records.ts; WebCephRecordsGrid; proposed group/transform store",
+      "required_evidence": "O03 O09 O32 O33 O34 O36 O37",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R194",
+      "source_line": 194,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R195",
+      "source_line": 195,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R196",
+      "source_line": 196,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R197",
+      "source_line": 197,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R198",
+      "source_line": 198,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R199",
+      "source_line": 199,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R200",
+      "source_line": 200,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R201",
+      "source_line": 201,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R202",
+      "source_line": 202,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R203",
+      "source_line": 203,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R204",
+      "source_line": 204,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R205",
+      "source_line": 205,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R206",
+      "source_line": 206,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R207",
+      "source_line": 207,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R208",
+      "source_line": 208,
+      "packet": "ceph",
+      "original_proposed_sources": "lib/ceph.ts; CephTracer; cephCompare; cephSuperimpose; Ceph routes/store",
+      "required_evidence": "O03 O04 O10 O11 O12 O13",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R218",
+      "source_line": 218,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R219",
+      "source_line": 219,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R220",
+      "source_line": 220,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R221",
+      "source_line": 221,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R222",
+      "source_line": 222,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R223",
+      "source_line": 223,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R224",
+      "source_line": 224,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R225",
+      "source_line": 225,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R226",
+      "source_line": 226,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R227",
+      "source_line": 227,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R235",
+      "source_line": 235,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R236",
+      "source_line": 236,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R237",
+      "source_line": 237,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R238",
+      "source_line": 238,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R239",
+      "source_line": 239,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R243",
+      "source_line": 243,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R244",
+      "source_line": 244,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R245",
+      "source_line": 245,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R246",
+      "source_line": 246,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R247",
+      "source_line": 247,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R248",
+      "source_line": 248,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R249",
+      "source_line": 249,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R250",
+      "source_line": 250,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R251",
+      "source_line": 251,
+      "packet": "assessment",
+      "original_proposed_sources": "lib/ortho-assessment-model.ts; proposed schema2 result/ref registry",
+      "required_evidence": "O14 O15 O38 O39 O40",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R261",
+      "source_line": 261,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R262",
+      "source_line": 262,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R263",
+      "source_line": 263,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R264",
+      "source_line": 264,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R265",
+      "source_line": 265,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R266",
+      "source_line": 266,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R267",
+      "source_line": 267,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R268",
+      "source_line": 268,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R269",
+      "source_line": 269,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R270",
+      "source_line": 270,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R271",
+      "source_line": 271,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R272",
+      "source_line": 272,
+      "packet": "strategy",
+      "original_proposed_sources": "lib/ortho-treatment-strategy*.ts; PatientPlans; proposed space/IPR event contract",
+      "required_evidence": "O06 O08 O16 O17 O28",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R278",
+      "source_line": 278,
+      "packet": "visit",
+      "original_proposed_sources": "PatientOrtho; ortho_adjustments; clinical-visit/checkout existing routes",
+      "required_evidence": "O01 O05 O07 O08 O16 O28 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R279",
+      "source_line": 279,
+      "packet": "visit",
+      "original_proposed_sources": "PatientOrtho; ortho_adjustments; clinical-visit/checkout existing routes",
+      "required_evidence": "O01 O05 O07 O08 O16 O28 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R280",
+      "source_line": 280,
+      "packet": "visit",
+      "original_proposed_sources": "PatientOrtho; ortho_adjustments; clinical-visit/checkout existing routes",
+      "required_evidence": "O01 O05 O07 O08 O16 O28 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R281",
+      "source_line": 281,
+      "packet": "visit",
+      "original_proposed_sources": "PatientOrtho; ortho_adjustments; clinical-visit/checkout existing routes",
+      "required_evidence": "O01 O05 O07 O08 O16 O28 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R282",
+      "source_line": 282,
+      "packet": "visit",
+      "original_proposed_sources": "PatientOrtho; ortho_adjustments; clinical-visit/checkout existing routes",
+      "required_evidence": "O01 O05 O07 O08 O16 O28 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R283",
+      "source_line": 283,
+      "packet": "visit",
+      "original_proposed_sources": "PatientOrtho; ortho_adjustments; clinical-visit/checkout existing routes",
+      "required_evidence": "O01 O05 O07 O08 O16 O28 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R284",
+      "source_line": 284,
+      "packet": "visit",
+      "original_proposed_sources": "PatientOrtho; ortho_adjustments; clinical-visit/checkout existing routes",
+      "required_evidence": "O01 O05 O07 O08 O16 O28 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R292",
+      "source_line": 292,
+      "packet": "retention",
+      "original_proposed_sources": "lib/ortho-case-journey*.ts; proposed0053 retention; lib/ortho-followup.ts",
+      "required_evidence": "O18 O19 O20",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R293",
+      "source_line": 293,
+      "packet": "retention",
+      "original_proposed_sources": "lib/ortho-case-journey*.ts; proposed0053 retention; lib/ortho-followup.ts",
+      "required_evidence": "O18 O19 O20",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R294",
+      "source_line": 294,
+      "packet": "retention",
+      "original_proposed_sources": "lib/ortho-case-journey*.ts; proposed0053 retention; lib/ortho-followup.ts",
+      "required_evidence": "O18 O19 O20",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R295",
+      "source_line": 295,
+      "packet": "retention",
+      "original_proposed_sources": "lib/ortho-case-journey*.ts; proposed0053 retention; lib/ortho-followup.ts",
+      "required_evidence": "O18 O19 O20",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R296",
+      "source_line": 296,
+      "packet": "retention",
+      "original_proposed_sources": "lib/ortho-case-journey*.ts; proposed0053 retention; lib/ortho-followup.ts",
+      "required_evidence": "O18 O19 O20",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R297",
+      "source_line": 297,
+      "packet": "retention",
+      "original_proposed_sources": "lib/ortho-case-journey*.ts; proposed0053 retention; lib/ortho-followup.ts",
+      "required_evidence": "O18 O19 O20",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R298",
+      "source_line": 298,
+      "packet": "retention",
+      "original_proposed_sources": "lib/ortho-case-journey*.ts; proposed0053 retention; lib/ortho-followup.ts",
+      "required_evidence": "O18 O19 O20",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R299",
+      "source_line": 299,
+      "packet": "retention",
+      "original_proposed_sources": "lib/ortho-case-journey*.ts; proposed0053 retention; lib/ortho-followup.ts",
+      "required_evidence": "O18 O19 O20",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R303",
+      "source_line": 303,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R304",
+      "source_line": 304,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R305",
+      "source_line": 305,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R306",
+      "source_line": 306,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R307",
+      "source_line": 307,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R308",
+      "source_line": 308,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R309",
+      "source_line": 309,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R310",
+      "source_line": 310,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R311",
+      "source_line": 311,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R319",
+      "source_line": 319,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R320",
+      "source_line": 320,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R321",
+      "source_line": 321,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R322",
+      "source_line": 322,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R323",
+      "source_line": 323,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R324",
+      "source_line": 324,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R325",
+      "source_line": 325,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R326",
+      "source_line": 326,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R327",
+      "source_line": 327,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R328",
+      "source_line": 328,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R329",
+      "source_line": 329,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R335",
+      "source_line": 335,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R336",
+      "source_line": 336,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R337",
+      "source_line": 337,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R338",
+      "source_line": 338,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R339",
+      "source_line": 339,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R340",
+      "source_line": 340,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R341",
+      "source_line": 341,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R342",
+      "source_line": 342,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R343",
+      "source_line": 343,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R344",
+      "source_line": 344,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R345",
+      "source_line": 345,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R349",
+      "source_line": 349,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R350",
+      "source_line": 350,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R351",
+      "source_line": 351,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R352",
+      "source_line": 352,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R353",
+      "source_line": 353,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R354",
+      "source_line": 354,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R355",
+      "source_line": 355,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R359",
+      "source_line": 359,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R360",
+      "source_line": 360,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R361",
+      "source_line": 361,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R362",
+      "source_line": 362,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R363",
+      "source_line": 363,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R364",
+      "source_line": 364,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R365",
+      "source_line": 365,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R369",
+      "source_line": 369,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R370",
+      "source_line": 370,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R371",
+      "source_line": 371,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R372",
+      "source_line": 372,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R373",
+      "source_line": 373,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R374",
+      "source_line": 374,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R375",
+      "source_line": 375,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R376",
+      "source_line": 376,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R377",
+      "source_line": 377,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R378",
+      "source_line": 378,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R386",
+      "source_line": 386,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R387",
+      "source_line": 387,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R388",
+      "source_line": 388,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R389",
+      "source_line": 389,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R390",
+      "source_line": 390,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R391",
+      "source_line": 391,
+      "packet": "finance",
+      "original_proposed_sources": "canonical plans/invoices/payments/installments/legacy/FX/checkout; new read-only context adapter",
+      "required_evidence": "O02 O27 O28 O41 O42 O43 O44 O45 O46 O47 O48 O49",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R399",
+      "source_line": 399,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R400",
+      "source_line": 400,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R401",
+      "source_line": 401,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R402",
+      "source_line": 402,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R403",
+      "source_line": 403,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R404",
+      "source_line": 404,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R405",
+      "source_line": 405,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R406",
+      "source_line": 406,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R412",
+      "source_line": 412,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R413",
+      "source_line": 413,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R414",
+      "source_line": 414,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R415",
+      "source_line": 415,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R416",
+      "source_line": 416,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R417",
+      "source_line": 417,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R418",
+      "source_line": 418,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R419",
+      "source_line": 419,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R420",
+      "source_line": 420,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R421",
+      "source_line": 421,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R422",
+      "source_line": 422,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R423",
+      "source_line": 423,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R431",
+      "source_line": 431,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R432",
+      "source_line": 432,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R433",
+      "source_line": 433,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R434",
+      "source_line": 434,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R435",
+      "source_line": 435,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R436",
+      "source_line": 436,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R437",
+      "source_line": 437,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R438",
+      "source_line": 438,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R439",
+      "source_line": 439,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R440",
+      "source_line": 440,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R441",
+      "source_line": 441,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R442",
+      "source_line": 442,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R443",
+      "source_line": 443,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R444",
+      "source_line": 444,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R452",
+      "source_line": 452,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R453",
+      "source_line": 453,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R454",
+      "source_line": 454,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R455",
+      "source_line": 455,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R456",
+      "source_line": 456,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R457",
+      "source_line": 457,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R458",
+      "source_line": 458,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R459",
+      "source_line": 459,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R460",
+      "source_line": 460,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R461",
+      "source_line": 461,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R462",
+      "source_line": 462,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R463",
+      "source_line": 463,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R464",
+      "source_line": 464,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R465",
+      "source_line": 465,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R466",
+      "source_line": 466,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R470",
+      "source_line": 470,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R471",
+      "source_line": 471,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R472",
+      "source_line": 472,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R473",
+      "source_line": 473,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R474",
+      "source_line": 474,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R475",
+      "source_line": 475,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R476",
+      "source_line": 476,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R477",
+      "source_line": 477,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R478",
+      "source_line": 478,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R479",
+      "source_line": 479,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R480",
+      "source_line": 480,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R481",
+      "source_line": 481,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R482",
+      "source_line": 482,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R483",
+      "source_line": 483,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R484",
+      "source_line": 484,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R485",
+      "source_line": 485,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R486",
+      "source_line": 486,
+      "packet": "presentation",
+      "original_proposed_sources": "persisted study workspace/revisions; reviewed per-use transforms; explicit export manifest/job; actualPPTX/PDF",
+      "required_evidence": "O21 O22 O23 O24 O25 O26 O31 O32 O33 O34 O35 O36 O37 O49 O50 O51 O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R490",
+      "source_line": 490,
+      "packet": "authority",
+      "original_proposed_sources": "session/patient-access/permissions/settings; domain route guards",
+      "required_evidence": "O04 O06 O17 O26 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R491",
+      "source_line": 491,
+      "packet": "authority",
+      "original_proposed_sources": "session/patient-access/permissions/settings; domain route guards",
+      "required_evidence": "O04 O06 O17 O26 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R492",
+      "source_line": 492,
+      "packet": "authority",
+      "original_proposed_sources": "session/patient-access/permissions/settings; domain route guards",
+      "required_evidence": "O04 O06 O17 O26 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R493",
+      "source_line": 493,
+      "packet": "authority",
+      "original_proposed_sources": "session/patient-access/permissions/settings; domain route guards",
+      "required_evidence": "O04 O06 O17 O26 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R494",
+      "source_line": 494,
+      "packet": "authority",
+      "original_proposed_sources": "session/patient-access/permissions/settings; domain route guards",
+      "required_evidence": "O04 O06 O17 O26 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R495",
+      "source_line": 495,
+      "packet": "authority",
+      "original_proposed_sources": "session/patient-access/permissions/settings; domain route guards",
+      "required_evidence": "O04 O06 O17 O26 O29",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R499",
+      "source_line": 499,
+      "packet": "operations",
+      "original_proposed_sources": "Railway staging; Dockerfile; CI; job/storage/backup infrastructure",
+      "required_evidence": "O26 O29 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R500",
+      "source_line": 500,
+      "packet": "operations",
+      "original_proposed_sources": "Railway staging; Dockerfile; CI; job/storage/backup infrastructure",
+      "required_evidence": "O26 O29 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R501",
+      "source_line": 501,
+      "packet": "operations",
+      "original_proposed_sources": "Railway staging; Dockerfile; CI; job/storage/backup infrastructure",
+      "required_evidence": "O26 O29 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R502",
+      "source_line": 502,
+      "packet": "operations",
+      "original_proposed_sources": "Railway staging; Dockerfile; CI; job/storage/backup infrastructure",
+      "required_evidence": "O26 O29 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R503",
+      "source_line": 503,
+      "packet": "operations",
+      "original_proposed_sources": "Railway staging; Dockerfile; CI; job/storage/backup infrastructure",
+      "required_evidence": "O26 O29 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R504",
+      "source_line": 504,
+      "packet": "operations",
+      "original_proposed_sources": "Railway staging; Dockerfile; CI; job/storage/backup infrastructure",
+      "required_evidence": "O26 O29 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R505",
+      "source_line": 505,
+      "packet": "operations",
+      "original_proposed_sources": "Railway staging; Dockerfile; CI; job/storage/backup infrastructure",
+      "required_evidence": "O26 O29 O30",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R513",
+      "source_line": 513,
+      "packet": "delivery",
+      "original_proposed_sources": "docs/ORTHO_CEPH_IMPLEMENTATION_PLAN_AR.md; bounded domain packets",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R514",
+      "source_line": 514,
+      "packet": "delivery",
+      "original_proposed_sources": "docs/ORTHO_CEPH_IMPLEMENTATION_PLAN_AR.md; bounded domain packets",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R515",
+      "source_line": 515,
+      "packet": "delivery",
+      "original_proposed_sources": "docs/ORTHO_CEPH_IMPLEMENTATION_PLAN_AR.md; bounded domain packets",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R516",
+      "source_line": 516,
+      "packet": "delivery",
+      "original_proposed_sources": "docs/ORTHO_CEPH_IMPLEMENTATION_PLAN_AR.md; bounded domain packets",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R517",
+      "source_line": 517,
+      "packet": "delivery",
+      "original_proposed_sources": "docs/ORTHO_CEPH_IMPLEMENTATION_PLAN_AR.md; bounded domain packets",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R518",
+      "source_line": 518,
+      "packet": "delivery",
+      "original_proposed_sources": "docs/ORTHO_CEPH_IMPLEMENTATION_PLAN_AR.md; bounded domain packets",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R519",
+      "source_line": 519,
+      "packet": "delivery",
+      "original_proposed_sources": "docs/ORTHO_CEPH_IMPLEMENTATION_PLAN_AR.md; bounded domain packets",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R531",
+      "source_line": 531,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R532",
+      "source_line": 532,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R533",
+      "source_line": 533,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R534",
+      "source_line": 534,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R535",
+      "source_line": 535,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R536",
+      "source_line": 536,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R537",
+      "source_line": 537,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R538",
+      "source_line": 538,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R539",
+      "source_line": 539,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R540",
+      "source_line": 540,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R541",
+      "source_line": 541,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R542",
+      "source_line": 542,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R543",
+      "source_line": 543,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R544",
+      "source_line": 544,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R545",
+      "source_line": 545,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R546",
+      "source_line": 546,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R547",
+      "source_line": 547,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R548",
+      "source_line": 548,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R549",
+      "source_line": 549,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R550",
+      "source_line": 550,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R551",
+      "source_line": 551,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R552",
+      "source_line": 552,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R553",
+      "source_line": 553,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R554",
+      "source_line": 554,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R555",
+      "source_line": 555,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R556",
+      "source_line": 556,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R557",
+      "source_line": 557,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R558",
+      "source_line": 558,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R559",
+      "source_line": 559,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R560",
+      "source_line": 560,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R561",
+      "source_line": 561,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R562",
+      "source_line": 562,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R563",
+      "source_line": 563,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R564",
+      "source_line": 564,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R565",
+      "source_line": 565,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R566",
+      "source_line": 566,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R567",
+      "source_line": 567,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R568",
+      "source_line": 568,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R569",
+      "source_line": 569,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R570",
+      "source_line": 570,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R571",
+      "source_line": 571,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R572",
+      "source_line": 572,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R573",
+      "source_line": 573,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R574",
+      "source_line": 574,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R575",
+      "source_line": 575,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R576",
+      "source_line": 576,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R577",
+      "source_line": 577,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R578",
+      "source_line": 578,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R579",
+      "source_line": 579,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R580",
+      "source_line": 580,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R581",
+      "source_line": 581,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R582",
+      "source_line": 582,
+      "packet": "acceptance",
+      "original_proposed_sources": "unit/PostgreSQL/security-HTTP/browser suites",
+      "required_evidence": "all O01-O52",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R592",
+      "source_line": 592,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R593",
+      "source_line": 593,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R594",
+      "source_line": 594,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R595",
+      "source_line": 595,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R596",
+      "source_line": 596,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R597",
+      "source_line": 597,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R598",
+      "source_line": 598,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R599",
+      "source_line": 599,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R600",
+      "source_line": 600,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    },
+    {
+      "id": "V2R601",
+      "source_line": 601,
+      "packet": "delivery",
+      "original_proposed_sources": "docs; README; source/test/migration/artifact packets",
+      "required_evidence": "full final matrix",
+      "verification": "Not reverified as complete requirement on 2026-10-15 code head",
+      "current_evidence": [],
+      "accepted": false
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "O01",
+      "scenario": "مريض جديد ← تقييم ← صور ← خطة ← زيارة",
+      "expected": "حالة وسياق واحد، دون تكرار الهوية أو التشخيص أو الزيارة",
+      "requirement_id": "V2R531",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O02",
+      "scenario": "مريض بدأ التقويم قبل النظام ولا تتوفر سجلات أولية",
+      "expected": "إدخال ملخص سابق بتواريخه المعلومة دون اختراع T1 أو زيارات",
+      "requirement_id": "V2R532",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O03",
+      "scenario": "حالتان للمريض نفسه/صورة غير مرتبطة",
+      "expected": "لا اختلاط في السجلات أو السيفالو أو التصدير؛ ربط صريح فقط",
+      "requirement_id": "V2R533",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O04",
+      "scenario": "تبديل مريض/حالة أو سحب إذن أثناء الطلب",
+      "expected": "لا ظهور بيانات في السياق الآخر ولا قبول كتابة غير مصرح بها",
+      "requirement_id": "V2R534",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O05",
+      "scenario": "فقد رد الحفظ ثم إعادة المحاولة",
+      "expected": "لا تتكرر الزيارة أو IPR أو دفعة الاستيراد؛ تظهر النتيجة غير المؤكدة",
+      "requirement_id": "V2R535",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O06",
+      "scenario": "طبيبان يعدلان الخطة أو الدراسة",
+      "expected": "كشف تعارض أو تسلسل آمن، دون ضياع صامت للتعديلات",
+      "requirement_id": "V2R536",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O07",
+      "scenario": "إدخال زيارة قديمة بين زيارات قائمة",
+      "expected": "الترتيب صحيح، والمعرفات والصور والتواقيع لا تتغير",
+      "requirement_id": "V2R537",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O08",
+      "scenario": "الاحتفاظ بالسلك ثم تغييره/إزالته",
+      "expected": "التاريخ الفعلي دقيق، والمخطط لا يظهر كأنه مركب",
+      "requirement_id": "V2R538",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O09",
+      "scenario": "صور متعددة للمنظر في تواريخ مختلفة",
+      "expected": "اختيار المجموعة واضح؛ لا تُعرض كمجموعة زمنية واحدة مصطنعة",
+      "requirement_id": "V2R539",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O10",
+      "scenario": "صورة بلا معايرة أو نقطة لازمة",
+      "expected": "لا أطوال مؤكدة ولا صفر بديل ولا اعتماد نتيجة ناقصة",
+      "requirement_id": "V2R540",
+      "accepted": false,
+      "verification": "Partial only: WITS zero, missing calibration, collapsed plane, sealed zero and print; full scenario not accepted",
+      "partial_evidence": [
+        "evidence/unit.txt",
+        "evidence/postgres.txt",
+        "evidence/browser.txt"
+      ]
+    },
+    {
+      "id": "O11",
+      "scenario": "تصحيح دراسة معتمدة ثم مقارنة متابعة",
+      "expected": "المعتمد الأصلي ثابت، أصل التصحيح معروف، ومتابعة الصورة الجديدة منفصلة",
+      "requirement_id": "V2R541",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O12",
+      "scenario": "مرجعان/وحدتان/نسختا محرك مختلفتان",
+      "expected": "تحذير/منع حسب المواصفة، دون فرق رقمي مضلل",
+      "requirement_id": "V2R542",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O13",
+      "scenario": "عمر مجهول وفشل AI وقياسات ناقصة",
+      "expected": "لا افتراض نمو أو نتائج طبيعية أو توصية معتمدة تلقائيًا",
+      "requirement_id": "V2R543",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O14",
+      "scenario": "Bolton ومجموع الأسنان وفرق المساحة",
+      "expected": "نتائج مقابل أمثلة مستقلة موثقة، مع اختبارات التقريب والأسنان المفقودة والقيم الحدية",
+      "requirement_id": "V2R544",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O15",
+      "scenario": "تحليل مختلط للفكين ومقياس شعاعي",
+      "expected": "لا خلط لمجاميع الفكين؛ جداول/معادلات وإصدارات ومعايرة صحيحة",
+      "requirement_id": "V2R545",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O16",
+      "scenario": "IPR لنفس التماس في زيارتين وإعادة إرسال الطلب",
+      "expected": "المجموع صحيح بلا تضاعف، ومخطط/منفذ متمايزان",
+      "requirement_id": "V2R546",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O17",
+      "scenario": "تعديل خطة موقعة ورفض المريض بديلًا",
+      "expected": "إصدار وتدقيق وموافقة مرتبطة بالنسخة المناسبة",
+      "requirement_id": "V2R547",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O18",
+      "scenario": "مثبتان مختلفان للفكين وتسليم بتاريخ قديم",
+      "expected": "حفظ مستقل وتاريخ فعلي، لا كتابة اليوم أو استبدال أحدهما بالآخر",
+      "requirement_id": "V2R548",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O19",
+      "scenario": "مثبت ثابت ومتحرك للفك نفسه ثم استبدال",
+      "expected": "تاريخ أجهزة كامل، والمراجعة مرتبطة بالجهاز الصحيح",
+      "requirement_id": "V2R549",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O20",
+      "scenario": "تثبيت منتظم وآخر شدّة قديمة",
+      "expected": "قائمة المتابعة تعتمد استحقاق التثبيت، بلا إنذار انقطاع آلي من عداد الشدّات",
+      "requirement_id": "V2R550",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O21",
+      "scenario": "حالة مرجعية اصطناعية طويلة بزيارات كثيرة",
+      "expected": "PPTX وPDF يطابقان ترتيب A ومصادر الحالة، دون 43 شريحة مفروضة",
+      "requirement_id": "V2R551",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O22",
+      "scenario": "استكمال بيانات أثناء توليد عرض",
+      "expected": "نسخة متسقة من لقطة محددة، لا محتوى هجين",
+      "requirement_id": "V2R552",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O23",
+      "scenario": "PPTX عربي وإنجليزي مع جدول طويل وصور",
+      "expected": "نص وجداول قابلة للتحرير؛ لا قص أو تداخل؛ فتح فعلي في عارضين",
+      "requirement_id": "V2R553",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O24",
+      "scenario": "عرض مسودة/نهائي به بيانات غير معتمدة",
+      "expected": "توضيح الحالة وعدم تمرير مسودة على أنها نتيجة معتمدة",
+      "requirement_id": "V2R554",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O25",
+      "scenario": "تصدير تعليمي مع صور وmetadata",
+      "expected": "فحص محتويات ZIP والملفات المضمنة وعدم تسرب هوية مخفية تحت القص أو في notes",
+      "requirement_id": "V2R555",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O26",
+      "scenario": "سحب إذن الصور/التصدير بعد بدء المهمة",
+      "expected": "التوليد/التنزيل يحترمان الصلاحية الحالية دون تسرب الملفات",
+      "requirement_id": "V2R556",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O27",
+      "scenario": "استيراد ملف قديم مرتين مع بعض الصفوف الخاطئة",
+      "expected": "لا تكرار، تقرير رفض وتطابق واضح، واستكمال آمن للدفعة",
+      "requirement_id": "V2R557",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O28",
+      "scenario": "حفظ زيارة وتصدير واستيراد مع اتفاق SAR وسداد YER",
+      "expected": "لا تغيير في الفواتير والسندات أو إعادة حساب مالي من قسم التقويم",
+      "requirement_id": "V2R558",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O29",
+      "scenario": "Staging بها قالب رسالة وتذكير",
+      "expected": "لا رسالة إلى مريض حقيقي؛ أثر الاختبار ظاهر بمستقبل اختبار",
+      "requirement_id": "V2R559",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O30",
+      "scenario": "ترحيل على PostgreSQL ثم نشر/رجوع/استعادة",
+      "expected": "سلامة البيانات والقيود والتواريخ والروابط، مع دليل استعادة فعلي",
+      "requirement_id": "V2R560",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O31",
+      "scenario": "تعبئة حالة اصطناعية ثم اختيار قالب دراسة الحالة الخاص بالمركز",
+      "expected": "الشرائح الأساسية وتوزيع الصور والجداول مماثلة للمرجع وفق جدول المطابقة، دون ترتيب خارجي يدوي",
+      "requirement_id": "V2R561",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O32",
+      "scenario": "رفع دفعة صور وتصحيح اقتراح تصنيفها",
+      "expected": "تعيين صحيح للمناظر والحالة والزيارة، وتعديل سهل دون فقد المصدر",
+      "requirement_id": "V2R562",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O33",
+      "scenario": "قص وتدوير صورة ذات اتجاه EXIF ثم إعادة فتحها",
+      "expected": "إعادة إنتاج دقيقة للتحويل، وأصل محفوظ وقابل للرجوع",
+      "requirement_id": "V2R563",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O34",
+      "scenario": "صورة واحدة بقصين مختلفين في لوحتين",
+      "expected": "استخدامان مستقلان من الأصل نفسه؛ تغيير أحدهما لا يفسد الآخر",
+      "requirement_id": "V2R564",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O35",
+      "scenario": "معاينة ثم PPTX ثم PDF لصورة مقصوصة",
+      "expected": "تطابق القص والحجم النسبي والاتجاه دون تمدد أو دقة رديئة غير مبينة",
+      "requirement_id": "V2R565",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O36",
+      "scenario": "قص صورة مستخدمة في سيفالو معتمد لأجل العرض",
+      "expected": "لا تتغير المعالم أو المعايرة أو القياسات المعتمدة",
+      "requirement_id": "V2R566",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O37",
+      "scenario": "صورة لا يمكن قصها بأمان لخانة القالب",
+      "expected": "اختيار الاحتواء أو المراجعة؛ لا حذف منطقة سريرية مهمة بصمت",
+      "requirement_id": "V2R567",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O38",
+      "scenario": "وصول مريض جديد ثم إكمال رحلة التقييم خطوة بخطوة",
+      "expected": "نفس هوية المريض والحالة تتبع المقابلة والفحص خارج/داخل الفم والقياسات والبانوراما والسيفالو والخطة؛ استئناف آمن بعد الانقطاع",
+      "requirement_id": "V2R568",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O39",
+      "scenario": "إدخال قياسات الأسنان والقوس مرة واحدة واختيار عدة تحليلات",
+      "expected": "تشغيل التحليلات الجاهزة آليًا دون إدخال مجاميع/نتائج يدويًا؛ ما يحتاج مدخلات إضافية يطلبها تحديدًا ولا يخمنها",
+      "requirement_id": "V2R569",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O40",
+      "scenario": "تعديل قياس بعد اعتماد تحليل وتصدير عرض",
+      "expected": "إعادة حساب المسودات المرتبطة مع حفظ النسخة المعتمدة والعرض السابق؛ النسخة الجديدة تستخدم نتيجة جديدة ذات مصدر معروف",
+      "requirement_id": "V2R570",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O41",
+      "scenario": "اعتماد اتفاق وجدولة أقساطه",
+      "expected": "جدول يطابق صافي الاتفاق دون إنشاء دين إضافي؛ الدفعة المخططة لا تُسجل قبضًا",
+      "requirement_id": "V2R571",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O42",
+      "scenario": "اتفاق قديم له رصيد/سندات سابقة ثم إعادة ربطه",
+      "expected": "مصدر مديونية واحد وتقرير مطابقة؛ لا ازدواج في المبلغ ولا قبض تاريخي داخل صندوق اليوم",
+      "requirement_id": "V2R572",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O43",
+      "scenario": "اتفاق SAR وسداد YER أو USD وتغيير سعر الإعدادات",
+      "expected": "مبلغ صندوق فعلي وتخصيص بعملة الفاتورة وسعر تاريخي ثابت مع اتجاه ووحدة واضحين",
+      "requirement_id": "V2R573",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O44",
+      "scenario": "تحصيل جزئي/مقدم/متعدد العملات ثم إعادة المحاولة",
+      "expected": "تخصيصات صحيحة، سند واحد، فرق تقريب معلن، وعدم تجاوز السياسة المالية للزيادة",
+      "requirement_id": "V2R574",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O45",
+      "scenario": "شدّة مشمولة وعمل إضافي في الزيارة نفسها",
+      "expected": "المشمولة لا تُفوتر ثانية؛ الإضافي يحتاج قرار سعر/موافقة ومصدر مطالبة واضحًا",
+      "requirement_id": "V2R575",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O46",
+      "scenario": "وصول وتأجيل الدفع ثم تحصيل وخروج وإعادة توقيع",
+      "expected": "المطلوب الآن صحيح بعد المقبوض؛ لا مضاعفة سند أو قسط ولا اعتبار التأجيل سدادًا",
+      "requirement_id": "V2R576",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O47",
+      "scenario": "خصم/تعديل/إلغاء اتفاق أو عكس قبض دون صلاحية",
+      "expected": "رفض خادمي وتدقيق مناسب؛ عند الصلاحية إصدار/تسوية موثقة لا محو للتاريخ",
+      "requirement_id": "V2R577",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O48",
+      "scenario": "مثبت ضمن الاتفاق مع طلب مختبر وتخصص آخر",
+      "expected": "تكلفة المختبر لا تضاعف فاتورة المريض، والطبيب المنفذ وتغطية كل بند والعمولة من مصدرها الصحيح",
+      "requirement_id": "V2R578",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O49",
+      "scenario": "تقرير مالي وعرض علمي للحالة نفسها",
+      "expected": "المطابقة الحسابية حسب العملة في التقرير؛ تفاصيل الاتفاق لا تتسرب افتراضيًا للعرض العلمي",
+      "requirement_id": "V2R579",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O50",
+      "scenario": "فتح دراستين لمريضين مختلفين وتصديرهما",
+      "expected": "اسم المركز وهوية كل مريض صحيحان؛ لا اسم للحالة المرجعية في القالب أو الأزرار ولا تسرب بيانات بين المريضين",
+      "requirement_id": "V2R580",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O51",
+      "scenario": "تعبئة الدراسة وقص الصور ثم إغلاق المتصفح دون تصدير",
+      "expected": "الدراسة والقياسات والصور وتعديلات القص واختيارات العرض محفوظة؛ تُفتح من جهاز آخر وتُصدّر لاحقًا دون إعادة الإدخال",
+      "requirement_id": "V2R581",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    },
+    {
+      "id": "O52",
+      "scenario": "توثيق نسخة دراسة ثم تعديل المصدر أو فشل التصدير",
+      "expected": "النسخة الموثقة ثابتة، والتحديث بإصدار جديد؛ فشل التصدير لا يضيع التوثيق أو يُجبر على إعادة التعبئة",
+      "requirement_id": "V2R582",
+      "accepted": false,
+      "verification": "Not executed as a complete scenario on 2026-10-15 code head",
+      "partial_evidence": []
+    }
+  ],
+  "main_observed": "ce78247278397a02e8b9a0c437ab5605951a411c",
+  "scope": "WITS zero repair and source coordination only; no end-to-end scenario newly accepted"
+}

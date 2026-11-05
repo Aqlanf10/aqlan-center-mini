@@ -1,0 +1,138 @@
+{
+  "date_utc": "2026-10-14",
+  "code_head": "1f1061dde04b923ed6dff18d7bfe47785b5ec959",
+  "code_tree": "c0220512b5e864953d9badb130ea454631c38a3f",
+  "base": "9b1ddc0e7d0d2bcf5a5159089e3dc55be6da8216",
+  "saved_source_head": "82e6e52cfb72ee8f360c4a6d09c0ec41277c7d76",
+  "finance_candidate": "62168f21265640bf71fe2c98678b0f19136cac34",
+  "finance_files_changed_here": [],
+  "finance_candidate_paths": [
+    "__tests__/debt-monthly-schedule.test.ts",
+    "__tests__/invoice-price-quote.test.ts",
+    "__tests__/invoice-template-preview.test.ts",
+    "__tests__/invoice-template.test.ts",
+    "__tests__/postgres/invoice-catalog-authority.test.ts",
+    "__tests__/postgres/invoice-revision.test.ts",
+    "__tests__/security-http/debt-repayment-workspace-ui.test.ts",
+    "__tests__/security-http/invoice-monthly-schedule-ui.test.ts",
+    "__tests__/security-http/invoice-quote-contract-ui.test.ts",
+    "__tests__/td05-owner-review.test.ts",
+    "app/api/invoices/clinical-preview/route.ts",
+    "app/api/invoices/route.ts",
+    "app/api/services/route.ts",
+    "app/print/plan/[id]/page.tsx",
+    "components/DebtRepaymentAgreementPrint.tsx",
+    "components/DebtRepaymentEditor.tsx",
+    "components/DebtRepaymentPanel.tsx",
+    "components/PatientLedger.tsx",
+    "components/dental/invoice-template-preview.ts",
+    "docs/INVOICE_CONVERTED_QUOTE_PROPOSAL_20261014.md",
+    "docs/INVOICE_MONTHLY_SCHEDULE_CHECKLIST_20261014.md",
+    "docs/INVOICE_MONTHLY_SCHEDULE_EVIDENCE_20261014.json",
+    "docs/INVOICE_MONTHLY_SCHEDULE_HANDOFF_20261014.md",
+    "docs/INVOICE_PRICE_CONTRACT_ACCEPTANCE_20261014.md",
+    "docs/INVOICE_PRICE_CONTRACT_CHECKPOINT_20261014.md",
+    "docs/INVOICE_PRICE_CONTRACT_EVIDENCE_20261014.json",
+    "docs/INVOICE_PRICE_CONTRACT_HANDOFF_20261014.md",
+    "docs/evidence/invoice-pricing-contract-20261014/historical-contract-admin-1280.png",
+    "docs/evidence/invoice-pricing-contract-20261014/historical-contract-admin.pdf",
+    "docs/evidence/invoice-pricing-contract-20261014/historical-contract-reception-390.png",
+    "docs/evidence/invoice-pricing-contract-20261014/historical-contract-reception.pdf",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-contract-admin-1280.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-contract-admin.pdf",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-contract-reception-390.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-contract-reception.pdf",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-SAR-admin-1280.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-SAR-reception-390.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-USD-admin-1280.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-USD-reception-390.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-YER-admin-1280.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-YER-reception-390.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-quoted-admin-1280.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-quoted-reception-390.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-rounded-zero-admin-1280.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-rounded-zero-reception-390.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-statement-admin-1280.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-statement-reception-390.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-template-converted-admin-1280.png",
+    "docs/evidence/invoice-pricing-contract-20261014/invoice-template-converted-reception-390.png",
+    "lib/debt-monthly-schedule.ts",
+    "lib/debt-repayment-agreement-db.ts",
+    "lib/invoice-catalog-price.ts",
+    "lib/invoice-input.ts",
+    "lib/invoice-price-quote.ts",
+    "lib/invoice-price-settings-db.ts",
+    "lib/invoice-pricing.ts",
+    "lib/invoice-template-db.ts",
+    "lib/invoice-template.ts",
+    "lib/legacy-treatment-document-db.ts",
+    "lib/legacy-treatment-document.ts"
+  ],
+  "source_ledger_sha256": "7dc8afaa065a6779f7f796910c87ce38e4a8ee1fbf20095d31b7713470339438",
+  "original_prompt_sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+  "requirements_count": 349,
+  "acceptance_count": 52,
+  "accepted_count": 0,
+  "tests": {
+    "unit_ceph": {
+      "files": [
+        "__tests__/ceph.test.ts",
+        "__tests__/ceph-versioned-planes.test.ts",
+        "__tests__/ceph-compare.test.ts",
+        "__tests__/ceph-calendar-date.test.ts",
+        "__tests__/ceph-superimpose.test.ts",
+        "__tests__/ceph-ai.test.ts"
+      ],
+      "passed": 91,
+      "log": "unit-ceph-regression.txt"
+    },
+    "unit_clock": {
+      "files": [
+        "__tests__/clinic-clock.test.ts"
+      ],
+      "passed": 5,
+      "log": "unit-clinic-clock.txt"
+    },
+    "postgres_ceph": {
+      "files": [
+        "__tests__/postgres/ceph-versioned-planes.test.ts",
+        "__tests__/postgres/ceph-calendar-date.test.ts"
+      ],
+      "passed": 25,
+      "log": "pg-ceph-regression.txt"
+    },
+    "native_ceph": {
+      "files": [
+        "__tests__/security-http/ceph-versioned-planes-browser.test.ts"
+      ],
+      "passed": 2,
+      "widths": [
+        390,
+        1280
+      ],
+      "log": "native-ceph-visible.txt"
+    }
+  },
+  "evidence_sha256": {
+    "unit-clinic-clock.txt": "7b26cb87d929f898f8136c63c63de06bea91bbe058e8bad0a54f39be89ea2283",
+    "ceph-versioned-historical-390.png": "a396b4c542e70a538b5388f3fdfa62d023018ce004a1b5f58d44df0e50df57c1",
+    "ceph-versioned-historical-1280.png": "5d3399da57e51b623cbb7aba46912a368f205fabb19f8af5bfbf45aff19a7be5",
+    "lint-ceph.txt": "b2f33524709f2f6de1264d60c1674f2f9fd7fa36310f9d4c53c430c196faf424",
+    "typecheck-ceph-first.txt": "baa61911847346be3ed7480f44e2fff29d8514d47e305ff332bd498a85568410",
+    "pg-ceph-regression.txt": "97961f5fa095ecb071dbf32274640083010ff5a1cdc9117495b496619e40171a",
+    "native-ceph-second.txt": "ea966c0d9c2c0dbb115c0c0c3e0afdf4381f9273a92204a70a4cb365b85cd34e",
+    "ceph-versioned-historical-1280.json": "f43b0e03055e49062d086047c64613fb493021e3aecf49a0bd47977cf2c692b6",
+    "lint-ceph-followup.txt": "759823b88e3a5098d71b28f5faf1c8f85eb3de99c599e3177adec0a9b5484966",
+    "typecheck-ceph-second.txt": "76162e465989f3f070a9de8db711fbf358e53b74d09ce1bbdb57c727e4c4a16d",
+    "build-ceph-second.txt": "7a3e1dc248d3df74ed1fe533633afcc09d182cae2ac9e555d31dae2992d4556d",
+    "native-ceph-visible.txt": "a35a891c9f8569229d8b43c0f8a7434142a5cdd3e936aa9834dc26a91343589c",
+    "unit-ceph-regression.txt": "5f4fbdf6b243dea3b1620193096b7012a63b5d9b1fc483c9a2f27306feb86e65",
+    "ceph-versioned-current-1280.png": "21b62f820c7f1534e4c79cc6bd39c83f8c64e8436971a48059f4ae461bef06d8",
+    "ceph-versioned-historical-390.json": "1a0ac2af889a20fb4467ef4504ebf8f15bd43cc97d7ef2731cd45a5adf877564",
+    "ceph-versioned-current-390.png": "c39a188c2c3a0734bf9323769dd8ff4a37589ddf2f0b0e1d17b9ff00256bdb83",
+    "native-ceph-first.txt": "96bae712ec0d3d9ffcbf7aee6ba0c5494c91f3c53d8c04e7567f61c3552157fe",
+    "ceph-versioned-current-390.json": "a31df029efaeb8e84d748f7285ef7d3e703b79b566ac6adb5184849e70bf4fcb",
+    "ceph-versioned-current-1280.json": "4e839b5ba325e9aaa84d0940812614963f782eb94ec5678c7529806131097687"
+  },
+  "scope": "Bounded Ceph repair. Full clinical activation, transactional permission revocation, migration union, HR union, case presentation and exports remain open."
+}
