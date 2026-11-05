@@ -230,3 +230,18 @@ The tests required before any commit:
 - replay recovery by the same actor, with another actor refused;
 - a race test shown failing first: the patient leaving the scope during the writer's wait;
 - the legacy suites unchanged.
+
+## 8. Slice 93c — archiving, restoring and correcting issued invoices (G4-8)
+
+| Route | Admission (canonical) | Legacy |
+|---|---|---|
+| `POST /api/invoices/[id]/archive` (archive or restore) | `finance.invoices.cancel` | Administrator label only |
+| `GET /api/invoices/[id]/correct` | The read `read:invoices.correct` (`finance.invoices.correct`) | Administrator label only |
+| `POST /api/invoices/[id]/correct` | `finance.invoices.correct` | Administrator label only |
+
+The rules:
+- **Grants:** the grants are the map's rule and replace the label; neither implies the other.
+- **Scope:** inside the invoice's patient scope. The writers decide it right after their patient row lock, through an ownership witness, after an early unlocked look. Outside the scope reads as missing.
+- **Session revalidation points:** the slice-91 branded actor re-proves the live operation and its grant at each point where the legacy writer revalidated a session, including the correction's repayment terms through the debt writer.
+- **Durable archive rejections:** these (period locked, policy decision required) still commit their evidence before the refusal.
+- **Prices in a correction:** the legacy correction had no price ceiling (the administrator was unlimited). No new price policy is layered on `finance.invoices.correct` here. Whether a correction should also be bound by the discount, override and increase controls is a question for the owner.

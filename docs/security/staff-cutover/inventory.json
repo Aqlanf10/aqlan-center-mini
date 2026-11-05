@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "e83e942e1f72b1d5adeabddfa77a6ef0b16a01804fc3ccc85591a9c3fe899fd5",
+  "sourceDigest": "1027a5da922d20f343319adcfe7340ca033a7059d5c57b22a7b71fe8b467f138",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -68,7 +68,8 @@
     "finance.payments.void",
     "finance.invoices.cancel",
     "finance.invoices.mark-paid",
-    "finance.payments.refund"
+    "finance.payments.refund",
+    "finance.invoices.correct"
   ],
   "summary": {
     "routeMethods": 420,
@@ -1690,7 +1691,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 21
         }
       ]
     },
@@ -1703,7 +1704,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 30
         }
       ]
     },
@@ -8080,7 +8081,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 21
         }
       ]
     },
@@ -8102,7 +8103,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 21
         }
       ]
     },
@@ -8124,7 +8125,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 30
         }
       ]
     },
@@ -8146,7 +8147,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 30
         }
       ]
     },

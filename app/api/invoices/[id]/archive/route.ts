@@ -7,6 +7,7 @@ import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-h
 import { readCanonicalInvoiceArchive } from "@/lib/canonical-invoice-reads";
 import { readInvoiceArchive, changeInvoiceArchive } from "@/lib/invoice-archive-db";
 import { InvoiceArchiveError } from "@/lib/invoice-archive";
+import { commandCanonicalInvoiceArchive } from "@/lib/canonical-invoice-corrections";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
@@ -35,6 +36,18 @@ export async function GET(_request: Request, context: Context) {
   catch (error) { return failure(error); }
 }
 export async function POST(request: Request, context: Context) {
+  // M2 slice 93c (G4-8): archive or restore by finance.invoices.cancel inside the patient scope.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const result = await commandCanonicalInvoiceArchive(selected.handle, (await context.params).id, await readJsonBody(request, JSON_BODY_LIMIT_BYTES));
+      return NextResponse.json(result, { status: result.replayed || result.noop ? 200 : 201, headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof InvoiceArchiveError || bodyErrorResponse(error)) { const response = failure(error); response.headers.set("Cache-Control", "private, no-store"); return response; }
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد حالة الأرشفة؛ احتفظ بالطلب نفسه وأعد التحقق.");
+    }
+  }
   try {
     const { id, session } = await owner(context);
     if (session.role !== "admin") throw new InvoiceArchiveError("unauthorized", "الأرشفة والاسترجاع للمدير وحده.");

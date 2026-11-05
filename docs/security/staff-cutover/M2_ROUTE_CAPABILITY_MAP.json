@@ -2168,9 +2168,9 @@
    "finance.invoices.cancel"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 93c (G4-8): canonical. One admitted finance.invoices.cancel operation on the legacy writer (changeInvoiceArchiveOn: key lock, replay, lock order, eligibility, period lock, archive event and invoice.archive/invoice.restore audit); the slice-91 branded actor re-proves the operation and grant wherever the legacy writer revalidated its session; the scope decided right after the patient row lock (own: an ownership witness FOR SHARE NOWAIT; outside = missing 404); a durable rejection commits its evidence before the refusal. Legacy: the administrator label only; the explicit grant replaces it."
  },
  {
   "route": "/api/invoices/[id]/correct",
@@ -2182,9 +2182,16 @@
    "finance.invoices.correct"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 93c (G4-8): the registered read read:invoices.correct (finance.invoices.correct) on one snapshot; the invoice's patient inside the scope (outside = missing 404); the legacy correction context.",
+  "projection": {
+   "legacy": "the administrator label read the whole correction context.",
+   "groups": {
+    "context": "the invoice, its items, settlement, account due, repayment schedule and work identities — finance.invoices.correct (the act this form serves)"
+   },
+   "rows": "one invoice; its patient inside the scope (own: the validated clinician's patients)"
+  }
  },
  {
   "route": "/api/invoices/[id]/correct",
@@ -2196,9 +2203,9 @@
    "finance.invoices.correct"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 93c (G4-8): canonical. One admitted finance.invoices.correct operation on the legacy writer (reviseInvoiceOn: lock order, replay, replacement invoice, settlement lineage, dated repayment terms through the debt writer, lab-work aliasing, invoice.correct audit); the branded actor re-proves the operation and grant at each legacy revalidation point; the scope decided right after the patient row lock (outside = missing 404). Legacy: the administrator label only; the explicit grant replaces it. No new price ceiling is layered on corrections (legacy had none); see the slice report."
  },
  {
   "route": "/api/invoices/archive",

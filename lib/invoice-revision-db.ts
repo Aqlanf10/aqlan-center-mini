@@ -8,7 +8,7 @@ import type { SessionPayload } from "./auth";
 import { CLINIC_TIME_ZONE, correctInvoiceInTransaction, ensureSchema, getInvoice, getPool, getSettingsInTransaction,
   insertAuditRow, lockPlanItemsBilledBy, recomputePlanTotal, type DbClient } from "./db";
 import { debtAccountDue, lockDebtAccountForSchedule } from "./debt-account-position";
-import { DebtRepaymentError, debtRequestHash, readDebtPosition, writeDebtRepaymentInTransaction } from "./debt-installments-db";
+import { DebtRepaymentError, debtRequestHash, isCanonicalDebtActor, readDebtPosition, writeDebtRepaymentInTransaction, type DebtActorSource } from "./debt-installments-db";
 import { validateDebtRepaymentTerms } from "./debt-installments";
 import { planInvoiceRevision } from "./invoice-correction";
 import { parseAmount, type Currency } from "./money";
@@ -22,7 +22,9 @@ interface RevisionWork {
 }
 
 function bad(message: string, code: DebtRepaymentError["code"] = "invalid"): never { throw new DebtRepaymentError(code, message); }
-async function authority(client: DbClient, session: SessionPayload) {
+async function authority(client: DbClient, session: DebtActorSource) {
+  // The canonical actor (M2 slice 93c) re-proves its operation and finance.invoices.correct.
+  if (isCanonicalDebtActor(session)) { if (!await session.recheck(client)) bad("تصحيح الفاتورة يحتاج صلاحية تصحيح الفواتير؛ سجّل الدخول من جديد.", "unauthorized"); return; }
   const current = await revalidateSessionInTransaction(session, client);
   if (!current || current.role !== "admin") bad("تصحيح الفاتورة يحتاج جلسة مدير سارية؛ سجّل الدخول من جديد.", "unauthorized");
 }
@@ -84,6 +86,8 @@ async function contextInTx(client: DbClient, invoiceId: number) {
   return { ...facts, sourceHash: debtRequestHash(facts), schedule, target };
 }
 
+/** The correction context on a caller's read-only snapshot (M2 slice 93c, canonical). */
+export async function readInvoiceRevisionOn(client: DbClient, invoiceId: number) { return contextInTx(client, invoiceId); }
 export async function readInvoiceRevision(invoiceId: number, session: SessionPayload) {
   return withLegacyStaffReadOnlySnapshot(session, {
     allows: current => current.role === "admin",
@@ -96,15 +100,31 @@ export async function readInvoiceRevision(invoiceId: number, session: SessionPay
  * and the exact immutable acknowledgement. It creates no payment or refund. */
 export async function reviseInvoice(invoiceId: number, source: Record<string, unknown>, session: SessionPayload) {
   if (!Number.isSafeInteger(invoiceId) || invoiceId <= 0 || session.role !== "admin") bad("تصحيح الفاتورة للمدير وحده.", "unauthorized");
+  await ensureSchema(); const client = await getPool().connect(); let destroy=false;
+  try {
+    await client.query("BEGIN");
+    const result = await reviseInvoiceOn(client, invoiceId, source, session);
+    await client.query("COMMIT"); return result;
+  } catch (error) { try{await client.query("ROLLBACK");}catch{destroy=true;} throw error; } finally { client.release(destroy); }
+}
+
+/**
+ * The correction on a caller's open transaction (M2 slice 93c): the same validation, authority
+ * points (a canonical actor re-proves its operation and finance.invoices.correct there), lock
+ * order, replay, writers and audit; the caller commits only a result. `admit` decides the scope
+ * right after the patient row lock.
+ */
+export async function reviseInvoiceOn(client: DbClient, invoiceId: number, source: Record<string, unknown>, session: DebtActorSource,
+  admit?: (patientId: number) => Promise<void>) {
+  if (!Number.isSafeInteger(invoiceId) || invoiceId <= 0) bad("رقم الفاتورة غير صالح.");
   if (Object.keys(source).some(key => !["idempotencyKey","expectedSourceHash","reason","lines","discount","discountReason","repaymentTerms","expectedRemainingMinor","currency"].includes(key))) bad("حقول التصحيح غير مدعومة.");
   if (typeof source.idempotencyKey !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/.test(source.idempotencyKey)
     || typeof source.expectedSourceHash !== "string" || !/^[a-f0-9]{64}$/.test(source.expectedSourceHash)
     || typeof source.reason !== "string" || source.reason.trim().length < 3 || source.reason.trim().length > 300) bad("راجع مفتاح الطلب والنسخة وسبب التصحيح.");
   const reason = source.reason.trim(), key = source.idempotencyKey;
   const hash = debtRequestHash({ purpose: "invoice-revision-v1", invoiceId, source, actor: { userId: session.userId, username: session.username, role: session.role } });
-  await ensureSchema(); const client = await getPool().connect(); let destroy=false;
-  try {
-    await client.query("BEGIN"); await authority(client,session);
+  {
+    await authority(client,session);
     const replay = async () => {
       const { rows: [row] } = await client.query<{ request_hash: string; original_invoice_id: number; created_by: string; receipt: Record<string, unknown> | null }>(
         `SELECT c.request_hash,c.original_invoice_id,c.created_by,r.receipt FROM invoice_corrections c
@@ -115,7 +135,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       return row.receipt;
     };
     const early = await replay();
-    if (early) { await authority(client,session); await client.query("COMMIT"); return { ...early, replayed: true }; }
+    if (early) { await authority(client,session); return { ...early, replayed: true }; }
     const { rows: [owner] } = await client.query<{ patient_id: number }>("SELECT patient_id FROM invoices WHERE id=$1", [invoiceId]);
     if (!owner) bad("الفاتورة غير موجودة.", "missing");
     // Payroll/commission writers can need shift locks; fence them before holding
@@ -124,6 +144,8 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     // Fence that first write too, including a run with no items yet.
     if(typeof source.currency==="string")await client.query("LOCK TABLE expenses,hr_payroll_runs,hr_payroll_items IN SHARE MODE");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [owner.patient_id]);
+    // Canonical callers (M2 slice 93c): the patient scope, decided right after the patient row lock.
+    await admit?.(owner.patient_id);
     // Event foreign keys need receipt KEY SHARE locks. Refunds/corrections lock
     // their original receipt before shift, so acquire these compatible read-only
     // fences in the same order, never implicitly through an FK after shift.
@@ -147,7 +169,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       ORDER BY c.id FOR UPDATE`,[invoiceId]);
     await lockDebtAccountForSchedule(client,owner.patient_id);
     const waited = await replay();
-    if (waited) { await authority(client,session); await client.query("COMMIT"); return { ...waited, replayed: true }; }
+    if (waited) { await authority(client,session); return { ...waited, replayed: true }; }
     const before = await contextInTx(client,invoiceId);
     if (before.invoice.status === "cancelled") bad("الفاتورة استبدلت أو ألغيت؛ افتح النسخة الحالية.", "conflict");
     if (before.sourceHash !== source.expectedSourceHash) bad("تغيّرت الفاتورة أو المدفوعات أو الأقساط؛ حدّث معاينة الفرق.", "stale");
@@ -259,6 +281,6 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     await insertAuditRow(client,{action:"invoice.correct",entity:"invoice",entityId:invoiceId,actor:session.username,actorRole:session.role,
       details:{correctionId:revision.id,correctedInvoiceId:result.correctedId,reason,discountReason,settledMinor,remainingMinor,
         creditMinor:receipt.creditMinor,identityAmendments:[...amendments].map(([itemId,after])=>({itemId,before:before.invoice.items.find(item=>item.id===itemId),after})),repayment,receiptsPreserved:true,cashMovement:0,idempotencyKey:key}});
-    await authority(client,session); await client.query("COMMIT"); return { ...receipt, replayed:false };
-  } catch (error) { try{await client.query("ROLLBACK");}catch{destroy=true;} throw error; } finally { client.release(destroy); }
+    await authority(client,session); return { ...receipt, replayed:false };
+  }
 }
