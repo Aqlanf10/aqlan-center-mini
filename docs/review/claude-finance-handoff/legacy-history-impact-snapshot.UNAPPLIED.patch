@@ -1,0 +1,112 @@
+diff --git a/lib/legacy-history-impact-snapshot.ts b/lib/legacy-history-impact-snapshot.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/legacy-history-impact-snapshot.ts
+@@ -0,0 +1,69 @@
++/** Unmounted diagnostic contract. Input MUST come from one trusted bounded server
++ * snapshot. This function neither authenticates a user nor proves the supplied
++ * completeness/epoch assertions. Its fingerprint is not a signed consent token.
++ * It cannot authorize or execute an edit, archive, restore or deletion. */
++import { createHash } from "node:crypto";
++export type LegacyImpactAction = "edit" | "archive" | "restore" | "delete";
++type Json = null | boolean | string | number | readonly Json[] | { readonly [key: string]: Json };
++export interface LegacyImpactRow {
++  readonly id: number;
++  readonly patientId: number;
++  readonly legacyNumber: number;
++  /** Version of the source row, not a timestamp guessed from its visible values. */
++  readonly sourceRevision: string;
++  /** Complete canonical collector projection, not a UI summary. No secrets. */
++  readonly evidence: { readonly [key: string]: Json };
++}
++export interface LegacyImpactPayment extends LegacyImpactRow { readonly treatmentId: number }
++export interface LegacyImpactSnapshot {
++  readonly action: LegacyImpactAction;
++  readonly patientId: number;
++  readonly treatmentId: number;
++  /** Independently established generation; restore/import must invalidate it. */
++  readonly provenanceEpoch: string;
++  readonly treatment: LegacyImpactRow;
++  readonly payments: readonly LegacyImpactPayment[];
++  readonly complete: boolean;
++}
++const id = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0;
++const version = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value);
++function canonical(value: Json, depth = 0): string {
++  if (depth > 12) throw new Error("invalid-evidence");
++  if (value === null || typeof value === "boolean" || typeof value === "string") return JSON.stringify(value);
++  if (typeof value === "number") {
++    // Monetary BIGINT values must be represented as exact decimal strings.
++    if (!Number.isSafeInteger(value)) throw new Error("invalid-evidence");
++    return JSON.stringify(value);
++  }
++  if (Array.isArray(value)) return `[${value.map((item) => canonical(item, depth + 1)).join(",")}]`;
++  if (typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype) throw new Error("invalid-evidence");
++  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, Json>)[key], depth + 1)}`).join(",")}}`;
++}
++function rowMaterial(row: LegacyImpactRow): Json {
++  if (!row || !id(row.id) || !id(row.patientId) || !id(row.legacyNumber) || !version(row.sourceRevision)
++    || !row.evidence || Array.isArray(row.evidence) || Object.getPrototypeOf(row.evidence) !== Object.prototype) throw new Error("invalid-row");
++  return { id: row.id, patientId: row.patientId, legacyNumber: row.legacyNumber, sourceRevision: row.sourceRevision, evidence: row.evidence };
++}
++export function legacyHistoryImpactSnapshot(input: LegacyImpactSnapshot) {
++  if (!input || !["edit", "archive", "restore", "delete"].includes(input.action)) throw new Error("invalid-action");
++  if (!id(input.patientId) || !id(input.treatmentId) || !version(input.provenanceEpoch)) throw new Error("invalid-target");
++  if (input.complete !== true || !Array.isArray(input.payments) || input.payments.length > 1000) throw new Error("incomplete-source");
++  const treatment = rowMaterial(input.treatment);
++  if (input.treatment.id !== input.treatmentId || input.treatment.patientId !== input.patientId) throw new Error("target-mismatch");
++  const ids = new Set<number>(), legacyNumbers = new Set<number>();
++  const payments = [...input.payments].sort((a, b) => a.id - b.id).map((payment) => {
++    const material = rowMaterial(payment);
++    if (payment.patientId !== input.patientId || payment.treatmentId !== input.treatmentId) throw new Error("child-mismatch");
++    if (ids.has(payment.id) || legacyNumbers.has(payment.legacyNumber)) throw new Error("duplicate-child");
++    ids.add(payment.id); legacyNumbers.add(payment.legacyNumber);
++    return { ...material as Record<string, Json>, treatmentId: payment.treatmentId };
++  });
++  const encoded = canonical({ contract: "legacy-impact-snapshot-v1", action: input.action,
++    patientId: input.patientId, treatmentId: input.treatmentId, provenanceEpoch: input.provenanceEpoch,
++    complete: true, treatment, payments });
++  if (Buffer.byteLength(encoded, "utf8") > 1_000_000) throw new Error("source-too-large");
++  return Object.freeze({ readOnly: true as const, executionReady: false as const,
++    action: input.action, patientId: input.patientId, treatmentId: input.treatmentId,
++    paymentIds: Object.freeze([...ids]), sourceFingerprint: createHash("sha256").update(encoded).digest("hex"),
++    financialEffect: "none" as const });
++}
+diff --git a/__tests__/legacy-history-impact-snapshot.test.ts b/__tests__/legacy-history-impact-snapshot.test.ts
+new file mode 100644
+--- /dev/null
++++ b/__tests__/legacy-history-impact-snapshot.test.ts
+@@ -0,0 +1,33 @@
++import { describe, expect, it } from "vitest";
++import { legacyHistoryImpactSnapshot as preview, type LegacyImpactSnapshot } from "../lib/legacy-history-impact-snapshot";
++const fixture = (): LegacyImpactSnapshot => ({ action: "archive", patientId: 7, treatmentId: 10, provenanceEpoch: "import:1", complete: true,
++  treatment: { id: 10, patientId: 7, legacyNumber: 100, sourceRevision: "v1", evidence: { currency: "SAR", priceMinor: "10000", paidMinor: "5000" } },
++  payments: [{ id: 21, patientId: 7, treatmentId: 10, legacyNumber: 200, sourceRevision: "v1", evidence: { currency: "SAR", amountMinor: "5000" } }] });
++describe("unmounted legacy impact snapshot", () => {
++  it("is read-only and cannot authorize execution", () => { const source = fixture(); const before = JSON.stringify(source); const result = preview(source);
++    expect(result).toMatchObject({ readOnly: true, executionReady: false, financialEffect: "none", paymentIds: [21] });
++    expect(JSON.stringify(source)).toBe(before); expect(Object.isFrozen(result)).toBe(true); expect(Object.isFrozen(result.paymentIds)).toBe(true); });
++  it.each(["edit", "archive", "restore", "delete"] as const)("binds action %s", (action) => {
++    const source = fixture(); expect(preview({ ...source, action }).action).toBe(action);
++    expect(new Set(["edit", "archive", "restore", "delete"].map((a) => preview({ ...source, action: a as typeof action }).sourceFingerprint)).size).toBe(4); });
++  it("canonicalizes exact child sets without changing caller order", () => { const source = fixture(); const second = { ...source.payments[0], id: 22, legacyNumber: 201 };
++    const a = { ...source, payments: [second, source.payments[0]] }; const b = { ...source, payments: [source.payments[0], second] };
++    expect(preview(a).sourceFingerprint).toBe(preview(b).sourceFingerprint); expect(a.payments[0].id).toBe(22); });
++  it("binds changed child identity even with identical count and values", () => { const source = fixture();
++    expect(preview({ ...source, payments: [{ ...source.payments[0], id: 22 }] }).sourceFingerprint).not.toBe(preview(source).sourceFingerprint); });
++  it("binds empty child absence", () => { const source = fixture(); expect(preview({ ...source, payments: [] }).sourceFingerprint).not.toBe(preview(source).sourceFingerprint); });
++  it("binds full evidence, revisions and generation independently", () => { const source = fixture(); const baseline = preview(source).sourceFingerprint;
++    for (const changed of [{ ...source, provenanceEpoch: "restore:2" }, { ...source, treatment: { ...source.treatment, sourceRevision: "v2" } },
++      { ...source, payments: [{ ...source.payments[0], sourceRevision: "v2" }] },
++      { ...source, payments: [{ ...source.payments[0], evidence: { currency: "USD", amountMinor: "5000" } }] }]) expect(preview(changed).sourceFingerprint).not.toBe(baseline); });
++  it("canonicalizes evidence key order", () => { const source = fixture(); expect(preview({ ...source, treatment: { ...source.treatment, evidence: { paidMinor: "5000", priceMinor: "10000", currency: "SAR" } } }).sourceFingerprint).toBe(preview(source).sourceFingerprint); });
++  it.each([false, undefined, "true"])("rejects unproven completeness %s", (complete) => expect(() => preview({ ...fixture(), complete } as LegacyImpactSnapshot)).toThrow("incomplete-source"));
++  it("fails closed on cap overflow", () => { const source = fixture(); expect(() => preview({ ...source, payments: Array(1001).fill(source.payments[0]) })).toThrow("incomplete-source"); });
++  it.each([{ patientId: 8 }, { treatmentId: 11 }])("rejects foreign children %j", (change) => { const source = fixture(); expect(() => preview({ ...source, payments: [{ ...source.payments[0], ...change }] })).toThrow("child-mismatch"); });
++  it.each([{ patientId: 8 }, { id: 11 }])("rejects target mismatch %j", (change) => { const source = fixture(); expect(() => preview({ ...source, treatment: { ...source.treatment, ...change } })).toThrow("target-mismatch"); });
++  it.each([{ id: 21, legacyNumber: 201 }, { id: 22, legacyNumber: 200 }])("rejects duplicate children %j", (change) => { const source = fixture(); expect(() => preview({ ...source, payments: [...source.payments, { ...source.payments[0], ...change }] })).toThrow("duplicate-child"); });
++  it("rejects invalid action and generation", () => { expect(() => preview({ ...fixture(), action: "void" } as unknown as LegacyImpactSnapshot)).toThrow("invalid-action"); expect(() => preview({ ...fixture(), provenanceEpoch: "" })).toThrow("invalid-target"); });
++  it.each([NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1, undefined, new Date()])("rejects noncanonical evidence %s", (value) => { const source = fixture(); expect(() => preview({ ...source, treatment: { ...source.treatment, evidence: { value } } } as unknown as LegacyImpactSnapshot)).toThrow("invalid-evidence"); });
++  it("rejects overlarge and cyclic evidence", () => { const source = fixture(); expect(() => preview({ ...source, treatment: { ...source.treatment, evidence: { value: "x".repeat(1_000_001) } } })).toThrow("source-too-large");
++    const evidence: Record<string, unknown> = {}; evidence.self = evidence; expect(() => preview({ ...source, treatment: { ...source.treatment, evidence } } as LegacyImpactSnapshot)).toThrow("invalid-evidence"); });
++});

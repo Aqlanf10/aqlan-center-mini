@@ -1,0 +1,31 @@
+{
+  "status": "UNAPPLIED review artifacts only; not a feature or release candidate",
+  "handoff_base": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+  "snapshot_utc": "2026-10-21T22:21:00Z",
+  "artifacts": [
+    {
+      "path": "statement-reclassified-settlement-regression.patch",
+      "sha256": "7a221a17f3440901cdb524b08ca808a41558dc94f166dfb1d228f2dc042d4fc3",
+      "bytes": 6939,
+      "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "status": "UNAPPLIED",
+      "limits": "Prior reported 64 focused tests and full Node 22 tsc passed in source checkout. Single new rendering regression; not 64 tests in this patch. No browser, real PostgreSQL, authorization or full-suite proof. Not rerun for publication."
+    },
+    {
+      "path": "currency-correction-matrix-tests.patch",
+      "sha256": "88e8e57cbbf43542e454ad43decb592a69314fd9740c7a081373efb6bb0a1a15",
+      "bytes": 15205,
+      "base_sha": "22157aa228ce8f54dbc4a1f71c13fd86d16a9d04",
+      "status": "UNAPPLIED",
+      "limits": "Prior reported 47 mock tests passed. Tests describe original v1 writer behavior and require adaptation for six-direction work. Not real PostgreSQL, rollback, concurrency or current composed-candidate proof. Source checkout HEAD recorded, not a guarantee of original complete runtime dependency tree. Not rerun for publication."
+    },
+    {
+      "path": "legacy-history-impact-snapshot.UNAPPLIED.patch",
+      "sha256": "b46328f52532c4b1829da8e5ede845e5488beda20e85ef2dd74884e97b10b77d",
+      "bytes": 10578,
+      "base_sha": null,
+      "status": "UNAPPLIED",
+      "limits": "Standalone, unmounted pure contract, 28 prior reported tests. No database access, compiler, owner bootstrap, authenticated collector, permission grant, writer or route. Original cloud management commit 199ea44c5768427123472b8149576629b78808fe remains unverified; this is NOT its recovery. No integration base established."
+    }
+  ]
+}

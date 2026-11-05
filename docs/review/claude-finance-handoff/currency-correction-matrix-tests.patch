@@ -1,0 +1,207 @@
+diff --git a/__tests__/invoice-correction-currency-writer-boundaries.test.ts b/__tests__/invoice-correction-currency-writer-boundaries.test.ts
+new file mode 100644
+index 000000000..df51836ee
+--- /dev/null
++++ b/__tests__/invoice-correction-currency-writer-boundaries.test.ts
+@@ -0,0 +1,137 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import type { Currency } from "../lib/money";
++import { planCurrencyReclassification, type ReclassificationPayment } from "../lib/invoice-currency-reclassification";
++const mocks = vi.hoisted(() => ({
++  query: vi.fn(), release: vi.fn(), connect: vi.fn(), authority: vi.fn(), invoice: vi.fn(),
++  correct: vi.fn(), evidence: vi.fn(), prepare: vi.fn(), audit: vi.fn(), repayment: vi.fn(),
++  account: vi.fn(), identity: vi.fn(), settings: vi.fn(),
++}));
++vi.mock("../lib/db", () => ({
++  CLINIC_TIME_ZONE: "Asia/Aden", ensureSchema: vi.fn(), getPool: () => ({ connect: mocks.connect }),
++  getInvoice: mocks.invoice, correctInvoiceInTransaction: mocks.correct, insertAuditRow: mocks.audit,
++  getSettingsInTransaction: mocks.settings, lockPlanItemsBilledBy: vi.fn(), recomputePlanTotal: vi.fn(),
++}));
++vi.mock("../lib/session", () => ({ revalidateSessionInTransaction: mocks.authority }));
++vi.mock("../lib/debt-account-position", () => ({ debtAccountDue: mocks.account, lockDebtAccountForSchedule: vi.fn() }));
++vi.mock("../lib/debt-installments-db", () => ({
++  DebtRepaymentError: class extends Error { constructor(public code: string, message: string) { super(message); } },
++  debtRequestHash: () => "a".repeat(64),
++  readDebtPosition: vi.fn(async () => ({ settledMinor: 0, remainingMinor: 1000, settlementProofHash: "proof", sourceSnapshot: { payments: [] } })),
++  writeDebtRepaymentInTransaction: mocks.repayment,
++}));
++vi.mock("../lib/invoice-identity-amendments", () => ({ invoiceIdentityCatalog: vi.fn(async () => ({})), validateInvoiceIdentityAmendments: mocks.identity }));
++vi.mock("../lib/invoice-clinical-linkage", () => ({ invoiceQuantityAllowed: () => true }));
++vi.mock("../lib/debt-installments", () => ({ validateDebtRepaymentTerms: () => ({ ok: true, value: { mode: "full", installments: [] } }) }));
++vi.mock("../lib/schedule", () => ({ clinicDateString: () => "2026-10-21" }));
++vi.mock("../lib/invoice-currency-plan", () => ({ prepareInvoiceCurrencyChange: mocks.prepare, writeInvoiceCurrencyEvidence: mocks.evidence, InvoiceCurrencyScopeError: class extends Error {} }));
++import { reviseInvoice } from "../lib/invoice-revision-db";
++const actor = { role: "admin" as const, username: "synthetic-admin", userId: 5, expiresAt: 4102444800000 };
++const sourceInvoice = (baseCurrency: Currency) => ({ id: 12, patientId: 10, baseCurrency, status: "open", totalMinor: 1000, discountMinor: 0, createdAt: "2026-10-21T00:00:00.000Z", items: [{ id: 20, quantity: 1, unitPriceMinor: 1000, planItemId: null }] });
++const command = (currency: Currency) => ({ idempotencyKey: "synthetic-currency-12", expectedSourceHash: "a".repeat(64), reason: "تصحيح عملة", currency, lines: [{ itemId: 20, quantity: 1, unitPrice: "10" }], discount: "0", repaymentTerms: { mode: "full", installments: [] }, expectedRemainingMinor: 1000 });
++const payment: ReclassificationPayment = { id: 1, patientId: 10, invoiceId: 12, kind: "payment", reversalOfId: null, currency: "SAR", amountMinor: 100, baseCurrency: "YER", baseAmountMinor: 410, exchangeRate: 410 };
++let payments: ReclassificationPayment[];
++beforeEach(() => {
++  vi.resetAllMocks(); payments = [];
++  mocks.connect.mockResolvedValue({ query: mocks.query, release: mocks.release });
++  mocks.authority.mockResolvedValue(actor);
++  mocks.invoice.mockImplementation(async (id: number) => id === 13 ? { ...sourceInvoice("SAR"), id: 13 } : sourceInvoice("YER"));
++  mocks.settings.mockResolvedValue({}); mocks.identity.mockResolvedValue(new Map());
++  mocks.account.mockResolvedValue({ due: 0 });
++  mocks.prepare.mockImplementation(async () => ({ ...planCurrencyReclassification({ patientId: 10, lineageInvoiceIds: [12], fromCurrency: "YER", toCurrency: "SAR", principalMinor: 0, payments }), lineageInvoiceIds: [12], planIds: [] }));
++  mocks.query.mockImplementation(async (sql: string) => {
++    if (sql === "SELECT patient_id FROM invoices WHERE id=$1") return { rows: [{ patient_id: 10 }] };
++    if (sql.includes("AS bound")) return { rows: [{ bound: false }] };
++    if (sql.startsWith("INSERT INTO invoice_corrections")) return { rows: [{ id: 31 }] };
++    return { rows: [], rowCount: 1 };
++  });
++  mocks.correct.mockResolvedValue({ ok: true, correctedId: 13, itemPairs: [{ originalItemId: 20, correctedItemId: 21 }] });
++  mocks.evidence.mockResolvedValue(41);
++});
++function expectNoFinancialWrite() {
++  expect(mocks.correct).not.toHaveBeenCalled(); expect(mocks.evidence).not.toHaveBeenCalled();
++  expect(mocks.audit).not.toHaveBeenCalled(); expect(mocks.repayment).not.toHaveBeenCalled();
++  expect(mocks.query.mock.calls.map(([sql]) => sql).filter(sql => /^\s*(INSERT|UPDATE|DELETE)\b/i.test(sql))).toEqual([]);
++  expect(mocks.query).toHaveBeenCalledWith("ROLLBACK");
++  expect(mocks.query).not.toHaveBeenCalledWith("COMMIT");
++}
++describe("actual v1 writer direction and pre-write refusal matrix (mocked storage, not PG atomicity)", () => {
++  it.each([["YER", "USD"], ["SAR", "YER"], ["SAR", "USD"], ["USD", "YER"], ["USD", "SAR"]] as const)("refuses %s -> %s before all mutation helpers", async (from, to) => {
++    mocks.invoice.mockResolvedValue(sourceInvoice(from));
++    await expect(reviseInvoice(12, command(to), actor)).rejects.toMatchObject({ code: "invalid", message: "انتقال العملة غير مدعوم." });
++    expectNoFinancialWrite(); expect(mocks.release).toHaveBeenCalledExactlyOnceWith(false);
++  });
++  it("executes only eligible YER -> SAR using target minor units and immutable receipt snapshot totals", async () => {
++    payments = [payment];
++    const original = structuredClone(payments);
++    const result = await reviseInvoice(12, { ...command("SAR"), expectedRemainingMinor: 900 }, actor);
++    expect(result).toMatchObject({ currency: "SAR", originalCurrency: "YER", afterMinor: 1000, settledMinor: 100, remainingMinor: 900, creditMinor: 0, replayed: false });
++    expect(mocks.correct.mock.calls[0][1].lines).toEqual([{ itemId: 20, quantity: 1, unitPriceMinor: 1000 }]);
++    expect(mocks.correct.mock.calls[0][2]).toMatchObject({ currency: "SAR", discountMinor: 0 });
++    expect(payments).toEqual(original);
++    expect(mocks.query.mock.calls.map(([sql]) => sql).filter(sql => /^\s*(INSERT INTO|UPDATE|DELETE FROM) payments\b/i.test(sql))).toEqual([]);
++    expect(mocks.query).toHaveBeenCalledWith("COMMIT");
++  });
++  it.each([
++    { currency: "YER" }, { currency: "USD" }, { patientId: 11 }, { invoiceId: 99 },
++    { baseAmountMinor: 409 }, { kind: "refund", reversalOfId: 999 },
++  ])("refuses unprovable receipts %j before mutation", async corruption => {
++    payments = [{ ...payment, ...corruption } as ReclassificationPayment];
++    const before = structuredClone(payments);
++    await expect(reviseInvoice(12, command("SAR"), actor)).rejects.toThrow();
++    expectNoFinancialWrite(); expect(payments).toEqual(before);
++  });
++  it("does not treat fully refunded wrong-currency receipts as zero history", async () => {
++    payments = [{ ...payment, currency: "YER", amountMinor: 410, exchangeRate: 1 },
++      { ...payment, id: 2, kind: "refund", reversalOfId: 1, currency: "YER", amountMinor: 410, exchangeRate: 1 }];
++    await expect(reviseInvoice(12, command("SAR"), actor)).rejects.toThrow();
++    expectNoFinancialWrite();
++  });
++  it.each(["YER", "SAR", "USD"] as const)("retains same-currency %s correction in its own minor units", async currency => {
++    mocks.invoice.mockResolvedValue(sourceInvoice(currency));
++    mocks.account.mockResolvedValue({ due: 1000 });
++    const targetMinor = currency === "YER" ? 10 : 1000;
++    const result = await reviseInvoice(12, { ...command(currency), expectedRemainingMinor: targetMinor }, actor);
++    expect(result).toMatchObject({ currency, afterMinor: targetMinor, settledMinor: 0, remainingMinor: targetMinor });
++    expect(mocks.evidence).not.toHaveBeenCalled();
++    expect(mocks.correct.mock.calls[0][2]).not.toHaveProperty("currency");
++  });
++  it("rolls back a late revoked session rather than acknowledging the attempted writes", async () => {
++    mocks.authority.mockResolvedValueOnce(actor).mockResolvedValueOnce(null);
++    await expect(reviseInvoice(12, command("SAR"), actor)).rejects.toMatchObject({ code: "unauthorized" });
++    expect(mocks.correct).toHaveBeenCalledTimes(1);
++    expect(mocks.query).toHaveBeenCalledWith("ROLLBACK");
++    expect(mocks.query).not.toHaveBeenCalledWith("COMMIT");
++    // This proves the transaction-control decision, not rollback by PostgreSQL.
++  });
++  it("rejects new unpaid contract fields instead of reinterpreting a saved v1 command", async () => {
++    await expect(reviseInvoice(12, { ...command("SAR"), evidenceKind: "unpaid_root_v1" }, actor)).rejects.toMatchObject({ code: "invalid" });
++    expect(mocks.connect).not.toHaveBeenCalled();
++  });
++  it("refuses stale expected remaining after a valid settlement proof", async () => {
++    payments = [payment];
++    await expect(reviseInvoice(12, command("SAR"), actor)).rejects.toMatchObject({ code: "stale" });
++    expectNoFinancialWrite();
++  });
++  it("refuses account credit appropriation despite zero invoice receipts", async () => {
++    mocks.account.mockResolvedValue({ due: -1 });
++    await expect(reviseInvoice(12, command("SAR"), actor)).rejects.toMatchObject({ code: "conflict" });
++    expectNoFinancialWrite();
++  });
++  it("refuses receipt-set changes across the shift lock without taking a late receipt lock", async () => {
++    const base = mocks.query.getMockImplementation()!;
++    mocks.query.mockImplementation(async (sql: string) => sql.startsWith("WITH RECURSIVE lineage") ? { rows: sql.endsWith("FOR KEY SHARE OF p") ? [] : [{ id: 99 }] } : base(sql));
++    await expect(reviseInvoice(12, command("SAR"), actor)).rejects.toMatchObject({ code: "stale" });
++    expectNoFinancialWrite(); expect(mocks.invoice).not.toHaveBeenCalled();
++  });
++  it("revalidates a revoked admin session inside the transaction before mutation", async () => {
++    mocks.authority.mockResolvedValue(null);
++    await expect(reviseInvoice(12, command("SAR"), actor)).rejects.toMatchObject({ code: "unauthorized" });
++    expectNoFinancialWrite();
++  });
++  it("rolls back rather than acknowledges an incomplete inserted-item handoff", async () => {
++    mocks.correct.mockResolvedValue({ ok: true, correctedId: 13, itemPairs: [] });
++    await expect(reviseInvoice(12, command("SAR"), actor)).rejects.toMatchObject({ code: "conflict" });
++    expect(mocks.query).toHaveBeenCalledWith("ROLLBACK"); expect(mocks.query).not.toHaveBeenCalledWith("COMMIT");
++    expect(mocks.evidence).not.toHaveBeenCalled(); expect(mocks.audit).not.toHaveBeenCalled();
++  });
++});
+diff --git a/__tests__/invoice-correction-route-boundaries.test.ts b/__tests__/invoice-correction-route-boundaries.test.ts
+new file mode 100644
+index 000000000..44f4be88e
+--- /dev/null
++++ b/__tests__/invoice-correction-route-boundaries.test.ts
+@@ -0,0 +1,58 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++const mocks = vi.hoisted(() => ({ session: vi.fn(), read: vi.fn(), write: vi.fn() }));
++vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
++vi.mock("@/lib/invoice-revision-db", () => ({ readInvoiceRevision: mocks.read, reviseInvoice: mocks.write }));
++vi.mock("@/lib/debt-installments-db", () => ({ DebtRepaymentError: class extends Error {
++  constructor(public code: string, message: string) { super(message); }
++} }));
++import { POST } from "../app/api/invoices/[id]/correct/route";
++import { DebtRepaymentError } from "../lib/debt-installments-db";
++import { JSON_BODY_LIMIT_BYTES } from "../lib/security-limits";
++const actor = { role: "admin", username: "synthetic-admin", userId: 5 };
++const request = (body = "{}", headers: Record<string, string> = {}) => new Request("http://localhost/api/invoices/12/correct", { method: "POST", body, headers: { "content-type": "application/json", ...headers } });
++const context = (id = "12") => ({ params: Promise.resolve({ id }) });
++beforeEach(() => { vi.resetAllMocks(); mocks.session.mockResolvedValue(actor); });
++describe("existing correction POST authorization and failure boundary", () => {
++  it.each([null, "doctor", "reception", "accountant", "cashier"])("refuses %s before reading the body or invoking mutation", async role => {
++    mocks.session.mockResolvedValue(role ? { ...actor, role } : null);
++    const req = request("not JSON");
++    expect((await POST(req, context())).status).toBe(403);
++    expect(req.bodyUsed).toBe(false);
++    expect(mocks.write).not.toHaveBeenCalled();
++  });
++  it.each(["0", "-1", "NaN", "1.5", "9007199254740992"])("refuses invalid invoice ID %s before mutation", async id => {
++    expect((await POST(request(), context(id))).status).toBe(400);
++    expect(mocks.write).not.toHaveBeenCalled();
++  });
++  it.each(["null", "[]", "1", '"text"', "{"])("rejects malformed/non-object payload %s", async body => {
++    expect((await POST(request(body), context())).status).toBe(400);
++    expect(mocks.write).not.toHaveBeenCalled();
++  });
++  it("rejects declared oversized bodies before mutation", async () => {
++    expect((await POST(request("{}", { "content-length": String(JSON_BODY_LIMIT_BYTES + 1) }), context())).status).toBe(413);
++    expect(mocks.write).not.toHaveBeenCalled();
++  });
++  it.each([["unauthorized", 403], ["missing", 404], ["invalid", 400], ["stale", 409], ["conflict", 409]] as const)("preserves %s refusal status without retrying mutation", async (code, status) => {
++    mocks.write.mockRejectedValue(new DebtRepaymentError(code, "synthetic refusal"));
++    const response = await POST(request(), context());
++    expect(response.status).toBe(status);
++    expect(await response.json()).toEqual({ code, message: "synthetic refusal" });
++    expect(mocks.write).toHaveBeenCalledTimes(1);
++  });
++  it.each([false, true])("passes exact command and actor once, replay=%s", async replayed => {
++    const body = { currency: "SAR", idempotencyKey: "synthetic-operation", reason: "تصحيح العملة" };
++    const acknowledgement = { replayed, currency: "SAR", remainingMinor: 100 };
++    mocks.write.mockResolvedValue(acknowledgement);
++    const response = await POST(request(JSON.stringify(body)), context());
++    expect(response.status).toBe(replayed ? 200 : 201);
++    expect(await response.json()).toEqual(acknowledgement);
++    expect(mocks.write).toHaveBeenCalledExactlyOnceWith(12, body, actor);
++  });
++  it("redacts unexpected storage failures and never retries an uncertain command", async () => {
++    mocks.write.mockRejectedValue(new Error("private-storage-detail"));
++    const response = await POST(request(), context());
++    expect(response.status).toBe(500);
++    expect(await response.text()).not.toContain("private-storage-detail");
++    expect(mocks.write).toHaveBeenCalledTimes(1);
++  });
++});
