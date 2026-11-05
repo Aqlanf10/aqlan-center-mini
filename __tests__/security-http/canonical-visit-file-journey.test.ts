@@ -4,7 +4,7 @@
  *
  * HTTP: the desk links a walk-in to a file (audit) and opens a file from another walk-in
  * (patient.create audit); a queue account without patients.create is refused (403,
- * Arabic); deferring payment stays refused (409, financial group); the remover deletes an
+ * Arabic); deferring payment needs finance.payments.collect (403 here, M2 slice 90d); the remover deletes an
  * unsigned visit (audit) and a signed one is refused (409); an account without
  * visits.delete is refused (403). No DDL.
  */
@@ -41,7 +41,7 @@ beforeAll(async () => {
 }, 300_000);
 afterAll(async () => { await journey?.close(); }, 60_000);
 
-it("HTTP: link, open file, defer stays refused, delete by its own grant", async () => {
+it("HTTP: link, open file, defer by its own grant (refused here), delete by its own grant", async () => {
   const patch = (visitId: number, cookie: string, body: Record<string, unknown>) =>
     journey.api(`/api/visits/${visitId}`, cookie, { method: "PATCH", body: JSON.stringify(body) });
   const desk = await journey.login("desk");
@@ -60,9 +60,11 @@ it("HTTP: link, open file, defer stays refused, delete by its own grant", async 
   const denied = await patch(ids.mistaken, queue.cookie, { action: "open_file" });
   expect(denied.status).toBe(403);
   expect((await denied.json()).message).toMatch(ARABIC);
+  // M2 slice 90d: deferring is canonical under finance.payments.collect, which the desk does not hold.
   const deferred = await patch(ids.signed, desk.cookie, { action: "defer" });
-  expect(deferred.status).toBe(409);
+  expect(deferred.status).toBe(403);
   expect((await deferred.json()).message).toMatch(ARABIC);
+  expect((await journey.db.query("SELECT 1 FROM audit_log WHERE action = 'visit.payment_deferred'")).rows).toEqual([]);
 
   const noGrant = await journey.api(`/api/visits/${ids.mistaken}`, desk.cookie, { method: "DELETE", body: JSON.stringify({}) });
   expect(noGrant.status).toBe(403);

@@ -133,9 +133,11 @@ it("HTTP: queue moves need visits.manage and a visit inside the scope; not-yet-c
   expect(denied.status).toBe(403);
   expect((await denied.json()).message).toMatch(ARABIC);
   const reception = await journey.login("reception");
+  // M2 slice 90d: deferring is a money decision (finance.payments.collect), never visits.manage.
   const defer = await patch(reception.cookie, theirs.id, { action: "defer" });
-  expect(defer.status).toBe(409);
-  expect(await defer.json()).toMatchObject({ code: "visit_action_not_canonical" });
+  expect(defer.status).toBe(403);
+  expect((await defer.json()).message).toMatch(ARABIC);
+  expect((await journey.db.query("SELECT 1 FROM audit_log WHERE action = 'visit.payment_deferred'")).rows).toEqual([]);
   expect(await journey.ddlLog()).toEqual([]);
 });
 
