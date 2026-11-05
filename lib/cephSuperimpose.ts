@@ -1,4 +1,4 @@
-import type { LandmarkCode, LandmarkMap } from "./ceph";
+import { cephHandedness, isFiniteCephPoint, type LandmarkCode, type LandmarkMap } from "./ceph";
 
 /**
  * التراكب — رسمُ تحليلين فوق بعضهما لتُرى الحركة بالعين.
@@ -84,10 +84,34 @@ export function superimposeOnSN(base: SuperimposeInput, target: SuperimposeInput
     };
   }
 
+  // Alignment needs actual finite coordinates, not atan2(0, 0)'s synthetic zero.
+  if ([...Object.values(base.points), ...Object.values(target.points)]
+      .some(point => point != null && !isFiniteCephPoint(point))) {
+    return { ok: false, message: "التراكب غير متاح: توجد إحداثيات معالم غير صالحة." };
+  }
+  const baseHandedness = cephHandedness(base.points);
+  const targetHandedness = cephHandedness(target.points);
+  if (baseHandedness == null || targetHandedness == null) {
+    return { ok: false, message: "التراكب يحتاج إطارًا تشريحيًا صالحًا من S وN وMe، دون نقاط متطابقة أو على خط واحد." };
+  }
+  if (baseHandedness !== targetHandedness) {
+    return { ok: false, message: "اتجاه الصورتين معكوس: وحِّد اتجاه الصورة ومعالمها قبل التراكب؛ لا يُصحَّح الانعكاس بدوران فقط." };
+  }
+
   const bs = toMm(baseS, base.mmPerPixel);
   const bn = toMm(baseN, base.mmPerPixel);
   const ts = toMm(targetS, target.mmPerPixel);
   const tn = toMm(targetN, target.mmPerPixel);
+
+  const spanOf = (from: { x: number; y: number }, to: { x: number; y: number }) =>
+    Math.hypot(to.x - from.x, to.y - from.y);
+  const baseSpan = spanOf(bs, bn);
+  const targetSpan = spanOf(ts, tn);
+  if (![bs, bn, ts, tn].every(isFiniteCephPoint)
+      || !Number.isFinite(baseSpan) || baseSpan <= 0
+      || !Number.isFinite(targetSpan) || targetSpan <= 0) {
+    return { ok: false, message: "التراكب غير متاح: طول S-N أو مقياسه غير صالح." };
+  }
 
   const baseAngle = Math.atan2(bn.y - bs.y, bn.x - bs.x);
   const targetAngle = Math.atan2(tn.y - ts.y, tn.x - ts.x);
@@ -102,22 +126,23 @@ export function superimposeOnSN(base: SuperimposeInput, target: SuperimposeInput
     // الإزاحة إلى S، ثم الدوران، ثم الوضع عند S الأقدم — كله بالمليمتر.
     const dx = p.x - ts.x;
     const dy = p.y - ts.y;
-    moved[code as LandmarkCode] = toBasePx(
+    const transformed = toBasePx(
       { x: bs.x + dx * cos - dy * sin, y: bs.y + dx * sin + dy * cos },
       base.mmPerPixel,
     );
+    if (!isFiniteCephPoint(p) || !isFiniteCephPoint(transformed)) {
+      return { ok: false, message: "التراكب غير متاح: التحويل بالمقياس الحالي ينتج إحداثيات غير صالحة." };
+    }
+    moved[code as LandmarkCode] = transformed;
   }
-
-  const spanOf = (from: { x: number; y: number }, to: { x: number; y: number }) =>
-    Math.hypot(to.x - from.x, to.y - from.y);
 
   return {
     ok: true,
     value: {
       points: moved,
       // بالمليمتر لا بالبكسل — فرقُ الطولين هو نموّ قاعدة الجمجمة، ويُقرأ رقمًا.
-      cranialBaseBefore: spanOf(bs, bn),
-      cranialBaseAfter: spanOf(ts, tn),
+      cranialBaseBefore: baseSpan,
+      cranialBaseAfter: targetSpan,
       rotationDegrees: (rotation * 180) / Math.PI,
     },
   };
@@ -147,7 +172,7 @@ export function referenceLines(points: LandmarkMap) {
   for (const [a, b, label] of REFERENCE_LINES) {
     const from = points[a];
     const to = points[b];
-    if (!from || !to) continue;
+    if (!isFiniteCephPoint(from) || !isFiniteCephPoint(to) || (from.x === to.x && from.y === to.y)) continue;
     lines.push({ from, to, label });
   }
   return lines;

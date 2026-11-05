@@ -43,12 +43,13 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
         المعالم تُحفَظ لحظة نقرها وسحبها، والاعتماد يختم القياسات والتشخيص ويقفل التحليل.
       </p>
       <CephTracer
+        key={`${study.analysis.id}:${study.analysis.documentId}`}
         patientName={patient?.fullName ?? ""}
         patientBirthYear={patient?.birthYear ?? null}
         analysis={study.analysis}
         initialLandmarks={study.landmarks}
         stamped={
-          study.analysis.status === "completed" && study.measurements.length > 0
+          study.analysis.status === "completed"
             ? study.measurements
             : null
         }

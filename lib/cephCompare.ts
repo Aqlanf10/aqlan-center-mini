@@ -72,7 +72,7 @@ export interface ComparableMeasurement {
 
 /** يحوّل نتيجة قياس من محرك السيفالو إلى الشكل القابل للمقارنة. */
 export function comparable(result: MeasurementResult): ComparableMeasurement | null {
-  if (result.value == null || !Number.isFinite(result.value)) return null;
+  if (result.code === "EXT_INDEX" || result.value == null || !Number.isFinite(result.value)) return null;
   return {
     code: result.code,
     name: result.ar,
@@ -113,8 +113,8 @@ export function compareAnalyses(
   before: readonly ComparableMeasurement[],
   after: readonly ComparableMeasurement[],
 ): Comparison {
-  const beforeBy = new Map(before.map((item) => [item.code, item]));
-  const afterBy = new Map(after.map((item) => [item.code, item]));
+  const beforeBy = new Map(before.filter(item => item.code !== "EXT_INDEX").map((item) => [item.code, item]));
+  const afterBy = new Map(after.filter(item => item.code !== "EXT_INDEX").map((item) => [item.code, item]));
 
   const measurements: ComparedMeasurement[] = [];
   for (const [code, first] of beforeBy) {
