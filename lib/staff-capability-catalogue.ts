@@ -52,6 +52,9 @@ export const OWNER_ONLY_OPERATIONS = Object.freeze([
   // Owner decision (Dot 6484846432): whole-clinic import/export, backup and reset.
   // A limited, delegable report export stays reports.export / finance.export.
   "clinic.data.import", "clinic.data.export", "clinic.backup.manage", "clinic.reset",
+  // Owner decision G4-7 (6648682456): the case's responsible doctor is the protected
+  // owner's alone for now; any later delegation needs its own decision and a narrow grant.
+  "clinical.case-responsibility.change",
 ] as const);
 export type OwnerOnlyOperation = typeof OWNER_ONLY_OPERATIONS[number];
 

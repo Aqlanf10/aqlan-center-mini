@@ -7,7 +7,7 @@ const map = JSON.parse(fs.readFileSync(new URL("../../docs/security/staff-cutove
 const catalogue = fs.readFileSync(new URL("../../lib/staff-capability-catalogue.ts", import.meta.url), "utf8");
 const block = catalogue.slice(catalogue.indexOf("STAFF_CAPABILITIES = Object.freeze(["), catalogue.indexOf("] as const);"));
 const existing = new Set([...block.matchAll(/"([a-z.-]+)"/g)].map(m => m[1]));
-const ownerOnly = new Set(["staff.credentials.reset", "staff.clinician-link.change", "staff.role.change", "settings.security.change", "settings.integrations.change"]);
+const ownerOnly = new Set(["staff.credentials.reset", "staff.clinician-link.change", "staff.role.change", "settings.security.change", "settings.integrations.change", "clinical.case-responsibility.change"]);
 const key = r => `${r.method} ${r.route}`;
 test("every staff route held for canonical admission has exactly one map entry", () => {
   const held = inventory.routes.filter(r => r.classification === "staff-legacy-held").map(key).sort();

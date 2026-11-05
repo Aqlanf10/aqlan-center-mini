@@ -38,35 +38,49 @@ async function source(client: DbClient, target: ResponsibilityTarget, lock: bool
 async function authority(client: DbClient, admitted: SessionPayload) {
  const session = await revalidateSessionInTransaction(admitted, client);
  if (!session || session.role !== "admin") reject(403, "تحديد الطبيب المسؤول للمدير فقط بجلسة سارية.");
- return session;
+ return { userId: session.userId, username: session.username, role: session.role };
 }
-export async function patientResponsibilitySettings(target: ResponsibilityTarget, admitted: SessionPayload,
- command?: { expectedSourceFingerprint: string; doctorId: number; reason: string }): Promise<ResponsibilitySettings> {
- if (admitted.role !== "admin") reject(403, "تحديد الطبيب المسؤول للمدير فقط.");
+export type ResponsibilityCommand = { expectedSourceFingerprint: string; doctorId: number; reason: string };
+export function validateResponsibilityInput(target: ResponsibilityTarget, command?: ResponsibilityCommand): void {
  if (!Number.isSafeInteger(target.patientId) || target.patientId <= 0 || !Number.isSafeInteger(target.sourceId) || target.sourceId <= 0 || !["clinical", "ortho"].includes(target.kind)) reject(400, "مرجع الحالة غير صالح.");
  if (command && (!/^[a-f0-9]{64}$/.test(command.expectedSourceFingerprint) || !Number.isSafeInteger(command.doctorId) || command.doctorId <= 0 || command.reason.trim().length < 3 || command.reason.trim().length > 500)) reject(400, "اختر الطبيب واكتب سبب التغيير.");
+}
+export async function patientResponsibilitySettings(target: ResponsibilityTarget, admitted: SessionPayload,
+ command?: ResponsibilityCommand): Promise<ResponsibilitySettings> {
+ if (admitted.role !== "admin") reject(403, "تحديد الطبيب المسؤول للمدير فقط.");
+ validateResponsibilityInput(target, command);
  await ensureSchema(); const client = await getPool().connect();
  try {
-  await client.query("BEGIN"); const session = await authority(client, admitted);
-  const before = await source(client, target, !!command);
-  if (command) {
-   if (before.sourceFingerprint !== command.expectedSourceFingerprint) reject(409, "تغيّرت المسؤولية منذ عرضها. حدّث البيانات وراجع اختيارك.");
-   const { rows: doctor } = await client.query("SELECT id FROM parties WHERE id=$1 AND kind='doctor' AND is_active FOR SHARE NOWAIT", [command.doctorId]);
-   if (!doctor.length) reject(409, "الطبيب المختار غير متاح. حدّث القائمة.");
-   if (before.ortho) await client.query("UPDATE ortho_cases SET responsible_doctor_id=$2 WHERE id=$1", [before.ortho.id, command.doctorId]);
-   if (before.bridges.length) await client.query("UPDATE clinical_cases SET responsible_party_id=$2 WHERE id=ANY($1::int[])", [before.bridges.map(row => row.id), command.doctorId]);
-   await authority(client, admitted);
-   await insertAuditRow(client, { action: "case.responsibility_change", entity: "patient", entityId: target.patientId,
-    actor: session.username, actorRole: session.role, entityLabel: `الحالة ${target.kind}:${target.sourceId}`, details: { target, previous: { ortho: before.ortho, clinical: before.bridges }, doctorId: command.doctorId, reason: command.reason.trim(), actorUserId: session.userId } });
-  }
-  const after = command ? await source(client, target, false) : before;
-  const { rows: doctors } = await client.query<{ id: number; name: string }>("SELECT id,name FROM parties WHERE kind='doctor' AND is_active ORDER BY name,id");
-  const { rows: names } = after.doctorId === null ? { rows: [] } : await client.query<{ name: string }>("SELECT name FROM parties WHERE id=$1", [after.doctorId]);
-  await authority(client, admitted); await client.query("COMMIT");
-  return { ...target, doctorId: after.doctorId, doctorName: names[0]?.name ?? null, sourceFingerprint: after.sourceFingerprint, doctors };
+  await client.query("BEGIN");
+  const result = await patientResponsibilityOn(client, target, command, () => authority(client, admitted));
+  await client.query("COMMIT");
+  return result;
  } catch (error) {
   await client.query("ROLLBACK").catch(() => {});
   if ((error as { code?: string }).code === "55P03") reject(409, "يجري تحديث الحالة. أعد المحاولة بعد لحظة.");
   throw error;
  } finally { client.release(); }
+}
+
+/** The body on the caller's transaction (M2 slice 88b): `authorize` proves the actor
+ * wherever legacy revalidated its admin session (before, after the writes, before commit). */
+export async function patientResponsibilityOn(client: DbClient, target: ResponsibilityTarget, command: ResponsibilityCommand | undefined,
+ authorize: () => Promise<{ userId: number; username: string; role: string }>): Promise<ResponsibilitySettings> {
+ const session = await authorize();
+ const before = await source(client, target, !!command);
+ if (command) {
+  if (before.sourceFingerprint !== command.expectedSourceFingerprint) reject(409, "تغيّرت المسؤولية منذ عرضها. حدّث البيانات وراجع اختيارك.");
+  const { rows: doctor } = await client.query("SELECT id FROM parties WHERE id=$1 AND kind='doctor' AND is_active FOR SHARE NOWAIT", [command.doctorId]);
+  if (!doctor.length) reject(409, "الطبيب المختار غير متاح. حدّث القائمة.");
+  if (before.ortho) await client.query("UPDATE ortho_cases SET responsible_doctor_id=$2 WHERE id=$1", [before.ortho.id, command.doctorId]);
+  if (before.bridges.length) await client.query("UPDATE clinical_cases SET responsible_party_id=$2 WHERE id=ANY($1::int[])", [before.bridges.map(row => row.id), command.doctorId]);
+  await authorize();
+  await insertAuditRow(client, { action: "case.responsibility_change", entity: "patient", entityId: target.patientId,
+   actor: session.username, actorRole: session.role, entityLabel: `الحالة ${target.kind}:${target.sourceId}`, details: { target, previous: { ortho: before.ortho, clinical: before.bridges }, previousDoctorId: before.doctorId, doctorId: command.doctorId, reason: command.reason.trim(), actorUserId: session.userId } });
+ }
+ const after = command ? await source(client, target, false) : before;
+ const { rows: doctors } = await client.query<{ id: number; name: string }>("SELECT id,name FROM parties WHERE kind='doctor' AND is_active ORDER BY name,id");
+ const { rows: names } = after.doctorId === null ? { rows: [] } : await client.query<{ name: string }>("SELECT name FROM parties WHERE id=$1", [after.doctorId]);
+ await authorize();
+ return { ...target, doctorId: after.doctorId, doctorName: names[0]?.name ?? null, sourceFingerprint: after.sourceFingerprint, doctors };
 }

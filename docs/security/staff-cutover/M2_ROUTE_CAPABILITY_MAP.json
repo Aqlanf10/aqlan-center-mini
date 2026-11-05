@@ -4231,12 +4231,12 @@
    "admin"
   ],
   "need": [
-   "finance.patient-ledger.manage"
+   "clinical.case-responsibility.change"
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Held for owner decision G4-7: the route sets the case's responsible doctor (the case-doctor link that decision 6629149113 ties to clinical-financial authority), while the mapped grant is labelled payment responsibility. Canonical sessions stay refused until decided."
+  "status": "canonical-done",
+  "note": "M2 slice 88b, owner decision G4-7 (6648682456): the protected owner only, through the owner-only operation clinical.case-responsibility.change (never an editable grant; no finance grant or general administrative label). patientResponsibilityOn unchanged: fingerprint guard, doctor FOR SHARE NOWAIT, written reason, the audit with the actor, previous and new doctor in the same transaction. Any later delegation needs its own decision and a narrow clinical grant."
  },
  {
   "route": "/api/patients/[id]/responsibility",
@@ -4245,12 +4245,12 @@
    "admin"
   ],
   "need": [
-   "finance.patient-ledger.manage"
+   "clinical.case-responsibility.change"
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Held for owner decision G4-7: the route sets the case's responsible doctor (the case-doctor link that decision 6629149113 ties to clinical-financial authority), while the mapped grant is labelled payment responsibility. Canonical sessions stay refused until decided."
+  "status": "canonical-done",
+  "note": "M2 slice 88b, owner decision G4-7 (6648682456): the protected owner only, through the owner-only operation clinical.case-responsibility.change (never an editable grant; no finance grant or general administrative label). patientResponsibilityOn unchanged: fingerprint guard, doctor FOR SHARE NOWAIT, written reason, the audit with the actor, previous and new doctor in the same transaction. Any later delegation needs its own decision and a narrow clinical grant."
  },
  {
   "route": "/api/patients/[id]/return-booking-context",

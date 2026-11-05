@@ -57,10 +57,10 @@ describe("starting templates (owner decision 3)", () => {
   });
 });
 
-describe("owner-only operations (Dot 6484846432 decision 2, review 6486144288 item 4)", () => {
-  it("are exactly the five existing operations plus the four approved clinic operations; supplier recovery is not approved", () => {
+describe("owner-only operations (Dot 6484846432 decision 2, review 6486144288 item 4; owner decision G4-7 6648682456)", () => {
+  it("are exactly the five existing operations plus the four approved clinic operations and the case responsibility; supplier recovery is not approved", () => {
     expect([...OWNER_ONLY_OPERATIONS].sort()).toEqual([
-      "clinic.backup.manage", "clinic.data.export", "clinic.data.import", "clinic.reset",
+      "clinic.backup.manage", "clinic.data.export", "clinic.data.import", "clinic.reset", "clinical.case-responsibility.change",
       "settings.integrations.change", "settings.security.change",
       "staff.clinician-link.change", "staff.credentials.reset", "staff.role.change",
     ]);
