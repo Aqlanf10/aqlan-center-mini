@@ -57,19 +57,20 @@ export function preflightConnection(env: NodeJS.ProcessEnv) {
 export async function runPreflightCli(args = process.argv.slice(2), env = process.env,
   artifact?: Awaited<ReturnType<typeof validatePreflightArtifact>>): Promise<number> {
   if (args.length === 1 && args[0] === "--help") {
-    console.log("db:preflight: explicit DATABASE_URL, plus DATABASE_ENVIRONMENT for remote targets. JSON only; no writes. Optional --purchase-receipts-readiness: bounded source-derived 0065 catalog shape only, not operational availability. Optional --fingerprint-drilldown: compact 64-bucket summary for columns/constraints/internalTriggers; --fingerprint-drilldown=SECTION:00 through :3f selects one bucket. Unknown identities/text withheld; hashes are not encryption. Optional stdout is limited to 48 KiB. Exit 0 = evidence collected, 1 = incomplete/failed. Registry status is separate from adoption readiness.");
+    console.log("db:preflight: explicit DATABASE_URL, plus DATABASE_ENVIRONMENT for remote targets. JSON only; no writes. Optional --patient-numbering-readiness: count-only alias ambiguity gate; ready:false blocks release. Optional --purchase-receipts-readiness: bounded source-derived 0065 catalog shape only, not operational availability. Optional --fingerprint-drilldown: compact 64-bucket summary for columns/constraints/internalTriggers; --fingerprint-drilldown=SECTION:00 through :3f selects one bucket. Unknown identities/text withheld; hashes are not encryption. Optional stdout is limited to 48 KiB. Exit 0 = evidence collected, 1 = incomplete/failed, 2 = patient-number readiness blocks release. Registry status is separate from adoption readiness.");
     return 0;
   }
   const selectionMatch = args.length === 1 ? /^--fingerprint-drilldown=(columns|constraints|internalTriggers):([0-3][0-9a-f])$/.exec(args[0]) : null;
   const selection = selectionMatch ? { section: selectionMatch[1], bucket: selectionMatch[2] } as FingerprintBucketSelection : undefined;
   const fingerprintDrilldown = args.length === 1 && (args[0] === "--fingerprint-drilldown" || Boolean(selection));
+  const patientNumberingReadiness = args.length === 1 && args[0] === "--patient-numbering-readiness";
   const purchaseReceiptsReadiness = args.length === 1 && args[0] === "--purchase-receipts-readiness";
-  if (args.length && !fingerprintDrilldown && !purchaseReceiptsReadiness) throw new SchemaPreflightError("CLI_ARGUMENTS_INVALID", "Unsupported arguments.");
+  if (args.length && !fingerprintDrilldown && !purchaseReceiptsReadiness && !patientNumberingReadiness) throw new SchemaPreflightError("CLI_ARGUMENTS_INVALID", "Unsupported arguments.");
   const connection = preflightConnection(env);
   const files = await loadMigrationFiles().catch(() => {
     throw new SchemaPreflightError("MIGRATION_FILES_INVALID", "Migration files could not be validated.");
   });
-  const provenance = fingerprintDrilldown || purchaseReceiptsReadiness ? {
+  const provenance = fingerprintDrilldown || purchaseReceiptsReadiness || patientNumberingReadiness ? {
     nodeVersion: process.version, icuVersion: process.versions.icu ?? null,
     bundleSha256: artifact?.manifest.bundleSha256 ?? null,
     manifestSha256: artifact?.manifestSha256 ?? null,
@@ -92,7 +93,7 @@ export async function runPreflightCli(args = process.argv.slice(2), env = proces
     report = await bounded(Promise.race([
       (async () => {
         await client.connect();
-        return inspectSchemaReadOnly(client, files, { fingerprintDrilldown, purchaseReceiptsReadiness });
+        return inspectSchemaReadOnly(client, files, { fingerprintDrilldown, purchaseReceiptsReadiness, patientNumberingReadiness });
       })(),
       connectionFailure,
     ]), 40_000, new SchemaPreflightError("CLIENT_TIMEOUT", "Preflight client deadline exceeded."), destroy);
@@ -107,13 +108,13 @@ export async function runPreflightCli(args = process.argv.slice(2), env = proces
   // Publish evidence only after bounded cleanup also succeeds.
   const output = JSON.stringify({ ...report,
     ...(fingerprintDrilldown ? { fingerprintDrilldown: fingerprintBucketResponse(report!.fingerprintDrilldown!, selection), provenance } : {}),
-    ...(purchaseReceiptsReadiness ? { provenance } : {}),
+    ...((purchaseReceiptsReadiness || patientNumberingReadiness) ? { provenance } : {}),
     targetEnvironment: connection.environment, tls: connection.tls }, null, fingerprintDrilldown ? undefined : 2);
-  if ((fingerprintDrilldown || purchaseReceiptsReadiness) && Buffer.byteLength(output, "utf8") + 1 > 48 * 1024) {
+  if ((fingerprintDrilldown || purchaseReceiptsReadiness || patientNumberingReadiness) && Buffer.byteLength(output, "utf8") + 1 > 48 * 1024) {
     throw Object.assign(new Error("Fingerprint response exceeds its bound."), { code: "FINGERPRINT_RESPONSE_LIMIT" });
   }
   console.log(output);
-  return 0;
+  return patientNumberingReadiness && report?.patientNumberingReadiness?.ready !== true ? 2 : 0;
 }
 
 export function preflightErrorCode(error: unknown): string {

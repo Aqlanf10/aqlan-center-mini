@@ -280,6 +280,14 @@ export async function runBaselineSchemaProbe(
  */
 const BASELINE_EVOLUTIONS: { migration: string; replaced: string; replacement: string; kind: "constraint" | "index" }[] = [
   {
+    // 0074 replaces visit/tooth dedup only for explicit intent-bearing orders.
+    // Recognize this exact reviewed predicate, never any same-named index.
+    migration: "0074",
+    kind: "index",
+    replaced: "CREATE UNIQUE INDEX lab_orders_visit_tooth_uniq ON lab_orders USING btree (visit_id, tooth_code) WHERE ((visit_id IS NOT NULL) AND (status <> 'cancelled'::text))",
+    replacement: "CREATE UNIQUE INDEX lab_orders_visit_tooth_uniq ON lab_orders USING btree (visit_id, tooth_code) WHERE ((visit_id IS NOT NULL) AND (status <> 'cancelled'::text) AND (lab_work_intent_id IS NULL))",
+  },
+  {
     // (0023 — P1-5ب) الرصيد الافتتاحي بعملته: صفٌّ لكل (مريض، عملة).
     migration: "0023",
     kind: "constraint",

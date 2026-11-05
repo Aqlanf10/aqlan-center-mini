@@ -1,6 +1,7 @@
 import type { DependencyList, EffectCallback, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickAppointmentModal } from "../components/QuickAppointmentModal";
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic-reception", role: "reception" }) }));
 
 // Tests only. Run the real component's state, effects, cleanup and rendered event
 // handlers with manually committed React hooks. No DOM/window, app, API route,

@@ -6,6 +6,7 @@ import {
   type CaseStatus, type DependencyRequirement,
 } from "@/lib/cases";
 import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
+import PatientResponsibilitySettings from "./PatientResponsibilitySettings";
 import { useSession } from "./SessionProvider";
 import { SPECIALTIES, type ServiceSpecialty } from "@/lib/appointment-services";
 import type { CasePlanItem, PatientProblem, PlanItemDependency, SpecialtyCase } from "@/lib/db";
@@ -27,7 +28,7 @@ interface Payload {
   planVisible?: boolean;
 }
 
-interface Doctor { id: number; name: string }
+interface Doctor { id: number; name: string; isActive?: boolean }
 
 const STATUS_TONE: Record<CaseStatus, string> = {
   active: "bg-emerald-50 text-emerald-800 border-emerald-200",
@@ -94,6 +95,7 @@ export function PatientCases(props: PatientCasesProps) {
 
 function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOrtho, onOpenClinicalContext, onNavigationGuardChange, onOpenTreatmentEntry }:
   PatientCasesProps & { canRead: boolean }) {
+  const session = useSession();
   const [data, setData] = useState<Payload | null>(null);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -165,9 +167,13 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
     const owner = ownerRef.current;
     if (!canWrite) return;
     let active = true;
-    void fetch("/api/parties?kind=doctor", { cache: "no-store" })
-      .then((response) => response.ok ? response.json() : [])
-      .then((rows: unknown) => { if (active && owner.active) setDoctors(Array.isArray(rows) ? (rows as Doctor[]) : []); })
+    void Promise.all([
+      fetch("/api/parties?kind=doctor", { cache: "no-store" }).then(response => response.ok ? response.json() : []),
+      session?.role === "admin" ? Promise.resolve(null) : fetch("/api/auth/me", { cache: "no-store" }).then(response => response.ok ? response.json() : null),
+    ]).then(([rows, me]: [unknown, { username?: string; doctorPartyId?: number } | null]) => {
+      if (active && owner.active) setDoctors(Array.isArray(rows) ? (rows as Doctor[]).filter(doctor => doctor.isActive === true
+        && (session?.role === "admin" || (me?.username === session?.username && doctor.id === me?.doctorPartyId))) : []);
+    })
       .catch(() => { if (active && owner.active) setDoctors([]); });
     return () => { active = false; };
   }, [canWrite]);
@@ -351,6 +357,8 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
                   onClick={() => { const owner = ownerRef.current; if (owner.active && owner.ready && owner.writes === 0 && owner.readSequence === renderRead && data.cases.includes(item)) onOpenClinicalContext({ patientId, clinicalCaseId: item.id! }, "plans"); }}>
                   بنود خطة هذه الحالة
                 </button> : null}
+                {(item.id !== null || item.orthoCaseId !== null) && !CASE_TERMINAL.includes(item.status) ? <PatientResponsibilitySettings
+                  patientId={patientId} kind={item.orthoCaseId !== null ? "ortho" : "clinical"} sourceId={item.orthoCaseId ?? item.id!} /> : null}
                 {item.problem ? <p className="mt-1 text-xs text-slate-500">{item.problem}</p> : null}
                 {item.outcome ? <p className="mt-1 text-xs text-slate-500">النتيجة: {item.outcome}</p> : null}
                 {item.kind === "ortho" || item.orthoCaseId !== null ? (

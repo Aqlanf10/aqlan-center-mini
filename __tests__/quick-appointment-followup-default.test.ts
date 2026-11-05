@@ -1,6 +1,14 @@
 import type { DependencyList, EffectCallback, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickAppointmentModal } from "../components/QuickAppointmentModal";
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic-reception", role: "reception" }) }));
+// Isolate service defaults/advisory invalidation after verified clinical context;
+// actual context reads, choices and actor lifetimes are covered by return-booking-context-ui.
+vi.mock("../components/useReturnBookingContext", () => ({ useReturnBookingContext: ({ enabled }: { enabled: boolean }) => ({
+  ready: true, verified: enabled ? { doctorId: 71001, doctorName: "Synthetic current responsible" } : null,
+  fingerprint: enabled ? "b".repeat(64) : null, view: null, isCurrent: () => true, handleRejection: () => {},
+  payload: enabled ? { returnBookingSource: { kind: "clinical_case", id: 41 }, returnBookingFingerprint: "b".repeat(64) } : {},
+}) }));
 
 // Tests only. Run the real component's state, effects, cleanup and rendered event
 // handlers with manually committed React hooks. No DOM/window, app, API route,
@@ -142,7 +150,7 @@ describe("explicit board follow-up booking intent", () => {
     expect(field("duration").props.value).toBe("10");
     expect(elements(field("duration")).some((node) => node.type === "option" && node.props.value === "10")).toBe(true);
     await render().submit();
-    expect(payload()).toMatchObject({ patientId: 91001, appointmentType: "follow_up", serviceId: row.id, durationMinutes: 10, bookingIntent: "ortho_follow_up" });
+    expect(payload()).toMatchObject({ patientId: 91001, appointmentType: "follow_up", serviceId: row.id, durationMinutes: 10, bookingIntent: "ortho_follow_up", returnBookingSource: { kind: "clinical_case", id: 41 }, returnBookingFingerprint: "b".repeat(64) });
     expect(payload()).not.toHaveProperty("doctorId"); expect(payload()).not.toHaveProperty("caseId");
   });
   it.each(["absent", "inactive", "specialty", "legacy", "duplicate"])("does not invent or auto-select a service when the catalogue is %s", async (kind) => {

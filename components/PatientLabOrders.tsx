@@ -19,6 +19,7 @@ import {
   labToothInputProblem,
 } from "@/lib/lab";
 import { LabDentalChart } from "./LabDentalChart";
+import { LabPrescriptionEditor } from "./LabPrescriptionEditor";
 import { LabPrescriptionModal } from "./LabPrescriptionModal";
 import { LabDeliveryAppointmentModal } from "./LabDeliveryAppointmentModal";
 import { useClinicName, useSetting } from "./SettingsProvider";
@@ -136,6 +137,8 @@ export function PatientLabOrders({
      الخادم — فكان حقل التكلفة هنا يفشل دائمًا بلا جهة. */
   const [registeredLabs, setRegisteredLabs] = useState<{ id: number; name: string }[]>([]);
   const [prescriptionSelection, setPrescriptionSelection] = useState<OwnedOrder | null>(null);
+  const [editorSelection, setEditorSelection] = useState<OwnedOrder | null>(null);
+  const editorOrder = editorSelection?.owner === owner ? editorSelection.order : null;
   const [deliverySelection, setDeliverySelection] = useState<OwnedOrder | null>(null);
   const prescriptionOrder = prescriptionSelection?.owner === owner ? prescriptionSelection.order : null;
   const deliveryAppointmentOrder = deliverySelection?.owner === owner ? deliverySelection.order : null;
@@ -158,6 +161,7 @@ export function PatientLabOrders({
     setStatusError(null);
     setShowAdd(false);
     setPrescriptionSelection(null);
+    setEditorSelection(null);
     setDeliverySelection(null);
     setRegisteredLabs([]);
     // A reused instance must not carry a patient-specific draft into its new scope.
@@ -694,7 +698,7 @@ export function PatientLabOrders({
                       التسليم: {friendlyDate(order.dueDate)}
                     </p>
                     <p className="text-[11px] text-slate-400">
-                      أُرسل: {friendlyDate(order.sentDate)}
+                      {order.status === "needed" ? "لم يُرسل بعد" : `أُرسل: ${friendlyDate(order.sentDate)}`}
                     </p>
                   </div>
                 </div>
@@ -718,6 +722,7 @@ export function PatientLabOrders({
                     {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button" onClick={() => setClinicalOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تصحيح الإرسالية</button>}
                     {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button"
                       onClick={() => setShadeOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تعديل ألوان الأسنان</button>}
+                    {order.status === "needed" && ["admin", "doctor"].includes(session?.role ?? "") && <button type="button" className="min-h-11 rounded-lg bg-sky-700 px-3 text-white" onClick={() => setEditorSelection({ owner, order })}>استكمال الإرسالية</button>}
                     <button
                       type="button"
                       onClick={() => setPrescriptionOrder(order)}
@@ -789,6 +794,7 @@ export function PatientLabOrders({
         </div>
       )}
 
+      {editorOrder && <LabPrescriptionEditor key={`${scope}:${editorOrder.id}`} order={editorOrder} onClose={() => { setEditorSelection(null); void load(); }} onSaved={() => { if (isOwnerActive()) { setEditorSelection(null); void load(); } }} />}
       {/* نافذة استمارة طلب المعمل */}
       {clinicalOrder && orders.some(order => order.id === clinicalOrder.id) && (
         <LabOrderClinicalEditor key={`${session?.username}:${session?.role}:${clinicalOrder.id}`} order={clinicalOrder}

@@ -4,6 +4,7 @@ import { requirePortalSession } from "@/lib/portal-server";
 import { portalStatementView } from "@/lib/portal-statement";
 import { clinicDateString } from "@/lib/schedule";
 import { historicalOpeningBuckets } from "@/lib/statement-historical-details";
+import { projectPatientStatement, StatementProjectionError } from "@/lib/patient-statement-projection";
 
 export const dynamic = "force-dynamic";
 
@@ -25,15 +26,17 @@ export async function GET() {
     // in a response always describe the same committed state.
     // Previous-treatment details ride the same snapshot. A malformed saved historical fact withholds that
     // section only (null); it never fails or alters the balances, which never depend on it.
-    const { ledger: { invoices, payments, openings }, planCurrencies, plans, historicalAgreements } =
-      await patientStatementSnapshot(session.patientId, clinicDateString(new Date(), CLINIC_TIME_ZONE), { historicalAgreements: "tolerant" });
+    const { ledger: { invoices, payments, openings }, planCurrencies, plans, historicalAgreements, statementEvidence } =
+      await patientStatementSnapshot(session.patientId, clinicDateString(new Date(), CLINIC_TIME_ZONE), { historicalAgreements: "tolerant", patientFacing: true });
     /* (TD-05 · P1-5ب) بوابة المريض ترى ما يراه الصندوق: أرصدةً بعملاتها المستقلة —
        بالقاعدة نفسها التي يقرأ بها كشف الحساب (ledgerBalancesByCurrency). */
     const balances = ledgerBalancesByCurrency(session.patientId, { invoices, payments, openings }, planCurrencies);
     /* (FIN-INT-8) نفس مستندات الكشف المطبوع ونفس تسمياته، ولا شيء داخلي: لا ملغاة،
        ولا اسم موظف ولا ملاحظة ولا وردية. الأرصدة من الحساب الكانوني كما هي. */
     const historicalBuckets = historicalAgreements ? historicalOpeningBuckets(historicalAgreements, openings, payments) : null;
-    return NextResponse.json(portalStatementView({ invoices, payments, openings }, balances, "YER", plans, historicalBuckets));
+    if (!statementEvidence) throw new StatementProjectionError();
+    const projected = projectPatientStatement({ patientId: session.patientId, ledger: { invoices, payments, openings }, planCurrencies, evidence: statementEvidence });
+    return NextResponse.json(portalStatementView({ invoices, payments, openings }, balances, "YER", plans, historicalBuckets, projected), { headers: { "Cache-Control": "private, no-store", "Vary": "Cookie" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل كشف الحساب." }, { status: 500 });
   }

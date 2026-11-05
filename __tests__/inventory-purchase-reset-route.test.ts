@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+<<<<<<< HEAD
 import { ProtectedPrescriptionHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE } from "../lib/clinic-reset";
+=======
+import { ProtectedCollectionAttemptHistoryError, ProtectedInvoiceActionHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE } from "../lib/clinic-reset";
+>>>>>>> 7c57adf5f9a035d366c99fe0947578633653dd63
 
 const state = vi.hoisted(() => ({
   session: { username: "synthetic-owner", role: "admin" } as { username: string; role: string } | null,
@@ -41,10 +45,20 @@ describe("purchase history reset refusal preserves existing reset admission", ()
     expect(await response.json()).toEqual({ message: new ProtectedCollectionAttemptHistoryError().message, code: "protected-collection-attempt-history" });
     expect(state.backup).not.toHaveBeenCalled(); expect(state.remove).not.toHaveBeenCalled();
   });
+<<<<<<< HEAD
   it("refuses reset with protected prescription commands before backup or file removal", async () => {
     state.reset.mockRejectedValue(new ProtectedPrescriptionHistoryError());
     const response = await POST(request()); expect(response?.status).toBe(409);
     expect(await response?.json()).toMatchObject({ code: "protected-prescription-history" });
+=======
+  it("retains invoice action keys with their dedicated 409 before backup or file deletion", async () => {
+    const error = new ProtectedInvoiceActionHistoryError();
+    state.reset.mockRejectedValue(error);
+    const response = await POST(request());
+    if (!response) throw new Error("Reset POST did not return a response");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ message: error.message, code: "protected-invoice-action-history" });
+>>>>>>> 7c57adf5f9a035d366c99fe0947578633653dd63
     expect(state.backup).not.toHaveBeenCalled(); expect(state.remove).not.toHaveBeenCalled();
   });
   it("keeps the existing preview response and confirmation phrase unchanged", async () => {

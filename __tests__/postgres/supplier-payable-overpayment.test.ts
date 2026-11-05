@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -110,17 +110,11 @@ async function batch(partyId: number, orderIds: number[], amount: number, prepay
   });
 }
 
-beforeAll(async () => {
+beforeEach(async () => {
+  // A fresh disposable schema preserves production identity/history guards unchanged.
+  await resetPoolForTesting();
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
-});
-
-beforeEach(async () => {
-  // تنظيف قاعدة اختبارٍ معزولة فقط مع إبقاء حراس السجل التاريخي فعّالين.
-  // Keep HR append-only/FK guards active: parent TRUNCATE CASCADE would
-  // traverse even empty history tables. These isolated fixtures contain no HR rows.
-  await q(`TRUNCATE expense_payable_allocations, expenses, payables, lab_order_tracking, lab_orders, patients, cashier_shifts,
-                    audit_log RESTART IDENTITY CASCADE`);
   await q("DELETE FROM parties");
   await q(`INSERT INTO cashier_shifts (opened_by) VALUES ('p02')`);
 });

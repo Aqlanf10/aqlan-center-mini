@@ -123,7 +123,9 @@ describe("current printed statement reads one coherent snapshot", () => {
     for (const text of ["Synthetic crown #14", "Synthetic temporary crown", formatMoney(2_000, "SAR"), formatMoney(18_000, "SAR"),
       "Synthetic print agreement", formatMoney(300_000, "SAR")]) expect(html).toContain(text);
     const [original] = await q<{ receipt_number: string }>(`SELECT receipt_number FROM payments WHERE patient_id = $1 AND kind = 'payment' ORDER BY id LIMIT 1`, [patientId]);
-    expect(html).toContain(`عكس سند ${original.receipt_number}`);
+    expect(html).toContain(original.receipt_number);
+    expect(html).toContain("استرداد");
+    expect(html).not.toContain("عكس سند");
     expect(html).not.toContain("CANCELLED-PRINT-LINE");
     expect(html).not.toContain("OTHER-PATIENT-PRINT-LINE");
   });

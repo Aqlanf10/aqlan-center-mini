@@ -6,7 +6,7 @@ import { isValidTooth } from "@/lib/dental";
 import { CLINIC_BASE_CURRENCY, parseAmount, type Currency } from "@/lib/money";
 import type { ToothScopeMode } from "@/lib/invoice-clinical-linkage";
 import {
-  applyToothSelection, removeRowAt, replaceRowService,
+  applyToothSelection, removeRowAt, replaceRowService, selectedToothSurfaces,
   type ToothRowLike, type ToothSelection,
 } from "./invoice-tooth-selection";
 
@@ -24,6 +24,7 @@ export interface InvoiceDisplayRowLike extends ToothRowLike {
 
 export interface InvoiceDisplayGroupingContext<R extends InvoiceDisplayRowLike> {
   currency?: Currency;
+  modeOf?: (row: R) => ToothScopeMode;
   /** Return integer minor units; invalid/unknown prices must return null. */
   priceValue?: (row: R, index: number) => number | null;
   /** Plan/source identity, not the independent per-tooth case or plan-item ID. */
@@ -39,6 +40,7 @@ export interface InvoiceDisplayGroup<R extends InvoiceDisplayRowLike> {
   indices: number[];
   keys: string[];
   teeth: number[];
+  surfacesByTooth: Record<number, string>;
   /** Number of canonical children, not an editable clinical quantity. */
   quantity: number;
   /** Both amounts are integer minor units, or null if not safely readable. */
@@ -65,7 +67,7 @@ function signatureOf<R extends InvoiceDisplayRowLike>(row: R, index: number, pri
     || row.scope !== null || quantityOf(row) !== 1) return null;
   return JSON.stringify([
     row.displayGroupId, row.serviceId, row.doctorId, price === null ? ["unreadable", row.price] : ["minor", price], row.priceReason, row.manual === true,
-    row.description ?? "", row.surfaces, row.scope, row.groupId,
+    row.description ?? "", context.modeOf?.(row) === "tooth_surfaces" ? null : row.surfaces, row.scope, row.groupId,
     row.episodeTeeth === null ? null : sortedTeeth(row.episodeTeeth),
     context.provenance?.(row, index) ?? null,
   ]);
@@ -90,6 +92,7 @@ export function buildInvoiceDisplayGroups<R extends InvoiceDisplayRowLike>(
       // exact unreadable draft must match and no numeric total is invented.
       if (validAmount(sum) || candidate.unitPrice === null && unitPrice === null) {
         candidate.indices.push(index); candidate.keys.push(row.key); candidate.teeth.push(row.toothCode);
+        candidate.surfacesByTooth[row.toothCode] = row.surfaces;
         candidate.teeth.sort((a, b) => a - b);
         candidate.quantity = candidate.keys.length; candidate.total = sum; candidate.grouped = true;
         return;
@@ -97,6 +100,7 @@ export function buildInvoiceDisplayGroups<R extends InvoiceDisplayRowLike>(
     }
     const group: InvoiceDisplayGroup<R> = {
       key: row.key, row, indices: [index], keys: [row.key], teeth: row.toothCode === null ? [] : [row.toothCode],
+      surfacesByTooth: row.toothCode === null ? {} : { [row.toothCode]: row.surfaces },
       quantity: 1, unitPrice, total, grouped: false,
     };
     groups.push(group);
@@ -107,7 +111,7 @@ export function buildInvoiceDisplayGroups<R extends InvoiceDisplayRowLike>(
 
 /** A split bridge child opens with its own tooth, not the entire clinical episode. */
 export function selectionOfDisplayGroup<R extends InvoiceDisplayRowLike>(group: InvoiceDisplayGroup<R>): ToothSelection {
-  return { teeth: [...group.teeth], surfaces: group.row.surfaces, scope: group.row.scope };
+  return { teeth: [...group.teeth], surfaces: group.row.surfaces, surfacesByTooth: { ...group.surfacesByTooth }, scope: group.row.scope };
 }
 
 function compatibleKeys<R extends InvoiceDisplayRowLike>(rows: readonly R[], keys: readonly string[], context: InvoiceDisplayGroupingContext<R>): Set<string> {
@@ -175,7 +179,7 @@ export function applyGroupedToothSelection<R extends InvoiceDisplayRowLike>(
 ): R[] {
   const row = rows[index];
   if (!row) return [...rows];
-  if (mode !== "per_tooth_episode" && mode !== "multi_tooth_episode") {
+  if (mode !== "per_tooth_episode" && mode !== "multi_tooth_episode" && mode !== "tooth_surfaces") {
     return applyToothSelection(rows, index, mode, selection, makeKey).map(one => one.key === row.key ? { ...one, displayGroupId: null } : one);
   }
   const teeth = sortedTeeth(selection.teeth);
@@ -192,7 +196,7 @@ export function applyGroupedToothSelection<R extends InvoiceDisplayRowLike>(
   const displayGroupId = teeth.length > 1 ? row.displayGroupId ?? makeKey() : null;
   const desired = new Set(teeth);
 
-  if (mode === "per_tooth_episode") {
+  if (mode === "per_tooth_episode" || mode === "tooth_surfaces") {
     let working = [...rows];
     for (let at = working.length - 1; at >= 0; at--) {
       if (memberKeys.has(working[at].key) && working[at].key !== row.key) working = removeRowAt(working, at);
@@ -206,9 +210,13 @@ export function applyGroupedToothSelection<R extends InvoiceDisplayRowLike>(
       let key = existing?.key ?? (!retainedKeys.has(row.key) && !usedKeys.has(row.key) ? row.key : makeKey());
       if (usedKeys.has(key)) key = makeKey();
       usedKeys.add(key);
+      const surfaces = mode === "tooth_surfaces" && generated.toothCode !== null
+        ? selectedToothSurfaces(selection, generated.toothCode) : "";
+      const base = existing && (mode !== "tooth_surfaces" || existing.surfaces === surfaces)
+        ? existing : clearNewToothLink(existing ?? generated);
       return {
-        ...(existing ?? clearNewToothLink(generated)), key, quantity: "1", displayGroupId,
-        toothCode: generated.toothCode, surfaces: "", scope: null, episodeTeeth: null, groupId: null,
+        ...base, key, quantity: "1", displayGroupId,
+        toothCode: generated.toothCode, surfaces, scope: null, episodeTeeth: null, groupId: null,
       } as R;
     });
     return [...result.slice(0, at), ...replacements, ...result.slice(at + replacements.length)];

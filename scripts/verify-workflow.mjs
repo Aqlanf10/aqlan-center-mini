@@ -68,6 +68,39 @@ async function signVisit(visitId) {
 
 /* ═══════════ الرحلة ٢ (الأصعب أولًا): RCT ثلاث جلسات بفوترة «لكل جلسة» ═══════════ */
 
+// An ungrouped course proposes only its next session (30 minutes), not all
+// three sessions in a 90-minute visit. Check the whole course at every transition,
+// including walk-in completion, without losing the original session provenance.
+async function checkSequentialCourse(patientId, planId, completedVisitIds) {
+  const pending = await listPatientPlannedVisits(patientId);
+  const completed = completedVisitIds.length;
+  check(`الزيارة التالية وحدها بعد ${completed} جلسة منجزة`,
+    completed === 3 ? pending.length === 0 :
+      pending.length === 1 && pending[0].status === "planned" &&
+      pending[0].planId === planId && pending[0].sequence === completed + 1 &&
+      pending[0].durationMinutes === 30,
+    `${pending.length} زيارة`);
+  const { rows } = await pool.query(
+    `SELECT s.sequence, s.status, s.planned_visit_id, s.visit_id, s.planned_duration,
+            pv.status AS proposal_status, pv.sequence AS proposal_sequence
+       FROM treatment_sessions s JOIN plan_items i ON i.id = s.plan_item_id
+       LEFT JOIN planned_visits pv ON pv.id = s.planned_visit_id
+      WHERE i.plan_id = $1 ORDER BY s.sequence`, [planId],
+  );
+  check(`جلسات الخطة الثلاث محفوظة بالترتيب ومصدر التنفيذ بعد ${completed}`,
+    rows.length === 3 && rows.every((row, index) =>
+      row.sequence === index + 1 && row.planned_duration === 30 &&
+      (index < completed
+        ? row.status === "done" && row.visit_id === completedVisitIds[index] &&
+          row.planned_visit_id !== null && row.proposal_status === "completed" &&
+          row.proposal_sequence === index + 1
+        : row.status === "planned" && row.visit_id === null &&
+          (index === completed
+            ? row.planned_visit_id === pending[0]?.id && row.proposal_status === "planned"
+            : row.planned_visit_id === null))));
+  return pending;
+}
+
 async function journeyMultiSession() {
   console.log("\n── الرحلة ٢: علاج متعدد الجلسات — RCT 30,000 على ثلاث جلسات ──");
 
@@ -100,9 +133,7 @@ async function journeyMultiSession() {
   const consent = await recordPlanConsent({ planId: created.planId, actor: "فحص", note: "ورقي" });
   check("وُفِّقت الخطة فصارت اتفاقًا", consent.ok);
 
-  const planned = await listPatientPlannedVisits(patient.id);
-  check("وُلدت زيارة مخطَّطة لجلسات البند", planned.length === 1 && planned[0].durationMinutes === 90,
-    `${planned.length} زيارة`);
+  const planned = await checkSequentialCourse(patient.id, created.planId, []);
 
   const sessions = await pool.query(
     `SELECT s.sequence, s.status FROM treatment_sessions s
@@ -147,8 +178,7 @@ async function journeyMultiSession() {
   check("البند «قيد التنفيذ» لا «منفَّذ» — جلستان بقيتا", item1.rows[0].status === "in_progress");
 
   // ── الجلستان ٢ و٣: زيارتان مستقلتان من الإجراءات المتبقّية ──
-  const planned2 = await listPatientPlannedVisits(patient.id);
-  check("اقتُرحت الزيارة المخطَّطة التالية تلقائيًا", planned2.length >= 1, planned2[0]?.title ?? "");
+  await checkSequentialCourse(patient.id, created.planId, [started1.id]);
 
   // الجلسة ٢: زيارةٌ حرّة بإجراءٍ مرتبطٍ بالبند نفسه.
   const visit2 = await pool.query(
@@ -170,6 +200,8 @@ async function journeyMultiSession() {
   const signed2 = await signVisit(visit2.rows[0].id);
   check("الجلسة الثانية فُوترت 10,000 — لا أكثر ولا أقل", signed2.duesMinor === 10000);
 
+  await checkSequentialCourse(patient.id, created.planId, [started1.id, visit2.rows[0].id]);
+
   const visit3 = await pool.query(
     `INSERT INTO visits (patient_name, patient_phone, patient_id) VALUES ($1, $2, $3) RETURNING id`,
     [patient.fullName, patient.phone, patient.id],
@@ -187,6 +219,9 @@ async function journeyMultiSession() {
   });
   const signed3 = await signVisit(visit3.rows[0].id);
   check("الجلسة الثالثة (الإكمال) فُوترت 10,000 — الفرق محمَّل عليها", signed3.duesMinor === 10000);
+
+  await checkSequentialCourse(patient.id, created.planId,
+    [started1.id, visit2.rows[0].id, visit3.rows[0].id]);
 
   const finalItem = await pool.query(
     `SELECT status, done_at FROM plan_items WHERE plan_id = $1`, [created.planId],

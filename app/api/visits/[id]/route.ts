@@ -223,6 +223,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       if (result.reason === "has_prescription_history") {
         return NextResponse.json({ code: "has_prescription_history", message: "الزيارة مرتبطة بوصفات صادرة بمفاتيح محفوظة؛ لا تُحذف ولا يُمحى ارتباطها الأصلي. لم يُغيَّر شيء." }, { status: 409 });
       }
+      if (result.reason === "lab_linked") return NextResponse.json({message:"هذه الزيارة مرتبطة بهوية مختبر دائمة؛ لا تُحذف دون معالجة سريرية صريحة للروابط."},{status:409});
       if (result.reason === "signed") {
         return NextResponse.json(
           { message: "الزيارة موقّعة سريريًا — وثّقت عمل الطبيب ولا تُمحى." },

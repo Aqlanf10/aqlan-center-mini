@@ -104,6 +104,7 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
       else if (holdPatient) pendingPatients.push(route);
       else await json(route, patientPayload, patientStatus);
     }
+<<<<<<< HEAD
     else if (path === `/api/patients/${contextPatientId}/prescriptions`) {
       if (failPrescriber) await json(route, { message: "Synthetic identity outage" }, 503);
       else await json(route, { prescriptions: [], suggestions: [], prescriberOptions: { issuerId: 98104, canChooseAnyDoctor: false, doctors: [{ id: 98104, name: "طبيب تجريبي" }] } });
@@ -113,6 +114,12 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
     else if (method === "GET" && path === "/api/settings" && url.search === "") {
       await json(route, { "clinical.medication_catalog": JSON.stringify({ schemaVersion: 1, entries: [] }) });
     }
+=======
+    else if (path === `/api/patients/${contextPatientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [] });
+    // This unrelated clinical fixture models capability availability, not lab commands.
+    // Keep the exact read local; every unlisted request still fails the fixture.
+    else if (method === "GET" && path === "/api/lab/work-intents/capability" && !url.search) await json(route, { supported: true });
+>>>>>>> 7c57adf5f9a035d366c99fe0947578633653dd63
     else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties") await json(route, [{ id: 98104, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);

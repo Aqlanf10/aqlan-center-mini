@@ -74,8 +74,7 @@ async function visit(patientId: number, doctorId: number, day: string) {
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
-  // Preserve empty HR history guards: DELETE fixture parents after clearing their financial rows.
-  await q(`TRUNCATE payments, invoice_items, invoices, visits, appointments, treatment_plans, patients RESTART IDENTITY CASCADE`);
+  // Fresh schema has no patient rows; remove only seeded party fixtures.
   await q("DELETE FROM parties");
   [{ id: ortho }] = await q<{ id: number }>(`INSERT INTO parties (name, kind) VALUES ('د. التقويم', 'doctor') RETURNING id`);
   [{ id: endo }] = await q<{ id: number }>(`INSERT INTO parties (name, kind) VALUES ('د. العصب', 'doctor') RETURNING id`);

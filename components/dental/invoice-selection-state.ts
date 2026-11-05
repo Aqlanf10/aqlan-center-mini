@@ -110,6 +110,9 @@ export function readInvoiceSelectionPreview(payload: unknown,
         || !parsed.some((candidate) => candidate.id === request.planItemId
           && (existingPlanId === null || candidate.planId === existingPlanId))) return null;
     }
+    if(Object.hasOwn(line,"labWork") || Object.hasOwn(line,"labWorkOrderId")){
+      if(!request.planItemId || !object(item) || item.mode !== "existing" || item.id !== request.planItemId || line.refusal !== null || line.refusalMessage !== null) return null;
+    }
     itemChoices.set(request.key, parsed);
   }
   return { byRow, selections: { planChoices, itemChoices } };

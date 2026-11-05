@@ -1,3 +1,4 @@
+import { parseReturnBookingSource } from "@/lib/return-booking-source";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -170,15 +171,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         return NextResponse.json({ message: "حدّد تاريخ الموعد ووقته." }, { status: 400 });
       }
       const user = await findUserByUsername(session.username).catch(() => null);
+      const returnBookingSource = body.returnBookingSource === undefined ? null : parseReturnBookingSource(body.returnBookingSource);
+      if (body.returnBookingSource !== undefined && !returnBookingSource) return NextResponse.json({ message: "اختر حالة صحيحة للحجز." }, { status: 400 });
       const result = await convertWaitingToAppointment({
         waitingId: id, date, time,
+        nearbyAppointmentConfirmation: typeof body.nearbyAppointmentConfirmation === "string" ? body.nearbyAppointmentConfirmation.slice(0, 4096) : null,
+        returnBookingSource,
+        returnBookingFingerprint: typeof body.returnBookingFingerprint === "string" ? body.returnBookingFingerprint.slice(0, 128) : null,
         durationMinutes: body.durationMinutes == null ? null : Number(body.durationMinutes),
         serviceId: body.serviceId == null ? null : Number(body.serviceId),
         doctorId: body.doctorId == null ? null : Number(body.doctorId),
         chairNo: body.chairNo == null ? null : Number(body.chairNo),
         overrideReason: typeof body.overrideReason === "string" ? body.overrideReason : null,
       }, {
-        username: session.username,
+        username: session.username, userId: session.userId,
         role: session.role,
         doctorPartyId: user?.partyId ?? null,
         /* صلاحيةُ التجاوز تُقرأ من المستخدم في الخادم — لا من الطلب. */
@@ -196,7 +202,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         });
       }
       return NextResponse.json(
-        { message: result.message, conflict: result.conflict ?? null },
+        { message: result.message, conflict: result.conflict ?? null, ...(result.code ? { code: result.code } : {}) },
         { status: result.status },
       );
     }

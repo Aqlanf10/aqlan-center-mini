@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { partyStatementNetMinor } from "../../lib/party-statement";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
@@ -42,9 +42,10 @@ async function expectParity(partyId: number) {
   return statement;
 }
 
-beforeAll(async () => { await dropPublicSchema(process.env.DATABASE_URL!); await db.ensureSchema(); });
 beforeEach(async () => {
-  await query(`TRUNCATE expense_payable_allocations, expenses, payables, lab_order_tracking, lab_orders, patients, cashier_shifts, audit_log RESTART IDENTITY CASCADE`);
+  await db.resetPoolForTesting();
+  await dropPublicSchema(process.env.DATABASE_URL!);
+  await db.ensureSchema();
   await query("DELETE FROM parties");
   await query("INSERT INTO cashier_shifts (opened_by) VALUES ('statement-acceptance')");
 });
