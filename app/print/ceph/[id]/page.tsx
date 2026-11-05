@@ -1,11 +1,12 @@
+import { CEPH_UNAVAILABLE_NOTICE, isQuarantinedCephMeasurement, presentCephMeasurements } from "@/lib/cephPresentation";
 import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import {
   getCephReferenceSet, getCephStudy, getPatient, getSettingsSafe,
 } from "@/lib/db";
 import {
-  computeAll, enrichWithRefs, getClinicalInterpretation, getSeverityStars, interpret, MEASUREMENTS, projectOnLine,
-  type LandmarkCode, type LandmarkMap, type MeasurementResult,
+  computeAll, enrichWithRefs, projectOnLine,
+  type LandmarkCode, type LandmarkMap,
 } from "@/lib/ceph";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
@@ -102,26 +103,8 @@ export default async function CephPrintReportPage({
 
   // حساب القياسات أو قراءة اللقطة المعتمدة
   const rawResults = computeAll(points, study.analysis.mmPerPixel ?? NaN);
-  const table: MeasurementResult[] = study.analysis.status === "completed" && study.measurements.length > 0
-    ? (() => {
-        const snap = new Map(study.measurements.map((s) => [s.code, s.value]));
-        return rawResults.map((r) => {
-          const v = snap.get(r.code);
-          if (v == null || !Number.isFinite(v)) return { ...r, value: null, display: "—", status: null, severityStars: "", interpretationEn: "", interpretationAr: "" };
-          const def = MEASUREMENTS.find((d) => d.code === r.code);
-          const interp = getClinicalInterpretation(r.code, v);
-          return {
-            ...r,
-            value: v,
-            display: String(v),
-            status: def ? interpret(v, def) : r.status,
-            severityStars: def ? getSeverityStars(v, def.mean, def.tol) : r.severityStars,
-            interpretationEn: interp.en,
-            interpretationAr: interp.ar,
-          };
-        });
-      })()
-    : rawResults;
+  const table = presentCephMeasurements(rawResults,
+    study.analysis.status === "completed" ? study.measurements : null);
 
   const enriched = enrichWithRefs(table, refSet?.values ?? null);
 
@@ -174,6 +157,8 @@ export default async function CephPrintReportPage({
     <>
       <PrintButton />
       <div className="sheet sheet-a4" style={{ fontSize: "8.5pt", lineHeight: 1.4 }}>
+      <p className="mb-2 border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">{CEPH_UNAVAILABLE_NOTICE}</p>
+
         <PrintHeader
           settings={settings}
           title="تقرير التحليل السيفالومتري الرقمي · Digital Cephalometric Report"
@@ -268,6 +253,7 @@ export default async function CephPrintReportPage({
                   if (points.A && points.B && points.OcclA && points.OcclP) {
                     const pA = projectOnLine(points.A, points.OcclP, points.OcclA);
                     const pB = projectOnLine(points.B, points.OcclP, points.OcclA);
+                    if (![pA.x, pA.y, pB.x, pB.y].every(Number.isFinite)) return null;
                     return (
                       <g key="print-wits-drops" stroke="#ef4444" strokeWidth="1" strokeDasharray="3 2" opacity="0.85">
                         <line x1={points.A.x} y1={points.A.y} x2={pA.x} y2={pA.y} />
@@ -384,7 +370,7 @@ export default async function CephPrintReportPage({
                               {r.value != null ? `${r.value}${r.unit}` : "—"}
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
-                              {refNorm} {r.unit}
+                              {isQuarantinedCephMeasurement(r.code) ? "غير متاح" : `${refNorm} ${r.unit}`}
                             </td>
                             <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
                               {r.severityStars || "—"}
@@ -460,7 +446,7 @@ export default async function CephPrintReportPage({
                               {r.value != null ? `${r.value}${r.unit}` : "—"}
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
-                              {refNorm} {r.unit}
+                              {isQuarantinedCephMeasurement(r.code) ? "غير متاح" : `${refNorm} ${r.unit}`}
                             </td>
                             <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
                               {r.severityStars || "—"}

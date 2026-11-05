@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { CephViewport, type CephImageSize } from "./CephViewport";
+import { CEPH_UNAVAILABLE_NOTICE, isQuarantinedCephMeasurement, presentCephMeasurements } from "@/lib/cephPresentation";
+import { CephEditQueue, type CephDraftEdit, type CephEditResult } from "@/lib/ceph-edit-queue";
 import {
-  CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
+  CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, LANDMARK_ORDER, landmarkDef, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
   type CephSchool, type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
 } from "@/lib/ceph";
@@ -194,7 +197,14 @@ export function CephTracer({
   const [hoveredPoint, setHoveredPoint] = useState<LandmarkCode | null>(null);
   const [selectedSchool, setSelectedSchool] = useState<CephSchool>("all");
   const [cursorSurfacePt, setCursorSurfacePt] = useState<Pt | null>(null);
-  const [cursorClientPos, setCursorClientPos] = useState<{ x: number; y: number } | null>(null);
+  const [panMode, setPanMode] = useState(false);
+  const pointsRef = useRef(points);
+  pointsRef.current = points;
+  const suppressClick = useRef(false);
+  const dragStart = useRef<LandmarkMap | null>(null);
+  const onNaturalSize = useCallback((size: CephImageSize | null) => {
+    setNatural((prev) => size && prev?.w === size.w && prev.h === size.h ? prev : size);
+  }, []);
   const [history, setHistory] = useState<LandmarkMap[]>([]);
   const [future, setFuture] = useState<LandmarkMap[]>([]);
 
@@ -215,7 +225,53 @@ export function CephTracer({
     return computeAll(map, analysis.mmPerPixel ?? NaN);
   });
   const dragging = useRef<LandmarkCode | null>(null);
-  const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingWrites, setPendingWrites] = useState(0);
+  const [saveFailure, setSaveFailure] = useState<Exclude<CephEditResult, { ok: true }> | null>(null);
+  const queueRef = useRef<CephEditQueue | null>(null);
+  const allowDeparture = useRef(false);
+  if (!queueRef.current) {
+    queueRef.current = new CephEditQueue(initialLandmarks, async (edit) => {
+      const response = await fetch(`/api/ceph/${analysis.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) return { ok: false, conflict: response.status === 409,
+        message: body.message ?? "تعذّر حفظ التعديلات. ما زالت على الشاشة فقط." };
+      return { ok: true, mmPerPixel: body.mmPerPixel };
+    }, (count, error) => { setPendingWrites(count); setSaveFailure(error); });
+  }
+  const enqueueEdit = useCallback((edit: CephDraftEdit) => queueRef.current!.enqueue(edit), []);
+  useEffect(() => {
+    if (!pendingWrites) return;
+    const warn = (event: BeforeUnloadEvent) => { if (!allowDeparture.current) { event.preventDefault(); event.returnValue = ""; } };
+    const blockLink = (event: MouseEvent) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!link || link.target === "_blank" || link.hasAttribute("download")) return;
+      if (link.href === window.location.href) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setMessage("انتظر حفظ التعديلات أو أعد محاولة الحفظ قبل مغادرة مساحة الرسم.");
+    };
+    // Modern browsers can also cancel same-document Back/Forward navigation.
+    // beforeunload protects document departures in all supported browsers.
+    const navigation = (window as Window & { navigation?: EventTarget }).navigation;
+    const blockNavigation = (event: Event) => {
+      if (allowDeparture.current || (event as Event & { navigationType?: string }).navigationType === "reload") return;
+      if (event.cancelable) {
+        event.preventDefault();
+        setMessage("توجد تعديلات غير محفوظة. احفظها قبل مغادرة مساحة الرسم.");
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    document.addEventListener("click", blockLink, true);
+    navigation?.addEventListener("navigate", blockNavigation);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      document.removeEventListener("click", blockLink, true);
+      navigation?.removeEventListener("navigate", blockNavigation);
+    };
+  }, [pendingWrites]);
 
   const [dx, setDx] = useState<DxState>(() => ({
     skeletal: diagnosis?.skeletal ?? "",
@@ -226,26 +282,11 @@ export function CephTracer({
   }));
   const [dxDirty, setDxDirty] = useState(false);
 
-  /** حفظ نقطة واحدة — كتابةٌ فوقية برمزها، والخادم يرفض إن كان المعتمد. */
-  const savePoint = useCallback(async (code: LandmarkCode, pt: Pt) => {
-    setSaving(true);
-    setSources((s) => ({ ...s, [code]: "manual" }));
-    try {
-      const res = await fetch(`/api/ceph/${analysis.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ landmarks: [{ code, x: pt.x, y: pt.y, source: "manual" }] }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setMessage(data.message ?? "تعذّر الحفظ.");
-      }
-    } catch {
-      setMessage("تعذّر الاتصال — النقطة على الشاشة فقط ولم تُحفَظ.");
-    } finally {
-      setSaving(false);
-    }
-  }, [analysis.id]);
+  /** Manual edits, undo and calibration share an ordered, retryable queue. */
+  const savePoint = useCallback((code: LandmarkCode, pt: Pt) => {
+    setSources((current) => ({ ...current, [code]: "manual" }));
+    return enqueueEdit({ landmarks: [{ code, x: pt.x, y: pt.y, source: "manual" }] });
+  }, [enqueueEdit]);
 
   const pushHistory = useCallback((snap: LandmarkMap) => {
     setHistory((h) => [...h.slice(-39), snap]);
@@ -262,23 +303,23 @@ export function CephTracer({
     if (!completed) void savePoint(code, snapped);
   }, [completed, points, pushHistory, savePoint, scale]);
 
-  /** تحويل إحداثيات النقر إلى إحداثيات الصورة الطبيعية. */
+  /** Keep every clinical coordinate in native image pixels, at any fit/zoom/pan. */
   const imagePoint = (e: React.MouseEvent): Pt | null => {
-    const el = e.currentTarget as HTMLElement;
-    const rect = el.getBoundingClientRect();
-    if (!natural) return null;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!natural || rect.width <= 0 || rect.height <= 0) return null;
     return {
-      x: ((e.clientX - rect.left) / rect.width) * natural.w,
-      y: ((e.clientY - rect.top) / rect.height) * natural.h,
+      x: Math.max(0, Math.min(natural.w, ((e.clientX - rect.left) / rect.width) * natural.w)),
+      y: Math.max(0, Math.min(natural.h, ((e.clientY - rect.top) / rect.height) * natural.h)),
     };
   };
 
   const onSurfaceClick = (e: React.MouseEvent) => {
-    if (completed || !natural) return;
+    if (suppressClick.current) { suppressClick.current = false; return; }
+    if (completed || aiLoading || !natural || panMode) return;
     const pt = imagePoint(e);
     if (!pt) return;
-    // وضع المعايرة يسبق وضع المعالم — حتى تُعرض الأطوال بالمليمتر منذ أول نقطة.
     if (calMode) {
+      if (saving) return;
       if (!calMode.p1) { setCalMode({ p1: pt, p2: null }); return; }
       setCalMode({ p1: calMode.p1, p2: pt });
       return;
@@ -291,121 +332,115 @@ export function CephTracer({
   };
 
   const onPointerDown = (code: LandmarkCode) => (e: React.PointerEvent) => {
-    if (completed || calMode) return;
-    pushHistory(points);
+    if (completed || aiLoading || calMode || panMode || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    suppressClick.current = true;
+    dragStart.current = pointsRef.current;
     dragging.current = code;
     setSelected(code);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
-    if (points[code]) {
-      setCursorSurfacePt(points[code]!);
-      setCursorClientPos({ x: e.clientX, y: e.clientY });
-    }
+    setCursorSurfacePt(pointsRef.current[code] ?? null);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    const pt = imagePoint(e);
+    if (!pt) return;
+    setCursorSurfacePt(pt);
     const code = dragging.current;
-    if (!natural) return;
-    const el = e.currentTarget as HTMLElement;
-    const rect = el.getBoundingClientRect();
-    const pt = {
-      x: ((e.clientX - rect.left) / rect.width) * natural.w,
-      y: ((e.clientY - rect.top) / rect.height) * natural.h,
-    };
     if (code) {
-      const next = { ...points, [code]: pt };
+      const next = { ...pointsRef.current, [code]: { x: round1(pt.x), y: round1(pt.y) } };
+      pointsRef.current = next;
       setPoints(next);
       if (!completed) setResults(computeAll(next, scale ?? NaN));
-      setCursorSurfacePt(pt);
-      setCursorClientPos({ x: e.clientX, y: e.clientY });
     } else {
-      // فحص اقتراب المؤشر من أي معلم موضوع لتشغيل عدسة التكبير الفائقة كمنصة WebCeph
-      const threshold = Math.max(22, 32 / zoom);
-      let nearest: LandmarkCode | null = null;
-      let minD = Infinity;
-      for (const [k, p] of Object.entries(points) as [LandmarkCode, Pt | undefined][]) {
-        if (!p) continue;
-        const d = Math.hypot(p.x - pt.x, p.y - pt.y);
-        if (d < threshold && d < minD) {
-          minD = d;
-          nearest = k;
-        }
+      // Hit distance is measured in screen pixels, not affected by image resolution.
+      const rect = e.currentTarget.getBoundingClientRect();
+      const ratio = natural ? rect.width / natural.w : 1;
+      let nearest: LandmarkCode | null = null, minD = 18;
+      for (const [key, point] of Object.entries(points) as [LandmarkCode, Pt | undefined][]) {
+        if (!point) continue;
+        const distance = Math.hypot(point.x - pt.x, point.y - pt.y) * ratio;
+        if (distance < minD) { minD = distance; nearest = key; }
       }
-      if (nearest && points[nearest]) {
-        setHoveredPoint(nearest);
-        setCursorSurfacePt(points[nearest]!);
-        setCursorClientPos({ x: e.clientX, y: e.clientY });
-      } else if (hoveredPoint) {
-        setHoveredPoint(null);
-        setCursorSurfacePt(null);
-        setCursorClientPos(null);
-      }
+      setHoveredPoint(nearest);
     }
   };
 
-  const onSurfacePointerLeave = () => {
-    if (!dragging.current) {
-      setHoveredPoint(null);
-      setCursorSurfacePt(null);
-      setCursorClientPos(null);
-    }
-  };
-
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
     const code = dragging.current;
     dragging.current = null;
-    setCursorSurfacePt(null);
-    setCursorClientPos(null);
-    setHoveredPoint(null);
-    const pt = code ? points[code] : null;
-    if (code && pt) void savePoint(code, pt);
+    if (code) {
+      suppressClick.current = true;
+      e.preventDefault();
+      if (dragStart.current) pushHistory(dragStart.current);
+      const pt = pointsRef.current[code];
+      if (pt) void savePoint(code, pt);
+    }
+    dragStart.current = null;
+    if (e.pointerType === "touch") setCursorSurfacePt(null);
   };
 
-  /** تحريك دقيق بالأسهم — خطوة بكسل، ومع Shift عشرة أضعافها، وحفظٌ مؤجَّل. */
-  const nudge = useCallback((code: LandmarkCode, dxPx: number, dyPx: number) => {
-    const current = points[code];
-    if (!current) return;
-    pushHistory(points);
-    const next = { ...points, [code]: { x: current.x + dxPx, y: current.y + dyPx } };
-    setPoints(next);
-    if (!completed) setResults(computeAll(next, scale ?? NaN));
-    if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
-    nudgeTimer.current = setTimeout(() => {
-      const pt = next[code];
-      if (pt) void savePoint(code, pt);
-    }, 500);
-  }, [completed, points, pushHistory, savePoint, scale]);
+  const onPointerCancel = () => {
+    dragging.current = null;
+    suppressClick.current = true;
+    if (dragStart.current) {
+      pointsRef.current = dragStart.current;
+      setPoints(dragStart.current);
+      setResults(computeAll(dragStart.current, scale ?? NaN));
+    }
+    dragStart.current = null;
+    setCursorSurfacePt(null);
+    setHoveredPoint(null);
+  };
 
-  /** التراجع والإعادة — ويكتب الفرقُ في القاعدة كي لا يختلّ ما رآه الخادم. */
+  /** Arrow movement is saved in order, with no delayed timer able to undo Undo. */
+  const nudge = useCallback((code: LandmarkCode, dxPx: number, dyPx: number) => {
+    const current = pointsRef.current[code];
+    if (!current || completed || aiLoading || !natural) return;
+    pushHistory(pointsRef.current);
+    const pt = { x: round1(Math.max(0, Math.min(natural.w, current.x + dxPx))),
+      y: round1(Math.max(0, Math.min(natural.h, current.y + dyPx))) };
+    const next = { ...pointsRef.current, [code]: pt };
+    pointsRef.current = next;
+    setPoints(next);
+    setResults(computeAll(next, scale ?? NaN));
+    void savePoint(code, pt);
+  }, [aiLoading, completed, natural, pushHistory, savePoint, scale]);
+
   const persistDiff = useCallback((before: LandmarkMap, after: LandmarkMap) => {
     const codes = new Set([...Object.keys(before), ...Object.keys(after)]) as Set<LandmarkCode>;
+    const landmarks: NonNullable<CephDraftEdit["landmarks"]> = [];
+    const removeLandmarks: LandmarkCode[] = [];
     for (const code of codes) {
-      const b = before[code];
-      const a = after[code];
+      const b = before[code], a = after[code];
       if (b?.x !== a?.x || b?.y !== a?.y) {
-        if (a) void savePoint(code, a);
+        if (a) landmarks.push({ code, ...a, source: "manual" });
+        else removeLandmarks.push(code);
       }
     }
-  }, [savePoint]);
+    if (landmarks.length || removeLandmarks.length) void enqueueEdit({ landmarks, removeLandmarks });
+  }, [enqueueEdit]);
 
   const undo = useCallback(() => {
-    if (completed || history.length === 0) return;
+    if (completed || aiLoading || history.length === 0) return;
     const prev = history[history.length - 1];
     setHistory((h) => h.slice(0, -1));
     setFuture((f) => [points, ...f].slice(0, 40));
     setPoints(prev);
     setResults(computeAll(prev, scale ?? NaN));
     persistDiff(points, prev);
-  }, [completed, history, persistDiff, points, scale]);
+  }, [aiLoading, completed, history, persistDiff, points, scale]);
 
   const redo = useCallback(() => {
-    if (completed || future.length === 0) return;
+    if (completed || aiLoading || future.length === 0) return;
     const nextMap = future[0];
     setFuture((f) => f.slice(1));
     setHistory((h) => [...h.slice(-39), points]);
     setPoints(nextMap);
     setResults(computeAll(nextMap, scale ?? NaN));
     persistDiff(points, nextMap);
-  }, [completed, future, persistDiff, points, scale]);
+  }, [aiLoading, completed, future, persistDiff, points, scale]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -439,51 +474,37 @@ export function CephTracer({
   }, [completed, nudge, points, redo, selected, undo]);
 
   const saveCalibration = async () => {
-    if (!calMode?.p1 || !calMode?.p2) return;
+    if (!calMode?.p1 || !calMode?.p2 || saving || aiLoading) return;
     const mm = Number(calMm);
     if (!Number.isFinite(mm) || mm <= 0) { setMessage("أدخل المسافة الحقيقية بالمليمتر."); return; }
+    const next = { x1: round1(calMode.p1.x), y1: round1(calMode.p1.y),
+      x2: round1(calMode.p2.x), y2: round1(calMode.p2.y), mm };
+    if (Math.hypot(next.x2 - next.x1, next.y2 - next.y1) < 0.1) {
+      setMessage("اختر نقطتين مختلفتين للمعايرة."); return;
+    }
     setSaving(true);
     try {
-      const res = await fetch(`/api/ceph/${analysis.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          calibration: {
-            x1: round1(calMode.p1.x), y1: round1(calMode.p1.y),
-            x2: round1(calMode.p2.x), y2: round1(calMode.p2.y),
-            mm,
-          },
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setCalibration({ x1: round1(calMode.p1.x), y1: round1(calMode.p1.y), x2: round1(calMode.p2.x), y2: round1(calMode.p2.y), mm });
-        // المقياس يعود من الخادم نفسه — لا يُحسب في المتصفّح.
-        const study = await fetch(`/api/ceph/${analysis.id}`);
-        if (study.ok) {
-          const s = await study.json();
-          setScale(s.analysis?.mmPerPixel ?? null);
-          setResults(computeAll(points, s.analysis?.mmPerPixel ?? NaN));
-        }
+      const result = await enqueueEdit({ calibration: next });
+      if (result.ok) {
+        setCalibration(next);
+        // Read the authoritative scale from the same successful write, without a
+        // second GET whose failure could leave new calibration with an old scale.
+        setScale(result.mmPerPixel ?? null);
+        setResults(computeAll(pointsRef.current, result.mmPerPixel ?? NaN));
         setCalMode(null);
         setMessage("المعايرة محفوظة.");
-      } else {
-        setMessage(data.message ?? "تعذّر حفظ المعايرة.");
       }
-    } catch {
-      setMessage("تعذّر الاتصال.");
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const requiredMissing = REQUIRED_LANDMARKS.filter((c) => points[c] == null);
   const missing = LANDMARK_ORDER.filter((c) => points[c] == null);
-  const canComplete = !completed && scale != null && requiredMissing.length === 0;
+  const canComplete = !completed && !aiLoading && scale != null && requiredMissing.length === 0 && pendingWrites === 0 && !saveFailure;
   const completionPct = Math.round(((REQUIRED_LANDMARKS.length - requiredMissing.length) / REQUIRED_LANDMARKS.length) * 100);
   const optionalMissing = LANDMARK_ORDER.filter((c) => points[c] == null && !REQUIRED_LANDMARKS.includes(c));
 
   const complete = async () => {
+    if (!canComplete || saving) return;
     if (!window.confirm("اعتماد التحليل يقفل التعديل ويختم القياسات والتشخيص. هل تريد الاعتماد؟")) return;
     setSaving(true);
     try {
@@ -532,18 +553,8 @@ export function CephTracer({
 
   // جدول المسودة يجري حيًّا؛ وجدول المعتمد يقرأ اللقطة: القيم من ceph_measurements
   // وحدها مع تفسيرها على سجل التعريفات نفسه — لا رقم معتمد يُعاد حسابه.
-  const table = useMemo((): MeasurementResult[] => {
-    if (!(completed && stamped)) return results;
-    const snap = new Map(stamped.map((s) => [s.code, s.value]));
-    return results.map((r) => {
-      const v = snap.get(r.code);
-      if (v == null || !Number.isFinite(v)) {
-        return { ...r, value: null, display: "—", status: null };
-      }
-      const def = MEASUREMENTS.find((d) => d.code === r.code);
-      return { ...r, value: v, display: String(v), status: def ? interpret(v, def) : r.status };
-    });
-  }, [completed, stamped, results]);
+  const table = useMemo(() => presentCephMeasurements(results, completed ? (stamped ?? []) : null),
+    [completed, stamped, results]);
 
   const enriched = useMemo(() => enrichWithRefs(table, refValues), [table, refValues]);
 
@@ -586,7 +597,10 @@ export function CephTracer({
   };
 
   const autoLocateAi = async () => {
-    if (completed) return;
+    if (completed || aiLoading) return;
+    if (pendingWrites || saving || saveFailure) {
+      setMessage("احفظ التعديلات الحالية أولاً قبل اقتراح معالم جديدة."); return;
+    }
     setAiLoading(true);
     setMessage("جاري استقراء واقتراح المعالم بالذكاء الاصطناعي وفق المعايير السيفالومترية…");
     try {
@@ -605,6 +619,8 @@ export function CephTracer({
           nextPoints[lm.code as LandmarkCode] = { x: lm.x, y: lm.y };
           nextSources[lm.code] = "suggested";
         }
+        queueRef.current!.adoptAcknowledged(Object.entries(nextPoints).flatMap(([code, pt]) =>
+          pt ? [{ code: code as LandmarkCode, ...pt, source: nextSources[code] ?? "manual" }] : []));
         pushHistory(points);
         setPoints(nextPoints);
         setSources(nextSources);
@@ -689,6 +705,214 @@ export function CephTracer({
     ? new Date(analysis.xrayDate).getUTCFullYear() - patientBirthYear
     : null;
 
+  const visibleCalibration = calMode ?? (calibration ? { p1: { x: calibration.x1, y: calibration.y1 }, p2: { x: calibration.x2, y: calibration.y2 } } : null);
+
+  // Reuse the exact native-coordinate scene in the main view and the loupe.
+  const renderOverlay = (displayScale: number, interactive: boolean) => natural && <>
+                  {/* الخطوط الاستدلالية الأساسية */}
+                  {showGuides && GUIDE_LINES.map(([a, b]) => {
+                    const pa = points[a];
+                    const pb = points[b];
+                    if (!pa || !pb) return null;
+                    return (
+                      <line
+                        key={`guide-${a}${b}`}
+                        x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
+                        stroke="rgba(37,99,235,0.45)" strokeWidth={Math.max(1, 1.2 / displayScale)}
+                        strokeDasharray={`${6 / displayScale} ${4 / displayScale}`}
+                      />
+                    );
+                  })}
+
+                  {/* شبكة التخطيط الشعاعي والهيكل المتجهي الكامل (WebCeph Vector Tracing) */}
+                  {showFullTracing && (
+                    <g key="full-tracing-skeleton">
+                      {/* مستويات الجمجمة الأساسية */}
+                      {points.S && points.N && (
+                        <line x1={points.S.x} y1={points.S.y} x2={points.N.x} y2={points.N.y} stroke="#2563eb" strokeWidth={Math.max(1.8, 2.5 / displayScale)} />
+                      )}
+                      {points.Po && points.Or && (
+                        <line x1={points.Po.x} y1={points.Po.y} x2={points.Or.x} y2={points.Or.y} stroke="#d97706" strokeWidth={Math.max(1.6, 2.2 / displayScale)} />
+                      )}
+                      {points.Go && points.Me && (
+                        <line x1={points.Go.x} y1={points.Go.y} x2={points.Me.x} y2={points.Me.y} stroke="#059669" strokeWidth={Math.max(1.8, 2.5 / displayScale)} />
+                      )}
+                      {points.PNS && points.ANS && (
+                        <line x1={points.PNS.x} y1={points.PNS.y} x2={points.ANS.x} y2={points.ANS.y} stroke="#0891b2" strokeWidth={Math.max(1.4, 1.8 / displayScale)} />
+                      )}
+                      {points.OcclP && points.OcclA && (
+                        <line x1={points.OcclP.x} y1={points.OcclP.y} x2={points.OcclA.x} y2={points.OcclA.y} stroke="#7c3aed" strokeWidth={Math.max(1.5, 2 / displayScale)} />
+                      )}
+
+                      {/* الخطوط الهيكلية السهمية والمثلثات */}
+                      {points.N && points.Pog && (
+                        <line x1={points.N.x} y1={points.N.y} x2={points.Pog.x} y2={points.Pog.y} stroke="#64748b" strokeWidth={Math.max(1, 1.4 / displayScale)} strokeDasharray={`${4 / displayScale} ${3 / displayScale}`} />
+                      )}
+                      {points.S && points.Gn && (
+                        <line x1={points.S.x} y1={points.S.y} x2={points.Gn.x} y2={points.Gn.y} stroke="#8b5cf6" strokeWidth={Math.max(1, 1.4 / displayScale)} strokeDasharray={`${5 / displayScale} ${3 / displayScale}`} />
+                      )}
+                      {points.N && points.A && (
+                        <line x1={points.N.x} y1={points.N.y} x2={points.A.x} y2={points.A.y} stroke="#94a3b8" strokeWidth={Math.max(1, 1.2 / displayScale)} strokeDasharray={`${3 / displayScale} ${2 / displayScale}`} />
+                      )}
+                      {points.N && points.B && (
+                        <line x1={points.N.x} y1={points.N.y} x2={points.B.x} y2={points.B.y} stroke="#94a3b8" strokeWidth={Math.max(1, 1.2 / displayScale)} strokeDasharray={`${3 / displayScale} ${2 / displayScale}`} />
+                      )}
+                      {points.A && points.Pog && (
+                        <line x1={points.A.x} y1={points.A.y} x2={points.Pog.x} y2={points.Pog.y} stroke="#f59e0b" strokeWidth={Math.max(1, 1.4 / displayScale)} strokeDasharray={`${4 / displayScale} ${2 / displayScale}`} />
+                      )}
+
+                      {/* مضلع بيورك وجاراك (Bjork-Jarabak Polygon: S-Ar and Ar-Go) */}
+                      {points.S && points.Ar && (
+                        <line x1={points.S.x} y1={points.S.y} x2={points.Ar.x} y2={points.Ar.y} stroke="#0284c7" strokeWidth={Math.max(1.5, 2 / displayScale)} />
+                      )}
+                      {points.Ar && points.Go && (
+                        <line x1={points.Ar.x} y1={points.Ar.y} x2={points.Go.x} y2={points.Go.y} stroke="#0d9488" strokeWidth={Math.max(1.5, 2 / displayScale)} />
+                      )}
+
+                      {/* خطوط قاعدة الجمجمة مع Basion */}
+                      {points.N && points.Ba && (
+                        <line x1={points.N.x} y1={points.N.y} x2={points.Ba.x} y2={points.Ba.y} stroke="#0ea5e9" strokeWidth={Math.max(1.4, 1.8 / displayScale)} strokeDasharray={`${4 / displayScale} ${2 / displayScale}`} />
+                      )}
+                      {points.S && points.Ba && (
+                        <line x1={points.S.x} y1={points.S.y} x2={points.Ba.x} y2={points.Ba.y} stroke="#0284c7" strokeWidth={Math.max(1.4, 1.8 / displayScale)} />
+                      )}
+
+                      {/* محاور القواطع العلوية والسفلية */}
+                      {points.U1A && points.U1 && (
+                        <line x1={points.U1A.x} y1={points.U1A.y} x2={points.U1.x} y2={points.U1.y} stroke="#a855f7" strokeWidth={Math.max(1.5, 2 / displayScale)} />
+                      )}
+                      {points.L1A && points.L1 && (
+                        <line x1={points.L1A.x} y1={points.L1A.y} x2={points.L1.x} y2={points.L1.y} stroke="#c026d3" strokeWidth={Math.max(1.5, 2 / displayScale)} />
+                      )}
+
+                      {/* مساقط ويتس العمودية على خط الإطباق (Wits Perpendiculars) */}
+                      {points.A && points.OcclA && points.OcclP && (() => {
+                        const fa = projectOnLine(points.A, points.OcclA, points.OcclP);
+                        if (![fa.x, fa.y].every(Number.isFinite)) return null;
+                        return (
+                          <line x1={points.A.x} y1={points.A.y} x2={fa.x} y2={fa.y} stroke="#ec4899" strokeWidth={Math.max(1, 1.5 / displayScale)} strokeDasharray={`${3 / displayScale} ${2 / displayScale}`} />
+                        );
+                      })()}
+                      {points.B && points.OcclA && points.OcclP && (() => {
+                        const fb = projectOnLine(points.B, points.OcclA, points.OcclP);
+                        if (![fb.x, fb.y].every(Number.isFinite)) return null;
+                        return (
+                          <line x1={points.B.x} y1={points.B.y} x2={fb.x} y2={fb.y} stroke="#ec4899" strokeWidth={Math.max(1, 1.5 / displayScale)} strokeDasharray={`${3 / displayScale} ${2 / displayScale}`} />
+                        );
+                      })()}
+                    </g>
+                  )}
+
+                  {/* خط ريكتس الجمالي E-Line من Prn إلى PogS */}
+                  {points.Prn && points.PogS && (
+                    <g key="eline-ricketts">
+                      <line
+                        x1={points.Prn.x} y1={points.Prn.y}
+                        x2={points.PogS.x} y2={points.PogS.y}
+                        stroke="#db2777" strokeWidth={Math.max(1.8, 2.4 / displayScale)}
+                        strokeDasharray={`${6 / displayScale} ${3 / displayScale}`}
+                      />
+                      <text
+                        x={(points.Prn.x + points.PogS.x) / 2 + 8 / displayScale}
+                        y={(points.Prn.y + points.PogS.y) / 2}
+                        fontSize={Math.max(9, 12 / displayScale)}
+                        fill="#db2777"
+                        fontWeight="bold"
+                        className="pointer-events-none select-none"
+                      >
+                        E-Line (Ricketts)
+                      </text>
+                    </g>
+                  )}
+
+                  {/* شريط حجب هوية العينين للخصوصية الطبية (WebCeph Anonymization Mask) */}
+                  {anonymize && (
+                    <g key="anonymization-privacy-bar">
+                      <rect
+                        x={points.Or ? points.Or.x - 25 : (natural.w * 0.52)}
+                        y={points.Or ? points.Or.y - 45 : (natural.h * 0.36)}
+                        width={120}
+                        height={40}
+                        rx={Math.max(4, 6 / displayScale)}
+                        fill="#09090b"
+                        opacity="0.96"
+                      />
+                      <text
+                        x={points.Or ? points.Or.x + 35 : (natural.w * 0.61)}
+                        y={points.Or ? points.Or.y - 23 : (natural.h * 0.39)}
+                        fill="#f8fafc"
+                        fontSize={Math.max(8, 10 / displayScale)}
+                        fontWeight="bold"
+                        textAnchor="middle"
+                        className="pointer-events-none select-none font-mono"
+                      >
+                        CONFIDENTIAL · سري
+                      </text>
+                    </g>
+                  )}
+
+                  {visibleCalibration?.p1 && visibleCalibration?.p2 && (
+                    <line
+                      x1={visibleCalibration.p1.x} y1={visibleCalibration.p1.y} x2={visibleCalibration.p2.x} y2={visibleCalibration.p2.y}
+                      stroke="#b45309" strokeWidth={Math.max(1.5, 2 / displayScale)}
+                    />
+                  )}
+                  {visibleCalibration?.p1 && !visibleCalibration.p2 && (
+                    <circle cx={visibleCalibration.p1.x} cy={visibleCalibration.p1.y} r={Math.max(3, 5 / displayScale)} fill="#b45309" />
+                  )}
+
+                  {/* رسم المعالم التشريحية الـ 27 */}
+                  {(Object.keys(points) as LandmarkCode[]).map((code) => {
+                    const pt = points[code];
+                    if (!pt) return null;
+                    const isDragging = dragging.current === code;
+                    const isSuggested = sources[code] === "suggested";
+                    const isHovered = hoveredPoint === code;
+                    const pointFill = isDragging || isHovered
+                      ? "#dc2626"
+                      : isSuggested
+                      ? "#9333ea"
+                      : "#1e3a5f";
+                    return (
+                      <g
+                        key={code}
+                        onPointerEnter={interactive ? () => setHoveredPoint(code) : undefined}
+                      >
+                        {isSuggested && (
+                          <circle
+                            cx={pt.x} cy={pt.y}
+                            r={Math.max(7, 12 / displayScale)}
+                            fill="none"
+                            stroke="#c084fc"
+                            strokeWidth={Math.max(1.2, 1.8 / displayScale)}
+                            strokeDasharray={`${3 / displayScale} ${2 / displayScale}`}
+                          />
+                        )}
+                        <circle
+                          cx={pt.x} cy={pt.y}
+                          r={Math.max(isHovered ? 6 : 4, (isHovered ? 10 : 7) / displayScale)}
+                          fill={pointFill}
+                          stroke="#ffffff"
+                          strokeWidth={Math.max(1, 1.5 / displayScale)}
+                          className={completed ? "" : "cursor-grab"}
+                          onPointerDown={interactive ? onPointerDown(code) : undefined}
+                          onLostPointerCapture={interactive ? () => { if (dragging.current) onPointerCancel(); } : undefined}
+                          onClick={(e) => { e.stopPropagation(); suppressClick.current = false; }}
+                        />
+                        <text
+                          x={pt.x + 10 / displayScale} y={pt.y - 10 / displayScale}
+                          fontSize={Math.max(10, 14 / displayScale)}
+                          fill={isSuggested ? "#7e22ce" : "#1e3a5f"}
+                          fontWeight={isSuggested || isHovered ? "bold" : "normal"}
+                          className="pointer-events-none select-none"
+                        >
+                          {code}{isSuggested ? " ✦" : ""}
+                        </text>
+                      </g>
+                    );
+                  })}
+  </>;
+
   return (
     <div className="space-y-3">
       {/* الشريط العلوي */}
@@ -731,6 +955,7 @@ export function CephTracer({
             <button
               type="button"
               onClick={() => setCalMode(calMode ? null : { p1: null, p2: null })}
+              disabled={saving || aiLoading}
               className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${calMode ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-300 text-slate-700 hover:bg-slate-50"}`}
             >
               {calMode ? "إلغاء المعايرة" : calibration ? "تصحيح المعايرة" : "معايرة الشععة"}
@@ -747,6 +972,7 @@ export function CephTracer({
             <button
               type="button"
               onClick={() => void discard()}
+              disabled={saving || pendingWrites > 0 || aiLoading}
               className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
             >
               رفض المسودة
@@ -874,6 +1100,7 @@ export function CephTracer({
                 min="0.1"
                 step="0.1"
                 value={calMm}
+                disabled={saving || aiLoading}
                 onChange={(e) => setCalMm(e.target.value)}
                 className="w-28 rounded-lg border border-amber-300 px-2 py-1 text-sm"
               />
@@ -891,6 +1118,18 @@ export function CephTracer({
         </div>
       )}
 
+      {saveFailure && <div role="alert" className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-900">
+        <p>{saveFailure.message}</p>
+        <p>التعديلات غير المحفوظة: {pendingWrites}. الاعتماد متوقف حتى تُحفظ.</p>
+        {saveFailure.conflict ? <p>تغيّر التحليل في جلسة أخرى. أعد فتحه وراجع أحدث المعالم قبل إعادة التعديل.</p>
+          : <button type="button" className="mt-2 rounded border px-3 py-1" onClick={() => queueRef.current!.retry()}>إعادة محاولة الحفظ</button>}
+        <button type="button" className="m-2 rounded border px-3 py-1" onClick={() => {
+          if (window.confirm("سيُعاد تحميل المحفوظ من الخادم ولن تُستعاد التعديلات المحلية غير المحفوظة. هل تريد المتابعة؟")) {
+            allowDeparture.current = true;
+            window.location.reload();
+          }
+        }}>إعادة تحميل أحدث نسخة</button>
+      </div>}
       {message && (
         <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">{message}</p>
       )}
@@ -1036,7 +1275,7 @@ export function CephTracer({
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 lg:flex-row">
+        <div className={`flex flex-col gap-3 ${tracerStep === "analysis" ? "2xl:flex-row" : ""}`}>
         {/* لوحة الرسم */}
         <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-3">
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
@@ -1051,6 +1290,10 @@ export function CephTracer({
                 {z}×
               </button>
             ))}
+            <button type="button" aria-pressed={panMode} onClick={() => { setPanMode((v) => !v); setCursorSurfacePt(null); }}
+              className="rounded-md border border-slate-300 px-2 py-0.5 text-slate-600">
+              {panMode ? "تحديد المعالم" : "تحريك الصورة"}
+            </button>
             <label className="ms-3 flex items-center gap-1 text-slate-600">
               <input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />
               الخطوط الاستدلالية
@@ -1085,7 +1328,7 @@ export function CephTracer({
                 </button>
               </>
             )}
-            {saving && <span className="ms-2 text-slate-400">يحفظ…</span>}
+            {(saving || pendingWrites > 0) && <span className="ms-2 text-slate-400">يحفظ… ({pendingWrites})</span>}
           </div>
 
           {/* شريط أدوات معالجة الصورة وتحسين التباين والخصوصية (WebCeph Image Filters & Privacy) */}
@@ -1169,281 +1412,13 @@ export function CephTracer({
             )}
           </div>
 
-          <div className="max-h-[70vh] overflow-auto rounded-lg bg-slate-100">
-            <div
-              onClick={onSurfaceClick}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerLeave={onSurfacePointerLeave}
-              className="relative cursor-crosshair"
-              style={{ width: natural ? natural.w * zoom : 640, height: natural ? natural.h * zoom : 480 }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`/api/documents/${analysis.documentId}`}
-                alt="الشععة السيفالومترية"
-                className="absolute inset-0 h-full w-full select-none transition-[filter] duration-100"
-                style={{ filter: imageFilterStyle }}
-                draggable={false}
-                onLoad={(e) => {
-                  const el = e.currentTarget;
-                  setNatural({ w: el.naturalWidth, h: el.naturalHeight });
-                }}
-              />
-              {natural && (
-                <svg
-                  className="absolute inset-0 h-full w-full"
-                  viewBox={`0 0 ${natural.w} ${natural.h}`}
-                  preserveAspectRatio="none"
-                >
-                  {/* الخطوط الاستدلالية الأساسية */}
-                  {showGuides && GUIDE_LINES.map(([a, b]) => {
-                    const pa = points[a];
-                    const pb = points[b];
-                    if (!pa || !pb) return null;
-                    return (
-                      <line
-                        key={`guide-${a}${b}`}
-                        x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-                        stroke="rgba(37,99,235,0.45)" strokeWidth={Math.max(1, 1.2 / zoom)}
-                        strokeDasharray={`${6 / zoom} ${4 / zoom}`}
-                      />
-                    );
-                  })}
-
-                  {/* شبكة التخطيط الشعاعي والهيكل المتجهي الكامل (WebCeph Vector Tracing) */}
-                  {showFullTracing && (
-                    <g key="full-tracing-skeleton">
-                      {/* مستويات الجمجمة الأساسية */}
-                      {points.S && points.N && (
-                        <line x1={points.S.x} y1={points.S.y} x2={points.N.x} y2={points.N.y} stroke="#2563eb" strokeWidth={Math.max(1.8, 2.5 / zoom)} />
-                      )}
-                      {points.Po && points.Or && (
-                        <line x1={points.Po.x} y1={points.Po.y} x2={points.Or.x} y2={points.Or.y} stroke="#d97706" strokeWidth={Math.max(1.6, 2.2 / zoom)} />
-                      )}
-                      {points.Go && points.Me && (
-                        <line x1={points.Go.x} y1={points.Go.y} x2={points.Me.x} y2={points.Me.y} stroke="#059669" strokeWidth={Math.max(1.8, 2.5 / zoom)} />
-                      )}
-                      {points.PNS && points.ANS && (
-                        <line x1={points.PNS.x} y1={points.PNS.y} x2={points.ANS.x} y2={points.ANS.y} stroke="#0891b2" strokeWidth={Math.max(1.4, 1.8 / zoom)} />
-                      )}
-                      {points.OcclP && points.OcclA && (
-                        <line x1={points.OcclP.x} y1={points.OcclP.y} x2={points.OcclA.x} y2={points.OcclA.y} stroke="#7c3aed" strokeWidth={Math.max(1.5, 2 / zoom)} />
-                      )}
-
-                      {/* الخطوط الهيكلية السهمية والمثلثات */}
-                      {points.N && points.Pog && (
-                        <line x1={points.N.x} y1={points.N.y} x2={points.Pog.x} y2={points.Pog.y} stroke="#64748b" strokeWidth={Math.max(1, 1.4 / zoom)} strokeDasharray={`${4 / zoom} ${3 / zoom}`} />
-                      )}
-                      {points.S && points.Gn && (
-                        <line x1={points.S.x} y1={points.S.y} x2={points.Gn.x} y2={points.Gn.y} stroke="#8b5cf6" strokeWidth={Math.max(1, 1.4 / zoom)} strokeDasharray={`${5 / zoom} ${3 / zoom}`} />
-                      )}
-                      {points.N && points.A && (
-                        <line x1={points.N.x} y1={points.N.y} x2={points.A.x} y2={points.A.y} stroke="#94a3b8" strokeWidth={Math.max(1, 1.2 / zoom)} strokeDasharray={`${3 / zoom} ${2 / zoom}`} />
-                      )}
-                      {points.N && points.B && (
-                        <line x1={points.N.x} y1={points.N.y} x2={points.B.x} y2={points.B.y} stroke="#94a3b8" strokeWidth={Math.max(1, 1.2 / zoom)} strokeDasharray={`${3 / zoom} ${2 / zoom}`} />
-                      )}
-                      {points.A && points.Pog && (
-                        <line x1={points.A.x} y1={points.A.y} x2={points.Pog.x} y2={points.Pog.y} stroke="#f59e0b" strokeWidth={Math.max(1, 1.4 / zoom)} strokeDasharray={`${4 / zoom} ${2 / zoom}`} />
-                      )}
-
-                      {/* مضلع بيورك وجاراك (Bjork-Jarabak Polygon: S-Ar and Ar-Go) */}
-                      {points.S && points.Ar && (
-                        <line x1={points.S.x} y1={points.S.y} x2={points.Ar.x} y2={points.Ar.y} stroke="#0284c7" strokeWidth={Math.max(1.5, 2 / zoom)} />
-                      )}
-                      {points.Ar && points.Go && (
-                        <line x1={points.Ar.x} y1={points.Ar.y} x2={points.Go.x} y2={points.Go.y} stroke="#0d9488" strokeWidth={Math.max(1.5, 2 / zoom)} />
-                      )}
-
-                      {/* خطوط قاعدة الجمجمة مع Basion */}
-                      {points.N && points.Ba && (
-                        <line x1={points.N.x} y1={points.N.y} x2={points.Ba.x} y2={points.Ba.y} stroke="#0ea5e9" strokeWidth={Math.max(1.4, 1.8 / zoom)} strokeDasharray={`${4 / zoom} ${2 / zoom}`} />
-                      )}
-                      {points.S && points.Ba && (
-                        <line x1={points.S.x} y1={points.S.y} x2={points.Ba.x} y2={points.Ba.y} stroke="#0284c7" strokeWidth={Math.max(1.4, 1.8 / zoom)} />
-                      )}
-
-                      {/* محاور القواطع العلوية والسفلية */}
-                      {points.U1A && points.U1 && (
-                        <line x1={points.U1A.x} y1={points.U1A.y} x2={points.U1.x} y2={points.U1.y} stroke="#a855f7" strokeWidth={Math.max(1.5, 2 / zoom)} />
-                      )}
-                      {points.L1A && points.L1 && (
-                        <line x1={points.L1A.x} y1={points.L1A.y} x2={points.L1.x} y2={points.L1.y} stroke="#c026d3" strokeWidth={Math.max(1.5, 2 / zoom)} />
-                      )}
-
-                      {/* مساقط ويتس العمودية على خط الإطباق (Wits Perpendiculars) */}
-                      {points.A && points.OcclA && points.OcclP && (() => {
-                        const fa = projectOnLine(points.A, points.OcclA, points.OcclP);
-                        return (
-                          <line x1={points.A.x} y1={points.A.y} x2={fa.x} y2={fa.y} stroke="#ec4899" strokeWidth={Math.max(1, 1.5 / zoom)} strokeDasharray={`${3 / zoom} ${2 / zoom}`} />
-                        );
-                      })()}
-                      {points.B && points.OcclA && points.OcclP && (() => {
-                        const fb = projectOnLine(points.B, points.OcclA, points.OcclP);
-                        return (
-                          <line x1={points.B.x} y1={points.B.y} x2={fb.x} y2={fb.y} stroke="#ec4899" strokeWidth={Math.max(1, 1.5 / zoom)} strokeDasharray={`${3 / zoom} ${2 / zoom}`} />
-                        );
-                      })()}
-                    </g>
-                  )}
-
-                  {/* خط ريكتس الجمالي E-Line من Prn إلى PogS */}
-                  {points.Prn && points.PogS && (
-                    <g key="eline-ricketts">
-                      <line
-                        x1={points.Prn.x} y1={points.Prn.y}
-                        x2={points.PogS.x} y2={points.PogS.y}
-                        stroke="#db2777" strokeWidth={Math.max(1.8, 2.4 / zoom)}
-                        strokeDasharray={`${6 / zoom} ${3 / zoom}`}
-                      />
-                      <text
-                        x={(points.Prn.x + points.PogS.x) / 2 + 8 / zoom}
-                        y={(points.Prn.y + points.PogS.y) / 2}
-                        fontSize={Math.max(9, 12 / zoom)}
-                        fill="#db2777"
-                        fontWeight="bold"
-                        className="pointer-events-none select-none"
-                      >
-                        E-Line (Ricketts)
-                      </text>
-                    </g>
-                  )}
-
-                  {/* شريط حجب هوية العينين للخصوصية الطبية (WebCeph Anonymization Mask) */}
-                  {anonymize && (
-                    <g key="anonymization-privacy-bar">
-                      <rect
-                        x={points.Or ? points.Or.x - 25 : (natural.w * 0.52)}
-                        y={points.Or ? points.Or.y - 45 : (natural.h * 0.36)}
-                        width={Math.max(100, 120 / zoom)}
-                        height={Math.max(34, 40 / zoom)}
-                        rx={Math.max(4, 6 / zoom)}
-                        fill="#09090b"
-                        opacity="0.96"
-                      />
-                      <text
-                        x={points.Or ? points.Or.x + 35 : (natural.w * 0.61)}
-                        y={points.Or ? points.Or.y - 23 : (natural.h * 0.39)}
-                        fill="#f8fafc"
-                        fontSize={Math.max(8, 10 / zoom)}
-                        fontWeight="bold"
-                        textAnchor="middle"
-                        className="pointer-events-none select-none font-mono"
-                      >
-                        CONFIDENTIAL · سري
-                      </text>
-                    </g>
-                  )}
-
-                  {calMode?.p1 && calMode?.p2 && (
-                    <line
-                      x1={calMode.p1.x} y1={calMode.p1.y} x2={calMode.p2.x} y2={calMode.p2.y}
-                      stroke="#b45309" strokeWidth={Math.max(1.5, 2 / zoom)}
-                    />
-                  )}
-                  {calMode?.p1 && !calMode.p2 && (
-                    <circle cx={calMode.p1.x} cy={calMode.p1.y} r={Math.max(3, 5 / zoom)} fill="#b45309" />
-                  )}
-
-                  {/* رسم المعالم التشريحية الـ 27 */}
-                  {(Object.keys(points) as LandmarkCode[]).map((code) => {
-                    const pt = points[code];
-                    if (!pt) return null;
-                    const isDragging = dragging.current === code;
-                    const isSuggested = sources[code] === "suggested";
-                    const isHovered = hoveredPoint === code;
-                    const pointFill = isDragging || isHovered
-                      ? "#dc2626"
-                      : isSuggested
-                      ? "#9333ea"
-                      : "#1e3a5f";
-                    return (
-                      <g
-                        key={code}
-                        onPointerEnter={(e) => {
-                          if (!dragging.current && pt) {
-                            setHoveredPoint(code);
-                            setCursorSurfacePt(pt);
-                            setCursorClientPos({ x: e.clientX, y: e.clientY });
-                          }
-                        }}
-                      >
-                        {isSuggested && (
-                          <circle
-                            cx={pt.x} cy={pt.y}
-                            r={Math.max(7, 12 / zoom)}
-                            fill="none"
-                            stroke="#c084fc"
-                            strokeWidth={Math.max(1.2, 1.8 / zoom)}
-                            strokeDasharray={`${3 / zoom} ${2 / zoom}`}
-                          />
-                        )}
-                        <circle
-                          cx={pt.x} cy={pt.y}
-                          r={Math.max(isHovered ? 6 : 4, (isHovered ? 10 : 7) / zoom)}
-                          fill={pointFill}
-                          stroke="#ffffff"
-                          strokeWidth={Math.max(1, 1.5 / zoom)}
-                          className={completed ? "" : "cursor-grab"}
-                          onPointerDown={onPointerDown(code)}
-                        />
-                        <text
-                          x={pt.x + 10 / zoom} y={pt.y - 10 / zoom}
-                          fontSize={Math.max(10, 14 / zoom)}
-                          fill={isSuggested ? "#7e22ce" : "#1e3a5f"}
-                          fontWeight={isSuggested || isHovered ? "bold" : "normal"}
-                          className="pointer-events-none select-none"
-                        >
-                          {code}{isSuggested ? " ✦" : ""}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              )}
-            </div>
-          </div>
-
-          {/* عدسة التكبير الرقمية الفائقة 2.5x (Precision Zoom Loupe كمنصة WebCeph) */}
-          {showLoupe && cursorSurfacePt && cursorClientPos && natural && (
-            <div
-              className="pointer-events-none fixed z-50 flex flex-col items-center"
-              style={{
-                left: `${Math.max(16, Math.min(window.innerWidth - 170, cursorClientPos.x - 75))}px`,
-                top: `${Math.max(16, cursorClientPos.y - 175)}px`,
-              }}
-            >
-              <div className="relative h-36 w-36 overflow-hidden rounded-full border-2 border-slate-900 bg-slate-950 shadow-2xl ring-4 ring-purple-500/30">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`/api/documents/${analysis.documentId}`}
-                  alt="Magnified Ceph Loupe"
-                  className="absolute select-none transition-[filter] duration-100"
-                  style={{
-                    width: natural.w * 2.5,
-                    height: natural.h * 2.5,
-                    maxWidth: "none",
-                    transform: `translate(${72 - cursorSurfacePt.x * 2.5}px, ${72 - cursorSurfacePt.y * 2.5}px)`,
-                    filter: imageFilterStyle,
-                  }}
-                />
-                {/* شعيرات التقاطع الحمراء الحادة */}
-                <div className="absolute inset-x-0 top-1/2 h-[1px] -translate-y-1/2 bg-rose-500/80" />
-                <div className="absolute inset-y-0 left-1/2 w-[1px] -translate-x-1/2 bg-rose-500/80" />
-                <div className="absolute top-1/2 left-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-rose-500/90" />
-                {/* شارة المعلم والإحداثيات اللحظية */}
-                <div className="absolute bottom-1.5 inset-x-0 mx-auto w-max rounded bg-slate-900/90 px-2 py-0.5 text-center font-mono text-[10px] text-white shadow">
-                  {dragging.current
-                    ? `${dragging.current} ✦ سحب `
-                    : hoveredPoint
-                    ? `${hoveredPoint} · ${landmarkDef(hoveredPoint).ar} `
-                    : ""}
-                  X: {Math.round(cursorSurfacePt.x)} · Y: {Math.round(cursorSurfacePt.y)}
-                </div>
-              </div>
-            </div>
-          )}
+          <CephViewport
+            src={`/api/documents/${analysis.documentId}`} natural={natural} onNaturalSize={onNaturalSize}
+            zoom={zoom} onZoomChange={setZoom} panMode={panMode} filter={imageFilterStyle}
+            showLoupe={showLoupe} cursor={cursorSurfacePt} onCursor={setCursorSurfacePt}
+            onClick={onSurfaceClick} onPointerStart={() => { suppressClick.current = false; }} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel} renderOverlay={renderOverlay}
+          />
           {!completed && (
             <div className="mt-2 space-y-1">
               <p className="text-sm">
@@ -1518,8 +1493,9 @@ export function CephTracer({
         </div>
 
         {/* جدول القياسات مع تبويبات كبار العلماء وأشرطة الانحراف البيانية (WebCeph Parity) */}
-        <div className="w-full shrink-0 lg:w-[570px]">
+        <div className={`min-w-0 w-full ${tracerStep === "analysis" ? "2xl:w-[480px] 2xl:shrink-0" : ""}`}>
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <p role="note" className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{CEPH_UNAVAILABLE_NOTICE}</p>
             <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 flex items-center justify-between text-sm font-medium text-slate-700">
               <span>{completed ? "القياسات المعتمدة — لقطة الاعتماد" : "القياسات السيفالومترية — حيّة مع كل نقطة"}</span>
               <div className="flex items-center gap-2">
@@ -1589,11 +1565,9 @@ export function CephTracer({
                 /* مخطط بياني شريطي لانحرافات القياسات كمنصة WebCeph */
                 <div className="space-y-2 p-1">
                   {enriched
-                    .filter((r) => selectedSchool === "all" || r.schools.includes(selectedSchool))
+                    .filter((r) => !isQuarantinedCephMeasurement(r.code) && (selectedSchool === "all" || r.schools.includes(selectedSchool)))
                     .map((r) => {
-                      const activeVal = completed && stamped
-                        ? stamped.find((s) => s.code === r.code)?.value ?? null
-                        : r.value;
+                      const activeVal = r.value;
                       const mean = r.refMean ?? r.mean;
                       const sd = r.refSd ?? r.tol;
                       const z = activeVal != null && sd > 0 ? (activeVal - mean) / sd : null;
@@ -1677,9 +1651,7 @@ export function CephTracer({
                             const refText = r.refMean != null && r.refSd != null
                               ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
                               : `${r.mean}±${r.tol}`;
-                            const activeVal = completed && stamped
-                              ? stamped.find((s) => s.code === r.code)?.value ?? null
-                              : r.value;
+                            const activeVal = r.value;
                             return (
                               <tr key={r.code} className="border-b border-slate-100 hover:bg-slate-50/60 last:border-0">
                                 <td className="px-1.5 py-1 text-slate-700" title={r.ar}>
@@ -1702,7 +1674,7 @@ export function CephTracer({
                                   )}
                                 </td>
                                 <td className="px-1.5 py-1 text-left text-[11px] text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
-                                  {refText}{r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
+                                  {isQuarantinedCephMeasurement(r.code) ? "غير متاح" : `${refText}${r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}`}
                                 </td>
                                 <td className="px-1 py-1 text-center">
                                   <CephDeviationGauge
@@ -1745,9 +1717,7 @@ export function CephTracer({
                       const refText = r.refMean != null && r.refSd != null
                         ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
                         : `${r.mean}±${r.tol}`;
-                      const activeVal = completed && stamped
-                        ? stamped.find((s) => s.code === r.code)?.value ?? null
-                        : r.value;
+                      const activeVal = r.value;
                       return (
                         <tr key={r.code} className="border-b border-slate-100 hover:bg-slate-50/60 last:border-0">
                           <td className="px-1.5 py-1 text-slate-700" title={r.ar}>
@@ -1770,7 +1740,7 @@ export function CephTracer({
                             )}
                           </td>
                           <td className="px-1.5 py-1 text-left text-[11px] text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
-                            {refText}{r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
+                            {isQuarantinedCephMeasurement(r.code) ? "غير متاح" : `${refText}${r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}`}
                           </td>
                           <td className="px-1 py-1 text-center">
                             <CephDeviationGauge

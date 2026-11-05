@@ -28,12 +28,12 @@ describe("معالم الأنسجة الرخوة والبروفايل الجما
     expect(eUl).toBeDefined();
     expect(eUl?.group).toBe("softTissue");
     expect(eUl?.unit).toBe("mm");
-    expect(eUl?.needs).toEqual(["Prn", "PogS", "Ls"]);
+    expect(eUl?.needs).toEqual(["Prn", "PogS", "Ls", "S", "N", "Me"]);
 
     expect(eLl).toBeDefined();
     expect(eLl?.group).toBe("softTissue");
     expect(eLl?.unit).toBe("mm");
-    expect(eLl?.needs).toEqual(["Prn", "PogS", "Li"]);
+    expect(eLl?.needs).toEqual(["Prn", "PogS", "Li", "S", "N", "Me"]);
 
     expect(naso).toBeDefined();
     expect(naso?.group).toBe("softTissue");
@@ -44,6 +44,7 @@ describe("معالم الأنسجة الرخوة والبروفايل الجما
   it("حساب خط ريكتس E-Line: المسافة الموقعة من Ls وLi للخط Prn-PogS", () => {
     // خط عمودي من Prn(100, 20) إلى PogS(100, 120) على الشاشة
     const map: LandmarkMap = {
+      S: { x: 0, y: 0 }, N: { x: 100, y: 0 }, Me: { x: 100, y: 150 },
       Prn: { x: 100, y: 20 },
       PogS: { x: 100, y: 120 },
       // Ls خلف الخط بـ 4 وحدات (غربًا نحو -x)
@@ -161,8 +162,8 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     Po: img(0, -25),
     U1A: img(60, -34),
     U1: img(74.08, -71.44), // U1-NA = 22
-    L1A: img(68, -64),
-    L1: img(49.0, -99.2),   // L1-NB = 25
+    L1A: img(49.0, -99.2), // anatomical root inferior to edge
+    L1: img(68, -64),       // L1-NB = 25
     OcclA: img(70, -48),
     OcclP: img(0, -35.3),
     Gn: img(61.5, -95.5),
@@ -179,7 +180,7 @@ describe("محرك التشخيص التقويمي السردي والخبير g
 
     expect(dx.sagittalSkeletal.classification).toBe("Class I");
     expect(dx.sagittalSkeletal.severity).toBe("normal");
-    expect(dx.verticalSkeletal.pattern).toBe("Normodivergent");
+    expect(dx.verticalSkeletal.pattern).toBe("Hypodivergent"); // corrected SN-GoGn=25.2°
     expect(dx.treatmentRecommendations.extractionDecision).toBe("non-extraction");
     expect(dx.treatmentRecommendations.orthognathicSurgery).toBe(false);
     expect(dx.formatted.skeletal).toContain("صنف أول");
@@ -422,12 +423,12 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
 
     // EXT_INDEX
     const extInd = getClinicalInterpretation("EXT_INDEX", 145);
-    expect(extInd.en).toBe("Extraction indicated");
-    expect(extInd.ar).toContain("قلع");
+    expect(extInd.en).toBe("Unavailable: clinical definition requires validation");
+    expect(extInd.ar).toContain("تحققًا سريريًا");
 
     const nonExt = getClinicalInterpretation("EXT_INDEX", 160);
-    expect(nonExt.en).toBe("Non-Extraction preferred");
-    expect(nonExt.ar).toContain("عدم القلع");
+    expect(nonExt.en).toBe("Unavailable: clinical definition requires validation");
+    expect(nonExt.ar).toContain("تحققًا سريريًا");
   });
 
   it("حساب Overjet و Overbite هندسياً بإسقاط متجه القواطع على المستوى الإطباقي", () => {
@@ -435,6 +436,7 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
     // القاطع السفلي L1 عند (100, 100)
     // القاطع العلوي U1 متقدم 4 بكسل للأمام (+x) و2 بكسل للأسفل (+y: اتجاه العضة العمودية)
     const map: LandmarkMap = {
+      S: { x: 0, y: 0 }, N: { x: 100, y: 0 }, Me: { x: 100, y: 150 },
       OcclP: { x: 0, y: 100 },
       OcclA: { x: 200, y: 100 },
       L1: { x: 100, y: 100 },
@@ -465,6 +467,7 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
     // الزاوية بين Mandibular و AB = 90°
     // PP_FH = 0°
     const map: LandmarkMap = {
+      S: { x: 0, y: 0 }, N: { x: 100, y: 0 },
       Po: { x: 50, y: 100 },
       Or: { x: 150, y: 100 },
       Go: { x: 40, y: 200 },
@@ -493,8 +496,8 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
     expect(apdi).toBeCloseTo(90, 1);
     expect(odi).toBeCloseTo(90, 1);
     expect(cf).toBeCloseTo(180, 1);
-    // Nasolabial = 90°, nasoAdj = (90 - 95) * 0.5 = -2.5
-    expect(extIndex).toBeCloseTo(177.5, 1);
+    // No numerical extraction index without a validated clinical definition.
+    expect(extIndex).toBeNaN();
   });
 
   it("مدارس التحليل تضم WebCeph و Kim بجميع قياساتها وتصنيفاتها", () => {

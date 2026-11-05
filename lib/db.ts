@@ -1,3 +1,4 @@
+import { displayableCephSnapshot, isQuarantinedCephMeasurement } from "./cephPresentation";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
@@ -23880,13 +23881,14 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
     `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1`,
     [id],
   );
-  const sealed = row.status === "completed" && ms.length > 0
+  const sealed = row.status === "completed"
     ? new Map(ms.map((measurement) => [measurement.code, measurement.value]))
     : null;
   const live = computeAll(points, row.mm_per_pixel ?? NaN);
 
   const measurements: CephAnalysisForCompare["measurements"] = [];
   for (const result of live) {
+    if (isQuarantinedCephMeasurement(result.code)) continue;
     const value = sealed ? (sealed.get(result.code) ?? null) : result.value;
     if (value == null || !Number.isFinite(value)) continue;
     measurements.push({
@@ -24164,7 +24166,7 @@ export async function getCephStudy(id: number): Promise<{
     updatedAt: dx[0].updated_at.toISOString(),
   } : null;
 
-  return { analysis, landmarks, measurements: ms, diagnosis };
+  return { analysis, landmarks, measurements: displayableCephSnapshot(ms), diagnosis };
 }
 
 export interface CephCalibrationInput {
@@ -24198,6 +24200,10 @@ export async function updateCephCalibration(
       return { ok: false, message: "نقطتا المعايرة متطابقتان أو المسافة غير صالحة." };
     }
     const scale = cal.mm / px;
+    if (!Number.isFinite(scale) || scale <= 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "مقياس المعايرة غير صالح؛ اختر مسافة ونقطتين واضحتين." };
+    }
     await client.query(
       `UPDATE ceph_analyses
        SET cal_x1=$2, cal_y1=$3, cal_x2=$4, cal_y2=$5, cal_mm=$6, mm_per_pixel=$7
@@ -24225,19 +24231,38 @@ export async function updateCephCalibration(
  * المصدر يُسجَّل كما جاء: يدُ الطبيب `manual`، أو اقتراحٌ `suggested` أقرّ به
  * بتأكيده — فالمقترح لا يصير معلمًا إلا بمصادقةٍ تُختم باسمه.
  */
+export interface CephLandmarkInput {
+  code: LandmarkCode;
+  x: number;
+  y: number;
+  source?: "manual" | "suggested";
+}
+
 export async function updateCephLandmarks(
   id: number,
-  points: { code: LandmarkCode; x: number; y: number; source?: "manual" | "suggested" }[],
+  points: CephLandmarkInput[],
   by: string,
-): Promise<{ ok: true; count: number } | { ok: false; message: string }> {
+  removeCodes: LandmarkCode[] = [],
+  expectedLandmarks?: CephLandmarkInput[],
+): Promise<{ ok: true; count: number; removedCount: number } | { ok: false; message: string }> {
+  // Reject the entire mutation rather than silently applying its valid subset.
+  const validPoints = (values: CephLandmarkInput[]) => Array.isArray(values)
+    && values.every((pt) => pt && isCephLandmarkCode(pt.code)
+      && Number.isFinite(pt.x) && Number.isFinite(pt.y)
+      && (pt.source === undefined || pt.source === "manual" || pt.source === "suggested"))
+    && new Set(values.map((pt) => pt.code)).size === values.length;
+  if (!validPoints(points) || !Array.isArray(removeCodes)
+    || !removeCodes.every(isCephLandmarkCode) || new Set(removeCodes).size !== removeCodes.length
+    || points.some((pt) => removeCodes.includes(pt.code))
+    || (expectedLandmarks !== undefined && !validPoints(expectedLandmarks))) {
+    return { ok: false, message: "طلب المعالم غير صالح أو يحتوي رموزًا مكررة." };
+  }
+  const expected = expectedLandmarks === undefined ? null
+    : new Map(expectedLandmarks.map((pt) => [pt.code, pt]));
+  if (removeCodes.some((code) => !expected?.has(code))) {
+    return { ok: false, message: "إزالة المعلم تحتاج موضعه المحفوظ للتحقق من عدم تغيّره." };
+  }
   await ensureSchema();
-  if (points.length === 0) return { ok: true, count: 0 };
-  const clean = points.filter(
-    (pt) => isCephLandmarkCode(pt.code)
-      && Number.isFinite(pt.x) && Number.isFinite(pt.y),
-  );
-  if (clean.length === 0) return { ok: false, message: "لا معلم صالح في الطلب." };
-
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -24249,7 +24274,29 @@ export async function updateCephLandmarks(
       await client.query("ROLLBACK");
       return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
     }
-    for (const pt of clean) {
+    const { rows: stored } = await client.query<CephLandmarkInput & {
+      confirmed_by: string; confirmed_at: Date;
+    }>(
+      `SELECT code, x, y, source, confirmed_by, confirmed_at FROM ceph_landmarks
+       WHERE analysis_id = $1`, [id],
+    );
+    const current = new Map(stored.map((pt) => [pt.code, pt]));
+    const desired = new Map(points.map((pt) => [pt.code, pt]));
+    const same = (a: CephLandmarkInput | undefined, b: CephLandmarkInput | undefined) =>
+      a === undefined || b === undefined ? a === b
+        : a.x === b.x && a.y === b.y && (a.source ?? "manual") === (b.source ?? "manual");
+    // A repeated acknowledged request is harmless. Otherwise, a stale tab may
+    // not overwrite/remove a changed point. Unrelated points remain untouched.
+    if (expected && [...desired.keys(), ...removeCodes].some((code) =>
+      !same(current.get(code), desired.get(code)) && !same(current.get(code), expected.get(code)))) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "تغيّرت المعالم في جلسة أخرى. أعد تحميل التحليل قبل متابعة التعديل." };
+    }
+    const removed = stored.filter((pt) => removeCodes.includes(pt.code));
+    if (removed.length) {
+      await client.query(`DELETE FROM ceph_landmarks WHERE analysis_id = $1 AND code = ANY($2::text[])`, [id, removeCodes]);
+    }
+    for (const pt of points) {
       await client.query(
         `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -24260,13 +24307,17 @@ export async function updateCephLandmarks(
         [id, pt.code, pt.x, pt.y, pt.source === "suggested" ? "suggested" : "manual", by],
       );
     }
+    if (points.length || removed.length) {
+      // Retain removed coordinates and attribution; mutation and history are
+      // committed together or rolled back together, including on audit failure.
+      await insertAuditRow(client, {
+        action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
+        entityLabel: `كتابة ${points.length} معلمًا وإزالة ${removed.length} من المسودة`,
+        details: { landmarks: points, removedLandmarks: removed }, actor: by,
+      });
+    }
     await client.query("COMMIT");
-    await recordAudit({
-      action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
-      entityLabel: `كتابة ${clean.length} معلمًا (${clean.map((p) => p.code).join("، ")})`,
-      actor: by,
-    });
-    return { ok: true, count: clean.length };
+    return { ok: true, count: points.length, removedCount: removed.length };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -24582,7 +24633,7 @@ export async function getCephStampedValues(
   const { rows } = await getPool().query<{ code: string; value: number }>(
     `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1 ORDER BY id`, [id],
   );
-  return rows;
+  return displayableCephSnapshot(rows);
 }
 
 // ─── المخزون والمستهلكات السنية (المرحلة 9) ──────────────────────────────────

@@ -48,11 +48,11 @@ const CASE: LandmarkMap = {
   // U1-SN = 104 بالضبط وU1-NA = 22 بالضبط (المحور عند اتجاه N→S ناقص ١٠٤°).
   U1A: img(60, -34),
   U1: img(74.08, -71.44),
-  // القاطع السفلي تشريحيًا: القمة فوق الحافة، والمحور عند اتجاه N→B زائد ٢٥°
-  // → L1-NB = 25 بالضبط، والتاج خلف امتداد NB (مثالية Tweed مع FMA = ٢٥)
-  // → IMPA ≈ 86.6 وبُعد الحافة عن NB سالب.
-  L1A: img(68, -64),
-  L1: img(49.0, -99.2),
+  // Correct lower-incisor anatomy: the root apex is inferior to the incisal edge.
+  // Reversing the old erroneous endpoint order preserves its undirected L1-NB
+  // angle, but changes the directed Tweed wedge and the edge's signed offset.
+  L1A: img(49.0, -99.2),
+  L1: img(68, -64),
   // مستوى إطباق ينحدر 10° نحو الأمام → WITS = -1.3 (قريب من المعدل المنشور -1)
   OcclA: img(70, -48),
   OcclP: img(0, -35.3),
@@ -117,10 +117,10 @@ describe("القياسات على الحالة التركيبية", () => {
     expect(byCode("ANB")).toBeCloseTo(2, 1);
   });
 
-  it("FMA = 25 وIMPA المشتقة 86.6 وFMIA = 180 − المجموع", () => {
+  it("FMA = 25 وIMPA المشتقة 93.4 وFMIA = 180 − المجموع", () => {
     expect(byCode("FMA")).toBeCloseTo(25, 1);
-    expect(byCode("IMPA")).toBeCloseTo(86.6, 1);
-    expect(byCode("FMIA")).toBeCloseTo(68.4, 1);
+    expect(byCode("IMPA")).toBeCloseTo(93.4, 1);
+    expect(byCode("FMIA")).toBeCloseTo(61.6, 1);
   });
 
   it("U1-SN = 104 وU1-NA = 22 بالضبط — بمحورٍ تشريحي (القمة فوق الحافة)", () => {
@@ -131,7 +131,7 @@ describe("القياسات على الحالة التركيبية", () => {
   it("L1-NB = 25 وINTER = 131 وSN-GoGn والزاوية الوجهية ومحور Y — قيم مشتقة يدويًا", () => {
     expect(byCode("L1NB_A")).toBeCloseTo(25, 1);
     expect(byCode("INTER")).toBeCloseTo(131, 1);
-    expect(byCode("SNGOGN")).toBeCloseTo(31.6, 0);
+    expect(byCode("SNGOGN")).toBeCloseTo(25.2, 1);
     expect(byCode("FANGLE")).toBeCloseTo(87, 1);
     expect(byCode("YAXIS")).toBeCloseTo(63.8, 0);
   });
@@ -211,12 +211,11 @@ describe("القياسات على الحالة التركيبية", () => {
     expect(missingFor("MAX_LEN", withoutCo)).toEqual(["Co"]);
   });
 
-  it("الإشارة الأمامية: CONV وU1-NA موجبان — وL1-NB سالبٌ لأن تاج هذه الحالة خلف امتداد NB", () => {
+  it("الإشارة الأمامية: CONV وU1-NA موجبان — وL1-NB موجبٌ لأن الحافة أمام امتداد NB", () => {
     expect(byCode("CONV")).toBeCloseTo(1.7, 0);
     expect(byCode("U1NA_D")).toBeCloseTo(7.0, 1);
-    // قاعدة «الأمام موجب» مثبتة عبر U1NA_D وحالة lateralOffset أعلاه؛ وهنا
-    // القاطع السفلي بمثالية Tweed فياجازه امتداد NB من الخلف فيخرج البُعد سالبًا.
-    expect(byCode("L1NB_D")).toBeCloseTo(-13.7, 1);
+    // Correct incisal edge at img(68, -64), rather than the former root location.
+    expect(byCode("L1NB_D")).toBeCloseTo(3.2, 1);
   });
 
   it("WITS سالب قريب من المعدل، ويتحرك نحو الصنف الثاني إذا تراجع B للخلف", () => {
@@ -286,7 +285,7 @@ describe("السجلات المغلقة والتفسير", () => {
     const all = computeAll(CASE, SCALE);
     const s = summarize(all);
     expect(s.skeletal).toContain("صنف أول");
-    expect(s.vertical).toContain("متوازن");
+    expect(s.vertical).toContain("للعمقي"); // actual SN-GoGn=25.2°, not the old SN-GoMe=31.6°
 
     const classTwo = summarize(computeAll({ ...CASE, B: img(53.84, -79.85) }, SCALE));
     expect(classTwo.skeletal).toContain("ثانٍ");
