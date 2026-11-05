@@ -130,3 +130,42 @@ The owner approved the eight recommendations, under least privilege and with rea
 | G4-8 | Invoice reads stay bound to the patient scope, with no automatic bypass for financial roles. Patient scope `all` may become an explicit financial grant only once it is proved not to widen clinical access. Where the shared scope `all` would widen clinical exposure, the current refusal stays, and a design separating the financial scope from the clinical one comes first. No `all` and no grant is given to real accounts in this work. | in force since 92 and 93a; the financial/clinical scope separation design comes before any financial use of `all` |
 
 **Bounds of the approval:** design, implementation and tests on the WORK branch only. No change to real patients, doctors or accounts. WORK stays Draft, with no merge to main or REVIEW and no deploy or activation. Before Production: Staging first, then the owner's explicit personal approval.
+
+## 6. Slice 89 — the visit's money reads, field by field (G4-1, G4-4, G4-6)
+
+**Rule for derived fields:** a value computed from inputs under different grants is shown only to an actor holding **every** one of those grants. For example, today's remainder is the invoice net minus what was paid, so next to the net it reveals the payments. A hidden group is **omitted**, never replaced by zero: a zero would read as "nothing due" or "nothing paid".
+
+**Owner:** the protected owner holds every group.
+
+**`workflow.doctor_financial_view` (G4-6):** has no effect on canonical sessions. The legacy route keeps its behaviour, and the setting stays.
+
+### `GET /api/visits/[id]/billing-preview`
+
+- **Admission:** `finance.invoices.view`, inside the patient scope; outside reads like missing.
+- **Body:** the whole response is dues (per-line amounts and dues per currency), so it is the legacy body as is.
+
+### `GET /api/visits/[id]/financial-context`
+
+- **Admission:** `clinical.visits.document` **or** `finance.invoices.view`, inside the patient scope. Legacy served clinical roles a redacted body and money roles the full one.
+- **Source references** (`directReference`, `references`: invoice and agreement identifiers and their links) are shown with `finance.invoices.view` only.
+- **The coverage state, decisions and reasons** are clinical facts, shown to both.
+- **Never wider:** the legacy redaction function (`redactVisitFinancialContext`) is reused, with the grant in place of the role label.
+
+### `GET /api/visits/[id]/walkout`
+
+**Admission:** `finance.invoices.view`, the map's grant, inside the patient scope. The groups:
+
+| Group | Fields | Grants |
+|---|---|---|
+| Visit | visit id, patient id, name and number, arrival and signing, doctor, treatment done and next plan, line descriptions, teeth and quantities, billing class, ortho adjustment class and decision, next appointment, `deferred`, `signedToday` | admission |
+| Dues | `invoice` (id, number, net, currency); each line's `unitPriceMinor`, `currency`, `included` and `financialReviewRequired`; each summary line's `newBillableMinor` | `finance.invoices.view` |
+| Payments | `payments` (the day's receipts); `checkout.paymentsToday`, `checkout.openingPaidToday`, `checkout.invoicePaidMinor`; each summary line's `paymentsTodayMinor` | + `finance.payments.view` |
+| Account | `balances`; `checkout.previous`, `checkout.current`; each summary line's `previousBalanceMinor`, `currentBalanceMinor`, `legacySuggestedMinor`, `legacyRemainingMinor` | + `finance.patient-ledger.view` (G4-1: account totals and balance) |
+| Derived dues | each summary line's `todayRemainingMinor` (net − paid on the invoice) | invoices **and** payments |
+| Derived dues | each summary line's `dueNowMinor`; the `dueRecommendation` (sources, remaining, due now, account link) | invoices **and** payments **and** the ledger |
+| Action | `dueRecommendation.collectionAction` other than `"none"` | additionally `finance.payments.collect` (G4-4: the action is offered only with its grant; an action grant never implies a read) |
+| Handoff | `receptionHandoff` status | `visits.manage` (the operational queue grant; legacy admin and reception labels) |
+
+Every response passes through an allowlist projection, never object spreading.
+
+**Tests:** a field matrix per grant combination, with each derived field refused without any one of its inputs; revocation; outside reads like missing; and no hidden field in the serialized body.
