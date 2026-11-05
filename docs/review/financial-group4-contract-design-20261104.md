@@ -370,3 +370,39 @@ An early unlocked look comes first. The legacy wrappers run the same `…On` fun
 - `own` outside reads like missing.
 - A race in which the patient leaves the scope while the writer waits for the plan lock.
 - Revocation.
+
+## 12. Slice 94d-1 — the plan's financial approval (G4-1, G4-8)
+
+This section is written before the code. It covers `POST /api/plans/[id]/financial-approval`.
+
+| Source | Legacy | Canonical |
+|---|---|---|
+| A new agreement (`source.kind = "new"`): an approval invoice for the agreed total | admin or reception | `finance.invoices.create` (the map's grant) |
+| An existing source (`invoice` or `opening`): matching an earlier invoice or opening balance as the whole origin | admin only | `finance.invoices.create` **and** `finance.agreements.manage`. The administrator-only reconciliation becomes the explicit agreement-management grant, as for the agreement amendment and reconciliation routes the map already gives to `finance.agreements.manage`. |
+
+### The writer
+
+The writer is unchanged:
+- key and request hash;
+- patient row, debt-account and plan locks;
+- the guards against existing sources, history and clinical history;
+- the source ownership lineage;
+- the schedule-equals-total check;
+- the approval row and the `plan.financial_approval` audit in the same transaction.
+
+It is split into `approveAgreementOn(client, input, afterLocks)`; the legacy wrapper keeps its own transaction. The canonical actor is the slice 91 branded actor: its re-check re-proves the operation and exactly the grants above, at each point where the writer re-validated the legacy session.
+
+### Scope
+
+- An early unlocked look first: outside the scope reads like a missing plan.
+- The authoritative decision comes right after the patient row lock, before the replay under the lock and every refusal. An `own` actor needs a positive ownership witness `FOR SHARE NOWAIT`, held until commit.
+- On the canonical path the replay before the locks is skipped, so nothing answers before the scope is decided.
+
+### Tests required before the commit
+
+- A new approval with its invoice and audit, and replay.
+- A matched `opening` source: refused without `finance.agreements.manage` and accepted with it.
+- View grants, collect alone and the label refused.
+- `own` outside reads like missing.
+- A race in which the patient leaves the scope while the approval waits for the patient row.
+- Revocation.

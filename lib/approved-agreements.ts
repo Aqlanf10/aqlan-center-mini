@@ -46,8 +46,16 @@ async function transaction<T>(run:(client:DbClient)=>Promise<T>, readOnly=false)
 
 /** Explicit approval or explicit whole-source reconciliation. Never infer a
  * historical source from patient totals, matching amounts, or a plan title. */
-export async function approveAgreement(input:{planId:number;expectedTotalMinor:number;currency:Currency;source:AgreementSource;
-  reason:string;idempotencyKey:string;session:SessionPayload}) {
+type ApprovalInput={planId:number;expectedTotalMinor:number;currency:Currency;source:AgreementSource;
+  reason:string;idempotencyKey:string;session:DebtActorSource};
+export async function approveAgreement(input:ApprovalInput&{session:SessionPayload}) {
+  return transaction(client=>approveAgreementOn(client,input));
+}
+/** The approval writer on a caller's transaction (M2 slice 94d-1): `afterLocks` decides the
+ * actor's scope right after the patient row lock, before the replay under the lock and every
+ * refusal; with it the replay before the locks is skipped. A canonical actor's recheck carries the
+ * grants this command needs (the legacy admin-only source match included). */
+export async function approveAgreementOn(client:DbClient,input:ApprovalInput,afterLocks?:(patientId:number)=>Promise<void>) {
   if(!positive(input.planId)||!positive(input.expectedTotalMinor)||!isCurrency(input.currency)||!validKey(input.idempotencyKey)
     ||typeof input.reason!=="string"||input.reason.trim().length<3||input.reason.trim().length>300)fail("راجع بيانات اعتماد الالتزام.");
   if(!input.source||!["new","invoice","opening"].includes(input.source.kind))fail("اختر مصدر أصل الدين صراحةً.");
@@ -55,18 +63,19 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
   if(input.source.kind==="opening"&&(!Number.isSafeInteger(input.source.historicalPaidMinor)||input.source.historicalPaidMinor<0
     ||input.source.historicalPaidMinor>=input.expectedTotalMinor))fail("راجع المدفوع التاريخي والمتبقي الافتتاحي.");
   const hash=debtRequestHash({purpose:"approve-agreement-v1",...input,session:{id:input.session.userId,username:input.session.username}});
-  return transaction(async client=>{
+  {
     await assertDebtSession(client,input.session);
-    if(input.source.kind!=="new"&&(await revalidateSessionInTransaction(input.session,client))?.role!=="admin")throw new DebtRepaymentError("unauthorized","مطابقة أصل قديم للإدارة فقط.");
+    if(input.source.kind!=="new"&&!isCanonicalDebtActor(input.session)&&(await revalidateSessionInTransaction(input.session,client))?.role!=="admin")throw new DebtRepaymentError("unauthorized","مطابقة أصل قديم للإدارة فقط.");
     const replay=async()=>{
       const prior=(await client.query<ApprovedAgreement>("SELECT * FROM approved_agreement_principals WHERE idempotency_key=$1 OR plan_id=$2",[input.idempotencyKey,input.planId])).rows[0];
       if(prior&&prior.request_hash!==hash)throw new DebtRepaymentError("conflict","الاتفاق معتمد أو مفتاح الطلب مستعمل؛ راجع المصدر دون إثبات دين ثانٍ.");
       return prior;
     };
-    const prior=await replay();if(prior)return {agreement:prior,replayed:true};
+    if(!afterLocks){const prior=await replay();if(prior)return {agreement:prior,replayed:true};}
     const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM treatment_plans WHERE id=$1",[input.planId])).rows[0];
     if(!owner)throw new DebtRepaymentError("missing","الخطة غير موجودة.");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[owner.patient_id]);
+    if(afterLocks)await afterLocks(owner.patient_id);
     await lockDebtAccountForSchedule(client,owner.patient_id,true);
     const again=await replay();if(again)return {agreement:again,replayed:true};
     const p=(await client.query<{patient_id:number;total_minor:string;base_currency:Currency;status:string;consent_at:Date|null;title:string;primary_doctor_id:number|null}>(
@@ -143,7 +152,7 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
       details:{source:input.source,totalMinor:Number(p.total_minor),currency:p.base_currency,invoiceId,openingCurrency,historicalPaidMinor:historicalPaid,reason:input.reason}});
     await assertDebtSession(client,input.session);
     return {agreement:(await readApprovedAgreement(client,input.planId))!,replayed:false};
-  });
+  }
 }
 
 export async function approvedAgreementPosition(planId:number,today:string, reader?:DbClient):Promise<{

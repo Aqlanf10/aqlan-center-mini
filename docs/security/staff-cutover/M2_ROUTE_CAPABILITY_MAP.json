@@ -4888,8 +4888,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Financial approval of a plan creates billable obligations."
+  "status": "canonical-done",
+  "note": "Financial approval of a plan creates billable obligations. M2 slice 94d-1 (G4-1, G4-8; contract section 12): matching an existing source (invoice or opening) also needs finance.agreements.manage (legacy administrator only); the legacy writer approveAgreementOn with the slice 91 branded actor re-proving exactly these grants; the scope decided right after the patient row lock (outside = missing plan)."
  },
  {
   "route": "/api/plans/[id]/items",

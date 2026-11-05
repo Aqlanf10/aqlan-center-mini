@@ -3,7 +3,7 @@ import {
   CLINIC_TIME_ZONE, doctorOwnsPatient, getPaymentWith, getPool, getSettingsWith, listPatientPlansWith, patientInDoctorScopeWith,
   recordPlanInstallmentOn, setPlanStatusOn, type DbClient,
 } from "./db";
-import { collectApprovedAgreementOn, hydrateApprovedCollection } from "./approved-agreements";
+import { approveAgreementOn, collectApprovedAgreementOn, hydrateApprovedCollection, type AgreementSource } from "./approved-agreements";
 import { canonicalDebtActor } from "./debt-installments-db";
 import { CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, type Currency } from "./money";
 import { clinicDateString } from "./schedule";
@@ -26,7 +26,7 @@ import type { VerifiedDurableSession } from "./staff-durable-session";
  * An outside plan or patient reads like a missing one; role labels decide nothing.
  */
 export class CanonicalPlanRefusal extends Error {
-  constructor(readonly code: string, readonly status: 400 | 404 | 409, message: string) { super(message); this.name = "CanonicalPlanRefusal"; }
+  constructor(readonly code: string, readonly status: 400 | 403 | 404 | 409, message: string) { super(message); this.name = "CanonicalPlanRefusal"; }
 }
 /** A legacy instalment writer refusal, raised so the operation rolls back; the route answers
  * it exactly as the legacy route does. */
@@ -36,7 +36,7 @@ export class CanonicalPlanInstallmentOutcome extends Error {
 
 export const PLAN_MISSING = "الخطة غير موجودة.";
 const PATIENT_MISSING = "المريض غير موجود.";
-export type ScopedAction = "clinical.plans.edit" | "finance.payments.collect";
+export type ScopedAction = "clinical.plans.edit" | "finance.payments.collect" | "finance.invoices.create";
 
 export async function earlyInside(client: DbClient, handle: StaffOperationHandle, action: ScopedAction, patientId: number): Promise<boolean> {
   const scope = await staffOperationPatientScope(client, handle, action);
@@ -133,5 +133,28 @@ export async function commandCanonicalPlanCollection(session: VerifiedDurableSes
     }
     if ("reason" in result) throw new CanonicalPlanInstallmentOutcome(result.reason, plan.baseCurrency, result.recoveryInvoiceIds);
     return { kind: "installment" as const, body: result };
+  });
+}
+
+/** POST /api/plans/[id]/financial-approval (M2 slice 94d-1; contract section 12): the legacy
+ * approval writer under `finance.invoices.create`; matching an existing source (invoice or
+ * opening) also needs `finance.agreements.manage` (legacy administrator only). The branded actor
+ * re-proves exactly these grants wherever the writer revalidated its session; the scope is
+ * decided right after the patient row lock. */
+export async function commandCanonicalFinancialApproval(session: VerifiedDurableSession, planId: number,
+  input: { expectedTotalMinor: number; currency: Currency; source: AgreementSource; reason: string; idempotencyKey: string }, pool = getPool()) {
+  return withStaffOperation(pool, session, "finance.invoices.create", async (client, handle) => {
+    const identity = await staffOperationIdentity(client, handle, "finance.invoices.create");
+    await planPatient(client, handle, "finance.invoices.create", planId);
+    const needed = input.source.kind === "new" ? ["finance.invoices.create"] as const : ["finance.invoices.create", "finance.agreements.manage"] as const;
+    const holds = async (current: DbClient) => {
+      if (current !== client) return false;
+      const held = await staffOperationCapabilities(current, handle, "finance.invoices.create", ["finance.invoices.create", "finance.agreements.manage"] as const);
+      return needed.every(capability => held.has(capability));
+    };
+    if (!await holds(client)) throw new CanonicalPlanRefusal("agreement_source_not_granted", 403, "مطابقة أصل قائم تحتاج صلاحية إدارة الاتفاقات.");
+    const result = await approveAgreementOn(client, { planId, ...input, session: canonicalDebtActor(identity, holds) },
+      lockedAdmission(client, handle, "finance.invoices.create", PLAN_MISSING));
+    return { planId: result.agreement.plan_id, replayed: result.replayed };
   });
 }
