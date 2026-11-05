@@ -10326,39 +10326,53 @@ export async function setInvoiceStatus(
   ctx: { actor: string; actorRole: string | null },
 ): Promise<Invoice | null> {
   await ensureSchema();
+  const changed = await withTransaction(getPool(), client => setInvoiceStatusOn(client, id, status, ctx));
+  return changed ? getInvoice(id) : null;
+}
+
+/**
+ * The status change on the caller's transaction (M2 slice 93a): the legacy lock order
+ * (patient → visits/plans → items → invoice), then `admit` with the locked invoice row
+ * (the canonical scope and period decisions are made there, after every lock), then the
+ * unchanged body. false: missing or already cancelled.
+ */
+export async function setInvoiceStatusOn(
+  client: DbClient, id: number, status: "open" | "paid" | "cancelled",
+  ctx: { actor: string; actorRole: string | null },
+  admit?: (invoice: { patientId: number; createdAt: Date; status: string }) => Promise<void>,
+): Promise<boolean> {
   // الفاتورة الملغاة لا تعود: إلغاءٌ ثم فتحٌ يعيد مبلغًا أُسقط من رصيد المريض بعد
   // أن رآه مسدّدًا. التصحيح يكون بفاتورة جديدة لا بإحياء ملغاة.
-  const changed = await withTransaction(getPool(), async (client) => {
-    await lockPlanItemsBilledBy(client, id);
-    const { rows: [invoice] } = await client.query<{
-      status: string; invoice_number: string; total_minor: string; discount_minor: string; base_currency: string;
-    }>(
-      `SELECT status, invoice_number, total_minor, discount_minor, base_currency
-         FROM invoices WHERE id = $1 AND status <> 'cancelled' FOR UPDATE`, [id],
-    );
-    if (!invoice) return false;
-    if (invoice.status === status) return true;
-    await client.query(`UPDATE invoices SET status = $2 WHERE id = $1`, [id, status]);
-    if (status === "cancelled") {
-      await reopenOrthoDecisionsForInvoice(client, id, ctx.actor, ctx.actorRole);
-      await releasePlanItemFinancialLinks(client, id, ctx.actor, ctx.actorRole, "أُلغيت الفاتورة");
-    }
-    /* (FIN-3) تعليمها مسدّدة أو إعادتها مفتوحة يدويًّا يُسجَّل هنا في المعاملة نفسها؛ والإلغاء
-       يسجّله مساره بسببه وما دُفع عليه (invoice.cancel). */
-    if (status !== "cancelled") {
-      const currency = requireCurrency(invoice.base_currency, "فاتورة", id);
-      await insertAuditRow(client, {
-        action: "invoice.status", entity: "invoice", entityId: id, entityLabel: invoice.invoice_number,
-        details: {
-          من: invoice.status, إلى: status,
-          الصافي: formatMoney(Math.max(0, toMinor(invoice.total_minor) - toMinor(invoice.discount_minor)), currency),
-        },
-        actor: ctx.actor, actorRole: ctx.actorRole,
-      });
-    }
-    return true;
-  });
-  return changed ? getInvoice(id) : null;
+  await lockPlanItemsBilledBy(client, id);
+  const { rows: [invoice] } = await client.query<{
+    status: string; invoice_number: string; total_minor: string; discount_minor: string; base_currency: string;
+    patient_id: number; created_at: Date;
+  }>(
+    `SELECT status, invoice_number, total_minor, discount_minor, base_currency, patient_id, created_at
+       FROM invoices WHERE id = $1 AND status <> 'cancelled' FOR UPDATE`, [id],
+  );
+  if (!invoice) return false;
+  await admit?.({ patientId: invoice.patient_id, createdAt: invoice.created_at, status: invoice.status });
+  if (invoice.status === status) return true;
+  await client.query(`UPDATE invoices SET status = $2 WHERE id = $1`, [id, status]);
+  if (status === "cancelled") {
+    await reopenOrthoDecisionsForInvoice(client, id, ctx.actor, ctx.actorRole);
+    await releasePlanItemFinancialLinks(client, id, ctx.actor, ctx.actorRole, "أُلغيت الفاتورة");
+  }
+  /* (FIN-3) تعليمها مسدّدة أو إعادتها مفتوحة يدويًّا يُسجَّل هنا في المعاملة نفسها؛ والإلغاء
+     يسجّله مساره بسببه وما دُفع عليه (invoice.cancel). */
+  if (status !== "cancelled") {
+    const currency = requireCurrency(invoice.base_currency, "فاتورة", id);
+    await insertAuditRow(client, {
+      action: "invoice.status", entity: "invoice", entityId: id, entityLabel: invoice.invoice_number,
+      details: {
+        من: invoice.status, إلى: status,
+        الصافي: formatMoney(Math.max(0, toMinor(invoice.total_minor) - toMinor(invoice.discount_minor)), currency),
+      },
+      actor: ctx.actor, actorRole: ctx.actorRole,
+    });
+  }
+  return true;
 }
 
 /**
@@ -10367,7 +10381,11 @@ export async function setInvoiceStatus(
  */
 export async function invoiceLinkedPaymentsByCurrency(invoiceId: number): Promise<{ currency: Currency; netMinor: number }[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ currency: string; net: string }>(
+  return invoiceLinkedPaymentsByCurrencyWith(getPool(), invoiceId);
+}
+/** The same sums on a given client (inside the cancelling transaction, M2 slice 93a). */
+export async function invoiceLinkedPaymentsByCurrencyWith(q: Pick<DbClient, "query">, invoiceId: number): Promise<{ currency: Currency; netMinor: number }[]> {
+  const { rows } = await q.query<{ currency: string; net: string }>(
     `SELECT currency,
             SUM(CASE WHEN kind = 'refund' THEN -amount_minor ELSE amount_minor END)::text AS net
        FROM payments WHERE invoice_id = $1

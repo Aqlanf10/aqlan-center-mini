@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "346bf24ecace59ce453630d7494aa3553364a3fdc6355d3fa784bcb26e5565d7",
+  "sourceDigest": "fe85f829d30d33564c9c7b8cb2f3cf6cf2f0847ceb31b78e433fca9b0882aaad",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -65,7 +65,9 @@
     "patients.delete",
     "visits.delete",
     "finance.payments.collect",
-    "finance.payments.void"
+    "finance.payments.void",
+    "finance.invoices.cancel",
+    "finance.invoices.mark-paid"
   ],
   "summary": {
     "routeMethods": 420,
@@ -1713,11 +1715,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 23
         },
         {
           "symbol": "requireSession",
-          "line": 44
+          "line": 60
         }
       ]
     },
@@ -7955,11 +7957,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 23
         },
         {
           "symbol": "requireSession",
-          "line": 44
+          "line": 60
         }
       ]
     },
@@ -7982,11 +7984,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 23
         },
         {
           "symbol": "requireSession",
-          "line": 44
+          "line": 60
         }
       ]
     },

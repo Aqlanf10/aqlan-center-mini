@@ -8,6 +8,7 @@ import { requireSession } from "@/lib/session";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { readCanonicalInvoice } from "@/lib/canonical-invoice-reads";
+import { commandCanonicalInvoiceStatus, isCanonicalInvoiceRefusal, parseCanonicalInvoiceStatus } from "@/lib/canonical-invoice-writes";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 93a: reopen finance.invoices.create, cancel finance.invoices.cancel (+ reason),
+  // manual "paid" finance.invoices.mark-paid; scope and period decided after the writer's locks.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      const command = parseCanonicalInvoiceStatus(body);
+      return NextResponse.json(await commandCanonicalInvoiceStatus(selected.handle, Number((await context.params).id), command), { headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      if (isCanonicalInvoiceRefusal(error)) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تحديث الفاتورة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
