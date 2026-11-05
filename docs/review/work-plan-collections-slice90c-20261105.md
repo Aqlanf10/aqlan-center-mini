@@ -62,7 +62,7 @@ Every response must be `no-store`. The other legacy print, export and report pat
 | Audits | 10/10 (map: `POST /api/payments` `canonical-done`) |
 | tsc | Pass |
 | lint | Clean |
-| Legacy PG regression | Recorded in the commit |
+| Legacy PG regression (run with 90d) | 61 files, 794/794: every suite touching the agreement, instalment, recovery, attempt, deferral and invoice-linkage writers, plus the three canonical suites |
 
 The 8 tests in `plan-collections-canonical` cover:
 

@@ -4585,9 +4585,9 @@
    "finance.payments.collect"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 90d (G4-4): one admitted finance.payments.collect transaction on the legacy retirement (retireCollectionAttemptOn: the same checks, the per-key database lock against an in-flight send, the attempt-owner rule against the operation's own identity, the payment.attempt_retire audit); the patient admitted before it is read (own: an ownership witness FOR SHARE NOWAIT), outside answers exactly like a missing patient (400)."
  },
  {
   "route": "/api/plan-items/[id]/case",
@@ -6361,8 +6361,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "M2 slice 12: call, call_again, seat, return, finish and clear are canonical (one visits.manage transaction, legacy lock order, visit inside the current patient scope after the row lock, outside = missing 404, readiness gate unchanged, audit atomic). M2 slice 81: link (visit and target file inside the scope, linkVisitToPatientOn, visit.link audit) and open_file (visits.manage + patients.create; the matched file checked before the link, outside the scope refused; patient.create audit) are canonical. defer (a payment decision) refuses on the canonical path (409) until the financial group; the route stays existing until then.",
+  "status": "canonical-done",
+  "note": "M2 slice 12: call, call_again, seat, return, finish and clear are canonical (one visits.manage transaction, legacy lock order, visit inside the current patient scope after the row lock, outside = missing 404, readiness gate unchanged, audit atomic). M2 slice 81: link (visit and target file inside the scope, linkVisitToPatientOn, visit.link audit) and open_file (visits.manage + patients.create; the matched file checked before the link, outside the scope refused; patient.create audit) are canonical. M2 slice 90d: defer (a payment decision, finance.payments.collect) is canonical; every branch is canonical.",
   "branches": {
    "discriminator": "action",
    "values": {
@@ -6386,7 +6386,7 @@
      "need": [
       "finance.payments.collect"
      ],
-     "note": "Defers collection: a money decision. Not canonical yet (409 on the canonical path)."
+     "note": "Defers collection: a money decision. Canonical (M2 slice 90d): finance.payments.collect, never visits.manage; the visit row locked, then the scope on it (own: the visit's clinician or an ownership witness FOR SHARE NOWAIT; outside = missing 404); visit.payment_deferred audit atomic."
     },
     "return": {
      "need": [],

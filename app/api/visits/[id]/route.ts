@@ -8,7 +8,7 @@ import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalVisitFailure } from "@/lib/canonical-patient-http";
-import { commandCanonicalVisitMove, parseCanonicalVisitMove } from "@/lib/canonical-visits";
+import { commandCanonicalVisitDefer, commandCanonicalVisitMove, parseCanonicalVisitDefer, parseCanonicalVisitMove } from "@/lib/canonical-visits";
 import { canonicalVisitFileFailure, commandCanonicalVisitDelete, commandCanonicalVisitLink, commandCanonicalVisitOpenFile } from "@/lib/canonical-visit-file";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +50,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       } catch (error) {
         return canonicalVisitFileFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
       }
+    }
+    // M2 slice 90d (G4-4): deferring the payment is a money decision (finance.payments.collect).
+    if (fileAction === "defer") {
+      try { return NextResponse.json(await commandCanonicalVisitDefer(selected.handle, visitId, parseCanonicalVisitDefer(canonicalBody)), { headers: NO_STORE }); }
+      catch (error) { return canonicalVisitFailure(error, "تعذّر تأجيل الدفع. أعد المحاولة."); }
     }
     try {
       const moved = await commandCanonicalVisitMove(selected.handle, visitId, parseCanonicalVisitMove(canonicalBody));

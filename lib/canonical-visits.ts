@@ -1,6 +1,7 @@
 import "server-only";
 import {
   CLINIC_TIME_ZONE, PlannedVisitStartConflict, ActiveVisitExists, addVisitWith, callVisitAgainWith, chairReadinessSettingsWith, clearVisitWith, computeDebtRowsInSnapshot,
+  deferVisitPaymentWith, doctorOwnsPatient,
   finishVisitWith, gatedVisitMoveWith, getPool, insertAuditRow, listTodayVisitReadinessFactsWith, listTodayVisitsWith, patientInDoctorScopeWith,
   patientVisitReadinessFactsWith, returnVisitToWaitingWith, startVisitFromPlannedVisitWith, type DbClient, type VisitReadinessFacts,
 } from "./db";
@@ -43,7 +44,8 @@ export const VISIT_QUEUE_MAX_BYTES = 1024 * 1024;
 export class CanonicalVisitRefusal extends Error {
   constructor(
     readonly code: "invalid_visit_input" | "patient_not_found" | "visit_doctor_not_allowed" | "visit_already_active" | "planned_visit_not_found" | "planned_visit_conflict"
-      | "visit_not_found" | "visit_move_conflict" | "visit_action_not_canonical" | "clearance_required" | "emergency_reason_required",
+      | "visit_not_found" | "visit_move_conflict" | "visit_action_not_canonical" | "clearance_required" | "emergency_reason_required"
+      | "visit_not_signed" | "visit_scope_conflict",
     readonly status: 400 | 403 | 404 | 409,
     message: string,
     readonly visitId?: number,
@@ -176,9 +178,9 @@ export async function commandCanonicalArrival(session: VerifiedDurableSession, i
  * patient is one of the clinician's patients. A missing visit and one outside the
  * scope answer identically (404). The readiness gate and the written emergency
  * reason are unchanged; every move writes its audit row in the same transaction.
- * Deferring payment (a money decision) is not canonical yet and refuses (409); linking a
- * walk-in to a file and opening a file are handled by lib/canonical-visit-file.ts (M2 slice
- * 81) before this parser is reached.
+ * Deferring payment (a money decision, M2 slice 90d: commandCanonicalVisitDefer), linking a
+ * walk-in to a file and opening a file (lib/canonical-visit-file.ts, M2 slice 81) are
+ * handled before this parser is reached; it refuses them if reached directly.
  * ------------------------------------------------------------------------- */
 const QUEUE_ACTIONS = ["call", "call_again", "seat", "return", "finish", "clear"] as const;
 type QueueAction = typeof QUEUE_ACTIONS[number];
@@ -257,6 +259,55 @@ export async function commandCanonicalVisitMove(session: VerifiedDurableSession,
         return { kind: "cleared", clearedAt: cleared.clearedAt, clearedBy: cleared.clearedBy, already: cleared.already };
       }
     }
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * M2 slice 90d (owner decision G4-4): deferring the payment at the counter.
+ *
+ * A money decision, not a money movement (no receipt, no invoice; the balance stays on the
+ * patient): `finance.payments.collect` (the legacy money labels), never visits.manage. One
+ * admitted transaction on the legacy writer (deferVisitPaymentWith): the visit row locked
+ * FOR UPDATE, then the scope on the locked row — `all`, the visit's own clinician, or its
+ * patient through an ownership witness held FOR SHARE NOWAIT to commit — before its
+ * signature or deferral state is read; outside or missing answers alike (404). The audit
+ * row (visit.payment_deferred, with the written reason) is in the same transaction.
+ * ------------------------------------------------------------------------- */
+export interface CanonicalVisitDefer { readonly reason: string | null }
+export function parseCanonicalVisitDefer(body: unknown): CanonicalVisitDefer {
+  const source = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  return { reason: typeof source.reason === "string" && source.reason.trim() ? source.reason.trim().slice(0, 300) : null };
+}
+
+export async function commandCanonicalVisitDefer(session: VerifiedDurableSession, visitId: number, input: CanonicalVisitDefer, pool = getPool()) {
+  if (!Number.isSafeInteger(visitId) || visitId <= 0) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "رقم الزيارة غير صالح.");
+  return withStaffOperation(pool, session, "finance.payments.collect", async (client, handle) => {
+    const identity = await staffOperationIdentity(client, handle, "finance.payments.collect");
+    const admit = async () => {
+      const scope = await staffOperationPatientScope(client, handle, "finance.payments.collect");
+      if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+      if (scope.kind === "all") return;
+      const { rows: [visit] } = await client.query<{ patient_id: number | null; doctor_id: number | null }>(
+        "SELECT patient_id, doctor_id FROM visits WHERE id = $1", [visitId]);
+      if (visit?.doctor_id === scope.clinicianPartyId) return;
+      let inside = false;
+      if (visit?.patient_id != null) {
+        try { inside = await doctorOwnsPatient(scope.clinicianPartyId, visit.patient_id, client, "nowait"); }
+        catch (error) {
+          if (error && typeof error === "object" && "code" in error && error.code === "55P03") {
+            throw new CanonicalVisitRefusal("visit_scope_conflict", 409, "تعذّر تثبيت نطاق المريض. حدّث اللوحة وأعد المحاولة.");
+          }
+          throw error;
+        }
+      }
+      if (!inside) throw new CanonicalVisitRefusal("visit_not_found", 404, VISIT_NOT_FOUND);
+    };
+    const deferred = await deferVisitPaymentWith(client, visitId, { actor: identity.username, actorRole: identity.role }, input.reason, admit);
+    if (!deferred.ok) {
+      if (deferred.reason === "not_signed") throw new CanonicalVisitRefusal("visit_not_signed", 409, "وقّع الزيارة أولًا — التأجيل يكون عند الشبّاك بعد التوقيع.");
+      throw new CanonicalVisitRefusal("visit_not_found", 404, VISIT_NOT_FOUND);
+    }
+    return { ok: true as const, already: deferred.already, message: "أُجِّل الدفع — الرصيد باقٍ على المريض." };
   });
 }
 

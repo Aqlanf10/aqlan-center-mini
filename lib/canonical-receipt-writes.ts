@@ -4,6 +4,7 @@ import {
   patientInDoctorScopeWith, recordPaymentOn, recordPlanInstallmentOn, recordReversedInstallmentRecoveryOn, recordSettingsOwnedPaymentOn, type DbClient,
 } from "./db";
 import { collectApprovedAgreementOn, hydrateApprovedCollection } from "./approved-agreements";
+import { ATTEMPT_PATIENT_MISSING, CollectionAttemptError, retireCollectionAttemptOn, type CollectionAttemptIdentity } from "./collection-attempts";
 import { canonicalDebtActor } from "./debt-installments-db";
 import { CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, type Currency } from "./money";
 import type { RecoveryIntent } from "./reversed-installment-recovery";
@@ -173,5 +174,31 @@ export async function commandCanonicalRecovery(session: VerifiedDurableSession, 
       { similarityReview }, scopeAdmission(client, handle, "finance.payments.collect", intent.patientId));
     if (result.reason !== null || !result.payment) throw new CanonicalReceiptOutcome(result.reason ?? "recovery_review_required", "recovery");
     return { payment: result.payment, replayed: result.replayed === true };
+  });
+}
+
+/** Proving a collection attempt's outcome on the canonical runtime (M2 slice 90d,
+ * `POST /api/payments/attempts/retire`): the legacy retirement (the same checks, the
+ * per-key database lock against an in-flight send of the same key, the owner-of-the-attempt
+ * rule and the audit) under `finance.payments.collect`, for the operation's own identity.
+ * The patient is admitted before it is read: outside the scope answers exactly like a
+ * missing patient (400), so a retirement never reveals another patient. */
+export async function commandCanonicalRetireAttempt(session: VerifiedDurableSession, attempt: CollectionAttemptIdentity, pool = getPool()) {
+  return withStaffOperation(pool, session, "finance.payments.collect", async (client, handle) => {
+    const identity = await staffOperationIdentity(client, handle, "finance.payments.collect");
+    return retireCollectionAttemptOn(client, attempt, identity, async patientId => {
+      const scope = await staffOperationPatientScope(client, handle, "finance.payments.collect");
+      if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+      if (scope.kind === "all") return;
+      let inside: boolean;
+      try { inside = await doctorOwnsPatient(scope.clinicianPartyId, patientId, client, "nowait"); }
+      catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "55P03") {
+          throw new CollectionAttemptError(409, "تعذّر تثبيت نطاق المريض. أعد المحاولة؛ بقيت المحاولة محفوظة.");
+        }
+        throw error;
+      }
+      if (!inside) throw new CollectionAttemptError(400, ATTEMPT_PATIENT_MISSING);
+    });
   });
 }

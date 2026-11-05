@@ -32022,13 +32022,21 @@ export type DeferPaymentResult =
  * مُنهاة. الأثر الوحيد سطر تدقيق «من أجّل، ومتى، وكم كان المستحق» — مرّةً واحدة لكل زيارة.
  */
 export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null): Promise<DeferPaymentResult> {
-  return inVisitTransaction(async (client) => {
+  return inVisitTransaction(client => deferVisitPaymentWith(client, id, actor, reason));
+}
+
+/** The deferral on a caller's transaction (M2 slice 90d): `admit` decides the actor's scope
+ * on the locked visit row, before its signature or deferral state is read. */
+export async function deferVisitPaymentWith(client: DbClient, id: number, actor: VisitActor, reason: string | null,
+  admit?: () => Promise<void>): Promise<DeferPaymentResult> {
+  {
     const { rows } = await client.query<ReadinessFactsRow>(
       `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
       [CLINIC_TIME_ZONE, id],
     );
     const row = rows[0];
     if (!row) return { ok: false, reason: "not_found" };
+    await admit?.();
     if (!row.signed_at) return { ok: false, reason: "not_signed" };
     if (row.deferred) return { ok: true, already: true, invoiceId: row.invoice_id };
     await insertAuditRow(client, {
@@ -32043,7 +32051,7 @@ export async function deferVisitPayment(id: number, actor: VisitActor, reason: s
       actor: actor.actor, actorRole: actor.actorRole ?? null,
     });
     return { ok: true, already: false, invoiceId: row.invoice_id };
-  });
+  }
 }
 
 /** سطر عملٍ في ملخّص المغادرة. */
