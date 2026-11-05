@@ -52,7 +52,7 @@ Nothing here changes behaviour until the slices land.
 | **Prices and costs** | `services` (+ `prices`, `provisional`), `service-materials` | `finance.service-prices.view` / `.edit`; materials read `finance.cost-prices.view` | the catalogue without prices is not served today (decision G4-3) |
 | **Accounting and reports** | `accounting`, `finance/report`, `reports`, `report`, `reports/daily-clinic`, `reports/saved`, `executive*`, `finance/commissions*` | `finance.journal.post`, `reports.financial.view`, `reports.operational.view`, `finance.profits.view`, `finance.commissions.view-all` / `view-own` / `manage-rates` | per report; operational reports carry no money (decision G4-5) |
 
-## 3. Decisions for the owner (isolated; nothing is assumed)
+## 3. Decisions for the owner — all eight decided (6648682456, 2026-11-05; see section 5)
 
 **G4-1 — Plan amounts.**
 - *Already in force:* the canonical patient workflow summary (M2 slice 6) shows each active plan's account figures (total, done, remaining, overdue, next due date, currency) with `finance.patient-ledger.view`. The canonical plan reads carry no money at all.
@@ -102,14 +102,31 @@ Nothing here changes behaviour until the slices land.
 | Slice | Content | Waits on |
 |---|---|---|
 | 88 | Patient account reads (ledger, statement, treatment-financial-context, debts list, legacy balance arrangement read, debt-repayment workspace) — **done** | — |
-| 88b | Responsibility (the case's responsible doctor) | G4-7 |
-| 89 | Visit money reads (billing preview, financial context, walkout) | G4-4 |
-| 90 | Payment reads and collection (payments, attempts retire, defer) with the shift rule and request keys | G4-4 |
+| 88b | Responsibility (the case's responsible doctor) | decided (G4-7) |
+| 89 | Visit money reads (billing preview, financial context, walkout) | decided (G4-4) |
+| 90 | Payment reads and collection (payments, attempts retire, defer) with the shift rule and request keys | decided (G4-4) |
 | 91 | Payment correction/void; debt repayment arrangements and collection — **done** | — |
 | 92 | Invoice reads and archive reads — **done** (patient-scoped; G4-8) | — |
-| 93 | Invoice writes (create, patch, add-service, clinical preview), cancel, correct | — |
-| 94 | Plan money reads and writes, financial approval, amendment, reconcile | G4-1 |
-| 95 | Historical onboarding and documents | G4-2 |
-| 96 | Price-free service catalogue; services and prices; service materials | G4-3 |
+| 93 | Invoice writes: status (93a **done**), create and add-service and clinical preview (93b, G4-1 price controls), archive cancel and correct (93c) | decided (G4-1) |
+| 94 | Plan money reads and writes, financial approval, amendment, reconcile | decided (G4-1) |
+| 95 | Historical onboarding and documents | decided (G4-2) |
+| 96 | Price-free service catalogue; services and prices; service materials | decided (G4-3) |
 | 97 | Expenses, payables, parties, openings, FX, reconciliation, lab accounting | — |
-| 98 | Accounting, financial and operational reports, executive, commissions | G4-5 |
+| 98 | Accounting, financial and operational reports, executive, commissions | decided (G4-5) |
+
+## 5. Owner decisions 6648682456 (2026-11-05), binding
+
+The owner approved the eight recommendations, under least privilege and with read, write and scope kept separate. Each decision lands in the slice shown.
+
+| # | Decision | Lands in |
+|---|---|---|
+| G4-1 | Account totals, balance and debt need `finance.patient-ledger.view`. Item prices and the invoice's financial details need `finance.invoices.view`. Neither grants the other. Writing a price needs the write grant matching the act: `finance.invoices.create` when invoicing, with the settled price controls — `finance.discounts.apply` with a reason inside `billing.max_discount_percent`, `finance.discounts.override` beyond it, `finance.price-increases.apply` above the catalogue. A read grant never allows a write. | 93b (invoice create and add-service), 94 (plan money) |
+| G4-2 | The historical record and its clinical description appear with the patient-file read, inside the scope. Amounts, financial terms and instalments need `finance.patient-ledger.view` inside the scope. **The original mixed attachment** is protected too: if it carries money, hiding fields in JSON or the screen is not enough. Its download, preview, print and export sit behind the financial guard. A clinical reader who needs a copy gets a redacted rendering that shows no money; the original is never changed. | 95 |
+| G4-3 | A price-free clinical catalogue view for `clinical.visits.document`. It returns no price, cost or hidden financial field, and grants no financial or price-editing authority. | 96 |
+| G4-4 | Dues need `finance.invoices.view`; payments need `finance.payments.view`; the collect action needs `finance.payments.collect`. Each is bound to the patient scope and the existing writer controls. An action grant never implies its read, and an action's response reveals no unauthorised financial data. No grant is given automatically to reception or any account. | 89, 90 |
+| G4-5 | Operational counts need `reports.operational.view`; money fields need `reports.financial.view`. The patient or clinical scope holds for patient-linked information, aggregates included. Profit and purchase cost are never revealed implicitly; their own controls and grants stay. | 98 |
+| G4-6 | `workflow.doctor_financial_view` is not a grant for canonical sessions, nor a source for migration or automatic grants. Only explicit canonical grants count. The legacy route behaviour stays as it is; the setting is not removed. | 89 (help text and tests) |
+| G4-7 | Changing a case's responsible doctor is for **the protected owner only**, for now. A finance grant or a general administrative label never does it. A written reason is required, and the audit records the actor and the previous and new doctor inside the transaction. Any later delegation needs an explicit decision and a narrow, independent clinical grant; no general delegation is created now. The change is never a hidden way to widen scope or bypass the "no charge" controls. | 88b (now) |
+| G4-8 | Invoice reads stay bound to the patient scope, with no automatic bypass for financial roles. Patient scope `all` may become an explicit financial grant only once it is proved not to widen clinical access. Where the shared scope `all` would widen clinical exposure, the current refusal stays, and a design separating the financial scope from the clinical one comes first. No `all` and no grant is given to real accounts in this work. | in force since 92 and 93a; the financial/clinical scope separation design comes before any financial use of `all` |
+
+**Bounds of the approval:** design, implementation and tests on the WORK branch only. No change to real patients, doctors or accounts. WORK stays Draft, with no merge to main or REVIEW and no deploy or activation. Before Production: Staging first, then the owner's explicit personal approval.
