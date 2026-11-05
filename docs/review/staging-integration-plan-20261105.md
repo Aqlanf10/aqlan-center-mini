@@ -41,6 +41,16 @@ There was no Staging environment (`docs/STAGING_READINESS.md`, TD-02). The owner
 - Only a SHA that passed every gate is pushed to `staging/integration-20261105` (CI does not run there; a push deploys).
 - Claude holds no Railway credentials.
 
+## Update (owner, 2026-11-05, later the same day)
+
+Dot already has a Staging environment ready and separate from Production. The request to create a new Railway environment is withdrawn. Claude waits for Dot's report on:
+- the deploy branch or mechanism;
+- database and secret isolation;
+- the PostgreSQL version;
+- backup and rollback.
+
+Until then nothing is pushed to any deploy branch. The candidate keeps its full gate so it is ready when the target is confirmed.
+
 ## Candidate composition (first wave)
 
 The base is `origin/main` (`c6c88612`). It takes the reviewed legacy-path batches from the REVIEW head `9c31e071`, whose CI was green: features that work with today's accounts, without the canonical identity runtime.

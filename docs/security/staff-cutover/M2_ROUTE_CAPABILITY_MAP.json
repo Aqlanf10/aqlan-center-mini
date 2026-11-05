@@ -4873,8 +4873,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94c (G4-1, G4-8; contract section 11): clinical.plans.edit; the consent and its optional schedule in one admitted operation (recordPlanConsentOn, schedulePlanInstallmentsOn under a savepoint); a schedule refusal keeps the consent with the legacy 409; the schedule is validated before anything is written."
  },
  {
   "route": "/api/plans/[id]/financial-approval",
@@ -4904,8 +4904,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94c (G4-1, G4-8; contract section 11): clinical.plans.edit; removePlanItemOn (before consent only, its guards and audit) after the patient and plan row locks."
  },
  {
   "route": "/api/plans/[id]/items",
@@ -4920,8 +4920,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94c (G4-1, G4-8; contract section 11): clinical.plans.edit; updatePlanItemOn (session layout only, its financial-lineage guard and audit) after the patient and plan row locks."
  },
  {
   "route": "/api/plans/[id]/items",
@@ -4936,8 +4936,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 94c (G4-1, G4-8; contract section 11): clinical.plans.edit; one admitted operation on addPlanItemOn, the scope decided right after the patient and plan row locks (outside = missing plan); an agreement-currency price by the price grants (discounts.apply within the ceiling with a reason, discounts.override beyond, price-increases.apply above); plan.item_add and plan.price_override audited in the same transaction."
  },
  {
   "route": "/api/plans/[id]/reconcile",

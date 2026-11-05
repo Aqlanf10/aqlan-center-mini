@@ -325,3 +325,48 @@ This section is written before the code.
   - `clinical.plans.edit` and view grants refused;
   - outside reads like a missing plan;
   - revocation.
+
+## 11. Slice 94c — plan items and consent (G4-1, G4-8)
+
+This section is written before the code.
+
+| Route | Legacy | Canonical |
+|---|---|---|
+| `POST /api/plans/[id]/items` | A doctor (own patients, plan-edit switch) or the money roles. The price is the catalogue price on a base-currency plan. An agreement-currency plan requires an explicit price, checked against the catalogue: discount within the ceiling with a reason for non-admins, increase admin only. Audits `plan.item_add` (and `plan.price_override`) **after** the commit. | `clinical.plans.edit`. Prices by grants (G4-1): `finance.discounts.apply` within the ceiling with a reason, `finance.discounts.override` beyond it, `finance.price-increases.apply` above the catalogue. One admitted operation on `addPlanItemOn`; both audits **in the same transaction**. |
+| `PATCH /api/plans/[id]/items` (sessions, billing rule, doctor, note) | Same roles; `updatePlanItem` audits in its transaction. | `clinical.plans.edit` on `updatePlanItemOn`. |
+| `DELETE /api/plans/[id]/items` (before consent only) | Same roles; `removePlanItem`. | `clinical.plans.edit` on `removePlanItemOn`. |
+| `POST /api/plans/[id]/consent` (and an optional instalment schedule) | Money roles. Two transactions: the consent is committed, then the schedule; a schedule refusal answers 409 «سُجّلت الموافقة، وتعذّرت الجدولة». An invalid count or interval was refused only **after** the consent had been committed. | `clinical.plans.edit` (the map's grant). The count and interval are validated **before** anything is written (stricter: a malformed request no longer leaves a consent behind). The consent and the schedule run in one admitted operation. A schedule refusal keeps the consent: that state is committed and the same 409 is returned, as legacy. A thrown error rolls both back. |
+
+### Scope and locks
+
+Every writer takes `lockPlan`: the patient row, then the plan row. The scope is decided right after both locks:
+- an `own` actor needs a positive ownership witness `FOR SHARE NOWAIT`, held until commit;
+- a lock conflict is 409;
+- outside the scope, a plan reads like a missing plan.
+
+An early unlocked look comes first. The legacy wrappers run the same `…On` functions in their own transactions, through one runner that commits only an `ok` result.
+
+### What decides nothing
+
+- Role labels.
+- The legacy `canEditPlans` switch.
+- View grants.
+- The price grants without `clinical.plans.edit`.
+
+### Tests required before the commit
+
+- Add at the catalogue price with both audits in the transaction.
+- An agreement-currency explicit price, each way:
+  - without a price grant, refused;
+  - a discount within the ceiling with a reason, by `discounts.apply`;
+  - beyond the ceiling, by `override`;
+  - an increase, by `price-increases.apply`.
+- Update and delete with their legacy guards.
+- Consent:
+  - with a schedule;
+  - a schedule refusal keeps the consent (409);
+  - a malformed schedule writes nothing.
+- View grants and the label refused.
+- `own` outside reads like missing.
+- A race in which the patient leaves the scope while the writer waits for the plan lock.
+- Revocation.

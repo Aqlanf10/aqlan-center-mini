@@ -9515,6 +9515,12 @@ export async function listServicesWith(q: Pick<DbClient, "query">, includeInacti
 }
 
 /** خدمةٌ واحدة من الدليل — لأن سعرًا يأتي من المتصفّح سعرٌ يمكن تغييره في المتصفّح. */
+/** One catalogue service on a caller's snapshot or transaction (M2 slice 94c). */
+export async function getServiceWith(q: Pick<DbClient, "query">, id: number): Promise<Service | null> {
+  const { rows } = await q.query<ServiceRow>(`SELECT ${SERVICE_COLUMNS} FROM services WHERE id = $1`, [id]);
+  return rows[0] ? toService(rows[0]) : null;
+}
+
 export async function getService(id: number): Promise<Service | null> {
   await ensureSchema();
   const { rows } = await getPool().query<ServiceRow>(
@@ -21979,64 +21985,69 @@ export async function updatePlanItem(input: {
   actor: string;
   actorRole: string | null;
 }): Promise<PlanGuard> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const plan = await lockPlan(client, input.planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+  return ownedPlanTransaction((client) => updatePlanItemOn(client, input));
+}
 
-    const { rows: [before] } = await client.query<PlanItemAuditRow>(
-      `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1 AND plan_id = $2 FOR UPDATE`,
-      [input.itemId, input.planId],
-    );
-    if (!before) { await client.query("ROLLBACK"); return { ok: false, message: "البند غير موجود." }; }
-    const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
-      AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} LIMIT 1`, [input.itemId]);
-    if (financial && ((input.doctorId !== undefined && input.doctorId !== before.doctor_id)
-      || (input.billingRule !== undefined && input.billingRule !== before.billing_rule)
-      || (input.sessionCount !== undefined && input.sessionCount !== before.session_count))) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "البند له سجل مالي؛ تغيير الطبيب أو جلساته أو قاعدة الفوترة يحتاج مراجعة الاتفاق." };
-    }
+/** The same writer on a caller's transaction (M2 slice 94c): `admit` receives the plan's patient
+ * right after the patient and plan row locks. The caller commits only an `ok` result. */
+export async function updatePlanItemOn(client: DbClient, input: {
+  planId: number;
+  itemId: number;
+  plannedVisitNumber?: number;
+  billingRule?: PlanBillingRule;
+  sessionCount?: number;
+  doctorId?: number | null;
+  note?: string | null;
+  /** (TD-06) من عدّل — سطر التدقيق في المعاملة نفسها. */
+  actor: string;
+  actorRole: string | null;
+}, admit?: (patientId: number) => Promise<void>): Promise<PlanGuard> {
+  const plan = await lockPlan(client, input.planId, admit);
+  if (!plan) { return { ok: false, message: "الخطة غير موجودة." }; }
 
-    await client.query(
-      `UPDATE plan_items SET
-         planned_visit_number = COALESCE($3, planned_visit_number),
-         billing_rule         = COALESCE($4, billing_rule),
-         session_count        = COALESCE($5, session_count),
-         doctor_id            = COALESCE($6, doctor_id),
-         note                 = COALESCE($7, note)
-       WHERE id = $1 AND plan_id = $2`,
-      [
-        input.itemId,
-        input.planId,
-        input.plannedVisitNumber ?? null,
-        input.billingRule ?? null,
-        input.sessionCount ?? null,
-        input.doctorId ?? null,
-        input.note !== undefined ? input.note : null,
-      ],
-    );
-    const { rows: [after] } = await client.query<PlanItemAuditRow>(
-      `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1`, [input.itemId],
-    );
-    const changes = planItemChanges(before, after);
-    if (Object.keys(changes).length > 0) {
-      await insertAuditRow(client, {
-        action: "plan.item_update", entity: "plan_items", entityId: input.itemId, entityLabel: before.service_name,
-        details: { الخطة: input.planId, ...changes },
-        actor: input.actor, actorRole: input.actorRole,
-      });
-    }
-    await client.query("COMMIT");
-    return { ok: true };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+  const { rows: [before] } = await client.query<PlanItemAuditRow>(
+    `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1 AND plan_id = $2 FOR UPDATE`,
+    [input.itemId, input.planId],
+  );
+  if (!before) { return { ok: false, message: "البند غير موجود." }; }
+  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
+    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} LIMIT 1`, [input.itemId]);
+  if (financial && ((input.doctorId !== undefined && input.doctorId !== before.doctor_id)
+    || (input.billingRule !== undefined && input.billingRule !== before.billing_rule)
+    || (input.sessionCount !== undefined && input.sessionCount !== before.session_count))) {
+    return { ok: false, message: "البند له سجل مالي؛ تغيير الطبيب أو جلساته أو قاعدة الفوترة يحتاج مراجعة الاتفاق." };
   }
+
+  await client.query(
+    `UPDATE plan_items SET
+       planned_visit_number = COALESCE($3, planned_visit_number),
+       billing_rule         = COALESCE($4, billing_rule),
+       session_count        = COALESCE($5, session_count),
+       doctor_id            = COALESCE($6, doctor_id),
+       note                 = COALESCE($7, note)
+     WHERE id = $1 AND plan_id = $2`,
+    [
+      input.itemId,
+      input.planId,
+      input.plannedVisitNumber ?? null,
+      input.billingRule ?? null,
+      input.sessionCount ?? null,
+      input.doctorId ?? null,
+      input.note !== undefined ? input.note : null,
+    ],
+  );
+  const { rows: [after] } = await client.query<PlanItemAuditRow>(
+    `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1`, [input.itemId],
+  );
+  const changes = planItemChanges(before, after);
+  if (Object.keys(changes).length > 0) {
+    await insertAuditRow(client, {
+      action: "plan.item_update", entity: "plan_items", entityId: input.itemId, entityLabel: before.service_name,
+      details: { الخطة: input.planId, ...changes },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+  }
+  return { ok: true };
 }
 
 /**
@@ -22134,7 +22145,25 @@ export async function setPlanStatusOn(
 type PlanGuard = { ok: true } | { ok: false; message: string };
 
 /** حالة الخطة كما تحتاجها الحُرّاس — تُقرأ مع قفلٍ كي لا تتغيّر بين الفحص والتنفيذ. */
-async function lockPlan(client: DbClient, planId: number): Promise<{
+/** A legacy plan writer's own transaction: commit only an `ok` result, roll back any refusal or
+ * throw (M2 slice 94c; the same boundaries the writers held inline). */
+async function ownedPlanTransaction<T extends { ok: boolean }>(run: (client: DbClient) => Promise<T>): Promise<T> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await run(client);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function lockPlan(client: DbClient, planId: number, admit?: (patientId: number) => Promise<void>): Promise<{
   id: number; patientId: number; status: PlanStatus; consentAt: Date | null;
   baseCurrency: Currency; totalFromItems: boolean; totalMinor: number;
 } | null> {
@@ -22151,6 +22180,9 @@ async function lockPlan(client: DbClient, planId: number): Promise<{
   );
   if (rows.length === 0) return null;
   const row = rows[0];
+  // M2 slice 94b/94c: a canonical caller decides the actor's scope right after the patient and
+  // plan row locks, before the plan is read for any decision.
+  if (admit) await admit(row.patient_id);
   return {
     id: row.id, patientId: row.patient_id, status: row.status as PlanStatus,
     consentAt: row.consent_at, baseCurrency: row.base_currency as Currency,
@@ -22196,57 +22228,66 @@ export async function addPlanItem(input: {
   sessionCount?: number;
   doctorId?: number | null;
 }): Promise<PlanGuard & { totalMinor?: number }> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const plan = await lockPlan(client, input.planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+  return ownedPlanTransaction((client) => addPlanItemOn(client, input));
+}
 
-    const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
-    if (!allowed.ok) { await client.query("ROLLBACK"); return allowed; }
+/** The same writer on a caller's transaction (M2 slice 94c): `admit` receives the plan's patient
+ * right after the patient and plan row locks. The caller commits only an `ok` result. */
+export async function addPlanItemOn(client: DbClient, input: {
+  planId: number;
+  serviceId: number | null;
+  serviceName: string;
+  category: string | null;
+  toothCode: number | null;
+  surfaces: string | null;
+  quantity: number;
+  unitPriceMinor: number;
+  note: string | null;
+  /** تنظيم الجلسات: الزيارة المخطَّطة وقاعدة الفوترة وعدد الجلسات وطبيب البند. */
+  plannedVisitNumber?: number;
+  billingRule?: PlanBillingRule;
+  sessionCount?: number;
+  doctorId?: number | null;
+}, admit?: (patientId: number) => Promise<void>): Promise<PlanGuard & { totalMinor?: number }> {
+  const plan = await lockPlan(client, input.planId, admit);
+  if (!plan) { return { ok: false, message: "الخطة غير موجودة." }; }
 
-    if (input.toothCode !== null && !isValidTooth(input.toothCode)) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "رقم سنّ غير صحيح بالترقيم الدولي." };
-    }
-    // This generic item editor has no explicit new-episode selector. Keep historical work on its original identity.
-    const { rows: historical } = await client.query<{ legacy_context: unknown }>(
-      `SELECT ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context FROM legacy_treatment_agreements la
-        JOIN plan_items i ON i.id = la.plan_item_id
-        WHERE la.patient_id = $1 AND la.service_id = $2`, [plan.patientId, input.serviceId]);
-    const checkedHistoricalProbe = validateLineSite({ category: input.category, toothCode: input.toothCode, surfaces: input.surfaces });
-    const historicalProbe: LineSite = checkedHistoricalProbe.ok ? checkedHistoricalProbe.site
-      : { mode: "region", toothCode: input.toothCode, surfaces: normalizeSurfaces(input.surfaces), episodeTeeth: null, scope: null };
-    if (historical.some((row) => legacyCoverageOverlaps(legacyCoverageStateFromContext(row.legacy_context), historicalProbe))) { await client.query("ROLLBACK"); return { ok: false, message: "العلاج له اتفاق تاريخي محفوظ؛ استخدم بنده أو راجع الحلقة العلاجية قبل إضافة بند جديد." }; }
+  const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
+  if (!allowed.ok) { return allowed; }
 
-    await client.query(
-      `INSERT INTO plan_items
-         (plan_id, service_id, service_name, category, tooth_code, surfaces,
-          quantity, unit_price_minor, note, planned_visit_number, billing_rule,
-          session_count, doctor_id, sort_order)
-       VALUES ($1, $2, $3, $4::text, $5, $6::text, $7, $8, $9::text, $10, $11, $12, $13,
-               COALESCE((SELECT MAX(sort_order) + 1 FROM plan_items WHERE plan_id = $1), 100))`,
-      [
-        input.planId, input.serviceId, input.serviceName.trim(), input.category,
-        input.toothCode, normalizeSurfaces(input.surfaces),
-        Math.max(1, Math.round(input.quantity)), Math.max(0, Math.round(input.unitPriceMinor)),
-        input.note?.trim() || null,
-        input.plannedVisitNumber && input.plannedVisitNumber > 0 ? Math.round(input.plannedVisitNumber) : 1,
-        input.billingRule ?? "on_completion",
-        input.sessionCount && input.sessionCount > 0 ? Math.round(input.sessionCount) : 1,
-        input.doctorId ?? null,
-      ],
-    );
-    const totalMinor = await recomputePlanTotal(client, input.planId);
-    await client.query("COMMIT");
-    return { ok: true, totalMinor };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+  if (input.toothCode !== null && !isValidTooth(input.toothCode)) {
+    return { ok: false, message: "رقم سنّ غير صحيح بالترقيم الدولي." };
   }
+  // This generic item editor has no explicit new-episode selector. Keep historical work on its original identity.
+  const { rows: historical } = await client.query<{ legacy_context: unknown }>(
+    `SELECT ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context FROM legacy_treatment_agreements la
+      JOIN plan_items i ON i.id = la.plan_item_id
+      WHERE la.patient_id = $1 AND la.service_id = $2`, [plan.patientId, input.serviceId]);
+  const checkedHistoricalProbe = validateLineSite({ category: input.category, toothCode: input.toothCode, surfaces: input.surfaces });
+  const historicalProbe: LineSite = checkedHistoricalProbe.ok ? checkedHistoricalProbe.site
+    : { mode: "region", toothCode: input.toothCode, surfaces: normalizeSurfaces(input.surfaces), episodeTeeth: null, scope: null };
+  if (historical.some((row) => legacyCoverageOverlaps(legacyCoverageStateFromContext(row.legacy_context), historicalProbe))) { return { ok: false, message: "العلاج له اتفاق تاريخي محفوظ؛ استخدم بنده أو راجع الحلقة العلاجية قبل إضافة بند جديد." }; }
+
+  await client.query(
+    `INSERT INTO plan_items
+       (plan_id, service_id, service_name, category, tooth_code, surfaces,
+        quantity, unit_price_minor, note, planned_visit_number, billing_rule,
+        session_count, doctor_id, sort_order)
+     VALUES ($1, $2, $3, $4::text, $5, $6::text, $7, $8, $9::text, $10, $11, $12, $13,
+             COALESCE((SELECT MAX(sort_order) + 1 FROM plan_items WHERE plan_id = $1), 100))`,
+    [
+      input.planId, input.serviceId, input.serviceName.trim(), input.category,
+      input.toothCode, normalizeSurfaces(input.surfaces),
+      Math.max(1, Math.round(input.quantity)), Math.max(0, Math.round(input.unitPriceMinor)),
+      input.note?.trim() || null,
+      input.plannedVisitNumber && input.plannedVisitNumber > 0 ? Math.round(input.plannedVisitNumber) : 1,
+      input.billingRule ?? "on_completion",
+      input.sessionCount && input.sessionCount > 0 ? Math.round(input.sessionCount) : 1,
+      input.doctorId ?? null,
+    ],
+  );
+  const totalMinor = await recomputePlanTotal(client, input.planId);
+  return { ok: true, totalMinor };
 }
 
 /**
@@ -22261,42 +22302,43 @@ export async function removePlanItem(
   itemId: number,
   ctx: { actor: string; actorRole: string | null },
 ): Promise<PlanGuard> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const plan = await lockPlan(client, planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+  return ownedPlanTransaction((client) => removePlanItemOn(client, planId, itemId, ctx));
+}
 
-    const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
-    if (!allowed.ok) { await client.query("ROLLBACK"); return allowed; }
+/** The same writer on a caller's transaction (M2 slice 94c): `admit` receives the plan's patient
+ * right after the patient and plan row locks. The caller commits only an `ok` result. */
+export async function removePlanItemOn(
+  client: DbClient,
+  planId: number,
+  itemId: number,
+  ctx: { actor: string; actorRole: string | null },
+  admit?: (patientId: number) => Promise<void>,
+): Promise<PlanGuard> {
+  const plan = await lockPlan(client, planId, admit);
+  if (!plan) { return { ok: false, message: "الخطة غير موجودة." }; }
 
-    const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
-      AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL}`, [itemId]);
-    if (financial) { await client.query("ROLLBACK"); return { ok: false, message: "البند له سجل مالي أو اتفاق تاريخي محفوظ؛ لا يُحذف." }; }
-    const { rows: [removed] } = await client.query<PlanItemAuditRow>(
-      `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2 RETURNING ${PLAN_ITEM_AUDIT_COLUMNS}`, [itemId, planId],
-    );
-    if (!removed) { await client.query("ROLLBACK"); return { ok: false, message: "البند غير موجود." }; }
+  const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
+  if (!allowed.ok) { return allowed; }
 
-    await recomputePlanTotal(client, planId);
-    // (TD-06) حذفٌ نهائي لبندٍ مسعَّر — يبقى في السجل ما حُذف ومن حذفه.
-    await insertAuditRow(client, {
-      action: "plan.item_remove", entity: "plan_items", entityId: itemId, entityLabel: removed.service_name,
-      details: {
-        الخطة: planId, الخدمة: removed.service_name, الكمية: removed.quantity,
-        سعر_الوحدة: Number(removed.unit_price_minor), عملة_الخطة: plan.baseCurrency,
-      },
-      actor: ctx.actor, actorRole: ctx.actorRole,
-    });
-    await client.query("COMMIT");
-    return { ok: true };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
+    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL}`, [itemId]);
+  if (financial) { return { ok: false, message: "البند له سجل مالي أو اتفاق تاريخي محفوظ؛ لا يُحذف." }; }
+  const { rows: [removed] } = await client.query<PlanItemAuditRow>(
+    `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2 RETURNING ${PLAN_ITEM_AUDIT_COLUMNS}`, [itemId, planId],
+  );
+  if (!removed) { return { ok: false, message: "البند غير موجود." }; }
+
+  await recomputePlanTotal(client, planId);
+  // (TD-06) حذفٌ نهائي لبندٍ مسعَّر — يبقى في السجل ما حُذف ومن حذفه.
+  await insertAuditRow(client, {
+    action: "plan.item_remove", entity: "plan_items", entityId: itemId, entityLabel: removed.service_name,
+    details: {
+      الخطة: planId, الخدمة: removed.service_name, الكمية: removed.quantity,
+      سعر_الوحدة: Number(removed.unit_price_minor), عملة_الخطة: plan.baseCurrency,
+    },
+    actor: ctx.actor, actorRole: ctx.actorRole,
+  });
+  return { ok: true };
 }
 
 /**
@@ -22311,87 +22353,85 @@ export async function recordPlanConsent(input: {
   actor: string;
   note: string | null;
 }): Promise<PlanGuard & { itemCount?: number; totalMinor?: number }> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const plan = await lockPlan(client, input.planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+  return ownedPlanTransaction((client) => recordPlanConsentOn(client, input));
+}
 
-    const { rows: historicalScopes } = await client.query<{ legacy_context: unknown }>(
-      `SELECT ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context FROM plan_items i WHERE i.plan_id = $1 AND ${PLAN_ITEM_LEGACY_LINEAGE_SQL}`,
-      [input.planId]);
-    if (historicalScopes.some((row) => legacyCoverageStateFromContext(row.legacy_context).kind !== "verified")) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "نطاق العلاج التاريخي غير موثّق بالكامل؛ يلزم التحقق من النطاق ثم توثيق موافقة سريرية حالية صريحة. التاريخ القديم وحده لا يكفي، ولن يُمسح أو يُعاد تأريخه." };
-    }
+/** The same writer on a caller's transaction (M2 slice 94c): `admit` receives the plan's patient
+ * right after the patient and plan row locks. The caller commits only an `ok` result. */
+export async function recordPlanConsentOn(client: DbClient, input: {
+  planId: number;
+  actor: string;
+  note: string | null;
+}, admit?: (patientId: number) => Promise<void>): Promise<PlanGuard & { itemCount?: number; totalMinor?: number }> {
+  const plan = await lockPlan(client, input.planId, admit);
+  if (!plan) { return { ok: false, message: "الخطة غير موجودة." }; }
 
-    const { rows: itemRows } = await client.query<{
-      id: number; category: string | null; tooth_code: number | null;
-      surfaces: string | null; quantity: number; unit_price_minor: string; status: string;
-    }>(
-      `SELECT id, category, tooth_code, surfaces, quantity, unit_price_minor, status
-         FROM plan_items WHERE plan_id = $1 ORDER BY sort_order, id`,
-      [input.planId],
-    );
-
-    const agreedTotalMinor = plan.totalFromItems ? 0 : plan.totalMinor;
-    const guard = canConsent({
-      agreedTotalMinor,
-      status: plan.status,
-      consentAt: plan.consentAt?.toISOString() ?? null,
-      items: itemRows.map((row) => ({
-        serviceId: null, toothCode: row.tooth_code,
-        quantity: row.quantity, unitPriceMinor: toMinor(row.unit_price_minor),
-        status: row.status as PlanItemStatus,
-      })),
-    });
-    if (!guard.ok) { await client.query("ROLLBACK"); return guard; }
-
-    const totalMinor = plan.totalFromItems ? await recomputePlanTotal(client, input.planId) : plan.totalMinor;
-    await client.query(
-      `UPDATE treatment_plans SET consent_at = NOW(), consent_by = $2, consent_note = $3::text
-         WHERE id = $1`,
-      [input.planId, input.actor, input.note?.trim() || null],
-    );
-
-    // البنود على المخطط: حالاتٌ مخطَّطة لا منجَزة — والفرق بينهما نصف قيمة المخطط.
-    let charted = 0;
-    for (const row of itemRows) {
-      const condition = conditionForCategory(row.category);
-      if (!condition || row.tooth_code === null) continue;
-      await client.query(
-        `INSERT INTO tooth_conditions
-           (patient_id, tooth_code, condition, stage, surfaces, note, recorded_by)
-         VALUES ($1, $2, $3, 'planned', $4::text, $5::text, $6)`,
-        [
-          plan.patientId, row.tooth_code, condition, normalizeSurfaces(row.surfaces),
-          `من خطة العلاج رقم ${input.planId}`, input.actor,
-        ],
-      );
-      charted += 1;
-    }
-
-    // Consent, chart entries and their audit evidence commit together.
-    await insertAuditRow(client, {
-      action: "plan.consent",
-      entity: "treatment_plans",
-      entityId: input.planId,
-      entityLabel: `خطة رقم ${input.planId}`,
-      details: {
-        البنود: itemRows.length, "على المخطط": charted, المبلغ: totalMinor, العملة: plan.baseCurrency,
-        النطاق: plan.totalFromItems ? "بنود الخطة" : "اتفاق بمبلغ ثابت",
-      },
-      actor: input.actor,
-    });
-    await client.query("COMMIT");
-    return { ok: true, itemCount: itemRows.length, totalMinor };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+  const { rows: historicalScopes } = await client.query<{ legacy_context: unknown }>(
+    `SELECT ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context FROM plan_items i WHERE i.plan_id = $1 AND ${PLAN_ITEM_LEGACY_LINEAGE_SQL}`,
+    [input.planId]);
+  if (historicalScopes.some((row) => legacyCoverageStateFromContext(row.legacy_context).kind !== "verified")) {
+    return { ok: false, message: "نطاق العلاج التاريخي غير موثّق بالكامل؛ يلزم التحقق من النطاق ثم توثيق موافقة سريرية حالية صريحة. التاريخ القديم وحده لا يكفي، ولن يُمسح أو يُعاد تأريخه." };
   }
+
+  const { rows: itemRows } = await client.query<{
+    id: number; category: string | null; tooth_code: number | null;
+    surfaces: string | null; quantity: number; unit_price_minor: string; status: string;
+  }>(
+    `SELECT id, category, tooth_code, surfaces, quantity, unit_price_minor, status
+       FROM plan_items WHERE plan_id = $1 ORDER BY sort_order, id`,
+    [input.planId],
+  );
+
+  const agreedTotalMinor = plan.totalFromItems ? 0 : plan.totalMinor;
+  const guard = canConsent({
+    agreedTotalMinor,
+    status: plan.status,
+    consentAt: plan.consentAt?.toISOString() ?? null,
+    items: itemRows.map((row) => ({
+      serviceId: null, toothCode: row.tooth_code,
+      quantity: row.quantity, unitPriceMinor: toMinor(row.unit_price_minor),
+      status: row.status as PlanItemStatus,
+    })),
+  });
+  if (!guard.ok) { return guard; }
+
+  const totalMinor = plan.totalFromItems ? await recomputePlanTotal(client, input.planId) : plan.totalMinor;
+  await client.query(
+    `UPDATE treatment_plans SET consent_at = NOW(), consent_by = $2, consent_note = $3::text
+       WHERE id = $1`,
+    [input.planId, input.actor, input.note?.trim() || null],
+  );
+
+  // البنود على المخطط: حالاتٌ مخطَّطة لا منجَزة — والفرق بينهما نصف قيمة المخطط.
+  let charted = 0;
+  for (const row of itemRows) {
+    const condition = conditionForCategory(row.category);
+    if (!condition || row.tooth_code === null) continue;
+    await client.query(
+      `INSERT INTO tooth_conditions
+         (patient_id, tooth_code, condition, stage, surfaces, note, recorded_by)
+       VALUES ($1, $2, $3, 'planned', $4::text, $5::text, $6)`,
+      [
+        plan.patientId, row.tooth_code, condition, normalizeSurfaces(row.surfaces),
+        `من خطة العلاج رقم ${input.planId}`, input.actor,
+      ],
+    );
+    charted += 1;
+  }
+
+  // Consent, chart entries and their audit evidence commit together.
+  await insertAuditRow(client, {
+    action: "plan.consent",
+    entity: "treatment_plans",
+    entityId: input.planId,
+    entityLabel: `خطة رقم ${input.planId}`,
+    details: {
+      البنود: itemRows.length, "على المخطط": charted, المبلغ: totalMinor, العملة: plan.baseCurrency,
+      النطاق: plan.totalFromItems ? "بنود الخطة" : "اتفاق بمبلغ ثابت",
+    },
+    actor: input.actor,
+  });
+  return { ok: true, itemCount: itemRows.length, totalMinor };
 }
 
 /**
@@ -22407,53 +22447,50 @@ export async function schedulePlanInstallments(input: {
   everyDays: number;
   firstDueDate: string;
 }): Promise<PlanGuard & { count?: number }> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const plan = await lockPlan(client, input.planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
-    if (!plan.consentAt) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "سجّل موافقة المريض قبل جدولة الأقساط." };
-    }
+  return ownedPlanTransaction((client) => schedulePlanInstallmentsOn(client, input));
+}
 
-    const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.plan_id = $1
-      AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} LIMIT 1`, [input.planId]);
-    if (financial) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة مرتبطة بسجل مالي أو اتفاق تاريخي؛ لا تُنشأ أقساط تفوتر العلاج نفسه مرة ثانية." }; }
-    const { rows: existing } = await client.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM plan_installments WHERE plan_id = $1`, [input.planId],
-    );
-    if (Number(existing[0].count) > 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "للخطة جدول أقساط سلفًا." };
-    }
-
-    const { rows: totals } = await client.query<{ total_minor: string }>(
-      `SELECT total_minor FROM treatment_plans WHERE id = $1`, [input.planId],
-    );
-    const totalMinor = toMinor(totals[0].total_minor);
-    if (totalMinor <= 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "لا يمكن جدولة أقساط لخطة بلا مبلغ." };
-    }
-
-    const parts = splitInstallments(totalMinor, input.count, input.firstDueDate, input.everyDays);
-    for (const part of parts) {
-      await client.query(
-        `INSERT INTO plan_installments (plan_id, number, due_date, amount_minor)
-         VALUES ($1, $2, $3::date, $4)`,
-        [input.planId, part.number, part.dueDate, part.amountMinor],
-      );
-    }
-    await client.query("COMMIT");
-    return { ok: true, count: parts.length };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+/** The same writer on a caller's transaction (M2 slice 94c): `admit` receives the plan's patient
+ * right after the patient and plan row locks. The caller commits only an `ok` result. */
+export async function schedulePlanInstallmentsOn(client: DbClient, input: {
+  planId: number;
+  count: number;
+  everyDays: number;
+  firstDueDate: string;
+}, admit?: (patientId: number) => Promise<void>): Promise<PlanGuard & { count?: number }> {
+  const plan = await lockPlan(client, input.planId, admit);
+  if (!plan) { return { ok: false, message: "الخطة غير موجودة." }; }
+  if (!plan.consentAt) {
+    return { ok: false, message: "سجّل موافقة المريض قبل جدولة الأقساط." };
   }
+
+  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.plan_id = $1
+    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} LIMIT 1`, [input.planId]);
+  if (financial) { return { ok: false, message: "الخطة مرتبطة بسجل مالي أو اتفاق تاريخي؛ لا تُنشأ أقساط تفوتر العلاج نفسه مرة ثانية." }; }
+  const { rows: existing } = await client.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM plan_installments WHERE plan_id = $1`, [input.planId],
+  );
+  if (Number(existing[0].count) > 0) {
+    return { ok: false, message: "للخطة جدول أقساط سلفًا." };
+  }
+
+  const { rows: totals } = await client.query<{ total_minor: string }>(
+    `SELECT total_minor FROM treatment_plans WHERE id = $1`, [input.planId],
+  );
+  const totalMinor = toMinor(totals[0].total_minor);
+  if (totalMinor <= 0) {
+    return { ok: false, message: "لا يمكن جدولة أقساط لخطة بلا مبلغ." };
+  }
+
+  const parts = splitInstallments(totalMinor, input.count, input.firstDueDate, input.everyDays);
+  for (const part of parts) {
+    await client.query(
+      `INSERT INTO plan_installments (plan_id, number, due_date, amount_minor)
+       VALUES ($1, $2, $3::date, $4)`,
+      [input.planId, part.number, part.dueDate, part.amountMinor],
+    );
+  }
+  return { ok: true, count: parts.length };
 }
 
 /**

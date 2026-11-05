@@ -34,11 +34,11 @@ export class CanonicalPlanInstallmentOutcome extends Error {
   constructor(readonly reason: string, readonly planCurrency: string, readonly recoveryInvoiceIds?: number[]) { super(reason); this.name = "CanonicalPlanInstallmentOutcome"; }
 }
 
-const PLAN_MISSING = "الخطة غير موجودة.";
+export const PLAN_MISSING = "الخطة غير موجودة.";
 const PATIENT_MISSING = "المريض غير موجود.";
-type ScopedAction = "clinical.plans.edit" | "finance.payments.collect";
+export type ScopedAction = "clinical.plans.edit" | "finance.payments.collect";
 
-async function earlyInside(client: DbClient, handle: StaffOperationHandle, action: ScopedAction, patientId: number): Promise<boolean> {
+export async function earlyInside(client: DbClient, handle: StaffOperationHandle, action: ScopedAction, patientId: number): Promise<boolean> {
   const scope = await staffOperationPatientScope(client, handle, action);
   if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
   return scope.kind === "all" || await patientInDoctorScopeWith(client, scope.clinicianPartyId, patientId);
@@ -46,7 +46,7 @@ async function earlyInside(client: DbClient, handle: StaffOperationHandle, actio
 
 /** The authoritative decision after a writer's lock: an `own` actor needs a positive ownership
  * witness FOR SHARE NOWAIT, held until commit; a lock conflict is 409, outside reads as missing. */
-function lockedAdmission(client: DbClient, handle: StaffOperationHandle, action: ScopedAction, missing: string) {
+export function lockedAdmission(client: DbClient, handle: StaffOperationHandle, action: ScopedAction, missing: string) {
   return async (patientId: number) => {
     const scope = await staffOperationPatientScope(client, handle, action);
     if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
@@ -63,7 +63,7 @@ function lockedAdmission(client: DbClient, handle: StaffOperationHandle, action:
   };
 }
 
-async function planPatient(client: DbClient, handle: StaffOperationHandle, action: ScopedAction, planId: number): Promise<number> {
+export async function planPatient(client: DbClient, handle: StaffOperationHandle, action: ScopedAction, planId: number): Promise<number> {
   const { rows: [plan] } = await client.query<{ patient_id: number }>("SELECT patient_id FROM treatment_plans WHERE id = $1", [planId]);
   if (!plan || !await earlyInside(client, handle, action, plan.patient_id)) throw new CanonicalPlanRefusal("plan_not_found", 404, PLAN_MISSING);
   return plan.patient_id;
