@@ -162,8 +162,13 @@ describe("CephTracer real React native-pixel viewport", () => {
       expect((await writes(page)).flatMap(x=>x.landmarks??[]).every(p=>p.code==="S")).toBe(true);
       await page.getByRole("button",{name:"2×",exact:true}).click();
       await page.getByRole("button",{name:"تحريك الصورة",exact:true}).click();
-      a=await position(page,300,250); b={x:a.x-60,y:a.y-50};
       const viewport=page.getByTestId("ceph-viewport");
+      await viewport.scrollIntoViewIfNeeded();
+      const visible = await viewport.boundingBox();
+      if (!visible) throw new Error("Viewport missing");
+      // The upper-left native point can be clipped after centre-preserving zoom.
+      // Begin the gesture on the visible surface, preserving the strict movement check.
+      a={x:visible.x+visible.width/2,y:visible.y+visible.height/2}; b={x:a.x-60,y:a.y-50};
       const before=await viewport.evaluate(el=>({x:el.scrollLeft,y:el.scrollTop}));
       await touch("touchStart",a.x,a.y); await touch("touchMove",b.x,b.y); await touch("touchEnd",b.x,b.y);
       await expect.poll(()=>viewport.evaluate(el=>el.scrollLeft!==0||el.scrollTop!==0)).toBe(true);

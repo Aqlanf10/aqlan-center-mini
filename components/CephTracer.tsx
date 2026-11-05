@@ -201,6 +201,7 @@ export function CephTracer({
   const pointsRef = useRef(points);
   pointsRef.current = points;
   const suppressClick = useRef(false);
+  const pointerClickPoint = useRef<Pt | null>(null);
   const dragStart = useRef<LandmarkMap | null>(null);
   const onNaturalSize = useCallback((size: CephImageSize | null) => {
     setNatural((prev) => size && prev?.w === size.w && prev.h === size.h ? prev : size);
@@ -314,9 +315,12 @@ export function CephTracer({
   };
 
   const onSurfaceClick = (e: React.MouseEvent) => {
+    // Compatibility clicks may round to whole CSS pixels. PointerEvent retains
+    // the subpixel coordinate needed for native-image placement/calibration.
+    const pt = e.detail > 0 ? pointerClickPoint.current ?? imagePoint(e) : imagePoint(e);
+    pointerClickPoint.current = null;
     if (suppressClick.current) { suppressClick.current = false; return; }
     if (completed || aiLoading || !natural || panMode) return;
-    const pt = imagePoint(e);
     if (!pt) return;
     if (calMode) {
       if (saving) return;
@@ -368,6 +372,7 @@ export function CephTracer({
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
+    pointerClickPoint.current = imagePoint(e);
     const code = dragging.current;
     dragging.current = null;
     if (code) {
@@ -382,6 +387,7 @@ export function CephTracer({
   };
 
   const onPointerCancel = () => {
+    pointerClickPoint.current = null;
     dragging.current = null;
     suppressClick.current = true;
     if (dragStart.current) {
@@ -1416,7 +1422,7 @@ export function CephTracer({
             src={`/api/documents/${analysis.documentId}`} natural={natural} onNaturalSize={onNaturalSize}
             zoom={zoom} onZoomChange={setZoom} panMode={panMode} filter={imageFilterStyle}
             showLoupe={showLoupe} cursor={cursorSurfacePt} onCursor={setCursorSurfacePt}
-            onClick={onSurfaceClick} onPointerStart={() => { suppressClick.current = false; }} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+            onClick={onSurfaceClick} onPointerStart={() => { suppressClick.current = false; pointerClickPoint.current = null; }} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel} renderOverlay={renderOverlay}
           />
           {!completed && (
