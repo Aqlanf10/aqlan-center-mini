@@ -1,3 +1,4 @@
+import type { DbClient } from "./db";
 /**
  * إعادة الضبط — مسح البيانات التجريبية وإبقاء الإعداد (قرار المالك).
  *
@@ -148,7 +149,30 @@ export class ProtectedCollectionAttemptHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد إثبات إلغاء محاولات تحصيل؛ يجب الاحتفاظ بمفاتيحها حتى لا تُسجَّل محاولة متأخرة بعد إعادة الضبط. لم يُمسح شيء."); this.name = "ProtectedCollectionAttemptHistoryError"; }
 }
 
+/** Durable Rx commands are retained clinical history, never a wipe target. */
+export class ProtectedPrescriptionHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد إصدار وصفات بمفاتيح محفوظة. لم يُمسح شيء؛ يجب الاحتفاظ بالوصفات وسجل إصدارها."); this.name = "ProtectedPrescriptionHistoryError"; }
+}
+export async function assertNoPrescriptionIssuanceHistory(client: Pick<DbClient, "query">): Promise<void> {
+  // EXCLUSIVE blocks issuance reservations through the complete reset decision.
+  await client.query("LOCK TABLE prescription_issuance_commands IN EXCLUSIVE MODE");
+  const { rows: [history] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM prescription_issuance_commands) AS exists");
+  if (!history || history.exists) throw new ProtectedPrescriptionHistoryError();
+}
+
+/** Issued imaging requests are retained clinical snapshots and retry receipts. */
+export class ProtectedRadiologyHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد إصدار طلبات أشعة محفوظة. لم يُمسح شيء؛ يجب الاحتفاظ بطلبات الأشعة وسجل إصدارها."); this.name = "ProtectedRadiologyHistoryError"; }
+}
+export async function assertNoRadiologyRequestHistory(client: Pick<DbClient, "query">): Promise<void> {
+  await client.query("LOCK TABLE radiology_requests IN EXCLUSIVE MODE");
+  const { rows: [history] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM radiology_requests) AS exists");
+  if (!history || history.exists) throw new ProtectedRadiologyHistoryError();
+}
+
 export const RESET_KEEP_TABLES = [
+  "radiology_requests",
+  "prescription_issuance_commands",
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,

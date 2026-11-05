@@ -103,6 +103,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url, init) => {
     if (init?.method && init.method !== "GET") throw new Error("Mutation forbidden in read-only witness");
+    if (url === `/api/ortho/${IDs.ortho}/plan-link`) return Response.json({ caseId: IDs.ortho, patientId: IDs.patient, planId: null, status: "active", observedVersion: "a".repeat(64) });
     if (url === `/api/plans?patientId=${IDs.patient}`) return Response.json(planResponse());
     if (url === `/api/patients/${IDs.patient}/treatment-financial-context`) return Response.json(projectTreatmentFinancialReferences(invoiced()));
     throw new Error(`Unexpected read: ${url}`);
@@ -136,10 +137,10 @@ describe("normal invoice-to-Ortho linkage read-contract witness", () => {
     render(); await settle(); const output = text(render());
     expect(output).not.toContain("لا اتفاق مالي مربوط بالحالة");
     expect(output).not.toContain("حتى تُربط الحالة باتفاق أقساط");
-    expect(output).toContain("هذا الرابط ليس مطلوبًا للفاتورة أو الاتفاق السابق");
+    expect(output).toContain("الربط لا ينشئ فاتورة ولا يثبت السداد");
     expect(output).not.toContain("✓ رابط اتفاق أقساط قديم");
     expect(output).not.toContain("SYNTH-ORTHO-906");
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([`/api/plans?patientId=${IDs.patient}`]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([`/api/plans?patientId=${IDs.patient}`, `/api/ortho/${IDs.ortho}/plan-link`]);
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === undefined || init.method === "GET")).toBe(true);
   });
 
@@ -154,7 +155,12 @@ describe("normal invoice-to-Ortho linkage read-contract witness", () => {
   });
 
   it("preserves the distinct existing explicit installment-package path", async () => {
-    fetchMock.mockResolvedValue(Response.json(planResponse([{ id: 918 }])));
+    fetchMock.mockImplementation(async (url, init) => {
+      if (init?.method && init.method !== "GET") throw new Error("Mutation forbidden in read-only witness");
+      if (url === `/api/plans?patientId=${IDs.patient}`) return Response.json(planResponse([{ id: 918 }]));
+      if (url === `/api/ortho/${IDs.ortho}/plan-link`) return Response.json({ caseId: IDs.ortho, patientId: IDs.patient, planId: IDs.plan, status: "active", observedVersion: "b".repeat(64) });
+      throw new Error(`Unexpected read: ${url}`);
+    });
     render({ planId: IDs.plan }); await settle();
     expect(text(render({ planId: IDs.plan }))).toContain("✓ رابط اتفاق أقساط قديم");
   });

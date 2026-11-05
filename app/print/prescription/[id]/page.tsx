@@ -1,26 +1,17 @@
+import "./prescription.css";
 import { PrintMetadata } from "@/components/PrintDocument";
+import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
 import { notFound } from "next/navigation";
-import { getPatient, getPrescription, getSettingsSafe } from "@/lib/db";
+import { getPatient, getPrescription, getPrescriptionPrintSettings, CLINIC_TIME_ZONE } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
-import { isAdmin } from "@/lib/roles";
-import { sanitizeRxItems } from "@/lib/prescription";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
+import { clinicDateString } from "@/lib/schedule";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
-
-interface RxItem {
-  name: string;
-  dose?: string; // 500mg, 1g
-  form?: string; // Tablets, Capsules, Syrup, Mouthwash, Ointment — English
-  frequency?: string; // 1 tablet every 8 hours — English
-  duration?: string; // 5 days — English
-  instructions?: string; // تعليمات المريض بالعربية
-  instructionsEn?: string; // patient instructions in English
-}
 
 type InstructionsLang = "both" | "ar" | "en";
 
@@ -30,7 +21,7 @@ function parseInstructionsLang(value: string | undefined): InstructionsLang {
 }
 
 /**
- * الوصفة والروشتة الطبية السنية — مقاس A5 قياسي.
+ * الوصفة والروشتة الطبية السنية — مقاس A5 المعتمد، مع صفحات متابعة عند الحاجة.
  *
  * وثيقة رسمية تصدر باسم المريض بعد الكشف أو الجراحة، متضمنة التشخيص
  * والتنبيهات الطبية (الحساسية والأمراض المزمنة) وجدول الأدوية والجرعات
@@ -44,84 +35,69 @@ export default async function PrescriptionPrintPage({
 }: {
   params: Promise<{ id: string }>;
   searchParams: Promise<{
-    diagnosis?: string;
-    items?: string;
-    notes?: string;
+    rx?: string | string[];
+    draft?: string | string[];
+    items?: string | string[];
+    diagnosis?: string | string[];
+    notes?: string | string[];
+    doctorName?: string; // Historical metadata is ignored; saved snapshot wins.
+    doctorPartyId?: string;
     date?: string;
     lang?: string;
-    /** رقم وصفةٍ محفوظة (من مستودع الوكيل الآخر) — طباعة الوثيقة كما صدرت. */
-    rx?: string;
-    /** وضع المسودة: معاينة غير معتمدة بعلامة مائية — ليست وصفة صرف. */
-    draft?: string;
   }>;
 }) {
   const session = await requireSession();
   if (!session) notFound();
 
-  /* وثيقة سريرية رسمية: مستخدمٌ سريري (طبيب، أو مدير) لا استقبال — ومن يفتحها
-     يملك المريض (P0.9): الطبيب A لا يطبع وصفة مريض الطبيب B. */
-  if (!isAdmin(session.role) && session.role !== "doctor") notFound();
+  /* Existing clinicians and explicitly granted reception reprints; patient
+     scope and stored-only reception restrictions are checked independently. */
+  if (!await canPrintSavedPrescription(session)) notFound();
 
   const { id: rawId } = await params;
   const patientId = Number(rawId);
-  if (!Number.isInteger(patientId) || patientId <= 0) notFound();
+  if (!Number.isSafeInteger(patientId) || patientId <= 0) notFound();
 
   const sParams = await searchParams;
+  // Reject legacy draft/clinical payloads, even alongside a valid saved ID.
+  // Other historical query metadata is ignored; the saved snapshot is authoritative.
+  if (["draft", "items", "diagnosis", "notes"].some(key => Object.prototype.hasOwnProperty.call(sParams, key))
+    || typeof sParams.rx !== "string" || !/^\d+$/.test(sParams.rx)) notFound();
+  const storedRx = Number(sParams.rx);
+  if (!Number.isSafeInteger(storedRx) || storedRx <= 0) notFound();
 
   if (!(await canAccessPatient(session, patientId).catch(() => false))) notFound();
 
   const [patient, settings] = await Promise.all([
     getPatient(patientId),
-    getSettingsSafe(),
+    getPrescriptionPrintSettings(),
   ]);
 
   if (!patient) notFound();
 
   /* الوصفة المحفوظة (من مستودع الوكيل الآخر): تُطبَع من السجل كما صدرت —
    * فما طُبِع يُخزّن كما طُبِع، والإبطال وحده يغيّر شيئًا (بسببٍ موثّق). */
-  const storedRx = Number(sParams.rx);
-  const stored = Number.isInteger(storedRx) && storedRx > 0
-    ? await getPrescription(storedRx) : null;
-  if (sParams.rx && !stored) notFound();
-  if (stored && stored.patientId !== patientId) notFound();
+  const stored = await getPrescription(storedRx);
+  if (!stored || stored.patientId !== patientId) notFound();
+  // Reception receives only an active stored record.
+  if (session.role === "reception" && stored.status !== "active") notFound();
 
-  /* الوثيقة الرسمية تُطبع من السجل المحفوظ كما صدرت — وما لم يُحفظ فلا وصفة:
-   * صفحةٌ بلا وصفةٍ محفوظة لا تطبع أدوية «مثالًا» لم يصفها أحد (P0.9)، ولا
-   * يُطبع اسم طبيبٍ من معاملات الرابط. المسودة المعزولة (?draft=1) وحدها
-   * تعرض بياناتٍ مرسلة — منقّاة، وبعلامة «غير معتمدة» لا تصرف بها صيدلية. */
-  const isDraftMode = !stored && sParams.draft === "1" && typeof sParams.items === "string";
-
-  let rxItems: RxItem[] = [];
-  if (stored) {
-    rxItems = stored.items;
-  } else if (isDraftMode) {
-    try {
-      rxItems = sanitizeRxItems(JSON.parse(decodeURIComponent(sParams.items!)));
-    } catch {
-      rxItems = [];
-    }
-  }
-  if (!stored && !isDraftMode) notFound(); // لا وصفة محفوظة ولا مسودة معلنة: لا ورقة
-  if (isDraftMode && rxItems.length === 0) notFound(); // مسودة بلا أدوية صالحة: لا ورقة
-
-  const lang = parseInstructionsLang(stored ? stored.instructionsLang : sParams.lang);
-  const diagnosisText = stored ? stored.diagnosis : isDraftMode ? sParams.diagnosis : null;
-  const notesText = stored ? stored.notes : isDraftMode ? sParams.notes : null;
-  const now = new Date();
-  const dateStr = stored
-    ? stored.createdAt.slice(0, 10)
-    : isDraftMode
-      ? sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
-      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const rxItems = stored.items;
+  const lang = parseInstructionsLang(stored.instructionsLang);
+  const diagnosisText = stored.diagnosis;
+  const notesText = stored.notes;
+  // Display the saved instant in the canonical clinic zone, without rewriting it.
+  const dateStr = clinicDateString(new Date(stored.createdAt), CLINIC_TIME_ZONE);
   const age = ageFromBirthYear(patient.birthYear, dateStr);
+  const prescribingDoctorName = stored.prescribingDoctorName || "اسم الطبيب غير موثق في الوصفة القديمة";
 
   return (
     <>
-      {stored ? <PrintButton docType="prescription" docId={stored.id} /> : null}
-      <div className="sheet sheet-a5">
-        <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact />
+      <PrintButton docType="prescription" docId={stored.id} patientId={patientId} />
+      <div className="sheet sheet-a5 prescription-approved-a5">
+        <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact strictIdentity />
 
         {/* معلومات المريض */}
+        <table className="prescription-pages"><thead><tr className="prescription-page-identity"><td>
         <PrintMetadata>
           <div className="line">
             <span style={{ color: "#475569" }}>المريض:</span>
@@ -140,6 +116,8 @@ export default async function PrescriptionPrintPage({
             <span>{friendlyDateLong(dateStr)}</span>
           </div>
         </PrintMetadata>
+        <div className="prescription-record-identity">الطبيب: <bdi>{prescribingDoctorName}</bdi> · <bdi>Rx #{stored.id}</bdi>{stored.status === "void" && <strong className="prescription-void-identity"> · وصفة مُبطلة — لا تُصرف · VOID</strong>}</div>
+        </td></tr></thead><tbody><tr><td>
 
         {/* تنبيه الحساسية والأمراض المزمنة */}
         {patient.medicalAlert ? (
@@ -162,23 +140,7 @@ export default async function PrescriptionPrintPage({
         ) : null}
 
         {/* التشخيص إن وُجد */}
-        {isDraftMode ? (
-          <div style={{
-            border: "2px dashed #b45309",
-            backgroundColor: "#fffbeb",
-            color: "#92400e",
-            padding: "2mm 3mm",
-            borderRadius: "2mm",
-            fontSize: "10pt",
-            fontWeight: 900,
-            textAlign: "center",
-            marginTop: "2mm",
-          }}>
-            مسودة غير معتمدة — لا تُصرف من الصيدلية · UNAPPROVED DRAFT
-          </div>
-        ) : null}
-
-        {stored?.status === "void" ? (
+        {stored.status === "void" ? (
           <div style={{
             border: "2px solid #b91c1c",
             backgroundColor: "#fef2f2",
@@ -219,23 +181,23 @@ export default async function PrescriptionPrintPage({
           </span>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "3mm" }} dir="ltr">
+        </td></tr>
           {rxItems.map((item, idx) => {
             const ar = (item.instructions ?? "").trim();
             const en = (item.instructionsEn ?? "").trim();
             const showAr = lang !== "en" && ar;
             const showEn = lang !== "ar" && en;
             return (
-              <div
-                key={idx}
+              <tr key={idx} className={`prescription-medication${rxItems.length === 1 ? " prescription-single-medication" : ""}`}><td>
+              <div dir="ltr" data-prescription-body="ltr"
                 style={{
                   borderBottom: "1px dashed #cbd5e1",
                   paddingBottom: "2.5mm",
                   fontSize: "9pt",
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: "2mm" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "1mm", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", minWidth: 0, alignItems: "baseline", gap: "2mm" }}>
                     <span style={{ fontWeight: 800, color: "#0f172a", fontSize: "10pt" }}>
                       {idx + 1}. {item.name}
                     </span>
@@ -257,6 +219,7 @@ export default async function PrescriptionPrintPage({
                   )}
                 </div>
 
+                {item.selection?.amount && <p dir="ltr" className="mt-1 text-sm">Dose: {item.selection.amount}</p>}
                 {item.frequency && (
                   <div style={{ marginTop: "1mm", fontSize: "8.5pt", color: "#334155" }}>
                     💊 {item.frequency}
@@ -266,7 +229,7 @@ export default async function PrescriptionPrintPage({
                 {(showAr || showEn) && (
                   <div style={{ marginTop: "1mm", display: "grid", gap: "0.8mm" }}>
                     {showAr && (
-                      <div style={{ fontSize: "8.5pt", color: "#475569" }} dir="rtl">
+                      <div style={{ fontSize: "8.5pt", color: "#475569", textAlign: "right" }} dir="rtl">
                         <span style={{ fontWeight: 700 }}>التعليمات: </span>
                         {ar}
                       </div>
@@ -280,9 +243,10 @@ export default async function PrescriptionPrintPage({
                   </div>
                 )}
               </div>
+              </td></tr>
             );
           })}
-        </div>
+        <tr className="prescription-ending"><td>
 
         {notesText && (
           <div style={{ marginTop: "3mm", fontSize: "8pt", color: "#475569", lineHeight: "1.5" }}>
@@ -295,7 +259,7 @@ export default async function PrescriptionPrintPage({
           <div>
             <div style={{ fontSize: "8pt", color: "#64748b" }}>الطبيب المعالج · <span dir="ltr">Physician</span></div>
             <div style={{ fontWeight: 800, fontSize: "9pt", marginTop: "1mm" }}>
-              {stored ? stored.createdBy : session.username}
+              <bdi>{prescribingDoctorName}</bdi> · <bdi>Rx #{stored.id}</bdi>
             </div>
             <div style={{ fontSize: "7.5pt", color: "#94a3b8" }}>طب وجراحة الفم والأسنان · <span dir="ltr">Oral Medicine &amp; Dental Surgery</span></div>
           </div>
@@ -305,8 +269,10 @@ export default async function PrescriptionPrintPage({
           </div>
         </div>
 
-        <PrintFooter settings={settings} />
+        <PrintFooter settings={settings} strictIdentity />
+        </td></tr></tbody></table>
       </div>
     </>
   );
 }
+

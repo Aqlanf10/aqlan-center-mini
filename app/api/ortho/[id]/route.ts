@@ -1,8 +1,9 @@
+import { commandOrthoPlanLink, OrthoPlanLinkRefusal } from "@/lib/ortho-plan-link-command";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  CLINIC_TIME_ZONE, closeOrthoCase, findUserByUsername, getOrthoCase, linkOrthoCasePlan, recordAdjustment,
+  CLINIC_TIME_ZONE, closeOrthoCase, getOrthoCase, recordAdjustment,
   setOrthoPhase, setRetainer,
 } from "@/lib/db";
 import { isElasticClass, PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
@@ -109,23 +110,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     /* (P1-B) ربط الحالة باتفاقها المالي أو فكّه — يغيّر مصدر فوترة الشدّات القادمة، فلمن يملك الخطط. */
     if ("planId" in source) {
-      if (!["admin", "doctor", "reception"].includes(session.role)) {
-        return forbidden("ربط حالة التقويم بالاتفاق للإدارة والطبيب والاستقبال.");
+      try {
+        return NextResponse.json(await commandOrthoPlanLink(session, caseId, body), { headers: { "Cache-Control": "no-store" } });
+      } catch (error) {
+        if (error instanceof OrthoPlanLinkRefusal) return NextResponse.json({ message: error.message, code: error.code }, { status: error.status, headers: { "Cache-Control": "no-store" } });
+        throw error;
       }
-      if (session.role === "doctor") {
-        const user = await findUserByUsername(session.username).catch(() => null);
-        if (user?.permissions && user.permissions.canEditPlans === false) {
-          return forbidden("غير مصرّح لك بتعديل خطط العلاج.");
-        }
-      }
-      const raw = source.planId;
-      const planId = raw === null ? null : Number(raw);
-      if (planId !== null && !(Number.isInteger(planId) && planId > 0)) {
-        return NextResponse.json({ message: "الخطة المختارة غير صالحة." }, { status: 400 });
-      }
-      const linked = await linkOrthoCasePlan({ caseId, planId, actor: session.username, actorRole: session.role });
-      if (!linked.ok) return NextResponse.json({ message: linked.message }, { status: linked.status });
-      return NextResponse.json(linked);
     }
 
     if (typeof source.phase === "string") {

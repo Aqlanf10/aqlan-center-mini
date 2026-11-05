@@ -67,6 +67,8 @@ export type SettingKey =
   | "clinical.phrases_diagnosis"
   | "clinical.phrases_next"
   | "messaging.consent_mode"
+  | "clinical.medication_catalog"
+  | "clinical.radiology_centers"
   | "plans.specialty_templates"
   | "reminders.auto_template"
   | "reminders.auto_language"
@@ -189,6 +191,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // (PAT-3) opt_out: يُراسَل المريض ما لم يسحب موافقته؛ opt_in: لا يُراسَل إلا بموافقةٍ مسجّلة.
   "messaging.consent_mode": "opt_out",
   // (SPEC-T2) قوالب الخطط حسب التخصص بصيغة JSON — فارغٌ يعني القوالب الجاهزة في الشيفرة.
+  "clinical.medication_catalog": '{"schemaVersion":1,"entries":[]}',
+  "clinical.radiology_centers": "[]",
   "plans.specialty_templates": "",
   "reminders.auto_template": "appointment_reminder",
   "reminders.auto_language": "ar",

@@ -1,0 +1,93 @@
+name: PR521 focused radiology journey HTTP diagnostic
+on:
+  pull_request:
+    branches: [feat/rx-compact-reviewed-regimens-20261103]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: pr521-radiology-http-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  prove:
+    if: >-
+      github.repository == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.number == 521 &&
+      github.event.pull_request.base.ref == 'feat/rx-compact-reviewed-regimens-20261103' &&
+      github.event.pull_request.head.repo.full_name == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.head.ref == 'feat/radiology-request-complete-20261103'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11.21.1
+      - run: npm ci
+      - name: Verify exact diagnostic head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Verify environment contract
+        run: npm run verify:environment
+      - name: Build exact production application
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Install PDF text inspection tool
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
+      # Diagnostic only: existing full-suite CI/release gates remain required.
+      # One synthetic isolated built-app test. Never expose raw output or artifacts.
+      - name: Diagnose radiology journey with bounded sanitized output
+        id: diagnose
+        timeout-minutes: 22
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_log="$RUNNER_TEMP/pr509-legacy-http-raw.log"
+          raw_json="$RUNNER_TEMP/pr509-http-raw.json"
+          trap 'rm -f -- "$raw_log" "$raw_json"' EXIT
+          set +e
+          timeout 20m npm run test:security-http -- \
+            __tests__/security-http/radiology-request-journey.test.ts \
+            --reporter=json --includeTaskLocation --outputFile.json="$raw_json" >"$raw_log" 2>&1
+          test_status=$?
+          diagnostic="$RUNNER_TEMP/pr521-radiology-diagnostic.json"
+          node scripts/dependency-security/pr509-http-diagnostic.mjs > "$diagnostic"
+          sanitizer_status=$?
+          set -e
+          cat "$diagnostic"
+          if [ "$test_status" -ne 0 ]; then exit "$test_status"; fi
+          exit "$sanitizer_status"
+
+      - name: Upload only sanitized diagnostic
+        if: always() && steps.diagnose.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr521-radiology-sanitized-diagnostic
+          path: ${{ runner.temp }}/pr521-radiology-diagnostic.json
+          if-no-files-found: error
+          retention-days: 1

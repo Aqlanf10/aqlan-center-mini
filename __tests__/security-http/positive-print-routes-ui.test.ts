@@ -77,7 +77,7 @@ describe("positive persisted print routes on the built app", () => {
       await page.evaluate(() => document.fonts.ready);
       // Persist diagnostic evidence BEFORE any content/status assertion, including failures.
       await page.screenshot({ path: `${output}/${name}.png`, fullPage: true });
-      const format = name === "invoice" ? "A4" : ["card", "patient-card", "voucher"].includes(name) ? "A6" : "A5";
+      const format = name === "invoice" ? "A4" : ["card", "patient-card", "voucher", "prescription"].includes(name) ? "A6" : "A5";
       const pdfPath = `${output}/${name}.pdf`;
       await page.pdf({ path: pdfPath, format, printBackground: true, preferCSSPageSize: true });
       const pdfText = execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", pdfPath, "-"], { encoding: "utf8" });

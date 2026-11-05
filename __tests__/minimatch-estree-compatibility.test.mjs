@@ -9,13 +9,13 @@ const fromEstree = createRequire(require.resolve("@typescript-eslint/typescript-
 const minimatch = fromEstree("minimatch").minimatch;
 const read = (name) => JSON.parse(readFileSync(new URL(`../${name}`, import.meta.url), "utf8"));
 
-describe("scoped minimatch fix without a lint toolchain migration", () => {
-  it("pins only the affected estree copy to the official development-only package", () => {
+describe("reviewed minimatch fix with the staging lint toolchain", () => {
+  it("pins the shared estree and ESLint copy to the official development-only package", () => {
     const manifest = read("package.json");
     const lock = read("package-lock.json");
-    const fixedPath = "node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch";
+    const fixedPath = "node_modules/minimatch";
     const copies = Object.keys(lock.packages).filter((path) => path.endsWith("/minimatch"));
-    expect(copies.sort()).toEqual([fixedPath, "node_modules/minimatch"]);
+    expect(copies).toEqual([fixedPath]);
     expect(lock.packages[fixedPath]).toMatchObject({
       version: "11.0.3",
       resolved: "https://registry.npmjs.org/minimatch/-/minimatch-11.0.3.tgz",
@@ -24,22 +24,23 @@ describe("scoped minimatch fix without a lint toolchain migration", () => {
       engines: { node: "18 || 20 || >=22" },
     });
     expect(fromEstree("minimatch/package.json").version).toBe("11.0.3");
-    expect(lock.packages["node_modules/minimatch"]).toMatchObject({ version: "3.1.5", dev: true });
     expect(lock.packages["node_modules/@isaacs/nonrecursive-glob-match"].dev).toBe(true);
-    expect(lock.packages["node_modules/eslint"].version).toBe("9.39.5");
-    expect(lock.packages["node_modules/eslint-plugin-react-hooks"].version).toBe("6.1.1");
-    expect(manifest.engines.node).toBe(">=22 <23");
+    expect(lock.packages["node_modules/eslint"].version).toBe("10.14.0");
+    expect(lock.packages["node_modules/eslint-plugin-react-hooks"].version).toBe("7.1.1");
+    expect(manifest.engines.node).toBe(">=22.13 <23");
     expect(fromEstree.resolve("minimatch")).toContain(`${fixedPath}/`);
   });
 
-  it.each(["eslint", "@eslint/config-array", "@eslint/eslintrc"])(
-    "preserves the callable legacy minimatch API used by %s", (consumer) => {
+  it.each(["eslint", "@eslint/config-array", "@typescript-eslint/typescript-estree"])(
+    "preserves the named minimatch API used by %s", (consumer) => {
       const fromConsumer = createRequire(require.resolve(consumer));
-      const legacy = fromConsumer("minimatch");
+      const { minimatch: match, Minimatch } = fromConsumer("minimatch");
       expect(fromConsumer.resolve("minimatch")).toBe(require.resolve("minimatch"));
-      expect(typeof legacy).toBe("function");
-      expect(legacy("src/component.tsx", "src/**")).toBe(true);
-      expect(legacy("README.md", "**/*.{ts,tsx}")).toBe(false);
+      expect(typeof match).toBe("function");
+      expect(typeof Minimatch).toBe("function");
+      expect(new Minimatch("**/*.{ts,tsx}", { dot: true }).match(".hidden/component.tsx")).toBe(true);
+      expect(match("src/component.tsx", "src/**")).toBe(true);
+      expect(match("README.md", "**/*.{ts,tsx}")).toBe(false);
     },
   );
 
@@ -77,14 +78,15 @@ describe("scoped minimatch fix without a lint toolchain migration", () => {
       parser.clearCaches();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000); // A cold TypeScript project service can exceed Vitest's 5s default.
 
-  it("loads the unchanged ESLint rules and keeps ignored paths excluded", async () => {
+  it("loads the staging ESLint safety rules and keeps ignored paths excluded", async () => {
     const { ESLint } = await import("eslint");
     const eslint = new ESLint();
     const config = await eslint.calculateConfigForFile("components/PrescriptionModal.tsx");
     expect(config.rules["react-hooks/rules-of-hooks"][0]).toBe(2);
-    expect(config.rules["react-hooks/component-hook-factories"][0]).toBe(2);
+    // Hooks 7 replaced the deprecated factory rule with static-components.
+    expect(config.rules["react-hooks/static-components"][0]).toBe(2);
     expect(await eslint.isPathIgnored("node_modules/synthetic/file.ts")).toBe(true);
     expect(await eslint.isPathIgnored(".next/synthetic/file.ts")).toBe(true);
     expect(await eslint.isPathIgnored("components/PrescriptionModal.tsx")).toBe(false);
