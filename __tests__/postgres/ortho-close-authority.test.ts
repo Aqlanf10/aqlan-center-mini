@@ -1,3 +1,7 @@
+// Real PostgreSQL server-route fixture, outside Next's server-module resolver.
+// Only the framework marker is stubbed; transactional authority and storage stay real.
+vi.mock("server-only", () => ({}));
+
 import { randomUUID } from 'node:crypto';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import { createSessionToken, sessionCredentialVersion, type SessionPayload } from '../../lib/auth';

@@ -122,7 +122,16 @@ jobs:
       - name: Raw body parser scanner
         run: npm run ci:scan:body
 
+      # Next runs a separate full-project TypeScript CLI during production build.
+      # Earlier step-local NODE_OPTIONS do not carry into this mandatory check.
+      - name: Verify production build typecheck memory capacity
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: node scripts/typecheck-memory.mjs
+
       - name: Production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build
 
       - name: Build and smoke-test read-only preflight artifact

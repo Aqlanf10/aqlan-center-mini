@@ -25,6 +25,22 @@ describe("full TypeScript runner capacity without coverage reduction", () => {
   it.each([NaN, Infinity, 0, -1])("refuses unknown memory metrics %s", availableBytes => {
     expect(() => inspectTypecheckMemory({ ...capacity, availableBytes })).toThrow("TYPECHECK_MEMORY_METRICS_INVALID");
   });
+  it.each([
+    ["Verify full typecheck memory capacity", "Typecheck", "npm run typecheck"],
+    ["Verify production build typecheck memory capacity", "Production build", "npm run build"],
+  ])("rechecks capacity immediately before %s and scopes the same heap to its compiler", (guard, step, command) => {
+    const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+    const expected = `      - name: ${guard}
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: node scripts/typecheck-memory.mjs
+
+      - name: ${step}
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: ${command}`;
+    expect(ci.split(expected)).toHaveLength(2);
+  });
   it("keeps complete source coverage and mandatory compiler/build gates", () => {
     const read = name => readFileSync(new URL(`../${name}`, import.meta.url), "utf8");
     const config = JSON.parse(read("tsconfig.json"));
@@ -32,6 +48,7 @@ describe("full TypeScript runner capacity without coverage reduction", () => {
     expect(config.exclude).toEqual(["node_modules"]);
     expect(config.compilerOptions.strict).toBe(true);
     expect(JSON.parse(read("package.json")).scripts.typecheck).toBe("tsc --noEmit");
+    expect(JSON.parse(read("package.json")).scripts.build).toBe("next build");
     const ci = read(".github/workflows/ci.yml");
     expect(ci).toContain("run: node scripts/typecheck-memory.mjs");
     expect(ci).toMatch(/- name: Typecheck\n        env:\n          NODE_OPTIONS: --max-old-space-size=4096\n        run: npm run typecheck/);

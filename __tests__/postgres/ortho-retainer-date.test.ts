@@ -1,3 +1,7 @@
+// Real PostgreSQL server-route fixture, outside Next's server-module resolver.
+// Only the framework marker is stubbed; transactional authority and storage stay real.
+vi.mock("server-only", () => ({}));
+
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";

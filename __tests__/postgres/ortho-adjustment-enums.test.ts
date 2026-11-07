@@ -1,3 +1,7 @@
+// Real PostgreSQL server-route fixture, outside Next's server-module resolver.
+// Only the framework marker is stubbed; transactional authority and storage stay real.
+vi.mock("server-only", () => ({}));
+
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, createIsolatedDatabase, stubPostgresEnv } from "./_setup";
 import { createAdjustmentCommand } from "../../lib/ortho-adjustment-command";
