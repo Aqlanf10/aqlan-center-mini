@@ -122,12 +122,12 @@ export function PatientAppointmentsPanel({ patientId }: { patientId: number }) {
     <section aria-label="مواعيد المريض" data-testid="patient-appointments-panel" dir="rtl" className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-4 sm:px-5">
         <div><h2 className="text-base font-extrabold text-navy-900">مواعيد المريض</h2><p className="mt-1 text-xs text-slate-500">سجل المواعيد المعتمد، بترتيب الموعد وتوقيت العيادة</p></div>
-        <button type="button" onClick={() => { if (isOwner() && !owner.pending) setSelection({ view: selection.view, cursor: null, previous: [] }); }} disabled={ready?.busy} className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 disabled:opacity-40">تحديث المواعيد</button>
+        <button type="button" onClick={() => { if (isOwner() && current.current?.pending === false) setSelection({ view: selection.view, cursor: null, previous: [] }); }} disabled={ready?.busy} className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 disabled:opacity-40">تحديث المواعيد</button>
       </div>
       <div className="flex flex-wrap gap-2 p-4" role="group" aria-label="عرض المواعيد">
         {([ ["upcoming", "اليوم والقادمة"], ["history", "السابقة والمغلقة"] ] as const).map(([view, label]) => (
           <button type="button" key={view} aria-pressed={selection.view === view} disabled={ready?.busy}
-            onClick={() => { if (isOwner() && !owner.pending && selection.view !== view) setSelection({ view, cursor: null, previous: [] }); }}
+            onClick={() => { if (isOwner() && current.current?.pending === false && selection.view !== view) setSelection({ view, cursor: null, previous: [] }); }}
             className={`min-h-11 rounded-xl px-4 text-sm font-bold disabled:opacity-40 ${selection.view === view ? "bg-navy-900 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
         ))}
       </div>
