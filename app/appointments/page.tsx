@@ -106,7 +106,7 @@ export default function AppointmentsPage() {
      حمله نصف حقيقته لأنّ الحساب يفترض يومًا من ١٢ ساعة لم يُهيِّئه أحد. */
   const dayStart = useSetting("clinic.day_start");
   const dayEnd = useSetting("clinic.day_end");
-  const today = useMemo(todayLocal, []);
+  const [today] = useState(() => todayLocal());
   /* رابطٌ مباشر إلى يومٍ وفلتر: «غدًا · لم يُذكَّر» من بطاقة الشاشة الرئيسية يفتح
      القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
   const [date, setDate] = useState(today);
@@ -114,6 +114,7 @@ export default function AppointmentsPage() {
      إلى يومٍ آخر أثناء الانتظار. */
   const dateRef = useRef(today);
   const dateRevisionRef = useRef(0);
+  const [dayFence, setDayFence] = useState({ revision: 0, request: 0 });
   const [dayList, setDayList] = useState<{
     date: string; revision: number; request: number;
     status: "loading" | "ready" | "error"; items: Appointment[]; error: string | null;
@@ -134,9 +135,10 @@ export default function AppointmentsPage() {
   const latestLoadRequestRef = useRef(0);
   const mountedRef = useRef(false);
   const readyRequestRef = useRef<number | null>(null);
-  // Ownership is checked during render, before the new date's effects run.
-  const ownsDayList = dayList?.date === date && dayList.revision === dateRevisionRef.current
-    && dayList.request === latestLoadRequestRef.current;
+  // Render uses an immutable fence snapshot; callbacks keep synchronous ref fences.
+  // A different date is hidden immediately, before its layout effect commits.
+  const ownsDayList = dayList?.date === date && dayList.revision === dayFence.revision
+    && dayList.request === dayFence.request;
   const ready = ownsDayList && dayList.status === "ready";
   const loading = !ownsDayList || dayList.status === "loading";
   const error = ownsDayList ? dayList.error : null;
@@ -185,6 +187,7 @@ export default function AppointmentsPage() {
     // Commit the date fence before browser events can use the previous panel.
     if (dateRef.current !== date) dateRevisionRef.current += 1;
     dateRef.current = date;
+    setDayFence({ revision: dateRevisionRef.current, request: latestLoadRequestRef.current });
     candidateRequestRef.current += 1;
     setFreed(null);
     setCandidateNote(null);
@@ -306,6 +309,7 @@ export default function AppointmentsPage() {
     const requestId = ++latestLoadRequestRef.current;
     const revision = dateRevisionRef.current;
     const context = { date: target, revision, request: requestId };
+    setDayFence({ revision, request: requestId });
     const isCurrent = () => mountedRef.current && requestId === latestLoadRequestRef.current
       && target === dateRef.current && revision === dateRevisionRef.current;
     readyRequestRef.current = null;

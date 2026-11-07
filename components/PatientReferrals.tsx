@@ -35,12 +35,13 @@ interface Step {
 
 // A committed patient context owns every read and write completion. Retiring it
 // does not claim to undo a POST that the server may already have committed.
-function createReferralOwner() {
+function createReferralOwner(patientId: number, canIssue: boolean) {
   let active = false;
   let read = 0;
   let write = 0;
   let pending = false;
   return {
+    patientId, canIssue,
     activate: () => { active = true; },
     retire: () => { active = false; read++; write++; pending = false; },
     beginRead: () => active ? ++read : null,
@@ -64,7 +65,7 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
   /** (REF-1) مواعيد المريض القادمة — «حجز الإحالة» يربط أحدها بالإحالة. */
   appointments?: Pick<Appointment, "id" | "scheduledDate" | "scheduledTime" | "status" | "doctorId" | "doctorName">[];
 }) {
-  const owner = useMemo(createReferralOwner, [patientId, canIssue]);
+  const owner = useMemo(() => createReferralOwner(patientId, canIssue), [patientId, canIssue]);
   useLayoutEffect(() => { owner.activate(); return owner.retire; }, [owner]);
   const [context, setContext] = useState(owner);
   const [items, setItems] = useState<Referral[]>([]);

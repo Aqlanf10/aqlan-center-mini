@@ -94,9 +94,13 @@ export function OrthoTreatmentStrategy(props: OrthoTreatmentStrategyProps) {
 function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId }: OrthoTreatmentStrategyProps) {
   const session = useSession();
   const authority = JSON.stringify([session?.userId ?? null, session?.username, session?.role, session?.permissions ?? null]);
-  const owner = useMemo(() => ({ patientId, orthoCaseId, authority, referenceVisitId, identity: lifetime?.identity, active: false }),
+  const owner = useMemo(() => ({ patientId, orthoCaseId, authority, referenceVisitId, identity: lifetime?.identity }),
     [patientId, orthoCaseId, authority, referenceVisitId, lifetime?.identity]);
-  useLayoutEffect(() => { owner.active = true; return () => { owner.active = false; }; }, [owner]);
+  const committedOwner = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    committedOwner.current = owner;
+    return () => { if (committedOwner.current === owner) committedOwner.current = null; };
+  }, [owner]);
   const lifetimeRef = useRef(lifetime);
   useLayoutEffect(() => { lifetimeRef.current = lifetime; }, [lifetime]);
   const [selected, setSelected] = useState<number | undefined>();
@@ -117,7 +121,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
   useEffect(() => {
     const life = lifetimeRef.current;
     const controller = new AbortController(); let active = true;
-    const current = () => owner.active && active && !controller.signal.aborted && (!life || life.active());
+    const current = () => committedOwner.current === owner && active && !controller.signal.aborted && (!life || life.active());
     setRead({ owner, data: null, error: null, loading: true });
     const timer = setTimeout(() => {
       if (!current()) return;
@@ -160,14 +164,14 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
 
   async function send(retry = false) {
     const retryAllowed = !!lifetime?.beginRetry && lifetime.active() && lifetime.uncertain && !lifetime.busy && data?.state === "ready" && data.canRevise;
-    if ((retry ? !retryAllowed : strategyBlocked) || !lifetime || !data?.clinicalWritable || !owner.active || !draft || !scope) return;
+    if ((retry ? !retryAllowed : strategyBlocked) || !lifetime || !data?.clinicalWritable || committedOwner.current !== owner || !draft || !scope) return;
     const checked = checkStrategyCommand({ schemaVersion: 1, commandId: draft.commandId,
       expectedRevisionId: draft.expectedRevisionId, reason: draft.reason,
       rows: draft.rows.map(({ problemId, objective, strategy, rationale, planItemIds }) => ({ problemId, objective, strategy, rationale, planItemIds })) });
     if (!checked.ok) { setMessage(checked.message); return; }
     const operation = retry ? lifetime.beginRetry?.() : lifetime.begin(); if (!operation) return;
     let confirmed = false;
-    const showMessage = (value: string) => { if (owner.active) setMessage(value); };
+    const showMessage = (value: string) => { if (committedOwner.current === owner) setMessage(value); };
     setMessage(null);
     try {
       const response = await fetch(`/api/ortho/${orthoCaseId}/strategy`, {
@@ -185,7 +189,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
         if (retry) operation.markUncertain();
         const error = payload && typeof payload === "object" && "message" in payload && typeof payload.message === "string" ? payload.message : "تعذّر الحفظ.";
         showMessage(error);
-        if (response.status === 404 && owner.active) setRead({ owner, data: null, error, loading: false });
+        if (response.status === 404 && committedOwner.current === owner) setRead({ owner, data: null, error, loading: false });
         return;
       }
       const result = payload as { ok?: unknown; revision?: unknown; replayed?: unknown } | null;
@@ -199,7 +203,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
       const current = operation.current(); operation.finish();
       if (current && confirmed) {
         lifetime.settle("document", ""); lifetime.refresh();
-        if (owner.active) { setSelected(undefined); setMessage("حُفظ التوثيق؛ جارٍ قراءة السجل المعتمد."); }
+        if (committedOwner.current === owner) { setSelected(undefined); setMessage("حُفظ التوثيق؛ جارٍ قراءة السجل المعتمد."); }
       }
     }
   }
@@ -208,7 +212,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
   return <section aria-label={lifetime ? "خطة الحالة: المشكلة والهدف والاستراتيجية" : "خطة الحالة للمرجع فقط"} data-testid={lifetime ? "ortho-strategy-editor" : "ortho-strategy-reference"}
     className={`min-w-0 rounded-2xl border border-slate-200 bg-white ${unlinked ? "space-y-2 p-2 sm:space-y-3 sm:p-4" : "space-y-3 p-4"}`}>
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:flex-wrap sm:justify-between"><h4 className={`${unlinked ? "text-xs sm:text-sm" : "text-sm"} font-black text-navy-900`}>المشكلة ← الهدف ← الاستراتيجية</h4>
-      <button type="button" className={buttonClass} disabled={!!lifetime?.busy} onClick={() => { if (owner.active && (!lifetime || lifetime.active())) setReload(value => value + 1); }}>تحديث سجل الخطة</button></div>
+      <button type="button" className={buttonClass} disabled={!!lifetime?.busy} onClick={() => { if (committedOwner.current === owner && (!lifetime || lifetime.active())) setReload(value => value + 1); }}>تحديث سجل الخطة</button></div>
     {!lifetime ? <p className="text-xs text-slate-500">مرجع للقراءة فقط. لا ينسخ النص إلى الزيارة ولا يضيف إجراءً أو توقيعًا أو مبلغًا.</p> : null}
     {loading ? <p role="status" className="text-sm text-slate-500">جارٍ التحقق من خطة الحالة…</p> : null}
     {read.owner === owner && read.error ? <p role="alert" className="text-sm text-rose-800">{read.error}</p> : null}
@@ -221,7 +225,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
     {data?.state === "ready" ? <>
       {data.history.length ? <label className="block text-xs font-bold text-slate-600">النسخة المعروضة
         <select aria-label="نسخة خطة الحالة" className={fieldClass} disabled={!!draft || !!lifetime?.busy || !!lifetime?.uncertain} value={selected ?? data.history[0].revisionId}
-          onChange={event => { if (!owner.active || lifetime && !lifetime.active() || draft || lifetime?.busy || lifetime?.uncertain) return; setSelected(Number(event.target.value)); setMessage(null); }}>
+          onChange={event => { if (committedOwner.current !== owner || lifetime && !lifetime.active() || draft || lifetime?.busy || lifetime?.uncertain) return; setSelected(Number(event.target.value)); setMessage(null); }}>
           {data.history.map(entry => <option key={entry.revisionId} value={entry.revisionId}>نسخة {entry.version} · {entry.createdAt.slice(0, 10)} · {entry.createdBy}{entry.recordingContext === "retrospective" ? " · تصحيح توثيقي" : ""}</option>)}
         </select></label> : <p className="text-sm text-slate-500">لا توجد نسخة موثّقة لخطة هذه الحالة بعد.</p>}
       {data.revision ? <Revision revision={data.revision} /> : null}

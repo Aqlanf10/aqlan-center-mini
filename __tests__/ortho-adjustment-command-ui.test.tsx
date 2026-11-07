@@ -6,7 +6,7 @@ import { wiresFor } from "../lib/ortho";
 // Exercise the actual standalone form's state and submit handlers with synthetic data.
 // Peripheral components are stubbed; no route, database, browser, or real network runs.
 const hooks = vi.hoisted(() => ({
-  values: [] as unknown[], cursor: 0, memos: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
+  values: [] as unknown[], cursor: 0, changed: false, pending: [] as Array<() => void>, memos: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
   session: { userId: 7, username: "synthetic-doctor", role: "doctor", permissions: { canUploadXrays: true } } as Record<string, unknown>,
   effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
 }));
@@ -24,8 +24,10 @@ vi.mock("react", async (original) => {
       const index = hooks.cursor++; const before = hooks.effects.get(index);
       if (before && deps && before.deps && deps.length === before.deps.length
         && deps.every((value, at) => Object.is(value, before.deps![at]))) return;
-      before?.cleanup?.();
-      hooks.effects.set(index, { deps, cleanup: effect() || undefined });
+      hooks.pending.push(() => {
+        before?.cleanup?.();
+        hooks.effects.set(index, { deps, cleanup: effect() || undefined });
+      });
     },
     useState: (initial: unknown) => {
       const index = hooks.cursor++;
@@ -33,7 +35,9 @@ vi.mock("react", async (original) => {
         hooks.values[index] = typeof initial === "function" ? initial() : initial;
       }
       return [hooks.values[index], (value: unknown) => {
-        hooks.values[index] = typeof value === "function" ? value(hooks.values[index]) : value;
+        const next = typeof value === "function" ? value(hooks.values[index]) : value;
+        if (!Object.is(next, hooks.values[index])) hooks.changed = true;
+        hooks.values[index] = next;
       }];
     },
     useRef: (initial: unknown) => {
@@ -76,9 +80,17 @@ let caseRow: Case;
 let patientId = 92001;
 let storage: Map<string, string>;
 
-function render() {
-  hooks.cursor = 0;
-  return AdjustmentForm({ caseRow, today, wires: wiresFor(caseRow.slot), patientId, onSaved, onError });
+function render(commit = true) {
+  // Layout publication happens after render, then React settles its state before
+  // a user can act. Do not simulate effects by mutating values during render.
+  for (let round = 0; round < 20; round++) {
+    hooks.cursor = 0; hooks.changed = false;
+    const tree = AdjustmentForm({ caseRow, today, wires: wiresFor(caseRow.slot), patientId, onSaved, onError });
+    if (!commit) return tree;
+    hooks.pending.splice(0).forEach(run => run());
+    if (!hooks.changed) return tree;
+  }
+  throw Error("Adjustment form did not settle");
 }
 function elements(node: ReactNode): Element[] {
   if (Array.isArray(node)) return node.flatMap(elements);
@@ -112,7 +124,7 @@ function unmount() {
   // Genuine remount discards memoized owners and runs their layout cleanup,
   // not only useState slots. Ordinary rerenders preserve every hook lifetime.
   for (const effect of hooks.effects.values()) effect.cleanup?.();
-  hooks.effects.clear(); hooks.memos.clear(); hooks.values = []; hooks.cursor = 0;
+  hooks.effects.clear(); hooks.memos.clear(); hooks.values = []; hooks.cursor = 0; hooks.pending = []; hooks.changed = false;
 }
 
 beforeEach(() => {
@@ -381,4 +393,16 @@ describe("lossless authored interval string admission", () => {
     expect(fetchMock.mock.calls[1][1]).toEqual(frozen);
   });
 
+});
+
+
+it("does not publish command recovery for an abandoned actor render", async () => {
+  fetchMock.mockRejectedValueOnce(Error("Uncertain original command")); await submit();
+  const originalSession = hooks.session, memos = new Map(hooks.memos), values = [...hooks.values];
+  const retry = elements(render()).find(entry => entry.props["data-testid"] === "adjustment-reconcile")!;
+  hooks.session = { ...hooks.session, userId: 99 }; render(false);
+  hooks.pending = []; hooks.memos = memos; hooks.values = values; hooks.session = originalSession;
+  await (retry.props.onClick as (event: unknown) => Promise<void>)({ preventDefault() {} });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1][1]).toEqual(fetchMock.mock.calls[0][1]);
 });

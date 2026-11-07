@@ -150,27 +150,32 @@ export function CephTracer({
   const retiredMount = useRef(false);
   const [editReady, setEditReady] = useState(false);
   const [editRetired, setEditRetired] = useState(false);
-  const owner = useMemo(() => ({ active: false, queue: null as CephEditQueue | null, scope: editScope }), [editScope]);
+  // Render identities are immutable. Queue/request state is published only at
+  // commit and accessed by callbacks that still own that exact identity.
+  const owner = useMemo(() => ({ scope: editScope }), [editScope]);
+  const editRuntime = useRef<{ owner: typeof owner | null; active: boolean; queue: CephEditQueue | null }>({ owner: null, active: false, queue: null });
   const locked = completed || readOnly || completing;
   // Lifecycle reads/actions exist for completed studies too; the drawing queue
   // owner is intentionally inactive there and cannot own these requests.
   const viewScope = JSON.stringify([editScope, provenance]);
   const [initialViewScope] = useState(viewScope);
-  const viewOwner = useMemo(() => ({ active: false, sent: false, retired: false, request: null as object | null, scope: viewScope }), [viewScope]);
+  const viewOwner = useMemo(() => ({ scope: viewScope }), [viewScope]);
+  const viewRuntime = useRef<{ owner: typeof viewOwner | null; active: boolean; sent: boolean; retired: boolean; request: object | null }>({ owner: null, active: false, sent: false, retired: false, request: null });
   const [directRetired, setDirectRetired] = useState(false);
   useLayoutEffect(() => {
-    if (viewOwner.retired || viewOwner.scope !== initialViewScope) { setDirectRetired(true); return; }
-    viewOwner.active = true;
-    return () => { viewOwner.active = false; viewOwner.request = null; if (viewOwner.sent) viewOwner.retired = true; };
+    viewRuntime.current.owner = viewOwner;
+    if (viewRuntime.current.retired || viewOwner.scope !== initialViewScope) { setDirectRetired(true); return; }
+    viewRuntime.current.active = true;
+    return () => { viewRuntime.current.active = false; viewRuntime.current.request = null; if (viewRuntime.current.sent) viewRuntime.current.retired = true; };
   }, [viewOwner, initialViewScope]);
   const beginDirectRequest = () => {
-    if (!viewOwner.active || viewOwner.request || directRetired) return null;
-    const ticket = {}; viewOwner.request = ticket; return ticket;
+    if (!(viewRuntime.current.owner === viewOwner && viewRuntime.current.active) || viewRuntime.current.request || directRetired) return null;
+    const ticket = {}; viewRuntime.current.request = ticket; return ticket;
   };
-  const currentDirectRequest = (ticket: object) => viewOwner.active && viewOwner.request === ticket;
+  const currentDirectRequest = (ticket: object) => (viewRuntime.current.owner === viewOwner && viewRuntime.current.active) && viewRuntime.current.request === ticket;
   const finishDirectRequest = (ticket: object, completion = false) => {
     if (!currentDirectRequest(ticket)) return;
-    viewOwner.request = null; setSaving(false); if (completion) setCompleting(false);
+    viewRuntime.current.request = null; setSaving(false); if (completion) setCompleting(false);
   };
 
   const [points, setPointsState] = useState<LandmarkMap>(() => {
@@ -241,13 +246,13 @@ export function CephTracer({
   const setPoints = useCallback((next: LandmarkMap) => {
     pointsRef.current = next;
     setPointsState(next);
-  }, []);
+  }, [setPointsState]);
   const suppressClick = useRef(false);
   const pointerClickPoint = useRef<Pt | null>(null);
   const dragStart = useRef<TraceSnapshot | null>(null);
   const onNaturalSize = useCallback((size: CephImageSize | null) => {
     setNatural((prev) => size && prev?.w === size.w && prev.h === size.h ? prev : size);
-  }, []);
+  }, [setNatural]);
   const [history, setHistoryState] = useState<TraceSnapshot[]>([]);
   const historyRef = useRef(history);
   const setHistory = useCallback((update: TraceSnapshot[] | ((current: TraceSnapshot[]) => TraceSnapshot[])) => {
@@ -281,30 +286,31 @@ export function CephTracer({
   const [saveFailure, setSaveFailure] = useState<Exclude<CephEditResult, { ok: true }> | null>(null);
   const allowDeparture = useRef(false);
   const currentFailure = useRef<typeof saveFailure>(null);
-  const recoveryTicket = useMemo(() => ({ owner, viewOwner, failure: saveFailure, consumed: false }), [owner, viewOwner, saveFailure]);
+  const recoveryTicket = useMemo(() => ({ owner, viewOwner, failure: saveFailure }), [owner, viewOwner, saveFailure]);
   const committedRecovery = useRef<typeof recoveryTicket | null>(null);
+  const consumedRecovery = useRef<object | null>(null);
   useLayoutEffect(() => {
     committedRecovery.current = recoveryTicket;
     return () => { if (committedRecovery.current === recoveryTicket) committedRecovery.current = null; };
   }, [recoveryTicket]);
-  const recoveryCurrent = () => owner.active && viewOwner.active && !viewOwner.request
-    && committedRecovery.current === recoveryTicket && !recoveryTicket.consumed
+  const recoveryCurrent = () => (editRuntime.current.owner === owner && editRuntime.current.active) && (viewRuntime.current.owner === viewOwner && viewRuntime.current.active) && !viewRuntime.current.request
+    && committedRecovery.current === recoveryTicket && consumedRecovery.current !== recoveryTicket
     && recoveryTicket.failure !== null && currentFailure.current === recoveryTicket.failure;
   const retryDrawingSave = () => {
     if (!recoveryCurrent() || recoveryTicket.failure?.conflict) return;
-    recoveryTicket.consumed = true; currentFailure.current = null;
+    consumedRecovery.current = recoveryTicket; currentFailure.current = null;
     setSaveFailure(null);
-    owner.queue?.retry();
+    editRuntime.current.queue?.retry();
   };
   const reloadDrawing = () => {
     if (!recoveryCurrent()) return;
     if (!window.confirm("ستُقرأ النسخة المحفوظة من الخادم. قد يكون الطلب السابق حُفظ رغم غياب التأكيد؛ التعديلات المحلية المعلّقة لن تُعاد تلقائيًا. هل تريد المتابعة؟")) return;
     if (!recoveryCurrent()) return;
-    recoveryTicket.consumed = true; currentFailure.current = null;
+    consumedRecovery.current = recoveryTicket; currentFailure.current = null;
     // Retire before navigation: a delayed/failed reload must never drain the old queue.
-    owner.active = false; owner.queue?.retire(); owner.queue = null;
+    editRuntime.current.active = false; editRuntime.current.queue?.retire(); editRuntime.current.queue = null;
     retiredMount.current = true;
-    viewOwner.active = false; viewOwner.retired = true; viewOwner.request = null;
+    viewRuntime.current.active = false; viewRuntime.current.retired = true; viewRuntime.current.request = null;
     setEditReady(false); setEditRetired(true); setDirectRetired(true); setSaveFailure(null);
     allowDeparture.current = true;
     try { window.location.reload(); }
@@ -314,35 +320,36 @@ export function CephTracer({
     }
   };
   useLayoutEffect(() => {
+    editRuntime.current.owner = owner;
     // Initial StrictMode replay has no user edits. A later reconnect must not
     // reconstruct CAS acknowledgement from stale initial props or replay writes.
     if (owner.scope !== initialEdit.scope) retiredMount.current = true;
     if (editedMount.current || retiredMount.current || readOnly || completed) {
-      owner.active = false;
+      editRuntime.current.active = false;
       setEditReady(false);
       setEditRetired(true);
       return;
     }
-    owner.active = true;
-    owner.queue = new CephEditQueue(initialEdit.landmarks, async edit => {
-      if (!owner.active) return CephEditQueue.retiredResult;
+    editRuntime.current.active = true;
+    editRuntime.current.queue = new CephEditQueue(initialEdit.landmarks, async edit => {
+      if (!(editRuntime.current.owner === owner && editRuntime.current.active)) return CephEditQueue.retiredResult;
       const response = await fetch(`/api/ceph/${initialEdit.analysisId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit),
       });
       const body = await response.json().catch(() => ({}));
-      if (!owner.active) return CephEditQueue.retiredResult;
+      if (!(editRuntime.current.owner === owner && editRuntime.current.active)) return CephEditQueue.retiredResult;
       if (!response.ok) return { ok: false, conflict: response.status === 409,
         message: body.message ?? "تعذّر حفظ التعديلات. ما زالت على الشاشة فقط." };
       return { ok: true, mmPerPixel: body.mmPerPixel, calibration: body.calibration };
-    }, (count, error) => { if (owner.active) { currentFailure.current = error; pendingWritesRef.current = count; setPendingWrites(count); setSaveFailure(error); } },
+    }, (count, error) => { if ((editRuntime.current.owner === owner && editRuntime.current.active)) { currentFailure.current = error; pendingWritesRef.current = count; setPendingWrites(count); setSaveFailure(error); } },
     { calibration: initialEdit.calibration, mmPerPixel: initialEdit.mmPerPixel });
     setEditReady(true);
-    return () => { owner.active = false; owner.queue?.retire(); owner.queue = null; };
+    return () => { editRuntime.current.active = false; editRuntime.current.queue?.retire(); editRuntime.current.queue = null; };
   }, [owner, initialEdit, readOnly, completed]);
   const enqueueEdit = useCallback((edit: CephDraftEdit) => {
-    if (!owner.active || !owner.queue) return Promise.resolve(CephEditQueue.retiredResult);
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || !editRuntime.current.queue) return Promise.resolve(CephEditQueue.retiredResult);
     editedMount.current = true;
-    return owner.queue.enqueue(edit);
+    return editRuntime.current.queue.enqueue(edit);
   }, [owner]);
   const [dx, setDxState] = useState<DxState>(() => ({
     skeletal: diagnosis?.skeletal ?? "",
@@ -397,7 +404,7 @@ export function CephTracer({
 
   /** Manual edits, undo and calibration share an ordered, retryable queue. */
   const savePoint = useCallback((code: LandmarkCode, pt: Pt) => {
-    if (!owner.active) return Promise.resolve(CephEditQueue.retiredResult);
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active)) return Promise.resolve(CephEditQueue.retiredResult);
     setSources((current) => ({ ...current, [code]: "manual" }));
     return enqueueEdit({ landmarks: [{ code, x: pt.x, y: pt.y, source: "manual" }] });
   }, [enqueueEdit, setSources, owner]);
@@ -408,7 +415,7 @@ export function CephTracer({
   }, [setHistory, setFuture]);
 
   const placePoint = useCallback((code: LandmarkCode, pt: Pt) => {
-    if (!owner.active || locked) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked) return;
     const snapped = { x: round1(pt.x), y: round1(pt.y) };
     pushHistory(pointsRef.current);
     const next = { ...pointsRef.current, [code]: snapped };
@@ -435,7 +442,7 @@ export function CephTracer({
   }, [owner, locked, natural, calMode, panMode]);
   const onSurfaceClick = (e: React.MouseEvent) => {
     const context = surfaceContext.current;
-    if (!owner.active || !viewOwner.active || viewOwner.request || !context || context.owner !== owner
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || !(viewRuntime.current.owner === viewOwner && viewRuntime.current.active) || viewRuntime.current.request || !context || context.owner !== owner
       || context.locked || !natural || context.natural !== natural || context.calibrating !== !!calMode
       || context.panMode || panModeRef.current || !!calModeRef.current !== !!calMode || dragging.current) return;
     // Compatibility click events may round client coordinates to whole CSS
@@ -443,7 +450,7 @@ export function CephTracer({
     const pt = e.detail > 0 ? pointerClickPoint.current ?? imagePoint(e) : imagePoint(e);
     pointerClickPoint.current = null;
     if (suppressClick.current) { suppressClick.current = false; return; }
-    if (!owner.active || locked || !natural || panMode) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked || !natural || panMode) return;
     if (!pt) return;
     if (calModeRef.current) {
       if (saving || calibrationFlight.current) return;
@@ -459,7 +466,7 @@ export function CephTracer({
   };
 
   const onPointerDown = (code: LandmarkCode) => (e: React.PointerEvent) => {
-    if (!owner.active || locked || calModeRef.current || panModeRef.current || dragging.current || e.button !== 0) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked || calModeRef.current || panModeRef.current || dragging.current || e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     suppressClick.current = true;
@@ -473,12 +480,14 @@ export function CephTracer({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!owner.active || (dragging.current && (dragOwner.current?.owner !== owner || dragOwner.current.pointerId !== e.pointerId))) return;
+    // Viewing remains available without an edit queue (read-only/completed).
+    // A held drag still requires its live edit owner and exact pointer.
+    if (!(viewRuntime.current.owner === viewOwner && viewRuntime.current.active) || (dragging.current && (!(editRuntime.current.owner === owner && editRuntime.current.active) || dragOwner.current?.owner !== owner || dragOwner.current.pointerId !== e.pointerId))) return;
     const pt = imagePoint(e);
     if (!pt) return;
     setCursorSurfacePt(pt);
     const code = dragging.current;
-    if (code && !locked) {
+    if (code && (editRuntime.current.owner === owner && editRuntime.current.active) && !locked) {
       const next = { ...pointsRef.current, [code]: { x: round1(pt.x), y: round1(pt.y) } };
       pointsRef.current = next;
       setPoints(next);
@@ -497,7 +506,7 @@ export function CephTracer({
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
-    if (!owner.active || (dragging.current && (dragOwner.current?.owner !== owner || dragOwner.current.pointerId !== e.pointerId))) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || (dragging.current && (dragOwner.current?.owner !== owner || dragOwner.current.pointerId !== e.pointerId))) return;
     if (locked && dragging.current) { onPointerCancel(); return; }
     const release = imagePoint(e);
     const code = dragging.current;
@@ -531,7 +540,7 @@ export function CephTracer({
   };
 
   const onPointerCancel = (event?: React.PointerEvent) => {
-    if (!owner.active || (event && (!dragOwner.current || dragOwner.current.owner !== owner || dragOwner.current.pointerId !== event.pointerId))) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || (event && (!dragOwner.current || dragOwner.current.owner !== owner || dragOwner.current.pointerId !== event.pointerId))) return;
     pointerClickPoint.current = null;
     dragging.current = null;
     dragOwner.current = null;
@@ -547,7 +556,7 @@ export function CephTracer({
   };
 
   const toggleCalibration = () => {
-    if (!owner.active || locked || saving || calibrationFlight.current) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked || saving || calibrationFlight.current) return;
     // A toolbar activation can interrupt a held landmark pointer. Restore its
     // unsaved preview and consume its trailing click before changing modes.
     // The viewport keeps ownership of any existing pan/pinch until it ends.
@@ -561,7 +570,7 @@ export function CephTracer({
   /** Arrow movement is saved in order, with no delayed timer able to undo Undo. */
   const nudge = useCallback((code: LandmarkCode, dxPx: number, dyPx: number) => {
     const current = pointsRef.current[code];
-    if (!owner.active || !current || locked || !natural || dragging.current || calMode || panMode || tracerStep !== "digitization") return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || !current || locked || !natural || dragging.current || calMode || panMode || tracerStep !== "digitization") return;
     const pt = { x: round1(Math.max(0, Math.min(natural.w, current.x + dxPx))),
       y: round1(Math.max(0, Math.min(natural.h, current.y + dyPx))) };
     if (pt.x === current.x && pt.y === current.y) return;
@@ -587,7 +596,7 @@ export function CephTracer({
   }, [enqueueEdit]);
 
   const undo = useCallback(() => {
-    if (!owner.active || locked || dragging.current || historyRef.current.length === 0) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked || dragging.current || historyRef.current.length === 0) return;
     const prev = historyRef.current[historyRef.current.length - 1];
     const current = { points: pointsRef.current, sources: { ...sourcesRef.current } };
     setHistory((h) => h.slice(0, -1));
@@ -598,7 +607,7 @@ export function CephTracer({
   }, [locked, owner, persistDiff, setFuture, setHistory, setPoints, setSources]);
 
   const redo = useCallback(() => {
-    if (!owner.active || locked || dragging.current || futureRef.current.length === 0) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked || dragging.current || futureRef.current.length === 0) return;
     const next = futureRef.current[0];
     const current = { points: pointsRef.current, sources: { ...sourcesRef.current } };
     setFuture((f) => f.slice(1));
@@ -608,17 +617,18 @@ export function CephTracer({
     persistDiff(current, next);
   }, [locked, owner, persistDiff, setFuture, setHistory, setPoints, setSources]);
 
-  const pointActionTicket = useMemo(() => ({ owner, selected, points, sources, locked, natural, saving, calMode, panMode, tracerStep, consumed: false }),
+  const pointActionTicket = useMemo(() => ({ owner, selected, points, sources, locked, natural, saving, calMode, panMode, tracerStep }),
     [owner, selected, points, sources, locked, natural, saving, calMode, panMode, tracerStep]);
   const committedPointAction = useRef<typeof pointActionTicket | null>(null);
+  const consumedPointAction = useRef<object | null>(null);
   useLayoutEffect(() => {
     committedPointAction.current = pointActionTicket;
     return () => { if (committedPointAction.current === pointActionTicket) committedPointAction.current = null; };
   }, [pointActionTicket]);
   const canClearSelected = !locked && !!selected && !!points[selected] && !!natural && !saving
     && !pendingWrites && !saveFailure && !draggingPoint && !calMode && !panMode && tracerStep === "digitization";
-  const currentPointAction = () => !locked && !!natural && !saving && owner.active && viewOwner.active && !viewOwner.request
-    && committedPointAction.current === pointActionTicket && !pointActionTicket.consumed
+  const currentPointAction = () => !locked && !!natural && !saving && (editRuntime.current.owner === owner && editRuntime.current.active) && (viewRuntime.current.owner === viewOwner && viewRuntime.current.active) && !viewRuntime.current.request
+    && committedPointAction.current === pointActionTicket && consumedPointAction.current !== pointActionTicket
     && selectedRef.current === selected && pointsRef.current === points && sourcesRef.current === sources
     && !pendingWritesRef.current && !currentFailure.current && !dragging.current && !calModeRef.current
     && !panModeRef.current && !calibrationFlight.current;
@@ -628,7 +638,7 @@ export function CephTracer({
     const code = selected;
     if (!window.confirm(`إزالة موضع ${code} من هذه المسودة؟ سيصبح غير محدد، ويمكن استعادة الموضع ومصدره عبر التراجع. لا يعني ذلك غياب البنية التشريحية.`)) return;
     if (!current()) return;
-    pointActionTicket.consumed = true;
+    consumedPointAction.current = pointActionTicket;
     pushHistory(pointsRef.current, sourcesRef.current);
     const nextPoints = { ...pointsRef.current }, nextSources = { ...sourcesRef.current };
     delete nextPoints[code]; delete nextSources[code];
@@ -641,14 +651,14 @@ export function CephTracer({
     if (!currentPointAction() || !code || !pt || sourcesRef.current[code] !== "suggested") return;
     if (!window.confirm(`هل راجعت موضع ${code} (${landmarkDef(code).ar}) على الأشعة وتؤكد صحته؟ ستُسجّل المراجعة باسمك.`)) return;
     if (!currentPointAction() || sourcesRef.current[code] !== "suggested") return;
-    pointActionTicket.consumed = true;
+    consumedPointAction.current = pointActionTicket;
     pushHistory(pointsRef.current);
     void savePoint(code, pt);
   };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!owner.active || locked) return;
+      if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked) return;
       const target = e.target as HTMLElement | null;
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       const mod = e.ctrlKey || e.metaKey;
@@ -678,7 +688,7 @@ export function CephTracer({
   }, [locked, nudge, owner, points, redo, selected, undo]);
 
   const saveCalibration = async () => {
-    if (!owner.active || locked || !calMode?.p1 || !calMode?.p2 || saving || calibrationFlight.current
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked || !calMode?.p1 || !calMode?.p2 || saving || calibrationFlight.current
       || committedCalibrationInput.current !== calibrationInput || calModeRef.current !== calMode || calMmRef.current !== calMm) return;
     const mm = Number(calMm);
     if (!Number.isFinite(mm) || mm <= 0) { setMessage("أدخل المسافة الحقيقية بالمليمتر."); return; }
@@ -691,7 +701,7 @@ export function CephTracer({
     setSaving(true);
     try {
       const result = await enqueueEdit({ calibration: next });
-      if (result.ok && owner.active && calibrationFlight.current === flight) {
+      if (result.ok && (editRuntime.current.owner === owner && editRuntime.current.active) && calibrationFlight.current === flight) {
         setCalibration(result.calibration ?? next);
         // Read the authoritative scale from the same successful write, without a
         // second GET whose failure could leave new calibration with an old scale.
@@ -702,13 +712,13 @@ export function CephTracer({
           setMessage("حُفظت المعايرة المرسلة؛ اختيار المسطرة الأحدث لم يُعتمد بعد.");
         }
       }
-    } finally { if (calibrationFlight.current === flight) { calibrationFlight.current = null; if (owner.active) setSaving(false); } }
+    } finally { if (calibrationFlight.current === flight) { calibrationFlight.current = null; if ((editRuntime.current.owner === owner && editRuntime.current.active)) setSaving(false); } }
   };
 
   const requiredMissing = REQUIRED_LANDMARKS.filter((c) => points[c] == null);
   const missing = LANDMARK_ORDER.filter((c) => points[c] == null);
   const unreviewed = LANDMARK_ORDER.filter((code) => points[code] != null && sources[code] !== "manual");
-  const canComplete = calculationReadiness?.ready === true && owner.active && editReady && sourcesReady && !!natural && natural.w > 0 && natural.h > 0 && !locked && !calMode && draggingPoint === null && Number.isFinite(scale) && scale != null && scale > 0
+  const canComplete = calculationReadiness?.ready === true && owner.scope === initialEdit.scope && viewOwner.scope === initialViewScope && editReady && sourcesReady && !!natural && natural.w > 0 && natural.h > 0 && !locked && !calMode && draggingPoint === null && Number.isFinite(scale) && scale != null && scale > 0
     && requiredMissing.length === 0 && unreviewed.length === 0 && pendingWrites === 0 && !saveFailure && !dxDirty;
   const completionPct = Math.round(((REQUIRED_LANDMARKS.length - requiredMissing.length) / REQUIRED_LANDMARKS.length) * 100);
   const optionalMissing = LANDMARK_ORDER.filter((c) => points[c] == null && !REQUIRED_LANDMARKS.includes(c));
@@ -723,11 +733,11 @@ export function CephTracer({
   }, [completionTicket]);
 
   const complete = async () => {
-    if (!owner.active || committedCompletionTicket.current !== completionTicket || !canComplete || saving) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || committedCompletionTicket.current !== completionTicket || !canComplete || saving) return;
     const ticket = beginDirectRequest(); if (!ticket) return;
-    if (!window.confirm("اعتماد التحليل يقفل التعديل ويختم القياسات والتشخيص. هل تريد الاعتماد؟")) { if (currentDirectRequest(ticket)) viewOwner.request = null; return; }
-    if (!currentDirectRequest(ticket) || !owner.active || committedCompletionTicket.current !== completionTicket) { if (currentDirectRequest(ticket)) viewOwner.request = null; return; }
-    viewOwner.sent = true;
+    if (!window.confirm("اعتماد التحليل يقفل التعديل ويختم القياسات والتشخيص. هل تريد الاعتماد؟")) { if (currentDirectRequest(ticket)) viewRuntime.current.request = null; return; }
+    if (!currentDirectRequest(ticket) || !(editRuntime.current.owner === owner && editRuntime.current.active) || committedCompletionTicket.current !== completionTicket) { if (currentDirectRequest(ticket)) viewRuntime.current.request = null; return; }
+    viewRuntime.current.sent = true;
     setCompleting(true);
     setSaving(true);
     try {
@@ -762,9 +772,9 @@ export function CephTracer({
   const duplicate = async () => {
     if (!completed) return;
     const ticket = beginDirectRequest(); if (!ticket) return;
-    if (!window.confirm("فتح نسخة تصحيح عن هذا التحليل المعتمد؟")) { if (currentDirectRequest(ticket)) viewOwner.request = null; return; }
+    if (!window.confirm("فتح نسخة تصحيح عن هذا التحليل المعتمد؟")) { if (currentDirectRequest(ticket)) viewRuntime.current.request = null; return; }
     if (!currentDirectRequest(ticket)) return;
-    viewOwner.sent = true; setSaving(true);
+    viewRuntime.current.sent = true; setSaving(true);
     try {
       const res = await fetch(`/api/ceph/${analysis.id}/duplicate`, { method: "POST" });
       if (!currentDirectRequest(ticket)) return;
@@ -781,9 +791,9 @@ export function CephTracer({
     if (completed || saving || pendingWrites > 0) return;
     const ticket = beginDirectRequest(); if (!ticket) return;
     const note = window.prompt("سبب رفض المسودة (يُوثَّق باسمك):");
-    if (note === null) { if (currentDirectRequest(ticket)) viewOwner.request = null; return; }
+    if (note === null) { if (currentDirectRequest(ticket)) viewRuntime.current.request = null; return; }
     if (!currentDirectRequest(ticket)) return;
-    viewOwner.sent = true; setSaving(true);
+    viewRuntime.current.sent = true; setSaving(true);
     try {
       const res = await fetch(`/api/ceph/${analysis.id}`, {
         method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: note || "" }),
@@ -807,7 +817,7 @@ export function CephTracer({
   const summary = useMemo(() => (!completed ? describeCephMeasurements(table) : null), [table, completed]);
 
   const saveDiagnosis = async () => {
-    if (!owner.active || locked || saving) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked || saving) return;
     const submitted = dxRef.current;
     if (Object.values(submitted).some((value) => value.trim().length > 2000)) {
       setMessage("أحد حقول التشخيص يتجاوز 2000 حرف. اختصره قبل الحفظ؛ لم يُحذف نصك ولم يُرسل جزء منه.");
@@ -815,7 +825,7 @@ export function CephTracer({
     }
     if (!submitted.finalDx.trim()) { setMessage("الاستنتاج السيفالومتري لا يُترك فارغًا — حرّره ثم احفظ."); return; }
     const ticket = beginDirectRequest(); if (!ticket) return;
-    viewOwner.sent = true;
+    viewRuntime.current.sent = true;
     setSaving(true);
     try {
       const res = await fetch(`/api/ceph/${analysis.id}`, {
@@ -863,14 +873,14 @@ export function CephTracer({
   };
 
   const fillSuggestion = () => {
-    if (!owner.active || locked || !table) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked || !table) return;
     const raw = describeCephMeasurements(table);
     setDx((prev) => fillEmptyCephDiagnosisFields(prev, raw));
     setDxDirty(true);
   };
 
   const generateDescriptiveObservations = () => {
-    if (!owner.active || locked) return;
+    if (!(editRuntime.current.owner === owner && editRuntime.current.active) || locked) return;
     // Use the currently displayed measurements, including unsaved local edits.
     // No server round trip, external provider or stale response can overwrite notes.
     const raw = describeCephMeasurements(table);
@@ -1329,7 +1339,7 @@ export function CephTracer({
                 step="0.1"
                 value={calMm}
                 disabled={saving}
-                onChange={(e) => { if (owner.active && !calibrationFlight.current) setCalMm(e.target.value); }}
+                onChange={(e) => { if ((editRuntime.current.owner === owner && editRuntime.current.active) && !calibrationFlight.current) setCalMm(e.target.value); }}
                 className="w-28 rounded-lg border border-amber-300 px-2 py-1 text-sm"
               />
               <span className="text-xs">مم بين النقطتين</span>

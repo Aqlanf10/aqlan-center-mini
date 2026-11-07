@@ -37,6 +37,9 @@ function Workspace({patientId,orthoCaseId}:{patientId:number;orthoCaseId:number}
   const draftRef=useRef(draft);
   useLayoutEffect(()=>{draftRef.current=draft;},[draft]);
   const expectedRef=useRef<FacialSaveExpectation|null>(null),scopeRef=useRef<Pick<FacialSubmissionContext,"scope"|"actorId">|null>(null);
+  // Recovery controls render state; the ref remains the synchronous command guard.
+  const [hasExpected,setHasExpected]=useState(false);
+  const publishExpected=(expected:FacialSaveExpectation|null)=>{expectedRef.current=expected;setHasExpected(expected!==null);};
   const recoveryBlocked=recovery?.state==="blocked"||recovery?.state==="cancelled"||recoveryConflict;
   const head=data?.history[0]??null,revision=data?.history.find(r=>r.id===historyId)??head;
   const stale=!!draft&&!!data&&draft.expectedHeadId!==(head?.id??null);
@@ -53,7 +56,7 @@ function Workspace({patientId,orthoCaseId}:{patientId:number;orthoCaseId:number}
   });
   const currentRender = () => current() && committedEdit.current === renderState;
   const endpoint=`/api/ortho/${orthoCaseId}/facial-analysis`;
-  const deny=()=>{deniedRef.current=true;committedEdit.current=null;gesture.current=null;expectedRef.current=null;scopeRef.current=null;setDraft(null);setPending(null);setLoaded(null);setRead(null);setRecovery(undefined);setDenied(true);};
+  const deny=()=>{deniedRef.current=true;committedEdit.current=null;gesture.current=null;publishExpected(null);scopeRef.current=null;setDraft(null);setPending(null);setLoaded(null);setRead(null);setRecovery(undefined);setDenied(true);};
   useEffect(()=>{
     const controller=new AbortController();let live=true;
     const valid=()=>live&&!controller.signal.aborted&&committed.current===generation&&!deniedRef.current;
@@ -73,7 +76,7 @@ function Workspace({patientId,orthoCaseId}:{patientId:number;orthoCaseId:number}
         if(local&&canonicalJourneyJSON(local)!==canonicalJourneyJSON(receipt.expected)||!local&&draftRef.current){
           setRecoveryConflict(true);setLoaded(null);setRead({generation,data:null,error:null});setMessage("يوجد طلب محفوظ من نافذة أخرى. راجع استعادته أو إلغاءه صراحةً قبل متابعة التحرير.");return;
         }
-        const restored=receipt.expected;expectedRef.current=restored;setPending(restored.command);
+        const restored=receipt.expected;publishExpected(restored);setPending(restored.command);
         setDraft({documentId:restored.command.documentId,expectedHeadId:restored.command.expectedHeadId,reason:restored.command.reason,content:restored.command.content});setUncertain(true);
         setMessage("استُعيد طلب القياسات المحفوظ على الخادم. تحقّق منه بإعادة الطلب نفسه أو ألغِ الطلب المعلّق صراحةً.");
         if(documentId!==restored.command.documentId){setLoaded(null);setDocumentId(restored.command.documentId);return;}
@@ -142,14 +145,14 @@ function Workspace({patientId,orthoCaseId}:{patientId:number;orthoCaseId:number}
       expected=retry?expectedRef.current!:{scope:{patientId,orthoCaseId,clinicalCaseId:data.clinicalCaseId},actorId:data.actorId,previousVersion:head?.version??0,command};
       if(!expected||canonicalJourneyJSON(expected.command)!==canonicalJourneyJSON(command))throw Error("identity_changed");
     }catch{setMessage("أكمل سبب المراجعة ومصدر تاريخ الصورة. مراجعة الطبيب تتطلب فحص الجودة ونتيجة قابلة للحساب وملاحظة مكتوبة.");return;}
-    expectedRef.current=expected;setPending(expected.command);setBusy(true);busyRef.current=true;setUncertain(false);setMessage(null);committedEdit.current=null;
+    publishExpected(expected);setPending(expected.command);setBusy(true);busyRef.current=true;setUncertain(false);setMessage(null);committedEdit.current=null;
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
     const context={scope:expected.scope,actorId:expected.actorId,current,deny};
     try{
       const identity=recovery?.state==="pending"||recovery?.state==="committed"?recovery.identity:undefined;
       await submitFacialAndAcknowledge(context,expected,identity,controller.signal);
       if(!current())return;
-      expectedRef.current=null;setDraft(null);setPending(null);setRecovery(undefined);setHistoryId(null);setMessage("حُفظت مراجعة الصورة وتأكد تسجيلها على الخادم.");setRefresh(v=>v+1);
+      publishExpected(null);setDraft(null);setPending(null);setRecovery(undefined);setHistoryId(null);setMessage("حُفظت مراجعة الصورة وتأكد تسجيلها على الخادم.");setRefresh(v=>v+1);
     }catch{if(current()){setUncertain(true);setMessage("لم يتأكد الحفظ والإقرار النهائي. احتُفظ بمعرّف الطلب نفسه؛ تحقّق من الاستعادة على الخادم قبل إنشاء أي طلب بديل.");}}
     finally{clearTimeout(timer);busyRef.current=false;if(current())setBusy(false);}
   }
@@ -166,7 +169,7 @@ function Workspace({patientId,orthoCaseId}:{patientId:number;orthoCaseId:number}
       const alreadyCancelled=receipt?.state==="cancelled"&&receipt.identity.commandId===identity.commandId&&receipt.identity.requestFingerprint===identity.requestFingerprint;
       await cancelFacialAndAcknowledge({...binding,current,deny},identity,alreadyCancelled,controller.signal);
       if(!current())return;
-      expectedRef.current=null;setDraft(null);setPending(null);setRecovery(undefined);setRecoveryConflict(false);setUncertain(false);setLoaded(null);setDocumentId(null);setRefresh(v=>v+1);setMessage("أُلغي الطلب المعلّق وأُقرّ إلغاؤه؛ لم تُحذف أي مراجعة محفوظة.");
+      publishExpected(null);setDraft(null);setPending(null);setRecovery(undefined);setRecoveryConflict(false);setUncertain(false);setLoaded(null);setDocumentId(null);setRefresh(v=>v+1);setMessage("أُلغي الطلب المعلّق وأُقرّ إلغاؤه؛ لم تُحذف أي مراجعة محفوظة.");
     }catch{if(current())setMessage("لم يتأكد إلغاء الطلب. أعد التحقق من حالة الاستعادة؛ لا تنشئ طلباً بديلاً.");}
     finally{clearTimeout(timer);busyRef.current=false;if(current())setBusy(false);}
   }
@@ -174,15 +177,15 @@ function Workspace({patientId,orthoCaseId}:{patientId:number;orthoCaseId:number}
     if(!currentRender()||busyRef.current||expectedRef.current||!draftRef.current||!recoveryConflict||!recovery||(recovery.state!=="pending"&&recovery.state!=="committed"))return;
     if(!window.confirm("تجاهل المسودة المحلية غير المرسلة واستعادة طلب الحفظ المسجّل في النافذة الأخرى؟"))return;
     if(!currentRender()||busyRef.current||expectedRef.current)return;
-    const restored=recovery.expected;committedEdit.current=null;gesture.current=null;expectedRef.current=restored;
+    const restored=recovery.expected;committedEdit.current=null;gesture.current=null;publishExpected(restored);
     const next={documentId:restored.command.documentId,expectedHeadId:restored.command.expectedHeadId,reason:restored.command.reason,content:restored.command.content};
     draftRef.current=next;setDraft(next);setPending(restored.command);setRecoveryConflict(false);setUncertain(true);setLoaded(null);setDocumentId(restored.command.documentId);setRefresh(v=>v+1);
   }
   const recoveryControls=<section aria-label="استعادة طلب قياسات الوجه" className="space-y-2 rounded-lg border p-3">
     <p>طلبات الحفظ التي وصلت إلى سجل الخادم تُستعاد بعد إغلاق الصفحة. الطلب الذي لم يصل إلى الخادم لا يمكن استعادته بعد الإغلاق. المسودات التي لم يُضغط حفظها تبقى في هذه الصفحة فقط؛ لا تُخزّن القياسات في تخزين المتصفح.</p>
-    {recoveryConflict&&!expectedRef.current&&!!draftRef.current&&(recovery?.state==="pending"||recovery?.state==="committed")&&<button className={control} disabled={busy} onClick={discardLocalAndRestore}>تجاهل المسودة المحلية واستعادة طلب الخادم</button>}
+    {recoveryConflict&&!hasExpected&&!!draft&&(recovery?.state==="pending"||recovery?.state==="committed")&&<button className={control} disabled={busy} onClick={discardLocalAndRestore}>تجاهل المسودة المحلية واستعادة طلب الخادم</button>}
     {(!!pending||recoveryBlocked||!!error)&&<button className={control} disabled={busy} onClick={()=>{if(currentRender()&&!busyRef.current){committedEdit.current=null;setRefresh(v=>v+1);}}}>التحقق من استعادة طلب القياسات</button>}
-    {(recovery?.state==="pending"||recovery?.state==="cancelled"||recovery?.state==="blocked"&&recovery.canCancel||recovery===null&&!!pending||recoveryConflict&&!!expectedRef.current)&&<button className={control} disabled={busy} onClick={()=>void cancelRecovery()}>إلغاء طلب القياسات المعلّق</button>}
+    {(recovery?.state==="pending"||recovery?.state==="cancelled"||recovery?.state==="blocked"&&recovery.canCancel||recovery===null&&!!pending||recoveryConflict&&hasExpected)&&<button className={control} disabled={busy} onClick={()=>void cancelRecovery()}>إلغاء طلب القياسات المعلّق</button>}
   </section>;
   if(denied)return <p role="alert" className="rounded-xl border p-4">الصورة والتحليل محجوبان بالصلاحية الحالية. أعد تسجيل الدخول للتحقق.</p>;
   if(recoveryBlocked)return <main dir="rtl" className="space-y-3 p-4"><p role="alert">تعذّر إتاحة مصدر الطلب المستعاد أو تعارض مع طلب هذه النافذة. لا تُعرض الصورة أو معالمها حتى حسم حالة الطلب.</p>{message&&<p role="status">{message}</p>}{recoveryControls}</main>;

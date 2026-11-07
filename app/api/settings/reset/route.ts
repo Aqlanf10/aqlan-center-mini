@@ -1,3 +1,4 @@
+import { ProtectedPrescriptionHistoryError } from "@/lib/clinic-reset";
 import { NextResponse } from "next/server";
 import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -86,6 +87,7 @@ export async function POST(request: Request) {
     if (error instanceof ProtectedPurchaseHistoryError) return noStore({ message: error.message, code: "protected-purchase-history" }, 409);
     if (error instanceof ProtectedAgreementHistoryError) return noStore({ message: error.message, code: "protected-agreement-history" }, 409);
     if (error instanceof ProtectedCollectionAttemptHistoryError) return noStore({ message: error.message, code: "protected-collection-attempt-history" }, 409);
+    if (error instanceof ProtectedPrescriptionHistoryError) return noStore({ message: error.message, code: "protected-prescription-history" }, 409);
     return noStore({ message: "تعذّرت إعادة الضبط ولم يُمسح شيء. أعد المحاولة بعد قليل (قد يكون أحدٌ يُدخل بيانات الآن)." }, 500);
   }
   if (!result.ok) {

@@ -84,7 +84,7 @@ const fetchMock = vi.fn();
 let props: Parameters<typeof WebCephRecordsGrid>[0];
 let read: (url: string) => unknown;
 let write: (url: string) => unknown;
-let location: { href: string };
+let location: { href: string; assign(url: string): void };
 function render(effects = true) {
   let tree: ReturnType<typeof WebCephRecordsGrid> | null = null;
   let round = 0;
@@ -117,7 +117,7 @@ beforeEach(() => {
   read = (url) => response(url.endsWith("/documents") ? { documents: [document()] } : { analyses: [study()] });
   write = () => response({ id: 71 }, 201);
   fetchMock.mockImplementation((url: string, init?: RequestInit) => Promise.resolve(init?.method === "POST" ? write(url) : read(url)));
-  location = { href: "" }; vi.stubGlobal("window", { location }); vi.stubGlobal("fetch", fetchMock);
+  location = { href: "", assign(url) { this.href = url; } }; vi.stubGlobal("window", { location }); vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => { unmount(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -258,3 +258,31 @@ describe('upload uncertainty and pending read retirement',()=>{
  it('a saved read-refresh callback clears pending file and invalidates old confirmation',async()=>{read=()=>response({},500);await ready();const refresh=button('إعادة تحميل سجلات الحالة');read=url=>response(url.endsWith('/documents')?{documents:[document()]}:{analyses:[study()]});invoke(refresh);await ready();invoke(button('استبدال'));await selectFile();fillMetadata();const confirm=button('تأكيد بيانات الصورة ورفعها');invoke(refresh);await ready();invoke(confirm);expect(writes()).toHaveLength(0);expect(text(render())).not.toContain('بيانات الصورة قبل الرفع');});
 });
 it('ignores retained and current picker callbacks after same-name actor ABA',async()=>{await ready();invoke(button('استبدال'));const old=picker();hooks.userId=8;render();hooks.userId=7;await ready();await selectFile(old);await selectFile(picker());expect(writes()).toHaveLength(0);expect(text(render())).not.toContain('بيانات الصورة قبل الرفع');});
+
+it('does not release the current actor upload lock when a retired actor request settles', async () => {
+  await stageFile(); fillMetadata();
+  const previous = deferred<unknown>(), current = deferred<unknown>();
+  write = () => previous.promise;
+  invoke(button('تأكيد بيانات الصورة ورفعها'));
+  hooks.userId = 8; await ready();
+  invoke(button('استبدال')); await selectFile(); fillMetadata();
+  write = () => current.promise;
+  const confirm = button('تأكيد بيانات الصورة ورفعها'); invoke(confirm);
+  expect(writes()).toHaveLength(2);
+  previous.resolve(response({ id: 71 }, 201)); await settle(); render();
+  expect(picker().props.disabled).toBe(true);
+  invoke(confirm); expect(writes()).toHaveLength(2);
+  current.resolve(response({ id: 72 }, 201)); await ready();
+  expect(picker().props.disabled).toBe(false);
+});
+
+it('keeps a committed pending file intact when a foreign actor render is abandoned', async () => {
+  await stageFile(); fillMetadata();
+  const confirm = button('تأكيد بيانات الصورة ورفعها');
+  const memos = new Map(hooks.memos), values = [...hooks.values];
+  hooks.userId = 8;
+  expect(text(render(false))).not.toContain('بيانات الصورة قبل الرفع');
+  hooks.pending = []; hooks.memos = memos; hooks.values = values; hooks.userId = 7;
+  invoke(confirm); expect(writes()).toHaveLength(1);
+  await ready();
+});

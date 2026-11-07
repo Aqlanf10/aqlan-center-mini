@@ -21,3 +21,6 @@ backups/
 
 # Generated, allowlisted dependency security evidence
 .dependency-audit/
+
+# Sanitized HTTP test failure indexes (raw reports stay in runner temp).
+.http-failure-index/

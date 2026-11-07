@@ -92,6 +92,21 @@ describe("patient appointment panel lifecycle", () => {
     expect(fetchMock.mock.calls.filter(call => call[1].method === "PATCH")).toHaveLength(0);
     if (mode === "logout") { hooks.session = before; render(); expect(text(render())).not.toContain("Synthetic doctor"); }
   });
+  it("leaves committed reminders live when a different-patient render is abandoned", async () => {
+    render(); await resolve(0, payload());
+    const retained = reminder().props.onConfirmed as (value: ReturnType<typeof snapshot>) => Promise<void>;
+    const committedValues = hooks.values.slice();
+    hooks.cursor = 0;
+    const speculative = PatientAppointmentsPanel({ patientId: 32 });
+    expect(elements(speculative).some(node => node.type === AppointmentReminder)).toBe(false);
+    expect(requests).toHaveLength(1);
+    hooks.values = committedValues; hooks.pending = [];
+    const pending = retained(snapshot());
+    expect(requests).toHaveLength(2);
+    await resolve(1, { ok: true });
+    await resolve(2, payload()); await pending;
+    expect(text(render())).toContain("سُجّلت إفادتك");
+  });
   it("fences old callbacks after refresh and unmount", async () => {
     render(); await resolve(0, payload()); const old = reminder(); click("تحديث المواعيد");
     await (old.props.onConfirmed as (s: ReturnType<typeof snapshot>) => Promise<void>)(snapshot()); expect((old.props.isCurrent as () => boolean)()).toBe(false);

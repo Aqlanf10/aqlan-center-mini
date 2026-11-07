@@ -172,7 +172,16 @@ describe('read-only ceph workspace', () => {
     await flush();
     const after = (viewport().props.renderOverlay as (scale: number, interactive: boolean) => ReactNode)(1, true);
     expect(nodes(after).filter(n => n.type === 'circle').map(n => [n.props.cx, n.props.cy])).toEqual(original);
+    expect(viewport().props.cursor).toEqual({ x: 150, y: 250 });
     expect(fetchMock).not.toHaveBeenCalled(); expect(confirmation).not.toHaveBeenCalled();
+  });
+  it('ignores a retained viewing handler after its view owner unmounts', () => {
+    props.readOnly = true; loaded();
+    const move = viewport().props.onPointerMove as (e: unknown) => void;
+    hooks.effects.forEach(effect => effect.cleanup?.());
+    hooks.changed = false;
+    move({ ...event(), clientX: 150, clientY: 250 });
+    expect(hooks.changed).toBe(false); expect(fetchMock).not.toHaveBeenCalled();
   });
   it('shows a draft as a read-only draft, keeps viewing tools, and exposes no clinical editors', () => {
     props.readOnly = true; loaded(); const tree = render();
@@ -740,4 +749,20 @@ describe('landmark final release coordinate',()=>{
   (point.props.onPointerDown as(e:unknown)=>void)({...event(),clientX:103,clientY:202});render();(viewport().props.onPointerUp as(e:unknown)=>void)({...event(),clientX:103,clientY:202});await flush();expect(edits()).toEqual([]);expect(button('S ✦')).toBeDefined();
  });
 
+});
+
+describe('committed tracer authority survives abandoned render', () => {
+  it.each(['actor', 'source', 'calibration'] as const)('does not replace the committed drawing owner for an abandoned %s render', async change => {
+    props.actorId = 1; loaded(); click('S ✦');
+    const review = button('راجعت موضع S على الأشعة').props.onClick as () => void;
+    const previousProps = props, previousMemos = new Map(hooks.memos), previousValues = [...hooks.values];
+    props = change === 'actor' ? { ...props, actorId: 2 }
+      : change === 'source' ? { ...props, analysis: { ...props.analysis, documentId: 99 } }
+      : { ...props, analysis: { ...props.analysis, mmPerPixel: 0.2 } };
+    hooks.cursor = 0; hooks.pending = []; CephTracer(props);
+    hooks.pending = []; hooks.memos = previousMemos; hooks.values = previousValues; props = previousProps;
+    review(); await flush();
+    expect(edits()).toHaveLength(1);
+    expect(edits()[0]).toEqual({ landmarks: [{ code: 'S', x: 100, y: 200, source: 'manual' }], expectedLandmarks: [{ code: 'S', x: 100, y: 200, source: 'suggested' }] });
+  });
 });

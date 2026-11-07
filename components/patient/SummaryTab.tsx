@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
 import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
 import { HistoricalClinicalNote } from "../HistoricalClinicalNote";
@@ -100,20 +100,20 @@ export function SummaryTab({
   const [rebookUncertain, setRebookUncertain] = useState(false);
   const [scheduleError, setScheduleError] = useState<{ field?: "date" | "time" | "reason"; text: string } | null>(null);
   const scheduleInFlight = useRef(false);
+  const [rebookAttemptVisitId, setRebookAttemptVisitId] = useState<number | null>(null);
   const rebookAttempt = useRef<{ plannedVisitId: number; body: string; uncertain: boolean } | null>(null);
   const dateField = useRef<HTMLInputElement>(null);
   const timeField = useRef<HTMLInputElement>(null);
   const reasonField = useRef<HTMLTextAreaElement>(null);
-  const lifetime = useRef({ patientId, active: true });
-  if (lifetime.current.patientId !== patientId) {
-    lifetime.current.active = false;
-    lifetime.current = { patientId, active: true };
-  }
-  useEffect(() => {
-    const owner = lifetime.current;
-    owner.active = true;
+  // Allocate a candidate without retiring the committed patient's callbacks.
+  // Only a committed layout may publish and activate the new lifetime.
+  const renderOwner = useMemo(() => ({ patientId }), [patientId]);
+  const lifetime = useRef({ renderOwner, active: false });
+  useLayoutEffect(() => {
+    const owner = { renderOwner, active: true };
+    lifetime.current = owner;
     return () => { owner.active = false; };
-  }, [patientId]);
+  }, [renderOwner]);
   const [collectOpen, setCollectOpen] = useState(false);
   const [lastReceipt, setLastReceipt] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -127,7 +127,7 @@ export function SummaryTab({
     visit.appointmentStatus === "no_show" || visit.appointmentStatus === "cancelled"
       ? visit.canRebook ? "تحتاج إعادة حجز" : "تحتاج مراجعة قبل إعادة الحجز"
       : PLANNED_VISIT_STATUS_LABEL[visit.status];
-  const currentWorkflow = () => lifetime.current.active && lifetime.current.patientId === patientId
+  const currentWorkflow = () => lifetime.current.active && lifetime.current.renderOwner === renderOwner
     && workflowIsCurrent?.() !== false;
 
   const openSchedule = (plannedVisitId: number) => {
@@ -162,6 +162,7 @@ export function SummaryTab({
         setScheduleError({ field: "reason", text: "اكتب سبب إعادة الحجز من 3 أحرف على الأقل، بحد أقصى 500 حرف." });
         reasonField.current?.focus(); return;
       }
+      setRebookAttemptVisitId(visit.id);
       rebookAttempt.current = { plannedVisitId: visit.id, uncertain: false, body: JSON.stringify({
         expectedAppointmentId: visit.appointmentId, expectedGeneration: visit.rebookGeneration,
         date: scheduleDate, time: scheduleTime,
@@ -191,6 +192,7 @@ export function SummaryTab({
       }
       if (response.ok && Number.isSafeInteger(payload?.appointmentId) && payload.appointmentId > 0) {
         rebookAttempt.current = null;
+        setRebookAttemptVisitId(null);
         setRebookUncertain(false);
         setScheduleFor(null);
         setMessage("تمت إعادة حجز الجلسة. بقي الموعد السابق وحالته محفوظين في السجل.");
@@ -199,6 +201,7 @@ export function SummaryTab({
       }
       if (!response.ok && response.status < 500 && !attempt.uncertain) {
         rebookAttempt.current = null;
+        setRebookAttemptVisitId(null);
         setScheduleError({ text: payload?.message ?? "لم تُقبل إعادة الحجز. راجع الموعد والصلاحية ثم حاول مجددًا." });
         return;
       }
@@ -419,7 +422,7 @@ export function SummaryTab({
           <ul className="space-y-2">
             {summary.plannedVisits.map((visit) => {
               const terminalAppointment = visit.appointmentStatus === "no_show" || visit.appointmentStatus === "cancelled";
-              const isRebooking = terminalAppointment || rebookAttempt.current?.plannedVisitId === visit.id;
+              const isRebooking = terminalAppointment || rebookAttemptVisitId === visit.id;
               const errorId = `planned-visit-${visit.id}-error`;
               const historyId = `planned-visit-${visit.id}-history`;
               return (

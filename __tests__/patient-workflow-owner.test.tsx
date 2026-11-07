@@ -9,8 +9,8 @@ type Frame = { slots: Slot[]; cursor: number; dirty: boolean; live: boolean;
 const runtime = vi.hoisted(() => ({
   frame: null as Frame | null,
   params: { id: "7" },
-  session: { username: "doctor-a", role: "doctor", permissions: null } as
-    { username: string; role: string; permissions: Record<string, boolean> | null } | null,
+  session: { userId: 101, username: "doctor-a", role: "doctor", permissions: null } as
+    { userId: number; username: string; role: string; permissions: Record<string, boolean> | null } | null,
 }));
 
 // Stub leaf workspaces so this suite exercises the real page owner without
@@ -205,7 +205,7 @@ const urls = (fetcher: ReturnType<typeof seedFetch>) => fetcher.mock.calls.map((
 
 beforeEach(() => {
   runtime.frame = null;
-  runtime.session = { username: "doctor-a", role: "doctor", permissions: null };
+  runtime.session = { userId: 101, username: "doctor-a", role: "doctor", permissions: null };
   vi.stubGlobal("window", Object.assign(new EventTarget(), { location: new URL("http://test.invalid/patients/7") }));
   vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
 });
@@ -404,7 +404,7 @@ describe("real patient page workflow owner", () => {
     expect(urls(fetcher).some((url) => url.endsWith("/cases"))).toBe(false);
   });
 
-  it.each(["principal", "permissions", "signout"] as const)("retires accepted and delayed data after a %s change", async (change) => {
+  it.each(["principal", "actor-id", "permissions", "signout"] as const)("retires accepted and delayed data after a %s change", async (change) => {
     const fetcher = seedFetch();
     const view = mountPage(); await flush();
     const accepted = child(view.render(), "mock-endo");
@@ -415,7 +415,7 @@ describe("real patient page workflow owner", () => {
     oldRefresh(); await flush();
     const nextFile = deferred<Reply>(); const nextWorkflow = deferred<Reply>();
     fetcher.mockReturnValueOnce(nextFile.promise).mockReturnValueOnce(nextWorkflow.promise);
-    runtime.session = change === "signout" ? null : { username: change === "principal" ? "doctor-b" : "doctor-a",
+    runtime.session = change === "signout" ? null : { userId: change === "actor-id" ? 102 : 101, username: change === "principal" ? "doctor-b" : "doctor-a",
       role: "doctor", permissions: change === "permissions" ? { canEditPlans: false } : null };
     const retired = view.render();
     expect(hasFile(retired)).toBe(false);

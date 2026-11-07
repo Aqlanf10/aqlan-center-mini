@@ -226,9 +226,13 @@ describe("CephTracer real React native-pixel viewport", () => {
     const f = await open(); try {
       await f.page.evaluate(() => { (window as any).__ceph.offline = true; });
       await place(f.page, "S", 300, 250);
-      await expect.poll(() => f.page.getByRole("alert").textContent()).toContain("غير المحفوظة");
+      await expect.poll(() => f.page.getByRole("alert").textContent()).toContain("التعديلات المعلّقة دون تأكيد الحفظ");
+      expect(await f.page.getByRole("alert").textContent()).toContain("قد يكون الطلب الجاري حُفظ");
+      expect(await writes(f.page)).toHaveLength(1);
       expect(await f.page.evaluate(() => (window as any).__ceph.saved.landmarks)).toEqual([]);
       await f.page.evaluate(() => { (window as any).__ceph.offline = false; });
+      expect(await f.page.getByRole("button", { name: "اعتماد التحليل", exact: true }).isDisabled()).toBe(true);
+      expect(await writes(f.page)).toHaveLength(1);
       await f.page.getByRole("alert").getByRole("button", { name: "إعادة محاولة الحفظ", exact: true }).click();
       await expect.poll(() => f.page.evaluate(() => (window as any).__ceph.saved.landmarks)).toEqual([{ code: "S", x: 300, y: 250, source: "manual" }]);
       await expect.poll(() => f.page.getByRole("alert").count()).toBe(0);
@@ -261,7 +265,7 @@ describe("CephTracer descriptive narrative safety", () => {
     const f = await open(); try {
       await f.page.getByRole("button", { name: /2\. التحليل والمدارس السبع/ }).click();
       await f.page.getByRole("button", { name: "تعبئة قراءة وصفية" }).click();
-      expect(await f.page.locator("textarea").nth(3).inputValue()).toContain("وليست تشخيصًا نهائيًا");
+      expect(await f.page.locator("textarea").nth(3).inputValue()).toBe("قياسات وصفية فقط، بلا تصنيف سريري آلي أو توصية علاجية؛ يلزم تقييم الطبيب.");
       expect(await f.page.locator("textarea").nth(4).inputValue()).toBe("");
       await f.page.getByRole("button", { name: /3\. التقرير الرسمي والمطابقة/ }).click();
       expect(await f.page.getByText("مسودة للمراجعة؛ لم تُعتمد سريريًا بعد", { exact: true }).isVisible()).toBe(true);
@@ -316,10 +320,14 @@ describe('CephTracer read-only clinical capability', () => {
       const initial = await f.page.evaluate(() => JSON.stringify((window as any).__ceph.saved));
       expect(await f.page.getByText(/عرض فقط: تعديل القياسات/).isVisible()).toBe(true);
       expect(await f.page.getByRole('button', { name: 'اعتماد التحليل', exact: true }).count()).toBe(0);
+      const overlayBefore = await f.page.getByTestId('ceph-overlay').innerHTML();
+      await hover(f.page, 600, 400);
+      await expect.poll(() => f.page.getByTestId('ceph-loupe').isVisible()).toBe(true);
       const from = await position(f.page, 250, 200), to = await position(f.page, 300, 250);
       await f.page.mouse.move(from.x, from.y); await f.page.mouse.down(); await f.page.mouse.move(to.x, to.y); await f.page.mouse.up();
       await f.page.mouse.click(to.x, to.y); await f.page.keyboard.press('ArrowRight'); await f.page.keyboard.press('Control+z');
       expect(await f.page.getByTestId('ceph-loupe').isVisible()).toBe(true);
+      expect(await f.page.getByTestId('ceph-overlay').innerHTML()).toBe(overlayBefore);
       await f.page.getByRole('button', { name: /2\. التحليل والمدارس السبع/ }).click();
       expect(await f.page.locator('textarea').count()).toBe(0);
       expect(await f.page.getByRole('button', { name: 'حفظ التشخيص', exact: true }).count()).toBe(0);

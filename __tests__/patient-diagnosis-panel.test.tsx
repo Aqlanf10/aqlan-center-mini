@@ -192,6 +192,19 @@ describe("case diagnosis authoring containment", () => {
     await ready(); invoke(button("+ تحديث")); const old = form(); (old.props.onCancel as () => void)();
     invoke(button("+ تحديث")); await save(old); expect(writes()).toHaveLength(0); await save(); expect(writes()).toHaveLength(1);
   });
+  it("does not retire committed diagnosis actions during an abandoned different-patient render", async () => {
+    await ready(); invoke(button("+ تحديث")); const committedForm = form();
+    const originalProps = props; const committedMemos = new Map(hooks.memos);
+    const requests = fetchMock.mock.calls.length;
+    props = { ...props, patientId: 12, orthoCaseId: 22 };
+    expect(text(render(false))).not.toContain("Synthetic case A diagnosis");
+    expect(fetchMock.mock.calls).toHaveLength(requests);
+    // Discard speculative work, including its effects and memo cache, as React does.
+    hooks.pending = []; hooks.memos = committedMemos; props = originalProps;
+    await save(committedForm); await ready();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0][0]).toBe("/api/patients/11/diagnoses");
+  });
   it("rejects retained old-case callbacks and ignores an old write completion", async () => {
     await ready(); invoke(button("+ تحديث")); const old = form(), pending = deferred<unknown>(); write = () => pending.promise; const writing = save(old);
     props = { ...props, patientId: 12, orthoCaseId: 22 }; read = () => response({ diagnoses: [] }); await ready();

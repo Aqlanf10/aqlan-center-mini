@@ -9,13 +9,17 @@ const runtime = vi.hoisted(() => ({ frame: null as Frame | null }));
 vi.mock("react", async original => {
   const react = await original<typeof import("react")>();
   const slot = () => { const f = runtime.frame!; const i = f.cursor++; return f.slots[i] ?? (f.slots[i] = {}); };
+  const effect = (fn: () => void | (() => void), deps?: unknown[]) => { const s = slot();
+      if (!s.deps || !deps || deps.some((v, i) => !Object.is(v, s.deps![i]))) {
+        runtime.frame!.effects.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; s.deps = deps; }); } };
   return { ...react,
     useState: (initial: unknown) => { const s = slot(); if (!("value" in s)) s.value = typeof initial === "function" ? initial() : initial;
       return [s.value, (next: unknown) => { s.value = typeof next === "function" ? next(s.value) : next; }]; },
     useRef: (initial: unknown) => { const s = slot(); if (!s.value) s.value = { current: initial }; return s.value; },
-    useEffect: (fn: () => void | (() => void), deps?: unknown[]) => { const s = slot();
-      if (!s.deps || !deps || deps.some((v, i) => !Object.is(v, s.deps![i]))) { s.deps = deps;
-        runtime.frame!.effects.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; }); } },
+    useMemo: (fn: () => unknown, deps: unknown[]) => { const s = slot();
+      if (!s.deps || deps.some((v, i) => !Object.is(v, s.deps![i]))) { s.value = fn(); s.deps = deps; }
+      return s.value; },
+    useEffect: effect, useLayoutEffect: effect,
   };
 });
 vi.mock("../components/CollectPaymentModal", () => ({ CollectPaymentModal: () => null }));
@@ -55,12 +59,36 @@ function mount(timeZone = "Asia/Aden") {
   const click = (text: string) => (find("button", text).props.onClick as () => void)();
   const submit = () => (find("form").props.onSubmit as (event: unknown) => void)({ preventDefault: vi.fn() });
   render(); click("إعادة حجز");
-  return { props, render, find, field, change, click, submit, unmount: () => frame.slots.forEach(s => s.cleanup?.()) };
+  return { props, render, find, field, change, click, submit,
+    abandonPatient: (patientId: number) => {
+      runtime.frame = { slots: frame.slots.map(s => ({ ...s })), cursor: 0, effects: [] };
+      SummaryTab({ ...props, patientId }); runtime.frame = frame;
+    }, unmount: () => frame.slots.forEach(s => s.cleanup?.()) };
 }
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-22T21:30:00Z")); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("explicit planned-session rebooking UI", () => {
+  it("a committed patient change retires the old response and saved submit callback", async () => {
+    let resolve!: (value: unknown) => void;
+    const fetch = vi.fn(() => new Promise(done => { resolve = done; })); vi.stubGlobal("fetch", fetch);
+    const f = mount(); f.change("reason", "طلب المريض");
+    const savedSubmit = f.find("form").props.onSubmit as (event: unknown) => void;
+    f.submit(); f.props.patientId = 99; f.render();
+    resolve(reply({ appointmentId: 102 }, 201)); await turns();
+    expect(f.props.onChanged).not.toHaveBeenCalled();
+    savedSubmit({ preventDefault: vi.fn() }); expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("an abandoned patient render preserves the committed rebooking response", async () => {
+    let resolve!: (value: unknown) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(done => { resolve = done; })));
+    const f = mount(); f.change("reason", "طلب المريض"); f.submit();
+    f.abandonPatient(99);
+    resolve(reply({ appointmentId: 102 }, 201)); await turns();
+    expect(f.props.onChanged).toHaveBeenCalledTimes(1);
+    expect(words(f.render())).toContain("تمت إعادة حجز الجلسة");
+  });
+
   it("respects a configured clinic timezone instead of the Aden fallback", () => {
     const f = mount("America/Los_Angeles");
     expect(f.field("date").props.value).toBe("2026-10-23");
@@ -122,6 +150,21 @@ describe("explicit planned-session rebooking UI", () => {
     f.submit(); await turns(); expect(f.field("reason").props.disabled).toBe(true); // A later 401 does not prove the first attempt failed.
     f.submit(); await turns(); expect(fetch.mock.calls.map(call => call[1].body)).toEqual([body, body, body]);
     expect(f.props.onChanged).toHaveBeenCalledTimes(1);
+  });
+  it("keeps the rebooking form and exact retry after a refreshed appointment stops being terminal", async () => {
+    const fetch = vi.fn().mockRejectedValueOnce(new Error("lost reply"))
+      .mockResolvedValueOnce(reply({ appointmentId: 102, replayed: true }));
+    vi.stubGlobal("fetch", fetch);
+    const f = mount(); f.change("reason", "طلب المريض"); f.submit(); await turns();
+    const body = fetch.mock.calls[0][1].body;
+    f.props.summary.plannedVisits = [{ ...f.props.summary.plannedVisits[0],
+      appointmentId: 102, appointmentStatus: "booked", canRebook: false, rebookGeneration: "b".repeat(32) }];
+    expect(f.find("form").props["aria-label"]).toBe("إعادة حجز جلسة اختبار");
+    expect(f.field("reason").props.disabled).toBe(true);
+    f.submit(); await turns();
+    expect(fetch.mock.calls[1]).toEqual(["/api/planned-visits/71/rebook", expect.objectContaining({ body })]);
+    expect(f.props.onChanged).toHaveBeenCalledTimes(1);
+    expect(f.find("form")).toBeUndefined();
   });
   it("uses a new request identity only after an explicit rejection permits changing the payload", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(reply({ message: "الوقت ممتلئ" }, 409))

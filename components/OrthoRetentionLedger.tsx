@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import OrthoRetentionInstructions from "./OrthoRetentionInstructions";
 import OrthoRetentionDeviceDossiers from "./OrthoRetentionDeviceDossiers";
 import { verifyRetentionDocumentChoices } from "@/lib/ortho-retention-client";
@@ -33,11 +33,12 @@ export function RetentionDocumentPicker({data,draft,blocked,update}:{data:Retent
  const page=loaded?.owner===data?loaded.page:null;
  const [error,setError]=useState('');
  const [busy,setBusy]=useState(false);
- const current=useRef({data,blocked});current.current={data,blocked};
+ const current=useRef<{data:RetentionLedgerRead;blocked:boolean}|null>(null);
+ useLayoutEffect(()=>{const committed={data,blocked};current.current=committed;return()=>{if(current.current===committed)current.current=null;};},[data,blocked]);
  useEffect(()=>{
   if(!request||blocked)return;
   let active=true;const controller=new AbortController();
-  const valid=()=>active&&!controller.signal.aborted&&current.current.data===data&&!current.current.blocked;
+  const valid=()=>active&&!controller.signal.aborted&&current.current?.data===data&&!current.current?.blocked;
   const timer=setTimeout(()=>controller.abort(),20000);
   setBusy(true);setLoaded(null);setError('');
   void(async()=>{try{
@@ -48,12 +49,12 @@ export function RetentionDocumentPicker({data,draft,blocked,update}:{data:Retent
    if(new TextEncoder().encode(text).length>2*1024*1024)throw Error('document_choices_limit');
    const verified=verifyRetentionDocumentChoices(JSON.parse(text),data,request.afterId);
    if(valid())setLoaded({owner:data,page:verified});
-  }catch{if(active&&current.current.data===data)setError('تعذر التحقق من مصادر المستندات؛ لا تُغيّر الشواهد المحفوظة.');}
+  }catch{if(active&&current.current?.data===data)setError('تعذر التحقق من مصادر المستندات؛ لا تُغيّر الشواهد المحفوظة.');}
   finally{clearTimeout(timer);if(active)setBusy(false);}})();
   return()=>{active=false;clearTimeout(timer);controller.abort();};
  },[data,request,blocked]);
  const select=(w:RetentionDocumentWitness)=>{
-  if(blocked||current.current.blocked||current.current.data!==data)return;
+  if(blocked||current.current?.blocked||current.current?.data!==data)return;
   const old=draft.expectedDocuments.find(x=>x.id===w.id);
   const documentIds=draft.content.documentIds.includes(w.id)?draft.content.documentIds:[...draft.content.documentIds,w.id];
   if(documentIds.length>30)return;

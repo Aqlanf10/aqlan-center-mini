@@ -72,6 +72,22 @@ describe("one shared print-document watermark across all paper families", () => 
     expect(css).toContain("top: min(50%, 66mm)"); expect(css).toContain("top: min(50%, 97mm)");
     expect(css).not.toMatch(/@page[^}]*size:\s*A[56]/);
   });
+  it("restores physical A4 preview sizing without changing compact or Ortho paper contracts", () => {
+    const css = source("components/print-document.css");
+    expect(source("components/PrintDocumentWatermark.tsx")).toContain("<A4WatermarkPreview src={src} />");
+    expect(css).toContain('.a4-preview-canvas[data-a4-preview-paper="true"] { min-height: 297mm; }');
+    expect(css).toContain('[data-a4-preview-orientation="landscape"] { min-height: 210mm; }');
+    expect(css).toContain("width: 76mm; height: 65mm;");
+    expect(source("components/A4WatermarkPreview.tsx")).toContain('const COMPACT = ".sheet-a5, .sheet-a6";');
+    expect(source("components/A4WatermarkPreview.tsx")).toContain("associatedPrintAction(canvas)?.click()");
+  });
+  it("compensates numbered-page asymmetric margins without shifting compact sheets", () => {
+    const css = source("components/print-document.css");
+    expect(css).toContain("body:has(.print-brand-header):has(.hr-staff-sheet, .dossier-sheet, .cs-sheet) > .print-document-watermark { top: calc(50% + 3mm); }");
+    expect(css).toContain("body:has(.print-brand-header):has(.hr-tasks-sheet) > .print-document-watermark { top: calc(50% + 2mm); }");
+    expect(css).toContain("top: min(50%, 66mm)");
+    expect(css).toContain("top: min(50%, 97mm)");
+  });
   it("protects original QR, stored signature, and clinical pixels above decoration", () => {
     const css = source("components/print-document.css");
     expect(css).toContain(".print-watermark-protected, .sign-row, .print-document-signatures, [data-signature-img]");

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildCephCompletionWitness, cephProvenanceHash } from "../lib/ceph-completion-provenance";
 const m = vi.hoisted(() => ({ study: vi.fn(), save: vi.fn(), ai: vi.fn(), settings: vi.fn(), session: vi.fn(), access: vi.fn(), landmarkSave: vi.fn() }));
 vi.mock("../lib/session", () => ({ requireSession: m.session }));
@@ -14,6 +14,13 @@ beforeEach(() => {
   vi.clearAllMocks(); m.landmarkSave.mockResolvedValue({ ok: true }); m.session.mockResolvedValue({ username: "viewer" }); m.access.mockResolvedValue(true);
   m.study.mockResolvedValue({ analysis: { status: "draft", patientId: 11, mmPerPixel: null }, landmarks: [], measurements: [], diagnosis: { note: "Clinician's original plan", finalDx: "Original diagnosis" } });
   m.settings.mockResolvedValue({ enabled: true, hasKey: true }); m.ai.mockResolvedValue({ ok: true, content: "Four Premolars Extraction" });
+});
+// Every accepted descriptive request and every rejection must remain local/read-only.
+afterEach(() => {
+  expect(m.ai).not.toHaveBeenCalled();
+  expect(m.settings).not.toHaveBeenCalled();
+  expect(m.save).not.toHaveBeenCalled();
+  expect(m.landmarkSave).not.toHaveBeenCalled();
 });
 describe("existing ceph narrative route is descriptive and read only", () => {
   it("cannot re-enable unsafe recommendations via external AI or overwrite clinician notes", async () => {

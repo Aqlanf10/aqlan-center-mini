@@ -10,7 +10,8 @@ import type { ToolConfirmationOffer } from "../lib/ai-tools/types";
  * the original card's evidence, show the server's qualified wording and the safe /finance navigation,
  * and never bring back a retry confirmation. Generic confirmation handling for other tools is unchanged.
  */
-const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0 }));
+const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0,
+  callbacks: new Map<number, { deps: readonly unknown[]; callback: unknown }>() }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   const slot = (initial: unknown) => { const index = hooks.cursor++; if (!(index in hooks.values)) hooks.values[index] = initial; return index; };
@@ -24,6 +25,11 @@ vi.mock("react", async (original) => {
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
     useEffect: () => {},
     useMemo: (factory: () => unknown) => factory(),
+    useCallback: (callback: unknown, deps: readonly unknown[]) => {
+      const index = slot(undefined), previous = hooks.callbacks.get(index);
+      if (previous && previous.deps.length === deps.length && deps.every((value, i) => Object.is(value, previous.deps[i]))) return previous.callback;
+      hooks.callbacks.set(index, { deps, callback }); return callback;
+    },
   };
 });
 
@@ -100,13 +106,13 @@ describe("the chat window, confirming a historical payment card", () => {
   const props = { isOpen: true, onClose: () => {}, currentUserRole: "admin", currentUserName: "مدير اصطناعي" } as Parameters<typeof AiStaffChatModal>[0];
   const render = () => { hooks.cursor = 0; return nodes(AiStaffChatModal(props) as ReactNode); };
   beforeEach(() => {
-    hooks.values = []; hooks.cursor = 0;
+    hooks.values = []; hooks.cursor = 0; hooks.callbacks.clear();
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset().mockResolvedValue({ ok: true, json: async () => containedPayload() });
     render();
     hooks.values[0] = [cardMessage()]; // messages state: the card issued before containment, still on screen
   });
-  afterEach(() => { vi.unstubAllGlobals(); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it("shows a terminal refusal, the preserved card, the qualified wording and the /finance link — never a retry button", async () => {
     const confirm = render().find((node) => node.type === "button" && text(node).includes("تأكيد التنفيذ"));
@@ -128,4 +134,26 @@ describe("the chat window, confirming a historical payment card", () => {
     // A second click is impossible and nothing else was sent.
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it("sends only on an event and refreshes the memoized handler with the current draft and history", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, reply: "Synthetic existing chat reply" }) });
+    const clock = vi.spyOn(Date, "now");
+    const tree = render();
+    expect(clock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const textarea = tree.find(node => node.type === "textarea")!;
+    (textarea.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "First synthetic draft" } });
+    const submit = () => (render().find(node => node.type === "form")!.props.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
+    submit();
+    await vi.waitFor(() => expect((hooks.values[0] as ChatMessage[])).toHaveLength(3));
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).messages.at(-1).content).toBe("First synthetic draft");
+    (render().find(node => node.type === "textarea")!.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "Second synthetic draft" } });
+    submit();
+    await vi.waitFor(() => expect((hooks.values[0] as ChatMessage[])).toHaveLength(5));
+    const sent = JSON.parse(String(fetchMock.mock.calls[1][1].body)).messages;
+    expect(sent).toHaveLength(4);
+    expect(sent.at(-2).content).toBe("Synthetic existing chat reply");
+    expect(sent.at(-1).content).toBe("Second synthetic draft");
+    clock.mockRestore();
+  });
+
 });

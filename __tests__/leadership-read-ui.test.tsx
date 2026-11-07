@@ -6,6 +6,7 @@ vi.mock("react",async original=>{const react=await original<typeof import("react
  useContext:()=>null,
  useState:(initial:unknown)=>{const s=slot();if(!("value" in s))s.value=typeof initial==="function"?initial():initial;return[s.value,(next:unknown)=>{s.value=typeof next==="function"?next(s.value):next;}];},
  useRef:(initial:unknown)=>{const s=slot();if(!s.value)s.value={current:initial};return s.value;},
+ useLayoutEffect:(fn:()=>void|(()=>void),deps?:unknown[])=>{const s=slot();if(!s.deps||!deps||deps.some((v,i)=>!Object.is(v,s.deps![i]))){s.deps=deps;runtime.frame!.effects.push(()=>{s.cleanup?.();s.cleanup=fn()||undefined;});}},
  useEffect:(fn:()=>void|(()=>void),deps?:unknown[])=>{const s=slot();if(!s.deps||!deps||deps.some((v,i)=>!Object.is(v,s.deps![i]))){s.deps=deps;runtime.frame!.effects.push(()=>{s.cleanup?.();s.cleanup=fn()||undefined;});}},
 };});
 import {useLeadershipRead} from "../components/leadership/useLeadershipRead";
@@ -57,5 +58,26 @@ it("refreshes server-today after midnight, retains manually selected/paged cohor
  await click("عرض قائمة الزيارات");await click("التالي");expect(latestDayUrl()).toContain("page=1&day=2026-10-26");
  serverDay="2026-10-27";await click("تحديث التشغيل والمعمل");expect(latestDayUrl()).toContain("page=0&day=2026-10-26");
  await click("اليوم");expect(latestDayUrl()).not.toContain("&day=");expect(walk(render()).find(e=>e.type==="input"&&e.props.type==="date")!.props.value).toBe("2026-10-27");
+ frame.slots.forEach(slot=>slot.cleanup?.());
+});
+
+it.each([false,true])("publishes a new decoder only when its render commits (commit=%s)",async(commit)=>{
+ let resolve!:(value:unknown)=>void;
+ vi.stubGlobal("fetch",vi.fn(()=>new Promise(done=>{resolve=done;})));
+ const frame:Frame={slots:[],cursor:0,effects:[]};
+ const committed=(value:unknown)=>typeof value==="string"?`committed:${value}`:null;
+ const replacement=vi.fn(()=>"replacement");
+ const DecoderHarness=(decode:(value:unknown)=>string|null,commit:boolean)=>{
+  runtime.frame=commit?frame:{slots:frame.slots.map(slot=>({...slot})),cursor:0,effects:[]};
+  runtime.frame.cursor=0;
+  const result=useLeadershipRead("/synthetic/decoder",decode);
+  if(commit)frame.effects.splice(0).forEach(effect=>effect());
+  return result;
+ };
+ DecoderHarness(committed,true);
+ DecoderHarness(replacement,commit);
+ resolve(response("verified"));await turns();
+ expect(DecoderHarness(commit?replacement:committed,true).data).toBe(commit?"replacement":"committed:verified");
+ expect(replacement).toHaveBeenCalledTimes(commit?1:0);
  frame.slots.forEach(slot=>slot.cleanup?.());
 });

@@ -15,7 +15,6 @@ import {
   CURRENCY_LABEL,
   CURRENCY_SHORT,
   formatMoney,
-  parseAmount,
   toInputAmount,
   type Currency,
 } from "@/lib/money";
@@ -119,6 +118,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
   const [lastReceiptIsInstallment, setLastReceiptIsInstallment] = useState(true);
   const [consentFor, setConsentFor] = useState<number | null>(null);
 
+  const [completionReadGeneration, setCompletionReadGeneration] = useState(0);
   const readRef = useRef({ active: false, generation: 0, controller: null as AbortController | null });
   const load = useCallback(async () => {
     const lifetime = readRef.current;
@@ -149,6 +149,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
       if (!Array.isArray(payload?.plans)) throw new Error("تعذّر التحقق من بيانات الخطط.");
       setReadDenied(false);
       if (payload.canSeeFinancial !== true) { setLastReceipt(null); setPayFor(null); setPayAmount(""); }
+      setCompletionReadGeneration(generation);
       setPlans(payload.plans as Plan[]);
       setPlannedVisits(Array.isArray(payload.plannedVisits) ? payload.plannedVisits : []);
       setCanSeeFinancial(payload.canSeeFinancial === true);
@@ -195,10 +196,13 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
   }, [busy, money.attempt, consentFor, payFor]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   const completionAllowed = useRef<(id: number) => boolean>(() => false);
-  const completionReadGeneration = readRef.current.generation;
-  completionAllowed.current = (id) => readRef.current.active && readRef.current.generation === completionReadGeneration
-    && !loading && !readUnavailable && !readDenied && canSeeFinancial && canHandleMoney(session?.role)
-    && money.ready && !busy && money.attempt === null && plans.some(plan => plan.id === id && plan.status === "active") && canLeave();
+  // Saved handlers must only observe committed authority and plan state.
+  // A suspended or abandoned render must not replace the live completion gate.
+  useLayoutEffect(() => {
+    completionAllowed.current = (id) => readRef.current.active && readRef.current.generation === completionReadGeneration
+      && !loading && !readUnavailable && !readDenied && canSeeFinancial && canHandleMoney(session?.role)
+      && money.ready && !busy && money.attempt === null && plans.some(plan => plan.id === id && plan.status === "active") && canLeave();
+  }, [completionReadGeneration, loading, readUnavailable, readDenied, canSeeFinancial, session?.role, money.ready, busy, money.attempt, plans, canLeave]);
 
   const visiblePlans = plans.filter((plan) => (context?.planId === undefined || plan.id === context.planId)
     && (context?.planItemId === undefined || plan.items.some((item) => item.id === context.planItemId))

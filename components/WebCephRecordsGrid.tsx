@@ -16,8 +16,9 @@ import {
 } from "@/lib/ortho-records";
 
 type PendingFile = { token: object; file: File; slot: PhotoView; metadataVersion: number };
-type UploadMetadata = { owner: Owner; token: object; version: number; slot: PhotoView; stage: PhotoStage | "unknown" | ""; dateState: "known" | "unknown" | ""; date: string; note: string };
-type Owner = { scope: readonly unknown[]; active: boolean; ready: boolean; busy: boolean; sequence: number;
+type UploadMetadata = { fileName: string; owner: Owner; token: object; version: number; slot: PhotoView; stage: PhotoStage | "unknown" | ""; dateState: "known" | "unknown" | ""; date: string; note: string };
+type Owner = { scope: readonly unknown[] };
+type OwnerRuntime = { owner: Owner | null; active: boolean; ready: boolean; busy: boolean; sequence: number;
   controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null; picker: PhotoView | null; pending: PendingFile | null };
 type Snapshot = { owner: Owner; status: "loading" | "ready" | "error";
   documents: OrthoRecordDocument[]; studies: OrthoRecordStudy[] };
@@ -41,12 +42,13 @@ export function WebCephRecordsGrid({
     || (session?.role === "doctor" && session.permissions?.canViewXrays === true));
   const canUpload = canRead && (session?.role !== "doctor" || session.permissions?.canUploadXrays === true);
   const permissionScope = JSON.stringify(session?.permissions ?? null);
-  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope],
-    active: false, ready: false, busy: false, sequence: 0,
-    controller: null, timer: null, picker: null, pending: null }),
+  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope] }),
     [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope]);
+  // Mutable transport/picker state is never read by render. The immutable owner
+  // scopes state snapshots; callbacks additionally require its committed runtime.
+  const runtime = useRef<OwnerRuntime>({ owner: null, active: false, ready: false, busy: false, sequence: 0, controller: null, timer: null, picker: null, pending: null });
   const [metadata, setMetadata] = useState<UploadMetadata | null>(null);
-  const pendingMetadata = metadata?.owner === owner && owner.pending?.token === metadata.token ? metadata : null;
+  const pendingMetadata = metadata?.owner === owner ? metadata : null;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [operation, setOperation] = useState<{ owner: Owner; slot?: PhotoView; documentId?: number } | null>(null);
   const [failure, setFailure] = useState<{ owner: Owner; message: string } | null>(null);
@@ -61,28 +63,30 @@ export function WebCephRecordsGrid({
   const error = failure?.owner === owner ? failure.message : null;
   const activeStage = selection?.owner === owner ? selection.stage : "all";
   const setActiveStage = (stage: PhotoStage | "all") => {
-    if (owner.active) setSelection({ owner, stage });
+    if ((runtime.current.owner === owner && runtime.current.active)) setSelection({ owner, stage });
   };
   const setError = (message: string | null) => {
-    if (owner.active) setFailure(message ? { owner, message } : null);
+    if ((runtime.current.owner === owner && runtime.current.active)) setFailure(message ? { owner, message } : null);
   };
   useLayoutEffect(() => {
-    owner.active = true;
+    runtime.current = { owner, active: true, ready: false, busy: false, sequence: 0, controller: null, timer: null, picker: null, pending: null };
     return () => {
-      owner.active = false; owner.ready = false; owner.picker = null; owner.pending = null; owner.controller?.abort();
-      if (owner.timer !== null) clearTimeout(owner.timer);
+      runtime.current.active = false; runtime.current.ready = false; runtime.current.picker = null; runtime.current.pending = null; runtime.current.controller?.abort();
+      if (runtime.current.timer !== null) clearTimeout(runtime.current.timer);
     };
   }, [owner]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
-    if (!owner.active || !canRead) return false;
-    owner.ready = false; owner.picker = null; owner.pending = null; owner.controller?.abort();
-    if (owner.timer !== null) clearTimeout(owner.timer);
-    const sequence = ++owner.sequence;
-    const controller = new AbortController(); owner.controller = controller;
-    const current = () => owner.active && owner.sequence === sequence;
+    if (!(runtime.current.owner === owner && runtime.current.active) || !canRead) return false;
+    setMetadata(null);
+    runtime.current.ready = false; runtime.current.picker = null; runtime.current.pending = null; runtime.current.controller?.abort();
+    if (runtime.current.timer !== null) clearTimeout(runtime.current.timer);
+    const readRuntime = runtime.current;
+    const sequence = ++readRuntime.sequence;
+    const controller = new AbortController(); runtime.current.controller = controller;
+    const current = () => runtime.current === readRuntime && readRuntime.active && readRuntime.sequence === sequence;
     setSnapshot({ owner, status: "loading", documents: [], studies: [] });
     setFailure(null);
     try {
@@ -96,17 +100,17 @@ export function WebCephRecordsGrid({
         return { documents: decodeOrthoRecordDocuments(docs, patientId), studies: decodeOrthoRecordStudies(studies, patientId) };
       };
       const payload = await Promise.race([read(), new Promise<never>((_, reject) => {
-        owner.timer = setTimeout(() => { controller.abort(); reject(new Error(ORTHO_RECORDS_READ_FAILURE)); }, READ_TIMEOUT_MS);
+        runtime.current.timer = setTimeout(() => { controller.abort(); reject(new Error(ORTHO_RECORDS_READ_FAILURE)); }, READ_TIMEOUT_MS);
       })]);
       if (!current() || controller.signal.aborted) return false;
-      owner.ready = true;
+      runtime.current.ready = true;
       setSnapshot({ owner, status: "ready", ...payload });
       return true;
     } catch {
       if (current()) setSnapshot({ owner, status: "error", documents: [], studies: [] });
       return false;
     } finally {
-      if (current() && owner.timer !== null) { clearTimeout(owner.timer); owner.timer = null; }
+      if (current() && runtime.current.timer !== null) { clearTimeout(runtime.current.timer); runtime.current.timer = null; }
     }
   }, [patientId, owner, canRead]);
 
@@ -121,7 +125,7 @@ export function WebCephRecordsGrid({
 
   // فتح أو إنشاء دراسة السيفالومتري فوراً
   const handleLaunchCeph = async (docId: number) => {
-    if (!owner.active || !owner.ready || owner.busy || owner.pending || !canRead
+    if (!(runtime.current.owner === owner && runtime.current.active) || !runtime.current.ready || runtime.current.busy || runtime.current.pending || !canRead
       || !documents.some(doc => doc.id === docId && doc.orthoCaseId === orthoCaseId)) return;
     const existing = caseRecordStudy(cephStudies, patientId, orthoCaseId, docId);
     // A patient-wide study is an explicit reference, never this case's analysis.
@@ -130,13 +134,14 @@ export function WebCephRecordsGrid({
       return;
     }
     if (!existing && !canUpload) return;
-    owner.busy = true;
+    const operationRuntime = runtime.current;
+    operationRuntime.busy = true;
     setOperation({ owner, documentId: docId });
     setError(null);
     try {
       // 1. فحص هل توجد دراسة سابقة لهذه الشععة
       if (existing) {
-        window.location.href = `/ceph/${existing.id}`;
+        window.location.assign(`/ceph/${existing.id}`);
         return;
       }
 
@@ -153,25 +158,25 @@ export function WebCephRecordsGrid({
         }),
       });
       const data = await res.json();
-      if (!owner.active) return;
+      if (runtime.current !== operationRuntime || !operationRuntime.active) return;
       const analysisId = recordStudyId(data?.id);
       if (res.ok && analysisId !== null) {
-        window.location.href = `/ceph/${analysisId}`;
+        window.location.assign(`/ceph/${analysisId}`);
       } else {
         setError(data.message ?? "تعذّر فتح جلسة الرسم والتحليل السيفالومتري.");
       }
     } catch {
-      setError("تعذّر الاتصال بخادم السيفالومتري.");
+      if (runtime.current === operationRuntime && operationRuntime.active) setError("تعذّر الاتصال بخادم السيفالومتري.");
     } finally {
-      owner.busy = false;
-      if (owner.active) setOperation(null);
+      operationRuntime.busy = false;
+      if (runtime.current === operationRuntime && operationRuntime.active) setOperation(null);
     }
   };
 
   // تشغيل منتقي الملفات للسلوت المحدد
   const triggerUpload = (slotKey: PhotoView) => {
-    if (!owner.active || !owner.ready || owner.busy || owner.pending || !canUpload) return;
-    owner.picker = slotKey;
+    if (!(runtime.current.owner === owner && runtime.current.active) || !runtime.current.ready || runtime.current.busy || runtime.current.pending || !canUpload) return;
+    runtime.current.picker = slotKey;
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
       fileInputRef.current.click();
@@ -180,23 +185,23 @@ export function WebCephRecordsGrid({
 
   // File selection never sends or invents acquisition metadata.
   const onFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0], slot = owner.picker;
+    const file = e.target.files?.[0], slot = runtime.current.picker;
     e.target.value = "";
-    if (!owner.active || !owner.ready || owner.busy || owner.pending || !canUpload || !file || !slot) return;
-    owner.picker = null;
+    if (!(runtime.current.owner === owner && runtime.current.active) || !runtime.current.ready || runtime.current.busy || runtime.current.pending || !canUpload || !file || !slot) return;
+    runtime.current.picker = null;
     const token = {};
-    owner.pending = { token, file, slot, metadataVersion: 0 };
-    setMetadata({ owner, token, version: 0, slot, stage: "", dateState: "", date: "", note: "" });
+    runtime.current.pending = { token, file, slot, metadataVersion: 0 };
+    setMetadata({ fileName: file.name, owner, token, version: 0, slot, stage: "", dateState: "", date: "", note: "" });
     setError(null);
   };
-  const metadataCurrent = (value: UploadMetadata) => owner.active && owner.ready && !owner.busy && canUpload
-    && value.owner === owner && owner.pending?.token === value.token && owner.pending.metadataVersion === value.version;
+  const metadataCurrent = (value: UploadMetadata) => (runtime.current.owner === owner && runtime.current.active) && runtime.current.ready && !runtime.current.busy && canUpload
+    && value.owner === owner && runtime.current.pending?.token === value.token && runtime.current.pending.metadataVersion === value.version;
   const patchMetadata = (value: UploadMetadata, patch: Partial<Pick<UploadMetadata, "stage" | "dateState" | "date" | "note">>) => {
-    if (metadataCurrent(value)) { owner.pending!.metadataVersion++; setMetadata({ ...value, ...patch, version: owner.pending!.metadataVersion }); }
+    if (metadataCurrent(value)) { runtime.current.pending!.metadataVersion++; setMetadata({ ...value, ...patch, version: runtime.current.pending!.metadataVersion }); }
   };
   const cancelUpload = (value: UploadMetadata) => {
     if (!metadataCurrent(value)) return;
-    owner.pending = null; setMetadata(null);
+    runtime.current.pending = null; setMetadata(null);
   };
   const confirmUpload = async (value: UploadMetadata) => {
     if (!metadataCurrent(value)) return;
@@ -206,9 +211,10 @@ export function WebCephRecordsGrid({
       || !value.note.trim() || value.note.length > 300) {
       setError("اختر المرحلة وحالة التاريخ صراحةً، وأدخل تاريخاً صالحاً عند معرفته وشرح المصدر من 1 إلى 300 حرف."); return;
     }
-    const pending = owner.pending!;
+    const operationRuntime = runtime.current;
+    const pending = operationRuntime.pending!;
     // Consume before await: double clicks and ambiguous replies cannot replay this file.
-    owner.pending = null; owner.busy = true; setMetadata(null);
+    runtime.current.pending = null; runtime.current.busy = true; setMetadata(null);
     setOperation({ owner, slot: pending.slot }); setError(null);
     const slotDef = WEBCEPH_RECORD_SLOTS.find(s => s.key === pending.slot);
     const body = new FormData(); body.append("file", pending.file);
@@ -218,7 +224,7 @@ export function WebCephRecordsGrid({
     if (value.stage !== "unknown") body.append("photoStage", value.stage);
     if (value.dateState === "known") body.append("takenOn", value.date);
     body.append("note", value.note.trim());
-    const controller = new AbortController(); owner.controller = controller;
+    const controller = new AbortController(); runtime.current.controller = controller;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const uncertain = "نتيجة الرفع غير مؤكدة؛ قد تكون الصورة حُفظت. لم تُعد المحاولة. أعد قراءة السجلات وافحصها قبل اختيار الملف مرة أخرى.";
     try {
@@ -226,12 +232,12 @@ export function WebCephRecordsGrid({
         (async () => { const response = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body, credentials: "same-origin", signal: controller.signal }); return { response, doc: await response.json() }; })(),
         new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(Error("timeout")); }, 30_000); }),
       ]);
-      if (!owner.active) return;
+      if (runtime.current !== operationRuntime || !operationRuntime.active) return;
       if (outcome.response.redirected || !outcome.response.ok || !recordStudyId(outcome.doc?.id)) { setError(uncertain); return; }
       setSelection({ owner, stage: "all" });
       void loadData();
-    } catch { if (owner.active) setError(uncertain); }
-    finally { if (timer) clearTimeout(timer); owner.busy = false; if (owner.active) setOperation(null); }
+    } catch { if (runtime.current === operationRuntime && operationRuntime.active) setError(uncertain); }
+    finally { if (timer) clearTimeout(timer); operationRuntime.busy = false; if (runtime.current === operationRuntime && operationRuntime.active) setOperation(null); }
   };
 
   const categories = [
@@ -303,14 +309,14 @@ export function WebCephRecordsGrid({
       ) : failed ? (
         <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           <p>{ORTHO_RECORDS_READ_FAILURE}</p>
-          <button type="button" onClick={() => { if (owner.active && !owner.busy) void loadData(); }}
+          <button type="button" onClick={() => { if ((runtime.current.owner === owner && runtime.current.active) && !runtime.current.busy) void loadData(); }}
             className="mt-2 font-bold underline">إعادة تحميل سجلات الحالة</button>
         </div>
       ) : null}
 
       {pendingMetadata && <section aria-label="بيانات الصورة قبل الرفع" className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
         <h4 className="font-bold">بيانات الصورة قبل الرفع</h4>
-        <p className="break-words text-sm">الملف: {owner.pending?.file.name} · الموضع: {WEBCEPH_RECORD_SLOTS.find(slot => slot.key === pendingMetadata.slot)?.labelAr}</p>
+        <p className="break-words text-sm">الملف: {pendingMetadata.fileName} · الموضع: {WEBCEPH_RECORD_SLOTS.find(slot => slot.key === pendingMetadata.slot)?.labelAr}</p>
         <p className="text-sm">لم يُرفع الملف بعد. المرحلة وتاريخ الالتقاط من المصدر، لا من مرحلة العلاج أو تاريخ اليوم. شرح المصدر ملاحظة مسجلة، وليس شهادة تحقق.</p>
         <label className="block">مرحلة الصورة<select aria-label="مرحلة الصورة الموثقة" value={pendingMetadata.stage} onChange={e => patchMetadata(pendingMetadata, {stage: e.target.value as UploadMetadata["stage"]})} className="min-h-11 w-full rounded border p-2"><option value="">اختر صراحةً…</option><option value="unknown">غير معلومة</option>{Object.entries(PHOTO_STAGE_LABEL).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         <label className="block">تاريخ الالتقاط<select aria-label="حالة تاريخ الالتقاط" value={pendingMetadata.dateState} onChange={e => patchMetadata(pendingMetadata, {dateState:e.target.value as UploadMetadata["dateState"],date:""})} className="min-h-11 w-full rounded border p-2"><option value="">اختر صراحةً…</option><option value="known">معلوم من المصدر</option><option value="unknown">غير معلوم</option></select></label>
@@ -319,7 +325,7 @@ export function WebCephRecordsGrid({
         <button type="button" className="min-h-11 rounded border px-3" onClick={() => void confirmUpload(pendingMetadata)}>تأكيد بيانات الصورة ورفعها</button>
         <button type="button" className="min-h-11 rounded border px-3" onClick={() => cancelUpload(pendingMetadata)}>إلغاء الملف دون رفع</button>
       </section>}
-      {error?.startsWith("نتيجة الرفع غير مؤكدة") && <button type="button" className="min-h-11 underline" disabled={owner.busy} onClick={() => { if (owner.active && !owner.busy) void loadData(); }}>إعادة قراءة السجلات دون إعادة الرفع</button>}
+      {error?.startsWith("نتيجة الرفع غير مؤكدة") && <button type="button" className="min-h-11 underline" disabled={operation?.owner === owner} onClick={() => { if ((runtime.current.owner === owner && runtime.current.active) && !runtime.current.busy) void loadData(); }}>إعادة قراءة السجلات دون إعادة الرفع</button>}
 
       {/* مدخل ملف مخفي لاختيار الملف قبل تأكيد بياناته */}
       <input

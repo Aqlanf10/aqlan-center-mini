@@ -920,13 +920,14 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     setError("غير مصرّح لك بعرض كابينة التقويم لهذا المريض.");
   }, [owner]);
   useLayoutEffect(() => { owner.bindDenial(deny); }, [owner, deny]);
+  const readUsername = session?.username, readRole = session?.role;
   const load = useCallback(() => {
     if (!owner.active) return;
     const controller = new AbortController();
     const sequence = owner.beginRead(controller);
     const current = () => owner.active && owner.readSequence === sequence && !controller.signal.aborted;
     setReadState("loading"); setPatient(null); setError(null);
-    if (!session?.username?.trim() || !["admin", "doctor", "reception", "assistant"].includes(session.role)) {
+    if (!readUsername?.trim() || !["admin", "doctor", "reception", "assistant"].includes(readRole ?? "")) {
       deny(); return;
     }
     let finished = 0;
@@ -970,7 +971,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     };
     // Independent continuations: no stalled peer or JSON body can postpone denial.
     void read("clinical"); void read("contact");
-  }, [owner, patientId, session?.username, session?.role, deny]);
+  }, [owner, patientId, readUsername, readRole, deny]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1233,10 +1234,10 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </FinancialContextContainer>
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
-                      <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">رابط خطة أقساط قديم · للتوافق فقط</summary>
+                      <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">ربط خطة علاج أو اتفاق قائم</summary>
                         <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
-                          canLink={row.planId !== null && (session?.role === "admin" || session?.role === "reception"
-                            || (session?.role === "doctor" && session.permissions?.canEditPlans !== false))}
+                          canLink={(session?.role === "admin" || session?.role === "reception"
+                            || (session?.role === "doctor" && session.permissions?.canViewPlans === true && session.permissions?.canEditPlans === true))}
                           onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
                       </details>
                     ) : null}
@@ -2039,16 +2040,24 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   const hasActor = Number.isSafeInteger(actorId) && Number(actorId) > 0;
   const authority = hasActor ? `user:${actorId}` : "";
   const commandScope = useMemo(() => ({ patientId, caseId: caseRow.id, authority }), [patientId, caseRow.id, authority]);
-  const commandState = useMemo(() => ({ scope: commandScope, command: null as AdjustmentCommand | null, blocked: false }), [commandScope]);
+  // Durable recovery has a render snapshot and a synchronous callback authority.
+  // Never publish another scope during render, including an abandoned render.
+  type CommandState = { scope: typeof commandScope; command: AdjustmentCommand | null; blocked: boolean };
+  const commandRef = useRef<CommandState | null>(null);
+  const [commandSnapshot, setCommandSnapshot] = useState<CommandState | null>(null);
+  const commandState = commandSnapshot?.scope === commandScope ? commandSnapshot : { scope: commandScope, command: null, blocked: true };
+  const publishCommand = (next: CommandState) => { commandRef.current = next; setCommandSnapshot(next); };
   useLayoutEffect(() => {
     try {
       if (!commandScope.authority) throw new Error("Missing immutable actor identity");
-      commandState.command = readAdjustmentCommand(sessionStorage, commandScope);
-      if (commandState.command) form.uncertain();
-    } catch { commandState.blocked = true; form.uncertain(); }
+      const command = readAdjustmentCommand(sessionStorage, commandScope);
+      publishCommand({ scope: commandScope, command, blocked: false });
+      if (command) form.uncertain();
+    } catch { publishCommand({ scope: commandScope, command: null, blocked: true }); form.uncertain(); }
+    return () => { if (commandRef.current?.scope === commandScope) commandRef.current = null; };
     // The draft/authority lifetime owns recovery, not an asynchronous parent refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commandState, form.draft]);
+  }, [commandScope, form.draft]);
 
   const [queue, setQueue] = form.field<QueuedPhoto[]>("queue", []);
   const [stage, setStage] = form.field<PhotoStage>("stage", () =>
@@ -2073,6 +2082,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
 
   const submit = async (event: React.FormEvent, reconcile = false) => {
     event.preventDefault();
+    const commandState = commandRef.current;
+    if (!commandState || commandState.scope !== commandScope) return;
     if (commandState.blocked || !hasActor || !form.session?.username?.trim()
       || !["doctor", "admin"].includes(form.session.role)) return;
     const recovered = commandState.command !== null;
@@ -2104,7 +2115,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       const command = commandState.command ?? createAdjustmentCommand(sessionStorage, commandScope, {
         doneOn, upperWire, lowerWire, elastics, elasticNote, done, nextWeeks: intervalWeeks!,
       });
-      commandState.command = command;
+      publishCommand({ ...commandState, command });
       const frozen = JSON.parse(command.body) as { doneOn: string; nextWeeks: number };
       let receipt = command.receipt;
       if (!receipt) {
@@ -2118,7 +2129,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
           form.uncertain(); onError(payload?.message ?? "تعذّر تأكيد تسجيل الشدّة. أعد التحقق بنفس الطلب المحفوظ."); return;
         }
         // Persist the acknowledgement BEFORE any non-idempotent uploads or parent callback.
-        commandState.command = completeAdjustmentCommand(sessionStorage, command, payload);
+        publishCommand({ ...commandState, command: completeAdjustmentCommand(sessionStorage, command, payload) });
         receipt = payload;
       }
       const adjustmentId = receipt.id;
@@ -2163,6 +2174,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     } finally { form.finish(operation); }
   };
   const startNew = () => {
+    const commandState = commandRef.current;
+    if (!commandState || commandState.scope !== commandScope) return;
     if (!commandState.command?.receipt || commandState.blocked || !hasActor || !form.session?.username?.trim()
       || !["doctor", "admin"].includes(form.session.role)) return;
     const operation = form.beginRetry(caseRow.status === "active" || caseRow.status === "retention");
@@ -2171,7 +2184,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       retireAdjustmentCommand(sessionStorage, commandState.command);
       for (const photo of queue) form.release(photo.preview);
       form.commit("queue", []);
-      commandState.command = null;
+      publishCommand({ ...commandState, command: null });
       onError(null);
     } catch { form.uncertain(); onError("تعذّر بدء شدّة جديدة بأمان. راجع السجل."); }
     finally { form.finish(operation); }

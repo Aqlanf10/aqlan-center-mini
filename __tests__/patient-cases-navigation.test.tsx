@@ -713,7 +713,7 @@ describe("PatientCases orthodontic navigation containment", () => {
     },
   );
 
-  const replacements = ["patient", "principal", "permission", "role", "canWrite"] as const;
+  const replacements = ["patient", "principal", "userId", "permission", "role", "canWrite"] as const;
   it.each(replacements.flatMap((changed) => ["headers", "body"].map((phase) => ({ changed, phase }))))(
     "rejects retained callbacks and late $phase after $changed A→B→A replacement", async ({ changed, phase }) => {
       await mount(); const originalProps = { ...props }; const originalSession = hooks.session;
@@ -730,6 +730,7 @@ describe("PatientCases orthodontic navigation containment", () => {
       expect(writes()).toHaveLength(1); if (phase === "body") expect(json).toHaveBeenCalledOnce();
       if (changed === "patient") props = { ...props, patientId: 92 };
       else if (changed === "principal") hooks.session = { ...hooks.session!, username: "synthetic-b" };
+      else if (changed === "userId") hooks.session = { ...hooks.session!, userId: 902 };
       else if (changed === "permission") hooks.session = { ...hooks.session!, permissions: { canViewPlans: false } as NonNullable<SessionInfo["permissions"]> };
       else if (changed === "role") hooks.session = { ...hooks.session!, role: "admin" };
       else props = { ...props, canWrite: false };

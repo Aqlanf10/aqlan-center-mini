@@ -20,7 +20,8 @@ const STATUS: Record<Appointment["status"], { label: string; style: string }> = 
   no_show: { label: "لم يحضر", style: "border-slate-200 bg-slate-100 text-slate-700" },
 };
 type Selection = { view: PatientAppointmentsView; cursor: string | null; previous: (string | null)[] };
-type Owner = { patientId: number; session: ReturnType<typeof useSession>; sessionKey: string; selection: Selection; active: boolean; revision: number; abort: AbortController | null; mutation: AbortController | null; pending: boolean; page: PatientAppointmentsPage | null };
+type Owner = { patientId: number; session: ReturnType<typeof useSession>; sessionKey: string; selection: Selection };
+type Lifetime = { owner: Owner; active: boolean; revision: number; abort: AbortController | null; mutation: AbortController | null; pending: boolean; page: PatientAppointmentsPage | null };
 type State = { owner: Owner; phase: "loading" | "ready" | "error"; page?: PatientAppointmentsPage; message?: string; busy?: boolean };
 
 /** Independent of financial summary loading. All records come from the canonical patient endpoint. */
@@ -35,29 +36,31 @@ export function PatientAppointmentsPanel({ patientId }: { patientId: number }) {
   const selection = savedSelection?.scope === scope ? savedSelection.value : scope.initial;
   const setSelection = useCallback((value: Selection) => saveSelection({ scope, value }), [scope]);
   // Object identity retires even a replacement session with identical claims, and A → B → A.
-  const owner = useMemo<Owner>(() => ({ patientId, session, sessionKey, selection, active: false, revision: 0, abort: null, mutation: null, pending: false, page: null }),
+  const owner = useMemo<Owner>(() => ({ patientId, session, sessionKey, selection }),
     [patientId, session, sessionKey, selection]);
-  const current = useRef<Owner | null>(null);
+  const current = useRef<Lifetime | null>(null);
   const [state, setState] = useState<State | null>(null);
   const ready = state?.owner === owner && state.phase === "ready" ? state : null;
   const error = state?.owner === owner && state.phase === "error" ? state.message : null;
-  const isOwner = useCallback(() => current.current === owner && owner.active && permitted, [owner, permitted]);
+  const isOwner = useCallback(() => current.current?.owner === owner && current.current.active && permitted, [owner, permitted]);
 
   useLayoutEffect(() => {
-    current.current = owner; owner.active = true;
-    return () => { owner.active = false; owner.revision++; owner.page = null; owner.abort?.abort(); owner.mutation?.abort(); if (current.current === owner) current.current = null; };
+    const committed: Lifetime = { owner, active: true, revision: 0, abort: null, mutation: null, pending: false, page: null };
+    current.current = committed;
+    return () => { committed.active = false; committed.revision++; committed.page = null; committed.abort?.abort(); committed.mutation?.abort(); if (current.current === committed) current.current = null; };
   }, [owner]);
 
   const load = useCallback(async (notice?: string): Promise<boolean> => {
-    if (!isOwner() || owner.pending) return false;
-    const revision = ++owner.revision;
-    owner.abort?.abort(); owner.abort = new AbortController(); owner.page = null;
+    const committed = current.current;
+    if (!isOwner() || !committed || committed.owner !== owner || committed.pending) return false;
+    const revision = ++committed.revision;
+    committed.abort?.abort(); committed.abort = new AbortController(); committed.page = null;
     setState({ owner, phase: "loading", message: notice });
-    const live = () => isOwner() && owner.revision === revision;
+    const live = () => committed.active && current.current === committed && isOwner() && committed.revision === revision;
     try {
       const params = new URLSearchParams({ projection: "appointments", view: selection.view });
       if (selection.cursor !== null) params.set("cursor", selection.cursor);
-      const response = await fetch(`/api/patients/${patientId}?${params}`, { cache: "no-store", signal: owner.abort.signal });
+      const response = await fetch(`/api/patients/${patientId}?${params}`, { cache: "no-store", signal: committed.abort.signal });
       const body: unknown = await response.json().catch(() => null);
       if (!live()) return false;
       if (!response.ok) {
@@ -66,7 +69,7 @@ export function PatientAppointmentsPanel({ patientId }: { patientId: number }) {
       }
       const page = readPatientAppointmentsPage(body, patientId, selection.view, selection.cursor);
       if (!page) throw new Error("تعذّر التحقق من بيانات المواعيد. أعد التحميل.");
-      owner.page = page;
+      committed.page = page;
       setState({ owner, phase: "ready", page, message: notice });
       return true;
     } catch (error) {
@@ -77,37 +80,40 @@ export function PatientAppointmentsPanel({ patientId }: { patientId: number }) {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const refresh = () => { if (isOwner() && !owner.pending) setSelection({ view: selection.view, cursor: null, previous: [] }); };
+    const committed = current.current;
+    if (!committed || committed.owner !== owner) return;
+    const refresh = () => { if (committed.active && isOwner() && !committed.pending) setSelection({ view: selection.view, cursor: null, previous: [] }); };
     const visible = () => { if (document.visibilityState === "visible") refresh(); };
     const midnight = window.setInterval(() => {
-      if (owner.page && clinicDateString(new Date(), owner.page.timeZone) !== owner.page.today) refresh();
+      if (committed.page && clinicDateString(new Date(), committed.page.timeZone) !== committed.page.today) refresh();
     }, 30_000);
     window.addEventListener("focus", refresh); document.addEventListener("visibilitychange", visible);
     return () => { window.clearInterval(midnight); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", visible); };
   }, [isOwner, owner, selection.view, setSelection]);
 
   const page = ready?.page;
-  const currentPage = () => isOwner() && !!page && owner.page === page && !owner.pending;
+  const currentPage = () => isOwner() && !!page && current.current?.page === page && !current.current.pending;
   const confirmReminder = async (item: Appointment, snapshot: ManualAppointmentReminderSnapshot) => {
-    if (!currentPage() || !page?.canRemind || !canRemindPatientRole(session?.role) || snapshot.patientId !== patientId
+    const committed = current.current;
+    if (!committed || committed.owner !== owner || !currentPage() || !page?.canRemind || !canRemindPatientRole(session?.role) || snapshot.patientId !== patientId
       || !page.appointments.includes(item) || (item.status !== "booked" && item.status !== "no_show")) return;
-    owner.pending = true; owner.mutation = new AbortController();
+    committed.pending = true; committed.mutation = new AbortController();
     setState({ owner, phase: "ready", page, busy: true });
     let recorded = false;
     let notice = "لم نتمكن من تأكيد تسجيل التذكير. راجع حالة الموعد بعد التحديث قبل إعادة المحاولة.";
     try {
       const response = await fetch(`/api/appointments/${item.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, signal: owner.mutation.signal,
+        method: "PATCH", headers: { "Content-Type": "application/json" }, signal: committed.mutation.signal,
         body: JSON.stringify({ action: "reminded", snapshot }),
       });
       const body = await response.json().catch(() => null);
-      if (!isOwner()) return;
+      if (!committed.active || current.current !== committed || !isOwner()) return;
       recorded = response.ok && body?.ok === true;
       if (!recorded && typeof body?.message === "string") notice = body.message;
     } catch { /* A lost response is unknown; only a fresh read may show a recorded stamp. */ }
     finally {
-      owner.pending = false;
-      if (isOwner()) await load(recorded ? "سُجّلت إفادتك بالتذكير. هذا ليس إثبات تسليم آلي." : notice);
+      committed.pending = false;
+      if (committed.active && current.current === committed && isOwner()) await load(recorded ? "سُجّلت إفادتك بالتذكير. هذا ليس إثبات تسليم آلي." : notice);
     }
   };
 

@@ -38,8 +38,12 @@ export function OrthoCaseAssessmentV2(props: OrthoCaseAssessmentV2Props) {
   return <Workspace key={`${props.patientId}:${props.orthoCaseId}:${props.clinicalCaseId ?? "unresolved"}:${authority}`} {...props} />;
 }
 function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionView }: OrthoCaseAssessmentV2Props) {
-  const owner = useMemo(() => ({ active: false }), [lifetime?.identity]);
-  useLayoutEffect(() => { owner.active = true; return () => { owner.active = false; }; }, [owner]);
+  const owner = useMemo(() => ({}), [lifetime?.identity]);
+  const committedOwner = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    committedOwner.current = owner;
+    return () => { if (committedOwner.current === owner) committedOwner.current = null; };
+  }, [owner]);
   const latest = useRef(lifetime);
   useLayoutEffect(() => { latest.current = lifetime; }, [lifetime]);
   const [selected, setSelected] = useState<number>();
@@ -54,7 +58,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     committedGeneration.current = generation;
     return () => { if (committedGeneration.current === generation) committedGeneration.current = null; };
   }, [generation]);
-  const currentView = () => owner.active && committedGeneration.current === generation
+  const currentView = () => committedOwner.current === owner && committedGeneration.current === generation
     && latest.current?.identity === lifetime?.identity && (!lifetime || lifetime.active());
   // Same-generation callbacks must also own the exact draft bytes they rendered.
   const currentDraft = () => currentView() && latest.current?.values.document === lifetime?.values.document;
@@ -69,7 +73,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
   const editable = !!writable && !stale;
   useEffect(() => {
     const life = latest.current, controller = new AbortController(); let live = true;
-    const current = () => live && owner.active && committedGeneration.current === generation
+    const current = () => live && committedOwner.current === owner && committedGeneration.current === generation
       && !controller.signal.aborted && (!life || life.active());
     const timer = setTimeout(() => { if (current()) { setRead({ generation, data: null, error: "تعذرت القراءة؛ لم يُعتبر السجل فارغًا." }); controller.abort(); } }, 15000);
     void (async () => {
@@ -108,7 +112,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     lifetime.settle("document", JSON.stringify(next)); setMessage(null);
   }
   async function save(retry = false) {
-    if (!currentDraft() || !lifetime || !draft || data?.state !== "ready" || !data.clinicalWritable || !owner.active || !lifetime.active()
+    if (!currentDraft() || !lifetime || !draft || data?.state !== "ready" || !data.clinicalWritable || committedOwner.current !== owner || !lifetime.active()
       || lifetime.busy || (!retry && !editable) || retry && !lifetime.uncertain) return;
     const command = assessmentEditorCommandV2(draft);
     if (!command) { setMessage("أكمل السبب والقياسات ومصدر وتاريخ كل قيمة قبل الحفظ؛ الفراغ ليس صفرًا."); return; }

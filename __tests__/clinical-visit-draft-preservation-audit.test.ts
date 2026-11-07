@@ -26,11 +26,14 @@ vi.mock("react", async (original) => {
     useId: () => "synthetic-phrase-field",
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? initial() : initial);
-      return [hooks.values[index], (value: unknown) => {
+      // Match React's stable setter identity without weakening lifecycle assertions.
+      const setter = hooks.memos.get(index)?.value ?? ((value: unknown) => {
         const next = typeof value === "function" ? value(hooks.values[index]) : value;
         if (!Object.is(next, hooks.values[index])) hooks.changed = true;
         hooks.values[index] = next;
-      }];
+      });
+      hooks.memos.set(index, { value: setter });
+      return [hooks.values[index], setter];
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
     useCallback: (callback: unknown, deps?: readonly unknown[]) => {

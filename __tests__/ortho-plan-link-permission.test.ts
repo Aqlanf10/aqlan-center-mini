@@ -4,6 +4,7 @@ import type { Role } from "../lib/roles";
 
 const mocks = vi.hoisted(() => ({ session: vi.fn(), user: vi.fn(), owns: vi.fn(), today: vi.fn(),
   create: vi.fn(), baseline: vi.fn(), link: vi.fn(), audit: vi.fn(), found: vi.fn() }));
+vi.mock("@/lib/ortho-plan-link-command", () => ({ commandOrthoPlanLink: mocks.link, OrthoPlanLinkRefusal: class extends Error {} }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden", findUserByUsername: mocks.user, doctorOwnsPatient: mocks.owns,
@@ -23,7 +24,7 @@ const handlers = {
   create: (planId: number | null = 51) => create(request({ patientId, planId })),
   baseline: (planId: number | null = 51) => baseline(request({ patientId, planId,
     phase: "working", financialMode: "installments", monthsElapsed: 10, monthsRemaining: 8 })),
-  link: (planId: number | null = 51) => update(request({ planId }, "PATCH"), context),
+  link: (planId: number | null = 51) => update(request({ planId, expectedVersion: "a".repeat(64) }, "PATCH"), context),
 };
 function user(permissions: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) {
   return { id: 7, username: "synthetic-doctor", role: "doctor", isActive: true, partyId: 17,

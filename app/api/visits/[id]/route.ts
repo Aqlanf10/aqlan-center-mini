@@ -224,6 +224,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       if (result.reason === 'forbidden') return NextResponse.json({message:'حذف الزيارات للمدير وحده.'},{status:403});
       if (result.reason === 'scope_changed') return NextResponse.json({message:'تغيّر ربط الزيارة. أعد تحميل الملف.'},{status:409});
       if (result.reason === 'protected_reference') return NextResponse.json({message:'الزيارة مرتبطة بسجل شدّة موثّق ولا يمكن حذفها.'},{status:409});
+      if (result.reason === "has_prescription_history") return NextResponse.json({ message: "الزيارة مرتبطة بوصفات صادرة بمفاتيح محفوظة؛ لا يمكن حذفها." }, { status: 409 });
       if (result.reason === "signed") {
         return NextResponse.json(
           { message: "الزيارة موقّعة سريريًا — وثّقت عمل الطبيب ولا تُمحى." },

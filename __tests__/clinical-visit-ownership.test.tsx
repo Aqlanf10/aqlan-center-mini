@@ -10,7 +10,7 @@ import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
 // and state/effects run in the reviewed lightweight hook-harness style.
 // This exercises the actual component, without changing clinical sign rules.
 const hooks = vi.hoisted(() => ({
-  values: [] as unknown[], cursor: 0, changed: false, username: "synthetic-doctor", role: "doctor",
+  values: [] as unknown[], cursor: 0, changed: false, freezeOwners: false, username: "synthetic-doctor", role: "doctor",
   permissions: null as import("../lib/doctor-permissions").DoctorPermissions | null,
   effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void; phase: "layout" | "passive" }>(),
   memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
@@ -29,11 +29,16 @@ vi.mock("react", async (original) => {
     ...react,
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? initial() : initial);
-      return [hooks.values[index], (value: unknown) => {
+      const value = hooks.values[index];
+      if (hooks.freezeOwners && value && typeof value === "object" && "key" in value) Object.freeze(value);
+      // Match React's stable setter identity without weakening lifecycle assertions.
+      const setter = hooks.memos.get(index)?.value ?? ((value: unknown) => {
         const next = typeof value === "function" ? value(hooks.values[index]) : value;
         if (!Object.is(next, hooks.values[index])) hooks.changed = true;
         hooks.values[index] = next;
-      }];
+      });
+      hooks.memos.set(index, { value: setter });
+      return [hooks.values[index], setter];
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
     useCallback: (callback: unknown, deps?: readonly unknown[]) => {
@@ -143,7 +148,7 @@ async function flush() {
 async function mount() { render(); await flush(); }
 function unmount() { hooks.effects.forEach((effect) => effect.cleanup?.()); hooks.effects.clear(); }
 beforeEach(() => {
-  hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
+  hooks.freezeOwners = false; hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
   hooks.role = "doctor"; hooks.username = "synthetic-doctor"; hooks.permissions = null; vi.clearAllMocks(); currentVisitId = 91001; onSigned = vi.fn<() => void>();
   stored = new Map([[91001, visit(91001, "Visit A diagnosis")], [91002, visit(91002, "Visit B diagnosis")]]);
   reads = new Map(); extraReads = new Map(); pendingWrite = null; expectedPatientId = undefined; navigationGuard = null;
@@ -175,6 +180,22 @@ beforeEach(() => {
 afterEach(() => { unmount(); vi.unstubAllGlobals(); });
 
 describe("clinical visit owner retirement", () => {
+  it("keeps render identity tokens immutable across committed visit and principal changes", async () => {
+    hooks.freezeOwners = true;
+    await mount();
+    expect(field("② التشخيص").props.value).toBe("Visit A diagnosis");
+    currentVisitId = 91002;
+    render(); await flush();
+    expect(field("② التشخيص").props.value).toBe("Visit B diagnosis");
+    hooks.username = "replacement-clinician";
+    render(); await flush();
+    expect(field("② التشخيص").props.value).toBe("Visit B diagnosis");
+    currentVisitId = 91001;
+    render(); await flush();
+    expect(field("② التشخيص").props.value).toBe("Visit A diagnosis");
+    expect(writes()).toHaveLength(0);
+  });
+
   it("cannot save A's draft to B while B's first read is pending", async () => {
     await mount(); expect(field("② التشخيص").props.value).toBe("Visit A diagnosis");
     (field("② التشخيص").props.onChange as (value: string) => void)("Edited only for A");
@@ -312,6 +333,21 @@ describe("owner lifetime, command and navigation contracts", () => {
     currentVisitId = 91002; await flush(); post.resolve(response(200, { ok: true })); await reviewA; await flush();
     expect(nodes().some((node) => node.props.role === "dialog" && node.props["aria-label"] === "مراجعة وإنهاء الزيارة")).toBe(false);
     expect(field("② التشخيص").props.value).toBe("Visit B diagnosis");
+  });
+
+  it("does not reuse a prior review preview while a reopened review is waiting", async () => {
+    extraReads.set("/api/visits/91001/billing-preview", async () =>
+      response(200, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: "First review only" }));
+    await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+    expect(contents(render())).toContain("First review only");
+    await invoke(button("رجوع — أكمل العمل")); render();
+    const nextPreview = deferred<Response>();
+    extraReads.set("/api/visits/91001/billing-preview", () => nextPreview.promise);
+    await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+    expect(contents(render())).not.toContain("First review only");
+    nextPreview.resolve(response(200, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: "Fresh review" }));
+    await flush();
+    expect(contents(render())).toContain("Fresh review");
   });
 
   it("ignores a late financial preview from A after opening B's review", async () => {

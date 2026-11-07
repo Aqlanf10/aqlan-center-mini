@@ -53,7 +53,7 @@ vi.mock("react", async (original) => {
   };
 });
 vi.mock("../components/SessionProvider", () => ({
-  useSession: () => ({ username: "synthetic-doctor", role: "doctor", permissions: {} }),
+  useSession: () => ({ username: "synthetic-doctor", role: "doctor", permissions: { canViewPlans: true, canEditPlans: true } }),
 }));
 vi.mock("../components/SettingsProvider", () => ({ useClinicName: () => "Synthetic clinic", useSetting: () => "" }));
 vi.mock("../components/LegacyOnboardingChecklist", () => ({ LegacyOnboardingChecklist: () => null }));
@@ -166,12 +166,12 @@ beforeEach(() => {
 afterEach(async () => { await settle(); vi.unstubAllGlobals(); });
 
 describe("PatientOrtho preserves the legacy financial-link boundary", () => {
-  it("does not offer a new legacy plan link when the case has no existing link", async () => {
+  it("offers explicit existing-agreement selection without creating a financial source", async () => {
     render(); await settle();
     const tree = render();
     const link = elements(tree).find((node) => node.type === OrthoPackageLink);
-    expect(link?.props).toMatchObject({ patientId: PATIENT_ID, caseId: CASE_ID, planId: null, canLink: false });
-    expect(text(tree)).toContain("رابط خطة أقساط قديم · للتوافق فقط");
+    expect(link?.props).toMatchObject({ patientId: PATIENT_ID, caseId: CASE_ID, planId: null, canLink: true });
+    expect(text(tree)).toContain("ربط خطة علاج أو اتفاق قائم");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toEqual([]);
   });
 

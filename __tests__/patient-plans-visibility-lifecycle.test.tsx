@@ -151,6 +151,29 @@ beforeEach(() => {
 afterEach(() => { retire(); vi.unstubAllGlobals(); });
 
 describe("actual PatientPlans financial-read lifetime", () => {
+  it.each([false, true])("keeps the committed completion gate when a render is abandoned (allowed=%s)", async (allowed) => {
+    hooks.session = { ...hooks.session!, role: "admin" };
+    await mount();
+    const saved = button("إنهاء الخطة");
+    const initialPlans = hooks.values[0];
+    if (!allowed) { hooks.values[0] = []; render(); }
+    const committedValues = hooks.values;
+    const committedMemos = new Map(hooks.memos);
+    // Model a work-in-progress fiber: state slots are copied but refs are shared.
+    // The speculative response changes plan availability, then is discarded.
+    hooks.values = [...committedValues];
+    hooks.values[0] = allowed ? [] : initialPlans;
+    hooks.cursor = 0;
+    const wrapper = PatientPlans({ patientId, onOpenTreatmentEntry: openTreatmentEntry }) as Element;
+    hooks.cursor = 0;
+    (wrapper.type as (props: Record<string, unknown>) => ReactNode)(wrapper.props);
+    hooks.pending = [];
+    hooks.values = committedValues;
+    hooks.memos = committedMemos;
+    await click(saved);
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === "PATCH")).toBe(allowed);
+  });
+
   it('retires a saved completion callback as soon as a financial read refresh starts',async()=>{
     hooks.session={...hooks.session!,role:'admin'};
     await mount();const stale=button('إنهاء الخطة');expect(stale).toBeDefined();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { compareSavedDiagnoses } from "@/lib/ortho-diagnosis-comparison";
 import { OrthoDiagnosisComparison } from "./OrthoDiagnosisComparison";
 import { friendlyDateLong } from "@/lib/reminders";
@@ -41,8 +41,9 @@ function decodeVersions(payload: unknown, caseId: number): DiagnosisVersionView[
   return payload.diagnoses as DiagnosisVersionView[];
 }
 
-type Owner = { scope: readonly unknown[]; active: boolean; ready: boolean; readSequence: number; controller: AbortController | null; saving: boolean; timer: ReturnType<typeof setTimeout> | null };
-type Writer = { owner: Owner; active: boolean };
+type Owner = { scope: readonly unknown[] };
+type Lifetime = { owner: Owner; active: boolean; ready: boolean; readSequence: number; controller: AbortController | null; saving: boolean; timer: ReturnType<typeof setTimeout> | null };
+type Writer = { owner: Owner };
 type Snapshot = { sequence: number; owner: Owner; status: "loading" | "ready" | "error"; versions: DiagnosisVersionView[] };
 
 type DiagnosisProps = { patientId: number; orthoCaseId: number } & (
@@ -55,30 +56,34 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
   const canRead = !!session?.username?.trim() && ["admin", "doctor", "reception", "assistant"].includes(session.role);
   const canWrite = !readOnly && canRead && (session?.role === "doctor" || session?.role === "admin");
   const permissionScope = JSON.stringify(session?.permissions ?? null);
-  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId],
-    active: false, ready: false, readSequence: 0, controller: null, saving: false, timer: null }),
+  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId] }),
     [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId]);
+  const lifetime = useRef<Lifetime | null>(null);
+  const writerRef = useRef<Writer | null>(null);
+  const isCurrentOwner = useCallback(() => lifetime.current?.owner === owner && lifetime.current.active, [owner]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [pair, setPair] = useState<{ snapshot: Snapshot; leftId: string; rightId: string } | null>(null);
   const [writer, setWriter] = useState<Writer | null>(null);
   const [savingOwner, setSavingOwner] = useState<Owner | null>(null);
   useLayoutEffect(() => {
-    owner.active = true;
+    const committed: Lifetime = { owner, active: true, ready: false, readSequence: 0, controller: null, saving: false, timer: null };
+    lifetime.current = committed;
     return () => {
-      owner.active = false; owner.ready = false; owner.controller?.abort();
-      if (owner.timer !== null) clearTimeout(owner.timer);
+      committed.active = false; committed.ready = false; committed.controller?.abort();
+      if (committed.timer !== null) clearTimeout(committed.timer);
     };
   }, [owner]);
 
   const load = useCallback(async () => {
-    if (!owner.active) return;
-    owner.ready = false;
-    owner.controller?.abort();
-    if (owner.timer !== null) clearTimeout(owner.timer);
+    const committed = lifetime.current;
+    if (!committed || committed.owner !== owner || !committed.active) return;
+    committed.ready = false;
+    committed.controller?.abort();
+    if (committed.timer !== null) clearTimeout(committed.timer);
     const controller = new AbortController();
-    owner.controller = controller;
-    const sequence = ++owner.readSequence;
-    const current = () => owner.active && !controller.signal.aborted && owner.readSequence === sequence;
+    committed.controller = controller;
+    const sequence = ++committed.readSequence;
+    const current = () => committed.active && !controller.signal.aborted && committed.readSequence === sequence;
     setPair(null);
     setSnapshot({ sequence, owner, status: "loading", versions: [] });
     const timeout = setTimeout(() => {
@@ -86,19 +91,19 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
       controller.abort();
       setSnapshot({ sequence, owner, status: "error", versions: [] });
     }, READ_TIMEOUT_MS);
-    owner.timer = timeout;
+    committed.timer = timeout;
     try {
       if (!canRead || !positiveId(patientId) || !positiveId(orthoCaseId)) throw new Error(readFailure);
       const response = await fetch(`/api/patients/${patientId}/diagnoses?orthoCaseId=${orthoCaseId}`,
         { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(readFailure);
       const versions = decodeVersions(await response.json(), orthoCaseId);
-      if (current()) { owner.ready = true; setSnapshot({ sequence, owner, status: "ready", versions }); }
+      if (current()) { committed.ready = true; setSnapshot({ sequence, owner, status: "ready", versions }); }
     } catch {
       if (current()) setSnapshot({ sequence, owner, status: "error", versions: [] });
     } finally {
       clearTimeout(timeout);
-      if (owner.timer === timeout) owner.timer = null;
+      if (committed.timer === timeout) committed.timer = null;
     }
   }, [owner, patientId, orthoCaseId, canRead]);
   useEffect(() => { void load(); }, [load]);
@@ -108,8 +113,11 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
   const versions = ready ? snapshot.versions : [];
   const current = versions[0];
   const pairSelection = pair?.snapshot === snapshot ? pair : null;
-  const pairCurrent = () => owner.active && owner.ready && snapshot?.owner === owner
-    && snapshot.status === "ready" && snapshot.sequence === owner.readSequence;
+  const pairCurrent = () => {
+    const committed = lifetime.current;
+    return committed?.owner === owner && committed.active && committed.ready && snapshot?.owner === owner
+      && snapshot.status === "ready" && snapshot.sequence === committed.readSequence;
+  };
   const choosePair = (side: "leftId" | "rightId", id: string) => {
     if (!pairCurrent() || !snapshot || id !== "" && !versions.some(entry => String(entry.id) === id)) return;
     setPair(previous => ({ snapshot,
@@ -118,12 +126,25 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
   };
   const comparison = ready && pairSelection?.leftId && pairSelection.rightId
     ? compareSavedDiagnoses(versions, { orthoCaseId, leftId: Number(pairSelection.leftId), rightId: Number(pairSelection.rightId) }) : null;
-  const writing = writer?.owner === owner && writer.active;
+  const writing = writer?.owner === owner;
   const saving = savingOwner === owner;
 
+  const openWriter = () => {
+    const committed = lifetime.current;
+    if (committed?.owner !== owner || !committed.active || !committed.ready || committed.saving) return;
+    const next = { owner }; writerRef.current = next; setWriter(next);
+  };
+  const cancelWriter = () => {
+    const committed = lifetime.current;
+    if (committed?.owner !== owner || !committed.active || !writer || writerRef.current !== writer || committed.saving) return;
+    writerRef.current = null; setWriter(null);
+  };
+
   const save = async (content: Record<string, string>, label: string) => {
-    if (!owner.active || !canWrite || !owner.ready || !writer?.active || writer.owner !== owner || owner.saving) return;
-    owner.saving = true;
+    const committed = lifetime.current;
+    if (!committed || committed.owner !== owner || !committed.active || !canWrite || !committed.ready
+      || !writer || writerRef.current !== writer || writer.owner !== owner || committed.saving) return;
+    committed.saving = true;
     setSavingOwner(owner);
     onError?.(null);
     try {
@@ -132,18 +153,18 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
         body: JSON.stringify({ content, label, orthoCaseId }),
       });
       const payload = await response.json().catch(() => null);
-      if (!owner.active) return;
+      if (!committed.active) return;
       if (!response.ok) { onError?.(payload?.message ?? "تعذّر الحفظ."); return; }
-      writer.active = false;
+      writerRef.current = null;
       setWriter(null);
       // The POST has settled. A bounded refresh must not keep the write latch
       // held if an old transport ignores abort after its read deadline.
       void load();
     } catch {
-      if (owner.active) onError?.("تعذّر الاتصال بالخادم.");
+      if (committed.active) onError?.("تعذّر الاتصال بالخادم.");
     } finally {
-      owner.saving = false;
-      if (owner.active) setSavingOwner(null);
+      committed.saving = false;
+      if (committed.active) setSavingOwner(null);
     }
   };
 
@@ -186,7 +207,7 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
         {failed ? (
           <div role="alert" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
             <p>{readFailure}</p>
-            <button type="button" onClick={() => { if (owner.active) void load(); }}
+            <button type="button" onClick={() => { if (isCurrentOwner()) void load(); }}
               className="mt-2 min-h-11 rounded-lg px-2 font-bold underline">إعادة تحميل التشخيص</button>
           </div>
         ) : !ready ? (
@@ -221,13 +242,13 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
           {comparison?.ok ? <OrthoDiagnosisComparison comparison={comparison} /> : comparison ? <p role="alert" className="text-xs">تعذّرت مقارنة الاختيار؛ اختر قيدين مختلفين من سجل هذه الحالة.</p> : <p className="text-xs">لم يُحدّد قيدان للمقارنة بعد.</p>}
         </section>}
         {canWrite && ready && (!writing ? (
-          <button type="button" onClick={() => { if (owner.active && owner.ready && !owner.saving) setWriter({ owner, active: true }); }}
+          <button type="button" onClick={openWriter}
             className="w-full rounded-xl border border-navy-800 bg-white py-2 text-xs font-bold text-navy-800 hover:bg-navy-50 transition-colors">
             {current ? "+ تحديث التشخيص (نسخة جديدة — لا يمسح القديم)" : "+ سجّل تشخيص هذه الحالة"}
           </button>
         ) : (
           <DiagnosisForm key={`${patientId}:${orthoCaseId}:${session?.userId}:${session?.username}:${session?.role}`} saving={saving}
-            onCancel={() => { if (owner.active && writer && !owner.saving) { writer.active = false; setWriter(null); } }} onSave={save} />
+            onCancel={cancelWriter} onSave={save} />
         ))}
       </div>
     </div>
