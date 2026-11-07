@@ -36,7 +36,7 @@ export class CanonicalPlanInstallmentOutcome extends Error {
 
 export const PLAN_MISSING = "الخطة غير موجودة.";
 const PATIENT_MISSING = "المريض غير موجود.";
-export type ScopedAction = "clinical.plans.edit" | "finance.payments.collect" | "finance.invoices.create" | "finance.agreements.manage";
+export type ScopedAction = "clinical.plans.edit" | "finance.payments.collect" | "finance.invoices.create" | "finance.agreements.manage" | "finance.legacy.record" | "finance.legacy.void";
 
 export async function earlyInside(client: DbClient, handle: StaffOperationHandle, action: ScopedAction, patientId: number): Promise<boolean> {
   const scope = await staffOperationPatientScope(client, handle, action);

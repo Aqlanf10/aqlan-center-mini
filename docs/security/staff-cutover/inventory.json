@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "2ccbad7ac6787679245e26b0a3862c5af1c3aaa49c4538857d54ad0f1f10b579",
+  "sourceDigest": "20e56249b8198090bde995ab520b97085e7ceba1ed5d4a6bb8acd99dddb0810a",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -69,7 +69,9 @@
     "finance.invoices.cancel",
     "finance.invoices.mark-paid",
     "finance.payments.refund",
-    "finance.invoices.correct"
+    "finance.invoices.correct",
+    "finance.legacy.record",
+    "finance.legacy.void"
   ],
   "summary": {
     "routeMethods": 420,
@@ -2521,11 +2523,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 70
         }
       ]
     },
@@ -2538,7 +2540,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 43
         }
       ]
     },
@@ -2551,11 +2553,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 38
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 66
+          "line": 83
         }
       ]
     },
@@ -10857,11 +10859,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 38
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 66
+          "line": 83
         }
       ]
     },
@@ -10884,11 +10886,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 38
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 66
+          "line": 83
         }
       ]
     },
@@ -10910,11 +10912,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 70
         }
       ]
     },
@@ -10936,11 +10938,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 70
         }
       ]
     },
@@ -10963,7 +10965,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 43
         }
       ]
     },

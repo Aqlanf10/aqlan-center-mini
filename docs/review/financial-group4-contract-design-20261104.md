@@ -552,3 +552,10 @@ The writers are unchanged: keys and request hashes, the patient, debt-account, p
   - `own` outside reads as missing;
   - a race in which the patient leaves the scope while the writer waits for the patient row;
   - revocation.
+
+### 95b detail, written before its code: pre-system treatments
+
+- **Record** (`POST /legacy-treatments`): `finance.legacy.record`. The writer receives `canEditOpening = finance.opening-balances.manage`, so an increase of an existing opening is refused without it (`opening_edit_forbidden`), as the legacy reception was. When repayment terms are sent, the writer's label-and-setting check is replaced by the branded actor's re-check of the same grants.
+- **Preview** (`POST /legacy-treatments/preview`): read-only, in one snapshot under the new read `read:legacy.record`, which needs `finance.legacy.record`. The opening effect (none, created, increased) is shown. The current and resulting opening amounts are shown only with `finance.patient-ledger.view`: the record grant does not reveal another person's opening amount.
+- **Void** (`GET` the impact preview under the new read `read:legacy.void`, `POST` apply): `finance.legacy.void` **and** `finance.patient-ledger.view`. The impact preview and the voided agreement show amounts recorded by someone else (principal, collections, remaining), and under G4-1 amounts need the ledger view; the void grant alone does not reveal them. The `manager_authorized` mode is the legacy administrator's exception, which removes principal although collections exist; it needs `finance.opening-balances.manage` as well. These are a fifth and sixth point, extending point 4.
+- Every refusal returns the legacy message and status. The operation then rolls back, so a refused act writes nothing.
