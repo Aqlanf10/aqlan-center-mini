@@ -185,6 +185,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     // فالسطر الذي يُفشله يهمّ من يشغّل الاستعادة، والهدف المعزول يُتخلّص منه بأمان.
     const migrationPool = clientAsPool(client);
     try {
+      // Both migration SQL (including Unicode escapes) and archive data require
+      // deterministic literal semantics, even when the target database defaults off.
+      await client.query("SET standard_conforming_strings = on");
       const migrationRun = await migrate(migrationPool, { apply: true, files: migrationFiles });
       result.migrationsApplied = migrationRun.appliedVersions;
 
@@ -194,7 +197,6 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
       result.skippedMigrationRecordLines = prepared.skippedMigrationRecordLines;
       result.sqlRowsStatementLines = prepared.sqlRowsStatementLines;
       const dataSql = prepared.dataSql;
-      await client.query("SET standard_conforming_strings = on");
       await client.query("BEGIN");
       try {
         const cyclicKeys = await nonDeferrableCyclicForeignKeys(client);

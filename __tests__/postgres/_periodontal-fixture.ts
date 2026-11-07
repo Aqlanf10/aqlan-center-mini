@@ -72,6 +72,16 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
     return periodontalCandidateMigrationVersion(files.slice(0, -1));
   if (files.at(-1)?.version === "0106" && files.at(-1)?.filename === "0106_ortho_assessment_verifier_2_2.sql")
     return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  // Restored prescription lineage is an indivisible reviewed extension, not a new
+  // production allocation for the inactive periodontal fixture.
+  const lineage = ["0090_booking_request_preferences.sql", "0091_prescribing_doctor_identity.sql",
+    "0092_prescribing_doctor_snapshot.sql", "0093_prescription_issuance_commands.sql"];
+  if (files.some(file => ["0090", "0091", "0092", "0093"].includes(file.version))) {
+    const tail = files.slice(-4);
+    if (tail.length !== 4 || tail.some((file, index) => file.filename !== lineage[index] || file.version !== lineage[index].slice(0, 4)))
+      throw new Error("Prescription lineage requires the exact reviewed 0090–0093 chain.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -4));
+  }
   const reviewedAdditions: Record<string, string> = {
     "0066": "0066_agreement_delta_amendments.sql",
     "0067": "0067_patient_appointment_history_index.sql",

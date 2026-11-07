@@ -192,7 +192,7 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     // No baseline adoption on drift. Only the pre-existing runtime extensions remain.
     const { rows } = await pool.query<{ version: string; checksum: string }>('SELECT version, checksum FROM schema_migrations ORDER BY version');
     expect(rows).toEqual(before.rows);
-    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0106', '0108', '0109', '0110', '0111', '0112', '0113', '0114', '0115', '0116', '0117', '0118', '0119', '0120', '0121', '0122']);
+    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091', '0092', '0093', '0106', '0108', '0109', '0110', '0111', '0112', '0113', '0114', '0115', '0116', '0117', '0118', '0119', '0120', '0121', '0122']);
     expect(rows.some(row => row.version === BASELINE_VERSION)).toBe(false);
   });
 

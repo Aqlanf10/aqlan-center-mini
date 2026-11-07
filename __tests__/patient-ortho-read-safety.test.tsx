@@ -4,6 +4,7 @@ import { PatientOrtho, type AdjustmentForm } from "../components/PatientOrtho";
 import type { SessionInfo } from "../components/SessionProvider";
 import type { StudyMountOwner } from "../lib/ortho-case-study-mount-owner";
 import { syntheticStudyCommand } from "./fixtures/ortho-case-study";
+import { readAdjustmentCommand } from "../lib/ortho-adjustment-command";
 import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
 
 // STATUS: UNRUN. Source-authored deterministic regressions. Actual parent,
@@ -877,11 +878,20 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     if (phase === "adjustment") respond(command, { id: 81 });
     else respond(writes()[1], {});
     await pending; await flush();
+    // View retirement must not discard a verified durable receipt or publish into
+    // the removed form. The parent mutation may finish while this view is absent.
+    const recovered = readAdjustmentCommand(sessionStorage, { patientId, caseId: 41, authority: `user:${hooks.session!.userId}` });
+    expect(recovered?.receipt?.id).toBe(81);
+    expect(recovered?.key).toBe(new Headers(command.init?.headers).get("Idempotency-Key"));
+    expect(recovered?.body).toBe(command.init?.body);
+    expect(hooks.retiredWrites).toBe(0);
     expect(writes()).toHaveLength(phase === "adjustment" ? 1 : 2);
     expect(text(render())).not.toContain("الجلسة القادمة المقترحة");
     expect(revokeURL).not.toHaveBeenCalled();
     refresh(); await grant(); expect(fields()).toEqual(before);
     expect(elements(render()).some((node) => node.props["data-testid"] === "ortho-write-uncertain")).toBe(true);
+    expect(text(render())).toContain("تم حفظ الشدّة رقم 81");
+    expect(elements(render()).some((node) => node.props["data-testid"] === "adjustment-new-intent")).toBe(true);
     await submit(oldForm); await submit(); await flush();
     expect(writes()).toHaveLength(phase === "adjustment" ? 1 : 2);
     expect(createURL.mock.calls).toEqual([[first], [second]]); expect(revokeURL).not.toHaveBeenCalled();

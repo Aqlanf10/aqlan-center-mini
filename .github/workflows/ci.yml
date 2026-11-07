@@ -55,7 +55,17 @@ jobs:
       - name: Verify environment contract
         run: npm run verify:environment
 
+      # The complete application/test graph exceeds Node's default ~2 GiB heap.
+      # Scope the larger limit to this gate; verify actual runner/cgroup headroom
+      # first rather than skipping files or making compiler diagnostics optional.
+      - name: Verify full typecheck memory capacity
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: node scripts/typecheck-memory.mjs
+
       - name: Typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run typecheck
 
       # Phase 1A introduced ESLint primarily as a correctness guardrail

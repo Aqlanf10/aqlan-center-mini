@@ -621,12 +621,27 @@ use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
 
+## Preserved Staging prescription lineage: 0090–0093
+
+The composed candidate retains the original reviewed SQL bytes and checksums:
+
+- `0090_booking_request_preferences.sql`: Historical booking preference lineage.
+  Retaining this migration does not enable booking application features.
+- `0091_prescribing_doctor_identity.sql`: Saved prescribing doctor identity.
+- `0092_prescribing_doctor_snapshot.sql`: Immutable saved prescriber display data.
+- `0093_prescription_issuance_commands.sql`: Durable issuance command receipts
+  supporting atomic issuance and recovery without a duplicate prescription.
+
+These entries coexist with newer orthodontic migrations. Do not renumber or
+rewrite historical SQL, remove registry entries, or infer permission to issue
+for another clinician from a role alone. Exact-head schema checks remain required.
+
 ## Local orthodontic integration chain: 0106–0122
 
 **Local integration only, not deployed to Staging or Production.** These entries
 describe the reviewed source files and their runtime registration in this local
 candidate, not evidence that any live database has applied them. The current
-source contains 82 numbered migrations; absent numbers are not available for
+source contains 86 numbered migrations; absent numbers are not available for
 reuse. Exact-head CI, schema verification and deployment acceptance remain
 separate requirements.
 

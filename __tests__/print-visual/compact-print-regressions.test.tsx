@@ -9,17 +9,19 @@ import tailwindcss from "tailwindcss";
 import autoprefixer from "autoprefixer";
 import tailwindConfig from "../../tailwind.config";
 import { SETTING_DEFAULTS } from "../../lib/settings";
+import { friendlyDateLong } from "../../lib/reminders";
 import { dispatchOrder } from "../fixtures/lab-dispatch";
 import { assertLabDispatchPdfFields } from "../helpers/lab-dispatch-pdf-fields";
 
-vi.mock("@/lib/session", () => ({ requireSession: async () => ({ role: "admin", username: "SYN-DRAFT-CLINICIAN" }) }));
+vi.mock("@/lib/session", () => ({ requireSession: async () => ({ role: "admin", username: "SYN-SESSION-CLINICIAN" }) }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: async () => true }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null, ReprintMark: () => null }));
 vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", printCount: async () => 0,
   getSettingsSafe: async () => SETTING_DEFAULTS,
+  getPrescriptionPrintSettings: async () => SETTING_DEFAULTS,
   patientAppointmentsFrom: async () => [{ id: 1, patientId: 2, scheduledDate: "2031-01-04", scheduledTime: "09:30", status: "booked" }],
   getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
-  getPrescription: async () => ({ id: 11, patientId: 1, createdBy: "SYN-SAVED-CLINICIAN", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: [{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }] }),
+  getPrescription: async () => ({ id: 11, patientId: 1, status: "active", prescribingDoctorName: "SYN-SAVED-CLINICIAN", createdBy: "SYN-SAVED-AUTHOR", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "SYN-SAVED-NOTES", items: [{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }] }),
   getLabOrderById: async () => dispatchOrder({ labName: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456", serviceName: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", workType: "SYNTHETIC-DISPATCH-SERVICE-1234567890123" }),
   getPayment: async () => ({ id: 1, receiptNumber: "SYN-PROV-ORIGINAL-BHGFBCDEFABCD", patientName: "SYNTHETIC-RECEIPT-PROVENANCE", invoiceId: 1, kind: "payment", amountMinor: 50000, currency: "YER", method: "cash", createdBy: "SYNTHETIC-SIGNER", createdAt: "2000-03-02T22:00:00.000Z" }),
 }));
@@ -51,16 +53,49 @@ function labCss() {
   return css.toString();
 }
 describe("native compact print regression witnesses", () => {
-  it.each(["receipt", "lab", "prescription-saved", "prescription-draft", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
+  // Drafts and query-authored clinical fields are deliberately unsupported.
+  // Keep these witnesses separate from valid saved-record PDF rendering.
+  it.each<[string, Awaited<Parameters<typeof PrescriptionPage>[0]["searchParams"]>]>([
+    ["legacy draft", { draft: "1", items: "[]", diagnosis: "SYN-URL-TAMPER" }],
+    ["saved draft override", { rx: "11", draft: "1" }],
+    ["saved items override", { rx: "11", items: "[]" }],
+    ["saved diagnosis override", { rx: "11", diagnosis: "SYN-URL-TAMPER" }],
+    ["saved notes override", { rx: "11", notes: "SYN-URL-TAMPER" }],
+    ["empty clinical override", { rx: "11", diagnosis: "" }],
+    ["missing saved ID", {}],
+    ["zero saved ID", { rx: "0" }],
+    ["negative saved ID", { rx: "-1" }],
+    ["fractional saved ID", { rx: "1.5" }],
+    ["ambiguous saved ID", { rx: ["11", "12"] }],
+    ["unsafe saved ID", { rx: "9007199254740992" }],
+  ])("rejects %s before prescription rendering", async (_label, query) => {
+    await expect(PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(query) }))
+      .rejects.toThrow("NEXT_HTTP_ERROR_FALLBACK;404");
+  });
+
+  it("renders the saved prescription snapshot unchanged by historical query metadata", async () => {
+    const renderSaved = async (query: Awaited<Parameters<typeof PrescriptionPage>[0]["searchParams"]>) =>
+      renderToStaticMarkup(await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(query) }));
+    const saved = await renderSaved({ rx: "11" });
+    const overridden = await renderSaved({ rx: "11", doctorName: "SYN-URL-TAMPER", doctorPartyId: "999", date: "1900-01-01", lang: "ar" });
+    expect(overridden).toBe(saved);
+    for (const field of ["SYN-RX-PATIENT", "SYN-RX-001", "SYN-SAVED-CLINICIAN", "SYN-SAVED-DIAGNOSIS", "SYN-SAVED-NOTES", "SYNTHETIC-RX-MEDICATION", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", "تعليمات اصطناعية للاختبار", friendlyDateLong("2031-01-15")]) {
+      expect(saved).toContain(field);
+    }
+    expect(saved).not.toContain("SYN-SAVED-AUTHOR");
+    expect(saved).not.toContain("SYN-SESSION-CLINICIAN");
+  });
+
+  it.each(["receipt", "lab", "prescription-saved", "prescription-saved-metadata", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
     const prescription = kind.startsWith("prescription-");
     const node = kind === "patient-card" ? await PatientCardPage({ params: Promise.resolve({ id: "2" }) }) : prescription
       ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(kind === "prescription-saved"
-        ? { rx: "11", diagnosis: "SYN-URL-TAMPER" }
-        : { draft: "1", lang: "both", diagnosis: "SYN-DRAFT-DIAGNOSIS", items: JSON.stringify([{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }]) }) })
+        ? { rx: "11" }
+        : { rx: "11", doctorName: "SYN-URL-TAMPER", doctorPartyId: "999", date: "1900-01-01", lang: "ar" }) })
       : await (kind === "receipt" ? ReceiptPage : LabPage)({ params: Promise.resolve({ id: "1" }) });
     const body = renderToStaticMarkup(<><PrintDocumentWatermark /><div className="print-root">{node}</div></>);
     const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
-    const css = globalCss + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + (kind === "lab" ? labCss() : "");
+    const css = globalCss + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + (kind === "lab" ? labCss() : "") + (prescription ? readFileSync(resolve("app/print/prescription/[id]/prescription.css"), "utf8") : "");
     if (kind === "lab") expect(css).toContain(`.${labStyles.sheet} .${labStyles.labIdentity} { display: block; line-height: 1.35; }`);
     const output = resolve(".settings-ui-artifacts/unified-print");
     mkdirSync(output, { recursive: true });
@@ -103,7 +138,7 @@ describe("native compact print regression witnesses", () => {
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
         const references = kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
-          ? ["SYN-RX-PATIENT", "SYN-RX-001", "SYNTHETIC-RX-MEDICATION", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", kind === "prescription-saved" ? "SYN-SAVED-CLINICIAN" : "SYN-DRAFT-CLINICIAN", kind === "prescription-saved" ? "SYN-SAVED-DIAGNOSIS" : "SYN-DRAFT-DIAGNOSIS"]
+          ? ["SYN-RX-PATIENT", "SYN-RX-001", "SYNTHETIC-RX-MEDICATION", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", "SYN-SAVED-CLINICIAN", "SYN-SAVED-DIAGNOSIS", "SYN-SAVED-NOTES"]
           : ["SYN-PROV-ORIGINAL-BHGFBCDEFABCD", "SYN-REV-00002", "SYN-REP-00003"];
         for (const reference of references) expect(text).toContain(reference);
         if (kind === "patient-card") {
@@ -112,7 +147,16 @@ describe("native compact print regression witnesses", () => {
         }
         if (prescription) {
           expect(text).not.toContain("SYN-URL-TAMPER");
-          expect(text.includes("DRAFT")).toBe(kind === "prescription-draft");
+          expect(text).not.toContain("DRAFT");
+          expect(text).not.toContain("SYN-SESSION-CLINICIAN");
+          expect(text).not.toContain("SYN-SAVED-AUTHOR");
+          expect(text).not.toContain("1900");
+          expect(body).toContain("تعليمات اصطناعية للاختبار");
+          expect(await page.locator("html").evaluate(node => getComputedStyle(node).direction)).toBe("rtl");
+          expect(await page.locator('[data-prescription-body="ltr"]').evaluate(node => getComputedStyle(node).direction)).toBe("ltr");
+          expect(await page.locator('[data-prescription-body="ltr"] [dir="rtl"]').evaluate(node => getComputedStyle(node).direction)).toBe("rtl");
+          expect(await page.locator(".prescription-page-identity").innerText()).toContain("Rx #11");
+          expect(await page.locator(".sign-row").innerText()).toContain("SYN-SAVED-CLINICIAN");
         }
       }
     } finally { await browser.close(); }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import lifecycleDeltas from "./fixtures/reviewed-contracts/diagnosis-lifecycle.json";
 import diagnosisDeltas from "./fixtures/reviewed-contracts/diagnosis-owner.json";
 import { reverseReviewedDeltas } from "./helpers/reviewed-source-deltas";
 import { DIAGNOSIS_CHOICE_GROUPS } from "../lib/diagnosis-choice-options";
@@ -11,7 +12,7 @@ describe("case diagnosis choice boundaries", () => {
     const start = source.indexOf("const READ_TIMEOUT_MS =");
     const end = source.indexOf("function DiagnosisForm(", start);
     expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start);
-    expect(createHash("sha256").update(reverseReviewedDeltas(source.slice(start, end), diagnosisDeltas)).digest("hex"))
+    expect(createHash("sha256").update(reverseReviewedDeltas(reverseReviewedDeltas(source.slice(start, end), lifecycleDeltas), diagnosisDeltas)).digest("hex"))
       .toBe("85e504adeb5112baa10aa2c629fc03c96b88eb101ec7407d0ac61aeb8b7f30ca");
   });
   it("retains the existing blank partial revision and exact six-key versioned submission", () => {

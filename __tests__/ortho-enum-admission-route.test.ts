@@ -1,3 +1,7 @@
+// This suite executes server routes in Node, outside Next's server-module resolver.
+// Keep the production server-only marker; supply only its server-context test stub.
+vi.mock("server-only", () => ({}));
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OrthoCase } from "@/lib/db";
 import { PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL } from "@/lib/ortho";
@@ -9,14 +13,14 @@ vi.mock("@/lib/patient-access", () => ({ canAccessPatient: vi.fn() }));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden", getOrthoCase: vi.fn(), findUserByUsername: vi.fn(),
   setOrthoPhase: vi.fn(), setRetainer: vi.fn(), recordAdjustment: vi.fn(),
-  closeOrthoCase: vi.fn(), linkOrthoCasePlan: vi.fn(),
+  closeOrthoCase: vi.fn(), linkOrthoCasePlan: vi.fn(), getPool: vi.fn(),
 }));
 
 import { PATCH, POST } from "@/app/api/ortho/[id]/route";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import {
-  getOrthoCase, setOrthoPhase, setRetainer, recordAdjustment, closeOrthoCase, linkOrthoCasePlan,
+  getOrthoCase, setOrthoPhase, setRetainer, recordAdjustment, closeOrthoCase, linkOrthoCasePlan, getPool,
 } from "@/lib/db";
 
 const handlers = { PATCH, POST };
@@ -186,13 +190,13 @@ describe("actual POST phase own-key normalization", () => {
   });
 });
 
-describe("PATCH action precedence stays unchanged", () => {
-  it("planId still wins over inherited phase and retainer strings", async () => {
-    expect((await call("PATCH", { planId: null, phase: "constructor", retainer: "__proto__", status: "completed" })).status).toBe(200);
-    expect(linkOrthoCasePlan).toHaveBeenCalledWith({
-      caseId: 41, planId: null, actor: "synthetic-admin", actorRole: "admin",
-    });
-    onlyWriter(linkOrthoCasePlan);
+describe("PATCH action precedence and versioned link admission", () => {
+  it.each([undefined, "a".repeat(64)])("refuses mixed plan-link intent before a transaction (version %s)", async (expectedVersion) => {
+    const response = await call("PATCH", { planId: null, expectedVersion, phase: "constructor", retainer: "__proto__", status: "completed" });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "invalid_link" });
+    noWriters();
+    expect(getPool).not.toHaveBeenCalled();
   });
   it("valid phase still wins over inherited retainer and completion", async () => {
     expect((await call("PATCH", { phase: "working", retainer: "constructor", status: "completed" })).status).toBe(200);

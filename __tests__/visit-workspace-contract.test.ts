@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import loadLifecycleDeltas from "./fixtures/reviewed-contracts/visit-load-lifecycle.json";
+import signLifecycleDeltas from "./fixtures/reviewed-contracts/visit-sign-lifecycle.json";
 import signDeltas from "./fixtures/reviewed-contracts/visit-sign.json";
 import { reverseReviewedDeltas } from "./helpers/reviewed-source-deltas";
 
@@ -48,13 +50,13 @@ describe("actual visit workspace retains its authoritative contracts", () => {
   it.each(baseline)("keeps $label identical except for exact reviewed admission deltas", ({ label, start, end, sha }) => {
     const from = source.indexOf(start); expect(from).toBeGreaterThan(-1);
     const to = source.indexOf(end, from); expect(to).toBeGreaterThan(from);
-    const slice = source.slice(from, to);
+    const slice = reverseReviewedDeltas(source.slice(from, to), label === "load" ? loadLifecycleDeltas : label === "sign" ? signLifecycleDeltas : []);
     expect(createHash("sha256").update(label === "sign" ? reverseReviewedDeltas(slice, signDeltas) : slice).digest("hex")).toBe(sha);
   });
   it("retains the original invoice-verification-only delta after reviewed admission changes", () => {
     const from = source.indexOf("  const sign = useCallback(");
     const to = source.indexOf("  /** (VISIT-2) فتح ملف", from);
-    const sign = reverseReviewedDeltas(source.slice(from, to), signDeltas);
+    const sign = reverseReviewedDeltas(reverseReviewedDeltas(source.slice(from, to), signLifecycleDeltas), signDeltas);
     const reviewedInsertion = ", invoiceReferenceState: undefined";
     expect(sign.split(reviewedInsertion)).toHaveLength(2);
     expect(createHash("sha256").update(sign.replace(reviewedInsertion, "")).digest("hex"))

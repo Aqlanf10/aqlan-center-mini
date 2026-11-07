@@ -1,3 +1,7 @@
+// This suite executes server routes in Node, outside Next's server-module resolver.
+// Keep the production server-only marker; supply only its server-context test stub.
+vi.mock("server-only", () => ({}));
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mock=vi.hoisted(()=>({session:vi.fn(),access:vi.fn(),found:vi.fn(),close:vi.fn(),phase:vi.fn(),retainer:vi.fn()}));
 vi.mock('@/lib/session',()=>({requireSession:mock.session}));

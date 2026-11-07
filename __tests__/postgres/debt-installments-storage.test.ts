@@ -1,3 +1,4 @@
+import reviewedMigrations from "../fixtures/reviewed-migration-manifest.json";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
@@ -34,7 +35,10 @@ describe("0059 existing-debt allocation storage",()=>{
   it("keeps migration/bootstrap byte-identical, applies with gaps and leaves prior invoice facts intact",async()=>{
     expect(readFileSync("migrations/0059_invoice_debt_installments.sql","utf8")).toBe(DEBT_INSTALLMENTS_SQL);
     expect((await q("SELECT to_jsonb(i) AS facts FROM invoices i WHERE id=$1",[invoiceId]))[0].facts).toEqual(oldInvoice);
-    expect((await q("SELECT version FROM schema_migrations ORDER BY version")).map(r=>r.version).at(-1)).toBe("0089");
+    expect(await q("SELECT version,name,checksum FROM schema_migrations ORDER BY version")).toEqual(
+      reviewedMigrations.filter(file => file.version <= "0059" || ["0063", "0064", "0065", "0066", "0067", "0068", "0069", "0078", "0087", "0089", "0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122"].includes(file.version))
+        .map(({version,name,checksum}) => ({version,name,checksum})),
+    );
   });
   it("creates exact terms without a second invoice or receipt; exact retry returns the same version",async()=>{
     const first=await schedules.saveDebtRepayment(input("debt-create-exact"));

@@ -2044,20 +2044,30 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   // Never publish another scope during render, including an abandoned render.
   type CommandState = { scope: typeof commandScope; command: AdjustmentCommand | null; blocked: boolean };
   const commandRef = useRef<CommandState | null>(null);
+  const commandPublication = useMemo(() => ({ scope: commandScope, draft: form.draft }), [commandScope, form.draft]);
+  const committedCommandPublication = useRef<object | null>(null);
   const [commandSnapshot, setCommandSnapshot] = useState<CommandState | null>(null);
   const commandState = commandSnapshot?.scope === commandScope ? commandSnapshot : { scope: commandScope, command: null, blocked: true };
-  const publishCommand = (next: CommandState) => { commandRef.current = next; setCommandSnapshot(next); };
+  const publishCommand = (next: CommandState) => {
+    if (committedCommandPublication.current !== commandPublication) return;
+    commandRef.current = next; setCommandSnapshot(next);
+  };
   useLayoutEffect(() => {
+    committedCommandPublication.current = commandPublication;
     try {
       if (!commandScope.authority) throw new Error("Missing immutable actor identity");
       const command = readAdjustmentCommand(sessionStorage, commandScope);
       publishCommand({ scope: commandScope, command, blocked: false });
       if (command) form.uncertain();
     } catch { publishCommand({ scope: commandScope, command: null, blocked: true }); form.uncertain(); }
-    return () => { if (commandRef.current?.scope === commandScope) commandRef.current = null; };
+    return () => {
+      if (committedCommandPublication.current === commandPublication) {
+        committedCommandPublication.current = null; commandRef.current = null;
+      }
+    };
     // The draft/authority lifetime owns recovery, not an asynchronous parent refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commandScope, form.draft]);
+  }, [commandPublication]);
 
   const [queue, setQueue] = form.field<QueuedPhoto[]>("queue", []);
   const [stage, setStage] = form.field<PhotoStage>("stage", () =>
@@ -2128,8 +2138,10 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         if (!response.ok || !isAdjustmentReceipt(payload, command)) {
           form.uncertain(); onError(payload?.message ?? "تعذّر تأكيد تسجيل الشدّة. أعد التحقق بنفس الطلب المحفوظ."); return;
         }
-        // Persist the acknowledgement BEFORE any non-idempotent uploads or parent callback.
-        publishCommand({ ...commandState, command: completeAdjustmentCommand(sessionStorage, command, payload) });
+        // Durable mutation authority can survive the form being concealed. Persist
+        // its receipt even then, but publish UI only to this committed form lifetime.
+        const acknowledged = completeAdjustmentCommand(sessionStorage, command, payload);
+        publishCommand({ ...commandState, command: acknowledged });
         receipt = payload;
       }
       const adjustmentId = receipt.id;

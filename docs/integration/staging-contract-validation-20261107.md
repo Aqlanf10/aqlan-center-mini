@@ -62,3 +62,14 @@ The historical 161-error inventory requires a fresh final-head scan. No final-he
 Diagnosis and lab unknown-POST handling releases its latch. Referrals principal scoping relies on parent remount. Lab overview query keys omit user ID. Existing retention-removal callback and draft-epoch gaps remain unchanged. The synthetic hooks harness is not ReactDOM, StrictMode or browser evidence.
 
 All database validation described here used synthetic local databases. The report establishes no live-database, backup, Production-setting or deployment verification. Full aggregate types, build, exact-head CI, remaining review, and browser/PDF gates remain pending. A production release requires verified backup readiness and deployment-target isolation in addition to those gates.
+
+
+## CI repair and preserved follow-up checkpoint
+
+This checkpoint includes the later reviewed PostgreSQL fixture/provenance, schema disclosure, strict test-contract, and adjustment UI publication repairs. It preserves the saved receipt while refusing publication through a retired React form setter. Migration SQL and production authorization contracts remain unchanged.
+
+Hosted CI for the preceding checkpoint `51cfbf8114408e759b394bd808c279a8ac135620` exhausted the default approximately 2 GiB V8 heap during full TypeScript checking before production build. The Typecheck step now requests 4096 MiB and checks measured runner/cgroup capacity and availability before compilation. Full TypeScript coverage, strict compiler options, and mandatory build remain intact. The capacity/environment regression group passed 89 tests. Actual hosted TypeScript and build success remain required.
+
+The synthetic print suite previously passed 35 of 37 cases; two obsolete prescription fixtures attempted unsupported draft/query-authored clinical data. The repaired test requires a saved Rx snapshot, rejects 12 unsafe query forms, and verifies historical metadata cannot override the saved record. Thirteen non-browser cases passed; the five PDF cases retain A5/native-page, field, geometry, and directionality assertions and require hosted browser execution. No production prescription route was loosened.
+
+Focused PostgreSQL repair groups, exact migration lineage and disclosure checks, and the relevant UI regression suites passed. Preflight passed all 12 cases, including the negative dependency-symlink escape witness, with production allowlists unchanged. The complete unit suite is being rerun against this source checkpoint. The preceding full run had 94 failures and 11 skipped tests; targeted repairs are not a replacement for the aggregate result. Local full TypeScript remained resource-blocked, and hosted TypeScript, PostgreSQL, full unit, lint, audit, build, preflight, HTTP and browser gates must pass on the final remote head before deployment. No Staging or Production deployment is performed by this checkpoint.

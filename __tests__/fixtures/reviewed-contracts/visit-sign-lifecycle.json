@@ -1,0 +1,10 @@
+[
+  {
+    "before": "      if (!currentOwner() || command.current !== attempt) return;\n      acceptedReadOwner.current = null;\n      loadSequence.current += 1;\n      setLoadedOwner(null); setReviewOpen(false); setBillingPreview(null);\n      setErrorOwner(owner); setError(\"تعذّر تأكيد نتيجة التوقيع. قد تكون الزيارة وُقّعت؛ أعد تحميل السجل قبل أي محاولة أخرى.\");\n    };\n    try {\n",
+    "after": "      if (!currentOwner() || command.current !== attempt) return;\n      acceptedReadOwner.current = null;\n      loadSequence.current += 1;\n      setLoadedOwner(null); setReviewOpen(false); setPreviewSnapshot(null);\n      setErrorOwner(owner); setError(\"تعذّر تأكيد نتيجة التوقيع. قد تكون الزيارة وُقّعت؛ أعد تحميل السجل قبل أي محاولة أخرى.\");\n    };\n    try {\n"
+  },
+  {
+    "before": "        return;\n      }\n      if (!isClinicalSignResult(payload, visitId, expectedPatientId ?? visit?.patientId)) { unknownOutcome(); return; }\n      confirmedSignOwner.current = owner;\n      setServerUnmet([]);\n      setReviewOpen(false);\n      setOrthoSession(null); setOverrideReason(\"\"); setNoChargeAdjustment(false); setNoChargeReason(\"\");\n",
+    "after": "        return;\n      }\n      if (!isClinicalSignResult(payload, visitId, expectedPatientId ?? visit?.patientId)) { unknownOutcome(); return; }\n      confirmedSignOwner.current = owner; setSignedOwner(owner);\n      setServerUnmet([]);\n      setReviewOpen(false);\n      setOrthoSession(null); setOverrideReason(\"\"); setNoChargeAdjustment(false); setNoChargeReason(\"\");\n"
+  }
+]
