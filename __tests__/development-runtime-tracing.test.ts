@@ -32,8 +32,13 @@ const expectedExcludes = [
 ];
 const exclusions = nextConfig.outputFileTracingExcludes ?? {};
 const routeMatchers = new Map<string, (file: string) => boolean>();
+const routeFileMatches = new Map<string, Map<string, boolean>>();
 
 function excluded(route: string, file: string): boolean {
+  let results = routeFileMatches.get(route);
+  if (!results) { results = new Map(); routeFileMatches.set(route, results); }
+  const previous = results.get(file);
+  if (previous !== undefined) return previous;
   let matcher = routeMatchers.get(route);
   if (!matcher) {
     const patterns = Object.entries(exclusions)
@@ -42,7 +47,9 @@ function excluded(route: string, file: string): boolean {
     matcher = patterns.length > 0 ? picomatch(patterns, options) : () => false;
     routeMatchers.set(route, matcher);
   }
-  return matcher(path.join(root, file));
+  const result = matcher(path.join(root, file));
+  results.set(file, result);
+  return result;
 }
 
 function files(directory: string): string[] {
@@ -60,9 +67,18 @@ const retainedScripts = files("scripts").filter((file) => !developmentScripts.ha
   && !file.startsWith("scripts/dependency-review/") && !file.startsWith("scripts/dependency-security/"));
 const runtimeSources = [...files("app"), ...files("components"), ...files("lib"), "proxy.ts"]
   .filter((file) => /\.[cm]?[jt]sx?$/.test(file) && !devLibraries.has(file));
+// Bound each test's synchronous AST workload as the repository grows, without
+// changing the timeout or excluding any source/import/candidate from the gate.
+const sourceBatchSize = 100;
+const sourceBatches = Array.from({ length: Math.ceil(runtimeSources.length / sourceBatchSize) }, (_, index) => ({
+  number: index + 1,
+  sources: runtimeSources.slice(index * sourceBatchSize, (index + 1) * sourceBatchSize),
+}));
 
-function importedModules(file: string): string[] {
-  const source = ts.createSourceFile(file, readFileSync(path.join(root, file), "utf8"), ts.ScriptTarget.Latest, true);
+function importedModules(file: string, text = readFileSync(path.join(root, file), "utf8")): string[] {
+  // The downward-only walk never consults parent pointers. Avoid constructing
+  // a second link for every node in large runtime sources.
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
   const modules: string[] = [];
   function visit(node: ts.Node) {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
@@ -83,6 +99,21 @@ function importedModules(file: string): string[] {
 }
 
 describe("temporary development-only runtime tracing boundary", () => {
+  it.each([
+    ['import value from "@/lib/scoped-braces-exception";', ["@/lib/scoped-braces-exception"]],
+    ['export * as value from "../scripts/dependency-security/tool.mjs";', ["../scripts/dependency-security/tool.mjs"]],
+    ['export { value } from "./tool.mjs";', ["./tool.mjs"]],
+    ['import value = require("./tool.mjs");', ["./tool.mjs"]],
+    ['function nested() { return import(`./tool.mjs`); }', ["./tool.mjs"]],
+    ['function nested() { return require(`./tool.mjs`); }', ["./tool.mjs"]],
+    ['const node = <span>{require("./tool.mjs")}</span>;', ["./tool.mjs"]],
+    ['const text = `${require("./tool.mjs")}`;', ["./tool.mjs"]],
+    ['import "\\u002e/tool.mjs";', ["./tool.mjs"]],
+    ['// require("./comment.mjs")\nconst text = \'import("./text.mjs")\';', []],
+  ] as const)("retains literal module detection for %s", (source, expected) => {
+    expect(importedModules("synthetic.tsx", source)).toEqual(expected);
+  });
+
   it("has only the reviewed project-owned paths, without a node_modules or broad source exclusion", () => {
     expect(exclusions).toEqual({ "/**": expectedExcludes });
   });
@@ -132,10 +163,16 @@ describe("temporary development-only runtime tracing boundary", () => {
     for (const file of retained) expect(excluded("/api/backup/full", file), file).toBe(false);
   });
 
-  it("does not let runtime app, component or library imports depend on excluded development tooling", () => {
+  it("covers every runtime source exactly once in the bounded import scans", () => {
     expect(runtimeSources.length).toBeGreaterThan(600);
+    expect(sourceBatches.flatMap(batch => batch.sources)).toEqual(runtimeSources);
+    expect(new Set(runtimeSources).size).toBe(runtimeSources.length);
+    expect(sourceBatches.every(batch => batch.sources.length > 0 && batch.sources.length <= sourceBatchSize)).toBe(true);
+  });
+
+  it.each(sourceBatches)("does not let runtime imports depend on excluded development tooling (batch $number)", ({ sources }) => {
     const violations: string[] = [];
-    for (const file of runtimeSources) {
+    for (const file of sources) {
       for (const specifier of importedModules(file)) {
         const target = specifier.startsWith("@/") ? specifier.slice(2)
           : specifier.startsWith(".") ? path.relative(root, path.resolve(root, path.dirname(file), specifier))
