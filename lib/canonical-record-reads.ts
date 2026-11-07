@@ -34,6 +34,10 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:ceph.list": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
   /** GET proposals: existing plan-edit grant and patient scope, independent balances. */
   "read:plans.proposals": Object.freeze({ record: "patient", need: Object.freeze(["clinical.plans.edit"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/legacy, /legacy-onboarding, /legacy-treatments and
+   * /historical-documents (M2 slice 95a, G4-2): the clinical description with the patient record
+   * read; every amount with finance.patient-ledger.view; plan sources with clinical.plans.view. */
+  "read:patients.history": Object.freeze({ record: "patient", need: Object.freeze([] as const), anyOf: Object.freeze([]) }),
   /** GET /api/plans/[id]/agreement-amendment and /reconcile: the agreement previews inside the
    * patient scope; finance.agreements.manage (M2 slice 94d-2). */
   "read:plans.agreement": Object.freeze({ record: "patient", need: Object.freeze(["finance.agreements.manage"] as const), anyOf: Object.freeze([]) }),

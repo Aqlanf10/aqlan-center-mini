@@ -109,7 +109,11 @@ function toView(row: AgreementRow): LegacyAgreementView {
 
 export async function listLegacyTreatments(patientId: number): Promise<LegacyAgreementView[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<AgreementRow>(
+  return listLegacyTreatmentsWith(getPool(), patientId);
+}
+/** The same list on a caller's reader (M2 slice 95a: the canonical read snapshot). */
+export async function listLegacyTreatmentsWith(reader: Pick<DbClient, "query">, patientId: number): Promise<LegacyAgreementView[]> {
+  const { rows } = await reader.query<AgreementRow>(
     `${AGREEMENT_SELECT} WHERE a.patient_id = $1 ORDER BY (a.status = 'live') DESC, a.id DESC`, [patientId]);
   return rows.map(toView);
 }

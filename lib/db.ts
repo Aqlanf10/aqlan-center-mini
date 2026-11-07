@@ -4133,8 +4133,16 @@ export async function patientLegacyHistory(patientId: number): Promise<{
   orphanPayments: LegacyTreatmentView["payments"];
 }> {
   await ensureSchema();
-  const [treatments, payments] = await Promise.all([
-    getPool().query<{
+  return patientLegacyHistoryWith(getPool(), patientId);
+}
+
+/** The archive read on a caller's reader (M2 slice 95a: the canonical read snapshot, where the
+ * two queries run one after the other on the snapshot client). */
+export async function patientLegacyHistoryWith(reader: Pick<DbClient, "query">, patientId: number): Promise<{
+  treatments: LegacyTreatmentView[];
+  orphanPayments: LegacyTreatmentView["payments"];
+}> {
+  const treatments = await reader.query<{
       id: number; legacy_number: number | null; treated_on: string | null; doctor_name: string | null; service: string | null;
       currency: string; price_minor: string; rate: string | null; paid_minor: string; remaining_minor: string;
       has_provenance: boolean; source_kind: string | null; historical_as_of: string | null;
@@ -4145,14 +4153,13 @@ export async function patientLegacyHistory(patientId: number): Promise<{
               to_jsonb(t)->>'source_kind' AS source_kind,
               to_jsonb(t)->>'historical_as_of' AS historical_as_of
          FROM legacy_treatments t WHERE patient_id = $1
-        ORDER BY treated_on NULLS LAST, legacy_number NULLS LAST, id`, [patientId]),
-    getPool().query<{
+        ORDER BY treated_on NULLS LAST, legacy_number NULLS LAST, id`, [patientId]);
+  const payments = await reader.query<{
       legacy_treatment_id: number | null; legacy_number: number; paid_on: string | null; currency: string;
       amount_minor: string; rate: string | null; method: string | null; cash_box: string | null;
     }>(
       `SELECT legacy_treatment_id, legacy_number, paid_on::text, currency, amount_minor::text, rate::text, method, cash_box
-         FROM legacy_payments WHERE patient_id = $1 ORDER BY paid_on NULLS LAST, legacy_number`, [patientId]),
-  ]);
+         FROM legacy_payments WHERE patient_id = $1 ORDER BY paid_on NULLS LAST, legacy_number`, [patientId]);
   const paymentOf = (row: typeof payments.rows[number]) => ({
     legacyNumber: row.legacy_number, paidOn: row.paid_on,
     currency: requireCurrency(row.currency, "دفعة قديمة", row.legacy_number),

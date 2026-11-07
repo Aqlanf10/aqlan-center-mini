@@ -218,6 +218,12 @@ export async function correctHistoricalDocument(patientId:number,documentId:numb
 export async function listHistoricalDocuments(patientId:number){
   await ensureSchema();const client=await getPool().connect();
   try{await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const documents=await listHistoricalDocumentsWith(client,patientId);
+    await client.query("COMMIT");return documents;
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+}
+/** The same list on a caller's read-only snapshot (M2 slice 95a). */
+export async function listHistoricalDocumentsWith(client:DbClient,patientId:number){
     const ids=(await client.query<{id:number}>("SELECT id FROM legacy_treatment_documents WHERE patient_id=$1 ORDER BY id DESC",[patientId])).rows;
     const documents=[];for(const {id} of ids){const document=await readHistoricalDocumentInTx(client,id,patientId);if(!document)continue;
       // Historical facts stay readable after an independent account correction.
@@ -225,6 +231,5 @@ export async function listHistoricalDocuments(patientId:number){
       const opening=await openingEvidence(client,patientId,document.currency,false);const history=(await client.query("SELECT version,reason,created_by,created_at::text,total_minor::text,discount_minor::text,previously_paid_minor::text,remaining_minor::text FROM legacy_treatment_document_revisions WHERE document_id=$1 ORDER BY version",[id])).rows;
       documents.push({...document,sourceHash:opening.sourceHash??debtRequestHash(null),openingPrincipalMinor:opening.position.principalMinor,openingCollectedMinor:opening.position.settledMinor,openingRemainingMinor:opening.position.remainingMinor,accountDueMinor:(await debtAccountDue(client,patientId,document.currency)).due,scheduleVersion:opening.scheduleVersion,
         correctionAvailable:opening.owned,correctionMessage:opening.owned?null:LEGACY_TREATMENT_MESSAGE.opening_not_owned,history});}
-    await client.query("COMMIT");return documents;
-  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+    return documents;
 }

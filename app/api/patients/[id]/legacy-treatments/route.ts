@@ -8,6 +8,9 @@ import { openingBalanceAccess } from "@/lib/opening-access";
 import { canAccessPatient } from "@/lib/patient-access";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalLegacyTreatments } from "@/lib/canonical-legacy-reads";
 import { effectiveTemplates } from "@/lib/specialty-templates";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 
@@ -25,6 +28,13 @@ function patientIdOf(raw: string): number | null {
  * مرضاه (كحساب المريض). الصندوق والمحاسبة لا يبلغون مسارات ملف المريض من الباب أصلًا.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 95a (G4-2): the clinical description with the record read; amounts with the ledger view.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalLegacyTreatments(selected.handle, Number((await context.params).id)), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل العلاجات السابقة للنظام."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = patientIdOf((await context.params).id);

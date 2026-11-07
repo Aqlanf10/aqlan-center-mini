@@ -484,3 +484,71 @@ A plan outside the scope is treated exactly like a missing one:
 - `own` outside reads like missing for a single plan; in the bulk form only the plans inside the scope are stamped and counted.
 - A race in which the patient leaves the scope while the reminder waits for the plan row.
 - Revocation.
+
+## 15. Slice 95 — historical onboarding and documents (G4-2, G4-6, G4-8)
+
+This section is written before the code. It covers the 13 legacy-only methods of the historical group. (`GET legacy-balance-arrangement` is already canonical, since slice 88.)
+
+| Part | Route | Methods | Legacy |
+|---|---|---|---|
+| 95a | `/api/patients/[id]/legacy` | GET | the patient gate and the money read |
+| 95a | `/api/patients/[id]/legacy-onboarding` | GET | the patient gate; plan sources by the plan-read rule |
+| 95a | `/api/patients/[id]/legacy-treatments` | GET | admin, reception; a doctor with "patient account" on own patients |
+| 95a | `/api/patients/[id]/historical-documents` | GET | the same |
+| 95b | `/api/patients/[id]/legacy-treatments` and `/preview` | POST | admin; reception when the setting allows |
+| 95b | `/api/patients/[id]/legacy-treatments/[agreementId]/void` | GET, POST | admin |
+| 95c | `/api/patients/[id]/historical-documents` and `/preview` | POST | admin, reception |
+| 95c | `/api/patients/[id]/historical-documents/[documentId]/correct` | POST | admin |
+| 95d | `/api/patients/[id]/legacy-balance-arrangement` | POST, PATCH | admin, reception |
+
+### 95a — the reads (G4-2)
+
+One read-only snapshot, inside the patient scope. A patient outside the scope reads exactly like a missing one.
+
+| Field group | Shown with |
+|---|---|
+| Existence and the clinical description: service, teeth and site, treatment dates, doctor, specialty, case and plan links, status, the onboarding steps and their clinical classification | the registered patient-record read |
+| Every amount, rate, balance, paid or remaining figure, discount, agreement term, instalment, repayment schedule, opening principal, account due, source hash and schedule version | `finance.patient-ledger.view` in addition |
+| The identities of new plans, plan items and historical documents in the onboarding reference | `clinical.plans.view` in addition (the legacy plan-read rule) |
+| The action flags (`access.add`, `access.edit`, `access.void`, `correctionAvailable`) | computed from the actor's canonical grants (95b–95d), never from a label or a setting |
+
+- `GET /legacy` is the old system's archive. It is all money (treatments with prices and paid amounts, payments). Without `finance.patient-ledger.view` the canonical read answers the legacy 403 refusal (no projection); with it, the archive as in legacy.
+- No grant other than the ledger view reveals an amount. `finance.legacy.record`, the history grants and collect do not.
+- **The original mixed attachment (G4-2):** none of these reads returns a file. The original attachment is served by the patient document routes, which keep their financial guard; nothing here relaxes it.
+
+### 95b–95d — the writes
+
+The writers are unchanged: keys and request hashes, the patient, debt-account, plan-item and document locks, opening ownership, the unallocated-receipt guard, the period lock, the discount controls and the audits. Each is split into an `…On` form on the admitted operation's transaction. The slice 91 branded actor re-proves the grants below at each point where the writer re-validated its session. The scope is decided right after the patient row lock; `own` takes the ownership witness `FOR SHARE NOWAIT`; outside reads as missing.
+
+| Act | Canonical grant |
+|---|---|
+| Record a pre-system treatment, preview it | `finance.legacy.record` |
+| Void a recorded agreement (read its preview, apply) | `finance.legacy.void` (the catalogue requires `finance.legacy.record`) |
+| Record a historical document, preview it | `patients.history.record` |
+| Correct a historical document | `patients.history.correct` (requires `patients.history.record`) **and** `finance.opening-balances.manage` |
+| Write a legacy balance arrangement | `finance.legacy.record` |
+| **Change an existing opening balance** in any of the acts above (anything beyond adding an opening for a currency that has none) | the act's grant **and** `finance.opening-balances.manage` |
+
+### Policy points the map leaves open (recommended; the owner may change them)
+
+1. **Add versus edit an opening.** Legacy splits opening rights by label: admin adds and edits; reception adds only, when `finance.reception_adds_opening_balance` is on. The canonical path keeps the same split by grant: the record grant adds; editing an existing opening also needs `finance.opening-balances.manage`. This is the map's grant for opening writes.
+2. **The reception setting is not a grant** (as G4-6 decided for `workflow.doctor_financial_view`). On the canonical path `finance.reception_adds_opening_balance` changes nothing; only explicit grants count. The legacy behaviour and the setting stay as they are.
+3. **Correction always rewrites the opening** (`addOnly: false`, a credit allowed). It was administrator-only, so it needs `finance.opening-balances.manage` together with `patients.history.correct`, not the correction grant alone.
+4. **Void lowers an opening** that the agreement owns. The map gives `finance.legacy.void` alone. I keep that: the void only removes what the same agreement added, under the ownership check, and never edits another source's opening.
+
+### Tests required before each part's commit
+
+- **95a:**
+  - the record read without the ledger view shows the clinical description and no amount, at any depth of the payload;
+  - with the ledger view, the legacy body;
+  - `GET /legacy` without the ledger view answers 403;
+  - the onboarding plan sources need `clinical.plans.view`;
+  - `own` outside reads as missing;
+  - revocation.
+- **95b–95d, for each writer:**
+  - the positive write and its audit, and replay;
+  - the grant matrix: the act's grant, the other finance grants, the label, the reception setting on the canonical path;
+  - editing an existing opening refused without `finance.opening-balances.manage` and accepted with it;
+  - `own` outside reads as missing;
+  - a race in which the patient leaves the scope while the writer waits for the patient row;
+  - revocation.

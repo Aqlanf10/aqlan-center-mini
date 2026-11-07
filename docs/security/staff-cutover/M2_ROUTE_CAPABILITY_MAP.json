@@ -3760,8 +3760,9 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 95a (G4-2; contract section 15): read:patients.history in one read-only snapshot, outside = missing; the identity and lines' clinical description with the record read; every amount, term, source hash and history reason with finance.patient-ledger.view; correctionAvailable needs patients.history.correct and finance.opening-balances.manage.",
+  "projection": {"legacy": "admin and reception (a doctor with the payments permission on own patients) saw every document with amounts, terms and history.", "groups": {"identity": "id, version, revision, creator, as-of date; lines' service, doctor, description, tooth and site; history versions and authors — the record read", "money": "currency, totals, discount and reason, paid, remaining, note, reason, repayment, opening figures, source hash, schedule version, line prices — only with finance.patient-ledger.view", "access": "correctionAvailable needs patients.history.correct and finance.opening-balances.manage"}, "rows": "one patient inside the patient scope; outside = missing"}
  },
  {
   "route": "/api/patients/[id]/historical-documents",
@@ -3885,8 +3886,9 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 95a (G4-2; contract section 15): read:patients.history in one read-only snapshot, outside = missing; the old system's archive is money throughout: finance.patient-ledger.view inside the patient scope, else the legacy 403 (no projection).",
+  "projection": {"legacy": "the patient gate with the money read (admin, reception; a doctor with the payments permission on own patients) saw the whole archive.", "groups": {"archive": "treatments with prices, paid and remaining, and payments — only with finance.patient-ledger.view; without it the legacy 403"}, "rows": "one patient inside the patient scope; outside = missing"}
  },
  {
   "route": "/api/patients/[id]/legacy-balance-arrangement",
@@ -3947,8 +3949,9 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 95a (G4-2; contract section 15): read:patients.history in one read-only snapshot, outside = missing; no amounts; the record read inside the patient scope; the plan, item and document sources with clinical.plans.view.",
+  "projection": {"legacy": "the patient gate showed the clinical steps; plan sources only to admin, reception or the owning doctor with plan reading.", "groups": {"clinical": "legacy flag, baseline step, adjustment class, warning — the record read", "sources": "financial reference sources, plan, item and document identities, the remaining steps — only with clinical.plans.view"}, "rows": "one patient inside the patient scope; outside = missing"}
  },
  {
   "route": "/api/patients/[id]/legacy-treatments",
@@ -3961,8 +3964,9 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 95a (G4-2; contract section 15): read:patients.history in one read-only snapshot, outside = missing; the clinical description with the record read; every amount, currency, opening and free text with finance.patient-ledger.view; action flags from canonical grants, not the label or the reception setting.",
+  "projection": {"legacy": "admin and reception (a doctor with the payments permission on own patients) saw every agreement with amounts; access flags by label and the reception setting.", "groups": {"identity": "service, tooth, specialty, plan, case, dates, status, coverage — the record read", "money": "currency, agreed, paid, remaining, opening effect and history, note, void reason — only with finance.patient-ledger.view", "access": "add by finance.legacy.record; edit also finance.opening-balances.manage; void by finance.legacy.void"}, "rows": "one patient inside the patient scope; outside = missing"}
  },
  {
   "route": "/api/patients/[id]/legacy-treatments",
