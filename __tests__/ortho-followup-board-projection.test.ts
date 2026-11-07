@@ -69,10 +69,15 @@ describe("board query source contract (not a substitute for real PostgreSQL)", (
     expect(candidateQuery).not.toContain("LIMIT");
     expect(candidateQuery).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/);
   });
-  it("retains historical no-show semantics independently of future bookings", () => {
-    expect(board).toContain("WHERE a.status = 'no_show'");
-    expect(board).toContain("WHERE a2.patient_id = a.patient_id AND a2.status = 'no_show'");
-    expect(board).toContain("ORDER BY a2.scheduled_date DESC, a2.id DESC LIMIT 1");
-    expect(board).toContain("lastWasNoShow: row.last_no_show");
+  it("derives the last current attendance status by full scheduled slot, independent of booking selection", () => {
+    const attendance = board.slice(board.indexOf("WITH attendance_cutoff AS ("), board.indexOf("planned_sessions AS ("));
+    expect(attendance).toContain("a.status IN ('no_show', 'arrived', 'done')");
+    expect(attendance).toContain("a.scheduled_date + a.scheduled_time");
+    expect(attendance).toContain("BOOL_OR(a.status = 'no_show')");
+    expect(attendance).toContain("BOOL_OR(a.status IN ('arrived', 'done'))");
+    expect(attendance).toContain("ORDER BY patient_id, scheduled_at DESC");
+    expect(attendance).not.toMatch(/(?:a\.id|updated_at|created_at|to_char)/);
+    expect(board).toContain("lastWasNoShow: outcome === \"no_show\" || outcome === \"conflict\"");
+    expect(board).toContain("attendanceContext:");
   });
 });

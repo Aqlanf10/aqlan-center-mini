@@ -3,6 +3,8 @@
 import { UNVERIFIED_VISIT_INVOICE_LABEL } from "@/lib/visit-financial-presentation";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { adjustmentTextAdmissionError } from "@/lib/ortho-adjustment-text-input";
+import { parseAdjustmentInterval, ADJUSTMENT_INTERVAL_ERROR } from "@/lib/ortho-adjustment-interval";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { isValidTooth, normalizeSurfaces, toothName } from "@/lib/dental";
@@ -11,6 +13,7 @@ import { ToothField } from "./ToothPicker";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
 import { PostOpModal } from "./PostOpModal";
+import { OrthoTreatmentStrategy } from "./OrthoTreatmentStrategy";
 import { PatientDiagnosis } from "./PatientDiagnosis";
 import {
   BILLING_RULE_LABEL, labWorkForCategory, priceForSession, sessionPriceNote,
@@ -251,7 +254,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
   // A retained component may receive another visit or principal. A fresh token
   // also distinguishes A→B→A, so identity equality cannot revive old requests.
-  const ownerKey = JSON.stringify([visitId, expectedPatientId ?? null, session?.username ?? null,
+  const ownerKey = JSON.stringify([visitId, expectedPatientId ?? null, session?.userId ?? null, session?.username ?? null,
     session?.role ?? null, session?.permissions ?? null]);
   const [owner, setOwner] = useState({ key: ownerKey, generation: 0 });
   if (owner.key !== ownerKey) setOwner({ key: ownerKey, generation: owner.generation + 1 });
@@ -305,6 +308,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const [orthoSession, setOrthoSession] = useState<{
     upperWire: string; lowerWire: string; elastics: ElasticClass | ""; elasticNote: string; done: string; nextWeeks: string;
   } | null>(null);
+  const adjustmentTextError = orthoSession ? adjustmentTextAdmissionError(orthoSession) : null;
+  const adjustmentInterval = orthoSession ? parseAdjustmentInterval(orthoSession.nextWeeks) : null;
+  const adjustmentSnapshot = useRef({ owner, session: orthoSession });
+  useLayoutEffect(() => { adjustmentSnapshot.current = { owner, session: orthoSession }; }, [owner, orthoSession]);
   /* (VISIT-1) ما مُلئ تلقائيًا — يُوسَم «تلقائي» حتى يلمسه الطبيب. */
   const [autoFilled, setAutoFilled] = useState<Set<NoteKey | "doctor">>(new Set());
   /* آخر نصٍّ ولّدته الإجراءات في «ما نُفّذ» — ما دام الحقل عليه (أو فارغًا) يتبع الإجراءات. */
@@ -644,6 +651,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     if (busy || !ownsVisit || acceptedReadOwner.current !== owner || confirmedSignOwner.current === owner
       || signReadSequence !== loadSequence.current || visit?.status === "signed"
       || !currentOwner() || command.current?.owner === owner) return;
+    if (adjustmentSnapshot.current.owner !== owner || adjustmentSnapshot.current.session !== orthoSession) return;
+    if (orthoSession && visit?.ortho?.visitAdjustmentId === null && adjustmentTextError) {
+      setError(adjustmentTextError); return;
+    }
+    if (orthoSession && visit?.ortho?.visitAdjustmentId === null && adjustmentInterval === null) {
+      setError(ADJUSTMENT_INTERVAL_ERROR); return;
+    }
     const blocked = visitSignatureBlock(visit);
     if (blocked) { setError(blocked); return; }
     if (orthoSession?.elastics === "" && visit?.ortho?.visitAdjustmentId === null) {
@@ -672,7 +686,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               caseId: visit.ortho.caseId,
               upperWire: orthoSession.upperWire, lowerWire: orthoSession.lowerWire,
               elastics: orthoSession.elastics, elasticNote: orthoSession.elasticNote,
-              done: orthoSession.done, nextWeeks: Number(orthoSession.nextWeeks) || 4,
+              done: orthoSession.done, nextWeeks: adjustmentInterval!,
             }
             : null,
         }),
@@ -722,7 +736,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     } finally {
       if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }
     }
-  }, [busy, ownsVisit, currentOwner, owner, visitId, expectedPatientId, load, onSigned, overrideReason, orthoSession, visit, noChargeAdjustment, noChargeReason, signReadSequence]);
+  }, [busy, ownsVisit, currentOwner, owner, visitId, expectedPatientId, load, onSigned, overrideReason, orthoSession, visit, noChargeAdjustment, noChargeReason, signReadSequence, adjustmentInterval, adjustmentTextError]);
 
   /** (VISIT-2) فتح ملف المريض الجديد من زيارته — يعيد رقم الملف أو null مع رسالة الخطأ. */
   const openPatientFile = useCallback(async (id: number): Promise<number | null> => {
@@ -1350,9 +1364,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               </div>
             ) : null}
             {referenceOwner.key === referenceKey && referenceOpen?.owner === referenceOwner && referenceOpen.open && visit.patientId && visit.ortho ? (
-              <section className="mb-3 rounded-xl border border-slate-200 bg-white p-3" aria-label="تشخيص حالة التقويم للمرجع">
+              <section className="mb-3 rounded-xl border border-slate-200 bg-white p-3" aria-label="تشخيص وخطة حالة التقويم للمرجع">
                 <PatientDiagnosis key={`${referenceOwner.key}:${referenceOwner.generation}`} patientId={visit.patientId}
                   orthoCaseId={visit.ortho.caseId} readOnly referenceVisitId={visitId} />
+                <p className="my-2 text-xs text-slate-500">خطة الحالة المحفوظة للمرجع الحالي؛ ليست لقطة للخطة وقت هذه الزيارة ولا إثباتًا لتنفيذها.</p>
+                <OrthoTreatmentStrategy key={`${referenceOwner.key}:${referenceOwner.generation}:strategy`}
+                  patientId={visit.patientId} orthoCaseId={visit.ortho.caseId} referenceVisitId={visitId} />
               </section>
             ) : null}
             {visit.suggestions?.chiefComplaint ? <p className="mb-2 text-[11px] text-slate-600">سبب الموعد / الجلسة المخطّطة: {visit.suggestions.chiefComplaint}</p> : null}
@@ -1658,7 +1675,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           </button>
           <button
             onClick={async () => {
-              if (!currentOwner()) return;
+              if (!currentOwner() || adjustmentSnapshot.current.owner !== owner || adjustmentSnapshot.current.session !== orthoSession) return;
+              if (orthoSession && visit.ortho?.visitAdjustmentId === null && adjustmentTextError) {
+                setError(adjustmentTextError); return;
+              }
+              if (orthoSession && visit.ortho?.visitAdjustmentId === null && adjustmentInterval === null) {
+                setError(ADJUSTMENT_INTERVAL_ERROR); return;
+              }
               if (orthoSession?.elastics === "" && visit.ortho?.visitAdjustmentId === null) {
                 setError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
                 return;
@@ -1729,10 +1752,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                 <div className="rounded-xl border border-navy-200 bg-navy-50 p-3" data-testid="ortho-session-review">
                   <dt className="font-extrabold text-navy-900">شدّة التقويم اليوم</dt>
                   <dd className="mt-1 space-y-1 text-navy-800">
+                    {adjustmentTextError ? <p role="alert">{adjustmentTextError}</p> : null}
                     <p>{orthoSession.done.trim() || "لم يُكتب وصف لما نُفّذ في الشدّة"}</p>
                     <p>علوي <span dir="ltr">{orthoSession.upperWire || "—"}</span> · سفلي <span dir="ltr">{orthoSession.lowerWire || "—"}</span></p>
                     <p>المطاطات: {orthoSession.elastics ? ELASTIC_LABEL[orthoSession.elastics] : "لم يُحدّد الصنف بعد"}{orthoSession.elasticNote ? ` · ${orthoSession.elasticNote}` : ""}</p>
-                    <p>الشدّة القادمة بعد {Number(orthoSession.nextWeeks) || 4} أسابيع</p>
+                    <p>{adjustmentInterval === null ? "فترة المتابعة غير صالحة؛ أدخل عددًا صحيحًا من 1 إلى 52 أسبوعًا قبل التوقيع." : <>الشدّة القادمة بعد {adjustmentInterval} أسابيع</>}</p>
                   </dd>
                 </div>
               ) : visit.ortho?.visitAdjustmentId != null ? (

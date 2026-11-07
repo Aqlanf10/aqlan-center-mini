@@ -1,0 +1,41 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "lib/ceph.ts",
+    "lib/ceph-diagnosis-fields.ts",
+    "components/CephTracer.tsx",
+    "app/api/ceph/[id]/ai-analyze/route.ts",
+    "app/print/ceph/[id]/page.tsx",
+    "__tests__/ceph-narrative-safety.test.ts",
+    "__tests__/ceph-narrative-route.test.ts",
+    "__tests__/ceph-print-approval.test.tsx",
+    "__tests__/ceph-diagnosis-fields.test.ts",
+    "__tests__/ceph-template-safety.test.tsx",
+    "__tests__/security-http/ceph-tracer-real-react.test.ts",
+    "__tests__/ceph-review-interactions.test.tsx",
+    "__tests__/ceph-manual-review-gate.test.ts",
+    "__tests__/fixtures/ceph-tracer-real-react.tsx",
+    "lib/ceph-access.ts",
+    "app/api/ceph/[id]/complete/route.ts",
+    "app/api/ceph/[id]/route.ts",
+    "app/ceph/[id]/page.tsx",
+    "__tests__/ceph-clinical-write-access.test.ts",
+    "__tests__/ceph-page-access.test.ts",
+    "__tests__/ceph-completion-validity.test.ts",
+    "lib/ceph-completion-snapshot.ts",
+    "__tests__/ceph-completion-snapshot.test.ts",
+    "__tests__/ceph-completion-snapshot-route.test.ts",
+    "__tests__/postgres/ortho-case-identity.test.ts",
+    "lib/ceph-edit-queue.ts",
+    "__tests__/ceph-edit-queue.test.ts",
+    "__tests__/ceph-writer-cas.test.ts",
+    "__tests__/ceph-writer-cas-route.test.ts",
+    "__tests__/ceph-landmark-write-protocol.test.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

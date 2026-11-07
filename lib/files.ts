@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { isSafeKey, storageKey } from "./storage";
 
@@ -109,6 +109,26 @@ export async function readFileByKey(key: string): Promise<Buffer | null> {
   } catch {
     return null;
   }
+}
+
+/** Bounded read for native image processors. Check and read the same handle,
+ * then probe one extra byte so growth cannot defeat the allocation limit. No
+ * original file is changed and no browser-supplied path is accepted. */
+export async function readFileByKeyBounded(key: string, maximumBytes: number): Promise<Buffer | null> {
+  if (!isSafeKey(key) || !Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 25 * 1024 * 1024) return null;
+  const directory = configuredDirectory(); if (!directory) return null;
+  let file;
+  try {
+    file = await open(/*turbopackIgnore: true*/ join(/*turbopackIgnore: true*/ directory, key), "r");
+    const info = await file.stat();
+    if (!info.isFile() || info.size < 1 || info.size > maximumBytes) return null;
+    const bytes = Buffer.alloc(info.size + 1); let offset = 0;
+    while (offset < bytes.length) {
+      const result = await file.read(bytes, offset, bytes.length - offset, offset);
+      if (!result.bytesRead) break; offset += result.bytesRead;
+    }
+    return offset === info.size ? bytes.subarray(0, offset) : null;
+  } catch { return null; } finally { await file?.close().catch(() => undefined); }
 }
 
 /**

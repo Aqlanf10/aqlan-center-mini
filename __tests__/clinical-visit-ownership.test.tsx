@@ -214,7 +214,7 @@ describe("clinical visit owner retirement", () => {
     const signA = invoke(find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node))));
     currentVisitId = 91002; await flush();
     stored.set(91001, { ...stored.get(91001), status: "signed" });
-    post.resolve(response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }));
+    post.resolve(response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }));
     await signA; await flush();
     expect(onSigned).not.toHaveBeenCalled();
     expect(field("② التشخيص").props.value).toBe("Visit B diagnosis");
@@ -440,7 +440,7 @@ describe("review findings", () => {
   it("preserves a successful live signature and checkout callback when the follow-up read fails", async () => {
     await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
     reads.set(91001, async () => response(503, { message: "Synthetic signed reload failure" }));
-    pendingWrite = async () => response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+    pendingWrite = async () => response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
     const capturedSign = find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));
     await invoke(capturedSign); await flush();
     expect(onSigned).toHaveBeenCalledOnce();
@@ -474,7 +474,7 @@ describe("atomic clinical snapshots", () => {
 
 it("does not thaw an accepted signature when its follow-up read unexpectedly says open", async () => {
   await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
-  pendingWrite = async () => response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  pendingWrite = async () => response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
   await invoke(find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)))); await flush();
   expect(onSigned).toHaveBeenCalledOnce();
   expect(nodes().some((node) => node.props.label === "② التشخيص")).toBe(false);
@@ -514,7 +514,7 @@ it("does not warn about a pending or unsaved command during live successful-sign
   await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
   pendingWrite = async () => {
     stored.set(91001, { ...stored.get(91001), status: "signed" });
-    return response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+    return response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
   };
   await invoke(find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)))); await flush();
   expect(onSigned).toHaveBeenCalledOnce(); expect(allowedAtSuccess).toBe(true); expect(prevented).not.toHaveBeenCalled();
@@ -551,7 +551,7 @@ it("does not apply A's delayed patient context after B's current context", async
 it.each([401, 403, 404])("hides the confirmed signature receipt after authoritative %s and keeps captured writes retired", async (status) => {
   await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
   reads.set(91001, async () => response(status, { message: "Private denial detail" }));
-  pendingWrite = async () => response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  pendingWrite = async () => response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
   const sign = find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));
   await invoke(sign); await flush();
   expect(onSigned).toHaveBeenCalledOnce();
@@ -565,7 +565,7 @@ it.each([401, 403, 404])("hides the confirmed signature receipt after authoritat
 it("does not carry a confirmed signature receipt into another visit's pending owner", async () => {
   await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
   reads.set(91001, async () => response(503, {}));
-  pendingWrite = async () => response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  pendingWrite = async () => response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
   await invoke(find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)))); await flush();
   expect(find((node) => node.props["data-testid"] === "clinical-sign-confirmed")).toBeDefined();
   const b = deferred<Response>(); reads.set(91002, () => b.promise); currentVisitId = 91002; render();
@@ -736,7 +736,7 @@ it("clears stale documentary verification after sign until the exact response in
   pendingWrite = async (_id, body) => {
     expect(body).toEqual({ action: "sign", dependencyOverrideReason: null, outsideContractDecision: null, orthoSession: null });
     reads.set(91001, () => reread.promise);
-    return response(200, { patientId: 92001, invoiceId: 98002, invoiceCurrency: "YER", duesMinor: 10000,
+    return response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: 98002, invoiceCurrency: "YER", duesMinor: 10000,
       sessionsCompleted: 0, nextPlannedVisit: null });
   };
   const signing = invoke(find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node))));
@@ -753,4 +753,19 @@ it("clears stale documentary verification after sign until the exact response in
   expect(nodes().some(node => node.props.href === "/print/invoice/98002")).toBe(true);
   expect(onSigned).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ patientId: 92001, invoiceId: 98002,
     invoiceCurrency: "YER", duesMinor: 10000 }));
+});
+
+
+it.each([
+  { status: "signed" },
+  { id: 91001 },
+  {},
+])("does not publish signature success without exact visit and signed status %j", async identity => {
+  await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+  pendingWrite = async () => response(200, { ...identity, patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  const captured = find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));
+  await invoke(captured); await flush();
+  expect(onSigned).not.toHaveBeenCalled();
+  expect(contents(render())).toContain("تعذّر تأكيد نتيجة التوقيع");
+  const count = writes().length; await invoke(captured); await flush(); expect(writes()).toHaveLength(count);
 });

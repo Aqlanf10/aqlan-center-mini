@@ -1,8 +1,10 @@
+import { OrthoBaselineAuthorityError } from "@/lib/ortho-baseline-authority";
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, recordOrthoBaseline } from "@/lib/db";
 import { checkBaselineDraft } from "@/lib/ortho-baseline";
 import { clinicDateString } from "@/lib/schedule";
 import { canAccessPatient } from "@/lib/patient-access";
+import { canChangeOrthoPlanLink } from "@/lib/ortho-plan-link-access";
 import { idOf, json, readBody } from "@/lib/case-route";
 import { requireSession } from "@/lib/session";
 
@@ -31,10 +33,10 @@ export async function POST(request: Request) {
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const draft = checkBaselineDraft(read.body, today);
   if (!draft.ok) return json(draft.message, 400);
-  // ربط خطةٍ قائمة يحترم صلاحية عرض الخطط نفسها — فلا يصير المسار بابًا خلفيًّا حولها.
+  // الربط يغيّر تغطية الشدّات؛ يلزم عرض الخطة وتعديلها ضمن نطاق الطبيب.
   if (draft.value.planId !== null
-    && !(await canAccessPatient(session, patientId, "canViewPlans").catch(() => false))) {
-    return json("عرض خطط العلاج غير مفعّل لحسابك.", 403);
+    && !(await canChangeOrthoPlanLink(session, patientId))) {
+    return json("غير مصرّح لك بربط حالة التقويم بخطة العلاج.", 403);
   }
   // الطبيب المسؤول افتراضًا: الطبيب الذي يسجّل.
   const responsibleDoctorId = draft.value.responsibleDoctorId
@@ -43,7 +45,7 @@ export async function POST(request: Request) {
   try {
     const result = await recordOrthoBaseline({
       ...draft.value, responsibleDoctorId, patientId, actor: session.username, actorRole: session.role,
-    });
+    }, { patientId, session });
     if (!result.ok) {
       const messages = {
         no_patient: ["لا يوجد مريض بهذا الرقم.", 404],
@@ -56,7 +58,8 @@ export async function POST(request: Request) {
       return json(message, status);
     }
     return NextResponse.json({ id: result.id }, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof OrthoBaselineAuthorityError) return NextResponse.json({message:error.message,code:error.code},{status:error.status});
     return json("تعذّر تسجيل الحالة السابقة. أعد المحاولة.", 500);
   }
 }

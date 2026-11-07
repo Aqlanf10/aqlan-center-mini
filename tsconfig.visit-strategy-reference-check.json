@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["next-env.d.ts", "components/ClinicalVisit.tsx", "components/OrthoTreatmentStrategy.tsx", "__tests__/clinical-visit-ortho-entry.test.tsx", "__tests__/ortho-treatment-strategy-ui.test.tsx"],
+  "exclude": ["node_modules"]
+}

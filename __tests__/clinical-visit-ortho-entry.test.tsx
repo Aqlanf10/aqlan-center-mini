@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClinicalVisit } from "../components/ClinicalVisit";
+import { OrthoTreatmentStrategy } from "../components/OrthoTreatmentStrategy";
 import { PatientDiagnosis } from "../components/PatientDiagnosis";
 
 // Orthodontic chairside entry regressions on a fixed, already-linked synthetic visit. No routes,
@@ -9,7 +10,7 @@ import { PatientDiagnosis } from "../components/PatientDiagnosis";
 // and state/effects run in the reviewed lightweight hook-harness style.
 // This exercises the actual component, without changing clinical sign rules.
 const hooks = vi.hoisted(() => ({
-  values: [] as unknown[], cursor: 0, changed: false, username: "synthetic-doctor", role: "doctor",
+  values: [] as unknown[], cursor: 0, changed: false, userId: 94001, username: "synthetic-doctor", role: "doctor",
   effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void; phase: "layout" | "passive" }>(),
   memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
   pending: [] as Array<() => void>,
@@ -63,7 +64,7 @@ vi.mock("react", async (original) => {
     },
   };
 });
-vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ role: hooks.role, username: hooks.username }) }));
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ userId: hooks.userId, role: hooks.role, username: hooks.username }) }));
 vi.mock("../components/SettingsProvider", () => ({ useSetting: () => "Synthetic quick phrase" }));
 vi.mock("../components/ToothPicker", () => ({ ToothField: () => null }));
 vi.mock("../components/PrescriptionModal", () => ({ PrescriptionModal: () => null }));
@@ -145,7 +146,7 @@ function deferred<T>() {
 beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false;
   hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
-  hooks.role = "doctor"; hooks.username = "synthetic-doctor";
+  hooks.userId = 94001; hooks.role = "doctor"; hooks.username = "synthetic-doctor";
   renderedVisitId = 91001; vi.clearAllMocks(); nextPost = null; nextRead = null; onSigned = vi.fn<() => void>();
   stored = {
     id: 91001, patientId: 92001, patientName: "Synthetic orthodontic patient", ...emptyNotes,
@@ -165,7 +166,7 @@ beforeEach(() => {
       if (body.action === "sign") {
         stored = { ...stored, status: "signed", signedAt: "2026-10-04T10:00:00Z", signedBy: "Synthetic signer",
           ortho: { ...(stored.ortho as object), visitAdjustmentId: 95002 } };
-        return response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: "YER", duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+        return response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: "YER", duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
       }
       stored = { ...stored, ...body };
       return response(200, { ok: true });
@@ -509,9 +510,9 @@ describe("baseline-only elastic class confirmation", () => {
   });
 });
 
-describe("lazy case diagnosis reference in explicit orthodontic follow-up", () => {
+describe.each([PatientDiagnosis, OrthoTreatmentStrategy])("lazy case reference in explicit orthodontic follow-up (%s)", Panel => {
   const reference = () => find(node => node.props["data-testid"] === "ortho-visit-reference");
-  const panels = () => nodes().filter(node => node.type === PatientDiagnosis);
+  const panels = () => nodes().filter(node => node.type === Panel);
   const toggle = (open: boolean, node = reference(), nested = false) => {
     const currentTarget = { open };
     (node.props.onToggle as ((event: unknown) => void) | undefined)?.({ currentTarget, target: nested ? {} : currentTarget });
@@ -523,7 +524,7 @@ describe("lazy case diagnosis reference in explicit orthodontic follow-up", () =
     await start(); expect(panels()).toHaveLength(0);
     toggle(true); expect(panels()).toHaveLength(1);
     expect(contents(reference())).toContain("آخر تشخيص من زيارة موقّعة للمريض");
-    expect(panels()[0].props).toEqual({ patientId: 92001, orthoCaseId: 95001, readOnly: true, referenceVisitId: 91001 });
+    expect(panels()[0].props).toEqual({ patientId: 92001, orthoCaseId: 95001, ...(Panel === PatientDiagnosis ? { readOnly: true } : {}), referenceVisitId: 91001 });
     toggle(false, reference(), true); expect(panels()).toHaveLength(1); // a nested history toggle must not close the owner
     toggle(false); expect(panels()).toHaveLength(0);
     toggle(true); expect(panels()).toHaveLength(1); expect(writes()).toHaveLength(0);
@@ -588,3 +589,138 @@ describe("lazy case diagnosis reference in explicit orthodontic follow-up", () =
   });
 });
 
+
+
+describe("lazy saved strategy reference in the visit", () => {
+  const panels = () => nodes().filter(node => node.type === OrthoTreatmentStrategy);
+  const disclosure = () => find(node => node.props["data-testid"] === "ortho-visit-reference");
+  const toggle = (open: boolean, node = disclosure()) => {
+    const currentTarget = { open };
+    (node.props.onToggle as (event: unknown) => void)({ currentTarget, target: currentTarget }); render();
+  };
+  it("mounts only after explicit opening with exact case/visit and no write lifetime", async () => {
+    await mount(); expect(panels()).toHaveLength(0);
+    await start(); expect(panels()).toHaveLength(0);
+    toggle(true); expect(panels()).toHaveLength(1);
+    expect(panels()[0].props).toEqual({ patientId: 92001, orthoCaseId: 95001, referenceVisitId: 91001 });
+    toggle(false); expect(panels()).toHaveLength(0);
+    toggle(true); expect(panels()).toHaveLength(1); expect(writes()).toHaveLength(0);
+  });
+  it("retires same-name immutable actor changes and retained disclosure callbacks", async () => {
+    stored.ortho = { ...orthodontics, visitAdjustmentId: 95002 };
+    await mount(); toggle(true); const old = disclosure();
+    for (const id of [94002, 94001]) {
+      hooks.userId = id; await mount();
+      expect(panels()).toHaveLength(0); toggle(true, old); expect(panels()).toHaveLength(0);
+      toggle(true); expect(panels()).toHaveLength(1);
+    }
+    expect(writes()).toHaveLength(0);
+  });
+  it.each([401, 403, 500])("removes reference after parent reload failure %s and requires fresh opening after recovery", async status => {
+    stored.ortho = { ...orthodontics, visitAdjustmentId: 95002 };
+    await mount(); toggle(true); const old = disclosure();
+    nextRead = async () => response(status, { message: "Synthetic reload refusal" });
+    await save(); await flush(); expect(panels()).toHaveLength(0);
+    toggle(true, old); expect(panels()).toHaveLength(0);
+    nextRead = null;
+    await invoke(find(node => node.type === "button" && typeof node.props.onClick === "function")); await flush();
+    expect(panels()).toHaveLength(0); toggle(true); expect(panels()).toHaveLength(1);
+    expect(writes()).toHaveLength(1); // Only the explicit existing visit save, never a strategy write.
+  });
+  it("ignores an old principal's held visit read across same-name actor ABA", async () => {
+    stored.ortho = { ...orthodontics, visitAdjustmentId: 95002 };
+    const held = deferred<ReturnType<typeof response>>(); nextRead = () => held.promise;
+    render(); await flush();
+    nextRead = null; hooks.userId = 94002; await mount();
+    hooks.userId = 94001; await mount();
+    held.resolve(response(200, { ...stored, ortho: { ...orthodontics, caseId: 95999, visitAdjustmentId: 95002 } }));
+    await flush(); toggle(true);
+    expect(panels()[0].props.orthoCaseId).toBe(95001); expect(writes()).toHaveLength(0);
+  });
+
+});
+
+describe("explicit clinical visit adjustment interval", () => {
+  it.each(["", "0", "not-a-number", "1.5", "-1", "53"])("does not sign an invalid authored interval %j", async value => {
+    await mount(); await start(); edit("أسابيع حتى الشدّة القادمة", value);
+    await review(); await flush();
+    expect(writes()).toHaveLength(0);
+    edit("أسابيع حتى الشدّة القادمة", "6"); await review(); await flush(); await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ nextWeeks: 6 });
+  });
+  it("guards an already-open review and a retained prior sign callback after interval changes", async () => {
+    await mount(); await start(); await review(); await flush();
+    const old = find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));
+    edit("أسابيع حتى الشدّة القادمة", "bad"); render(); const count = writes().length;
+    await invoke(old); await sign(); await flush();
+    expect(writes()).toHaveLength(count);
+    expect(contents(find(node => node.props["data-testid"] === "ortho-session-review"))).toContain("فترة المتابعة غير صالحة");
+  });
+  it("preserves invalid draft on save without signing", async () => {
+    await mount(); await start(); edit("أسابيع حتى الشدّة القادمة", "bad");
+    await save(); await flush();
+    expect(writes()).toHaveLength(1); expect(bodies()[0]).not.toHaveProperty("orthoSession");
+    expect(input("أسابيع حتى الشدّة القادمة").props.value).toBe("bad");
+  });
+  it.each(["1", "52", " 4 "])("signs valid numeric interval %j exactly", async value => {
+    await mount(); await start(); edit("أسابيع حتى الشدّة القادمة", value);
+    await review(); await flush(); await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ nextWeeks: Number(value) });
+  });
+
+});
+
+describe("staged clinical adjustment text admission", () => {
+  it.each([
+    ["السلك العلوي لهذه الشدّة", 40], ["السلك السفلي لهذه الشدّة", 40],
+    ["وصف مطاطات هذه الشدّة", 120], ["ما نُفّذ في الشدّة", 400],
+  ] as const)("keeps oversized %s editable without review-save or signing", async (label, limit) => {
+    await mount(); await start(); if (label === "وصف مطاطات هذه الشدّة") edit("مطاطات هذه الشدّة", "class_ii"); const value = "ع".repeat(limit + 1); edit(label, value);
+    await review(); await flush();
+    expect(writes()).toHaveLength(0); expect(input(label).props.value).toBe(value);
+    edit(label, "Corrected text"); await review(); await flush(); await sign(); await flush();
+    expect(bodies().filter(body => body.action === "sign")).toHaveLength(1);
+  });
+  it("refuses oversized text introduced into an already-open review", async () => {
+    await mount(); await start(); await review(); await flush();
+    edit("ما نُفّذ في الشدّة", "x".repeat(401)); const count = writes().length;
+    await sign(); await flush(); expect(writes()).toHaveLength(count);
+    expect(contents(find(node => node.props["data-testid"] === "ortho-session-review"))).toContain("400");
+  });
+
+  it("preserves oversized staged text through save without signing", async () => {
+    await mount(); await start(); const text = "ع".repeat(401); edit("ما نُفّذ في الشدّة", text);
+    await save(); await flush(); expect(writes()).toHaveLength(1);
+    expect(bodies()[0]).not.toHaveProperty("orthoSession"); expect(input("ما نُفّذ في الشدّة").props.value).toBe(text);
+  });
+  it("rejects retained sign closure after current text becomes oversized", async () => {
+    await mount(); await start(); await review(); await flush();
+    const old = find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));
+    edit("ما نُفّذ في الشدّة", "ع".repeat(401)); render(); const count = writes().length;
+    await invoke(old); await flush(); expect(writes()).toHaveLength(count);
+  });
+  it("sends trimmed-length boundary text without locally truncating authored whitespace", async () => {
+    await mount(); await start(); const value = "  " + "ع".repeat(400) + "  "; edit("ما نُفّذ في الشدّة", value);
+    await review(); await flush(); await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ done: value });
+  });
+
+});
+
+
+describe("lossless staged interval string admission", () => {
+  it.each(["1.0000000000000001", "51.9999999999999999"])("does not sign a rounded near-integer %s", async value => {
+    await mount(); await start(); edit("أسابيع حتى الشدّة القادمة", value);
+    await review(); await flush(); expect(writes()).toHaveLength(0);
+  });
+  it.each(["+1", "1.0", "1e0", ".1e1", " 01 ", "0x4", "0b100", "0o4"])("signs exact integral spelling %s as its numeric value", async value => {
+    await mount(); await start(); edit("أسابيع حتى الشدّة القادمة", value);
+    await review(); await flush(); await sign(); await flush(); expect(bodies().at(-1)?.orthoSession).toMatchObject({ nextWeeks: Number(value) });
+  });
+  it("keeps a rounded-fraction draft editable and blocks actual signing from an open review", async () => {
+    await mount(); await start(); await review(); await flush(); edit("أسابيع حتى الشدّة القادمة", "1.0000000000000001");
+    const count = writes().length; await sign(); await flush(); expect(writes()).toHaveLength(count);
+    edit("أسابيع حتى الشدّة القادمة", "6"); await sign(); await flush(); expect(bodies().at(-1)?.orthoSession).toMatchObject({ nextWeeks: 6 });
+  });
+
+});

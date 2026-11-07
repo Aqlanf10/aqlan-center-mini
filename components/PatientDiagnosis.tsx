@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { compareSavedDiagnoses } from "@/lib/ortho-diagnosis-comparison";
+import { OrthoDiagnosisComparison } from "./OrthoDiagnosisComparison";
 import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "./SessionProvider";
 import { DiagnosisChoiceField } from "./DiagnosisChoiceField";
@@ -41,7 +43,7 @@ function decodeVersions(payload: unknown, caseId: number): DiagnosisVersionView[
 
 type Owner = { scope: readonly unknown[]; active: boolean; ready: boolean; readSequence: number; controller: AbortController | null; saving: boolean; timer: ReturnType<typeof setTimeout> | null };
 type Writer = { owner: Owner; active: boolean };
-type Snapshot = { owner: Owner; status: "loading" | "ready" | "error"; versions: DiagnosisVersionView[] };
+type Snapshot = { sequence: number; owner: Owner; status: "loading" | "ready" | "error"; versions: DiagnosisVersionView[] };
 
 type DiagnosisProps = { patientId: number; orthoCaseId: number } & (
   | { readOnly: true; referenceVisitId: number; onError?: (message: string | null) => void }
@@ -53,10 +55,11 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
   const canRead = !!session?.username?.trim() && ["admin", "doctor", "reception", "assistant"].includes(session.role);
   const canWrite = !readOnly && canRead && (session?.role === "doctor" || session?.role === "admin");
   const permissionScope = JSON.stringify(session?.permissions ?? null);
-  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId],
+  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId],
     active: false, ready: false, readSequence: 0, controller: null, saving: false, timer: null }),
-    [patientId, orthoCaseId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId]);
+    [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [pair, setPair] = useState<{ snapshot: Snapshot; leftId: string; rightId: string } | null>(null);
   const [writer, setWriter] = useState<Writer | null>(null);
   const [savingOwner, setSavingOwner] = useState<Owner | null>(null);
   useLayoutEffect(() => {
@@ -76,11 +79,12 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
     owner.controller = controller;
     const sequence = ++owner.readSequence;
     const current = () => owner.active && !controller.signal.aborted && owner.readSequence === sequence;
-    setSnapshot({ owner, status: "loading", versions: [] });
+    setPair(null);
+    setSnapshot({ sequence, owner, status: "loading", versions: [] });
     const timeout = setTimeout(() => {
       if (!current()) return;
       controller.abort();
-      setSnapshot({ owner, status: "error", versions: [] });
+      setSnapshot({ sequence, owner, status: "error", versions: [] });
     }, READ_TIMEOUT_MS);
     owner.timer = timeout;
     try {
@@ -89,9 +93,9 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
         { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(readFailure);
       const versions = decodeVersions(await response.json(), orthoCaseId);
-      if (current()) { owner.ready = true; setSnapshot({ owner, status: "ready", versions }); }
+      if (current()) { owner.ready = true; setSnapshot({ sequence, owner, status: "ready", versions }); }
     } catch {
-      if (current()) setSnapshot({ owner, status: "error", versions: [] });
+      if (current()) setSnapshot({ sequence, owner, status: "error", versions: [] });
     } finally {
       clearTimeout(timeout);
       if (owner.timer === timeout) owner.timer = null;
@@ -103,6 +107,17 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
   const failed = snapshot?.owner === owner && snapshot.status === "error";
   const versions = ready ? snapshot.versions : [];
   const current = versions[0];
+  const pairSelection = pair?.snapshot === snapshot ? pair : null;
+  const pairCurrent = () => owner.active && owner.ready && snapshot?.owner === owner
+    && snapshot.status === "ready" && snapshot.sequence === owner.readSequence;
+  const choosePair = (side: "leftId" | "rightId", id: string) => {
+    if (!pairCurrent() || !snapshot || id !== "" && !versions.some(entry => String(entry.id) === id)) return;
+    setPair(previous => ({ snapshot,
+      leftId: previous?.snapshot === snapshot ? previous.leftId : "",
+      rightId: previous?.snapshot === snapshot ? previous.rightId : "", [side]: id }));
+  };
+  const comparison = ready && pairSelection?.leftId && pairSelection.rightId
+    ? compareSavedDiagnoses(versions, { orthoCaseId, leftId: Number(pairSelection.leftId), rightId: Number(pairSelection.rightId) }) : null;
   const writing = writer?.owner === owner && writer.active;
   const saving = savingOwner === owner;
 
@@ -191,13 +206,27 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
             ) : null}
           </>
         ) : versions.map(entry)}
+
+        {ready && versions.length > 1 && <section aria-label="مقارنة قيدين محفوظين للتشخيص" className="space-y-3 rounded-xl border border-slate-200 p-3">
+          <h5 className="text-sm font-bold">مقارنة قيدين محفوظين للتشخيص</h5>
+          <p className="text-xs text-slate-600">اختر القيدين صراحةً؛ ترتيب العرض لا يعني قبل العلاج وبعده. قد يكون كل قيد تحديثًا جزئيًا. لا تُدمج الحقول ولا يُستنتج تحسّن أو تشخيص حالي من الاختلاف.</p>
+          <div className="grid gap-3 sm:grid-cols-2">{(["leftId", "rightId"] as const).map((side, index) => <label key={side} className="text-xs font-bold">
+            قيد المقارنة {index === 0 ? "الأول" : "الثاني"}
+            <select aria-label={`قيد المقارنة ${index === 0 ? "الأول" : "الثاني"}`} className="mt-1 min-h-11 w-full rounded-lg border bg-white px-2"
+              value={pairSelection?.[side] ?? ""} onChange={event => choosePair(side, event.target.value)}>
+              <option value="">اختر قيدًا محفوظًا…</option>
+              {versions.map(entry => <option key={entry.id} value={String(entry.id)}>قيد #{entry.id} · نسخة {entry.version} · {entry.createdAt} · {entry.createdBy}</option>)}
+            </select>
+          </label>)}</div>
+          {comparison?.ok ? <OrthoDiagnosisComparison comparison={comparison} /> : comparison ? <p role="alert" className="text-xs">تعذّرت مقارنة الاختيار؛ اختر قيدين مختلفين من سجل هذه الحالة.</p> : <p className="text-xs">لم يُحدّد قيدان للمقارنة بعد.</p>}
+        </section>}
         {canWrite && ready && (!writing ? (
           <button type="button" onClick={() => { if (owner.active && owner.ready && !owner.saving) setWriter({ owner, active: true }); }}
             className="w-full rounded-xl border border-navy-800 bg-white py-2 text-xs font-bold text-navy-800 hover:bg-navy-50 transition-colors">
             {current ? "+ تحديث التشخيص (نسخة جديدة — لا يمسح القديم)" : "+ سجّل تشخيص هذه الحالة"}
           </button>
         ) : (
-          <DiagnosisForm key={`${patientId}:${orthoCaseId}:${session?.username}:${session?.role}`} saving={saving}
+          <DiagnosisForm key={`${patientId}:${orthoCaseId}:${session?.userId}:${session?.username}:${session?.role}`} saving={saving}
             onCancel={() => { if (owner.active && writer && !owner.saving) { writer.active = false; setWriter(null); } }} onSave={save} />
         ))}
       </div>

@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "tsBuildInfoFile": "/tmp/retention-persistence.tsbuildinfo"
+  },
+  "include": [
+    "next-env.d.ts",
+    "lib/ortho-retention-*.ts",
+    "lib/ortho-case-study-recorded-facts.ts",
+    "__tests__/ortho-retention-persistence-contract.test.ts",
+    "__tests__/postgres/ortho-retention-persistence.test.ts",
+    "__tests__/ortho-retention-capacity.test.ts",
+    "__tests__/ortho-case-study-recorded-facts.test.ts",
+    "__tests__/postgres/ortho-case-study.test.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

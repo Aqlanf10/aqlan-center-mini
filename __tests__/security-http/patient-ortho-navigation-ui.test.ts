@@ -92,7 +92,11 @@ async function fixture(width: number) {
           // NextAppointmentCard without a server write or React state injection.
           // Later GETs project only this in-memory synthetic adjustment.
           syntheticSaved = { caseId: Number(url.pathname.split("/").at(-1)), body };
-          await json(route, { id: SYNTHETIC_ADJUSTMENT, visitId: null }, 201); return;
+          const requestKey = request.headers()["idempotency-key"];
+          expect(requestKey).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+          await json(route, { id: SYNTHETIC_ADJUSTMENT, visitId: null, attachedToToday: false,
+            patientId: syntheticSaved.caseId === CASE_A ? h.seeded.patientAId : h.seeded.patientBId,
+            caseId: syntheticSaved.caseId, requestKey }, 201); return;
         }
         await json(route, { message: status === 409 ? REJECTED : FAILED }, status); return;
       }
@@ -226,7 +230,7 @@ async function retained(page: Page, url: string, historyLength: number, expected
   if (await select.isVisible()) expect(await select.inputValue()).toBe("ortho");
   expect(await snapshot(page)).toEqual(expected);
 }
-async function returnToFreshOrtho(page: Page, marker = MARKER_A) {
+async function returnToFreshOrtho(page: Page, marker = MARKER_A, recovered = false) {
   await page.getByTestId("patient-tab-treatment").click();
   await chooseTreatment(page, "ortho"); await ready(page, marker);
   expect(await workspace(page).getByLabel("ما نُفّذ في الشدّة", { exact: true }).count()).toBe(0);
@@ -236,7 +240,11 @@ async function returnToFreshOrtho(page: Page, marker = MARKER_A) {
   expect(await workspace(page).getByLabel("أسابيع حتى الشدّة القادمة", { exact: true }).inputValue()).toBe("4");
   expect(await workspace(page).getByLabel("السلك العلوي", { exact: true }).inputValue()).toBe("014 NiTi");
   expect(await workspace(page).getByLabel("السلك السفلي", { exact: true }).inputValue()).toBe("012 NiTi");
-  expect(await workspace(page).getByTestId("ortho-write-uncertain").count()).toBe(0);
+  expect(await workspace(page).getByTestId("ortho-write-uncertain").count()).toBe(recovered ? 1 : 0);
+  if (recovered) {
+    expect(await workspace(page).getByTestId("adjustment-reconcile").isEnabled()).toBe(true);
+    expect(await workspace(page).getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).count()).toBe(0);
+  }
 }
 async function capture(page: Page, width: number) {
   const field = workspace(page).getByLabel("ما نُفّذ في الشدّة", { exact: true });
@@ -327,7 +335,7 @@ describe("Ortho leave guard on the real built RTL patient page", () => {
       await f.page.getByTestId("patient-tab-summary").click(); await selected(f.page, "patient-tab-summary");
       expect(f.page.url()).not.toBe(before); expect(await f.page.evaluate(() => history.length)).toBe(length);
       expect(f.dialogs).toEqual([]);
-      await returnToFreshOrtho(f.page);
+      await returnToFreshOrtho(f.page, MARKER_A, true);
       // The route guard would fail the suite on any appointments, document or
       // extra adjustment POST, even if it was attempted during cleanup.
       expect(f.writes.map(write => [write.path, write.status])).toEqual([[`/api/ortho/${CASE_A}`, 201]]);
@@ -370,10 +378,10 @@ describe("Ortho leave guard on the real built RTL patient page", () => {
       }
       await f.release(); await retained(f.page, original, length, expected);
       expect(f.dialogs).toEqual([]); expect(f.writes).toHaveLength(1);
-      await f.prompt(false, () => f.page.getByTestId("patient-tab-summary").click());
+      await f.prompt(false, () => f.page.getByTestId("patient-tab-summary").click(), UNCERTAIN);
       await retained(f.page, original, length, expected);
-      await f.prompt(true, () => f.page.getByTestId("patient-tab-summary").click());
-      await selected(f.page, "patient-tab-summary"); await returnToFreshOrtho(f.page);
+      await f.prompt(true, () => f.page.getByTestId("patient-tab-summary").click(), UNCERTAIN);
+      await selected(f.page, "patient-tab-summary"); await returnToFreshOrtho(f.page, MARKER_A, true);
       expect(f.writes).toHaveLength(1); expect(f.documents).toHaveLength(1);
     });
   });
@@ -384,7 +392,8 @@ describe("Ortho leave guard on the real built RTL patient page", () => {
       const expected = await dirtyAdjustment(f.page), original = f.page.url(), length = await f.page.evaluate(() => history.length);
       f.arm(500); await workspace(f.page).getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).click();
       await expect.poll(() => f.writes.length).toBe(1); await f.release();
-      expect(await workspace(f.page).getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).isDisabled()).toBe(true);
+      expect(await workspace(f.page).getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).count()).toBe(0);
+      expect(await workspace(f.page).getByTestId("adjustment-reconcile").isEnabled()).toBe(true);
       await f.prompt(false, () => chooseTreatment(f.page, "plans"), UNCERTAIN);
       await retained(f.page, original, length, expected);
       const before = f.reads.get(h.seeded.patientAId) ?? 0;
@@ -395,7 +404,7 @@ describe("Ortho leave guard on the real built RTL patient page", () => {
       await f.prompt(false, () => f.page.getByTestId("patient-tab-summary").click(), UNCERTAIN);
       await retained(f.page, original, length, expected);
       await f.prompt(true, () => f.page.getByTestId("patient-tab-summary").click(), UNCERTAIN);
-      await selected(f.page, "patient-tab-summary"); await returnToFreshOrtho(f.page);
+      await selected(f.page, "patient-tab-summary"); await returnToFreshOrtho(f.page, MARKER_A, true);
       expect(f.writes).toHaveLength(1); expect(f.documents).toHaveLength(1);
     });
   });

@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["__tests__/ortho-tanaka-output-integration.test.tsx"],"exclude":["node_modules"]}

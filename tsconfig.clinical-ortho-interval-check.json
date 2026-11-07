@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false,"noEmit":true},"include":["lib/ortho-baseline.ts","app/api/visits/[id]/clinical/route.ts","__tests__/clinical-ortho-interval.test.ts","__tests__/postgres/clinical-ortho-interval.test.ts"],"exclude":["node_modules"]}

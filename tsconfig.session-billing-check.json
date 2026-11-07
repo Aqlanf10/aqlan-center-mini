@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["lib/ortho-session-billing-review*.ts","app/api/patients/[id]/ortho-billing-decisions/route.ts","__tests__/ortho-session-billing-review*.test.ts","__tests__/postgres/ortho-session-billing-review.test.ts"],"exclude":["node_modules"]}

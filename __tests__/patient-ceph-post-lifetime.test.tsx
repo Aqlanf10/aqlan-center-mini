@@ -116,6 +116,7 @@ function retire(kind: string) {
   else if (kind === "unmount") unmount();
   else if (kind === "patient") props = { ...props, patientId: 12 };
   else if (kind === "case") props = { ...props, orthoCaseId: 22 };
+  else if (kind === "actorId") hooks.session = { ...hooks.session!, userId: (hooks.session?.userId ?? 101) + 1 };
   else if (kind === "principal") hooks.session = { ...hooks.session!, username: "synthetic-other" };
   else if (kind === "role") hooks.session = { ...hooks.session!, role: "reception" };
   else if (kind === "permissions") hooks.session = { ...hooks.session!, permissions: { ...DEFAULT_DOCTOR_PERMISSIONS, canUploadXrays: false } };
@@ -239,7 +240,7 @@ describe("PatientCeph creation belongs to its current form and authority", () =>
   });
 
   for (const boundary of ["response", "body"] as const) {
-    it.each(["cancel", "header", "unmount", "patient", "case", "principal", "role", "permissions", "logout"])(
+    it.each(["cancel", "header", "unmount", "patient", "case", "principal", "actorId", "role", "permissions", "logout"])(
       "retires %s while awaiting " + boundary, async (kind) => {
         await open(); const savedSubmit = handler(OPEN); savedSubmit();
         if (boundary === "body") { posts[0].sendHeaders(); await flush(); expect(posts[0].json).toHaveBeenCalledOnce(); }
@@ -253,7 +254,7 @@ describe("PatientCeph creation belongs to its current form and authority", () =>
     );
   }
 
-  it.each(["patient", "case", "principal", "permissions"])("does not revive an A→B→A %s operation", async (kind) => {
+  it.each(["patient", "case", "principal", "actorId", "permissions"])("does not revive an A→B→A %s operation", async (kind) => {
     await open(); click(OPEN); posts[0].sendHeaders(); await flush();
     const oldProps = props, oldSession = hooks.session;
     retire(kind); props = oldProps; hooks.session = oldSession; render(); await flush();
@@ -326,4 +327,91 @@ describe("PatientCeph creation belongs to its current form and authority", () =>
     expect(newStudy.props.disabled).toBe(true); (newStudy.props.onClick as () => void)(); render();
     expect(writes()).toHaveLength(0); expect(text(render())).not.toContain(OPEN);
   });
+});
+
+it('retires a saved create handler when immutable actor changes but username and grants match',async()=>{
+ hooks.session={...hooks.session!,userId:101};
+ await open();const oldSubmit=handler(OPEN);
+ hooks.session={...hooks.session!,userId:202};render();await flush();
+ oldSubmit();expect(writes()).toHaveLength(0);
+});
+it('retires pending create acknowledgment on same-name different immutable actor',async()=>{
+ hooks.session={...hooks.session!,userId:101};
+ await open();click(OPEN);
+ hooks.session={...hooks.session!,userId:202};render();await flush();
+ posts[0].respond();await flush();
+ expect(callback).not.toHaveBeenCalled();
+ expect(location.href).not.toBe('/ceph/71');
+});
+
+it('hides prior actor study rows when replacement authority read is denied',async()=>{
+ const original=fetchMock.getMockImplementation()!;let denied=false;
+ fetchMock.mockImplementation((url:string,init?:RequestInit)=>{
+  if(!init?.method&&url.endsWith('/ceph'))return Promise.resolve({ok:!denied,status:denied?403:200,json:async()=>({analyses:[{
+   id:789,patientId:PATIENT,documentId:DOC,orthoCaseId:CASE,status:'draft',phase:'during',xrayDate:null,mmPerPixel:null,
+   findings:null,createdAt:'2026-01-01T00:00:00Z',createdBy:'OLD-ACTOR-PRIVATE-RECORD'
+  }]})} as Response);
+  return original(url,init);
+ });
+ render();await flush();expect(text(render())).toContain('OLD-ACTOR-PRIVATE-RECORD');
+ denied=true;hooks.session={...hooks.session!,username:'replacement-actor'};render();await flush();
+ expect(text(render())).not.toContain('OLD-ACTOR-PRIVATE-RECORD');
+ expect(text(render())).toContain('سجلات السيفالومتري غير متاحة');
+ expect(text(render())).not.toContain('جارٍ تحميل سجلات السيفالومتري');
+ expect(text(render())).not.toContain('لا توجد دراسات سيفالومترية مسجلة بعد');
+ const pending=pendingPost();fetchMock.mockImplementation((url:string,init?:RequestInit)=>!init?.method&&url.endsWith('/ceph')?pending.headers.promise:original(url,init));
+ hooks.session={...hooks.session!,username:'third-actor'};render();
+ expect(text(render())).toContain('جارٍ تحميل سجلات السيفالومتري');
+ expect(text(render())).not.toContain('سجلات السيفالومتري غير متاحة');
+ expect(text(render())).not.toContain('تعذّر تحميل دراسات السيفالو.');
+ pending.respond({analyses:[]});await flush();
+ expect(text(render())).toContain('لا توجد دراسات سيفالومترية مسجلة بعد');
+ expect(text(render())).not.toContain('جارٍ تحميل سجلات السيفالومتري');
+});
+
+it.each(['response','body'] as const)('does not adopt an old study read after authority replacement at %s',async boundary=>{
+ const original=fetchMock.getMockImplementation()!,oldRead=pendingPost();let first=true;
+ fetchMock.mockImplementation((url:string,init?:RequestInit)=>{
+  if(!init?.method&&url.endsWith('/ceph')&&first){first=false;return oldRead.headers.promise;}
+  return original(url,init);
+ });
+ hooks.session={...hooks.session!,userId:101};render();
+ if(boundary==='body'){oldRead.sendHeaders();await flush();}
+ hooks.session={...hooks.session!,userId:202};render();await flush();
+ oldRead.respond({analyses:[{id:789,patientId:PATIENT,documentId:DOC,orthoCaseId:CASE,status:'draft',phase:'during',
+  xrayDate:null,mmPerPixel:null,findings:null,createdAt:'2026-01-01T00:00:00Z',createdBy:'OLD-DELAYED-READ'}]});
+ await flush();expect(text(render())).not.toContain('OLD-DELAYED-READ');
+});
+
+it('hides old study rows immediately while new patient read is pending',async()=>{
+ const original=fetchMock.getMockImplementation()!,pending=pendingPost();let hold=false;
+ fetchMock.mockImplementation((url:string,init?:RequestInit)=>{
+  if(!init?.method&&url.endsWith('/ceph'))return hold?pending.headers.promise:Promise.resolve({ok:true,status:200,json:async()=>({analyses:[{
+   id:789,patientId:PATIENT,documentId:DOC,orthoCaseId:null,status:'draft',phase:'during',xrayDate:null,mmPerPixel:null,
+   findings:null,createdAt:'2026-01-01T00:00:00Z',createdBy:'OLD-PATIENT-ROW'
+  }]})} as Response);
+  return original(url,init);
+ });
+ props={...props,orthoCaseId:undefined,embedded:false};render();await flush();expect(text(render())).toContain('OLD-PATIENT-ROW');
+ hold=true;props={...props,patientId:12};render();expect(text(render())).not.toContain('OLD-PATIENT-ROW');
+ pending.respond({analyses:[]});await flush();expect(text(render())).not.toContain('OLD-PATIENT-ROW');
+});
+
+it('retires comparison selection and captured checkbox handlers with the owned study read',async()=>{
+ const original=fetchMock.getMockImplementation()!;
+ fetchMock.mockImplementation((url:string,init?:RequestInit)=>{
+  if(!init?.method&&url.endsWith('/ceph'))return Promise.resolve({ok:true,status:200,json:async()=>({analyses:[788,789].map(id=>({
+   id,patientId:PATIENT,documentId:DOC,orthoCaseId:CASE,status:'completed',provenanceState:'versioned',phase:'during',
+   xrayDate:null,mmPerPixel:null,findings:null,createdAt:'2026-01-01T00:00:00Z',createdBy:'SYNTHETIC'
+  }))})} as Response);
+  return original(url,init);
+ });
+ render();await flush();
+ const checks=nodes(render()).filter(node=>node.props.type==='checkbox');
+ const handlers=checks.map(node=>node.props.onChange as (event:{target:{checked:boolean}})=>void);
+ handlers.forEach(handler=>handler({target:{checked:true}}));render();
+ expect(nodes(render()).some(node=>String(node.props.href??'').includes('/ceph/compare?'))).toBe(true);
+ hooks.session={...hooks.session!,userId:202};render();await flush();
+ handlers.forEach(handler=>handler({target:{checked:true}}));render();
+ expect(nodes(render()).some(node=>String(node.props.href??'').includes('/ceph/compare?'))).toBe(false);
 });

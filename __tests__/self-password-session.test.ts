@@ -77,6 +77,17 @@ function useToken(token: string) {
 async function loginToken(password = OLD_PASSWORD) {
   const response = await login(request("login", { username: user.username, password }));
   expect(response.status).toBe(200);
+  const display = await response.clone().json();
+  // Login shares auth/me's immutable userId projection. Only display data is
+  // exposed in JSON; session tokens and credential fingerprints stay private.
+  expect(display).toEqual({
+    userId: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    permissions: user.permissions ?? null,
+  });
+  expect(display).not.toHaveProperty("token");
   const token = response.cookies.get(SESSION_COOKIE)?.value;
   expect(token).toBeTruthy();
   return token!;

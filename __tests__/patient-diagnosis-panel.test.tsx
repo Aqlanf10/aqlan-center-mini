@@ -1,3 +1,4 @@
+import { OrthoDiagnosisComparison } from "../components/OrthoDiagnosisComparison";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientDiagnosis } from "../components/PatientDiagnosis";
@@ -6,7 +7,7 @@ import { PatientDiagnosis } from "../components/PatientDiagnosis";
 // browser/DOM test or an authorization substitute for the API/PG regressions.
 const hooks = vi.hoisted(() => ({
   permissions: { canViewAllPatients: true } as Record<string, boolean>, loggedOut: false,
-  values: [] as unknown[], cursor: 0, changed: false, username: "synthetic-doctor", role: "doctor",
+  values: [] as unknown[], cursor: 0, changed: false, userId: 9, username: "synthetic-doctor", role: "doctor",
   effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void; phase: "layout" | "passive" }>(),
   memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
   pending: [] as Array<() => void>,
@@ -67,7 +68,7 @@ vi.mock("react", async (original) => {
   };
 });
 
-vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.loggedOut ? null : ({ role: hooks.role, username: hooks.username, permissions: hooks.permissions }) }));
+vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.loggedOut ? null : ({ userId: hooks.userId, role: hooks.role, username: hooks.username, permissions: hooks.permissions }) }));
 type Element = ReactElement<Record<string, unknown>>;
 const nodes = (node: ReactNode): Element[] => Array.isArray(node) ? node.flatMap(nodes)
   : node && typeof node === "object" && "props" in node ? [node as Element, ...nodes((node as Element).props.children as ReactNode)] : [];
@@ -104,7 +105,7 @@ const writes = () => fetchMock.mock.calls.filter(([, options]) => options?.metho
 const canOpen = () => nodes(render()).some(n => n.type === "button" && text(n).startsWith("+"));
 function unmount() { hooks.effects.forEach(effect => effect.cleanup?.()); hooks.effects.clear(); }
 beforeEach(() => {
-  hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
+  hooks.userId = 9; hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
   hooks.role = "doctor"; hooks.username = "synthetic-doctor"; hooks.permissions = { canViewAllPatients: true }; hooks.loggedOut = false; fetchMock.mockReset(); onError.mockReset();
   props = { patientId: 11, orthoCaseId: 21, onError };
   read = () => response({ diagnoses: [version()] }); write = () => response({ id: 52, version: 8 }, 201);
@@ -239,7 +240,8 @@ describe("read-only chairside diagnosis reference", () => {
     expect(text(render())).toContain("قد يتضمن القيد حقولًا محدّثة فقط");
     expect(text(render())).toContain("لا يمثّل بالضرورة تقييمًا كاملًا");
     expect(text(render())).toContain("بلا دمج");
-    expect(nodes(render()).some(n => ["input", "textarea", "select", "button"].includes(String(n.type)))).toBe(false);
+    expect(nodes(render()).some(n => ["input", "textarea", "button", "form"].includes(String(n.type)))).toBe(false);
+    expect(nodes(render()).filter(n => n.type === "select").map(n => n.props["aria-label"])).toEqual(["قيد المقارنة الأول", "قيد المقارنة الثاني"]);
     expect(writes()).toHaveLength(0); expect(onError).not.toHaveBeenCalled();
   });
 
@@ -316,4 +318,89 @@ describe("read-only chairside diagnosis reference", () => {
       expect(fetchMock).not.toHaveBeenCalled(); expect(text(render())).toContain("هذا لا يعني عدم وجود تشخيص");
     },
   );
+});
+
+
+describe("saved diagnosis pair review admission", () => {
+  it("offers two explicit blank selections without changing saved rows or issuing writes", async () => {
+    read = () => response({ diagnoses: [version(), version({ id: 50, version: 4, content: { note: "Older partial entry" } })] });
+    await ready();
+    const selectors = nodes(render()).filter(n => n.type === "select" && String(n.props["aria-label"]).includes("قيد المقارنة"));
+    expect(selectors).toHaveLength(2); expect(selectors.map(n => n.props.value)).toEqual(["", ""]);
+    expect(text(render())).toContain("Synthetic case A diagnosis"); expect(text(render())).toContain("Older partial entry");
+    expect(writes()).toHaveLength(0);
+  });
+  it("retires same-name actor identity and old writer across ABA", async () => {
+    await ready(); invoke(button("+ تحديث")); const old = form();
+    for (const id of [10, 9]) {
+      hooks.userId = id; read = () => response({ diagnoses: [version({ content: { note: `Actor ${id}` } })] });
+      expect(text(render(false))).not.toContain("Synthetic case A diagnosis"); await ready();
+      expect(text(render())).toContain(`Actor ${id}`); await save(old); expect(writes()).toHaveLength(0);
+    }
+  });
+});
+
+
+describe("diagnosis comparison owner and snapshot isolation", () => {
+  const entries = () => [version(), version({ id: 50, version: 4, content: { note: "Older partial entry" } })];
+  const select = (side: string) => find(n => n.type === "select" && n.props["aria-label"] === `قيد المقارنة ${side}`);
+  const change = (control: Element, value: string) => { (control.props.onChange as (event: unknown) => void)({ target: { value } }); render(); };
+  const compared = () => nodes(render()).filter(n => n.type === OrthoDiagnosisComparison);
+  const choose = () => { change(select("الأول"), "51"); change(select("الثاني"), "50"); };
+  beforeEach(() => { read = () => response({ diagnoses: entries() }); });
+  it("uses two explicit IDs, rejects identical choices and never starts a read or write", async () => {
+    await ready(); const calls = fetchMock.mock.calls.length;
+    change(select("الأول"), "51"); expect(compared()).toHaveLength(0);
+    change(select("الثاني"), "51"); expect(compared()).toHaveLength(0); expect(text(render())).toContain("قيدين مختلفين");
+    change(select("الثاني"), "50"); expect(compared()).toHaveLength(1);
+    expect(compared()[0].props.comparison).toMatchObject({ left: { id: 51 }, right: { id: 50 } });
+    expect(fetchMock.mock.calls).toHaveLength(calls); expect(writes()).toHaveLength(0);
+  });
+  it.each(["case", "patient", "actor", "permission", "visit"])("retires comparison and retained selection after %s ABA", async kind => {
+    if (kind === "visit") props = { patientId: 11, orthoCaseId: 21, readOnly: true, referenceVisitId: 91 };
+    await ready(); choose(); const old = select("الأول"), originalProps = props, originalPermissions = hooks.permissions;
+    if (kind === "case") { props = { ...props, orthoCaseId: 22 }; read = () => response({ diagnoses: entries().map(entry => ({ ...entry, orthoCaseId: 22 })) }); }
+    if (kind === "patient") props = { ...props, patientId: 12 };
+    if (kind === "actor") hooks.userId = 10;
+    if (kind === "permission") hooks.permissions = { canViewAllPatients: false };
+    if (kind === "visit") props = { patientId: 11, orthoCaseId: 21, readOnly: true, referenceVisitId: 92 };
+    expect(compared()).toHaveLength(0); await ready(); change(old, "50"); expect(compared()).toHaveLength(0);
+    props = originalProps; hooks.userId = 9; hooks.permissions = originalPermissions; read = () => response({ diagnoses: entries() });
+    await ready(); change(old, "50"); expect(select("الأول").props.value).toBe(""); expect(compared()).toHaveLength(0); expect(writes()).toHaveLength(0);
+  });
+  it.each(["success-reordered", "denial", "timeout"])("retires pair on explicit save refresh: %s", async outcome => {
+    await ready(); choose(); const old = select("الأول"); invoke(button("+ تحديث"));
+    const held = deferred<unknown>();
+    if (outcome === "success-reordered") read = () => response({ diagnoses: entries().reverse() });
+    else if (outcome === "denial") read = () => response({}, 403);
+    else { vi.useFakeTimers(); read = () => held.promise; }
+    await save(); await ready(); expect(compared()).toHaveLength(0); change(old, "50");
+    if (outcome === "timeout") { await vi.advanceTimersByTimeAsync(15_000); render(); }
+    if (outcome !== "success-reordered") {
+      read = () => response({ diagnoses: entries() }); invoke(button("إعادة تحميل")); await ready();
+      held.resolve(response({ diagnoses: entries() })); await ready();
+    }
+    change(old, "50"); expect(select("الأول").props.value).toBe(""); expect(select("الثاني").props.value).toBe("");
+    expect(compared()).toHaveLength(0); expect(writes()).toHaveLength(1);
+  });
+  it("preserves the existing open writer and exact save payload while comparing", async () => {
+    await ready(); invoke(button("+ تحديث")); const existing = form(); choose();
+    expect(form().type).toBe(existing.type); expect(form().key).toBe(existing.key); expect(writes()).toHaveLength(0);
+    await save(existing); await ready();
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ content: { note: "Synthetic update" }, label: "Synthetic label", orthoCaseId: 21 });
+  });
+  it("ignores a same-name actor's old held read after ABA and cannot recover an old pair", async () => {
+    const held = deferred<unknown>(); read = () => ({ ok: true, json: () => held.promise }); await ready();
+    hooks.userId = 10; read = () => response({ diagnoses: entries() }); await ready(); choose();
+    const previous = select("الثاني"); hooks.userId = 9; await ready();
+    held.resolve({ diagnoses: [version({ content: { note: "STALE_ACTOR_CONTENT" } }), version({ id: 50 })] }); await ready();
+    change(previous, "51"); expect(text(render())).not.toContain("STALE_ACTOR_CONTENT");
+    expect(select("الأول").props.value).toBe(""); expect(compared()).toHaveLength(0); expect(writes()).toHaveLength(0);
+  });
+  it("ignores selector callbacks after unmount without reads or writes", async () => {
+    await ready(); choose(); const old = select("الأول"), before = fetchMock.mock.calls.length;
+    unmount(); (old.props.onChange as (event: unknown) => void)({ target: { value: "50" } });
+    expect(fetchMock.mock.calls).toHaveLength(before); expect(writes()).toHaveLength(0);
+  });
+
 });

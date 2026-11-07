@@ -18,6 +18,8 @@ import type { DoctorPermissions } from "@/lib/doctor-permissions";
  *    منفصل غير المتصفح — لا يُصدر من دخول المتصفح ولا يُخزَّن في الصفحة.
  */
 export interface SessionInfo {
+  /** Immutable server-authenticated identity; absent in legacy/demo session views. */
+  userId?: number;
   username: string;
   role: Role | string;
   displayName?: string;
@@ -119,6 +121,7 @@ export function SessionProvider({ value, children }: {
         if (cancelled) return;
         if (response.ok) {
           const me = (await response.json()) as {
+            userId?: number;
             username?: string;
             displayName?: string;
             role?: string;
@@ -126,6 +129,7 @@ export function SessionProvider({ value, children }: {
           };
           if (me?.username && me?.role) {
             setSessionState({
+              userId: me.userId,
               username: me.username,
               displayName: me.displayName,
               role: me.role,

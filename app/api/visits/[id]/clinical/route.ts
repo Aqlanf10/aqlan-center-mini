@@ -1,9 +1,10 @@
+import { ClinicalMutationAuthorityError } from "@/lib/clinical-mutation-authority";
 import { InventoryBusy, InventoryTrackingRequired } from "@/lib/inventory-domain/legacy-write-guard";
 import { ClinicalDoctorIdentityConflict } from "@/lib/clinical-doctor-identity";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { addVisitAddendum, getClinicalVisit, getSettings, recordAudit, saveClinicalNotes, setVisitProcedures, signClinicalVisit, ClinicalPlanConflict, ProcedurePriceRejected, InventoryShortage, type ProcedurePriceOverride } from "@/lib/db";
+import { addVisitAddendum, getClinicalVisit, getSettings, recordAudit, saveClinicalNotes, setVisitProcedures, signAuthorizedClinicalVisit, ClinicalPlanConflict, ProcedurePriceRejected, InventoryShortage, type ProcedurePriceOverride } from "@/lib/db";
 import { CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { requireSession } from "@/lib/session";
@@ -51,7 +52,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     }
 
     return NextResponse.json(visit);
-  } catch {
+  } catch (error) {
+    if (error instanceof ClinicalPlanConflict) {
+      return NextResponse.json({ message: error.message }, { status: 409 });
+    }
     return NextResponse.json({ message: "تعذّر تحميل الزيارة." }, { status: 500 });
   }
 }
@@ -128,15 +132,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const orthoSession = checkOrthoSessionDraft(source.orthoSession);
       if (!orthoSession.ok) return NextResponse.json({ message: orthoSession.message }, { status: 400 });
       // (TD-05) الأساس دستوري من الكود — وعملة فاتورة الزيارة ترث عملة خطة بنودها.
-      const result = await signClinicalVisit({
-        visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: session.username,
-        /* (P0-F) المُنهي ليس الطبيب المعالج: المساعد لا يصير طبيبًا افتراضيًا لسطرٍ بلا طبيب. */
-        signerDoctorPartyId: assistant ? null : session.partyId ?? null,
+      const result = await signAuthorizedClinicalVisit({
+        visitId, baseCurrency: CLINIC_BASE_CURRENCY,
         dependencyOverrideReason: typeof source.dependencyOverrideReason === "string" ? source.dependencyOverrideReason : null,
         orthoSession: orthoSession.value,
         outsideContractDecision,
-        signerRole: session.role,
-      });
+      }, { patientId: visit.patientId, session });
       const messages: Record<string, string> = {
         not_found: "الزيارة غير موجودة.",
         already_signed: "الزيارة موقَّعة سلفًا. التصحيح يكون بملحق.",
@@ -161,31 +162,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           { status: result.reason === "invalid_override_reason" || result.reason === "invalid_decision_reason" ? 400 : 409 },
         );
       }
-      await recordAudit({
-        action: "visit.sign", entity: "visit", entityId: visitId,
-        entityLabel: result.visit?.patientName,
-        details: {
-          الإجراءات: result.visit?.procedures.length ?? 0,
-          الإجمالي: result.duesMinor,
-          الفاتورة: result.invoiceId,
-          الفاتورة_المرتبطة_بالزيارة: result.visit?.invoiceId ?? result.invoiceId,
-          عملة_الفاتورة: result.invoiceCurrency,
-          تحديثات_المخطط: result.chartUpdates,
-          بنود_اكتملت: result.planItemsDone,
-          جلسات_منجزة: result.sessionsCompleted,
-          طلبات_معمل_تلقائية: result.labOrdersCreated,
-          حركات_مستهلكات: result.materialsDeducted,
-          الجلسة_القادمة: result.nextPlannedVisit?.title ?? null,
-          شدّة_التقويم: result.orthoAdjustmentId,
-          تصنيف_فوترة_الشدّة: result.orthoBillingClass,
-          /* (P0-F) المُنهي (signed_by) غير الطبيب المعالج: يُسجَّلان معًا. */
-          المنهي: session.username,
-          دور_المنهي: session.role,
-          الطبيب_المعالج: result.visit?.doctorId ?? null,
-          ...(result.orthoBillingDecision ? { قرار_الشدّة: result.orthoBillingDecision === "billed" ? "فوتِرت" : "بلا رسوم" } : {}),
-        },
-        actor: session.username, actorRole: session.role,
-      });
       /*
        * الاستجابة تحمل نتيجة الرحلة كاملة: الاستحقاق الذي تولّد وفق قواعد الفوترة
        * بعملة فاتورته الفعلية (TD-05 owner review — الشبّاك يعرض استحقاق اليوم
@@ -291,6 +267,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     return NextResponse.json(await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null }));
   } catch (error) {
+    if (error instanceof ClinicalMutationAuthorityError) {
+      return NextResponse.json({ message: error.message }, { status: error.status });
+    }
     if (error instanceof ClinicalDoctorIdentityConflict) {
       return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
     }

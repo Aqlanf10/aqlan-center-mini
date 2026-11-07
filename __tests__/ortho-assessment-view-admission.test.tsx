@@ -1,3 +1,4 @@
+import OrthoSavedModelReview from "../components/OrthoSavedModelReview";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrthoCaseAssessmentV2, type AssessmentLifetimeV2 } from "../components/OrthoCaseAssessmentV2";
@@ -93,10 +94,10 @@ function retireView() {
   hooks.values.length = 0; hooks.effects.clear(); hooks.memos.clear(); hooks.pending.length = 0;
   outerKey = null;
 }
-function render() {
+function render(sectionView?: "measurements" | "interview" | "extraoral" | "intraoral" | "radiographs", orthoCaseId=2) {
   for (let round = 0; round < 20; round++) {
     hooks.cursor = 0; hooks.changed = false;
-    const wrapper = OrthoCaseAssessmentV2({ patientId: 1, orthoCaseId: 2, lifetime: life() });
+    const wrapper = OrthoCaseAssessmentV2({ patientId: 1, orthoCaseId, lifetime: life(), sectionView });
     if (outerKey !== wrapper.key) { retireView(); outerKey = wrapper.key; }
     const tree = (wrapper.type as (input: unknown) => ReactNode)(wrapper.props);
     hooks.pending.splice(0).forEach(effect => effect());
@@ -179,4 +180,51 @@ describe("actual assessment view handler admission", () => {
     parent.readVersion++; render(); await flush(); const requests = fetchMock.mock.calls.length;
     select({ target: { value: "6" } }); await flush(); expect(fetchMock).toHaveBeenCalledTimes(requests);
   });
+});
+
+describe('panoramic source read admission in the existing assessment workspace', () => {
+  it('revokes the parent draft owner on an image-list permission denial', async () => {
+    ready.sources = { imaging: 'allowed', truncated: false, items: [] };
+    fetchMock.mockImplementation(async (url: string) => url.includes('/documents')
+      ? { ok: false, status: 403, redirected: false, json: async () => ({ message: 'synthetic denial' }) }
+      : { ok: true, status: 200, redirected: false, json: async () => ready });
+    render(); await flush();
+    expect(parent.allowed).toBe(false);
+    expect(textOf(render())).toContain('التقييم محجوب حتى إعادة التحقق');
+    expect(change).not.toHaveBeenCalled(); expect(beginLease).not.toHaveBeenCalled();
+  });
+  it('keeps an image-list outage explicit instead of calling it an empty patient record', async () => {
+    ready.sources = { imaging: 'allowed', truncated: false, items: [] };
+    fetchMock.mockImplementation(async (url: string) => url.includes('/documents')
+      ? { ok: false, status: 503, redirected: false, json: async () => ({ message: 'synthetic outage' }) }
+      : { ok: true, status: 200, redirected: false, json: async () => ready });
+    render(); await flush();
+    expect(parent.allowed).toBe(true);
+    expect(textOf(render())).toContain('تعذر تحميل أصل البانوراما؛ لم يُعتبر السجل فارغاً.');
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method)).toBe(false);
+  });
+});
+
+
+describe('selected saved model review parent admission',()=>{
+ const install=()=>{ready.history=[{id:5,version:1,createdAt:'2026-01-01',createdBy:'Synthetic'}];ready.revision={id:5,schemaVersion:2,version:1,content:{},createdAt:'2026-01-01',createdBy:'Synthetic',reason:'Fixture',contentHash:'a'.repeat(64)};};
+ const panels=(tree:ReactNode)=>nodes(tree).filter(n=>n.type===OrthoSavedModelReview);
+ it('passes only selected saved read and exact scope, independent of draft changes',async()=>{install();render();await flush();const before=panels(render())[0];expect(before).toBeDefined();expect(before.props.expected).toEqual({patientId:1,orthoCaseId:2,clinicalCaseId:3,revisionId:5});parent.document=JSON.stringify({reason:'unsaved',measurements:{marker:'draft'},expectedRevisionId:5});const after=panels(render())[0];expect(after.props.data).toBe(before.props.data);expect(after.props).not.toHaveProperty('draft');});
+ it('hides saved model review from interview-only section',async()=>{install();render();await flush();expect(panels(render('interview'))).toHaveLength(0);});
+ it('removes the panel immediately on denied or retired parent authority',async()=>{install();render();await flush();expect(panels(render())).toHaveLength(1);parent.allowed=false;expect(panels(render())).toHaveLength(0);});
+ it('retires panel during reload before a late response can settle',async()=>{install();render();await flush();fetchMock.mockImplementation(()=>new Promise(()=>{}));parent.readVersion++;expect(panels(render())).toHaveLength(0);});
+ it('does not retain saved panel across principal or case switches',async()=>{install();render();await flush();fetchMock.mockImplementation(()=>new Promise(()=>{}));hooks.session={username:'different-principal',role:'doctor',permissions:null};expect(panels(render())).toHaveLength(0);expect(panels(render(undefined,99))).toHaveLength(0);});
+});
+
+describe('saved clinical findings admission',()=>{
+ const install=()=>{ready.history=[{id:5,version:1,createdAt:'2026-01-01',createdBy:'Synthetic'}];ready.revision={id:5,schemaVersion:2,version:1,content:{},createdAt:'2026-01-01',createdBy:'Synthetic',reason:'Fixture',contentHash:'a'.repeat(64)};};
+ const panels=(tree:ReactNode)=>nodes(tree).filter(n=>typeof n.type==='function'&&n.type.name==='OrthoSavedClinicalFindings');
+ it('offers readable saved clinical findings without opening a corrective draft',async()=>{install();render();await flush();expect(panels(render())).toHaveLength(1);expect(parent.document).toBe('');});
+ it('retires the saved read when immutable userId changes with identical display identity',async()=>{hooks.session={...hooks.session!,userId:71};install();render();await flush();expect(nodes(render()).some(n=>n.props['data-testid']==='assessment-v2-saved')).toBe(true);fetchMock.mockImplementation(()=>new Promise(()=>{}));hooks.session={...hooks.session!,userId:72};expect(nodes(render()).some(n=>n.props['data-testid']==='assessment-v2-saved')).toBe(false);});
+ it('passes selected saved bytes only while a draft changes and keeps raw evidence',async()=>{install();render();await flush();const selected=panels(render())[0].props.revision;parent.document=JSON.stringify({reason:'draft only',measurements:{marker:'draft clinical values'},expectedRevisionId:5});expect(panels(render())[0].props.revision).toBe(selected);expect(panels(render())[0].props).not.toHaveProperty('draft');expect(nodes(render()).some(n=>n.props['data-testid']==='assessment-v2-saved')).toBe(true);expect(change).not.toHaveBeenCalled();});
+ it.each(['interview','extraoral','intraoral','measurements','radiographs'] as const)('mounts only matching clinical section %s',async section=>{install();render(section);for(let i=0;i<20;i++)await Promise.resolve();const found=panels(render(section));expect(found.length).toBe(['interview','extraoral','intraoral'].includes(section)?1:0);if(found.length)expect(found[0].props.section).toBe(section);});
+ it('withdraws panel during refresh and after denial without hiding raw source caveats on accepted reads',async()=>{install();ready.sources={imaging:'restricted',truncated:true,items:[]};render();await flush();expect(textOf(render())).toContain('مراجع الصور والأشعة مقيدة');expect(textOf(render())).toContain('قائمة المصادر محدودة');fetchMock.mockImplementation(async()=>({ok:false,status:403}));parent.readVersion++;expect(panels(render())).toHaveLength(0);await flush();expect(panels(render())).toHaveLength(0);});
+ it('changes displayed revision only after selected historical read succeeds',async()=>{install();ready.history=[{id:6,version:2,createdAt:'2026-01-02',createdBy:'Synthetic'},{id:5,version:1,createdAt:'2026-01-01',createdBy:'Synthetic'}];render();await flush();let resolve!:(value:unknown)=>void;fetchMock.mockImplementation(()=>new Promise(r=>resolve=r));const select=nodes(render()).find(n=>n.type==='select')!;(select.props.onChange as (e:unknown)=>void)({target:{value:'6'}});expect(panels(render())).toHaveLength(0);expect(fetchMock.mock.calls.at(-1)?.[0]).toContain('revisionId=6');const historical={...(ready.revision as object),id:6,version:2};resolve({ok:true,status:200,redirected:false,json:async()=>({...ready,revision:historical})});await flush();expect(panels(render())[0].props.revision).toBe(historical);});
+ it('rejects late saved reads across same-name principal ABA',async()=>{install();hooks.session={...hooks.session!,userId:71};let resolve!:(value:unknown)=>void;fetchMock.mockImplementationOnce(()=>new Promise(r=>resolve=r)).mockImplementation(()=>new Promise(()=>{}));render();hooks.session={...hooks.session!,userId:72};render();hooks.session={...hooks.session!,userId:71};render();resolve({ok:true,status:200,redirected:false,json:async()=>ready});await flush();expect(panels(render())).toHaveLength(0);expect(parent.document).toBe('');});
+
 });

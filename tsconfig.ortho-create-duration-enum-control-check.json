@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false,"noEmit":true},"include":["__tests__/postgres/ortho-create-enum-admission.test.ts","__tests__/postgres/ortho-create-duration-admission.test.ts"],"exclude":["node_modules"]}

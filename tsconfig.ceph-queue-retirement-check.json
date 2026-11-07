@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["next-env.d.ts","components/CephTracer.tsx","lib/ceph-edit-queue.ts","app/ceph/[id]/page.tsx","__tests__/ceph-review-interactions.test.tsx","__tests__/ceph-edit-queue.test.ts","__tests__/ceph-page-access.test.ts"],"exclude":["node_modules"]}

@@ -1,0 +1,11 @@
+import {it,expect} from 'vitest';
+import {readSessionBillingReview} from '../lib/ortho-session-billing-review-contract';
+const scope={patientId:1,orthoCaseId:2,actorId:3,access:'clinical_financial' as const};
+function sample(){return {...scope,generatedAt:'2026-11-06T00:00:00.000Z',access:'clinical_financial',entries:[{id:4,doneOn:'2026-01-01',recordedClass:'OUTSIDE_CONTRACT',decision:'no_charge',reason:'Recorded reason',reasonRestricted:false,decidedBy:'actor',decidedAt:'2026-01-02T00:00:00.000Z',invoice:{state:'none'}}]};}
+it('reads exact current facts, retaining null legacy classification',()=>{const x=sample();expect(readSessionBillingReview(x,scope)).toEqual(x);expect(readSessionBillingReview({...x,entries:[{...x.entries[0],recordedClass:null,decision:null,reason:null,decidedAt:null,decidedBy:null}]},scope).entries[0].recordedClass).toBeNull();});
+it.each(['patientId','orthoCaseId','actorId'])('rejects swapped %s',(key)=>expect(()=>readSessionBillingReview({...sample(),[key]:99},scope)).toThrow());
+it('rejects money/clinical extras rather than retain them',()=>{expect(()=>readSessionBillingReview({...sample(),total:1},scope)).toThrow();expect(()=>readSessionBillingReview({...sample(),entries:[{...sample().entries[0],note:'clinical'}]},scope)).toThrow();});
+it('enforces clinical and financial redaction',()=>{const x=sample(),row=x.entries[0];expect(()=>readSessionBillingReview({...x,access:'clinical',entries:[{...row,invoice:{state:'current',id:8,number:'INV'}}]},scope)).toThrow();expect(()=>readSessionBillingReview({...x,access:'financial'},scope)).toThrow();expect(readSessionBillingReview({...x,access:'financial',entries:[{...row,reason:null,reasonRestricted:true}]},{...scope,access:'financial'}).entries[0].reason).toBeNull();});
+it('rejects duplicates invalid dates unknown enum and excess rows',()=>{const x=sample();for(const entries of [[x.entries[0],x.entries[0]],[{...x.entries[0],doneOn:'2026-02-30'}],[{...x.entries[0],recordedClass:'invented'}],Array.from({length:1001},(_,i)=>({...x.entries[0],id:i+1}))])expect(()=>readSessionBillingReview({...x,entries},scope)).toThrow();});
+
+it('rejects actor access mode substitution',()=>expect(()=>readSessionBillingReview(sample(),{...scope,access:'clinical'})).toThrow());

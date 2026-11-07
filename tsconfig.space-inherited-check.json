@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["__tests__/postgres/ortho-revision-registration.test.ts","__tests__/postgres/ortho-tanaka-boundary-migration.test.ts"],"exclude":["node_modules"]}

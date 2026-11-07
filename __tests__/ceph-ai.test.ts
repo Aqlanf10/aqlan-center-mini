@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CEPH_SCHOOLS, computeAll, generateCephExpertDiagnosis, getClinicalInterpretation, getSeverityStars,
   LANDMARKS, MEASUREMENTS, measure, suggestDiagnosis, suggestLandmarks,
-  type LandmarkCode, type LandmarkMap, type Pt,
+  type LandmarkMap, type Pt,
 } from "../lib/ceph";
 
 const img = (x: number, y: number): Pt => ({ x, y: -y });
@@ -28,12 +28,12 @@ describe("معالم الأنسجة الرخوة والبروفايل الجما
     expect(eUl).toBeDefined();
     expect(eUl?.group).toBe("softTissue");
     expect(eUl?.unit).toBe("mm");
-    expect(eUl?.needs).toEqual(["Prn", "PogS", "Ls"]);
+    expect(eUl?.needs).toEqual(["Prn", "PogS", "Ls", "S", "N", "Me"]);
 
     expect(eLl).toBeDefined();
     expect(eLl?.group).toBe("softTissue");
     expect(eLl?.unit).toBe("mm");
-    expect(eLl?.needs).toEqual(["Prn", "PogS", "Li"]);
+    expect(eLl?.needs).toEqual(["Prn", "PogS", "Li", "S", "N", "Me"]);
 
     expect(naso).toBeDefined();
     expect(naso?.group).toBe("softTissue");
@@ -44,6 +44,7 @@ describe("معالم الأنسجة الرخوة والبروفايل الجما
   it("حساب خط ريكتس E-Line: المسافة الموقعة من Ls وLi للخط Prn-PogS", () => {
     // خط عمودي من Prn(100, 20) إلى PogS(100, 120) على الشاشة
     const map: LandmarkMap = {
+      S: { x: 0, y: 0 }, N: { x: 100, y: 0 }, Me: { x: 100, y: 150 },
       Prn: { x: 100, y: 20 },
       PogS: { x: 100, y: 120 },
       // Ls خلف الخط بـ 4 وحدات (غربًا نحو -x)
@@ -161,8 +162,8 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     Po: img(0, -25),
     U1A: img(60, -34),
     U1: img(74.08, -71.44), // U1-NA = 22
-    L1A: img(68, -64),
-    L1: img(49.0, -99.2),   // L1-NB = 25
+    L1A: img(49.0, -99.2), // anatomical root inferior to edge
+    L1: img(68, -64),       // L1-NB = 25
     OcclA: img(70, -48),
     OcclP: img(0, -35.3),
     Gn: img(61.5, -95.5),
@@ -173,20 +174,20 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     PogS: img(70, -88),
   };
 
-  it("تشخيص حالة صنف أول متوازنة طبيعية", () => {
+  it("وصف صنف أول دون استنتاج خطة أو شدة سريرية", () => {
     const results = computeAll(balancedCase, 1.0);
     const dx = generateCephExpertDiagnosis(results, { age: 13, gender: "female" });
 
     expect(dx.sagittalSkeletal.classification).toBe("Class I");
-    expect(dx.sagittalSkeletal.severity).toBe("normal");
-    expect(dx.verticalSkeletal.pattern).toBe("Normodivergent");
-    expect(dx.treatmentRecommendations.extractionDecision).toBe("non-extraction");
+    expect(dx.sagittalSkeletal.severity).toBe("indeterminate");
+    expect(dx.verticalSkeletal.pattern).toBe("Indeterminate"); // FMA=25° and SN-GoGn=25.2° disagree
+    expect(dx.treatmentRecommendations.extractionDecision).toBe("not-specified");
     expect(dx.treatmentRecommendations.orthognathicSurgery).toBe(false);
     expect(dx.formatted.skeletal).toContain("صنف أول");
     expect(dx.formatted.finalDx).toContain("Class I");
   });
 
-  it("تشخيص صنف ثانٍ نموذج 1 شديد مع بروز ثنائي واستطباب قلع الضواحك", () => {
+  it("وصف صنف ثانٍ مع بروز القواطع دون قرار قلع", () => {
     // تراجع الفك السفلي + بروز مفرط للقواطع
     const classTwoCase: LandmarkMap = {
       ...balancedCase,
@@ -201,14 +202,14 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     const results = computeAll(classTwoCase, 1.0);
     const dx = generateCephExpertDiagnosis(results, { age: 14, gender: "male" });
 
-    expect(dx.sagittalSkeletal.classification).toBe("Class II div 1");
-    expect(dx.sagittalSkeletal.severity).toBe("moderate");
-    expect(dx.treatmentRecommendations.extractionDecision).toBe("extraction-indicated");
-    expect(dx.treatmentRecommendations.growthModification).toBe(true);
+    expect(dx.sagittalSkeletal.classification).toBe("Class II");
+    expect(dx.sagittalSkeletal.severity).toBe("indeterminate");
+    expect(dx.treatmentRecommendations.extractionDecision).toBe("not-specified");
+    expect(dx.treatmentRecommendations.growthModification).toBe(false);
     expect(dx.formatted.recommendationsText).toContain("قلع");
   });
 
-  it("تشخيص صنف ثانٍ نموذج 2 مع ارتداد القواطع العلوية وخطة غير قالعة مع توسيع", () => {
+  it("وصف صنف ثانٍ مع ارتداد القواطع دون استنتاج تقسيم أو توسيع", () => {
     const classTwoDivTwoCase: LandmarkMap = {
       ...balancedCase,
       B: img(57, -80), // ANB > 4
@@ -220,12 +221,12 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     const results = computeAll(classTwoDivTwoCase, 1.0);
     const dx = generateCephExpertDiagnosis(results, { age: 12 });
 
-    expect(dx.sagittalSkeletal.classification).toBe("Class II div 2");
-    expect(dx.treatmentRecommendations.extractionDecision).toBe("non-extraction");
-    expect(dx.treatmentRecommendations.expansion).toBe(true);
+    expect(dx.sagittalSkeletal.classification).toBe("Class II");
+    expect(dx.treatmentRecommendations.extractionDecision).toBe("not-specified");
+    expect(dx.treatmentRecommendations.expansion).toBe(false);
   });
 
-  it("تشخيص صنف ثالث مع قصور الفك العلوي في طفل صغير يستدعي Facemask", () => {
+  it("وصف صنف ثالث عند طفل دون وصف جهاز نمو", () => {
     const classThreeChild: LandmarkMap = {
       ...balancedCase,
       A: img(57, -51.98), // SNA = 74° (تراجع فك علوي)
@@ -237,11 +238,11 @@ describe("محرك التشخيص التقويمي السردي والخبير g
 
     expect(dx.sagittalSkeletal.classification).toBe("Class III");
     expect(dx.sagittalSkeletal.maxilla).toBe("retrognathic");
-    expect(dx.treatmentRecommendations.growthModification).toBe(true);
-    expect(dx.treatmentRecommendations.growthModificationAr).toContain("Facemask");
+    expect(dx.treatmentRecommendations.growthModification).toBe(false);
+    expect(dx.treatmentRecommendations.growthModificationAr).toBeUndefined();
   });
 
-  it("تشخيص صنف ثالث هيكلي شديد لدى شخص بالغ يستدعي جراحة تقويمية للفكين", () => {
+  it("وصف صنف ثالث عند بالغ دون وصف جراحة", () => {
     const severeAdultClassThree: LandmarkMap = {
       ...balancedCase,
       A: img(58, -51.98),
@@ -252,12 +253,12 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     const dx = generateCephExpertDiagnosis(results, { age: 24, gender: "male" });
 
     expect(dx.sagittalSkeletal.classification).toBe("Class III");
-    expect(dx.sagittalSkeletal.severity).toBe("severe");
-    expect(dx.treatmentRecommendations.orthognathicSurgery).toBe(true);
-    expect(dx.treatmentRecommendations.orthognathicSurgeryAr).toContain("جراحة تقويمية");
+    expect(dx.sagittalSkeletal.severity).toBe("indeterminate");
+    expect(dx.treatmentRecommendations.orthognathicSurgery).toBe(false);
+    expect(dx.treatmentRecommendations.orthognathicSurgeryAr).toBeUndefined();
   });
 
-  it("تشخيص النمط العمودي المنفتح Hyperdivergent واستطباب زرعات TADs", () => {
+  it("وصف النمط العمودي المنفتح دون استطباب زرعات", () => {
     const hyperCase: LandmarkMap = {
       ...balancedCase,
       // زاوية الفك مفتوحة جداً
@@ -268,8 +269,8 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     const results = computeAll(hyperCase, 1.0);
     const dx = generateCephExpertDiagnosis(results);
 
-    expect(dx.verticalSkeletal.pattern).toBe("Hyperdivergent");
-    expect(dx.treatmentRecommendations.anchorageOrTADs).toBe(true);
+    expect(dx.verticalSkeletal.pattern).toBe("Indeterminate"); // FMA high, SN-GoGn remains in its reference range
+    expect(dx.treatmentRecommendations.anchorageOrTADs).toBe(false);
   });
 
   it("اقتراح التشخيص suggestDiagnosis يدعم قسم الأنسجة الرخوة عند توفر قياساتها", () => {
@@ -311,7 +312,7 @@ describe("مدارس كبار علماء التقويم ومضلع بيورك و
     expect(bjorkSum).toBeCloseTo(saddle + articular + gonial, 2);
   });
 
-  it("تأثير مجموع مضلع بيورك على تشخيص الدوران الفكي (Clockwise vs Counter-clockwise)", () => {
+  it("وصف مجموع بيورك دون تنبؤ بدوران النمو", () => {
     // حالة مضلع بيورك مرتفع > 402° (دوران مع عقارب الساعة وميل لانفتاح العضة)
     const hyperBjorkResults = [
       { code: "BJORK_SUM", value: 408, ar: "", en: "", unit: "°", group: "vertical" as const, schools: ["jarabak" as const], display: "408", mean: 396, tol: 6, status: "above" as const, severityStars: "**" as const, interpretationEn: "", interpretationAr: "", source: "Bjork" },
@@ -320,7 +321,8 @@ describe("مدارس كبار علماء التقويم ومضلع بيورك و
 
     const dx = generateCephExpertDiagnosis(hyperBjorkResults);
     expect(dx.verticalSkeletal.pattern).toBe("Hyperdivergent");
-    expect(dx.verticalSkeletal.detailsAr.some((d) => d.includes("عقارب الساعة"))).toBe(true);
+    expect(dx.verticalSkeletal.detailsAr.some((d) => d.includes("Bjork sum = 408"))).toBe(true);
+    expect(dx.verticalSkeletal.growthTendencyAr).toContain("غير محددين");
   });
 
   it("تحقق من تصنيف المدارس السبع الكلاسيكية لكبار العلماء", () => {
@@ -422,12 +424,12 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
 
     // EXT_INDEX
     const extInd = getClinicalInterpretation("EXT_INDEX", 145);
-    expect(extInd.en).toBe("Extraction indicated");
-    expect(extInd.ar).toContain("قلع");
+    expect(extInd.en).toBe("Unavailable: clinical definition requires validation");
+    expect(extInd.ar).toContain("تحققًا سريريًا");
 
     const nonExt = getClinicalInterpretation("EXT_INDEX", 160);
-    expect(nonExt.en).toBe("Non-Extraction preferred");
-    expect(nonExt.ar).toContain("عدم القلع");
+    expect(nonExt.en).toBe("Unavailable: clinical definition requires validation");
+    expect(nonExt.ar).toContain("تحققًا سريريًا");
   });
 
   it("حساب Overjet و Overbite هندسياً بإسقاط متجه القواطع على المستوى الإطباقي", () => {
@@ -435,6 +437,7 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
     // القاطع السفلي L1 عند (100, 100)
     // القاطع العلوي U1 متقدم 4 بكسل للأمام (+x) و2 بكسل للأسفل (+y: اتجاه العضة العمودية)
     const map: LandmarkMap = {
+      S: { x: 0, y: 0 }, N: { x: 100, y: 0 }, Me: { x: 100, y: 150 },
       OcclP: { x: 0, y: 100 },
       OcclA: { x: 200, y: 100 },
       L1: { x: 100, y: 100 },
@@ -465,6 +468,7 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
     // الزاوية بين Mandibular و AB = 90°
     // PP_FH = 0°
     const map: LandmarkMap = {
+      S: { x: 0, y: 0 }, N: { x: 100, y: 0 },
       Po: { x: 50, y: 100 },
       Or: { x: 150, y: 100 },
       Go: { x: 40, y: 200 },
@@ -493,8 +497,8 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
     expect(apdi).toBeCloseTo(90, 1);
     expect(odi).toBeCloseTo(90, 1);
     expect(cf).toBeCloseTo(180, 1);
-    // Nasolabial = 90°, nasoAdj = (90 - 95) * 0.5 = -2.5
-    expect(extIndex).toBeCloseTo(177.5, 1);
+    // No numerical extraction index without a validated clinical definition.
+    expect(extIndex).toBeNaN();
   });
 
   it("مدارس التحليل تضم WebCeph و Kim بجميع قياساتها وتصنيفاتها", () => {
@@ -511,7 +515,7 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
 
     const kimMeasurements = MEASUREMENTS.filter((m) => m.schools.includes("kim"));
     expect(kimMeasurements.map((m) => m.code)).toEqual(
-      expect.arrayContaining(["FH_AB", "AB_MAND", "PP_FH", "APDI", "ODI", "CF", "EXT_INDEX"])
+      expect.arrayContaining(["FH_AB", "AB_MAND", "PP_FH", "APDI", "ODI", "CF", "EI_KIM_1996"])
     );
   });
 

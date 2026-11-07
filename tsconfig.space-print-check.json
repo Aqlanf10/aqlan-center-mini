@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["next-env.d.ts","lib/ortho-space-print.ts","app/print/ortho-space/[id]/page.tsx","components/OrthoSpaceLedger.tsx","__tests__/ortho-space-print*.tsx","__tests__/postgres/ortho-space-persistence.test.ts"],"exclude":["node_modules"]}

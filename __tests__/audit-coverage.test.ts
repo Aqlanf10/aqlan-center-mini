@@ -154,6 +154,14 @@ describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
     expect(AUDIT_EXEMPT).not.toHaveProperty("POST /api/expenses");
   });
 
+  it("identifies the scoped study image preview as read-only without exempting saved study writes", () => {
+    const key = "POST /api/ortho/[id]/case-study/media";
+    expect(handlers.find(handler => handler.key === key)?.audits).toBe(false);
+    expect(AUDIT_EXEMPT).toHaveProperty(key);
+    expect(AUDIT_EXEMPT).not.toHaveProperty("POST /api/ortho/[id]/case-study");
+    expect(AUDIT_EXEMPT).not.toHaveProperty("POST /api/ortho/[id]/retention-ledger");
+  });
+
   it("only omits an unambiguous literal quote call, not writes or uncertain options", () => {
     expect(callsIn('recordExpense({ amountMinor: value.amountMinor, quoteOnly: true });')
       .has("recordExpense")).toBe(false);

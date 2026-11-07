@@ -11,7 +11,7 @@ import {
 } from "@/components/Chat";
 import { messagePreview } from "@/lib/messages";
 import { CURRENCY_LABEL, activeBalanceCurrencies, formatMoney } from "@/lib/money";
-import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
+import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal-intake-fields";
 import type { PortalHistoricalTreatment, PortalStatement } from "@/lib/portal-statement";
 import { friendlyDate, friendlyDateLong } from "@/lib/reminders";
 

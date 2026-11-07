@@ -1,0 +1,14 @@
+[
+  {
+    "before": "      || signReadSequence !== loadSequence.current || visit?.status === \"signed\"\n      || !currentOwner() || command.current?.owner === owner) return;\n    const blocked = visitSignatureBlock(visit);\n    if (blocked) { setError(blocked); return; }\n",
+    "after": "      || signReadSequence !== loadSequence.current || visit?.status === \"signed\"\n      || !currentOwner() || command.current?.owner === owner) return;\n    if (adjustmentSnapshot.current.owner !== owner || adjustmentSnapshot.current.session !== orthoSession) return;\n    if (orthoSession && visit?.ortho?.visitAdjustmentId === null && adjustmentTextError) {\n      setError(adjustmentTextError); return;\n    }\n    if (orthoSession && visit?.ortho?.visitAdjustmentId === null && adjustmentInterval === null) {\n      setError(ADJUSTMENT_INTERVAL_ERROR); return;\n    }\n    const blocked = visitSignatureBlock(visit);\n    if (blocked) { setError(blocked); return; }\n"
+  },
+  {
+    "before": "              upperWire: orthoSession.upperWire, lowerWire: orthoSession.lowerWire,\n              elastics: orthoSession.elastics, elasticNote: orthoSession.elasticNote,\n              done: orthoSession.done, nextWeeks: Number(orthoSession.nextWeeks) || 4,\n            }\n            : null,\n",
+    "after": "              upperWire: orthoSession.upperWire, lowerWire: orthoSession.lowerWire,\n              elastics: orthoSession.elastics, elasticNote: orthoSession.elasticNote,\n              done: orthoSession.done, nextWeeks: adjustmentInterval!,\n            }\n            : null,\n"
+  },
+  {
+    "before": "      if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }\n    }\n  }, [busy, ownsVisit, currentOwner, owner, visitId, expectedPatientId, load, onSigned, overrideReason, orthoSession, visit, noChargeAdjustment, noChargeReason, signReadSequence]);\n\n",
+    "after": "      if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }\n    }\n  }, [busy, ownsVisit, currentOwner, owner, visitId, expectedPatientId, load, onSigned, overrideReason, orthoSession, visit, noChargeAdjustment, noChargeReason, signReadSequence, adjustmentInterval, adjustmentTextError]);\n\n"
+  }
+]

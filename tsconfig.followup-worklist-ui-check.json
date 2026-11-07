@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["app/print/ortho-followups/page.tsx","app/ortho/page.tsx","__tests__/ortho-followup-worklist-print.test.tsx","__tests__/ortho-followup-reminder-ui.test.tsx"],"exclude":["node_modules"]}

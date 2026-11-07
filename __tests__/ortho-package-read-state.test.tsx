@@ -253,6 +253,16 @@ describe("existing explicit linking actions", () => {
     expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: 51 }) }]]);
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
+  it.each(["active", "completed"])("links an approved %s agreement without inventing an installment schedule", async (status) => {
+    fetchMock.mockResolvedValueOnce(response([fixture({ status, installments: [], agreementApproved: true })]))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    render({ planId: null }); await settle();
+    const select = nodes(render({ planId: null })).find((node) => node.type === "select")!;
+    (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "51" } });
+    click(button(render({ planId: null }), "اربط")); await settle();
+    expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: 51 }) }]]);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
   it("never acts on a synthetic selection not present in the confirmed agreements", async () => {
     fetchMock.mockResolvedValue(response()); render({ planId: null }); await settle();
     const select = nodes(render({ planId: null })).find((node) => node.type === "select")!;

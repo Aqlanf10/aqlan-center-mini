@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["components/OrthoSavedModelReview.tsx","components/OrthoSavedModelResult.tsx","components/OrthoCaseAssessmentV2.tsx","__tests__/ortho-saved-model*.test.tsx","__tests__/ortho-assessment-view-admission.test.tsx"],"exclude":["node_modules"]}

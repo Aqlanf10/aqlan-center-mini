@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["next-env.d.ts","lib/ortho-session-report.ts","app/print/ortho-sessions/[id]/page.tsx","__tests__/ortho-session-report-print.test.tsx","__tests__/postgres/ortho-session-report.test.ts"],"exclude":["node_modules"]}

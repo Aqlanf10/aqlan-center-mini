@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
+import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal-intake-fields";
 import { friendlyDateLong } from "@/lib/reminders";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 

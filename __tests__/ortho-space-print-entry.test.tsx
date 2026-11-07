@@ -1,0 +1,9 @@
+import {it,expect} from 'vitest';
+import {renderToStaticMarkup} from 'react-dom/server';
+import OrthoSpaceLedger from '../components/OrthoSpaceLedger';
+import type {SpaceLedgerRead} from '../lib/ortho-space-client';
+const data={ok:true,scope:{patientId:1,orthoCaseId:2,clinicalCaseId:3},actorId:4,writable:true,headId:10,history:[{id:10,contentHash:'a'.repeat(64),content:{authored:{kind:'plan',arch:'upper',gains:[],uses:[],contacts:[],rationale:'Saved only',alternatives:'Saved alternatives'},baseline:{discrepancyMm:0,estimated:false}}}],ipr:{current:[],totals:[]},baselines:[],strategy:null,adjustments:[]} as unknown as SpaceLedgerRead;
+it('offers a head-hash-bound current saved ledger print link',()=>{const html=renderToStaticMarkup(<OrthoSpaceLedger data={data} draft={null} writable={true} busy={false} uncertain={false} update={()=>{}} discard={()=>{}} save={()=>{}}/>);expect(html).toContain('/print/ortho-space/2?');expect(html).toContain('headHash='+'a'.repeat(64));expect(html).toContain('طباعة السجل المحفوظ الحالي');});
+it.each([{busy:true,uncertain:false},{busy:false,uncertain:true}])('hides print during unresolved submission %j',state=>{const html=renderToStaticMarkup(<OrthoSpaceLedger data={data} draft={null} writable={true} {...state} update={()=>{}} discard={()=>{}} save={()=>{}}/>);expect(html).not.toContain('/print/ortho-space/');});
+it('does not offer printing without a saved head',()=>{const html=renderToStaticMarkup(<OrthoSpaceLedger data={{...data,headId:null,history:[]}} draft={null} writable={true} busy={false} uncertain={false} update={()=>{}} discard={()=>{}} save={()=>{}}/>);expect(html).not.toContain('/print/ortho-space/');});
+it('allows authorized read-only users to print the saved head',()=>{const html=renderToStaticMarkup(<OrthoSpaceLedger data={data} draft={null} writable={false} busy={false} uncertain={false} update={()=>{}} discard={()=>{}} save={()=>{}}/>);expect(html).toContain('/print/ortho-space/2?');});

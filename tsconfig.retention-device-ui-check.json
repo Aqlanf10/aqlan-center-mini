@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["components/OrthoRetentionDeviceDossiers.tsx","components/OrthoRetentionEventDetails.tsx","components/OrthoRetentionLedger.tsx","__tests__/ortho-retention-device-dossiers-ui.test.tsx"],"exclude":["node_modules"]}

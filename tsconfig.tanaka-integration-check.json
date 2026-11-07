@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["lib/ortho-assessment-*.ts","lib/ortho-case-study-recorded-facts.ts","components/OrthoAssessmentMeasurementsV2.tsx","__tests__/ortho-assessment-tanaka*.ts","__tests__/ortho-tanaka-composed*.ts*"],"exclude":["node_modules"]}

@@ -56,11 +56,20 @@ describe("login reference UI preserves auth boundaries", () => {
     expect(node("password").props.type).toBe("text");
   });
   it("posts existing API, projects only existing session fields, stores nothing by default", async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ username: "doctor", displayName: "Doctor", role: "doctor", token: "not-for-js" }) });
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ userId: 7, username: "doctor", displayName: "Doctor", role: "doctor", token: "not-for-js" }) });
     await submit();
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "doctor", password: "synthetic-password" }) });
-    expect(h.session).toHaveBeenCalledWith({ username: "doctor", displayName: "Doctor", role: "doctor" });
+    expect(h.session).toHaveBeenCalledWith({ userId: 7, username: "doctor", displayName: "Doctor", role: "doctor" });
     expect(h.replace).toHaveBeenCalledWith("/");
+    expect(storage.size).toBe(0);
+  });
+  it("preserves the authenticated public actor identity and permissions for embedded clinical commands", async () => {
+    vi.stubGlobal("window", { location: { pathname: "/patients/19", search: "" }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    const permissions = { canViewPlans: false, canEditPlans: false };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ userId: 47, username: "doctor", displayName: "Doctor", role: "doctor", permissions, token: "never-copy-a-token" }) });
+    await submit();
+    expect(h.session).toHaveBeenCalledWith({ userId: 47, username: "doctor", displayName: "Doctor", role: "doctor", permissions });
+    expect(h.replace).not.toHaveBeenCalled();
     expect(storage.size).toBe(0);
   });
   it("saves only username after explicit opt-in and successful login", async () => {

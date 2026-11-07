@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["next-env.d.ts","components/CephTracer.tsx","__tests__/ceph-review-interactions.test.tsx"],"exclude":["node_modules"]}

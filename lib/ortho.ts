@@ -29,7 +29,7 @@ export const APPLIANCE_LABEL: Record<Appliance, string> = {
 };
 
 /** الجهاز الثابت وحده هو الذي تُتابَع أسلاكه — والمتحرّك يُتابع بخطواته. */
-export function usesArchwires(appliance: Appliance): boolean {
+export function usesArchwires(appliance: Appliance | null): boolean {
   return appliance === "fixed_metal" || appliance === "fixed_ceramic";
 }
 
@@ -50,9 +50,10 @@ export const ARCHES_LABEL: Record<Arches, string> = {
  * يطول بلا سبب — كإغلاق فراغٍ على سلكٍ مرن ينتج «تأثير الحبل» فتميل الأسنان بدل
  * أن تنتقل.
  */
-export type OrthoPhase = "aligning" | "working" | "finishing" | "retention";
+export type OrthoPhase = "assessment" | "aligning" | "working" | "finishing" | "retention";
 
 export const PHASE_LABEL: Record<OrthoPhase, string> = {
+  assessment: "التقييم قبل بدء العلاج",
   aligning: "التسوية والمحاذاة",
   working: "المرحلة العاملة",
   finishing: "الإنهاء",
@@ -60,6 +61,7 @@ export const PHASE_LABEL: Record<OrthoPhase, string> = {
 };
 
 export const PHASE_HINT: Record<OrthoPhase, string> = {
+  assessment: "التقييم قبل بدء العلاج",
   aligning: "فكّ الازدحام وتسوية المستوى — أسلاك مرنة",
   working: "إغلاق الفراغات وتصحيح العلاقة — أسلاك فولاذية مستطيلة",
   finishing: "التفاصيل والإطباق النهائي",
@@ -68,9 +70,10 @@ export const PHASE_HINT: Record<OrthoPhase, string> = {
 
 export const PHASE_ORDER: OrthoPhase[] = ["aligning", "working", "finishing", "retention"];
 
-export type CaseStatus = "active" | "retention" | "completed" | "discontinued";
+export type CaseStatus = "assessment" | "active" | "retention" | "completed" | "discontinued";
 
 export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
+  assessment: "قيد التقييم",
   active: "جارية",
   retention: "تثبيت",
   completed: "مكتملة",
@@ -127,8 +130,8 @@ export const WIRE_SEQUENCE: Record<SlotSize, Archwire[]> = {
   ],
 };
 
-export function wiresFor(slot: SlotSize): Archwire[] {
-  return WIRE_SEQUENCE[slot] ?? WIRE_SEQUENCE["022"];
+export function wiresFor(slot: SlotSize | null): Archwire[] {
+  return slot === null ? [] : WIRE_SEQUENCE[slot] ?? WIRE_SEQUENCE["022"];
 }
 
 export function findWire(slot: SlotSize, code: string): Archwire | null {
@@ -141,7 +144,7 @@ export function findWire(slot: SlotSize, code: string): Archwire | null {
  * يُعيد `null` عند آخر السلسلة — ولا يدور إلى أولها: العودة إلى سلكٍ مرنٍ بعد
  * الفولاذي قرارٌ سريري يُتّخذ عمدًا، لا اقتراحٌ يقدّمه برنامج.
  */
-export function nextWire(slot: SlotSize, current: string | null): Archwire | null {
+export function nextWire(slot: SlotSize | null, current: string | null): Archwire | null {
   const wires = wiresFor(slot);
   if (!current) return wires[0] ?? null;
   const index = wires.findIndex((wire) => wire.code === current);

@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["next-env.d.ts", "components/OrthoFacialAnalysis.tsx", "components/OrthoFacialOlderHistory.tsx", "components/OrthoFacialSavedRevision.tsx", "lib/ortho-facial-history-client.ts", "__tests__/ortho-facial-view-ownership.test.tsx", "__tests__/ortho-facial-older-history.test.tsx", "__tests__/ortho-facial-saved-revision.test.tsx"],
+  "exclude": ["node_modules"]
+}

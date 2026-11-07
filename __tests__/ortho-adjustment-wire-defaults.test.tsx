@@ -7,6 +7,7 @@ import { wiresFor } from "../lib/ortho";
 // Peripheral components are stubbed; no route, database, browser, or real network runs.
 const hooks = vi.hoisted(() => ({
   values: [] as unknown[], cursor: 0, memos: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
+  session: { userId: 7, username: "synthetic-doctor", role: "doctor", permissions: { canUploadXrays: true } } as Record<string, unknown>,
   effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
 }));
 vi.mock("react", async (original) => {
@@ -48,7 +49,7 @@ vi.mock("../components/PatientCeph", () => ({ PatientCeph: () => null }));
 vi.mock("../components/PatientDiagnosis", () => ({ PatientDiagnosis: () => null }));
 vi.mock("../components/WebCephRecordsGrid", () => ({ WebCephRecordsGrid: () => null }));
 vi.mock("../components/SettingsProvider", () => ({ useClinicName: () => "Synthetic clinic", useSetting: () => "" }));
-vi.mock("../components/SessionProvider", () => ({ useSession: () => null }));
+vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 
 type Props = ComponentProps<typeof AdjustmentForm>;
 type Case = Props["caseRow"];
@@ -72,10 +73,12 @@ const fetchMock = vi.fn();
 const onSaved = vi.fn();
 const onError = vi.fn();
 let caseRow: Case;
+let patientId = 92001;
+let storage: Map<string, string>;
 
 function render() {
   hooks.cursor = 0;
-  return AdjustmentForm({ caseRow, today, wires: wiresFor(caseRow.slot), patientId: 92001, onSaved, onError });
+  return AdjustmentForm({ caseRow, today, wires: wiresFor(caseRow.slot), patientId, onSaved, onError });
 }
 function elements(node: ReactNode): Element[] {
   if (Array.isArray(node)) return node.flatMap(elements);
@@ -99,7 +102,14 @@ function chooseWire(label: string, value: string) {
 }
 async function submit() {
   const form = render();
-  await form.props.onSubmit({ preventDefault: vi.fn() });
+  const retry = elements(form).find((entry) => entry.props["data-testid"] === "adjustment-reconcile");
+  if (retry) await (retry.props.onClick as (event: unknown) => Promise<void>)({ preventDefault: vi.fn() });
+  else await form.props.onSubmit({ preventDefault: vi.fn() });
+}
+function startNew() {
+  const button = elements(render()).find((entry) => entry.props["data-testid"] === "adjustment-new-intent");
+  if (!button) throw new Error("Missing explicit new intent");
+  (button.props.onClick as () => void)();
 }
 const body = (index = 0) => JSON.parse(String(fetchMock.mock.calls[index][1].body)) as Record<string, unknown>;
 const response = (status: number, value: unknown) => ({ status, ok: status >= 200 && status < 300, json: async () => value });
@@ -116,7 +126,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   caseRow = structuredClone(base);
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue(response(200, { id: 96001, visitId: 91002 }));
+  patientId = 92001;
+  hooks.session = { userId: 7, username: "synthetic-doctor", role: "doctor", permissions: { canUploadXrays: true } };
+  storage = new Map();
+  vi.stubGlobal("sessionStorage", { getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) });
+  fetchMock.mockImplementation(async (_url: string, init: RequestInit) => response(201, {
+    id: 96001, patientId, caseId: caseRow.id, visitId: 91002, attachedToToday: true,
+    requestKey: (init.headers as Record<string, string>)["Idempotency-Key"],
+  }));
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => { unmount(); vi.unstubAllGlobals(); });
@@ -233,6 +251,7 @@ describe("standalone orthodontic adjustment wire defaults", () => {
     expect(input("السلك العلوي").props.value).toBe("016 NiTi");
     expect(input("السلك السفلي").props.value).toBe("012 NiTi");
     expect(input("ما نُفّذ في الشدّة").props.value).toBe("");
+    startNew();
     edit("ما نُفّذ في الشدّة", "Next notes-only session");
     await submit();
     expect(body(1)).toMatchObject({ upperWire: "016 NiTi", lowerWire: "012 NiTi", done: "Next notes-only session" });
@@ -394,6 +413,7 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     expect(input("وصف المطاطات").props.value).toBe("Updated instructions");
     expect(input("أسابيع حتى الشدّة القادمة").props.value).toBe("2");
     expect(input("ما نُفّذ في الشدّة").props.value).toBe("");
+    startNew();
     await submit();
     expect(body(1)).toMatchObject({ elastics: "vertical", elasticNote: "Updated instructions", nextWeeks: 2, done: "" });
   });

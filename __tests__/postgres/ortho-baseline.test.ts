@@ -51,7 +51,7 @@ beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
   orthodontist = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'د. عقلان') RETURNING id`))[0].id;
-  legacyPatient = (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ('P-ORTHO-1', 'سارة علي') RETURNING id`))[0].id;
+  legacyPatient = (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ('P-ORTHO-1', 'مريض اصطناعي لاختبار التقويم') RETURNING id`))[0].id;
   otherPatient = (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ('P-ORTHO-2', 'مريض آخر') RETURNING id`))[0].id;
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
@@ -86,8 +86,9 @@ describe("(CASE-1) legacy orthodontic baseline", () => {
       responsibleDoctorId: orthodontist, responsibleDoctorName: "د. عقلان",
       legacyFinancialMode: "installments", remainingObjectives: "إغلاق فراغ القلع العلوي",
     });
-    expect(found?.baselineRecordedAt).not.toBeNull();
-    expect(found?.progress.monthsElapsed).toBeGreaterThanOrEqual(10);
+    if (!found?.progress) throw new Error("Expected treatment progress for the recorded active legacy baseline");
+    expect(found.baselineRecordedAt).not.toBeNull();
+    expect(found.progress.monthsElapsed).toBeGreaterThanOrEqual(10);
 
     const audit = await q<{ action: string; actor: string; actor_role: string; entity_id: string }>(
       `SELECT action, actor, actor_role, entity_id FROM audit_log WHERE action = 'ortho.baseline'`);
@@ -132,7 +133,7 @@ describe("(CASE-1) legacy orthodontic baseline", () => {
 
 describe("(CASE-1) one orthodontic session per visit", () => {
   it("the sign writes the adjustment inside its transaction; the visit shows it; a retry adds nothing", async () => {
-    const visitId = await openVisit(legacyPatient, "سارة علي");
+    const visitId = await openVisit(legacyPatient, "مريض اصطناعي لاختبار التقويم");
     const invoicesBefore = await count(`SELECT COUNT(*)::int AS n FROM invoices`);
     const signed = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "dr-aqlan", orthoSession: session(legacyCase), signerRole: "doctor" });
     expect(signed.reason).toBeNull();
@@ -154,7 +155,7 @@ describe("(CASE-1) one orthodontic session per visit", () => {
   });
 
   it("a double-clicked concurrent sign produces one signature and one adjustment", async () => {
-    const visitId = await openVisit(legacyPatient, "سارة علي");
+    const visitId = await openVisit(legacyPatient, "مريض اصطناعي لاختبار التقويم");
     const [a, b] = await Promise.all([
       signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "dr-aqlan", orthoSession: session(legacyCase) }),
       signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "dr-aqlan", orthoSession: session(legacyCase) }),
@@ -164,7 +165,7 @@ describe("(CASE-1) one orthodontic session per visit", () => {
   });
 
   it("the existing API is idempotent per (case, visit): double click and concurrency return the same row", async () => {
-    const visitId = await openVisit(legacyPatient, "سارة علي");
+    const visitId = await openVisit(legacyPatient, "مريض اصطناعي لاختبار التقويم");
     const input = {
       caseId: legacyCase, visitId, doneOn: TODAY, phase: null, upperWire: null, lowerWire: null,
       elastics: "none" as const, elasticNote: null, done: "شدّ", nextWeeks: 4, note: null, recordedBy: "dr-aqlan",
@@ -196,7 +197,7 @@ describe("(CASE-1) one orthodontic session per visit", () => {
 
   it("a case of another patient is refused: the sign rolls back entirely", async () => {
     otherCase = (await q<{ id: number }>(`INSERT INTO ortho_cases (patient_id, created_by) VALUES ($1, 'admin') RETURNING id`, [otherPatient]))[0].id;
-    const visitId = await openVisit(legacyPatient, "سارة علي");
+    const visitId = await openVisit(legacyPatient, "مريض اصطناعي لاختبار التقويم");
     const result = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "dr", orthoSession: session(otherCase) });
     expect(result.reason).toBe("ortho_case_invalid");
     expect(await q(`SELECT signed_at FROM visits WHERE id = $1`, [visitId])).toEqual([{ signed_at: null }]);

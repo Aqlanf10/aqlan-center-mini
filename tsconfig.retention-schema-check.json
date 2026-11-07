@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["next-env.d.ts", "lib/ortho-retention-schema.ts", "lib/ortho-retention-submission-schema.ts", "lib/clinic-reset.ts", "__tests__/postgres/ortho-retention-schema.test.ts", "__tests__/postgres/ortho-retention-history-ownership.test.ts", "__tests__/postgres/ortho-retention-ledger-backup.test.ts"],
+  "exclude": ["node_modules"]
+}

@@ -36,9 +36,20 @@ describe("ortho withheld-image presentation", () => {
     expect(html).not.toContain("/api/documents/");
   });
 
-  it.each([true, undefined])("retains the visible/legacy comparison (%s)", (photosVisible) => {
+  it.each([true, undefined])("keeps visible/legacy comparison awaiting its authorized image read (%s)", (photosVisible) => {
     const html = renderToStaticMarkup(createElement(OrthoComparison, { patientId: 1, orthoCaseId: 9, photosVisible }));
-    expect(html).toContain("التوثيق الفوتوغرافي ومقارنة المراحل");
+    // Static rendering cannot complete the effect-owned authorized read. Visible
+    // and legacy-unspecified permission must not imply an empty/loaded gallery.
+    expect(html).toContain('aria-label="مقارنة الصور المسجلة"');
+    expect(html).toContain("مقارنة الصور بحسب المرحلة المسجلة");
+    expect(html).toContain('role="status">جارٍ التحقق من الصور…');
+    expect(html).toContain("تحديث قراءة الصور");
+    expect(html).toContain("لا يثبت تقدم العلاج أو الحضور");
+    expect(html).toContain("تاريخ الرفع ليس تاريخ التقاط الصورة");
+    expect(html).not.toContain("صورة مسجلة قابلة للعرض");
+    expect(html).not.toContain("/api/documents/");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain('role="alert"');
     expect(html).not.toContain("محجوبة حسب صلاحياتك");
   });
 

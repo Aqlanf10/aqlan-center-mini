@@ -1,0 +1,16 @@
+{
+  "image": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1200\" height=\"800\"><path fill=\"#d02030\" d=\"M0 0h600v400H0z\"/><path fill=\"#20c040\" d=\"M600 0h600v400H600z\"/><path fill=\"#2040d0\" d=\"M0 400h600v400H0z\"/><path fill=\"#e0c020\" d=\"M600 400h600v400H600z\"/></svg>",
+  "imageSha256": "ea6271e3a00ebbe0566eee36e9110d5acd8768e44f558e1874547b7fd3bcba6b",
+  "referenceSet": {
+    "key": "builtin_default",
+    "name": "Synthetic bundled reference",
+    "population": "Synthetic geometry fixture only",
+    "ageMin": null,
+    "ageMax": null,
+    "sex": null,
+    "version": "synthetic-v1",
+    "active": true,
+    "values": []
+  },
+  "referenceSetSha256": "ec83bd302301dd40bb371bb6cefaa1042944baf65c03e6d8ebf091d8b3695f89"
+}

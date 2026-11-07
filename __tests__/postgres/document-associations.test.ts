@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { assertRealPostgresUrl, dropPublicSchema, rawPool, stubPostgresEnv } from "./_setup";
 
@@ -8,8 +9,11 @@ assertRealPostgresUrl();
 stubPostgresEnv();
 
 const storage = vi.hoisted(() => ({ writes: 0, onWrite: null as (() => Promise<void>) | null }));
-vi.mock("@/lib/session", () => ({ requireSession: async () => ({ username: "document-test", role: "admin" }) }));
-vi.mock("@/lib/patient-access", () => ({ canAccessPatient: async () => true }));
+const admitted = vi.hoisted(() => ({ session: null as SessionPayload | null }));
+// Cookie admission and patient-access decisions are mocked. Preserve canonical
+// transaction account/credential revalidation against the synthetic account.
+vi.mock("@/lib/session", async original => ({ ...await original<typeof import("../../lib/session")>(), requireSession: async () => admitted.session }));
+vi.mock("@/lib/patient-access", async original => ({ ...await original<typeof import("../../lib/patient-access")>(), canAccessPatient: async () => true }));
 vi.mock("@/lib/files", () => ({
   storageStatus: async () => ({ ready: true }),
   putFile: async () => { storage.writes++; await storage.onWrite?.(); return { key: "synthetic.png", sha256: "a".repeat(64), sizeBytes: 67 }; },
@@ -39,8 +43,13 @@ const upload = async (links: Record<string, string | undefined>) => {
 };
 
 beforeAll(async () => {
+  vi.stubEnv("SESSION_SECRET", "synthetic-document-association-authority-20261106");
   await dropPublicSchema(process.env.DATABASE_URL!);
   await db.ensureSchema();
+  const password = "synthetic-document-account-password";
+  const actor = (await pool.query("INSERT INTO users(username,display_name,password_hash,role) VALUES('document-test','Synthetic document actor',$1,'admin') RETURNING id", [password])).rows[0];
+  admitted.session = { userId: actor.id, username: "document-test", role: "admin", partyId: null,
+    expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion(password) };
   const p = await pool.query("INSERT INTO patients (patient_number, full_name) VALUES ('DOC-A','Synthetic A'),('DOC-B','Synthetic B') RETURNING id");
   [patient, foreignPatient] = p.rows.map(r => r.id);
   const v = await pool.query("INSERT INTO visits (patient_id,patient_name,status) VALUES ($1,'Synthetic A','waiting'),($1,'Synthetic A2','waiting'),($2,'Synthetic B','waiting'),(NULL,'Unlinked','waiting') RETURNING id", [patient, foreignPatient]);
@@ -50,9 +59,45 @@ beforeAll(async () => {
   const a = await pool.query("INSERT INTO ortho_adjustments (case_id,visit_id,done_on,elastics,next_weeks,recorded_by) VALUES ($1,$4,CURRENT_DATE,'none',4,'test'),($2,$4,CURRENT_DATE,'none',4,'test'),($3,$5,CURRENT_DATE,'none',4,'test'),($1,NULL,CURRENT_DATE,'none',4,'test'),($1,$5,CURRENT_DATE,'none',4,'test') RETURNING id", [caseId, oldCase, foreignCase, visit, foreignVisit]);
   [adjustment, oldAdjustment, foreignAdjustment, historicalAdjustment, corruptAdjustment] = a.rows.map(r => r.id);
 });
-afterAll(async () => { await pool.end(); await db.resetPoolForTesting(); });
+afterAll(async () => { await pool.end(); await db.resetPoolForTesting(); vi.unstubAllEnvs(); });
 
 describe("document association integrity", () => {
+
+  // Real multipart route, authorized writer, account revalidation and DATE storage.
+  // Cookie admission, all patient-access checks and file storage remain synthetic.
+  it.each(["2000-02-29", "2024-02-29", "2026-01-31"])("roundtrips explicit acquisition date %s and source metadata", async takenOn => {
+    const writes = storage.writes;
+    const note = "Synthetic imported scan; acquisition date supplied by record";
+    const response = await upload({ orthoCaseId: String(caseId), takenOn, photoStage: "initial", note, uploadedBy: "forged-client-actor" });
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body).toMatchObject({ patientId: patient, orthoCaseId: caseId, takenOn, photoStage: "initial", note, uploadedBy: "document-test" });
+    const { rows: [stored] } = await pool.query(
+      "SELECT patient_id, ortho_case_id, taken_on::text AS taken_on, photo_stage, note FROM patient_documents WHERE id=$1", [body.id]);
+    expect(stored).toEqual({ patient_id: patient, ortho_case_id: caseId, taken_on: takenOn, photo_stage: "initial", note });
+    expect(storage.writes).toBe(writes + 1);
+  });
+
+  it.each([undefined, ""])("roundtrips unknown acquisition metadata %s without inferring date or stage", async empty => {
+    const note = "Synthetic archived image; date and treatment stage unknown";
+    const response = await upload({ orthoCaseId: String(caseId), takenOn: empty, photoStage: empty, note });
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body).toMatchObject({ takenOn: null, photoStage: null, note });
+    const { rows: [stored] } = await pool.query(
+      "SELECT taken_on::text AS taken_on, photo_stage, note FROM patient_documents WHERE id=$1", [body.id]);
+    expect(stored).toEqual({ taken_on: null, photo_stage: null, note });
+  });
+
+  it("refuses explicit invalid dates before storage or document insertion", async () => {
+    const writes = storage.writes, before = await count();
+    for (const takenOn of ["2026-02-30", "2026-02-29", "1900-02-29", "0000-01-01", "2026-13-01", "2026-1-1", "not-a-date"]) {
+      const response = await upload({ orthoCaseId: String(caseId), takenOn, photoStage: "progress", note: "Synthetic invalid acquisition date" });
+      expect(response.status).toBe(400);
+      expect(storage.writes).toBe(writes);
+      expect(await count()).toBe(before);
+    }
+  });
   it("preserves supported optional associations without inventing links", async () => {
     for (const links of [{}, { visitId: visit }, { orthoCaseId: caseId }, { adjustmentId: adjustment },
       { orthoCaseId: caseId, visitId: anotherVisit }, { adjustmentId: historicalAdjustment },

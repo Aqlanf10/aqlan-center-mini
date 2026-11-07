@@ -1,5 +1,10 @@
+import { parseCephSourceIdentity } from "@/lib/ceph-source-review";
+import { parseCephCompletionSnapshot } from "@/lib/ceph-completion-snapshot";
+import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { NextResponse } from "next/server";
 import { completeCephAnalysis, getCephStudy } from "@/lib/db";
+import { canWriteCephClinical } from "@/lib/ceph-access";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -17,12 +22,13 @@ export const dynamic = "force-dynamic";
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
-export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (!canWriteCephClinical(session.role)) return NextResponse.json({ message: "اعتماد التحليل متاح للطبيب والمدير فقط." }, { status: 403 });
   const { id: raw } = await context.params;
   const id = Number(raw);
-  if (!Number.isInteger(id) || id <= 0) {
+  if (!Number.isSafeInteger(id) || id <= 0) {
     return NextResponse.json({ message: "رقم التحليل غير صالح." }, { status: 400 });
   }
 
@@ -30,12 +36,25 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   if (!study) {
     return NextResponse.json({ message: "التحليل غير موجود." }, { status: 404 });
   }
-  if (!(await canAccessPatient(session, study.analysis.patientId, "canUploadXrays"))) {
+  if (!(await canAccessPatient(session, study.analysis.patientId, "canUploadXrays").catch(() => false))) {
     return NextResponse.json({ message: "غير مصرّح لك باعتماد هذا التحليل." }, { status: 403 });
   }
 
+  let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); }
+  catch (error) {
+    return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const expectedSnapshot = parseCephCompletionSnapshot(body && typeof body === "object" && !Array.isArray(body)
+    ? (body as Record<string, unknown>).expectedSnapshot : undefined);
+  if (!expectedSnapshot) return NextResponse.json({ message: "الاعتماد يحتاج نسخة صالحة من البيانات التي راجعتها." }, { status: 400 });
+
+  const hasSources = !!body && typeof body === "object" && !Array.isArray(body) && Object.hasOwn(body, "expectedSources");
+  const expectedSources = hasSources ? parseCephSourceIdentity((body as Record<string, unknown>).expectedSources) : null;
+  if (hasSources && !expectedSources) return NextResponse.json({ message: "هوية مصادر المراجعة غير صالحة؛ أعد فتح الدراسة." }, { status: 400 });
+
   try {
-    const done = await completeCephAnalysis(id, session.username);
+    const done = await completeCephAnalysis(id, session.username, expectedSnapshot, session, expectedSources);
     if (!done.ok) {
       // الشروط ناقصة أمرٌ متوقّع لا عطل — رسالته تُعرض كما هي.
       return NextResponse.json({ message: done.message ?? "لا يمكن الاعتماد." }, { status: 409 });

@@ -1,8 +1,10 @@
+import { createHash, randomUUID } from "node:crypto";
+import { hashPassword, sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 import { DEFAULT_SPECIALTY_TEMPLATES } from "../../lib/specialty-templates";
 import { parseLegacyTreatmentRequest } from "../../lib/legacy-treatment";
-import { REQUIRED_LANDMARKS } from "../../lib/ceph";
+import { computeAll, MEASUREMENTS, REQUIRED_LANDMARKS, type LandmarkMap } from "../../lib/ceph";
 import { checkBaselineDraft } from "../../lib/ortho-baseline";
 
 /**
@@ -32,12 +34,19 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
 
 const TODAY = "2026-10-06";
 let doctor = 0;
+let completionSession: SessionPayload;
 let orthoService = 0;
 let fixture = 0;
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  process.env.SESSION_SECRET ||= `${randomUUID()}${randomUUID()}`;
+  const passwordHash = await hashPassword(randomUUID());
+  const actorId = (await q<{ id: number }>(`INSERT INTO users(username,display_name,password_hash,role,is_active)
+    VALUES('ortho-id-test','Synthetic Ceph signer',$1,'admin',true) RETURNING id`, [passwordHash]))[0].id;
+  completionSession = { userId: actorId, username: "ortho-id-test", role: "admin", expiresAt: Date.now() + 3_600_000,
+    credentialVersion: sessionCredentialVersion(passwordHash) };
   doctor = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'Synthetic Doctor') RETURNING id`))[0].id;
   orthoService = (await q<{ id: number }>(
     `INSERT INTO services (name, price_minor, is_active, price_configured, category)
@@ -58,22 +67,43 @@ async function approvedStudy(patientId: number, over: {
   const [document] = await q<{ id: number }>(
     `INSERT INTO patient_documents (patient_id, kind, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
      VALUES ($1, 'imaging', 'Synthetic image', 'image/jpeg', 1, $2, $3, 'ortho-id-test') RETURNING id`,
-    [patientId, `sha-${fixture}-${over.phase}`, `synthetic/${fixture}-${over.phase}.jpg`]);
+    [patientId, createHash("sha256").update(`synthetic-${fixture}-${over.phase}`).digest("hex"), `synthetic/${fixture}-${over.phase}.jpg`]);
   const created = await createCephAnalysis({
     patientId, documentId: document.id, createdBy: "ortho-id-test", orthoCaseId: over.orthoCaseId,
     phase: over.phase, xrayDate: over.xrayDate, device: over.device, refSet: over.refSet ?? "builtin_default",
   });
   if (!created.ok) throw new Error(created.message);
-  const calibrated = await updateCephCalibration(created.id, { x1: 0, y1: 0, x2: 100, y2: 0, mm: 50 }, "ortho-id-test");
+  const analysisId = Number(created.id);
+  if (!Number.isSafeInteger(analysisId) || analysisId <= 0) throw new Error("Invalid synthetic analysis identity");
+  const calibrated = await updateCephCalibration(analysisId, { x1: 0, y1: 0, x2: 100, y2: 0, mm: 50 }, "ortho-id-test", { calibration: null, mmPerPixel: null });
   if (!calibrated.ok) throw new Error(calibrated.message);
-  // Distinct synthetic points: completion needs presence of the required landmarks, not a clinical result.
-  for (const [index, code] of REQUIRED_LANDMARKS.entries()) {
+  // Defined synthetic geometry from the ceph arithmetic fixture. Arbitrary
+  // index-derived points can be collinear and must not bypass the completion gate.
+  const points: LandmarkMap = {
+    S: { x: 100, y: 20 }, N: { x: 169, y: 12 }, A: { x: 167.57, y: 71.98 },
+    B: { x: 163.84, y: 99.85 }, Pog: { x: 164.03, y: 106.87 }, Me: { x: 160, y: 125 },
+    Gn: { x: 161.5, y: 115.5 }, Go: { x: 82.97, y: 89.08 }, Or: { x: 160, y: 45 },
+    Po: { x: 100, y: 45 }, U1A: { x: 160, y: 54 }, U1: { x: 174.08, y: 91.44 },
+    L1A: { x: 149, y: 119.2 }, L1: { x: 168, y: 84 },
+    OcclA: { x: 170, y: 68 }, OcclP: { x: 100, y: 55.3 },
+  };
+  const values = computeAll(points, 0.5);
+  expect(MEASUREMENTS.filter(definition => definition.needs.every(code => points[code] != null)
+    && !Number.isFinite(values.find(value => value.code === definition.code)?.value))).toEqual([]);
+  for (const code of REQUIRED_LANDMARKS) {
     await q(`INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by) VALUES ($1, $2, $3, $4, 'manual', 'ortho-id-test')`,
-      [created.id, code, 40 + (index * 37) % 400, 30 + (index * 53) % 380]);
+      [analysisId, code, points[code]!.x, points[code]!.y]);
   }
-  const completed = await completeCephAnalysis(created.id, "ortho-id-test");
+  const reviewed = await db.getCephStudy(analysisId);
+  if (!reviewed) throw new Error("Synthetic study missing");
+  if (reviewed.completionSources.state !== "available") throw new Error("Synthetic sources unavailable");
+  const completed = await completeCephAnalysis(analysisId, "ortho-id-test", {
+    patientId: reviewed.analysis.patientId, documentId: reviewed.analysis.documentId, refSet: reviewed.analysis.refSet,
+    calibration: reviewed.analysis.calibration, mmPerPixel: reviewed.analysis.mmPerPixel,
+    landmarks: reviewed.landmarks, diagnosis: reviewed.diagnosis,
+  }, completionSession, reviewed.completionSources.identity);
   if (!completed.ok) throw new Error(completed.message);
-  return { id: created.id, documentId: document.id };
+  return { id: analysisId, documentId: document.id };
 }
 
 const readStudyRow = async (id: number) => (await q<{

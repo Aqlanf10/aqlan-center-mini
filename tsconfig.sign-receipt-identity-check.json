@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false,"noEmit":true},"include":["next-env.d.ts","lib/clinical-sign-result.ts","__tests__/clinical-sign-result.test.ts","__tests__/clinical-visit-ownership.test.tsx","__tests__/clinical-visit-ortho-entry.test.tsx","__tests__/patient-ortho-read-safety.test.tsx"],"exclude":["node_modules"]}

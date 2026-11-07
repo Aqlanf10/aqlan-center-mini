@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["next-env.d.ts","lib/ortho-study-illustrated-store.ts","app/api/ortho/[id]/case-study/review-image/route.ts","__tests__/ortho-study-panel-image*.ts","__tests__/postgres/ortho-study-image.test.ts"],"exclude":["node_modules"]}

@@ -40,7 +40,7 @@ const { POST: postClinical } = await import("../app/api/visits/[id]/clinical/rou
 
 let patientId: number;
 let serviceId: number;
-const adminSession = { userId: 1, username: "ownrev", role: "admin" };
+const adminSession = { userId: 1, username: "ownrev", role: "admin", expiresAt: Date.now() + 60 * 60_000 };
 
 beforeAll(async () => {
   await ensureSchema();

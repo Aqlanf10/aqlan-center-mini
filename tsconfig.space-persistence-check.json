@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["next-env.d.ts","lib/ortho-space*.ts","__tests__/postgres/ortho-space*.test.ts"],"exclude":["node_modules"]}

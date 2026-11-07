@@ -5,6 +5,7 @@ export interface OrthoRecordDocument {
   patientId: number;
   orthoCaseId: number | null;
   title: string;
+  note?: string | null;
   isImage: boolean;
   photoStage: string | null;
   photoView: string | null;
@@ -44,6 +45,7 @@ export function decodeOrthoRecordDocuments(payload: unknown, patientId: number):
     if (!row || typeof row !== "object" || !positiveId(row.id) || ids.has(row.id)
       || row.patientId !== patientId || !nullableId(row.orthoCaseId) || typeof row.title !== "string"
       || typeof row.isImage !== "boolean" || !nullableText(row.photoStage) || !nullableText(row.photoView)
+      || row.note !== undefined && !nullableText(row.note)
       || !nullableText(row.takenOn) || !nullableText(row.removedAt)
       || typeof row.uploadedAt !== "string" || !Number.isFinite(Date.parse(row.uploadedAt))) {
       throw new Error(ORTHO_RECORDS_READ_FAILURE);

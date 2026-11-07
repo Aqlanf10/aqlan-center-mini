@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["lib/ortho-problem*.ts","components/PatientOrtho.tsx","app/api/ortho/*/problem-sources/route.ts","__tests__/ortho-problem*.ts*","__tests__/postgres/ortho-problem*.ts","app/api/ortho/*/problem-sources/recovery/route.ts"],"exclude":["node_modules"]}

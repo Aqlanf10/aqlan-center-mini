@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","include":["next-env.d.ts","lib/clinical-mutation-authority.ts","app/api/ortho/adjustments/[id]/billing-decision/route.ts","app/api/visits/[id]/route.ts","__tests__/postgres/ortho-billing-authority.test.ts","__tests__/postgres/visit-delete-authority.test.ts"],"exclude":["node_modules"],"compilerOptions":{"incremental":false}}

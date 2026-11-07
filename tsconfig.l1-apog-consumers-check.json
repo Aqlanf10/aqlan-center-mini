@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["next-env.d.ts","lib/ceph-completion-provenance.ts","lib/cephPresentation.ts","__tests__/ceph-l1-apog-consumers.test.ts","__tests__/ceph-presentation.test.tsx","__tests__/ceph-completion-provenance.test.ts"],"exclude":["node_modules"]}

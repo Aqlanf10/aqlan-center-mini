@@ -23,6 +23,7 @@ describe.each(["", "scripts/dependency-review/consumer-fixture/"])("official dep
     expect(lock.packages["node_modules/postcss-nested"].version).toBe("6.2.0");
     expect(manifest.overrides).toEqual(prefix ? overrides : {
       ...overrides,
+      "pptxgenjs@4.0.1": { "image-size": "2.0.4" },
       "@typescript-eslint/typescript-estree@8.70.0": { minimatch: "11.0.3" },
     });
   });

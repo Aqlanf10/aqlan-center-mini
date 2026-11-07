@@ -3,6 +3,7 @@ import { chromium, type Browser, type Locator, type Page, type Route } from "pla
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BUCKET_LABEL, BUCKET_ORDER, classifyFollowups, groupByBucket, type FollowupCase } from "../../lib/ortho-followup";
 import { friendlyDate, reminderText, unbookedFollowupText } from "../../lib/reminders";
+import { nextAdjustmentDate } from "../../lib/ortho";
 import { baseUrl, harness } from "./_server";
 
 // Actual built /ortho page and existing isolated security-harness admin session.
@@ -184,8 +185,12 @@ describe("truthful unbooked follow-up on the real built orthodontic board", () =
       const invitation = await messageFrom(f.invitation, unbooked.patientPhone!);
       const reminder = await messageFrom(f.reminder, booked.patientPhone!);
       expect(invitation.text).toBe(unbookedFollowupText(unbooked.patientName));
-      const due = rows.find((row) => row.caseId === unbooked.caseId)!.dueDate;
-      for (const invented of [due, friendlyDate(due), "16:00", "4:00", "الساعة", "مكانكم محفوظ", "نذكّركم بموعدكم", "لنؤجله"]) {
+      const row = rows.find((row) => row.caseId === unbooked.caseId);
+      expect(row).toMatchObject({ dueDate: null, dueBasis: "retention_schedule_unavailable" });
+      // A legacy adjustment interval is not a recorded retention recall. Keep
+      // testing that neither message invents the old interval-derived date.
+      const inventedDue = nextAdjustmentDate(unbooked.lastAdjustmentDate ?? unbooked.startDate, unbooked.nextWeeks);
+      for (const invented of [inventedDue, friendlyDate(inventedDue), "16:00", "4:00", "الساعة", "مكانكم محفوظ", "نذكّركم بموعدكم", "لنؤجله"]) {
         expect(invitation.text).not.toContain(invented);
       }
       const appointment = booked.nextAppointment!;
@@ -194,7 +199,7 @@ describe("truthful unbooked follow-up on the real built orthodontic board", () =
         scheduledDate: appointment.date, scheduledTime: appointment.time, durationMinutes: 15,
         note: null, status: "booked" }, "upcoming"));
       expect(reminder.text).toContain("الخميس 08/10 الساعة 10:30 صباحًا");
-      expect(reminder.text).not.toContain(friendlyDate(due));
+      expect(reminder.text).not.toContain(friendlyDate(inventedDue));
       const unbookedRow = f.page.locator("li").filter({ has: f.page.getByRole("link", { name: unbooked.patientName, exact: true }) });
       const content = await unbookedRow.textContent();
       expect(content).toContain("لا موعد متابعة تقويم مؤكد");

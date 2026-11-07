@@ -148,7 +148,60 @@ export class ProtectedCollectionAttemptHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد إثبات إلغاء محاولات تحصيل؛ يجب الاحتفاظ بمفاتيحها حتى لا تُسجَّل محاولة متأخرة بعد إعادة الضبط. لم يُمسح شيء."); this.name = "ProtectedCollectionAttemptHistoryError"; }
 }
 
+/** Intake commands are durable clinical identity proofs, not resettable setup data. */
+export const ORTHO_INTAKE_HISTORY_TABLES = ["ortho_case_intake_events"] as const;
+export class ProtectedOrthoIntakeHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد تسجيل فتح تقييم أو بدء علاج محفوظ؛ يجب الاحتفاظ بمفاتيحها لمنع إعادة استخدامها مع ملفات أخرى. لم يُمسح شيء."); this.name = "ProtectedOrthoIntakeHistoryError"; }
+}
+
+/** Clinical command proofs survive sessions and cannot be erased before identity reuse. */
+export const ORTHO_ADJUSTMENT_HISTORY_TABLES = ["ortho_adjustment_requests"] as const;
+export class ProtectedOrthoAdjustmentHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد تسجيل محاولات شدّة محفوظة؛ يجب الاحتفاظ بمفاتيحها لمنع تكرارها بعد إعادة استعمال أرقام الملفات. لم يُمسح شيء."); this.name = "ProtectedOrthoAdjustmentHistoryError"; }
+}
+
+/** Saved authored history and retry proofs cannot be removed before identity reuse. */
+export const ORTHO_STUDY_HISTORY_TABLES = ["ortho_case_study_revisions", "ortho_study_submissions"] as const;
+export class ProtectedOrthoStudyHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد حفظ دراسة تقويم؛ يجب الاحتفاظ بمراجعاتها ومفاتيحها. لم يُمسح شيء."); this.name = "ProtectedOrthoStudyHistoryError"; }
+}
+
+/** Signed cephalometric evidence must survive reset and identity reuse. */
+export const CEPH_PROVENANCE_HISTORY_TABLES = ["ceph_completion_provenance"] as const;
+export class ProtectedCephProvenanceHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد اعتماد تحليل سيفالومتري موثّق؛ يجب الاحتفاظ بسجل الاعتماد. لم يُمسح شيء."); this.name = "ProtectedCephProvenanceHistoryError"; }
+}
+
+/** Source-bound facial reviews and request proofs survive reset. */
+export const ORTHO_FACIAL_HISTORY_TABLES = ["ortho_facial_revisions", "ortho_facial_submissions"] as const;
+export class ProtectedOrthoFacialHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد حفظ مراجعات تحليل الوجه؛ يجب الاحتفاظ بسجلها ومفاتيحها. لم يُمسح شيء."); this.name = "ProtectedOrthoFacialHistoryError"; }
+}
+
+/** Immutable documentary space/IPR facts and exact-intent tombstones survive identity reuse. */
+export const ORTHO_SPACE_HISTORY_TABLES = ["ortho_space_entries", "ortho_space_submissions"] as const;
+export class ProtectedOrthoSpaceHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد حفظ سجل المسافات أو برد الأسنان؛ يجب الاحتفاظ بتاريخه ومفاتيحه. لم يُمسح شيء."); this.name = "ProtectedOrthoSpaceHistoryError"; }
+}
+
+export const ORTHO_PROBLEM_HISTORY_TABLES = ["ortho_problem_source_reviews", "ortho_problem_source_submissions"] as const;
+export class ProtectedOrthoProblemHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد حفظ مراجعة مصادر المشاكل؛ يجب الاحتفاظ بتاريخها ومفاتيحها. لم يُمسح شيء."); this.name = "ProtectedOrthoProblemHistoryError"; }
+}
+/** Immutable retention facts and request tombstones must survive identity reuse. */
+export const ORTHO_RETENTION_HISTORY_TABLES = ["ortho_retention_entries", "ortho_retention_submissions"] as const;
+export class ProtectedOrthoRetentionHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد حفظ سجل التثبيت؛ يجب الاحتفاظ بتاريخه ومفاتيحه. لم يُمسح شيء."); this.name = "ProtectedOrthoRetentionHistoryError"; }
+}
 export const RESET_KEEP_TABLES = [
+  ...ORTHO_RETENTION_HISTORY_TABLES,
+  ...ORTHO_SPACE_HISTORY_TABLES,
+  ...ORTHO_PROBLEM_HISTORY_TABLES,
+  ...ORTHO_FACIAL_HISTORY_TABLES,
+  ...CEPH_PROVENANCE_HISTORY_TABLES,
+  ...ORTHO_STUDY_HISTORY_TABLES,
+  ...ORTHO_INTAKE_HISTORY_TABLES,
+  ...ORTHO_ADJUSTMENT_HISTORY_TABLES,
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,

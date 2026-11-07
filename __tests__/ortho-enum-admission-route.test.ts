@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OrthoCase } from "@/lib/db";
-import { PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
+import { PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL } from "@/lib/ortho";
+import { OrthoPhaseAuthorityError } from "@/lib/ortho-phase-authority";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 
 vi.mock("@/lib/session", () => ({ requireSession: vi.fn() }));
@@ -27,7 +28,7 @@ const nonstrings: unknown[] = [undefined, null, false, 0, 3, [], {}, { value: "w
 const context = (id = "41") => ({ params: Promise.resolve({ id }) });
 const found = { id: 41, patientId: 101, status: "active" } as OrthoCase;
 const request = (method: Method, body: unknown) => new Request("https://synthetic.invalid/api/ortho/41", {
-  method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  method, headers: { "Content-Type": "application/json", "Idempotency-Key": "synthetic-ortho-route-001" }, body: JSON.stringify(body),
 });
 const call = (method: Method, body: unknown) => handlers[method](request(method, body), context());
 function noWriters() { for (const writer of writers) expect(writer).not.toHaveBeenCalled(); }
@@ -60,7 +61,7 @@ describe("actual PATCH retainer own-key admission", () => {
     expect(setRetainer).toHaveBeenCalledWith({
       id: 41, retainer, deliveredOn: retainer === "none" ? null : "2026-09-21",
       preserveExistingDeliveryDate: false,
-    });
+    }, { patientId: 101, session: await requireSession() });
     onlyWriter(setRetainer);
   });
 
@@ -82,20 +83,40 @@ describe("actual PATCH retainer own-key admission", () => {
     expect((await call("PATCH", { retainer, status: "completed" })).status).toBe(200);
     expect(closeOrthoCase).toHaveBeenCalledWith({
       id: 41, status: "completed", actor: "synthetic-admin", note: null,
-    });
+    }, { patientId: 101, session: await requireSession() });
     onlyWriter(closeOrthoCase);
   });
 
   it("keeps explicit none without a delivery date", async () => {
     expect((await call("PATCH", { retainer: "none" })).status).toBe(200);
-    expect(setRetainer).toHaveBeenCalledWith({ id: 41, retainer: "none", deliveredOn: null, preserveExistingDeliveryDate: true });
+    expect(setRetainer).toHaveBeenCalledWith({ id: 41, retainer: "none", deliveredOn: null, preserveExistingDeliveryDate: true }, { patientId: 101, session: await requireSession() });
   });
 });
 
 describe("actual PATCH phase own-key admission", () => {
-  it.each(Object.keys(PHASE_LABEL))("accepts canonical phase %s", async (phase) => {
+  it("binds phase changes to the admitted server patient and session, ignoring body identity", async () => {
+    const admitted = await requireSession();
+    expect((await call("PATCH", { phase: "retention", patientId: 999, actor: "forged", session: { userId: 999, role: "admin" } })).status).toBe(200);
+    expect(setOrthoPhase).toHaveBeenCalledWith(41, "retention", { patientId: 101, session: admitted });
+    onlyWriter(setOrthoPhase);
+  });
+  it.each([400, 401, 403, 409] as const)("returns transactional phase refusal %s without invoking another writer", async status => {
+    vi.mocked(setOrthoPhase).mockRejectedValue(new OrthoPhaseAuthorityError(status, "synthetic_phase_refusal", "Synthetic phase refusal"));
+    const response = await call("PATCH", { phase: "working", retainer: "essix", status: "completed" });
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ code: "synthetic_phase_refusal", message: "Synthetic phase refusal" });
+    onlyWriter(setOrthoPhase);
+  });
+
+  it("rejects assessment as a generic treatment-phase change before every writer", async () => {
+    const response = await call("PATCH", { phase: "assessment" });
+    expect(response.status).toBe(400);
+    noWriters();
+  });
+
+  it.each(PHASE_ORDER)("accepts canonical treatment phase %s", async (phase) => {
     expect((await call("PATCH", { phase })).status).toBe(200);
-    expect(setOrthoPhase).toHaveBeenCalledWith(41, phase);
+    expect(setOrthoPhase).toHaveBeenCalledWith(41, phase, { patientId: 101, session: await requireSession() });
     onlyWriter(setOrthoPhase);
   });
 
@@ -115,13 +136,15 @@ describe("actual PATCH phase own-key admission", () => {
 
   it.each(nonstrings.map((value) => [value] as const))("keeps retainer fallthrough for non-string phase %j", async (phase) => {
     expect((await call("PATCH", { phase, retainer: "none" })).status).toBe(200);
-    expect(setRetainer).toHaveBeenCalledWith({ id: 41, retainer: "none", deliveredOn: null, preserveExistingDeliveryDate: true });
+    expect(setRetainer).toHaveBeenCalledWith({ id: 41, retainer: "none", deliveredOn: null, preserveExistingDeliveryDate: true }, { patientId: 101, session: await requireSession() });
     onlyWriter(setRetainer);
   });
 });
 
 describe("actual POST phase own-key normalization", () => {
-  // POST's established unknown-phase contract is null, not request rejection.
+  // Keep historical normalization unchanged for journal matching, while the
+  // separate trusted raw admission error refuses NEW malformed requests.
+  // The mocked replay below is not proof of stored journal/hash compatibility.
   it.each(Object.keys(PHASE_LABEL))("passes canonical phase %s to the adjustment writer", async (phase) => {
     expect((await call("POST", { phase, nextWeeks: 5, done: "Synthetic adjustment" })).status).toBe(201);
     expect(recordAdjustment).toHaveBeenCalledWith(expect.objectContaining({
@@ -131,17 +154,26 @@ describe("actual POST phase own-key normalization", () => {
     onlyWriter(recordAdjustment);
   });
 
-  it.each([...inherited, ...otherUnknown, ...nonstrings].map((value) => [value] as const))("normalizes non-own phase %j to null while retaining valid adjustment data", async (phase) => {
+  it.each([...inherited, ...otherUnknown, ...nonstrings].map((value) => [value] as const))("preserves normalized non-own phase %j and exact raw admission context", async (phase) => {
+    const malformed = phase !== undefined && phase !== null;
+    if (malformed) vi.mocked(recordAdjustment).mockResolvedValue({
+      ok: true, id: 501, created: false, replayed: true, visitId: null, attachedToToday: false,
+    });
     const response = await call("POST", {
       phase, nextWeeks: 5, doneOn: "2026-09-21", done: "Synthetic adjustment",
       upperWire: "014 NiTi", lowerWire: "012 NiTi", elastics: "class_ii", note: "Synthetic note",
     });
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(malformed ? 200 : 201);
     expect(recordAdjustment).toHaveBeenCalledWith({
       caseId: 41, visitId: null, doneOn: "2026-09-21", phase: null,
       upperWire: "014 NiTi", lowerWire: "012 NiTi", elastics: "class_ii", elasticNote: null,
       done: "Synthetic adjustment", nextWeeks: 5, note: "Synthetic note",
       recordedBy: "synthetic-admin", actorRole: "admin",
+      request: { key: "synthetic-ortho-route-001", patientId: 101, session: await requireSession(),
+        newTextAdmissionError: null, newDateAdmissionError: null, newIntervalAdmissionError: null,
+        newVisitAdmissionError: null, omittedDateForReplay: false,
+        newEnumAdmissionError: malformed ? "مرحلة جلسة التقويم غير صالحة؛ اختر قيمة معروفة أو اتركها غير محددة." : null,
+      },
     });
     onlyWriter(recordAdjustment);
   });
@@ -232,7 +264,8 @@ describe("writer outcomes stay unchanged", () => {
     vi.mocked(recordAdjustment).mockResolvedValue({ ok: true, id: 501, created: false, visitId: null, attachedToToday: false });
     const response = await call("POST", { phase: "__proto__" });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ id: 501, existing: true, visitId: null, attachedToToday: false });
+    expect(await response.json()).toEqual({ id: 501, existing: true, visitId: null, attachedToToday: false,
+      patientId: 101, caseId: 41, requestKey: "synthetic-ortho-route-001" });
   });
   it("retains POST exception handling after normalization", async () => {
     vi.mocked(recordAdjustment).mockRejectedValue(new Error("Synthetic failure"));

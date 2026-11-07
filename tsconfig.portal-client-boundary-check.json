@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["lib/portal-intake-fields.ts","lib/portal.ts","app/portal/page.tsx","components/patient/PatientIntakeHistory.tsx","__tests__/portal-intake-boundary.test.ts"],"exclude":["node_modules"]}

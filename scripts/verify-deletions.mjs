@@ -17,6 +17,8 @@
  *   node --import tsx scripts/verify-deletions.mjs
  */
 import "./use-pglite.mjs";
+import { randomBytes, randomUUID } from "node:crypto";
+import { sessionCredentialVersion } from "../lib/auth.ts";
 
 const db = await import("../lib/db.ts");
 const {
@@ -51,6 +53,7 @@ const SYNTHETIC_USD_RATE = 531.125;
 const UNIT_MINOR = 2000; // ٢٠ دولارًا بالسنتات — سعر الوحدة في جدول التسعير
 
 let failed = false;
+let deletionSession;
 const check = (label, ok, extra = "") => {
   console.log(`  ${ok ? "✓" : "✗"} ${label}${extra ? ` — ${extra}` : ""}`);
   if (!ok) failed = true;
@@ -60,6 +63,10 @@ const number = () => "DL-" + Date.now().toString().slice(-8) + Math.floor(Math.r
 
 async function seed() {
   await ensureSchema();
+  // This verifier owns an in-memory database; use a real synthetic current admin.
+  const username = `synthetic-delete-${randomUUID()}`, credential = randomBytes(32).toString("hex");
+  const { rows: [actor] } = await pool.query("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic delete verifier',$2,'admin') RETURNING id", [username, credential]);
+  deletionSession = { userId: actor.id, username, role: "admin", partyId: null, expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion(credential) };
   // وردية مفتوحة — القبض والصرف لا يمرّان بلاها.
   await pool.query(`UPDATE cashier_shifts SET status = 'closed', closed_at = NOW() WHERE status = 'open'`);
   await pool.query(
@@ -358,7 +365,7 @@ async function journeyDeleteVisit() {
     patientId: patient.id, toothCode: 16, condition: "carries",
     stage: "existing", recordedBy: "فحص", visitId: visit.id,
   });
-  const deleted = await deleteVisit(visit.id, { actor: "المدير", actorRole: "admin", reason: "زيارة مكررة" });
+  const deleted = await deleteVisit(visit.id, { session: deletionSession, patientId: patient.id, reason: "زيارة مكررة" });
   check("زيارة الانتظار حُذفت", deleted.ok === true);
   const visitGone = await countRows(`SELECT COUNT(*)::text AS count FROM visits WHERE id = $1`, [visit.id]);
   check("اختفت من الطابور", visitGone === 0);
@@ -374,7 +381,7 @@ async function journeyDeleteVisit() {
     note: null, patientId: patient2.id,
   });
   await pool.query(`UPDATE visits SET signed_at = NOW() WHERE id = $1`, [visit2.id]);
-  const blocked = await deleteVisit(visit2.id, { actor: "المدير", actorRole: "admin" });
+  const blocked = await deleteVisit(visit2.id, { session: deletionSession, patientId: patient2.id });
   check("الزيارة الموقّعة تُمنع من الحذف", blocked.ok === false && blocked.reason === "signed");
   return [patient, patient2];
 }

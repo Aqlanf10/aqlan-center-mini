@@ -86,14 +86,14 @@ export interface OrthoTreatmentStrategyProps {
 }
 export function OrthoTreatmentStrategy(props: OrthoTreatmentStrategyProps) {
   const session = useSession();
-  const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
+  const authority = JSON.stringify([session?.userId ?? null, session?.username, session?.role, session?.permissions ?? null]);
   // Presentation state belongs to this exact patient/case/session/visit owner.
   // In particular, B must never request A's selected history revision.
   return <StrategyWorkspace key={`${props.patientId}:${props.orthoCaseId}:${props.referenceVisitId ?? "case"}:${authority}`} {...props} />;
 }
 function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId }: OrthoTreatmentStrategyProps) {
   const session = useSession();
-  const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
+  const authority = JSON.stringify([session?.userId ?? null, session?.username, session?.role, session?.permissions ?? null]);
   const owner = useMemo(() => ({ patientId, orthoCaseId, authority, referenceVisitId, identity: lifetime?.identity, active: false }),
     [patientId, orthoCaseId, authority, referenceVisitId, lifetime?.identity]);
   useLayoutEffect(() => { owner.active = true; return () => { owner.active = false; }; }, [owner]);
@@ -208,7 +208,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
   return <section aria-label={lifetime ? "خطة الحالة: المشكلة والهدف والاستراتيجية" : "خطة الحالة للمرجع فقط"} data-testid={lifetime ? "ortho-strategy-editor" : "ortho-strategy-reference"}
     className={`min-w-0 rounded-2xl border border-slate-200 bg-white ${unlinked ? "space-y-2 p-2 sm:space-y-3 sm:p-4" : "space-y-3 p-4"}`}>
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:flex-wrap sm:justify-between"><h4 className={`${unlinked ? "text-xs sm:text-sm" : "text-sm"} font-black text-navy-900`}>المشكلة ← الهدف ← الاستراتيجية</h4>
-      <button type="button" className={buttonClass} disabled={!!lifetime?.busy} onClick={() => setReload(value => value + 1)}>تحديث سجل الخطة</button></div>
+      <button type="button" className={buttonClass} disabled={!!lifetime?.busy} onClick={() => { if (owner.active && (!lifetime || lifetime.active())) setReload(value => value + 1); }}>تحديث سجل الخطة</button></div>
     {!lifetime ? <p className="text-xs text-slate-500">مرجع للقراءة فقط. لا ينسخ النص إلى الزيارة ولا يضيف إجراءً أو توقيعًا أو مبلغًا.</p> : null}
     {loading ? <p role="status" className="text-sm text-slate-500">جارٍ التحقق من خطة الحالة…</p> : null}
     {read.owner === owner && read.error ? <p role="alert" className="text-sm text-rose-800">{read.error}</p> : null}
@@ -221,7 +221,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
     {data?.state === "ready" ? <>
       {data.history.length ? <label className="block text-xs font-bold text-slate-600">النسخة المعروضة
         <select aria-label="نسخة خطة الحالة" className={fieldClass} disabled={!!draft || !!lifetime?.busy || !!lifetime?.uncertain} value={selected ?? data.history[0].revisionId}
-          onChange={event => { setSelected(Number(event.target.value)); setMessage(null); }}>
+          onChange={event => { if (!owner.active || lifetime && !lifetime.active() || draft || lifetime?.busy || lifetime?.uncertain) return; setSelected(Number(event.target.value)); setMessage(null); }}>
           {data.history.map(entry => <option key={entry.revisionId} value={entry.revisionId}>نسخة {entry.version} · {entry.createdAt.slice(0, 10)} · {entry.createdBy}{entry.recordingContext === "retrospective" ? " · تصحيح توثيقي" : ""}</option>)}
         </select></label> : <p className="text-sm text-slate-500">لا توجد نسخة موثّقة لخطة هذه الحالة بعد.</p>}
       {data.revision ? <Revision revision={data.revision} /> : null}

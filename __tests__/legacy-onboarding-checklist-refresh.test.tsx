@@ -233,6 +233,9 @@ beforeEach(() => {
     throw new Error(`Unexpected synthetic read: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
+  // The real parent now owns a beforeunload recovery listener. Provide the
+  // browser event surface instead of skipping its effect or weakening cleanup.
+  vi.stubGlobal("window", new EventTarget());
 });
 afterEach(() => { unmount(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 

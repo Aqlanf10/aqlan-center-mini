@@ -13,6 +13,7 @@ export async function GET() {
   const user = await findUserByUsername(session.username).catch(() => null);
 
   return NextResponse.json({
+    userId: session.userId,
     username: session.username,
     displayName: user?.displayName ?? session.username,
     role: session.role,

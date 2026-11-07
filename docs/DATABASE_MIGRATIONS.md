@@ -620,3 +620,69 @@ Application shade edits commit their audit record in the same transaction and
 use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
+
+## Local orthodontic integration chain: 0106–0122
+
+**Local integration only, not deployed to Staging or Production.** These entries
+describe the reviewed source files and their runtime registration in this local
+candidate, not evidence that any live database has applied them. The current
+source contains 82 numbered migrations; absent numbers are not available for
+reuse. Exact-head CI, schema verification and deployment acceptance remain
+separate requirements.
+
+- `0106_ortho_assessment_verifier_2_2.sql`: Forward-only replacement of the
+  assessment final-state validator to admit payload verifier 2.2.0 alongside
+  2.1.0. Preserves published 0052 and does not recompute historical results.
+- `0108_ortho_assessment_intake.sql`: Permits explicit assessment episodes
+  without invented appliance/start fields, constrains assessment versus
+  treatment state, and adds the intake-event journal and open-case index.
+- `0109_ortho_adjustment_requests.sql`: Durable actor/request-key outcomes
+  linking an adjustment and optional visit, with request fingerprints and
+  restrictive references. Existing adjustments are not deduplicated or rewritten.
+- `0110_ortho_assessment_verifier_2_2_1.sql`: Forward-only decimal-domain
+  verifier admission, including matching Tanaka engine and domain-policy
+  witnesses. Keeps 0052/0106 unchanged and performs no result backfill.
+- `0111_ortho_case_study.sql`: Versioned draft/documented study revisions
+  with case/patient ownership, predecessor and documentation lineage, actor
+  identity and command fingerprints.
+- `0112_ortho_study_submissions.sql`: Durable study command journal with
+  pending/committed/cancelled states, revision links and acknowledgement
+  metadata for recovery of uncertain submissions.
+- `0113_ceph_completion_provenance.sql`: Immutable completion witnesses,
+  SHA-256 identity, actor and sealing metadata. Existing completed analyses
+  remain unversioned; historical evidence is not reconstructed.
+- `0114_ceph_completion_source_cas.sql`: Expands the provenance envelope
+  constraint to versions 1 and 2 for source-CAS completion. Historical version
+  1 rows and signatures remain unchanged.
+- `0115_ortho_facial_revisions.sql`: Versioned facial-analysis revisions
+  linked to the patient document and case, with predecessor, actor, command
+  and content fingerprints and protected history.
+- `0116_ortho_facial_submissions.sql`: Durable facial command journal with
+  pending/committed/cancelled states and links to the resulting revision.
+- `0117_ortho_problem_sources.sql`: Append-only explicit problem-source
+  reviews with same-case source snapshots, fingerprints and predecessor
+  lineage. Does not infer problems or backfill historical cephalometric data.
+- `0118_ortho_problem_source_submissions.sql`: Durable problem-source
+  submission journal linked to the review, with request identity, settlement
+  and acknowledgement metadata.
+- `0119_ortho_space_ledger.sql`: Append-only space-planning and actual IPR
+  documentation, with version/predecessor identity and current/retrospective
+  capture context. Does not perform clinical or financial actions.
+- `0120_ortho_space_submissions.sql`: Durable space command journal with
+  pending/committed/cancelled states and a restrictive link to the ledger entry.
+- `0121_ortho_retention_ledger.sql`: Immutable documentary debond, device
+  delivery/replacement/review/repair/status and follow-up-intent events.
+  Preserves case ownership, correction and device lineage; does not transition
+  case lifecycle, schedule appointments or perform financial actions.
+- `0122_ortho_retention_submissions.sql`: Durable retention command journal
+  with pending/committed/cancelled states, request fingerprints, entry links,
+  settlement and acknowledgement metadata.
+
+The local `ensureSchema()` path registers these exact runtime mirrors through
+`applyRuntimeMigrationFiles` with checksums; numbered SQL and registry history
+must not be rewritten to conceal drift. The space and retention submission
+journals depend on their corresponding ledgers (0119 → 0120 and 0121 → 0122).
+The reviewed candidate chain also retains the preceding study, facial and
+problem-source dependencies. A code rollback is not permission to remove stored
+history, migration registry entries or backups. No live database changes were
+made for this documentation update.

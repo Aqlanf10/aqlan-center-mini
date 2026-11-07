@@ -93,6 +93,7 @@ async function open(width: number, kind: Kind = "ordinary") {
   const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const writes: Record<string, unknown>[] = [];
+  const requestKeys: string[] = [];
   const unexpected: string[] = [];
   const errors: string[] = [];
   let submitArmed = false;
@@ -103,6 +104,9 @@ async function open(width: number, kind: Kind = "ordinary") {
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
       if (submitArmed && request.method() === "POST" && url.pathname === postPath && url.search === "") {
         submitArmed = false;
+        const requestKey = request.headers()["idempotency-key"];
+        expect(requestKey).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+        requestKeys.push(requestKey);
         writes.push(request.postDataJSON() as Record<string, unknown>);
         await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ message: rejected }) });
         return;
@@ -135,14 +139,20 @@ async function open(width: number, kind: Kind = "ordinary") {
     expect(await form.count()).toBe(1);
     const note = form.getByRole("textbox", { name: "ما نُفّذ في الشدّة", exact: true });
     const save = form.getByRole("button", { name: "احفظ الشدّة والصور", exact: true });
-    return { context, page, fixture, form, upper, lower, note, save, writes,
+    return { context, page, fixture, form, upper, lower, note, save, writes, requestKeys,
       submit: async () => {
         const expected = writes.length + 1;
         submitArmed = true;
-        await save.click();
+        const reconcile = form.getByTestId("adjustment-reconcile");
+        await (await reconcile.count() ? reconcile : save).click();
         await expect.poll(() => writes.length).toBe(expected);
         await page.getByRole("alert").filter({ hasText: rejected }).waitFor();
-        await expect.poll(() => save.isEnabled()).toBe(true);
+        await expect.poll(() => form.getByTestId("adjustment-reconcile").isEnabled()).toBe(true);
+        expect(await save.count()).toBe(0);
+        if (writes.length > 1) {
+          expect(writes.at(-1)).toEqual(writes[0]);
+          expect(requestKeys.at(-1)).toBe(requestKeys[0]);
+        }
         expect(submitArmed).toBe(false);
       },
       assertSafe: () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); },
@@ -193,7 +203,7 @@ describe("standalone orthodontic wire defaults in the real RTL form", () => {
   it.each([1280, 390])("preserves notes-only wires and changes only an explicitly selected arch at %ipx", async (width) => {
     const fixture = fixtures.get("ordinary")!;
     const before = await storedState(fixture.patientId);
-    const f = await open(width);
+    let f = await open(width);
     try {
       await expectSelected(f.upper, "014 NiTi"); await expectSelected(f.lower, "012 NiTi");
       expect(await f.note.inputValue()).toBe(""); expect(f.writes).toEqual([]);
@@ -204,6 +214,12 @@ describe("standalone orthodontic wire defaults in the real RTL form", () => {
       expect(f.writes[0]).toMatchObject({ upperWire: "014 NiTi", lowerWire: "012 NiTi", done: "مراجعة اليوم دون تغيير الأسلاك" });
       await expectSelected(f.upper, "014 NiTi"); await expectSelected(f.lower, "012 NiTi");
       expect(await f.note.inputValue()).toBe("مراجعة اليوم دون تغيير الأسلاك");
+      await f.upper.selectOption("016 NiTi");
+      await expectSelected(f.upper, "014 NiTi"); // An unresolved command cannot be edited into another intent.
+      await f.submit(); expect(f.writes[1]).toEqual(f.writes[0]);
+      // Test a genuinely independent clinician selection in a fresh isolated browser context,
+      // rather than clearing/overwriting the unresolved command's sessionStorage.
+      f.assertSafe(); await f.context.close(); f = await open(width);
       if (width === 1280) await f.upper.selectOption("016 NiTi");
       else await f.lower.selectOption("014 NiTi");
       const chosen = width === 1280 ? { upperWire: "016 NiTi", lowerWire: "012 NiTi" }
@@ -211,8 +227,8 @@ describe("standalone orthodontic wire defaults in the real RTL form", () => {
       await expectSelected(f.upper, chosen.upperWire); await expectSelected(f.lower, chosen.lowerWire);
       await f.note.fill("اختيار صريح لسلك فك واحد");
       await f.submit();
-      expect(f.writes).toHaveLength(2);
-      expect(f.writes[1]).toMatchObject({ ...chosen, done: "اختيار صريح لسلك فك واحد" });
+      expect(f.writes).toHaveLength(1);
+      expect(f.writes[0]).toMatchObject({ ...chosen, done: "اختيار صريح لسلك فك واحد" });
       f.assertSafe(); expect(await storedState(fixture.patientId)).toEqual(before);
     } finally { await f.context.close(); }
   });
@@ -220,17 +236,18 @@ describe("standalone orthodontic wire defaults in the real RTL form", () => {
   it.each(["custom", "unset", "terminal"] as const)("displays and submits the actual %s wire values without silent replacement", async (kind) => {
     const fixture = fixtures.get(kind)!;
     const before = await storedState(fixture.patientId);
-    const f = await open(390, kind);
+    let f = await open(390, kind);
     try {
       await expectSelected(f.upper, fixture.upperWire); await expectSelected(f.lower, fixture.lowerWire);
       await f.note.fill("توثيق تجريبي دون تغيير السلك");
       await f.submit();
       expect(f.writes).toHaveLength(1);
       expect(f.writes[0]).toMatchObject({ upperWire: fixture.upperWire ?? "", lowerWire: fixture.lowerWire ?? "", done: "توثيق تجريبي دون تغيير السلك" });
+      f.assertSafe(); await f.context.close(); f = await open(390, kind);
       await f.lower.selectOption(kind === "unset" ? "012 NiTi" : "");
       await f.submit();
-      expect(f.writes).toHaveLength(2);
-      expect(f.writes[1]).toMatchObject({ upperWire: fixture.upperWire ?? "", lowerWire: kind === "unset" ? "012 NiTi" : "" });
+      expect(f.writes).toHaveLength(1);
+      expect(f.writes[0]).toMatchObject({ upperWire: fixture.upperWire ?? "", lowerWire: kind === "unset" ? "012 NiTi" : "" });
       f.assertSafe(); expect(await storedState(fixture.patientId)).toEqual(before);
     } finally { await f.context.close(); }
   });
@@ -272,7 +289,7 @@ async function captureRegimen(f: Awaited<ReturnType<typeof open>>, width: number
 describe("standalone orthodontic regimen continuity in the real RTL form", () => {
   it.each([1280, 390])("keeps the saved regimen and interval until explicitly changed at %ipx", async (width) => {
     const target = fixtures.get("ongoing")!; const before = await storedState(target.patientId);
-    const f = await open(width, "ongoing");
+    let f = await open(width, "ongoing");
     try {
       const elasticClass = f.form.getByLabel("صنف المطاطات", { exact: true });
       const description = f.form.getByLabel("وصف المطاطات", { exact: true });
@@ -287,8 +304,10 @@ describe("standalone orthodontic regimen continuity in the real RTL form", () =>
         elasticNote: "3/16 خفيفة — ليلًا", nextWeeks: 6, done: "مراجعة اليوم دون تغيير المطاطات" });
       expect(await elasticClass.inputValue()).toBe("class_ii"); expect(await interval.inputValue()).toBe("6");
       await f.submit(); expect(f.writes[1]).toEqual(f.writes[0]);
-      await elasticClass.selectOption("none"); await interval.fill("2"); await f.submit();
-      expect(f.writes[2]).toMatchObject({ elastics: "none", elasticNote: "", nextWeeks: 2 });
+      f.assertSafe(); await f.context.close(); f = await open(width, "ongoing");
+      await f.form.getByLabel("صنف المطاطات", { exact: true }).selectOption("none");
+      await f.form.getByLabel("أسابيع حتى الشدّة القادمة", { exact: true }).fill("2"); await f.submit();
+      expect(f.writes[0]).toMatchObject({ elastics: "none", elasticNote: "", nextWeeks: 2 });
       f.assertSafe(); expect(await storedState(target.patientId)).toEqual(before);
     } finally { await f.context.close(); }
   });

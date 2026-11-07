@@ -5,7 +5,7 @@ import {
   friendlyDateLong, friendlyTime, reminderText, toWhatsAppNumber, unbookedFollowupText,
 } from "@/lib/reminders";
 import { clinicDateString, getAppointmentTypeLabel } from "@/lib/schedule";
-import { sinceAdjustmentText } from "@/lib/ortho-followup";
+import { isRetentionFollowup, sinceAdjustmentText } from "@/lib/ortho-followup";
 import {
   BUCKET_LABEL, BUCKET_ORDER, BUCKET_TONE,
   type FollowupBucket, type FollowupRow,
@@ -71,6 +71,7 @@ export default function OrthoFollowupPage() {
 
   const buckets = feed?.buckets ?? [];
   const activeBucket = buckets.find((bucket) => bucket.bucket === active) ?? null;
+  const attendanceContext = buckets.flatMap((bucket) => bucket.rows).find((row) => row.attendanceContext)?.attendanceContext;
 
   const bookingContextKnown = (row: FollowupRow) => row.bookingContext?.verified === true
     && Array.isArray(row.bookingContext.reviewAppointments) && Array.isArray(row.bookingContext.otherAppointments)
@@ -108,11 +109,23 @@ export default function OrthoFollowupPage() {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="مركز متابعة التقويم"
-        subtitle="قائمة اليوم: من يحتاج شدّة، ومن بلا موعد قادم، ومن تجاوز أو غاب — قبل أن يذوب."
+        subtitle="متابعة العلاج والتثبيت: المواعيد القادمة، ومن بلا موعد، والمواعيد السابقة والغياب."
       />
 
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+
+      {attendanceContext ? (
+        <details className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+          <summary className="cursor-pointer font-bold">حالة الموعد لا تثبت إتمام علاج التقويم.</summary>
+          <p className="mt-2">مؤشر الغياب من الحالة الحالية لأحدث وقت موعد مشمول في هذه القراءة، وليس سجل حضور فعليًا أو نسخة تاريخية للحالات. عدم ظهور المؤشر لا يثبت الحضور.</p>
+          <p className="mt-1">حد البيانات بالتوقيت المحلي: <bdi>{attendanceContext.cutoff.localDateTime}</bdi> (<bdi>{attendanceContext.cutoff.timeZone}</bdi>).</p>
+          {attendanceContext.cutoff.kind === "date_only_before_midnight" ? (
+            <p className="mt-1 font-bold text-amber-800">قراءة بتاريخ فقط: تُستبعد مواعيد هذا اليوم؛ لا تمثل هذه القراءة حالة السجل في ذلك التاريخ.</p>
+          ) : null}
+          <p className="mt-1">تُرتّب المواعيد بالتوقيت المحلي؛ الساعة المتكررة عند تغيير التوقيت الصيفي لا تميّز لحظتي الموعد.</p>
+        </details>
       ) : null}
 
       {/* (P1-C) شدّات خارج العقد بانتظار قرار فوترة. */}
@@ -140,6 +153,14 @@ export default function OrthoFollowupPage() {
         })}
       </div>
 
+      {!loading && !error && feed && activeBucket ? <div className="mb-3 space-y-1">
+        <a href={`/print/ortho-followups?bucket=${encodeURIComponent(active)}`} target="_blank" rel="noopener noreferrer"
+          className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold">
+          طباعة قائمة المتابعة المختارة
+        </a>
+        <p className="text-xs text-slate-600">تُجهّز الطباعة من قراءة جديدة بصلاحيتك الحالية، وقد تختلف عن القائمة المعروضة. لا يُنقل محتوى الشاشة أو أرقام الهواتف إلى التقرير.</p>
+      </div> : null}
+
       {loading && !feed ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : !activeBucket || activeBucket.count === 0 ? (
@@ -165,10 +186,23 @@ export default function OrthoFollowupPage() {
                     className="text-sm font-extrabold text-navy-900 underline decoration-navy-200 underline-offset-4 hover:decoration-navy-800">
                     {row.patientName}
                   </a>
-                  <p className="mt-0.5 text-[11px] text-slate-500">
-                    آخر شدّ: {row.lastAdjustmentDate ? friendlyDateLong(row.lastAdjustmentDate) : "بلا شدّات"} ({sinceAdjustmentText(row.daysSinceLast)})
-                    {" · الاستحقاق: "}{friendlyDateLong(row.dueDate)}
-                  </p>
+                  {isRetentionFollowup(row) ? (
+                    <div className="mt-0.5 text-[11px] text-slate-600">
+                      <p>متابعة التثبيت: استحقاق التثبيت وآخر مراجعة غير متاحين في هذه اللوحة؛ يلزم مراجعة الطبيب لتحديد جدول المتابعة.</p>
+                      <p>الحجز لا يحدد استحقاق التثبيت ولا يثبت إتمام مراجعة التثبيت.</p>
+                    </div>
+                  ) : (
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      آخر شدّ: {row.lastAdjustmentDate ? friendlyDateLong(row.lastAdjustmentDate) : "بلا شدّات"} ({sinceAdjustmentText(row.daysSinceLast)})
+                      {" · الاستحقاق: "}{row.dueDate ? friendlyDateLong(row.dueDate) : "غير متاح"}
+                    </p>
+                  )}
+                  {row.attendanceContext?.outcome === "conflict" ? (
+                    <p role="status" className="mt-1 text-[11px] font-bold text-amber-800">
+                      تعارض حضور وغياب في وقت الموعد نفسه؛ يبقى مؤشر الغياب للمراجعة.
+                      {" "}<bdi>{row.attendanceContext.latestScheduledLocal}</bdi>
+                    </p>
+                  ) : null}
                   {!contextKnown ? (
                     <p role="status" className="mt-0.5 text-[11px] font-bold text-amber-700">
                       تعذّر التحقق من سياق المواعيد — راجع المواعيد قبل إضافة حجز
@@ -216,9 +250,11 @@ export default function OrthoFollowupPage() {
                       ))}
                     </div>
                   ) : null}
-                  <p className="mt-0.5 text-[10px] text-slate-400" dir="ltr">
-                    {row.upperWire || row.lowerWire ? `U: ${row.upperWire ?? "—"} · L: ${row.lowerWire ?? "—"}` : ""}
-                  </p>
+                  {!isRetentionFollowup(row) ? (
+                    <p className="mt-0.5 text-[10px] text-slate-400" dir="ltr">
+                      {row.upperWire || row.lowerWire ? `U: ${row.upperWire ?? "—"} · L: ${row.lowerWire ?? "—"}` : ""}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1.5">
                   {reviewDay ? (

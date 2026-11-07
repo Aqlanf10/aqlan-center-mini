@@ -1,0 +1,6 @@
+{
+ "extends": "./tsconfig.json",
+ "compilerOptions": { "incremental": false },
+ "include": ["next-env.d.ts", "app/api/ortho/route.ts", "__tests__/ortho-read-identity-admission.test.ts", "__tests__/postgres/ortho-read-identity-admission.test.ts"],
+ "exclude": ["node_modules"]
+}
