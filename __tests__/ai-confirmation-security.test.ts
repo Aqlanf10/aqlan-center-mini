@@ -36,10 +36,16 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/db", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../lib/db")>();
+// Keep the real patient-access guard, but never import the DB implementation here:
+// its patient-access dependency would capture real lookups during mock initialization.
+vi.mock("@/lib/db", () => {
   return {
-    ...actual,
+    CLINIC_TIME_ZONE: "Asia/Aden",
+    openingMinorsOf: (openings: readonly { currency: string; amountMinor: number }[]) => {
+      const result: Record<string, number> = {};
+      for (const opening of openings) result[opening.currency] = (result[opening.currency] ?? 0) + opening.amountMinor;
+      return result;
+    },
     searchPatients: mocks.searchPatients,
     getPatient: mocks.getPatient,
     getAppointment: mocks.getAppointment,

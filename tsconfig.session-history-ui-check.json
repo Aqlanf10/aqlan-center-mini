@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["components/OrthoSessionDetails.tsx","components/PatientOrtho.tsx","lib/ortho-session-display.ts","__tests__/ortho-session-display.test.tsx","__tests__/patient-ortho-read-safety.test.tsx"],"exclude":["node_modules"]}

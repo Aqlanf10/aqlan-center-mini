@@ -1,15 +1,20 @@
+// Real PostgreSQL server-route fixture, outside Next's server-module resolver.
+// Only the framework marker is stubbed; transactional authority and storage stay real.
+vi.mock("server-only", () => ({}));
+
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import type { CaseStatus, RetainerType } from "../../lib/ortho";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { assertPostgresMajorOrThrow, postgresMajorFromVersionNum } from "../../lib/env-contract";
 
-// Only authentication/access are mocked. PATCH, getOrthoCase, setRetainer,
-// closeOrthoCase and all their SQL execute against a fresh owned PostgreSQL DB.
-vi.mock("../../lib/session", () => ({ requireSession: vi.fn() }));
+// Route authentication/access are mocked; transactional session revalidation stays real.
+// PATCH, getOrthoCase, setRetainer, closeOrthoCase and phase SQL execute against a fresh owned PostgreSQL DB.
+vi.mock("../../lib/session", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/session")>()), requireSession: vi.fn() }));
 vi.mock("../../lib/patient-access", () => ({ canAccessPatient: vi.fn() }));
 import { requireSession } from "../../lib/session";
 import { canAccessPatient } from "../../lib/patient-access";
@@ -26,6 +31,9 @@ let sequence = 0;
 let db: typeof import("../../lib/db") | undefined;
 let route: typeof import("../../app/api/ortho/[id]/route");
 let countsBefore: Record<string, number>;
+let phaseActor: SessionPayload;
+let controlPatientId: number;
+const caseOwners = new Map<number, number>();
 
 // Test-only forwarding input: old product writers ignore the optional probe
 // flag; fixed writers consume it. No cast, flag deletion, SQL mock or branching.
@@ -34,7 +42,7 @@ type RetainerProbeInput = Parameters<NonNullable<typeof db>["setRetainer"]>[0] &
   preserveExistingDeliveryDate?: boolean;
 };
 function setRetainerForProbe(input: RetainerProbeInput) {
-  return db!.setRetainer(input);
+  return db!.setRetainer(input, { patientId: caseOwners.get(input.id) ?? controlPatientId, session: phaseActor });
 }
 
 beforeAll(async () => {
@@ -69,14 +77,16 @@ beforeAll(async () => {
   db = await import("../../lib/db");
   await db.resetPoolForTesting();
   await db.ensureSchema();
+  const passwordHash = "synthetic-retainer-phase-credential";
+  const { rows: [user] } = await db.getPool().query<{ id: number }>("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic retainer phase actor',$2,'admin') RETURNING id", [ACTOR, passwordHash]);
+  phaseActor = { userId: user.id, username: ACTOR, role: "admin", credentialVersion: sessionCredentialVersion(passwordHash), expiresAt: 4_102_444_800_000 };
+  controlPatientId = (await db.getPool().query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic missing-case authority') RETURNING id", [randomUUID()])).rows[0].id;
   route = await import("../../app/api/ortho/[id]/route");
   expect(db.CLINIC_TIME_ZONE).toBe("Asia/Aden");
 });
 
 beforeEach(async () => {
-  vi.mocked(requireSession).mockResolvedValue({
-    userId: 7, username: ACTOR, role: "admin", expiresAt: 4_102_444_800_000,
-  });
+  vi.mocked(requireSession).mockResolvedValue(phaseActor);
   vi.mocked(canAccessPatient).mockResolvedValue(true);
   countsBefore = await unrelatedCounts();
 });
@@ -137,6 +147,7 @@ async function fixture(retainer: RetainerType | null = null, deliveredOn: string
        CASE WHEN $2 IN ('completed','discontinued') THEN 'Synthetic closure' END)
      RETURNING id`, [patient.id, status, retainer, deliveredOn, ACTOR],
   );
+  caseOwners.set(row.id, patient.id);
   return row.id;
 }
 
@@ -182,16 +193,17 @@ function unwrap<T>(outcome: Outcome<T>): T {
   if (!outcome.ok) throw outcome.error;
   return outcome.value;
 }
-const SETTER = "%UPDATE ortho_cases SET retainer =%";
-const CLOSER = "%SELECT status, retainer FROM ortho_cases%";
-const PHASE = "%UPDATE ortho_cases SET phase =%";
+const SETTER = "%SELECT patient_id,status,retainer,retainer_on::text FROM ortho_cases%FOR UPDATE%";
+const CLOSER = "%SELECT patient_id, status, retainer FROM ortho_cases%FOR UPDATE%";
+const PHASE = "%FROM ortho_cases%FOR UPDATE%";
 
 async function waitForWriter(observer: Client, pattern: string, blocker: number, exclude = 0) {
   let pid = 0;
   await until(async () => {
     const { rows } = await observer.query<{ pid: number }>(`SELECT pid FROM pg_stat_activity
       WHERE datname = current_database() AND application_name = 'aqlan-center-mini'
-        AND state = 'active' AND wait_event_type = 'Lock' AND query ILIKE $1
+        AND state = 'active' AND wait_event_type = 'Lock'
+        AND (query ILIKE $1 OR query ILIKE '%SELECT id FROM patients%FOR NO KEY UPDATE%')
         AND $2::int = ANY(pg_blocking_pids(pid)) AND pid <> $3 ORDER BY pid LIMIT 1`,
     [pattern, blocker, exclude]);
     pid = rows[0]?.pid ?? 0;
@@ -200,7 +212,9 @@ async function waitForWriter(observer: Client, pattern: string, blocker: number,
   return pid;
 }
 
-/** Three independent connections create an observed lock queue. The first
+/** Patient-first writers may wait on their patient gate before reaching the case.
+ * Either stage must still be observed blocked by the exact expected writer PID.
+ * Three independent connections create an observed lock queue. The first
  * actual writer must block behind our row lock; the second must be blocked by
  * the first writer's PID (hard/soft PostgreSQL blocker), not merely be pending.
  * Both operations are real application calls, with no SQL/writer replacement. */
@@ -233,62 +247,71 @@ async function orderedPair<A, B>(id: number, first: () => Promise<A>, firstPatte
 
 describe("real PostgreSQL retainer delivery dates", () => {
   it.each([
-    { label: "first delivery", beforeType: null, beforeDate: null, type: "essix", expected: D2 },
+    { label: "first delivery", beforeType: null, beforeDate: null, type: "essix", expected: null },
     { label: "repeat same type", beforeType: "essix", beforeDate: D1, type: "essix", expected: D1 },
-    { label: "changed type", beforeType: "essix", beforeDate: D1, type: "hawley", expected: D2 },
-    { label: "nullable prior date", beforeType: "essix", beforeDate: null, type: "essix", expected: D2 },
+    { label: "changed type", beforeType: "essix", beforeDate: D1, type: "hawley", expected: null },
+    { label: "nullable prior date", beforeType: "essix", beforeDate: null, type: "essix", expected: null },
     { label: "none clears a known date", beforeType: "essix", beforeDate: D1, type: "none", expected: null },
     { label: "repeated none", beforeType: "none", beforeDate: null, type: "none", expected: null },
     { label: "none never preserves a stray known date", beforeType: "none", beforeDate: D1, type: "none", expected: null },
-    { label: "none to delivery", beforeType: "none", beforeDate: null, type: "bonded", expected: D2 },
+    { label: "none to delivery", beforeType: "none", beforeDate: null, type: "bonded", expected: null },
   ] as const)("$label preserves unrelated case fields", async ({ beforeType, beforeDate, type, expected }) => {
     const id = await fixture(beforeType, beforeDate);
     const unrelated = await fixture("hawley", D0, "retention");
     const before = await state(id); const otherBefore = await state(unrelated);
-    expect(await setRetainerForProbe({ id, retainer: type, deliveredOn: type === "none" ? null : D2,
+    expect(await setRetainerForProbe({ id, retainer: type, deliveredOn: null,
       preserveExistingDeliveryDate: true })).toBe(true);
-    expect(await state(id)).toEqual({ ...before, retainer: type, retainer_on: expected, status: "retention" });
+    expect(await state(id)).toEqual({ ...before, retainer: type, retainer_on: expected });
     expect(await state(unrelated)).toEqual(otherBefore);
     expect((await db!.getOrthoCase(id, D2))?.retainerOn).toBe(expected);
   });
 
   it("three-field direct callers and explicit false retain deliberate date corrections", async () => {
     const id = await fixture("essix", D1, "retention");
-    expect(await db!.setRetainer({ id, retainer: "essix", deliveredOn: D0 })).toBe(true);
+    expect(await setRetainerForProbe({ id, retainer: "essix", deliveredOn: D0 })).toBe(true);
     expect((await state(id)).retainer_on).toBe(D0);
     expect(await setRetainerForProbe({ id, retainer: "essix", deliveredOn: D2,
       preserveExistingDeliveryDate: false })).toBe(true);
     expect((await state(id)).retainer_on).toBe(D2);
     // The old direct-call contract also permits null; do not broaden this fix.
-    expect(await db!.setRetainer({ id, retainer: "essix", deliveredOn: null })).toBe(true);
+    expect(await setRetainerForProbe({ id, retainer: "essix", deliveredOn: null })).toBe(true);
     expect((await state(id)).retainer_on).toBeNull();
   });
 
-  it("real PATCH on two different clinic days retains the first delivered date", async () => {
+  it("real PATCH across clinic days keeps unknown dates unknown and preserves explicit dates", async () => {
     const id = await fixture();
     at("2026-08-19T21:30:00.000Z");
     expect((await patch(id, { retainer: "essix" })).status).toBe(200);
-    expect((await state(id)).retainer_on).toBe(D1);
+    expect((await state(id)).retainer_on).toBeNull();
     at("2026-10-05T21:30:00.000Z");
     expect((await patch(id, { retainer: "essix" })).status).toBe(200);
-    expect((await state(id)).retainer_on).toBe(D1);
+    expect((await state(id)).retainer_on).toBeNull();
     expect((await patch(id, { retainer: "essix", retainerOn: D0 })).status).toBe(200);
     expect((await state(id)).retainer_on).toBe(D0);
     expect((await patch(id, { retainer: "essix" })).status).toBe(200);
     expect((await state(id)).retainer_on).toBe(D0);
     expect((await patch(id, { retainer: "hawley" })).status).toBe(200);
-    expect((await state(id)).retainer_on).toBe(D2);
+    expect((await state(id)).retainer_on).toBeNull();
+    expect((await state(id)).status).toBe("active");
   });
 
   it("real PATCH none clears a known date and permits completion; null retainer still blocks it", async () => {
     const id = await fixture("essix", D1);
     expect((await patch(id, { retainer: "none", retainerOn: D0 })).status).toBe(200);
-    expect(await state(id)).toMatchObject({ retainer: "none", retainer_on: null, status: "retention" });
+    expect(await state(id)).toMatchObject({ retainer: "none", retainer_on: null, status: "active" });
     expect((await patch(id, { retainer: "none" })).status).toBe(200);
     expect(await db!.closeOrthoCase({ id, status: "completed", actor: ACTOR, note: null })).toEqual({ ok: true });
     const missingRetainer = await fixture(); const before = await state(missingRetainer);
     expect((await db!.closeOrthoCase({ id: missingRetainer, status: "completed", actor: ACTOR, note: null })).ok).toBe(false);
     expect(await state(missingRetainer)).toEqual(before);
+  });
+
+  it("explicit unknown clears a date, and the writer never dates a none selection", async () => {
+    const id = await fixture("essix", D1);
+    expect((await patch(id, { retainer: "essix", retainerOn: null })).status).toBe(200);
+    expect(await state(id)).toMatchObject({ retainer_on: null, status: "active", phase: "finishing" });
+    expect(await setRetainerForProbe({ id, retainer: "none", deliveredOn: D0 })).toBe(true);
+    expect(await state(id)).toMatchObject({ retainer: "none", retainer_on: null, status: "active" });
   });
 
   it.each(["completed", "discontinued"] as const)("%s cannot be mutated or reopened", async (status) => {
@@ -308,9 +331,9 @@ describe("real PostgreSQL retainer delivery dates", () => {
     expect((await db!.getPool().query("SELECT id FROM ortho_cases WHERE id = 2000000000")).rows).toEqual([]);
   });
 
-  it("an impossible explicit calendar date keeps the existing error/atomicity contract", async () => {
+  it("an impossible explicit calendar date is rejected without mutation", async () => {
     const id = await fixture("essix", D1, "retention"); const before = await state(id);
-    expect((await patch(id, { retainer: "essix", retainerOn: "2026-02-30" })).status).toBe(500);
+    expect((await patch(id, { retainer: "essix", retainerOn: "2026-02-30" })).status).toBe(400);
     expect(await state(id)).toEqual(before);
   });
 });
@@ -320,7 +343,7 @@ describe("observed PostgreSQL lock-current decisions", () => {
     const id = await fixture("essix", D1, "retention");
     at("2026-10-05T21:30:00.000Z");
     const [correction, repeat] = await orderedPair(id,
-      () => db!.setRetainer({ id, retainer: "essix", deliveredOn: D0 }), SETTER,
+      () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: D0 }), SETTER,
       () => patch(id, { retainer: "essix" }), SETTER);
     expect(correction).toBe(true); expect(repeat.status).toBe(200);
     expect((await state(id)).retainer_on).toBe(D0);
@@ -331,20 +354,20 @@ describe("observed PostgreSQL lock-current decisions", () => {
     at("2026-10-05T21:30:00.000Z");
     const [repeat, correction] = await orderedPair(id,
       () => patch(id, { retainer: "essix" }), SETTER,
-      () => db!.setRetainer({ id, retainer: "essix", deliveredOn: D0 }), SETTER);
+      () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: D0 }), SETTER);
     expect(repeat.status).toBe(200); expect(correction).toBe(true);
     expect((await state(id)).retainer_on).toBe(D0);
     expect((await patch(id, { retainer: "essix" })).status).toBe(200);
     expect((await state(id)).retainer_on).toBe(D0);
   });
 
-  it("competing first deliveries of the same type retain the first committed fallback", async () => {
+  it("competing type-only selections keep unknown delivery and active status", async () => {
     const id = await fixture();
     const [first, second] = await orderedPair(id,
-      () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: D1, preserveExistingDeliveryDate: true }), SETTER,
-      () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: D2, preserveExistingDeliveryDate: true }), SETTER);
+      () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: null, preserveExistingDeliveryDate: true }), SETTER,
+      () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: null, preserveExistingDeliveryDate: true }), SETTER);
     expect([first, second]).toEqual([true, true]);
-    expect(await state(id)).toMatchObject({ retainer: "essix", retainer_on: D1, status: "retention" });
+    expect(await state(id)).toMatchObject({ retainer: "essix", retainer_on: null, status: "active" });
   });
 
   it.each(["completed", "discontinued"] as const)("%s before a waiting PATCH rechecks the closed guard", async (status) => {
@@ -366,23 +389,24 @@ describe("observed PostgreSQL lock-current decisions", () => {
     expect(saved).toBe(true); expect(closed).toEqual({ ok: true });
     const before = await state(id);
     expect(before).toMatchObject({ status: "completed", retainer: "essix", retainer_on: D1 });
-    expect(await db!.setRetainer({ id, retainer: "essix", deliveredOn: D0 })).toBe(false);
+    expect(await setRetainerForProbe({ id, retainer: "essix", deliveredOn: D0 })).toBe(false);
     expect(await state(id)).toEqual(before);
   });
 
   it("different type selections retain last-writer type/date coherence", async () => {
     const id = await fixture("bonded", D0, "retention");
     expect(await orderedPair(id,
-      () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: D1, preserveExistingDeliveryDate: true }), SETTER,
-      () => setRetainerForProbe({ id, retainer: "hawley", deliveredOn: D2, preserveExistingDeliveryDate: true }), SETTER))
+      () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: null, preserveExistingDeliveryDate: true }), SETTER,
+      () => setRetainerForProbe({ id, retainer: "hawley", deliveredOn: null, preserveExistingDeliveryDate: true }), SETTER))
       .toEqual([true, true]);
-    expect(await state(id)).toMatchObject({ retainer: "hawley", retainer_on: D2 });
+    expect(await state(id)).toMatchObject({ retainer: "hawley", retainer_on: null });
   });
 
   it("an independent phase write survives a waiting type-only save", async () => {
     const id = await fixture("essix", D1, "retention");
+    const patientId = (await state(id)).patient_id as number;
     expect(await orderedPair(id,
-      () => db!.setOrthoPhase(id, "working"), PHASE,
+      () => db!.setOrthoPhase(id, "working", { patientId, session: phaseActor }), PHASE,
       () => setRetainerForProbe({ id, retainer: "essix", deliveredOn: D2, preserveExistingDeliveryDate: true }), SETTER))
       .toEqual([true, true]);
     expect(await state(id)).toMatchObject({ retainer: "essix", retainer_on: D1, phase: "working", status: "retention" });

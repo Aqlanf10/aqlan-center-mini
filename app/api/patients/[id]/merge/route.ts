@@ -56,14 +56,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const messages: Record<typeof result.reason, [string, number]> = {
         same_patient: ["لا يُدمج الملف في نفسه.", 400],
         not_found: ["لا يوجد ملف بهذا الرقم.", 404],
+        source_has_prescription_history: ["الملف المكرر له وصفات صادرة بمفاتيح محفوظة؛ لا يمكن نقلها بالدمج أو تغيير ارتباطها الأصلي. لم يُغيَّر شيء؛ راجع الملفين دون حذف سجل الإصدار.", 409],
         source_has_financial_history: [
           "الملف المكرر له أثر مالي (دفعات أو حركات مخزون أو رصيد افتتاحي أو سجل مالي سابق، ولو كان مسدّدًا بالكامل). لا يمكن نقل هذه السجلات بالدمج. راجع الملفين واختيار الملف الأساسي قبل المحاولة.",
           409,
         ],
+        source_has_clinical_command_history: ["الملف المكرر مرتبط بمحاولات تسجيل شدّة محفوظة بهويته الأصلية. لا يمكن نقلها بالدمج؛ لم يُغيَّر شيء. راجع اختيار الملف الأساسي.", 409],
         conflict: ["تعارضٌ يمنع الدمج (سجلٌّ لا يتكرر لكل مريض موجودٌ في الملفين). لم يُغيَّر شيء.", 409],
       };
       const [message, status] = messages[result.reason];
-      return NextResponse.json({ message, counts: result.counts ?? {} }, { status });
+      return NextResponse.json({ message, code: result.reason, counts: result.counts ?? {} }, { status });
     }
     return NextResponse.json({
       message: `دُمج الملف ${duplicateNumber} في ملف «${target.fullName}» وحُذف المكرر.`,

@@ -13,7 +13,7 @@ describe("محرك الأمان والتعارضات الدوائية (Medicatio
     expect(alerts.length).toBe(1);
     expect(alerts[0].severity).toBe("critical");
     expect(alerts[0].title).toContain("Penicillin Allergy");
-    expect(alerts[0].suggestedAlternative).toContain("Clindamycin");
+    expect(alerts[0].suggestedAlternative).toContain("لا تختَر بديلًا تلقائيًا");
   });
 
   it("يحذر من مسكنات NSAIDs أثناء الحمل", () => {
@@ -56,4 +56,14 @@ describe("محرك الأمان والتعارضات الدوائية (Medicatio
     expect(evaluatePrescriptionSafety([{ name: "Amoxicillin" }], null)).toEqual([]);
     expect(evaluatePrescriptionSafety([{ name: "Amoxicillin" }], "")).toEqual([]);
   });
+});
+
+it('never labels an antibiotic replacement or dose as automatically safe for penicillin allergy',()=>{
+ const alerts=evaluatePrescriptionSafety([{name:'Amoxicillin',dose:'500mg'}],'حساسية البنسلين');
+ const critical=alerts.filter(alert=>alert.severity==='critical');
+ expect(critical.length).toBeGreaterThan(0);
+ for(const alert of critical) {
+  expect(alert.suggestedAlternative).toContain('لا تختَر بديلًا تلقائيًا');
+  expect(alert.suggestedAlternative).not.toMatch(/Clindamycin|Azithromycin|\d+\s*mg|البديل الآمن المعتمد/);
+ }
 });

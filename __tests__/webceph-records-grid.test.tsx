@@ -6,7 +6,7 @@ import { WebCephRecordsGrid } from "../components/WebCephRecordsGrid";
 // browser/DOM test or an authorization substitute for the API/PG regressions.
 const hooks = vi.hoisted(() => ({
   permissions: { canViewAllPatients: true } as Record<string, boolean>, loggedOut: false,
-  values: [] as unknown[], cursor: 0, changed: false, username: "synthetic-doctor", role: "doctor",
+  values: [] as unknown[], cursor: 0, changed: false, userId: 7, username: "synthetic-doctor", role: "doctor",
   effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void; phase: "layout" | "passive" }>(),
   memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
   pending: [] as Array<() => void>,
@@ -67,7 +67,7 @@ vi.mock("react", async (original) => {
   };
 });
 
-vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.loggedOut ? null : ({ role: hooks.role, username: hooks.username, permissions: hooks.permissions }) }));
+vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.loggedOut ? null : ({ userId: hooks.userId, role: hooks.role, username: hooks.username, permissions: hooks.permissions }) }));
 type Element = ReactElement<Record<string, unknown>>;
 const nodes = (node: ReactNode): Element[] => Array.isArray(node) ? node.flatMap(nodes)
   : node && typeof node === "object" && "props" in node ? [node as Element, ...nodes((node as Element).props.children as ReactNode)] : [];
@@ -84,7 +84,7 @@ const fetchMock = vi.fn();
 let props: Parameters<typeof WebCephRecordsGrid>[0];
 let read: (url: string) => unknown;
 let write: (url: string) => unknown;
-let location: { href: string };
+let location: { href: string; assign(url: string): void };
 function render(effects = true) {
   let tree: ReturnType<typeof WebCephRecordsGrid> | null = null;
   let round = 0;
@@ -111,13 +111,13 @@ function selectFile(input = picker()) {
 function unmount() { hooks.effects.forEach(effect => effect.cleanup?.()); hooks.effects.clear(); }
 beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
-  hooks.role = "doctor"; hooks.username = "synthetic-doctor";
+  hooks.userId = 7; hooks.role = "doctor"; hooks.username = "synthetic-doctor";
   hooks.permissions = { canViewAllPatients: true, canViewXrays: true, canUploadXrays: true }; hooks.loggedOut = false;
   fetchMock.mockReset(); props = { patientId: 11, orthoCaseId: 21 };
   read = (url) => response(url.endsWith("/documents") ? { documents: [document()] } : { analyses: [study()] });
   write = () => response({ id: 71 }, 201);
   fetchMock.mockImplementation((url: string, init?: RequestInit) => Promise.resolve(init?.method === "POST" ? write(url) : read(url)));
-  location = { href: "" }; vi.stubGlobal("window", { location }); vi.stubGlobal("fetch", fetchMock);
+  location = { href: "", assign(url) { this.href = url; } }; vi.stubGlobal("window", { location }); vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => { unmount(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -225,9 +225,64 @@ describe("record action ownership", () => {
   });
   it("uploads once and treats failed post-save refresh as unknown, without duplicate upload or auto-created analysis", async () => {
     await ready(); invoke(button("استبدال")); const input = picker(); const pending = deferred<unknown>(); write = () => pending.promise;
-    selectFile(input); selectFile(input); expect(writes()).toHaveLength(1);
+    selectFile(input); selectFile(input); fillMetadata(); const confirm=button("تأكيد بيانات الصورة ورفعها"); invoke(confirm); invoke(confirm); expect(writes()).toHaveLength(1);
     expect((writes()[0][1].body as FormData).get("orthoCaseId")).toBe("21");
     read = () => response({}, 500); pending.resolve(response({ id: 71 }, 201)); await ready();
     expect(text(render())).toContain("هذا لا يعني عدم وجود صور"); expect(writes()).toHaveLength(1); expect(location.href).toBe("");
   });
+});
+
+describe('explicit documentary upload metadata',()=>{
+ it('does not POST on file selection or fabricate today/stage',async()=>{await ready();invoke(button('استبدال'));await selectFile();expect(writes()).toHaveLength(0);expect(text(render())).toContain('بيانات الصورة قبل الرفع');});
+});
+
+function field(label:string){return find(n=>n.props['aria-label']===label);}
+function setField(label:string,value:string){(field(label).props.onChange as (event:unknown)=>void)({target:{value}});render();}
+function fillMetadata(stage='unknown',dateState='unknown',date=''){setField('مرحلة الصورة الموثقة',stage);setField('حالة تاريخ الالتقاط',dateState);if(dateState==='known')setField('تاريخ الالتقاط الموثق',date);setField('شرح مصدر بيانات الصورة','Synthetic source explanation');}
+async function stageFile(){await ready();invoke(button('استبدال'));await selectFile();render();}
+describe('explicit metadata submission safety',()=>{
+ it('starts blank and cancel clears the file without sending',async()=>{await stageFile();expect(field('مرحلة الصورة الموثقة').props.value).toBe('');expect(field('حالة تاريخ الالتقاط').props.value).toBe('');expect(field('شرح مصدر بيانات الصورة').props.value).toBe('');const old=button('تأكيد بيانات الصورة ورفعها');invoke(button('إلغاء الملف دون رفع'));invoke(old);expect(writes()).toHaveLength(0);expect(text(render())).not.toContain('بيانات الصورة قبل الرفع');});
+ it('explicit unknown omits stage/date and never uses active filter or current phase',async()=>{props={...props,currentPhase:'retention',startDate:'2020-01-01'};await stageFile();fillMetadata();invoke(button('تأكيد بيانات الصورة ورفعها'));await settle();const body=writes()[0][1].body as FormData;expect(body.get('photoStage')).toBeNull();expect(body.get('takenOn')).toBeNull();expect(body.get('note')).toBe('Synthetic source explanation');expect(body.get('orthoCaseId')).toBe('21');});
+ it('submits exact explicit leap date and stage only once',async()=>{await stageFile();fillMetadata('initial','known','2024-02-29');const old=button('تأكيد بيانات الصورة ورفعها');invoke(old);invoke(old);expect(writes()).toHaveLength(1);const body=writes()[0][1].body as FormData;expect(body.get('takenOn')).toBe('2024-02-29');expect(body.get('photoStage')).toBe('initial');});
+ it.each(['2023-02-29','2024-04-31','', '2024-2-1'])('blocks invalid explicit date %s without silently storing null',async date=>{await stageFile();fillMetadata('initial','known',date);invoke(button('تأكيد بيانات الصورة ورفعها'));expect(writes()).toHaveLength(0);});
+ it.each(['',' '.repeat(3),'x'.repeat(301)])('blocks empty or overlength source note %#',async note=>{await stageFile();fillMetadata();setField('شرح مصدر بيانات الصورة',note);invoke(button('تأكيد بيانات الصورة ورفعها'));expect(writes()).toHaveLength(0);});
+ it('retained old confirmation cannot submit stale metadata after an edit',async()=>{await stageFile();fillMetadata();const old=button('تأكيد بيانات الصورة ورفعها');setField('شرح مصدر بيانات الصورة','New source');invoke(old);expect(writes()).toHaveLength(0);invoke(button('تأكيد بيانات الصورة ورفعها'));expect((writes()[0][1].body as FormData).get('note')).toBe('New source');});
+ it.each(['case','actor','permission'] as const)('retires pending file on %s ABA',async mode=>{await stageFile();fillMetadata();const old=button('تأكيد بيانات الصورة ورفعها');if(mode==='case'){props={...props,orthoCaseId:22};render();props={...props,orthoCaseId:21};}else if(mode==='actor'){hooks.userId=8;render();hooks.userId=7;}else{hooks.permissions={canViewXrays:true,canUploadXrays:false};render();hooks.permissions={canViewAllPatients:true,canViewXrays:true,canUploadXrays:true};}await ready();invoke(old);expect(writes()).toHaveLength(0);expect(text(render())).not.toContain('بيانات الصورة قبل الرفع');});
+ it('does not replay after uncertain POST; refresh is GET-only',async()=>{await stageFile();fillMetadata();write=()=>Promise.reject(Error('network outcome unknown'));const old=button('تأكيد بيانات الصورة ورفعها');invoke(old);await settle();expect(text(render())).toContain('قد تكون الصورة حُفظت');invoke(old);invoke(button('إعادة قراءة السجلات دون إعادة الرفع'));await settle();expect(writes()).toHaveLength(1);expect(text(render())).not.toContain('بيانات الصورة قبل الرفع');});
+ it('late successful reply after owner switch cannot refresh or alter the new owner',async()=>{await stageFile();fillMetadata();const pending=deferred<unknown>();write=()=>pending.promise;invoke(button('تأكيد بيانات الصورة ورفعها'));props={patientId:12,orthoCaseId:22};read=url=>response(url.endsWith('/documents')?{documents:[]}:{analyses:[]});await ready();const count=fetchMock.mock.calls.length;pending.resolve(response({id:71},201));await settle();expect(fetchMock.mock.calls.length).toBe(count);expect(writes()).toHaveLength(1);});
+});
+
+describe('upload uncertainty and pending read retirement',()=>{
+ it('times out a hanging upload without replay and ignores its late response',async()=>{await stageFile();fillMetadata();vi.useFakeTimers();const pending=deferred<unknown>();write=()=>pending.promise;invoke(button('تأكيد بيانات الصورة ورفعها'));await vi.advanceTimersByTimeAsync(30000);render();expect(text(render())).toContain('نتيجة الرفع غير مؤكدة');expect(writes()).toHaveLength(1);const count=fetchMock.mock.calls.length;pending.resolve(response({id:71},201));await settle();expect(fetchMock.mock.calls.length).toBe(count);expect(writes()).toHaveLength(1);});
+ it('unknown-stage success switches all-stage so the saved record is visible',async()=>{await ready();invoke(button('صور البداية'));invoke(button('استبدال'));await selectFile();fillMetadata();read=url=>response(url.endsWith('/documents')?{documents:[document({photoStage:null,title:'Synthetic unknown-stage saved'})]}:{analyses:[study()]});invoke(button('تأكيد بيانات الصورة ورفعها'));await ready();expect(imageSources().length).toBeGreaterThan(0);expect(writes()).toHaveLength(1);});
+ it('a saved read-refresh callback clears pending file and invalidates old confirmation',async()=>{read=()=>response({},500);await ready();const refresh=button('إعادة تحميل سجلات الحالة');read=url=>response(url.endsWith('/documents')?{documents:[document()]}:{analyses:[study()]});invoke(refresh);await ready();invoke(button('استبدال'));await selectFile();fillMetadata();const confirm=button('تأكيد بيانات الصورة ورفعها');invoke(refresh);await ready();invoke(confirm);expect(writes()).toHaveLength(0);expect(text(render())).not.toContain('بيانات الصورة قبل الرفع');});
+});
+it('ignores retained and current picker callbacks after same-name actor ABA',async()=>{await ready();invoke(button('استبدال'));const old=picker();hooks.userId=8;render();hooks.userId=7;await ready();await selectFile(old);await selectFile(picker());expect(writes()).toHaveLength(0);expect(text(render())).not.toContain('بيانات الصورة قبل الرفع');});
+
+it('does not release the current actor upload lock when a retired actor request settles', async () => {
+  await stageFile(); fillMetadata();
+  const previous = deferred<unknown>(), current = deferred<unknown>();
+  write = () => previous.promise;
+  invoke(button('تأكيد بيانات الصورة ورفعها'));
+  hooks.userId = 8; await ready();
+  invoke(button('استبدال')); await selectFile(); fillMetadata();
+  write = () => current.promise;
+  const confirm = button('تأكيد بيانات الصورة ورفعها'); invoke(confirm);
+  expect(writes()).toHaveLength(2);
+  previous.resolve(response({ id: 71 }, 201)); await settle(); render();
+  expect(picker().props.disabled).toBe(true);
+  invoke(confirm); expect(writes()).toHaveLength(2);
+  current.resolve(response({ id: 72 }, 201)); await ready();
+  expect(picker().props.disabled).toBe(false);
+});
+
+it('keeps a committed pending file intact when a foreign actor render is abandoned', async () => {
+  await stageFile(); fillMetadata();
+  const confirm = button('تأكيد بيانات الصورة ورفعها');
+  const memos = new Map(hooks.memos), values = [...hooks.values];
+  hooks.userId = 8;
+  expect(text(render(false))).not.toContain('بيانات الصورة قبل الرفع');
+  hooks.pending = []; hooks.memos = memos; hooks.values = values; hooks.userId = 7;
+  invoke(confirm); expect(writes()).toHaveLength(1);
+  await ready();
 });

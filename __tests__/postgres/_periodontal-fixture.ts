@@ -7,6 +7,81 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.at(-1)?.version === "0122" && files.at(-1)?.filename === "0122_ortho_retention_submissions.sql") {
+    if (files.at(-2)?.filename !== "0121_ortho_retention_ledger.sql") throw new Error("Retention submissions require the exact ledger baseline.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0121" && files.at(-1)?.filename === "0121_ortho_retention_ledger.sql") {
+    if (files.at(-2)?.filename !== "0120_ortho_space_submissions.sql") throw new Error("Retention ledger requires the exact space submission baseline.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0120" && files.at(-1)?.filename === "0120_ortho_space_submissions.sql") {
+    if (files.at(-2)?.version !== "0119" || files.at(-2)?.filename !== "0119_ortho_space_ledger.sql") throw new Error("Space submissions require the exact ledger baseline.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0119" && files.at(-1)?.filename === "0119_ortho_space_ledger.sql") {
+    if (files.at(-2)?.version !== "0118" || files.at(-2)?.filename !== "0118_ortho_problem_source_submissions.sql") throw new Error("Space ledger requires the exact problem submission baseline.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0118" && files.at(-1)?.filename === "0118_ortho_problem_source_submissions.sql") {
+    if (files.at(-2)?.version !== "0117") throw new Error("Problem submissions require the reviewed problem sources baseline.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0117" && files.at(-1)?.filename === "0117_ortho_problem_sources.sql") {
+    if (files.at(-2)?.version !== "0116") throw new Error("Problem sources require the reviewed facial submission baseline.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0116" && files.at(-1)?.filename === "0116_ortho_facial_submissions.sql") {
+    if (files.at(-2)?.version !== "0115" || files.at(-2)?.filename !== "0115_ortho_facial_revisions.sql")
+      throw new Error("Facial submissions require the reviewed facial revision baseline.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0115" && files.at(-1)?.filename === "0115_ortho_facial_revisions.sql") {
+    if (files.at(-2)?.version !== "0114" || files.at(-2)?.filename !== "0114_ceph_completion_source_cas.sql")
+      throw new Error("Facial revisions require the reviewed source-CAS baseline.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0114" && files.at(-1)?.filename === "0114_ceph_completion_source_cas.sql") {
+    if (files.at(-2)?.version !== "0113" || files.at(-2)?.filename !== "0113_ceph_completion_provenance.sql")
+      throw new Error("Cephalometric source-CAS requires the reviewed completion provenance migration.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0113" && files.at(-1)?.filename === "0113_ceph_completion_provenance.sql") {
+    if (files.at(-2)?.version !== "0112" || files.at(-2)?.filename !== "0112_ortho_study_submissions.sql")
+      throw new Error("Cephalometric provenance requires the reviewed study submission chain.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  // Exact saved-study/journal extensions; the test-only candidate stays outside their numbers.
+  if (files.at(-1)?.version === "0112" && files.at(-1)?.filename === "0112_ortho_study_submissions.sql") {
+    if (files.at(-2)?.version !== "0111" || files.at(-2)?.filename !== "0111_ortho_case_study.sql")
+      throw new Error("Study submissions require the exact reviewed saved-study migration.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0111" && files.at(-1)?.filename === "0111_ortho_case_study.sql")
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  if (files.at(-1)?.version === "0110" && files.at(-1)?.filename === "0110_ortho_assessment_verifier_2_2_1.sql") {
+    if (!files.some(file => file.version === "0106" && file.filename === "0106_ortho_assessment_verifier_2_2.sql"))
+      throw new Error("Tanaka boundary verifier requires the reviewed 2.2 verifier migration.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  // Exact local command extension; no unrelated successor migrations are admitted.
+  if (files.at(-1)?.version === "0109" && files.at(-1)?.filename === "0109_ortho_adjustment_requests.sql")
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  // Exact local intake extension, without accepting unrelated successor migrations.
+  if (files.at(-1)?.version === "0108" && files.at(-1)?.filename === "0108_ortho_assessment_intake.sql")
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  if (files.at(-1)?.version === "0106" && files.at(-1)?.filename === "0106_ortho_assessment_verifier_2_2.sql")
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  // Restored prescription lineage is an indivisible reviewed extension, not a new
+  // production allocation for the inactive periodontal fixture.
+  const lineage = ["0090_booking_request_preferences.sql", "0091_prescribing_doctor_identity.sql",
+    "0092_prescribing_doctor_snapshot.sql", "0093_prescription_issuance_commands.sql"];
+  if (files.some(file => ["0090", "0091", "0092", "0093"].includes(file.version))) {
+    const tail = files.slice(-4);
+    if (tail.length !== 4 || tail.some((file, index) => file.filename !== lineage[index] || file.version !== lineage[index].slice(0, 4)))
+      throw new Error("Prescription lineage requires the exact reviewed 0090–0093 chain.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -4));
+  }
   const reviewedAdditions: Record<string, string> = {
     "0066": "0066_agreement_delta_amendments.sql",
     "0067": "0067_patient_appointment_history_index.sql",

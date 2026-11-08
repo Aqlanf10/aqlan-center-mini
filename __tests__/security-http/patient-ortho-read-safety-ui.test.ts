@@ -214,6 +214,8 @@ describe("PatientOrtho parent-read safety on the real built RTL patient page", (
       await view.getByRole("alert").filter({ hasText: rejected }).waitFor();
       expect(f.submitted[0]).toMatchObject({ done: draftText, upperWire: "014 NiTi", lowerWire: "012 NiTi", nextWeeks: 7 });
       expect(await note.inputValue()).toBe(draftText);
+      expect(await view.getByTestId("adjustment-reconcile").isEnabled()).toBe(true);
+      expect(await view.getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).count()).toBe(0);
       f.assertIsolated(); expect(await storedState()).toEqual(before);
     } finally { await f.context.close(); }
   });

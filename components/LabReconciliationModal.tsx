@@ -46,20 +46,36 @@ function readComparison(value: unknown, partyId: number | null): ComparisonSnaps
   return { party: { id: value.party.id, name: value.party.name }, orders };
 }
 
-type ReadOwner<T> = { scope: readonly unknown[]; active: boolean; sequence: number; controller: AbortController | null; snapshot: T | null };
-type ReadState<T> = { owner: ReadOwner<T>; phase: "loading" | "ready" | "error"; data: T | null };
+type ReadOwner = { scope: readonly unknown[] };
+type ReadLifetime<T> = { owner: ReadOwner; sequence: number; controller: AbortController | null; snapshot: T | null };
+type ReadState<T> = { owner: ReadOwner; phase: "loading" | "ready" | "error"; data: T | null };
 /** Owner identity, rather than a reusable party key, retires A → B → A reads. */
 function useComparisonRead<T>(url: string | null, authorityKey: string | null, decode: (value: unknown) => T) {
-  const owner = useMemo<ReadOwner<T>>(() => ({ scope: [url, authorityKey, decode], active: false, sequence: 0, controller: null, snapshot: null }), [url, authorityKey, decode]);
+  const owner = useMemo<ReadOwner>(() => ({ scope: [url, authorityKey, decode] }), [url, authorityKey, decode]);
   const [state, setState] = useState<ReadState<T> | null>(null);
-  const retire = useCallback(() => { owner.active = false; owner.sequence++; owner.snapshot = null; owner.controller?.abort(); }, [owner]);
-  useLayoutEffect(() => { owner.active = true; return retire; }, [owner, retire]);
+  const lifetime = useRef<ReadLifetime<T> | null>(null);
+  const retire = useCallback(() => {
+    const committed = lifetime.current;
+    if (committed?.owner !== owner) return;
+    committed.controller?.abort();
+    lifetime.current = null;
+    setState(null);
+  }, [owner]);
+  useLayoutEffect(() => {
+    const committed: ReadLifetime<T> = { owner, sequence: 0, controller: null, snapshot: null };
+    lifetime.current = committed;
+    return () => {
+      committed.controller?.abort();
+      if (lifetime.current === committed) lifetime.current = null;
+    };
+  }, [owner]);
   const reload = useCallback(async () => {
-    if (!owner.active || !url || !authorityKey) return;
-    const sequence = ++owner.sequence;
-    owner.controller?.abort(); owner.snapshot = null;
-    const controller = new AbortController(); owner.controller = controller;
-    const current = () => owner.active && owner.sequence === sequence && !controller.signal.aborted;
+    const committed = lifetime.current;
+    if (!committed || committed.owner !== owner || !url || !authorityKey) return;
+    const sequence = ++committed.sequence;
+    committed.controller?.abort(); committed.snapshot = null;
+    const controller = new AbortController(); committed.controller = controller;
+    const current = () => lifetime.current === committed && committed.sequence === sequence && !controller.signal.aborted;
     setState({ owner, phase: "loading", data: null });
     try {
       const response = await fetch(url, { cache: "no-store", signal: controller.signal });
@@ -68,15 +84,15 @@ function useComparisonRead<T>(url: string | null, authorityKey: string | null, d
       const payload: unknown = await response.json();
       if (!current()) return;
       const data = decode(payload);
-      owner.snapshot = data; setState({ owner, phase: "ready", data });
+      committed.snapshot = data; setState({ owner, phase: "ready", data });
     } catch {
       if (current()) setState({ owner, phase: "error", data: null });
     }
   }, [owner, url, authorityKey, decode]);
   useEffect(() => { void reload(); }, [reload]);
-  const current = state?.owner === owner && owner.active && url && authorityKey ? state : null;
-  const data = current?.phase === "ready" && owner.snapshot === current.data ? current.data : null;
-  const isCurrent = (snapshot: T | null) => owner.active && snapshot !== null && owner.snapshot === snapshot;
+  const current = state?.owner === owner && url && authorityKey ? state : null;
+  const data = current?.phase === "ready" ? current.data : null;
+  const isCurrent = (snapshot: T | null) => lifetime.current?.owner === owner && snapshot !== null && lifetime.current.snapshot === snapshot;
   return { data, phase: current?.phase ?? "loading", reload, retire, isCurrent };
 }
 

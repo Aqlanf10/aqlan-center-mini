@@ -11,9 +11,40 @@ const legacy = { version: "0042", filename: "0042_legacy_treatment_agreements.sq
 const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sql" };
 
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
-  it("accepts the exact composed 0066–0069 chain and reviewed branch variants, retaining sentinel 9000", async () => {
+  it("accepts the complete saved-study, space and retention journal chain and rejects missing or renamed dependencies", async () => {
     const files = await loadMigrationFiles();
-    expect(files).toHaveLength(66);
+    expect(files).toHaveLength(86);
+    expect(() => periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0106"))).toThrow();
+    expect(files.at(-1)?.filename).toBe("0122_ortho_retention_submissions.sql");
+    expect(periodontalCandidateMigrationVersion(files)).toBe("9000");
+    expect(files.slice(-5).map(file => file.filename)).toEqual([
+      "0118_ortho_problem_source_submissions.sql",
+      "0119_ortho_space_ledger.sql",
+      "0120_ortho_space_submissions.sql",
+      "0121_ortho_retention_ledger.sql",
+      "0122_ortho_retention_submissions.sql",
+    ]);
+    // Every dependency remains mandatory when its successor is present.
+    for (const version of ["0090", "0091", "0092", "0093", "0117", "0118", "0119", "0120", "0121"]) {
+      expect(() => periodontalCandidateMigrationVersion(files.filter(file => file.version !== version))).toThrow();
+    }
+    // Reviewed intermediate tails remain valid without admitting unknown successors.
+    for (const version of ["0118", "0119", "0120", "0121", "0122"]) {
+      expect(periodontalCandidateMigrationVersion(files.filter(file => file.version <= version))).toBe("9000");
+    }
+
+    expect(() => periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0111"))).toThrow();
+    for (const version of ["0090", "0091", "0092", "0093", "0106", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122"]) {
+      expect(() => periodontalCandidateMigrationVersion(files.map(file => file.version === version
+        ? { ...file, filename: `${version}_unknown.sql` } : file))).toThrow();
+    }
+  });
+
+  it("accepts the exact composed 0066–0069 chain and reviewed branch variants, retaining sentinel 9000", async () => {
+    const files = (await loadMigrationFiles()).filter(file => !["0090", "0091", "0092", "0093", "0106", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122"].includes(file.version));
+    expect(files).toHaveLength(68);
+    expect(files[67]).toMatchObject({ version: "0109", filename: "0109_ortho_adjustment_requests.sql" });
+    expect(files[66]).toMatchObject({ version: "0108", filename: "0108_ortho_assessment_intake.sql" });
     expect(files[65]).toMatchObject({ version: "0089", filename: "0089_lab_shade_specification.sql" });
     expect(files[64]).toMatchObject({ version: "0087", filename: "0087_agreement_reminder_metadata.sql" });
     expect(files[63]).toMatchObject({ version: "0078", filename: "0078_agreement_reconciliation.sql" });
@@ -35,7 +66,7 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(()=>periodontalCandidateMigrationVersion([...files,{version:"0067",filename:"0067_unknown.sql"}])).toThrow();
     for (let index = 40; index < files.length; index++) {
       expect(()=>periodontalCandidateMigrationVersion(files.map((file,n)=>n===index?{...file,filename:`${file.version}_unknown.sql`}:file))).toThrow();
-      if(index < files.length-1 && files[index].version !== "0067") expect(()=>periodontalCandidateMigrationVersion(files.filter((_,n)=>n!==index))).toThrow();
+      if(index < files.length-1 && !["0067", "0089", "0108"].includes(files[index].version)) expect(()=>periodontalCandidateMigrationVersion(files.filter((_,n)=>n!==index))).toThrow();
     }
   });
   it("keeps the pre-invoice baseline at test-only 0041", () => {

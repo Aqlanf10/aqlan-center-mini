@@ -465,7 +465,7 @@ describe("chronology, no-show history and case cardinality", () => {
     expect(row.bookingContext.otherAppointments.map((item) => item.id)).toEqual([unrelated]);
   });
 
-  it("keeps any historical patient no-show despite newer completed, cancelled and future bookings", async () => {
+  it("lets a later completed slot supersede an older miss while cancellation and future bookings do not establish attendance", async () => {
     const target = await fixture();
     await appointment(target.patientId, {
       date: "2025-12-01", status: "no_show", serviceId: catalog("SYNTHETIC_ENDO").id, appointmentType: "endo",
@@ -474,7 +474,7 @@ describe("chronology, no-show history and case cardinality", () => {
     await appointment(target.patientId, { date: "2026-10-06", status: "cancelled" });
     const next = await appointment(target.patientId);
     const row = await boardRow(target.caseId);
-    expect(row.lastWasNoShow).toBe(true);
+    expect(row.lastWasNoShow).toBe(false);
     expect(row.nextAppointment?.id).toBe(next);
     expect(row.bookingContext).toEqual({ verified: true, pastUnresolvedAppointment: null, reviewAppointments: [], otherAppointments: [] });
     const unaffected = await fixture();

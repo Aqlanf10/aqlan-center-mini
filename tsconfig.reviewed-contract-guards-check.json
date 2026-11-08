@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["next-env.d.ts", "__tests__/visit-workspace-contract.test.ts", "__tests__/diagnosis-choices-contract.test.ts", "__tests__/print-watermark-coverage.test.tsx", "__tests__/reviewed-source-deltas.test.ts"],
+  "exclude": ["node_modules"]
+}

@@ -1,27 +1,19 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { getCephStudy } from "@/lib/db";
 import {
-  getCephStudy, getPatient, getSettingsSafe, updateCephDiagnosis, updateCephLandmarks,
-} from "@/lib/db";
-import {
-  computeAll, generateCephExpertDiagnosis, suggestLandmarks,
+  computeAll,
   type LandmarkCode, type Pt,
 } from "@/lib/ceph";
-import { aiChat, getAiSettings } from "@/lib/ai";
+import { CEPH_INTEGRITY_NOTICE, cephCompletionNotice, CEPH_REFERENCE_NOTICE, generateCephDescriptiveResponse, presentCephMeasurements } from "@/lib/cephPresentation";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
-/**
- * مسار الذكاء الاصطناعي السيفالومتري — تحليل واقتراح.
- *
- * القاعدة الدستورية الطبية (ZONE_B):
- * «الذكاء الاصطناعي يقترح ولا يعتمد.»
- * كل معلم يقترحه هذا المسار يحمل الوسم source: 'suggested' ولا يصير نهائيًا
- * إلا بتأكيد الطبيب واعتماده اليدوي.
- */
+/** Legacy endpoint: descriptive observations only. Unvalidated geometric
+ * template placement and external clinical generation are unavailable. */
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -65,136 +57,49 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return forbidden();
   }
 
-  // 1) خيار اقتراح المعالم الذكي
+  // A dimension/anchor template does not detect landmarks in the patient's image.
+  // Reject legacy callers too; never save, relabel manual points or invent a fallback.
   if (body.action === "suggest-landmarks") {
-    const currentPoints: Partial<Record<LandmarkCode, Pt>> = {};
-    for (const lm of study.landmarks) {
-      currentPoints[lm.code] = { x: lm.x, y: lm.y };
-    }
-
-    const width = Number(body.imageWidth) > 0 ? Number(body.imageWidth) : 1600;
-    const height = Number(body.imageHeight) > 0 ? Number(body.imageHeight) : 1600;
-
-    const patient = await getPatient(study.analysis.patientId);
-    let age: number | undefined;
-    if (patient?.birthYear) {
-      const refYear = study.analysis.xrayDate
-        ? new Date(study.analysis.xrayDate).getUTCFullYear()
-        : new Date().getUTCFullYear();
-      age = Math.max(1, refYear - patient.birthYear);
-    }
-
-    const suggestedMap = suggestLandmarks(width, height, currentPoints, { age, gender: patient?.gender });
-
-    const suggestedPoints = (Object.entries(suggestedMap) as [LandmarkCode, Pt][]).map(([code, pt]) => ({
-      code,
-      x: pt.x,
-      y: pt.y,
-      // القاعدة الدستورية: المصدر دائمًا 'suggested'
-      source: "suggested" as const,
-    }));
-
-    let saved = false;
-    if (body.save && study.analysis.status === "draft") {
-      const res = await updateCephLandmarks(id, suggestedPoints, session.username);
-      saved = res.ok;
-    }
-
     return NextResponse.json({
-      ok: true,
-      action: "suggest-landmarks",
-      landmarks: suggestedPoints,
-      saved,
-    });
+      ok: false, code: "UNVALIDATED_TEMPLATE", saved: false,
+      message: "التحديد التلقائي غير متاح: الأداة السابقة قالب هندسي غير متحقق سريريًا، ولا تكشف المعالم من صورة الأشعة. حدّد المعالم يدويًا وراجعها.",
+    }, { status: 409 });
   }
 
-  // 2) خيار توليد التشخيص التقويمي الذكي وخطة العلاج
+  // 2) قراءة وصفية محلية؛ يحرر الطبيب تشخيصه ويحفظه صراحةً في المسار المخصص
   if (body.action === "generate-diagnosis") {
-    const patient = await getPatient(study.analysis.patientId);
-
-    let age: number | undefined;
-    if (patient?.birthYear) {
-      const refYear = study.analysis.xrayDate
-        ? new Date(study.analysis.xrayDate).getUTCFullYear()
-        : new Date().getUTCFullYear();
-      age = Math.max(0, refYear - patient.birthYear);
+    const completed = study.analysis.status === "completed";
+    if (completed && study.provenance?.state === "integrity_unavailable") {
+      return NextResponse.json({ok:false,code:"CEPH_INTEGRITY_UNAVAILABLE",message:CEPH_INTEGRITY_NOTICE}, {status:409});
     }
-    const gender = patient?.gender ?? undefined;
-
     const currentPoints: Partial<Record<LandmarkCode, Pt>> = {};
-    for (const lm of study.landmarks) {
+    for (const lm of completed ? [] : study.landmarks) {
       currentPoints[lm.code] = { x: lm.x, y: lm.y };
     }
 
-    const results = computeAll(currentPoints, study.analysis.mmPerPixel ?? NaN);
-    const expert = generateCephExpertDiagnosis(results, { age, gender });
+    const results = presentCephMeasurements(completed ? [] : computeAll(currentPoints, study.analysis.mmPerPixel ?? NaN),
+      completed ? study.measurements : null, study.provenance);
+    const expert = generateCephDescriptiveResponse(results);
 
-    let aiEnhancedText: string | null = null;
-    /* (P2-11 — قرار المالك) وصف التحليل السيفالومتري نصٌّ سريري: لا يخرج إلى المزوّد
-       الخارجي إلا بتفعيل `ai.clinical_external` صراحةً — وإلا فالتشخيص من المحرك المحلي. */
-    const clinicalExternal = (await getSettingsSafe().catch(() => null))?.["ai.clinical_external"] === "true";
-    const shouldTryAi = body.useAiChat !== false && clinicalExternal;
-
-    if (shouldTryAi) {
-      try {
-        const aiSettings = await getAiSettings();
-        if (aiSettings.enabled && aiSettings.hasKey) {
-          const clinicalContext = `التحليل السيفالومتري:
-- التصنيف الهيكلي السهمي: ${expert.sagittalSkeletal.classification} (${expert.sagittalSkeletal.descriptionAr})
-- النمط الهيكلي العمودي: ${expert.verticalSkeletal.pattern} (${expert.verticalSkeletal.growthTendencyAr})
-- القواطع والتعويض: ${expert.dentalAnalysis.descriptionAr} — ${expert.dentalAnalysis.compensationAr}
-- الأنسجة الرخوة والبروفايل: ${expert.aestheticProfile.summaryAr}
-- العمر: ${age != null ? `${age} سنة` : "غير مسجل"} | الجنس: ${gender === "male" ? "ذكر" : gender === "female" ? "أنثى" : "غير محدد"}`;
-
-          const res = await aiChat({
-            messages: [
-              {
-                role: "system",
-                content:
-                  "أنت استشاري تقويم أسنان وخبير سيفالومتري في مركز عقلان. قدم ملخص تشخيصي تقويمي موجز وتوصيات خطة العلاج (القلع vs اللاقلاع، أجهزة تعديل النمو، التوسيع، الزرعات العظمية، أو الجراحة). التزم باللغة العربية الطبية الاحترافية واجعل الناتج لا يتجاوز 180 كلمة.",
-              },
-              { role: "user", content: clinicalContext },
-            ],
-            maxTokens: 500,
-            temperature: 0.2,
-          }, aiSettings);
-
-          if (res.ok && res.content.trim()) {
-            aiEnhancedText = res.content.trim();
-          }
-        }
-      } catch {
-        // Fallback to pure expert engine gracefully if AI is offline
-      }
-    }
-
+    // This endpoint is descriptive only. Legacy useAiChat/saveToDiagnosis flags
+    // cannot bypass the clinical safety boundary or overwrite authored notes.
     const suggestion = {
       skeletal: expert.formatted.skeletal,
       dental: expert.formatted.dental,
       softTissue: expert.formatted.softTissue,
       finalDx: expert.formatted.finalDx,
-      recommendationsText: aiEnhancedText || expert.formatted.recommendationsText,
+      recommendationsText: expert.formatted.recommendationsText,
     };
-
-    if (body.saveToDiagnosis && study.analysis.status === "draft") {
-      await updateCephDiagnosis(
-        id,
-        {
-          skeletal: suggestion.skeletal,
-          dental: suggestion.dental,
-          softTissue: suggestion.softTissue,
-          finalDx: suggestion.finalDx,
-          note: suggestion.recommendationsText,
-        },
-        session.username,
-      );
-    }
 
     return NextResponse.json({
       ok: true,
       action: "generate-diagnosis",
       expertDiagnosis: expert,
-      aiEnhancedText,
+      aiEnhancedText: null,
+      savedToDiagnosis: false,
+      notice: completed ? cephCompletionNotice(study.provenance) : CEPH_REFERENCE_NOTICE,
+      clinicalMeaning: "raw_measurements_only_no_clinical_classification",
+      recommendationMeaning: "no_automated_recommendation_not_a_contraindication",
       suggestion,
     });
   }

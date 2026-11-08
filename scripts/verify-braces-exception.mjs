@@ -10,23 +10,61 @@ import { runAuditJson, preserveRawAudit } from "./dependency-security/audit-proc
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 export async function fetchOfficialJson(url, fetchImpl = fetch) {
-  const response = await fetchImpl(url, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Cache-Control": "no-cache", "User-Agent": "aqlan-scoped-braces-verifier" }, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30_000) });
-  invariant(response.ok && response.url === url, `official lookup failed: ${url}`);
-  invariant(!/rel="next"/.test(response.headers.get("link") ?? ""), "official advisory result pagination unexpected");
-  invariant(/json/.test(response.headers.get("content-type") ?? ""), "official endpoint returned non-JSON");
-  const length = response.headers.get("content-length");
-  invariant(length === null || Number(length) <= 4 * 1024 * 1024, "official response too large");
-  const reader = response.body.getReader();
-  const chunks = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.length;
-    if (size > 4 * 1024 * 1024) { await reader.cancel(); throw new Error("Official response exceeded limit"); }
-    chunks.push(Buffer.from(value));
+  // At most two waits (each <= 5s) and three separately time-bounded requests.
+  // Only explicit gateway failures retry; content and security failures never do.
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    let response;
+    try {
+      response = await fetchImpl(url, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Cache-Control": "no-cache", "User-Agent": "aqlan-scoped-braces-verifier" }, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30_000) });
+    } catch (error) {
+      // Do not log arbitrary exception messages/causes: transports may include
+      // response bodies, credentials or redirect destinations in their errors.
+      const codes = new Set(["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET"]);
+      const code = codes.has(error?.cause?.code) ? error.cause.code : codes.has(error?.code) ? error.code : "unclassified";
+      const kind = error?.name === "TimeoutError" ? "timeout" : error?.name === "AbortError" ? "aborted" : "transport failure";
+      invariant(false, `official lookup failed: ${url}; ${kind}; code=${code}`);
+    }
+    // Preserve exact-URL and HTTP checks, but distinguish them. Only bounded,
+    // numeric public rate-limit diagnostics are safe to print, never raw headers
+    // or an error body. No retry/fallback is inferred from an opaque HTTP failure.
+    const status = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : "unknown";
+    const numericHeader = (name) => {
+      const value = response.headers?.get(name);
+      return typeof value === "string" && /^\d{1,12}$/.test(value) ? value : "unavailable";
+    };
+    invariant(response.url === url, `official lookup failed: ${url}; response URL mismatch; HTTP ${status}`);
+    if (!response.ok && [502, 503, 504].includes(status) && attempt < 3) {
+      const retryAfter = response.headers.get("retry-after");
+      // Support delta-seconds only. HTTP dates/ambiguous values cannot establish a
+      // bounded wait without clock assumptions; reject them rather than retry early.
+      invariant(retryAfter === null || /^[0-5]$/.test(retryAfter),
+        `official lookup failed: ${url}; HTTP ${status}; Retry-After timing unsupported or exceeds 5s budget`);
+      const delay = Math.max(attempt * 1000, retryAfter === null ? 0 : Number(retryAfter) * 1000);
+      // Discard error content without parsing/logging it before another request.
+      try { await response.body?.cancel(); } catch {
+        invariant(false, `official lookup failed: ${url}; HTTP ${status}; error body cancellation failed`);
+      }
+      console.warn(`Official lookup HTTP ${status}: ${url}; retry ${attempt + 1}/3 after ${delay}ms`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      continue;
+    }
+    invariant(response.ok, `official lookup failed: ${url}; HTTP ${status}; rate-limit-remaining=${numericHeader("x-ratelimit-remaining")}; rate-limit-reset=${numericHeader("x-ratelimit-reset")}; retry-after-seconds=${numericHeader("retry-after")}`);
+    invariant(!/rel="next"/.test(response.headers.get("link") ?? ""), "official advisory result pagination unexpected");
+    invariant(/json/.test(response.headers.get("content-type") ?? ""), "official endpoint returned non-JSON");
+    const length = response.headers.get("content-length");
+    invariant(length === null || Number(length) <= 4 * 1024 * 1024, "official response too large");
+    const reader = response.body.getReader();
+    const chunks = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 4 * 1024 * 1024) { await reader.cancel(); throw new Error("Official response exceeded limit"); }
+      chunks.push(Buffer.from(value));
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 /** Taken BEFORE both audits run; verification requires the installation to be byte-identical afterwards. */

@@ -14,7 +14,7 @@ vi.mock("pg", () => ({ Client: class {
   }
 } }));
 vi.mock("../lib/migrations", () => ({
-  loadMigrationFiles: async () => [], migrate: async () => ({ appliedVersions: [] }),
+  loadMigrationFiles: async () => [], migrate: async () => { state.calls.push("MIGRATE"); return { appliedVersions: [] }; },
   migrationStatus: async () => ({ probe: { ok: true, missing: [] }, consistent: true }),
 }));
 vi.mock("../lib/restore/client-config", () => ({ restoreClientConfigFor: () => ({}) }));
@@ -47,4 +47,13 @@ it("keeps legacy backups with no photo setting compatible", async () => {
   expect(state.mkdir).toHaveBeenCalledOnce();
   expect(state.write).not.toHaveBeenCalled();
   expect(state.end).toHaveBeenCalledOnce();
+});
+
+it("pins literal semantics before any schema migration or data replay", async () => {
+  expect((await stagedRestore(options)).ok).toBe(true);
+  const pin = state.calls.indexOf("SET standard_conforming_strings = on");
+  expect(pin).toBeGreaterThanOrEqual(0);
+  expect(pin).toBeLessThan(state.calls.indexOf("MIGRATE"));
+  expect(pin).toBeLessThan(state.calls.indexOf("BEGIN"));
+  expect(pin).toBeLessThan(state.calls.indexOf("SELECT 1;"));
 });

@@ -1,0 +1,73 @@
+name: Synthetic Ceph canvas diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'components/CephTracer.tsx'
+      - 'components/CephViewport.tsx'
+      - 'components/CephScientificContext.tsx'
+      - 'lib/ceph*.ts'
+      - '__tests__/fixtures/ceph-tracer-real-react.tsx'
+      - '__tests__/security-http/ceph-tracer-real-react.test.ts'
+      - 'vitest.ceph-browser.config.ts'
+      - 'scripts/ceph-diagnostic/**'
+      - '.github/workflows/ceph-canvas-diagnostic.yml'
+      - 'package*.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ceph-canvas-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+# Supplemental diagnostics only: no deployment, credentials, DB, or gate changes.
+jobs:
+  synthetic-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Initialize bounded evidence
+        run: |
+          mkdir -p ceph-diagnostic-output
+          printf '%s\n' '{"schema":1,"scope":"synthetic-ceph-browser-only","report":"not-started"}' > ceph-diagnostic-output/summary.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        id: install
+        run: npm ci
+      - name: Validate evidence sanitizer offline
+        run: node scripts/ceph-diagnostic/summarize-check.mjs
+      - name: Install Chromium
+        id: chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run isolated synthetic Ceph tests
+        id: tests
+        env:
+          CEPH_DIAGNOSTIC_DIR: ceph-diagnostic-output
+        run: npx vitest run --config vitest.ceph-browser.config.ts --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/ceph-raw.json"
+      - name: Produce allowlisted diagnostic summary
+        if: always()
+        env:
+          CEPH_STEP_INSTALL: ${{ steps.install.outcome }}
+          CEPH_STEP_CHROMIUM: ${{ steps.chromium.outcome }}
+          CEPH_STEP_TESTS: ${{ steps.tests.outcome }}
+        run: node scripts/ceph-diagnostic/summarize.mjs "$RUNNER_TEMP/ceph-raw.json" ceph-diagnostic-output/summary.json
+      - name: Upload bounded synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-ceph-canvas-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ceph-diagnostic-output/summary.json
+            ceph-diagnostic-output/loupe-initial.png
+            ceph-diagnostic-output/loupe-filtered.png

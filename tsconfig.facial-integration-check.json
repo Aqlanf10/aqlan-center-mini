@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["lib/ortho-facial*.ts","components/OrthoFacialAnalysis.tsx","app/api/ortho/*/facial*/route.ts","app/ortho/*/facial/page.tsx","__tests__/ortho-facial*.ts*","__tests__/postgres/ortho-facial*.ts"],"exclude":["node_modules"]}

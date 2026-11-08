@@ -1,0 +1,50 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "noEmit": true
+  },
+  "include": [
+    "lib/ceph-completion-provenance.ts",
+    "lib/ceph-completion-access.ts",
+    "app/api/ceph/[id]/complete/route.ts",
+    "__tests__/ceph-completion-provenance.test.ts",
+    "__tests__/ceph-completion-access.test.ts",
+    "__tests__/fixtures/ceph-provenance-sql.ts",
+    "lib/cephCompare.ts",
+    "lib/ceph-comparison-projection.ts",
+    "__tests__/ceph-comparison-projection.test.ts",
+    "lib/cephPresentation.ts",
+    "components/CephTracer.tsx",
+    "__tests__/ceph-viewport-gestures.test.tsx",
+    "components/CephCompareView.tsx",
+    "app/api/ceph/compare/route.ts",
+    "app/api/ceph/superimpose/route.ts",
+    "app/ceph/[id]/page.tsx",
+    "app/print/ceph/[id]/page.tsx",
+    "app/print/ceph-compare/page.tsx",
+    "__tests__/ceph-presentation.test.tsx",
+    "__tests__/ceph-compare.test.ts",
+    "__tests__/ceph-comparison-provenance-route.test.ts",
+    "__tests__/postgres/ceph-completion-provenance.test.ts",
+    "__tests__/postgres/ceph-provenance-schema.test.ts",
+    "lib/ceph-source-review.ts",
+    "lib/ceph-engine-identity.ts",
+    "lib/ceph-completion-source-cas-schema.ts",
+    "__tests__/ceph-source-review.test.ts",
+    "__tests__/ceph-completion-source-cas-schema.test.ts",
+    "__tests__/postgres/ceph-source-cas.test.ts",
+    "__tests__/postgres/ceph-source-cas-schema.test.ts",
+    "app/api/documents/[id]/route.ts",
+    "__tests__/ceph-source-image-route.test.ts",
+    "lib/ceph-image-source.ts",
+    "__tests__/ceph-historical-image.test.tsx",
+    "__tests__/ceph-compare-image-lifecycle.test.tsx",
+    "__tests__/ortho-patient-scope.test.ts",
+    "__tests__/fixtures/ceph-tracer-real-react.tsx",
+    "__tests__/security-http/ceph-tracer-real-react.test.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

@@ -14,7 +14,8 @@ let doctorPartyId = 0;
 const stamp = Date.now();
 
 type Who = "admin" | "reception" | "doctorA" | "doctorB" | "cashier" | "accountant";
-const post = (who: Who, path: string, body: unknown) => authedMutation(path, h.sessions[who], "POST", JSON.stringify(body));
+const post = (who: Who, path: string, body: unknown) => authedMutation(path, h.sessions[who], "POST", JSON.stringify(body),
+  /^\/api\/ortho\/\d+$/.test(path) ? { "Idempotency-Key": `synthetic-baseline-adjustment-${stamp}-${who}` } : {});
 const messageOf = async (response: Response) => (await response.json() as { message?: string }).message ?? "";
 const baseline = () => ({
   patientId, phase: "working", financialMode: "opening_balance", monthsElapsed: 9, monthsRemaining: 9,

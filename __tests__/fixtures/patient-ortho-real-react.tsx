@@ -8,9 +8,9 @@ import { DEFAULT_DOCTOR_PERMISSIONS } from "../../lib/doctor-permissions";
 // Test-only entry. The acceptance runner bundles this in memory and serves it
 // exclusively through Playwright interception. PatientOrtho, all its local
 // forms, SessionProvider and React development StrictMode remain real.
-const A: SessionInfo = { username: "ortho-reader-a", role: "doctor", displayName: "Synthetic A",
+const A: SessionInfo = { userId: 931001, username: "ortho-reader-a", role: "doctor", displayName: "Synthetic A",
   permissions: { ...DEFAULT_DOCTOR_PERMISSIONS, canViewAllPatients: true } };
-const B: SessionInfo = { ...A, username: "ortho-reader-b" };
+const B: SessionInfo = { ...A, userId: 931002, username: "ortho-reader-b" };
 const LIMITED: SessionInfo = { ...A, permissions: { ...A.permissions!, canEditPlans: false } };
 const OTHER_ROLE: SessionInfo = { ...A, role: "admin" };
 export const orthoFixtureIds = { patientA: 939101, patientB: 939102, caseId: 938101, visitId: 937101 } as const;
@@ -32,7 +32,7 @@ function caseRow(marker = "accepted-case-a", unsigned = false) {
       overdue: false, adjustments: 1, lastAdjustment: "2026-10-04", daysSinceLast: 0 } };
 }
 type Pending = { id: number; path: string; method: string; signal: AbortSignal | null;
-  jsonCalls: number; status: number | null; settled: boolean; submitted: unknown;
+  requestKey: string | null; jsonCalls: number; status: number | null; settled: boolean; submitted: unknown;
   headers: (status: number) => void; body: (value: unknown) => void; fail: () => void; badJSON: () => void };
 const requests: Pending[] = [];
 const unexpected: string[] = [];
@@ -77,7 +77,7 @@ window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response>
   let resolveBody!: (value: unknown) => void; let rejectBody!: (reason: Error) => void;
   const body = new Promise<unknown>((resolve, reject) => { resolveBody = resolve; rejectBody = reject; });
   const pending: Pending = { id: requests.length + 1, path, method, signal: init?.signal ?? null,
-    jsonCalls: 0, status: null, settled: false, submitted: submitted(init?.body),
+    requestKey: new Headers(init?.headers).get("Idempotency-Key"), jsonCalls: 0, status: null, settled: false, submitted: submitted(init?.body),
     headers: (status) => { pending.status = status; resolveHeaders({ status, ok: status >= 200 && status < 300,
       json: () => { pending.jsonCalls++; return body; } } as Response); },
     body: (value) => { pending.settled = true; resolveBody(value); },
@@ -122,6 +122,14 @@ async function replayHostCallback(key: string) {
     target: captured.element, currentTarget: captured.element,
     preventDefault() {}, stopPropagation() {}, });
 }
+function adjustmentResult(id: number, value: { id: number; visitId: number | null }) {
+  const pending = request(id);
+  if (pending.method !== "POST" || pending.path !== `/api/ortho/${caseId}`
+    || !pending.requestKey || !/^[A-Za-z0-9._:-]{8,128}$/.test(pending.requestKey)) {
+    throw new Error("Synthetic adjustment acknowledgement requires its actual request key");
+  }
+  return { ...value, patientId: patientA, caseId, requestKey: pending.requestKey, attachedToToday: value.visitId !== null };
+}
 const api = {
   snapshot: () => ({ setups, cleanups, unexpected: [...unexpected], created: [...created], revoked: [...revoked],
     commits: [...commits], permits: permits.map((one) => ({ ...one })),
@@ -129,7 +137,11 @@ const api = {
       connected: value.element.isConnected, replays: value.replays })),
     requests: requests.map((one) => ({ id: one.id, path: one.path, method: one.method,
       aborted: one.signal?.aborted ?? false, jsonCalls: one.jsonCalls, status: one.status,
-      settled: one.settled, submitted: one.submitted })) }),
+      settled: one.settled, submitted: one.submitted, requestKey: one.requestKey })) }),
+  respondAdjustment: (id: number, value: { id: number; visitId: number | null }) => {
+    request(id).headers(201); request(id).body(adjustmentResult(id, value));
+  },
+  adjustmentBody: (id: number, value: { id: number; visitId: number | null }) => request(id).body(adjustmentResult(id, value)),
   allow: (method: string, path: string, count = 1) => { permits.push({ method, path, remaining: count }); },
   headers: (id: number, status: number) => request(id).headers(status),
   body: (id: number, value: unknown) => request(id).body(value),

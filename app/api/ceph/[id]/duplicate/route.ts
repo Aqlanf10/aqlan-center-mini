@@ -1,5 +1,6 @@
+import {ClinicalMutationAuthorityError} from '@/lib/clinical-mutation-authority';
 import { NextResponse } from "next/server";
-import { duplicateCephAnalysis, getCephStudy } from "@/lib/db";
+import { duplicateAuthorizedCephAnalysis, getCephStudy } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -34,10 +35,11 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   }
 
   try {
-    const created = await duplicateCephAnalysis(id, session.username);
+    const created = await duplicateAuthorizedCephAnalysis(id, {patientId:study.analysis.patientId,documentId:study.analysis.documentId,session});
     if (!created.ok) return NextResponse.json({ message: created.message }, { status: 409 });
     return NextResponse.json({ id: created.id }, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof ClinicalMutationAuthorityError) return NextResponse.json({message:error.message},{status:error.status});
     return NextResponse.json({ message: "تعذّر فتح نسخة التصحيح." }, { status: 500 });
   }
 }

@@ -1,3 +1,5 @@
+import { isDocumentAcquisitionDate } from "./document-acquisition-date";
+
 /**
  * صور التقويم — أدوارها ووجهاتها وموعد المجموعة الكاملة.
  *
@@ -327,50 +329,41 @@ export function fullPhotoSetCheck(input: FullSetInput): FullSetCheck {
 
 export interface StagePhoto {
   id: number;
-  stage: PhotoStage;
+  stage: PhotoStage | null;
   view: PhotoView | null;
   takenOn: string | null;
   uploadedAt: string;
 }
 
-export interface ComparisonColumn {
+export interface ComparisonColumn<T extends StagePhoto = StagePhoto> {
   stage: PhotoStage;
   label: string;
-  /** أفضل صورة تُمثّل الدور في المقارنة: الأمامية الداخلية أولًا ثم أول ما وُجد. */
-  featured: StagePhoto | null;
+  featured: T | null;
   count: number;
+  /** All explicit stage members. ID order is administrative, not chronology. */
+  candidates: T[];
+  selection: "empty" | "recorded_date" | "single_unknown_date" | "ambiguous_date";
 }
 
-/**
- * يمثّل كل دورٍ بصورةٍ واحدة للمقارنة الجنبَ إلى الجنب.
- *
- * صورة الوجه الداخلي الأمامي هي مرآة العلاج — إن وُجدت فهي المرشّحة الأولى، ثم
- * أيّ صورة داخلية، ثم ما وُجد. والمقارنة بلا صورةٍ في عمودٍ ما تبقى عمودًا فارغًا
- * لا خطأً: بدايةٌ بلا صورٍ حادثٌ ماضٍ، والخيار الوحيد هو النظر إلى الموجود.
- */
-export function buildComparison(photos: StagePhoto[]): ComparisonColumn[] {
-  const rank = (view: PhotoView | null): number => {
-    if (view === "intraoral_frontal") return 0;
-    if (view && view.startsWith("intraoral")) return 1;
-    return 2;
-  };
-
-  return PHOTO_STAGE_ORDER.map((stage) => {
-    const inStage = photos
-      .filter((photo) => photo.stage === stage)
-      .sort((a, b) => {
-        const byRank = rank(a.view) - rank(b.view);
-        if (byRank !== 0) return byRank;
-        // داخل الدور نفسه: الأقدم تُمثّل البداية والأحدث تُمثّل ما بعدها.
-        return stage === "initial"
-          ? (a.takenOn ?? a.uploadedAt).localeCompare(b.takenOn ?? b.uploadedAt)
-          : (b.takenOn ?? b.uploadedAt).localeCompare(a.takenOn ?? a.uploadedAt);
-      });
-    return {
-      stage,
-      label: PHOTO_STAGE_LABEL[stage],
-      featured: inStage[0] ?? null,
-      count: inStage.length,
-    };
+/** Recorded stage groups only, not evidence of response or comparable photography.
+ * Preserve the prior view preference. Among that view rank, dates choose a
+ * representative only if all are known and the winning date is unique.
+ * Upload timestamps never stand in for acquisition dates. */
+export function buildComparison<T extends StagePhoto>(photos: readonly T[]): ComparisonColumn<T>[] {
+  const rank = (view: PhotoView | null): number => view === "intraoral_frontal" ? 0
+    : view?.startsWith("intraoral") ? 1 : 2;
+  return PHOTO_STAGE_ORDER.map(stage => {
+    const candidates = photos.filter(photo => photo.stage === stage).sort((a,b) => a.id-b.id);
+    if (!candidates.length) return {stage,label:PHOTO_STAGE_LABEL[stage],featured:null,count:0,candidates,selection:"empty"};
+    const bestRank = Math.min(...candidates.map(p => rank(p.view)));
+    const preferred = candidates.filter(p => rank(p.view) === bestRank);
+    const known = preferred.every(p => isDocumentAcquisitionDate(p.takenOn));
+    if (!known) return {stage,label:PHOTO_STAGE_LABEL[stage],featured:preferred.length===1?preferred[0]:null,
+      count:candidates.length,candidates,selection:preferred.length===1?"single_unknown_date":"ambiguous_date"};
+    const dates = preferred.map(p=>p.takenOn!).sort();
+    const date = stage === "initial" ? dates[0] : dates[dates.length-1];
+    const winners = preferred.filter(p=>p.takenOn===date);
+    return {stage,label:PHOTO_STAGE_LABEL[stage],featured:winners.length===1?winners[0]:null,
+      count:candidates.length,candidates,selection:winners.length===1?"recorded_date":"ambiguous_date"};
   });
 }

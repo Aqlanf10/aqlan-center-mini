@@ -77,7 +77,9 @@ function invoiced(paidMinor = 0): TreatmentFinancialSnapshot {
     legacyAgreements: [], openings: [],
   };
 }
+let observedProps: Props;
 function render(overrides: Partial<Props> = {}): ReactNode {
+  observedProps = { ...defaults, ...overrides };
   hooks.cursor = 0;
   const wrapper = OrthoPackageLink({ ...defaults, ...overrides });
   if (hooks.key !== (wrapper?.key ?? null)) {
@@ -107,7 +109,9 @@ beforeEach(() => {
     if (url === `/api/patients/${IDs.patient}/treatment-financial-context`) return Response.json(projectTreatmentFinancialReferences(invoiced()));
     throw new Error(`Unexpected read: ${url}`);
   });
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => url.endsWith("/plan-link")
+    ? Promise.resolve(Response.json({ caseId: observedProps.caseId, patientId: observedProps.patientId, planId: observedProps.planId, status: "active", observedVersion: "a".repeat(64) }))
+    : fetchMock(url, init));
 });
 afterEach(() => {
   for (const entry of hooks.effects.values()) entry.cleanup?.();

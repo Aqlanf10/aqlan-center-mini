@@ -1,0 +1,1000 @@
+{
+  "baseCommit": "cebe62f2e8d3d20a1196e10e9da892a30ec235cb",
+  "referenceVersion": "2026-11-01.expansion.1",
+  "entries": [
+    {
+      "profile": {
+        "id": "paracetamol-adult-sdcep",
+        "generic_name": "Paracetamol / Acetaminophen",
+        "class_group": "analgesic",
+        "population_reference": "بالغ؛ حد18 سنة نطاق منتج مقترح لا استنتاج من المصدر",
+        "indication_reference": "ألم سني أو بعد إجراء خفيف/متوسط",
+        "dose_basis": "mg/dose",
+        "reference_dose": 1000,
+        "reference_schedule": {
+          "times_per_day": 4,
+          "minimum_interval_hours": 4
+        },
+        "reference_limits": {
+          "mg_per_24h": 4000,
+          "maximum_administrations_24h": 4
+        },
+        "duration_reference": {
+          "example_days": 5,
+          "selection": "أقصر مدة فعالة يحددها الطبيب"
+        },
+        "form_strength_reference": [
+          "tablet 500mg"
+        ],
+        "source_ids": [
+          "SD_APAP",
+          "SD_ANALGESIC_CAUTION"
+        ],
+        "warning_ids": [
+          "apap",
+          "special-populations"
+        ],
+        "notes": "4000 سقف المصدر وليس جرعة افتراضية، وقد يلزم سقف أقل حسب المريض."
+      },
+      "sources": [
+        {
+          "id": "SD_APAP",
+          "title": "SDCEP paracetamol",
+          "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/odontogenic-pain/analgesics/paracetamol/",
+          "version": "live page",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        },
+        {
+          "id": "SD_ANALGESIC_CAUTION",
+          "title": "SDCEP analgesic cautions",
+          "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/supporting-tools/contraindications-cautions/contraindications-cautions-analgesics/",
+          "version": "live page",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        }
+      ],
+      "warnings": [
+        {
+          "id": "apap",
+          "value": {
+            "text_ar": "افحص جميع مصادر الباراسيتامول؛ خطر سمية الكبد عند التجاوز. مرض الكبد/سوء التغذية/وزن منخفض أو اختلال الكلى يحتاج مراجعة النشرة وتعديلًا مهنيًا لا تلقائيًا.",
+            "sources": [
+              "SD_ANALGESIC_CAUTION",
+              "AAPD25"
+            ]
+          }
+        },
+        {
+          "id": "special-populations",
+          "value": {
+            "text_ar": "الحمل/الرضاعة والكلى والكبد والجفاف والوزن المنخفض/الهشاشة تحتاجقرارمراجع؛ غيابرايةليسشهادةسلامة. لا تصحيح آلي للجرعات.",
+            "sources": [
+              "SD_ANALGESIC_CAUTION"
+            ],
+            "kind": "product-safety-policy"
+          }
+        }
+      ],
+      "defaultRule": {
+        "profileId": "paracetamol-adult-sdcep",
+        "medicationId": "paracetamol",
+        "basis": "mg/dose",
+        "scheduleKind": "times-per-day",
+        "range": [
+          1000,
+          1000
+        ],
+        "ageMonths": {
+          "min": 216
+        },
+        "weightRequired": true,
+        "administrations": [
+          4
+        ],
+        "minimumIntervalHours": 4,
+        "singleMaxMg": 1000,
+        "dailyMaxMg": 4000,
+        "antibiotic": false,
+        "sourceDurationDays": 5,
+        "scopeNote": "مثال SDCEP للبالغ فقط؛ سن18 حد نطاق التطبيق. وزن أقل من50kg أو حالة خاصة يحتاج مراجعة يدوية، وليس هذا المثال."
+      },
+      "ruleRanges": [
+        {
+          "fromMonth": 0,
+          "toMonth": 1440,
+          "rule": {
+            "profileId": "paracetamol-adult-sdcep",
+            "medicationId": "paracetamol",
+            "basis": "mg/dose",
+            "scheduleKind": "times-per-day",
+            "range": [
+              1000,
+              1000
+            ],
+            "ageMonths": {
+              "min": 216
+            },
+            "weightRequired": true,
+            "administrations": [
+              4
+            ],
+            "minimumIntervalHours": 4,
+            "singleMaxMg": 1000,
+            "dailyMaxMg": 4000,
+            "antibiotic": false,
+            "sourceDurationDays": 5,
+            "scopeNote": "مثال SDCEP للبالغ فقط؛ سن18 حد نطاق التطبيق. وزن أقل من50kg أو حالة خاصة يحتاج مراجعة يدوية، وليس هذا المثال."
+          }
+        }
+      ]
+    },
+    {
+      "profile": {
+        "id": "paracetamol-child-aapd",
+        "generic_name": "Paracetamol / Acetaminophen",
+        "class_group": "analgesic",
+        "population_reference": "أقل من12 سنة؛ الحد الأدنى ونشرة المنتج يحتاجان تحققًا",
+        "indication_reference": "ألم خفيف/متوسط",
+        "dose_basis": "mg/kg/dose",
+        "reference_dose": [
+          10,
+          15
+        ],
+        "reference_schedule": {
+          "interval_hours_range": [
+            4,
+            6
+          ],
+          "as_needed": true
+        },
+        "reference_limits": {
+          "mg_per_kg_24h": 75,
+          "mg_per_24h": 4000,
+          "mg_per_single_dose": null
+        },
+        "duration_reference": null,
+        "form_strength_reference": [
+          "oral liquid: exact concentration required"
+        ],
+        "source_ids": [
+          "AAPD25",
+          "SD_ANALGESIC_CAUTION"
+        ],
+        "warning_ids": [
+          "apap",
+          "pediatric"
+        ],
+        "notes": "لا تُقسم جرعة mg/kg/dose على عدد المرات. عدد الجرعات والسقف المفرد يقرهما الطبيب/النشرة قبل التفعيل."
+      },
+      "sources": [
+        {
+          "id": "AAPD25",
+          "title": "AAPD Useful Medications, revision 2025, pp669–677",
+          "url": "https://www.aapd.org/globalassets/media/policies_guidelines/r_usefulmeds25.pdf",
+          "version": "2025",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        },
+        {
+          "id": "SD_ANALGESIC_CAUTION",
+          "title": "SDCEP analgesic cautions",
+          "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/supporting-tools/contraindications-cautions/contraindications-cautions-analgesics/",
+          "version": "live page",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        }
+      ],
+      "warnings": [
+        {
+          "id": "apap",
+          "value": {
+            "text_ar": "افحص جميع مصادر الباراسيتامول؛ خطر سمية الكبد عند التجاوز. مرض الكبد/سوء التغذية/وزن منخفض أو اختلال الكلى يحتاج مراجعة النشرة وتعديلًا مهنيًا لا تلقائيًا.",
+            "sources": [
+              "SD_ANALGESIC_CAUTION",
+              "AAPD25"
+            ]
+          }
+        },
+        {
+          "id": "pediatric",
+          "value": {
+            "text_ar": "العمر والوزن الحاليان والقدرةعلىالبلع/البصق والمنتجالفعلي مطلوبة. حدودالفئة ليستدعوةلاستخدامها عندنقصالمعلومات.",
+            "sources": [
+              "AAPD25"
+            ],
+            "kind": "product-safety-policy"
+          }
+        }
+      ],
+      "defaultRule": {
+        "profileId": "paracetamol-child-aapd",
+        "medicationId": "paracetamol",
+        "basis": "mg/kg/dose",
+        "scheduleKind": "prn-max",
+        "range": [
+          10,
+          15
+        ],
+        "ageMonths": {
+          "min": 6,
+          "maxExclusive": 144
+        },
+        "weightRequired": true,
+        "administrations": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "minimumIntervalHours": 4,
+        "maximumIntervalHours": 6,
+        "singleMaxMg": 1000,
+        "dailyMaxMgPerKg": 75,
+        "dailyMaxMg": 4000,
+        "requiresLabelSingleMax": true,
+        "antibiotic": false,
+        "scopeNote": "نطاق التطبيق المحافظ من6أشهر إلى أقل من12سنة، مع تحقق عمر المنتج. يلزم سقف مفرد موثق من النشرة؛ لا نستنتجه من السقف اليومي."
+      },
+      "ruleRanges": [
+        {
+          "fromMonth": 0,
+          "toMonth": 1440,
+          "rule": {
+            "profileId": "paracetamol-child-aapd",
+            "medicationId": "paracetamol",
+            "basis": "mg/kg/dose",
+            "scheduleKind": "prn-max",
+            "range": [
+              10,
+              15
+            ],
+            "ageMonths": {
+              "min": 6,
+              "maxExclusive": 144
+            },
+            "weightRequired": true,
+            "administrations": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "minimumIntervalHours": 4,
+            "maximumIntervalHours": 6,
+            "singleMaxMg": 1000,
+            "dailyMaxMgPerKg": 75,
+            "dailyMaxMg": 4000,
+            "requiresLabelSingleMax": true,
+            "antibiotic": false,
+            "scopeNote": "نطاق التطبيق المحافظ من6أشهر إلى أقل من12سنة، مع تحقق عمر المنتج. يلزم سقف مفرد موثق من النشرة؛ لا نستنتجه من السقف اليومي."
+          }
+        }
+      ]
+    },
+    {
+      "profile": {
+        "id": "ibuprofen-adult-sdcep",
+        "generic_name": "Ibuprofen",
+        "class_group": "analgesic",
+        "population_reference": "بالغ",
+        "indication_reference": "ألم سني/التهابي أو بعد إجراء",
+        "dose_basis": "mg/dose",
+        "reference_dose": 400,
+        "reference_schedule": {
+          "times_per_day": 4,
+          "minimum_interval_hours": null
+        },
+        "reference_limits": {
+          "example_derived_mg_24h": 1600,
+          "source_possible_escalation_mg_24h": 2400
+        },
+        "duration_reference": {
+          "example_days": 5
+        },
+        "form_strength_reference": [
+          "tablet400mg"
+        ],
+        "source_ids": [
+          "SD_IBU",
+          "FDA_NSAID"
+        ],
+        "warning_ids": [
+          "nsaid",
+          "special-populations"
+        ],
+        "notes": "بعد الطعام إن أمكن؛ لا ترفع مثال1600 إلى2400 تلقائيًا، والفاصل يحتاج نشرة المنتج."
+      },
+      "sources": [
+        {
+          "id": "SD_IBU",
+          "title": "SDCEP ibuprofen",
+          "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/odontogenic-pain/analgesics/ibuprofen/",
+          "version": "live page",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        },
+        {
+          "id": "FDA_NSAID",
+          "title": "FDA NSAIDs and pregnancy",
+          "url": "https://www.fda.gov/media/142967/download",
+          "version": "2020 safety communication; checked current",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        }
+      ],
+      "warnings": [
+        {
+          "id": "nsaid",
+          "value": {
+            "text_ar": "منع/مراجعة حساسيةNSAIDs أو ربو محرّض بها، قرحة/نزف، جفاف أو قصوركلوي، مضادات التخثر، NSAIDs أخرى/أسبرين. من20أسبوع حمل يتجنب إلا لضرورة يقررها المختص؛ من30أسبوع يتجنب.",
+            "sources": [
+              "SD_IBU",
+              "FDA_NSAID"
+            ]
+          }
+        },
+        {
+          "id": "special-populations",
+          "value": {
+            "text_ar": "الحمل/الرضاعة والكلى والكبد والجفاف والوزن المنخفض/الهشاشة تحتاجقرارمراجع؛ غيابرايةليسشهادةسلامة. لا تصحيح آلي للجرعات.",
+            "sources": [
+              "SD_ANALGESIC_CAUTION"
+            ],
+            "kind": "product-safety-policy"
+          }
+        }
+      ],
+      "defaultRule": {
+        "profileId": "ibuprofen-adult-sdcep",
+        "medicationId": "ibuprofen",
+        "basis": "mg/dose",
+        "scheduleKind": "times-per-day",
+        "range": [
+          400,
+          400
+        ],
+        "ageMonths": {
+          "min": 216
+        },
+        "weightRequired": true,
+        "administrations": [
+          4
+        ],
+        "minimumIntervalHours": 0,
+        "dailyMaxMg": 2400,
+        "antibiotic": false,
+        "sourceDurationDays": 5,
+        "requiresProductSchedule": true,
+        "instructionsAr": "يفضل تناوله بعد الطعام.",
+        "instructionsEn": "Preferably after food.",
+        "scopeNote": "مثال بالغ400mg أربع مرات فقط؛ لا رفع تلقائي إلى2.4g. تحقّق من النشرة والحساسية والأسبرين والقرحة والكلى والحمل والتداخلات؛ الحالات الخاصة خارج المحول."
+      },
+      "ruleRanges": [
+        {
+          "fromMonth": 0,
+          "toMonth": 1440,
+          "rule": {
+            "profileId": "ibuprofen-adult-sdcep",
+            "medicationId": "ibuprofen",
+            "basis": "mg/dose",
+            "scheduleKind": "times-per-day",
+            "range": [
+              400,
+              400
+            ],
+            "ageMonths": {
+              "min": 216
+            },
+            "weightRequired": true,
+            "administrations": [
+              4
+            ],
+            "minimumIntervalHours": 0,
+            "dailyMaxMg": 2400,
+            "antibiotic": false,
+            "sourceDurationDays": 5,
+            "requiresProductSchedule": true,
+            "instructionsAr": "يفضل تناوله بعد الطعام.",
+            "instructionsEn": "Preferably after food.",
+            "scopeNote": "مثال بالغ400mg أربع مرات فقط؛ لا رفع تلقائي إلى2.4g. تحقّق من النشرة والحساسية والأسبرين والقرحة والكلى والحمل والتداخلات؛ الحالات الخاصة خارج المحول."
+          }
+        }
+      ]
+    },
+    {
+      "profile": {
+        "id": "ibuprofen-child-sdcep",
+        "generic_name": "Ibuprofen",
+        "class_group": "analgesic",
+        "population_reference": "6أشهر–17سنة؛ الوزن مطلوب لفحص السقف",
+        "indication_reference": "ألم سني",
+        "dose_basis": "age-band mg/dose",
+        "reference_dose": {
+          "6-11_months": 50,
+          "1-3_years": 100,
+          "4-6_years": 150,
+          "7-9_years": 200,
+          "10-11_years": 300,
+          "12-17_years": [
+            300,
+            400
+          ]
+        },
+        "reference_schedule": {
+          "times_per_day_by_age": {
+            "6-11_months": 4,
+            "1-11_years": 3,
+            "12-17_years": 4
+          }
+        },
+        "reference_limits": {
+          "mg_per_kg_24h": 30,
+          "age7plus_absolute_mg_24h": 2400
+        },
+        "duration_reference": {
+          "example_days": 5
+        },
+        "form_strength_reference": [
+          "100mg/5mL",
+          "tablet200mg"
+        ],
+        "source_ids": [
+          "SD_IBU",
+          "FDA_NSAID"
+        ],
+        "warning_ids": [
+          "nsaid",
+          "pediatric"
+        ],
+        "notes": "لا تستبدل سقف30 بسقف40 من مرجع آخر. إذا تجاوزت جرعة الفئة سقف الوزن تُحال للمراجعة ولا تخفض صامتًا."
+      },
+      "sources": [
+        {
+          "id": "SD_IBU",
+          "title": "SDCEP ibuprofen",
+          "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/odontogenic-pain/analgesics/ibuprofen/",
+          "version": "live page",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        },
+        {
+          "id": "FDA_NSAID",
+          "title": "FDA NSAIDs and pregnancy",
+          "url": "https://www.fda.gov/media/142967/download",
+          "version": "2020 safety communication; checked current",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        }
+      ],
+      "warnings": [
+        {
+          "id": "nsaid",
+          "value": {
+            "text_ar": "منع/مراجعة حساسيةNSAIDs أو ربو محرّض بها، قرحة/نزف، جفاف أو قصوركلوي، مضادات التخثر، NSAIDs أخرى/أسبرين. من20أسبوع حمل يتجنب إلا لضرورة يقررها المختص؛ من30أسبوع يتجنب.",
+            "sources": [
+              "SD_IBU",
+              "FDA_NSAID"
+            ]
+          }
+        },
+        {
+          "id": "pediatric",
+          "value": {
+            "text_ar": "العمر والوزن الحاليان والقدرةعلىالبلع/البصق والمنتجالفعلي مطلوبة. حدودالفئة ليستدعوةلاستخدامها عندنقصالمعلومات.",
+            "sources": [
+              "AAPD25"
+            ],
+            "kind": "product-safety-policy"
+          }
+        }
+      ],
+      "defaultRule": {
+        "profileId": "ibuprofen-child-sdcep",
+        "medicationId": "ibuprofen",
+        "basis": "mg/dose",
+        "scheduleKind": "times-per-day",
+        "range": [
+          50,
+          400
+        ],
+        "ageMonths": {
+          "min": 6,
+          "maxExclusive": 216
+        },
+        "weightRequired": true,
+        "administrations": [
+          3,
+          4
+        ],
+        "minimumIntervalHours": 0,
+        "dailyMaxMgPerKg": 30,
+        "antibiotic": false,
+        "sourceDurationDays": 5,
+        "requiresProductSchedule": true,
+        "instructionsAr": "يفضل تناوله بعد الطعام.",
+        "instructionsEn": "Preferably after food.",
+        "scopeNote": "نظام SDCEP مستقل بحسب العمر مع سقف30mg/kg/day؛ لا40mg/kg من مرجع آخر. حد عدد الجرعات والفاصل من المنتج إلزاميان؛ تعارضهما يرفض الحساب. مراجعة NSAID ليست ضمان سلامة طبيًا."
+      },
+      "ruleRanges": [
+        {
+          "fromMonth": 0,
+          "toMonth": 5,
+          "rule": null
+        },
+        {
+          "fromMonth": 6,
+          "toMonth": 11,
+          "rule": {
+            "profileId": "ibuprofen-child-sdcep",
+            "medicationId": "ibuprofen",
+            "basis": "mg/dose",
+            "scheduleKind": "times-per-day",
+            "range": [
+              50,
+              50
+            ],
+            "ageMonths": {
+              "min": 6,
+              "maxExclusive": 12
+            },
+            "weightRequired": true,
+            "administrations": [
+              4
+            ],
+            "minimumIntervalHours": 0,
+            "dailyMaxMgPerKg": 30,
+            "antibiotic": false,
+            "sourceDurationDays": 5,
+            "requiresProductSchedule": true,
+            "instructionsAr": "يفضل تناوله بعد الطعام.",
+            "instructionsEn": "Preferably after food.",
+            "scopeNote": "نظام SDCEP مستقل بحسب العمر مع سقف30mg/kg/day؛ لا40mg/kg من مرجع آخر. حد عدد الجرعات والفاصل من المنتج إلزاميان؛ تعارضهما يرفض الحساب. مراجعة NSAID ليست ضمان سلامة طبيًا."
+          }
+        },
+        {
+          "fromMonth": 12,
+          "toMonth": 47,
+          "rule": {
+            "profileId": "ibuprofen-child-sdcep",
+            "medicationId": "ibuprofen",
+            "basis": "mg/dose",
+            "scheduleKind": "times-per-day",
+            "range": [
+              100,
+              100
+            ],
+            "ageMonths": {
+              "min": 12,
+              "maxExclusive": 48
+            },
+            "weightRequired": true,
+            "administrations": [
+              3
+            ],
+            "minimumIntervalHours": 0,
+            "dailyMaxMgPerKg": 30,
+            "antibiotic": false,
+            "sourceDurationDays": 5,
+            "requiresProductSchedule": true,
+            "instructionsAr": "يفضل تناوله بعد الطعام.",
+            "instructionsEn": "Preferably after food.",
+            "scopeNote": "نظام SDCEP مستقل بحسب العمر مع سقف30mg/kg/day؛ لا40mg/kg من مرجع آخر. حد عدد الجرعات والفاصل من المنتج إلزاميان؛ تعارضهما يرفض الحساب. مراجعة NSAID ليست ضمان سلامة طبيًا."
+          }
+        },
+        {
+          "fromMonth": 48,
+          "toMonth": 83,
+          "rule": {
+            "profileId": "ibuprofen-child-sdcep",
+            "medicationId": "ibuprofen",
+            "basis": "mg/dose",
+            "scheduleKind": "times-per-day",
+            "range": [
+              150,
+              150
+            ],
+            "ageMonths": {
+              "min": 48,
+              "maxExclusive": 84
+            },
+            "weightRequired": true,
+            "administrations": [
+              3
+            ],
+            "minimumIntervalHours": 0,
+            "dailyMaxMgPerKg": 30,
+            "antibiotic": false,
+            "sourceDurationDays": 5,
+            "requiresProductSchedule": true,
+            "instructionsAr": "يفضل تناوله بعد الطعام.",
+            "instructionsEn": "Preferably after food.",
+            "scopeNote": "نظام SDCEP مستقل بحسب العمر مع سقف30mg/kg/day؛ لا40mg/kg من مرجع آخر. حد عدد الجرعات والفاصل من المنتج إلزاميان؛ تعارضهما يرفض الحساب. مراجعة NSAID ليست ضمان سلامة طبيًا."
+          }
+        },
+        {
+          "fromMonth": 84,
+          "toMonth": 119,
+          "rule": {
+            "profileId": "ibuprofen-child-sdcep",
+            "medicationId": "ibuprofen",
+            "basis": "mg/dose",
+            "scheduleKind": "times-per-day",
+            "range": [
+              200,
+              200
+            ],
+            "ageMonths": {
+              "min": 84,
+              "maxExclusive": 120
+            },
+            "weightRequired": true,
+            "administrations": [
+              3
+            ],
+            "minimumIntervalHours": 0,
+            "dailyMaxMgPerKg": 30,
+            "antibiotic": false,
+            "sourceDurationDays": 5,
+            "requiresProductSchedule": true,
+            "instructionsAr": "يفضل تناوله بعد الطعام.",
+            "instructionsEn": "Preferably after food.",
+            "scopeNote": "نظام SDCEP مستقل بحسب العمر مع سقف30mg/kg/day؛ لا40mg/kg من مرجع آخر. حد عدد الجرعات والفاصل من المنتج إلزاميان؛ تعارضهما يرفض الحساب. مراجعة NSAID ليست ضمان سلامة طبيًا.",
+            "dailyMaxMg": 2400
+          }
+        },
+        {
+          "fromMonth": 120,
+          "toMonth": 143,
+          "rule": {
+            "profileId": "ibuprofen-child-sdcep",
+            "medicationId": "ibuprofen",
+            "basis": "mg/dose",
+            "scheduleKind": "times-per-day",
+            "range": [
+              300,
+              300
+            ],
+            "ageMonths": {
+              "min": 120,
+              "maxExclusive": 144
+            },
+            "weightRequired": true,
+            "administrations": [
+              3
+            ],
+            "minimumIntervalHours": 0,
+            "dailyMaxMgPerKg": 30,
+            "antibiotic": false,
+            "sourceDurationDays": 5,
+            "requiresProductSchedule": true,
+            "instructionsAr": "يفضل تناوله بعد الطعام.",
+            "instructionsEn": "Preferably after food.",
+            "scopeNote": "نظام SDCEP مستقل بحسب العمر مع سقف30mg/kg/day؛ لا40mg/kg من مرجع آخر. حد عدد الجرعات والفاصل من المنتج إلزاميان؛ تعارضهما يرفض الحساب. مراجعة NSAID ليست ضمان سلامة طبيًا.",
+            "dailyMaxMg": 2400
+          }
+        },
+        {
+          "fromMonth": 144,
+          "toMonth": 215,
+          "rule": {
+            "profileId": "ibuprofen-child-sdcep",
+            "medicationId": "ibuprofen",
+            "basis": "mg/dose",
+            "scheduleKind": "times-per-day",
+            "range": [
+              300,
+              400
+            ],
+            "ageMonths": {
+              "min": 144,
+              "maxExclusive": 216
+            },
+            "weightRequired": true,
+            "administrations": [
+              4
+            ],
+            "minimumIntervalHours": 0,
+            "dailyMaxMgPerKg": 30,
+            "antibiotic": false,
+            "sourceDurationDays": 5,
+            "requiresProductSchedule": true,
+            "instructionsAr": "يفضل تناوله بعد الطعام.",
+            "instructionsEn": "Preferably after food.",
+            "scopeNote": "نظام SDCEP مستقل بحسب العمر مع سقف30mg/kg/day؛ لا40mg/kg من مرجع آخر. حد عدد الجرعات والفاصل من المنتج إلزاميان؛ تعارضهما يرفض الحساب. مراجعة NSAID ليست ضمان سلامة طبيًا.",
+            "dailyMaxMg": 2400
+          }
+        },
+        {
+          "fromMonth": 216,
+          "toMonth": 1440,
+          "rule": null
+        }
+      ]
+    },
+    {
+      "profile": {
+        "id": "amoxicillin-child-aapd-q8",
+        "generic_name": "Amoxicillin",
+        "class_group": "antibiotic",
+        "population_reference": "أكبر من3أشهر وأقل من40kg؛ عند40kg بالضبط مراجعة النص/النشرة",
+        "indication_reference": "جرعة مرجعية عامة؛ الاستطباب السني والمدة يقرهما الطبيب",
+        "dose_basis": "mg/kg/day",
+        "reference_dose": [
+          20,
+          40
+        ],
+        "reference_schedule": {
+          "interval_hours": 8,
+          "divisions_per_day": 3
+        },
+        "reference_limits": {
+          "mg_per_single_dose": 500
+        },
+        "duration_reference": null,
+        "form_strength_reference": [
+          "suspension: exact strength required"
+        ],
+        "source_ids": [
+          "AAPD25",
+          "SD_ABX_CAUTION"
+        ],
+        "warning_ids": [
+          "penicillin",
+          "antibiotic",
+          "pediatric"
+        ],
+        "notes": "الكمية هنا يومية، تقسم3؛ لا تنقل الجرعة كما هي لكل مرة."
+      },
+      "sources": [
+        {
+          "id": "AAPD25",
+          "title": "AAPD Useful Medications, revision 2025, pp669–677",
+          "url": "https://www.aapd.org/globalassets/media/policies_guidelines/r_usefulmeds25.pdf",
+          "version": "2025",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        },
+        {
+          "id": "SD_ABX_CAUTION",
+          "title": "SDCEP antibiotic cautions",
+          "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/supporting-tools/contraindications-cautions/contraindications-cautions-antibiotics/",
+          "version": "live page",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        }
+      ],
+      "warnings": [
+        {
+          "id": "penicillin",
+          "value": {
+            "text_ar": "لا عند تفاعل فوري للبنسلين مثل التأق/الشرى؛ قصوركلوي شديد قد يستلزم تعديلًا. تداخلwarfarin يحتاج تدبيرINR، لا بديل حساسية آلي.",
+            "sources": [
+              "SD_ABX_CAUTION"
+            ]
+          }
+        },
+        {
+          "id": "antibiotic",
+          "value": {
+            "text_ar": "لا مضاد تلقائي لكلألم/خلع. السبب الموضعي يعالج، ويوثق الاستطباب. صعوبةتنفس/بلع أوانتشارخطير أوإنتان تستدعي إحالةعاجلة، لازيادةجرعةآلية.",
+            "sources": [
+              "SD_ABSCESS",
+              "ADA_ABX"
+            ]
+          }
+        },
+        {
+          "id": "pediatric",
+          "value": {
+            "text_ar": "العمر والوزن الحاليان والقدرةعلىالبلع/البصق والمنتجالفعلي مطلوبة. حدودالفئة ليستدعوةلاستخدامها عندنقصالمعلومات.",
+            "sources": [
+              "AAPD25"
+            ],
+            "kind": "product-safety-policy"
+          }
+        }
+      ],
+      "defaultRule": {
+        "profileId": "amoxicillin-child-aapd-q8",
+        "medicationId": "amoxicillin",
+        "basis": "mg/kg/day",
+        "scheduleKind": "fixed-interval",
+        "range": [
+          20,
+          40
+        ],
+        "ageMonths": {
+          "min": 3,
+          "minExclusive": true,
+          "maxExclusive": 216
+        },
+        "weightBelowKg": 40,
+        "weightRequired": true,
+        "administrations": [
+          3
+        ],
+        "minimumIntervalHours": 8,
+        "singleMaxMg": 500,
+        "antibiotic": true,
+        "scopeNote": "أكبر من3أشهر وأقل من40kg؛ جرعة يومية تقسم3، والمدة والاستطباب يحددهما الطبيب. 40kg بالضبط غير مشمول."
+      },
+      "ruleRanges": [
+        {
+          "fromMonth": 0,
+          "toMonth": 1440,
+          "rule": {
+            "profileId": "amoxicillin-child-aapd-q8",
+            "medicationId": "amoxicillin",
+            "basis": "mg/kg/day",
+            "scheduleKind": "fixed-interval",
+            "range": [
+              20,
+              40
+            ],
+            "ageMonths": {
+              "min": 3,
+              "minExclusive": true,
+              "maxExclusive": 216
+            },
+            "weightBelowKg": 40,
+            "weightRequired": true,
+            "administrations": [
+              3
+            ],
+            "minimumIntervalHours": 8,
+            "singleMaxMg": 500,
+            "antibiotic": true,
+            "scopeNote": "أكبر من3أشهر وأقل من40kg؛ جرعة يومية تقسم3، والمدة والاستطباب يحددهما الطبيب. 40kg بالضبط غير مشمول."
+          }
+        }
+      ]
+    },
+    {
+      "profile": {
+        "id": "amoxicillin-child-aapd-q12",
+        "generic_name": "Amoxicillin",
+        "class_group": "antibiotic",
+        "population_reference": "أكبر من3أشهر وأقل من40kg",
+        "indication_reference": "جرعة مرجعية عامة؛ ليست مدة علاج خراج مفترضة",
+        "dose_basis": "mg/kg/day",
+        "reference_dose": [
+          25,
+          45
+        ],
+        "reference_schedule": {
+          "interval_hours": 12,
+          "divisions_per_day": 2
+        },
+        "reference_limits": {
+          "mg_per_single_dose": 875
+        },
+        "duration_reference": null,
+        "form_strength_reference": [
+          "suspension: exact strength required"
+        ],
+        "source_ids": [
+          "AAPD25",
+          "SD_ABX_CAUTION"
+        ],
+        "warning_ids": [
+          "penicillin",
+          "antibiotic",
+          "pediatric"
+        ],
+        "notes": "مسار مستقل عنq8؛ لا تبديل التكرار وحده."
+      },
+      "sources": [
+        {
+          "id": "AAPD25",
+          "title": "AAPD Useful Medications, revision 2025, pp669–677",
+          "url": "https://www.aapd.org/globalassets/media/policies_guidelines/r_usefulmeds25.pdf",
+          "version": "2025",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        },
+        {
+          "id": "SD_ABX_CAUTION",
+          "title": "SDCEP antibiotic cautions",
+          "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/supporting-tools/contraindications-cautions/contraindications-cautions-antibiotics/",
+          "version": "live page",
+          "checked_on": "2026-11-01",
+          "primary_source": true
+        }
+      ],
+      "warnings": [
+        {
+          "id": "penicillin",
+          "value": {
+            "text_ar": "لا عند تفاعل فوري للبنسلين مثل التأق/الشرى؛ قصوركلوي شديد قد يستلزم تعديلًا. تداخلwarfarin يحتاج تدبيرINR، لا بديل حساسية آلي.",
+            "sources": [
+              "SD_ABX_CAUTION"
+            ]
+          }
+        },
+        {
+          "id": "antibiotic",
+          "value": {
+            "text_ar": "لا مضاد تلقائي لكلألم/خلع. السبب الموضعي يعالج، ويوثق الاستطباب. صعوبةتنفس/بلع أوانتشارخطير أوإنتان تستدعي إحالةعاجلة، لازيادةجرعةآلية.",
+            "sources": [
+              "SD_ABSCESS",
+              "ADA_ABX"
+            ]
+          }
+        },
+        {
+          "id": "pediatric",
+          "value": {
+            "text_ar": "العمر والوزن الحاليان والقدرةعلىالبلع/البصق والمنتجالفعلي مطلوبة. حدودالفئة ليستدعوةلاستخدامها عندنقصالمعلومات.",
+            "sources": [
+              "AAPD25"
+            ],
+            "kind": "product-safety-policy"
+          }
+        }
+      ],
+      "defaultRule": {
+        "profileId": "amoxicillin-child-aapd-q12",
+        "medicationId": "amoxicillin",
+        "basis": "mg/kg/day",
+        "scheduleKind": "fixed-interval",
+        "range": [
+          25,
+          45
+        ],
+        "ageMonths": {
+          "min": 3,
+          "minExclusive": true,
+          "maxExclusive": 216
+        },
+        "weightBelowKg": 40,
+        "weightRequired": true,
+        "administrations": [
+          2
+        ],
+        "minimumIntervalHours": 12,
+        "singleMaxMg": 875,
+        "antibiotic": true,
+        "scopeNote": "نظام مستقل كل12ساعة؛ لا يستبدل التكرار داخل نظام8ساعات. يلزم منتج ومدة واستطباب مراجعون؛ راجع قيود قوة875 عند القصور الكلوي."
+      },
+      "ruleRanges": [
+        {
+          "fromMonth": 0,
+          "toMonth": 1440,
+          "rule": {
+            "profileId": "amoxicillin-child-aapd-q12",
+            "medicationId": "amoxicillin",
+            "basis": "mg/kg/day",
+            "scheduleKind": "fixed-interval",
+            "range": [
+              25,
+              45
+            ],
+            "ageMonths": {
+              "min": 3,
+              "minExclusive": true,
+              "maxExclusive": 216
+            },
+            "weightBelowKg": 40,
+            "weightRequired": true,
+            "administrations": [
+              2
+            ],
+            "minimumIntervalHours": 12,
+            "singleMaxMg": 875,
+            "antibiotic": true,
+            "scopeNote": "نظام مستقل كل12ساعة؛ لا يستبدل التكرار داخل نظام8ساعات. يلزم منتج ومدة واستطباب مراجعون؛ راجع قيود قوة875 عند القصور الكلوي."
+          }
+        }
+      ]
+    }
+  ],
+  "unchangedSemanticFiles": {
+    "lib/medication-dose-profiles.ts": "7878c24da905150ec1d69d3ee9b55a5d9b1938dbc995b576eb58338e201209b5",
+    "lib/medication-dose-review.ts": "6c80b1090737ff532db82e2d1fe7bb7bc4ba9f620185a6a33ea9c155af4aa93e"
+  }
+}

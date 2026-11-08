@@ -154,6 +154,34 @@ describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
     expect(AUDIT_EXEMPT).not.toHaveProperty("POST /api/expenses");
   });
 
+  it("identifies the scoped study image preview as read-only without exempting saved study writes", () => {
+    const key = "POST /api/ortho/[id]/case-study/media";
+    expect(handlers.find(handler => handler.key === key)?.audits).toBe(false);
+    expect(AUDIT_EXEMPT).toHaveProperty(key);
+    expect(AUDIT_EXEMPT).not.toHaveProperty("POST /api/ortho/[id]/case-study");
+    expect(AUDIT_EXEMPT).not.toHaveProperty("POST /api/ortho/[id]/retention-ledger");
+  });
+
+  it("bounds the descriptive ceph exemption without exempting clinical persistence", () => {
+    const key = "POST /api/ceph/[id]/ai-analyze";
+    expect(handlers.find(handler => handler.key === key)?.audits).toBe(false);
+    expect(AUDIT_EXEMPT).toHaveProperty(key);
+    // Pin the entire reviewed read-only route, including imports/helpers, so a
+    // new writer, external AI call or untested branch cannot inherit the exemption.
+    // Re-review this classification on changes; never automatically refresh the pin.
+    // ceph-narrative-route.test.ts also exercises both descriptive and refusal paths.
+    const source = readFileSync(join(ROOT, "app/api/ceph/[id]/ai-analyze/route.ts"), "utf8");
+    expect(createHash("sha256").update(source).digest("hex"))
+      .toBe("512d90ac6eb351fc295604f76d36c6c256edc5154d937f77e2e1ffc9bcf7c3cd");
+    for (const writer of [
+      "PATCH /api/ceph/[id]", "DELETE /api/ceph/[id]",
+      "POST /api/ceph/[id]/complete", "POST /api/ceph/[id]/duplicate",
+    ]) {
+      expect(AUDIT_EXEMPT).not.toHaveProperty(writer);
+      expect(handlers.find(handler => handler.key === writer)?.audits).toBe(true);
+    }
+  });
+
   it("only omits an unambiguous literal quote call, not writes or uncertain options", () => {
     expect(callsIn('recordExpense({ amountMinor: value.amountMinor, quoteOnly: true });')
       .has("recordExpense")).toBe(false);

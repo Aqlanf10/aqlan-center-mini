@@ -1,0 +1,51 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { problemSubmissionHash, verifyProblemSubmissionRecovery } from '../lib/ortho-problem-submission-contract';
+import { bootstrapProblemRecovery, cancelProblemAndAcknowledge, fetchProblemRecovery, submitProblemAndAcknowledge, verifyProblemTransition, type ProblemSaveExpectation } from '../lib/ortho-problem-submission-client';
+const scope={patientId:1,orthoCaseId:2,clinicalCaseId:3},actorId=4;
+const command=()=>({schemaVersion:1 as const,commandId:'synthetic_durable_command',source:{kind:'clinical_diagnosis' as const,id:1,member:'skeletal',version:`sha256:${'a'.repeat(64)}`},expectedReviewId:null,action:'create' as const,problemId:null,label:'Synthetic problem',reason:'Synthetic recovery test',clinicianReviewed:true as const});
+let active=true;
+const deny=vi.fn(()=>{active=false;}),fetchMock=vi.fn();
+const context=()=>({scope,actorId,current:()=>active,deny});
+const response=(raw:unknown,status=200,cache='private, no-store')=>new Response(JSON.stringify(raw),{status,headers:{'content-type':'application/json','cache-control':cache}});
+async function fixtures(){
+ const c=command(),identity={id:8,commandId:c.commandId,requestFingerprint:await problemSubmissionHash(c)};
+ const expected:ProblemSaveExpectation={scope,actorId,command:c};
+ const revision={ok:true,...scope,actorId,commandId:c.commandId,requestFingerprint:identity.requestFingerprint,reviewId:12,problemId:19,sourceIdentity:'clinical_diagnosis:skeletal',sourceVersion:c.source.version,replayed:false};
+ return {identity,expected,revision,recovery:{ok:true,scope,actorId,recovery:{state:'pending' as const,identity,expected}},ack:{ok:true,scope,actorId,identity,state:'committed',acknowledged:true}};
+}
+beforeEach(()=>{active=true;deny.mockClear();fetchMock.mockReset();vi.stubGlobal('fetch',fetchMock);});
+afterEach(()=>vi.unstubAllGlobals());
+describe('problem recovery strict receipts',()=>{
+ it('verifies exact recovered bytes rather than trusting the supplied fingerprint',async()=>{const f=await fixtures();fetchMock.mockResolvedValue(response(f.recovery));await expect(fetchProblemRecovery(context())).resolves.toEqual(f.recovery.recovery);expect(fetchMock.mock.calls[0][1]).toMatchObject({credentials:'same-origin',cache:'no-store'});});
+ it.each(['actor','scope','hash','command','extra_root','extra_expected','extra_identity','extra_command'] as const)('rejects changed %s in a restored command',async kind=>{
+  const f=await fixtures(),raw=structuredClone(f.recovery) as any;
+  if(kind==='actor')raw.actorId=5;if(kind==='scope')raw.scope.clinicalCaseId=5;if(kind==='hash')raw.recovery.identity.requestFingerprint='b'.repeat(64);
+  if(kind==='command')raw.recovery.expected.command.reason='Changed';
+  if(kind==='extra_root')raw.extra=1;if(kind==='extra_expected')raw.recovery.expected.extra=1;if(kind==='extra_identity')raw.recovery.identity.extra=1;if(kind==='extra_command')raw.recovery.expected.command.extra=1;
+  await expect(verifyProblemSubmissionRecovery(raw,scope,actorId)).rejects.toThrow();
+ });
+ it('requires no-store and rejects redirected recovery responses',async()=>{const f=await fixtures();fetchMock.mockResolvedValueOnce(response(f.recovery,200,'private'));await expect(fetchProblemRecovery(context())).rejects.toThrow();const redirected=response(f.recovery);Object.defineProperty(redirected,'redirected',{value:true});fetchMock.mockResolvedValueOnce(redirected);await expect(fetchProblemRecovery(context())).rejects.toThrow();});
+ it('quarantines authority on forbidden response without reading clinical bytes',async()=>{const text=vi.fn();fetchMock.mockResolvedValue({status:403,text});await expect(fetchProblemRecovery(context())).rejects.toThrow();expect(deny).toHaveBeenCalledOnce();expect(text).not.toHaveBeenCalled();});
+ it('does not restore a verified response into a retired owner',async()=>{const f=await fixtures();fetchMock.mockImplementation(async()=>{active=false;return response(f.recovery);});await expect(fetchProblemRecovery(context())).rejects.toThrow();});
+ it('rejects clinical payload smuggled into a metadata-only blocked reply',async()=>{const f=await fixtures();await expect(verifyProblemSubmissionRecovery({ok:true,scope,actorId,recovery:{state:'blocked',identity:null,canCancel:false,expected:f.expected}},scope,actorId)).rejects.toThrow();});
+});
+describe('problem save and acknowledgment protocol',()=>{
+ it('sends scope-bound exact bytes, verifies committed revision, then acknowledges matching identity',async()=>{const f=await fixtures();fetchMock.mockResolvedValueOnce(response(f.revision,201)).mockResolvedValueOnce(response(f.ack));await expect(submitProblemAndAcknowledge(context(),f.expected,f.identity)).resolves.toEqual(f.revision);expect(fetchMock).toHaveBeenCalledTimes(2);expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({patientId:1,clinicalCaseId:3,actorId,command:f.expected.command});expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({patientId:1,clinicalCaseId:3,actorId,commandId:f.identity.commandId,requestFingerprint:f.identity.requestFingerprint,action:'acknowledge'});});
+ it('does not acknowledge an uncertain save',async()=>{const f=await fixtures();fetchMock.mockRejectedValueOnce(Error('lost response'));await expect(submitProblemAndAcknowledge(context(),f.expected)).rejects.toThrow();expect(fetchMock).toHaveBeenCalledOnce();});
+ it.each(['actor','hash','command'] as const)('does not acknowledge an altered saved %s',async kind=>{const f=await fixtures(),r=structuredClone(f.revision);if(kind==='actor')r.actorId=5;if(kind==='hash')r.requestFingerprint='b'.repeat(64);if(kind==='command')r.commandId='changed_synthetic_id';fetchMock.mockResolvedValueOnce(response(r,201));await expect(submitProblemAndAcknowledge(context(),f.expected)).rejects.toThrow();expect(fetchMock).toHaveBeenCalledOnce();});
+ it('rejects a mismatched recovery identity before sending anything',async()=>{const f=await fixtures();await expect(submitProblemAndAcknowledge(context(),f.expected,{...f.identity,commandId:'different_synthetic_id'})).rejects.toThrow();expect(fetchMock).not.toHaveBeenCalled();});
+ it('does not treat a missing acknowledgement response as completed',async()=>{const f=await fixtures();fetchMock.mockResolvedValueOnce(response({...f.revision,replayed:true})).mockRejectedValueOnce(Error('ack response lost'));await expect(submitProblemAndAcknowledge(context(),f.expected,f.identity)).rejects.toThrow();expect(fetchMock).toHaveBeenCalledTimes(2);});
+ it.each(['actor','scope','id','fingerprint','state','acknowledged','extra'])('rejects changed %s in terminal acknowledgement',async kind=>{const f=await fixtures(),a=structuredClone(f.ack) as any;if(kind==='actor')a.actorId=5;if(kind==='scope')a.scope.patientId=5;if(kind==='id')a.identity.id=99;if(kind==='fingerprint')a.identity.requestFingerprint='b'.repeat(64);if(kind==='state')a.state='cancelled';if(kind==='acknowledged')a.acknowledged=false;if(kind==='extra')a.extra=1;expect(()=>verifyProblemTransition(a,context(),f.identity,'committed',true)).toThrow();});
+ it('does not acknowledge after authority is lost during saved receipt parsing',async()=>{const f=await fixtures(),r=response({...f.revision,replayed:true});const original=r.text.bind(r);r.text=async()=>{const text=await original();active=false;return text;};fetchMock.mockResolvedValueOnce(r);await expect(submitProblemAndAcknowledge(context(),f.expected)).rejects.toThrow();expect(fetchMock).toHaveBeenCalledOnce();});
+});
+describe('problem safe cancellation',()=>{
+ it('cancels an exact absent-or-pending identity then acknowledges the tombstone',async()=>{const f=await fixtures();fetchMock.mockResolvedValueOnce(response({...f.ack,state:'cancelled',acknowledged:false})).mockResolvedValueOnce(response({...f.ack,state:'cancelled'}));await expect(cancelProblemAndAcknowledge(context(),f.identity)).resolves.toEqual(f.identity);expect(fetchMock.mock.calls.map(c=>JSON.parse(c[1].body).action)).toEqual(['cancel','acknowledge']);});
+ it('acknowledges an already-cancelled receipt without sending another cancellation',async()=>{const f=await fixtures();fetchMock.mockResolvedValueOnce(response({...f.ack,state:'cancelled'}));await expect(cancelProblemAndAcknowledge(context(),f.identity,true)).resolves.toEqual(f.identity);expect(fetchMock).toHaveBeenCalledOnce();expect(JSON.parse(fetchMock.mock.calls[0][1].body).action).toBe('acknowledge');});
+ it('cannot treat an already committed revision as a cancelled request',async()=>{const f=await fixtures();fetchMock.mockResolvedValueOnce(response(f.ack));await expect(cancelProblemAndAcknowledge(context(),f.identity)).rejects.toThrow();expect(fetchMock).toHaveBeenCalledOnce();});
+ it('retains uncertainty when another outstanding command prevents cancellation',async()=>{const f=await fixtures();fetchMock.mockResolvedValueOnce(response({code:'problem_submission_unacknowledged'},409));await expect(cancelProblemAndAcknowledge(context(),f.identity)).rejects.toThrow();expect(fetchMock).toHaveBeenCalledOnce();});
+});
+
+describe('metadata-first problem binding bootstrap',()=>{
+ it('bootstraps positive actor and clinical bridge only from a verified endpoint envelope',async()=>{const f=await fixtures();fetchMock.mockResolvedValueOnce(response(f.recovery));await expect(bootstrapProblemRecovery({patientId:1,orthoCaseId:2},context())).resolves.toEqual(f.recovery);expect(fetchMock.mock.calls[0][0]).toBe('/api/ortho/2/problem-sources/recovery?patientId=1');});
+ it.each(['patient','case','actor_zero','actor_string','clinical_zero','clinical_string','extra_scope','extra_root'] as const)('rejects invalid bootstrap %s before returning a binding',async kind=>{const f=await fixtures(),raw=structuredClone(f.recovery) as any;if(kind==='patient')raw.scope.patientId=9;if(kind==='case')raw.scope.orthoCaseId=9;if(kind==='actor_zero')raw.actorId=0;if(kind==='actor_string')raw.actorId='4';if(kind==='clinical_zero')raw.scope.clinicalCaseId=0;if(kind==='clinical_string')raw.scope.clinicalCaseId='3';if(kind==='extra_scope')raw.scope.extra=1;if(kind==='extra_root')raw.extra=1;fetchMock.mockResolvedValueOnce(response(raw));await expect(bootstrapProblemRecovery({patientId:1,orthoCaseId:2},context())).rejects.toThrow();});
+});

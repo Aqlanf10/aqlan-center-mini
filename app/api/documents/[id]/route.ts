@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -43,6 +44,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       return NextResponse.json({ message: "المستند مخفيّ." }, { status: 404 });
     }
 
+    // An optional ceph review identity binds the image load to both the stored
+    // metadata and these exact response bytes. Ordinary downloads are unchanged.
+    const expectedDigests = new URL(request.url).searchParams.getAll("cephSource");
+    if (expectedDigests.length > 1 || (expectedDigests.length === 1 && !/^[a-f0-9]{64}$/.test(expectedDigests[0]))) {
+      return NextResponse.json({ message: "بصمة مصدر الأشعة غير صالحة." }, { status: 400 });
+    }
+    const expectedDigest = expectedDigests[0] ?? null;
+    if (expectedDigest !== null && found.sha256 !== expectedDigest) {
+      return NextResponse.json({ message: "تغيّر مصدر الأشعة منذ فتح الدراسة؛ أعد فتحها وراجع الصورة." }, { status: 409 });
+    }
     const bytes = await readFileByKey(found.storageKey);
     if (!bytes) {
       // الصف موجود والملف مفقود: عطلٌ في التخزين لا في الطلب — ويُقال صراحةً بدل
@@ -51,6 +62,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         { message: "وصف المستند موجود وملفّه مفقود من التخزين. راجع القرص الملحق." },
         { status: 410 },
       );
+    }
+
+    if (expectedDigest !== null && createHash("sha256").update(bytes).digest("hex") !== expectedDigest) {
+      return NextResponse.json({ message: "ملف الأشعة لا يطابق بصمته المسجلة؛ لا يمكن عرضه لهذه المراجعة." }, { status: 409 });
     }
 
     const download = new URL(request.url).searchParams.get("download") === "1";

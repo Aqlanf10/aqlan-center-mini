@@ -1,11 +1,15 @@
+import { CephSavedCompletionEvidence } from "@/components/CephSavedCompletionEvidence";
+import { cephDraftReferenceContext, CEPH_UNAVAILABLE_NOTICE, CEPH_INTEGRITY_NOTICE, cephCompletionNotice, enrichPresentedCephMeasurements, isQuarantinedCephMeasurement, presentCephMeasurements } from "@/lib/cephPresentation";
 import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
+import { CephDraftReferenceEvidence } from "@/components/CephDraftReferenceEvidence";
+import { CephScientificContext } from "@/components/CephScientificContext";
 import { notFound } from "next/navigation";
 import {
-  getCephReferenceSet, getCephStudy, getPatient, getSettingsSafe,
+  getCephStudy, getPatient, getSettingsSafe,
 } from "@/lib/db";
 import {
-  computeAll, enrichWithRefs, getClinicalInterpretation, getSeverityStars, interpret, MEASUREMENTS, projectOnLine,
-  type LandmarkCode, type LandmarkMap, type MeasurementResult,
+  computeAll, isDescriptiveCephMeasurement, projectOnLine,
+  type LandmarkCode, type LandmarkMap,
 } from "@/lib/ceph";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
@@ -14,42 +18,6 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { friendlyDateLong } from "@/lib/reminders";
 
 export const dynamic = "force-dynamic";
-
-/** مؤشر الانحراف البياني المصغر للطباعة الورقية الرسمية (WebCeph Standard). */
-function PrintDeviationGauge({
-  value,
-  mean,
-  sd,
-}: {
-  value: number | null;
-  mean: number;
-  sd: number;
-}) {
-  if (value == null || !Number.isFinite(value) || !Number.isFinite(sd) || sd <= 0) {
-    return <div style={{ height: "3.5px", width: "35px", backgroundColor: "#e2e8f0", borderRadius: "1.5px", margin: "0 auto" }} />;
-  }
-
-  const z = (value - mean) / sd;
-  let pos = 50 + (z * 15);
-  pos = Math.max(5, Math.min(95, pos));
-
-  return (
-    <div style={{ position: "relative", width: "40px", height: "4.5px", backgroundColor: "#f1f5f9", borderRadius: "2px", margin: "0 auto" }}>
-      <div style={{ position: "absolute", left: "50%", top: "-1.5px", bottom: "-1.5px", width: "1px", backgroundColor: "#94a3b8" }} />
-      <div
-        style={{
-          position: "absolute",
-          top: "-1.5px",
-          bottom: "-1.5px",
-          width: "5px",
-          left: `calc(${pos}% - 2.5px)`,
-          borderRadius: "1.5px",
-          backgroundColor: Math.abs(z) > 2 ? "#b91c1c" : Math.abs(z) > 1 ? "#d97706" : "#047857",
-        }}
-      />
-    </div>
-  );
-}
 
 /**
  * تقرير التحليل السيفالومتري الرسمي المطبوع — ورقة A4 احترافية ثنائية اللغة.
@@ -92,8 +60,14 @@ export default async function CephPrintReportPage({
   if (!(await canAccessPatient(session, study.analysis.patientId, "canViewXrays").catch(() => false))) notFound();
 
 
+  const completed = study.analysis.status === "completed";
+  if (completed && study.provenance?.state === "integrity_unavailable") {
+    return <p role="alert" className="p-6 text-red-700">{CEPH_INTEGRITY_NOTICE}</p>;
+  }
+  const historical = completed && study.provenance?.state === "versioned" ? study.provenance.witness : null;
+  const diagnosis = historical ? historical.snapshot.diagnosis : study.diagnosis;
   const patient = await getPatient(study.analysis.patientId);
-  const refSet = await getCephReferenceSet(study.analysis.refSet);
+  const draftReference = cephDraftReferenceContext(completed ? undefined : study.completionSources, study.analysis);
 
   const points: LandmarkMap = {};
   for (const lm of study.landmarks) {
@@ -101,29 +75,11 @@ export default async function CephPrintReportPage({
   }
 
   // حساب القياسات أو قراءة اللقطة المعتمدة
-  const rawResults = computeAll(points, study.analysis.mmPerPixel ?? NaN);
-  const table: MeasurementResult[] = study.analysis.status === "completed" && study.measurements.length > 0
-    ? (() => {
-        const snap = new Map(study.measurements.map((s) => [s.code, s.value]));
-        return rawResults.map((r) => {
-          const v = snap.get(r.code);
-          if (v == null || !Number.isFinite(v)) return { ...r, value: null, display: "—", status: null, severityStars: "", interpretationEn: "", interpretationAr: "" };
-          const def = MEASUREMENTS.find((d) => d.code === r.code);
-          const interp = getClinicalInterpretation(r.code, v);
-          return {
-            ...r,
-            value: v,
-            display: String(v),
-            status: def ? interpret(v, def) : r.status,
-            severityStars: def ? getSeverityStars(v, def.mean, def.tol) : r.severityStars,
-            interpretationEn: interp.en,
-            interpretationAr: interp.ar,
-          };
-        });
-      })()
-    : rawResults;
+  const rawResults = completed ? [] : computeAll(points, study.analysis.mmPerPixel ?? NaN);
+  const table = presentCephMeasurements(rawResults,
+    completed ? study.measurements : null, study.provenance);
 
-  const enriched = enrichWithRefs(table, refSet?.values ?? null);
+  const enriched = enrichPresentedCephMeasurements(table, draftReference.refs, completed, draftReference.source);
 
   // حساب عمر المريض وقت تصوير الشععة
   let ageAtXray: number | null = null;
@@ -174,6 +130,11 @@ export default async function CephPrintReportPage({
     <>
       <PrintButton />
       <div className="sheet sheet-a4" style={{ fontSize: "8.5pt", lineHeight: 1.4 }}>
+      <p className="mb-2 border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">{CEPH_UNAVAILABLE_NOTICE}</p>
+      {!completed && <><CephScientificContext /><CephDraftReferenceEvidence context={draftReference} />
+        <p role="note" className="p-2 text-xs">هذه قراءة جديدة لمسودة قابلة للتغيير وقت فتح الطباعة، وليست لقطة اعتماد أو نسخة مضمونة المطابقة للشاشة المفتوحة سابقًا.</p></>}
+      {completed && <p role="note" className="mb-2 border border-amber-200 p-2 text-xs">{cephCompletionNotice(study.provenance)}</p>}
+
         <PrintHeader
           settings={settings}
           title="تقرير التحليل السيفالومتري الرقمي · Digital Cephalometric Report"
@@ -214,19 +175,20 @@ export default async function CephPrintReportPage({
           <div>
             <span style={{ color: "#64748b" }}>المقياس / Scale: </span>
             <span className="num">
-              {study.analysis.mmPerPixel != null
-                ? `${(1 / study.analysis.mmPerPixel).toFixed(1)} px/mm`
+              {completed && !historical ? "المعايرة التاريخية غير موثّقة" : (historical?.snapshot.mmPerPixel ?? study.analysis.mmPerPixel) != null
+                ? `${(1 / (historical?.snapshot.mmPerPixel ?? study.analysis.mmPerPixel)!).toFixed(1)} px/mm`
                 : "غير معايَر"}
             </span>
           </div>
           <div>
             <span style={{ color: "#64748b" }}>المرجع / Ref Set: </span>
-            <span style={{ fontSize: "7.5pt" }}>{refSet?.name ?? "المعدلات القياسية المدمجة"}</span>
+            <span style={{ fontSize: "7.5pt" }}>{completed ? historical?.referenceSet.name ?? "المرجع التاريخي غير موثّق" : draftReference.name}</span>
           </div>
         </PrintMetadata>
+        {historical && <CephSavedCompletionEvidence witness={historical} />}
 
         {/* قسم المخطط الهندسي السيفالومتري والرسم التخطيطي */}
-        {ptsList.length >= 4 && (
+        {!completed && ptsList.length >= 4 && (
           <div className="print-watermark-protected" style={{
             margin: "2mm 0 3mm",
             border: "1px solid #e2e8f0",
@@ -268,6 +230,7 @@ export default async function CephPrintReportPage({
                   if (points.A && points.B && points.OcclA && points.OcclP) {
                     const pA = projectOnLine(points.A, points.OcclP, points.OcclA);
                     const pB = projectOnLine(points.B, points.OcclP, points.OcclA);
+                    if (![pA.x, pA.y, pB.x, pB.y].every(Number.isFinite)) return null;
                     return (
                       <g key="print-wits-drops" stroke="#ef4444" strokeWidth="1" strokeDasharray="3 2" opacity="0.85">
                         <line x1={points.A.x} y1={points.A.y} x2={pA.x} y2={pA.y} />
@@ -328,7 +291,7 @@ export default async function CephPrintReportPage({
         {/* جدول القياسات السيفالومترية الشاملة */}
         <div style={{ margin: "2mm 0" }}>
           <h3 style={{ fontSize: "9pt", fontWeight: 800, margin: "2mm 0 1.5mm", color: "#0f172a" }}>
-            📊 جدول القياسات السيفالومترية المعتمدة · Cephalometric Measurements Table
+            {completed ? "📊 لقطة القياسات عند الاعتماد · Sealed Measurements" : "📊 قياسات المسودة · Draft Measurements"}
           </h3>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm" }}>
@@ -351,20 +314,15 @@ export default async function CephPrintReportPage({
                       <tr>
                         <th style={{ textAlign: "right" }}>القياس / Parameter</th>
                         <th className="num">القيمة / Value</th>
-                        <th className="num">المرجع / Norm</th>
-                        <th style={{ textAlign: "center" }}>الشدة / Dev</th>
-                        <th style={{ textAlign: "center" }}>المؤشر / Gauge</th>
-                        <th style={{ textAlign: "center" }}>الحالة / Status</th>
+                        <th className="num">أرقام المرجع / Catalog numbers</th>
+                        <th>المصدر / Source</th>
                       </tr>
                     </thead>
                     <tbody>
                       {enriched.filter((r) => r.group === group).map((r) => {
-                        const statusLabel = r.refLabel
-                          ?? (r.status === "above" ? "أعلى من المدى" : r.status === "below" ? "أدنى من المدى" : r.status === "within" ? "طبيعي" : "—");
-                        const statusColor = r.status === "above" ? "#1d4ed8" : r.status === "below" ? "#b91c1c" : "#047857";
                         const refNorm = r.refMean != null && r.refSd != null
                           ? `${r.refMean}±${r.refSd}`
-                          : `${r.mean}±${r.tol}`;
+                          : "غير متاح";
                         return (
                           <tr key={r.code}>
                             <td>
@@ -380,25 +338,13 @@ export default async function CephPrintReportPage({
                                 </div>
                               )}
                             </td>
-                            <td className="num" style={{ fontWeight: 700, color: statusColor }}>
+                            <td className="num" style={{ fontWeight: 700, color: "#475569" }}>
                               {r.value != null ? `${r.value}${r.unit}` : "—"}
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
-                              {refNorm} {r.unit}
+                              {isQuarantinedCephMeasurement(r.code) ? "غير متاح" : (completed ? r.descriptiveOnly : isDescriptiveCephMeasurement(r.code)) ? "وصفي · بلا تصنيف" : refNorm}
                             </td>
-                            <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
-                              {r.severityStars || "—"}
-                            </td>
-                            <td style={{ textAlign: "center", verticalAlign: "middle" }}>
-                              <PrintDeviationGauge
-                                value={r.value}
-                                mean={r.refMean ?? r.mean}
-                                sd={r.refSd ?? r.tol}
-                              />
-                            </td>
-                            <td style={{ textAlign: "center", color: statusColor, fontSize: "6.5pt" }}>
-                              {statusLabel}
-                            </td>
+                            <td style={{ fontSize: "6.5pt", color: "#475569" }}>{r.source}{completed && r.note ? <div>{r.note}</div> : null}</td>
                           </tr>
                         );
                       })}
@@ -427,20 +373,15 @@ export default async function CephPrintReportPage({
                       <tr>
                         <th style={{ textAlign: "right" }}>القياس / Parameter</th>
                         <th className="num">القيمة / Value</th>
-                        <th className="num">المرجع / Norm</th>
-                        <th style={{ textAlign: "center" }}>الشدة / Dev</th>
-                        <th style={{ textAlign: "center" }}>المؤشر / Gauge</th>
-                        <th style={{ textAlign: "center" }}>الحالة / Status</th>
+                        <th className="num">أرقام المرجع / Catalog numbers</th>
+                        <th>المصدر / Source</th>
                       </tr>
                     </thead>
                     <tbody>
                       {enriched.filter((r) => r.group === group).map((r) => {
-                        const statusLabel = r.refLabel
-                          ?? (r.status === "above" ? "أعلى من المدى" : r.status === "below" ? "أدنى من المدى" : r.status === "within" ? "طبيعي" : "—");
-                        const statusColor = r.status === "above" ? "#1d4ed8" : r.status === "below" ? "#b91c1c" : "#047857";
                         const refNorm = r.refMean != null && r.refSd != null
                           ? `${r.refMean}±${r.refSd}`
-                          : `${r.mean}±${r.tol}`;
+                          : "غير متاح";
                         return (
                           <tr key={r.code}>
                             <td>
@@ -456,25 +397,13 @@ export default async function CephPrintReportPage({
                                 </div>
                               )}
                             </td>
-                            <td className="num" style={{ fontWeight: 700, color: statusColor }}>
+                            <td className="num" style={{ fontWeight: 700, color: "#475569" }}>
                               {r.value != null ? `${r.value}${r.unit}` : "—"}
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
-                              {refNorm} {r.unit}
+                              {isQuarantinedCephMeasurement(r.code) ? "غير متاح" : (completed ? r.descriptiveOnly : isDescriptiveCephMeasurement(r.code)) ? "وصفي · بلا تصنيف" : refNorm}
                             </td>
-                            <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
-                              {r.severityStars || "—"}
-                            </td>
-                            <td style={{ textAlign: "center", verticalAlign: "middle" }}>
-                              <PrintDeviationGauge
-                                value={r.value}
-                                mean={r.refMean ?? r.mean}
-                                sd={r.refSd ?? r.tol}
-                              />
-                            </td>
-                            <td style={{ textAlign: "center", color: statusColor, fontSize: "6.5pt" }}>
-                              {statusLabel}
-                            </td>
+                            <td style={{ fontSize: "6.5pt", color: "#475569" }}>{r.source}{completed && r.note ? <div>{r.note}</div> : null}</td>
                           </tr>
                         );
                       })}
@@ -495,56 +424,66 @@ export default async function CephPrintReportPage({
           borderRadius: "2mm",
         }}>
           <h4 style={{ fontSize: "9pt", fontWeight: 800, margin: "0 0 2mm", color: "#0f172a" }}>
-            🩺 الخلاصة التشخيصية المعتمدة وتوصيات خطة العلاج · Orthodontic Diagnosis & Plan
+            {completed ? "التشخيص والملاحظات المحفوظة عند الاعتماد · Recorded Diagnosis & Notes" : "مسودة التشخيص وملاحظات الطبيب · Draft Diagnosis & Notes"}
           </h4>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2mm", fontSize: "8pt" }}>
-            {study.diagnosis?.skeletal && (
+            {diagnosis?.skeletal && (
               <div>
                 <b style={{ color: "#1e3a5f" }}>التشخيص الهيكلي (Skeletal): </b>
-                <span>{study.diagnosis.skeletal}</span>
+                <span>{diagnosis.skeletal}</span>
               </div>
             )}
-            {study.diagnosis?.dental && (
+            {diagnosis?.dental && (
               <div>
                 <b style={{ color: "#1e3a5f" }}>التشخيص السني (Dental): </b>
-                <span>{study.diagnosis.dental}</span>
+                <span>{diagnosis.dental}</span>
               </div>
             )}
-            {study.diagnosis?.softTissue && (
+            {diagnosis?.softTissue && (
               <div>
                 <b style={{ color: "#1e3a5f" }}>الأنسجة والبروفايل (Soft Tissue): </b>
-                <span>{study.diagnosis.softTissue}</span>
+                <span>{diagnosis.softTissue}</span>
               </div>
             )}
             <div>
               <b style={{ color: "#1e3a5f" }}>الاستنتاج السيفالومتري (Conclusion): </b>
               <span style={{ fontWeight: 700, color: "#0f172a" }}>
-                {study.diagnosis?.finalDx || "—"}
+                {diagnosis?.finalDx || "—"}
               </span>
             </div>
           </div>
 
-          {study.diagnosis?.note && (
+          {diagnosis?.note && (
             <div style={{ marginTop: "2mm", paddingTop: "1.5mm", borderTop: "1px dashed #cbd5e1", fontSize: "8pt" }}>
-              <b style={{ color: "#1e3a5f" }}>توصيات خطة العلاج وملاحظات الطبيب المعالج: </b>
+              <b style={{ color: "#1e3a5f" }}>الملاحظات والخطة كما حُفظت: </b>
               <p style={{ margin: "1mm 0 0", whiteSpace: "pre-line", color: "#334155" }}>
-                {study.diagnosis.note}
+                {diagnosis.note}
               </p>
             </div>
           )}
         </div>
 
+        {historical && <div className="mt-3 break-all text-xs"><b>مصادر الحساب والمراجع المحفوظة وقت الاعتماد</b>
+          <p>{historical.referenceSet.name} · {historical.referenceSet.version}</p>
+          <p dir="ltr">Image SHA-256: {historical.image.sha256}</p>
+          <p dir="ltr">Reference SHA-256: {historical.referenceSetSha256}</p>
+          {historical.measurements.map(row => <p key={row.code}>{row.code}: {row.algorithm.id} · {row.algorithm.version} · {row.algorithm.calculationVersion ?? "—"} · {row.reference.source}
+                <span dir="ltr"> · SHA-256: {row.algorithm.sourceSha256}</span>
+                {row.reference.sourceUrl && <span> · {row.reference.sourceUrl}</span>}
+                {row.reference.populationReference && <span> · عينة وصفية محفوظة، ليست معيارًا شخصيًا: {row.reference.populationReference.mean} ± {row.reference.populationReference.sd} · {row.reference.populationReference.population}</span>}</p>)}
+        </div>}
         {/* سطر التوقيع والاعتماد */}
         <div className="sign-row" style={{ marginTop: "6mm" }}>
           <div>
-            <p><b>حرر واعُتمد بواسطة: </b>{study.analysis.completedBy || study.diagnosis?.createdBy || session.username}</p>
+            <p><b>{completed ? "المعتمِد المسجّل: " : "حالة الاعتماد: "}</b>{completed ? study.analysis.completedBy?.trim() || "غير موثّق في السجل" : "لم يُعتمد بعد"}</p>
+            {!historical && study.diagnosis?.createdBy && <p><b>محرر التشخيص: </b>{study.diagnosis.createdBy}</p>}
             <p style={{ color: "#64748b", fontSize: "7pt" }}>
-              تاريخ الاعتماد: {study.analysis.completedAt ? friendlyDateLong(study.analysis.completedAt.split("T")[0]) : "مسودة قيد المراجعة"}
+              {completed ? `تاريخ الاعتماد: ${study.analysis.completedAt ? friendlyDateLong(study.analysis.completedAt.split("T")[0]) : "غير موثّق في السجل"}` : "مسودة قيد المراجعة؛ الطباعة لا تعني الاعتماد"}
             </p>
           </div>
           <div style={{ textAlign: "center", minWidth: "50mm" }}>
-            <p><b>توقيع وخاتم الطبيب المعالج</b></p>
+            <p><b>{completed ? "توقيع وخاتم الطبيب المعالج" : "مكان التوقيع بعد المراجعة والاعتماد"}</b></p>
             <div style={{ height: "14mm", borderBottom: "1px solid #000", marginTop: "2mm" }} />
             <p style={{ fontSize: "7pt", color: "#64748b", marginTop: "1mm" }}>
               {settings["clinic.lead_doctor"]} — {settings["clinic.lead_doctor_title"]}

@@ -10,7 +10,7 @@ import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
 // and state/effects run in the reviewed lightweight hook-harness style.
 // This exercises the actual component, without changing clinical sign rules.
 const hooks = vi.hoisted(() => ({
-  values: [] as unknown[], cursor: 0, changed: false, username: "synthetic-doctor", role: "doctor",
+  values: [] as unknown[], cursor: 0, changed: false, freezeOwners: false, username: "synthetic-doctor", role: "doctor",
   permissions: null as import("../lib/doctor-permissions").DoctorPermissions | null,
   effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void; phase: "layout" | "passive" }>(),
   memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
@@ -29,11 +29,16 @@ vi.mock("react", async (original) => {
     ...react,
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? initial() : initial);
-      return [hooks.values[index], (value: unknown) => {
+      const value = hooks.values[index];
+      if (hooks.freezeOwners && value && typeof value === "object" && "key" in value) Object.freeze(value);
+      // Match React's stable setter identity without weakening lifecycle assertions.
+      const setter = hooks.memos.get(index)?.value ?? ((value: unknown) => {
         const next = typeof value === "function" ? value(hooks.values[index]) : value;
         if (!Object.is(next, hooks.values[index])) hooks.changed = true;
         hooks.values[index] = next;
-      }];
+      });
+      hooks.memos.set(index, { value: setter });
+      return [hooks.values[index], setter];
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
     useCallback: (callback: unknown, deps?: readonly unknown[]) => {
@@ -143,7 +148,7 @@ async function flush() {
 async function mount() { render(); await flush(); }
 function unmount() { hooks.effects.forEach((effect) => effect.cleanup?.()); hooks.effects.clear(); }
 beforeEach(() => {
-  hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
+  hooks.freezeOwners = false; hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
   hooks.role = "doctor"; hooks.username = "synthetic-doctor"; hooks.permissions = null; vi.clearAllMocks(); currentVisitId = 91001; onSigned = vi.fn<() => void>();
   stored = new Map([[91001, visit(91001, "Visit A diagnosis")], [91002, visit(91002, "Visit B diagnosis")]]);
   reads = new Map(); extraReads = new Map(); pendingWrite = null; expectedPatientId = undefined; navigationGuard = null;
@@ -175,6 +180,22 @@ beforeEach(() => {
 afterEach(() => { unmount(); vi.unstubAllGlobals(); });
 
 describe("clinical visit owner retirement", () => {
+  it("keeps render identity tokens immutable across committed visit and principal changes", async () => {
+    hooks.freezeOwners = true;
+    await mount();
+    expect(field("② التشخيص").props.value).toBe("Visit A diagnosis");
+    currentVisitId = 91002;
+    render(); await flush();
+    expect(field("② التشخيص").props.value).toBe("Visit B diagnosis");
+    hooks.username = "replacement-clinician";
+    render(); await flush();
+    expect(field("② التشخيص").props.value).toBe("Visit B diagnosis");
+    currentVisitId = 91001;
+    render(); await flush();
+    expect(field("② التشخيص").props.value).toBe("Visit A diagnosis");
+    expect(writes()).toHaveLength(0);
+  });
+
   it("cannot save A's draft to B while B's first read is pending", async () => {
     await mount(); expect(field("② التشخيص").props.value).toBe("Visit A diagnosis");
     (field("② التشخيص").props.onChange as (value: string) => void)("Edited only for A");
@@ -214,7 +235,7 @@ describe("clinical visit owner retirement", () => {
     const signA = invoke(find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node))));
     currentVisitId = 91002; await flush();
     stored.set(91001, { ...stored.get(91001), status: "signed" });
-    post.resolve(response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }));
+    post.resolve(response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }));
     await signA; await flush();
     expect(onSigned).not.toHaveBeenCalled();
     expect(field("② التشخيص").props.value).toBe("Visit B diagnosis");
@@ -312,6 +333,21 @@ describe("owner lifetime, command and navigation contracts", () => {
     currentVisitId = 91002; await flush(); post.resolve(response(200, { ok: true })); await reviewA; await flush();
     expect(nodes().some((node) => node.props.role === "dialog" && node.props["aria-label"] === "مراجعة وإنهاء الزيارة")).toBe(false);
     expect(field("② التشخيص").props.value).toBe("Visit B diagnosis");
+  });
+
+  it("does not reuse a prior review preview while a reopened review is waiting", async () => {
+    extraReads.set("/api/visits/91001/billing-preview", async () =>
+      response(200, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: "First review only" }));
+    await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+    expect(contents(render())).toContain("First review only");
+    await invoke(button("رجوع — أكمل العمل")); render();
+    const nextPreview = deferred<Response>();
+    extraReads.set("/api/visits/91001/billing-preview", () => nextPreview.promise);
+    await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+    expect(contents(render())).not.toContain("First review only");
+    nextPreview.resolve(response(200, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: "Fresh review" }));
+    await flush();
+    expect(contents(render())).toContain("Fresh review");
   });
 
   it("ignores a late financial preview from A after opening B's review", async () => {
@@ -440,7 +476,7 @@ describe("review findings", () => {
   it("preserves a successful live signature and checkout callback when the follow-up read fails", async () => {
     await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
     reads.set(91001, async () => response(503, { message: "Synthetic signed reload failure" }));
-    pendingWrite = async () => response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+    pendingWrite = async () => response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
     const capturedSign = find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));
     await invoke(capturedSign); await flush();
     expect(onSigned).toHaveBeenCalledOnce();
@@ -474,7 +510,7 @@ describe("atomic clinical snapshots", () => {
 
 it("does not thaw an accepted signature when its follow-up read unexpectedly says open", async () => {
   await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
-  pendingWrite = async () => response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  pendingWrite = async () => response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
   await invoke(find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)))); await flush();
   expect(onSigned).toHaveBeenCalledOnce();
   expect(nodes().some((node) => node.props.label === "② التشخيص")).toBe(false);
@@ -514,7 +550,7 @@ it("does not warn about a pending or unsaved command during live successful-sign
   await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
   pendingWrite = async () => {
     stored.set(91001, { ...stored.get(91001), status: "signed" });
-    return response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+    return response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
   };
   await invoke(find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)))); await flush();
   expect(onSigned).toHaveBeenCalledOnce(); expect(allowedAtSuccess).toBe(true); expect(prevented).not.toHaveBeenCalled();
@@ -551,7 +587,7 @@ it("does not apply A's delayed patient context after B's current context", async
 it.each([401, 403, 404])("hides the confirmed signature receipt after authoritative %s and keeps captured writes retired", async (status) => {
   await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
   reads.set(91001, async () => response(status, { message: "Private denial detail" }));
-  pendingWrite = async () => response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  pendingWrite = async () => response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
   const sign = find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));
   await invoke(sign); await flush();
   expect(onSigned).toHaveBeenCalledOnce();
@@ -565,7 +601,7 @@ it.each([401, 403, 404])("hides the confirmed signature receipt after authoritat
 it("does not carry a confirmed signature receipt into another visit's pending owner", async () => {
   await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
   reads.set(91001, async () => response(503, {}));
-  pendingWrite = async () => response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  pendingWrite = async () => response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
   await invoke(find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)))); await flush();
   expect(find((node) => node.props["data-testid"] === "clinical-sign-confirmed")).toBeDefined();
   const b = deferred<Response>(); reads.set(91002, () => b.promise); currentVisitId = 91002; render();
@@ -736,7 +772,7 @@ it("clears stale documentary verification after sign until the exact response in
   pendingWrite = async (_id, body) => {
     expect(body).toEqual({ action: "sign", dependencyOverrideReason: null, outsideContractDecision: null, orthoSession: null });
     reads.set(91001, () => reread.promise);
-    return response(200, { patientId: 92001, invoiceId: 98002, invoiceCurrency: "YER", duesMinor: 10000,
+    return response(200, { id: 91001, status: "signed", patientId: 92001, invoiceId: 98002, invoiceCurrency: "YER", duesMinor: 10000,
       sessionsCompleted: 0, nextPlannedVisit: null });
   };
   const signing = invoke(find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node))));
@@ -753,4 +789,19 @@ it("clears stale documentary verification after sign until the exact response in
   expect(nodes().some(node => node.props.href === "/print/invoice/98002")).toBe(true);
   expect(onSigned).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ patientId: 92001, invoiceId: 98002,
     invoiceCurrency: "YER", duesMinor: 10000 }));
+});
+
+
+it.each([
+  { status: "signed" },
+  { id: 91001 },
+  {},
+])("does not publish signature success without exact visit and signed status %j", async identity => {
+  await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+  pendingWrite = async () => response(200, { ...identity, patientId: 92001, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  const captured = find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));
+  await invoke(captured); await flush();
+  expect(onSigned).not.toHaveBeenCalled();
+  expect(contents(render())).toContain("تعذّر تأكيد نتيجة التوقيع");
+  const count = writes().length; await invoke(captured); await flush(); expect(writes()).toHaveLength(count);
 });

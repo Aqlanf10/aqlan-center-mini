@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import "./load-env.mjs";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Client } from "pg";
 
 /**
@@ -42,6 +43,14 @@ try {
   const db = await import("../lib/db.ts");
   const ortho = await import("../lib/ortho.ts");
   await db.ensureSchema();
+  // This verifier owns a newly created disposable database. Use a real synthetic
+  // account and admitted server context, never an unauthenticated writer bypass.
+  process.env.SESSION_SECRET ??= randomBytes(32).toString("hex");
+  const { sessionCredentialVersion } = await import("../lib/auth.ts");
+  const username = `synthetic-ortho-${randomUUID()}`, passwordHash = randomBytes(32).toString("hex");
+  const { rows: [actor] } = await db.getPool().query(
+    "INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic ortho verifier',$2,'admin') RETURNING id", [username,passwordHash]);
+  const session = { userId:actor.id,username,role:"admin",partyId:null,expiresAt:Date.now()+3600000,credentialVersion:sessionCredentialVersion(passwordHash) };
 
   const today = "2026-09-01";
   const patient = await db.createPatient({
@@ -114,9 +123,9 @@ try {
   });
   check("لا إكمال بلا مثبّت", !early.ok, early.ok ? "" : early.message);
 
-  await db.setRetainer({ id: opened.id, retainer: "essix", deliveredOn: "2026-08-20" });
+  await db.setRetainer({ id: opened.id, retainer: "essix", deliveredOn: "2026-08-20" }, { patientId:patient.id,session });
   const inRetention = await db.getOrthoCase(opened.id, today);
-  check("تسجيل المثبّت ينقلها إلى التثبيت", inRetention.status === "retention", inRetention.status);
+  check("تسجيل المثبّت لا يغيّر حالة العلاج", inRetention.status === afterSecond.status, inRetention.status);
   check("والمثبّت محفوظ بتاريخه",
     inRetention.retainer === "essix" && inRetention.retainerOn === "2026-08-20");
 

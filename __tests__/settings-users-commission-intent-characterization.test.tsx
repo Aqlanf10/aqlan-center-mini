@@ -9,6 +9,7 @@ import { CommissionCategoryEditor } from "../components/settings/CommissionCateg
 type Hooks = { values: unknown[]; cursor: number; changed: boolean; mounted: boolean; lateUpdates: number;
   effects: Map<number, { deps?: readonly unknown[]; cleanup?: () => void; layout: boolean }>;
   memos: Map<number, { deps?: readonly unknown[]; value: unknown }>; pending: Array<() => void>; layout: Array<() => void> };
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "self-admin", role: "admin" }) }));
 const runtime = vi.hoisted(() => ({ current: null as Hooks | null }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
@@ -42,6 +43,7 @@ function render(): ReactNode {
     if (++rounds > 25) throw new Error("Actual page did not settle");
     hooks.cursor = 0; hooks.changed = false; runtime.current = hooks;
     tree = UsersAndDoctorsPage(); runtime.current = null;
+    hooks.layout.splice(0).forEach((effect) => effect());
     hooks.pending.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
   return tree;

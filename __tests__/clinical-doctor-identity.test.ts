@@ -74,7 +74,16 @@ const procedure = (doctorId: number | null, price = 100): Procedure => ({
 const notes = { chiefComplaint: null, examination: null, diagnosis: "Synthetic diagnosis", treatmentDone: null,
   nextPlan: null, doctorId: 11 };
 
-function protocol(line: Procedure, visitDoctor: number | null = 11) {
+type RecordedOrthoSource = {
+  patient_id: number | null; signed: boolean; adjustments: number; cases: number;
+  case_id: number | null; adjustment_id: number | null; valid_scope: boolean | null;
+};
+const noRecordedOrthoSource = (): RecordedOrthoSource => ({
+  patient_id: 101, signed: false, adjustments: 0, cases: 0,
+  case_id: null, adjustment_id: null, valid_scope: null,
+});
+function protocol(line: Procedure, visitDoctor: number | null = 11,
+  recordedSource: RecordedOrthoSource | null = noRecordedOrthoSource()) {
   let state = { procedures: [line], doctorId: visitDoctor, diagnosis: "Original diagnosis", signed: false,
     invoiceDoctors: [] as (number | null)[], invoiceCount: 0 };
   let before = structuredClone(state);
@@ -86,6 +95,10 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
       return { rows: [{ patient_id: 101, patient_phone: null }] };
     }
     if (sql === "SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE") return { rows: [{ id: 101 }] };
+    if (sql.includes("FROM visits v LEFT JOIN ortho_adjustments a ON a.visit_id = v.id")) {
+      expect(values).toEqual([201, 101]);
+      return { rows: recordedSource === null ? [] : [recordedSource] };
+    }
     if (sql.includes("FROM parties")) return { rows: (values[0] as number[]).filter((id) => [11, 12].includes(id)).map((id) => ({ id })) };
     if (sql.includes("FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE")) return { rows: state.signed ? [] : [{
       id: 201, patient_id: 101, patient_name: "Synthetic patient", patient_phone: null, planned_visit_id: null,
@@ -135,8 +148,11 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
   };
   dependencies.normalizePatientPhone = domain("normalizePatientPhone", { toWhatsAppNumber });
   dependencies.phoneLookupForms = domain("phoneLookupForms", { toWhatsAppNumber });
+  dependencies.recordedVisitOrthoSource = domain("recordedVisitOrthoSource", dependencies);
   dependencies.lockVisitPatientFirst = domain("lockVisitPatientFirst", dependencies);
   dependencies.saveClinicalNotes = domain("saveClinicalNotes", dependencies);
+  // Exercise the public wrapper and its real private core after the authority extraction.
+  dependencies.signClinicalVisitCore = domain("signClinicalVisitCore", dependencies);
   return { state: () => structuredClone(state), query, writeEffects, dependencies,
     save: domain<(input: Record<string, unknown>) => Promise<boolean>>("setVisitProcedures", dependencies),
     sign: domain<(input: Record<string, unknown>) => Promise<{ reason: string | null; invoiceId: number | null }>>("signClinicalVisit", dependencies),
@@ -214,6 +230,26 @@ describe("exact domain bodies reject bad performer identities without effects (q
     expect(p.state()).toEqual(before);
     expect(p.writeEffects).not.toHaveBeenCalled();
     expect(p.query.mock.calls.some(([sql]) => sql.includes("INSERT INTO invoices"))).toBe(false);
+    expect(p.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
+  });
+  it.each([
+    ["missing visit", null],
+    ["foreign patient", { ...noRecordedOrthoSource(), patient_id: 102 }],
+    ["multiple recorded cases", { ...noRecordedOrthoSource(), adjustments: 2, cases: 2, case_id: 301, adjustment_id: 401, valid_scope: true }],
+    ["foreign recorded case", { ...noRecordedOrthoSource(), adjustments: 1, cases: 1, case_id: 301, adjustment_id: 401, valid_scope: false }],
+  ] as const)("runs the real recorded-ownership guard and rejects %s before signing effects", async (_label, recordedSource) => {
+    const p = protocol(procedure(12), 11, recordedSource); const before = p.state();
+    const Conflict = p.dependencies.ClinicalPlanConflict as new (message: string) => Error;
+    await expect(p.sign({ visitId: 201, baseCurrency: "YER", signedBy: "synthetic", signerDoctorPartyId: 11 }))
+      .rejects.toBeInstanceOf(Conflict);
+    expectPatientFirst(p.query);
+    const sourceRead = p.query.mock.calls.findIndex(([sql]) => sql.includes("FROM visits v LEFT JOIN ortho_adjustments"));
+    expect(sourceRead).toBeGreaterThan(3);
+    expect(p.state()).toEqual(before);
+    expect(p.writeEffects).not.toHaveBeenCalled();
+    expect(p.dependencies.progressTreatmentSessions).not.toHaveBeenCalled();
+    expect(p.dependencies.assertLegacyCaseSignable).not.toHaveBeenCalled();
+    expect(p.query.mock.calls.some(([sql]) => sql.includes("INSERT INTO invoices") || sql.startsWith("UPDATE visits SET signed_at"))).toBe(false);
     expect(p.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
   });
   it("keeps the no-treating-doctor refusal when all fallbacks are non-doctors", async () => {

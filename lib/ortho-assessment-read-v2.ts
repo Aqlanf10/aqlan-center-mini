@@ -1,6 +1,8 @@
 import { assessmentTimestamp,boundedText,keys,plain,positiveId,type Checked } from "./ortho-assessment-model";
 import { checkAssessmentDraftV2 } from "./ortho-assessment-measurement-set-v2";
-import { deriveDraftAnalysisV2 } from "./ortho-assessment-engine-2_1_0";
+import { deriveDraftAnalysisV2 as derive2_1_0 } from "./ortho-assessment-engine-2_1_0";
+import { deriveDraftAnalysisV2 as derive2_2_0 } from "./ortho-assessment-engine-2_2_0";
+import { deriveDraftAnalysisV2 as derive2_2_1 } from "./ortho-assessment-engine-2_2_1";
 import type { AnyAssessmentRevision,AssessmentRevisionV2,PersistedAssessmentContentV2 } from "./ortho-assessment-persisted-v2";
 const fail=(code:string):Checked<never>=>({ok:false,code});
 const hash=(value:unknown):value is string=>typeof value==="string"&&/^[a-f0-9]{64}$/.test(value);
@@ -18,8 +20,13 @@ export function sameAssessmentStructure(a:unknown,b:unknown):boolean{
 /** Version-pinned reconstruction. New engines must add verifiers, never change this historical version in place. */
 export function decodePersistedAssessmentV2Structure(raw:unknown):Checked<PersistedAssessmentContentV2>{
   if(!plain(raw)||!keys(raw,["schemaVersion","verifierVersion","draft","results"])||raw.schemaVersion!==2
-    ||raw.verifierVersion!=="ortho-assessment-payload-2.1.0"||!Array.isArray(raw.results))return fail("unsupported_payload_verifier");
+    ||(raw.verifierVersion!=="ortho-assessment-payload-2.1.0"&&raw.verifierVersion!=="ortho-assessment-payload-2.2.0"&&raw.verifierVersion!=="ortho-assessment-payload-2.2.1")||!Array.isArray(raw.results))return fail("unsupported_payload_verifier");
   const draft=checkAssessmentDraftV2(raw.draft);if(!draft.ok)return draft;
+  // Freeze the old admission set too: teaching the shared parser a new method
+  // must never make it reconstructable under a historical verifier.
+  const oldMethods=["arch_space","bolton_anterior","bolton_overall","moyers","tanaka_johnston","huckaba","ashley_howe","stanley_kerber","pont","linder_harth","peck_peck"];
+  if(raw.verifierVersion==="ortho-assessment-payload-2.1.0"&&draft.value.analyses.some(a=>!oldMethods.includes(a.method)))return fail("method_not_supported_by_payload_verifier");
+  const deriveDraftAnalysisV2=raw.verifierVersion==="ortho-assessment-payload-2.1.0"?derive2_1_0:raw.verifierVersion==="ortho-assessment-payload-2.2.0"?derive2_2_0:derive2_2_1;
   if(raw.results.length!==draft.value.analyses.length)return fail("invalid_result_witnesses");
   const results:PersistedAssessmentContentV2["results"]=[];
   for(let i=0;i<draft.value.analyses.length;i++){
@@ -29,7 +36,7 @@ export function decodePersistedAssessmentV2Structure(raw:unknown):Checked<Persis
     if(!expected.ok||!sameAssessmentStructure(entry.result,expected.value))return fail("result_reconstruction_mismatch");
     results.push({analysisId:selection.id,result:expected.value,resultHash:entry.resultHash});
   }
-  return {ok:true,value:{schemaVersion:2,verifierVersion:"ortho-assessment-payload-2.1.0",draft:draft.value,results}};
+  return {ok:true,value:{schemaVersion:2,verifierVersion:raw.verifierVersion,draft:draft.value,results}};
 }
 export function decodeAnyAssessmentRevisionStructure(raw:unknown,scope:{patientId:number;orthoCaseId:number;clinicalCaseId:number}):Checked<AnyAssessmentRevision>{
   if(!plain(raw))return fail("invalid_revision");

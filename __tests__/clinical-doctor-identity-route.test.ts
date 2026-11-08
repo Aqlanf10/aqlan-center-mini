@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ClinicalMutationAuthorityError } from "../lib/clinical-mutation-authority";
 import { ClinicalDoctorIdentityConflict } from "../lib/clinical-doctor-identity";
 
 const boundary = vi.hoisted(() => ({
   requireSession: vi.fn(), canAccessPatient: vi.fn(), getClinicalVisit: vi.fn(), getSettings: vi.fn(),
-  saveClinicalNotes: vi.fn(), setVisitProcedures: vi.fn(), signClinicalVisit: vi.fn(), recordAudit: vi.fn(),
+  saveClinicalNotes: vi.fn(), setVisitProcedures: vi.fn(), signAuthorizedClinicalVisit: vi.fn(), recordAudit: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: boundary.canAccessPatient }));
@@ -29,7 +30,7 @@ beforeEach(() => {
   boundary.getSettings.mockResolvedValue({});
   boundary.saveClinicalNotes.mockResolvedValue(true);
   boundary.setVisitProcedures.mockResolvedValue(true);
-  boundary.signClinicalVisit.mockResolvedValue({ reason: null, visit: current(), invoiceId: 701, duesMinor: 100, invoiceCurrency: "YER" });
+  boundary.signAuthorizedClinicalVisit.mockResolvedValue({ reason: null, visit: current(), invoiceId: 701, duesMinor: 100, invoiceCurrency: "YER" });
 });
 
 describe("actual clinical POST identity errors and combined-save boundary (DB-free stubs)", () => {
@@ -50,7 +51,7 @@ describe("actual clinical POST identity errors and combined-save boundary (DB-fr
   it.each(["doctor", "admin"])("%s sign exposes identity refusal without a success audit", async (role) => {
     boundary.requireSession.mockResolvedValue({ username: "synthetic", role, partyId: 11 });
     const error = new ClinicalDoctorIdentityConflict();
-    boundary.signClinicalVisit.mockRejectedValue(error);
+    boundary.signAuthorizedClinicalVisit.mockRejectedValue(error);
     const response = await post({ action: "sign" });
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ code: error.code, message: error.message });
@@ -106,5 +107,37 @@ describe("actual clinical POST identity errors and combined-save boundary (DB-fr
   it("does not turn unrelated writer failures into identity conflicts", async () => {
     boundary.setVisitProcedures.mockRejectedValue(new Error("Synthetic unrelated storage failure"));
     expect((await post({ doctorId: 11, procedures: [line] })).status).toBe(500);
+  });
+});
+
+describe("authenticated signing HTTP admission", () => {
+  it("passes server-owned patient and session without accepting forged actor context", async () => {
+    const admitted = { userId: 71, username: "synthetic-doctor", role: "doctor", partyId: 11,
+      expiresAt: Date.now() + 60_000 };
+    boundary.requireSession.mockResolvedValue(admitted);
+    const response = await post({ action: "sign", patientId: 999, session: { role: "admin" },
+      signedBy: "forged", signerRole: "admin", signerDoctorPartyId: 99 });
+    expect(response.status).toBe(200);
+    expect(boundary.signAuthorizedClinicalVisit).toHaveBeenCalledWith(
+      expect.objectContaining({ visitId: 201, baseCurrency: "YER" }),
+      { patientId: 101, session: admitted },
+    );
+    const command = boundary.signAuthorizedClinicalVisit.mock.calls[0][0];
+    for (const key of ["signedBy", "signerRole", "signerDoctorPartyId", "patientId", "session"])
+      expect(command).not.toHaveProperty(key);
+    // The authenticated writer owns the atomic signature audit.
+    expect(boundary.recordAudit).not.toHaveBeenCalled();
+  });
+  it.each([401, 403, 409] as const)("maps transactional authority refusal %s without a success payload", async status => {
+    boundary.signAuthorizedClinicalVisit.mockRejectedValue(new ClinicalMutationAuthorityError(status, "Synthetic authority refusal"));
+    const response = await post({ action: "sign" });
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ message: "Synthetic authority refusal" });
+    expect(boundary.recordAudit).not.toHaveBeenCalled();
+  });
+  it("preserves server-admitted unlinked walk-in identity", async () => {
+    boundary.getClinicalVisit.mockResolvedValue({ ...current(), patientId: null });
+    expect((await post({ action: "sign", patientId: 999 })).status).toBe(200);
+    expect(boundary.signAuthorizedClinicalVisit.mock.calls[0][1].patientId).toBeNull();
   });
 });

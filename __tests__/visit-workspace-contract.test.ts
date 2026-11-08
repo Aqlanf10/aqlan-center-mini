@@ -1,17 +1,18 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import loadLifecycleDeltas from "./fixtures/reviewed-contracts/visit-load-lifecycle.json";
+import signLifecycleDeltas from "./fixtures/reviewed-contracts/visit-sign-lifecycle.json";
+import signDeltas from "./fixtures/reviewed-contracts/visit-sign.json";
+import { reverseReviewedDeltas } from "./helpers/reviewed-source-deltas";
 
-// Core authority remains pinned to 055c399a, except the reviewed presentation-only
-// sign delta in #380: clear invoiceReferenceState after an owner-bound successful
-// sign response, before the canonical reread. It must not carry old invoice
-// verification onto the response invoice ID. Request/guards/response validation,
-// unknown-outcome handling, callback and dependencies are unchanged. Navigation
-// is outside this slice. The extra equivalence assertion below pins that claim.
-// The original sign SHA is retained there; the full current slice stays pinned too.
-// The load boundary differs only by
-// removing the retired catalogue modal reset after the inline ServiceSelect switch.
-// CI1768 caught that obsolete setter; all owner/read/draft guards remain unchanged.
+// Historical authority: 055c399a plus #380's invoiceReferenceState reset,
+// and the load slice's removal of the retired catalogue modal reset (CI1768).
+// Sign admission then changed in a241e995 + 680b0fd8: owner-bound staged input,
+// exact interval, and text validation. Reverse ONLY those exact reviewed hunks
+// before asserting the unchanged historical hashes, including the original
+// invoice-reset equivalence. All other source bytes remain protected.
+// Review: docs/verification/reviewed-contract-guards-20261107.md.
 const baseline = [
   {
     "label": "load",
@@ -46,15 +47,16 @@ const baseline = [
 ];
 const source = readFileSync("components/ClinicalVisit.tsx", "utf8");
 describe("actual visit workspace retains its authoritative contracts", () => {
-  it.each(baseline)("keeps $label byte-identical to its reviewed authority boundary", ({ start, end, sha }) => {
+  it.each(baseline)("keeps $label identical except for exact reviewed admission deltas", ({ label, start, end, sha }) => {
     const from = source.indexOf(start); expect(from).toBeGreaterThan(-1);
     const to = source.indexOf(end, from); expect(to).toBeGreaterThan(from);
-    expect(createHash("sha256").update(source.slice(from, to)).digest("hex")).toBe(sha);
+    const slice = reverseReviewedDeltas(source.slice(from, to), label === "load" ? loadLifecycleDeltas : label === "sign" ? signLifecycleDeltas : []);
+    expect(createHash("sha256").update(label === "sign" ? reverseReviewedDeltas(slice, signDeltas) : slice).digest("hex")).toBe(sha);
   });
-  it("changes only optimistic documentary verification within the original sign authority", () => {
+  it("retains the original invoice-verification-only delta after reviewed admission changes", () => {
     const from = source.indexOf("  const sign = useCallback(");
     const to = source.indexOf("  /** (VISIT-2) فتح ملف", from);
-    const sign = source.slice(from, to);
+    const sign = reverseReviewedDeltas(reverseReviewedDeltas(source.slice(from, to), signLifecycleDeltas), signDeltas);
     const reviewedInsertion = ", invoiceReferenceState: undefined";
     expect(sign.split(reviewedInsertion)).toHaveLength(2);
     expect(createHash("sha256").update(sign.replace(reviewedInsertion, "")).digest("hex"))

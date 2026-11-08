@@ -1,12 +1,16 @@
+import {readAuthorizedOrthoFollowupBoard, OrthoFollowupAuthorityError} from '@/lib/ortho-followup-authority';
 import { NextResponse } from "next/server";
 import {
-  CLINIC_TIME_ZONE, doctorOwnedPatientIds, findUserByUsername, orthoFollowupBoard,
+  CLINIC_TIME_ZONE,
 } from "@/lib/db";
 import { classifyFollowups, groupByBucket, BUCKET_ORDER } from "@/lib/ortho-followup";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+const json = (body: unknown, status = 200) => NextResponse.json(body, {
+  status, headers: { "Cache-Control": "private, no-store" },
+});
 
 /**
  * مركز متابعة التقويم.
@@ -22,21 +26,17 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const session = await requireSession();
   if (!session) {
-    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+    return json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
   }
-  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  // Mirror the existing proxy boundary without granting assistants or finance
+  // roles a clinic-wide clinical board when the handler is invoked directly.
+  if (!["admin", "reception", "doctor"].includes(session.role)) {
+    return json({ message: "غير مصرّح لك بالاطلاع على لوحة متابعة التقويم." }, 403);
+  }
+  const asOf = new Date();
+  const today = clinicDateString(asOf, CLINIC_TIME_ZONE);
   try {
-    let board = await orthoFollowupBoard(today);
-
-    if (session.role === "doctor" && typeof session.partyId === "number" && session.partyId) {
-      const user = await findUserByUsername(session.username).catch(() => null);
-      if (!user?.permissions?.canViewAllPatients) {
-        const candidateIds = Array.from(new Set(board.map((row) => row.patientId)));
-        const owned = await doctorOwnedPatientIds(session.partyId, candidateIds)
-          .catch(() => new Set<number>());
-        board = board.filter((row) => owned.has(row.patientId));
-      }
-    }
+    const board = await readAuthorizedOrthoFollowupBoard(session, today, asOf);
 
     const rows = classifyFollowups({ cases: board, today });
     const groups = groupByBucket(rows);
@@ -45,8 +45,9 @@ export async function GET() {
       count: groups.get(bucket)?.length ?? 0,
       rows: groups.get(bucket) ?? [],
     }));
-    return NextResponse.json({ today, buckets });
-  } catch {
-    return NextResponse.json({ message: "تعذّر تحميل لوحة متابعة التقويم." }, { status: 500 });
+    return json({ today, buckets });
+  } catch (error) {
+    if (error instanceof OrthoFollowupAuthorityError) return json({message:error.message},error.status);
+    return json({ message: "تعذّر تحميل لوحة متابعة التقويم." }, 500);
   }
 }

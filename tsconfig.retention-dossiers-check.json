@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["lib/ortho-retention-device-dossiers.ts","lib/ortho-retention-saved-context.ts","lib/ortho-retention-instructions.ts","__tests__/ortho-retention-device-dossiers.test.ts"],"exclude":["node_modules"]}

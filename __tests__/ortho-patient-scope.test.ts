@@ -1,3 +1,7 @@
+// This suite executes server routes in Node, outside Next's server-module resolver.
+// Keep the production server-only marker; supply only its server-context test stub.
+vi.mock("server-only", () => ({}));
+
 import { createHmac } from "node:crypto";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -156,7 +160,7 @@ describe("actual ortho route, proxy and canonical patient guard", () => {
     });
     // No mutation of the shared hydrated object can destroy photos for another authorized reader.
     expect(cases[0].adjustments[0].photos).toHaveLength(1);
-    vi.mocked(getDocumentForDownload).mockResolvedValue({ document: cases[0].adjustments[0].photos[0], storageKey: "synthetic" });
+    vi.mocked(getDocumentForDownload).mockResolvedValue({ document: cases[0].adjustments[0].photos[0], storageKey: "synthetic", sha256: "a".repeat(64) });
     expect((await download(req, context(2011))).status).toBe(403);
     expect(readFileByKey).not.toHaveBeenCalled();
   });

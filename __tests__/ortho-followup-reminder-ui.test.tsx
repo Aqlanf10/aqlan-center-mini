@@ -2,7 +2,7 @@ import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import OrthoFollowupPage from "../app/ortho/page";
 import { QuickAppointmentModal } from "../components/QuickAppointmentModal";
-import { BUCKET_LABEL, BUCKET_ORDER, type FollowupBucket, type FollowupRow } from "../lib/ortho-followup";
+import { BUCKET_LABEL, BUCKET_ORDER, classifyFollowups, type FollowupBucket, type FollowupRow } from "../lib/ortho-followup";
 import { friendlyDate, friendlyDateLong, friendlyTime, reminderText, unbookedFollowupText } from "../lib/reminders";
 
 // Actual board output and booking-success callback, with synthetic hook storage.
@@ -56,7 +56,7 @@ const fixture = (changes: Partial<FollowupRow> = {}): FollowupRow => ({
   lastAdjustmentDate: "2026-07-01", nextWeeks: 4, upperWire: null, lowerWire: null,
   nextAppointment: null, lastWasNoShow: false, buckets: ["no_appointment", "lapsed_8"],
   bookingContext: verifiedContext(),
-  dueDate: "2026-07-29", daysSinceLast: 96, ...changes,
+  dueDate: "2026-07-29", daysSinceLast: 96, dueBasis: "adjustment_interval", ...changes,
 });
 const booked = (status = "booked"): FollowupRow => fixture({
   buckets: ["this_week", "lapsed_8"],
@@ -157,7 +157,7 @@ describe("orthodontic board follow-up message", () => {
     await openBoard(row);
     const message = decodedMessage();
     expect(message).toBe(unbookedFollowupText(row.patientName));
-    for (const fabricated of [row.dueDate, friendlyDate(row.dueDate), "16:00", "4:00", "الساعة", "مكانكم محفوظ", "نذكّركم بموعدكم"]) {
+    for (const fabricated of [row.dueDate, friendlyDate(row.dueDate!), "16:00", "4:00", "الساعة", "مكانكم محفوظ", "نذكّركم بموعدكم"]) {
       expect(message).not.toContain(fabricated);
     }
     expect(text(links()[0])).toBe("واتساب لترتيب متابعة");
@@ -169,7 +169,7 @@ describe("orthodontic board follow-up message", () => {
     const row = fixture({ dueDate: "2026-11-02", lastAdjustmentDate: TODAY, daysSinceLast: 0, buckets: ["no_appointment"] });
     await openBoard(row);
     expect(decodedMessage()).toBe(unbookedFollowupText(row.patientName));
-    expect(decodedMessage()).not.toContain(friendlyDate(row.dueDate));
+    expect(decodedMessage()).not.toContain(friendlyDate(row.dueDate!));
   });
 
   it.each(["booked", "arrived"])("preserves the exact existing reminder for an actual %s appointment", async (status) => {
@@ -181,7 +181,7 @@ describe("orthodontic board follow-up message", () => {
       durationMinutes: 15, note: null, status: "booked",
     }, "upcoming"));
     expect(decodedMessage()).toContain("10:30 صباحًا");
-    expect(decodedMessage()).not.toContain(friendlyDate(row.dueDate));
+    expect(decodedMessage()).not.toContain(friendlyDate(row.dueDate!));
     expect(text(links()[0])).toBe("واتساب تذكير");
   });
 
@@ -361,4 +361,186 @@ describe("orthodontic board follow-up message", () => {
     }
     expect(JSON.stringify(row)).toBe(original);
   });
+});
+
+
+describe("actual follow-up page retention recall truth", () => {
+  const classified = (changes: Partial<FollowupRow> = {}) => classifyFollowups({ today: TODAY,
+    cases: [fixture({ status: "retention", phase: "retention", ...changes })] })[0];
+  const expectUnknownRecall = (visible: ReactNode) => {
+    const description = text(visible);
+    expect(description).toContain("متابعة التثبيت");
+    expect(description).toContain("استحقاق التثبيت وآخر مراجعة غير متاحين في هذه اللوحة");
+    expect(description).toContain("مراجعة الطبيب لتحديد جدول المتابعة");
+    expect(description).toContain("الحجز لا يحدد استحقاق التثبيت ولا يثبت إتمام مراجعة التثبيت");
+    expect(description).not.toContain("آخر شدّ:");
+    expect(description).not.toContain(" · الاستحقاق: ");
+    expect(description).not.toMatch(/قبل \d+ أسابيع|بلا شدّات|Invalid Date|null/);
+  };
+
+  it.each([
+    ["retention", "retention", "2025-01-01"], ["retention", "finishing", null],
+    ["active", "retention", "2025-01-01"], ["active", "retention", null],
+  ] as const)("shows unknown clinician recall for %s / %s with adjustment %s", async (status, phase, lastAdjustmentDate) => {
+    const row = classified({ status, phase, lastAdjustmentDate });
+    const before = structuredClone(row);
+    await openBoard(row);
+    expectUnknownRecall(patientRow(row.patientId));
+    expect(decodedMessage()).toBe(unbookedFollowupText(row.patientName));
+    expect(decodedMessage()).not.toMatch(/شدّ|متأخر|انقطاع|استحقاق|الساعة/);
+    expect(elements(render()).filter(node => node.type === "button").map(text).join(" ")).not.toMatch(/منذ [٤٦٨]/);
+    expect(row).toEqual(before);
+    expectReadOnlyFeedRequests(1);
+  });
+
+  it("does not display a stale adjustment-derived due date when a retention DTO is from an older projection", async () => {
+    const stale = fixture({ status: "retention", phase: "finishing", dueDate: "2026-07-29", daysSinceLast: 96 });
+    await openBoard(stale);
+    expectUnknownRecall(patientRow(stale.patientId));
+    expect(text(patientRow(stale.patientId))).not.toContain(friendlyDateLong("2026-07-29"));
+    expect(text(patientRow(stale.patientId))).not.toContain(friendlyDateLong(stale.lastAdjustmentDate!));
+    expect(decodedMessage()).toBe(unbookedFollowupText(stale.patientName));
+  });
+
+  it.each(["booked", "arrived"])("keeps the actual %s booking and exact reminder separate from unknown retention recall", async (status) => {
+    const row = classified({ nextAppointment: { id: 91, date: "2026-10-08", time: "10:30", status } });
+    await openBoard(row, "this_week");
+    const visible = patientRow(row.patientId);
+    expectUnknownRecall(visible);
+    expect(text(visible)).toContain("موعد متابعة التقويم المسجل:");
+    expect(text(visible)).toContain(friendlyDateLong("2026-10-08"));
+    expect(decodedMessage()).toBe(reminderText({
+      id: 91, patientId: row.patientId, patientName: row.patientName, patientPhone: row.patientPhone,
+      scheduledDate: "2026-10-08", scheduledTime: "10:30", durationMinutes: 15, note: null, status: "booked",
+    }, "upcoming"));
+    expect(decodedMessage()).not.toMatch(/شدّ|متأخر|انقطاع|استحقاق/);
+    expect(row.dueDate).toBeNull();
+    expect(text(links()[0])).toBe("واتساب تذكير");
+  });
+
+  it("keeps overdue booking evidence and unrelated/review bookings without claiming a missed retention schedule", async () => {
+    const past = { id: 92, date: "2026-10-01", time: "09:30", status: "arrived", serviceName: "موعد سابق" };
+    const other = { id: 93, date: "2026-10-07", time: "11:30", status: "booked", serviceName: "تنظيف الأسنان" };
+    const review = { id: 94, date: "2026-10-09", time: "13:00", status: "booked", serviceName: "مراجعة التصنيف" };
+    const row = classified({ lastWasNoShow: true, bookingContext: { verified: true,
+      pastUnresolvedAppointment: past, otherAppointments: [other], reviewAppointments: [review] } });
+    await openBoard(row, "overdue");
+    const visible = patientRow(row.patientId);
+    expectUnknownRecall(visible);
+    for (const item of [past, other, review]) {
+      expect(text(visible)).toContain(item.serviceName);
+      expect(text(visible)).toContain(friendlyDateLong(item.date));
+    }
+    expect(text(visible)).toContain("موعد متابعة سابق لم يُغلق:");
+    expect(text(visible)).toContain("لا موعد متابعة تقويم مؤكد");
+    expect(decodedMessage()).toBe(unbookedFollowupText(row.patientName));
+    expect(row.buckets).toEqual(["overdue", "no_show", "retention"]);
+    expectReadOnlyFeedRequests(1);
+  });
+
+  it("keeps active and retention row details isolated and active due display unchanged", async () => {
+    const active = fixture();
+    const retention = classified({ caseId: 42, patientId: 20, patientName: "مريض التثبيت", patientPhone: "777654321",
+      bookingContext: { ...verifiedContext(), otherAppointments: [
+        { id: 95, date: "2026-10-11", time: "12:30", status: "booked", serviceName: "حجز التثبيت الآخر" },
+      ] },
+    });
+    const before = structuredClone([active, retention]);
+    await openBoard([active, retention]);
+    const activeVisible = patientRow(active.patientId), retentionVisible = patientRow(retention.patientId);
+    expect(text(activeVisible)).toContain("آخر شدّ:");
+    expect(text(activeVisible)).toContain(friendlyDateLong(active.dueDate!));
+    expect(text(activeVisible)).not.toContain("استحقاق التثبيت");
+    expect(text(activeVisible)).not.toContain(retention.patientName);
+    expect(text(activeVisible)).not.toContain("حجز التثبيت الآخر");
+    expectUnknownRecall(retentionVisible);
+    expect(text(retentionVisible)).not.toContain(active.patientName);
+    expect(text(retentionVisible)).not.toContain(friendlyDateLong(active.dueDate!));
+    const whatsapp = links(retentionVisible);
+    expect(new URL(whatsapp[0].props.href as string).pathname).toBe("/967777654321");
+    const modal = openBooking(retention.patientId);
+    expect(modal.props.patientName).toBe(retention.patientName);
+    (modal.props.onClose as () => void)(); render();
+    expect([active, retention]).toEqual(before);
+    expectReadOnlyFeedRequests(1);
+  });
+  it.each([
+    ["retention", "retention", "Historical upper 016 NiTi", "Historical lower 014 NiTi", true],
+    ["retention", "finishing", "Historical upper 017 steel", null, true],
+    ["active", "retention", null, "Historical lower 019 steel", true],
+    ["active", "working", "Active upper 016 NiTi", "Active lower 014 NiTi", false],
+  ] as const)("does not imply current retention wires for %s / %s while preserving active presentation", async (status, phase, upperWire, lowerWire, retention) => {
+    const row = classified({ status, phase, upperWire, lowerWire });
+    const before = structuredClone(row);
+    await openBoard(row);
+    const description = text(patientRow(row.patientId));
+    if (retention) {
+      expectUnknownRecall(patientRow(row.patientId));
+      expect(description).not.toContain("U:");
+      expect(description).not.toContain("L:");
+      if (upperWire) expect(description).not.toContain(upperWire);
+      if (lowerWire) expect(description).not.toContain(lowerWire);
+    } else {
+      expect(description).toContain(`U: ${upperWire} · L: ${lowerWire}`);
+      expect(description).toContain("آخر شدّ:");
+    }
+    expect(row.upperWire).toBe(upperWire);
+    expect(row.lowerWire).toBe(lowerWire);
+    expect(row).toEqual(before);
+    expectReadOnlyFeedRequests(1);
+  });
+
+});
+
+
+describe("follow-up attendance projection explanation", () => {
+  const attendanceContext: NonNullable<FollowupRow["attendanceContext"]> = {
+    basis: "current_status_scheduled_slot", outcome: "attendance", latestScheduledLocal: "2026-10-05T10:00:00.123456",
+    cutoff: { kind: "explicit_instant", instant: "2026-10-05T09:00:00.000Z", localDateTime: "2026-10-05T12:00:00.000000", timeZone: "Asia/Aden" },
+  };
+  it("explains the status, cutoff, wall-clock and historical limitations once, not in every patient row", async () => {
+    await openBoard([fixture({ attendanceContext }), fixture({ patientId: 20, caseId: 42, attendanceContext })]);
+    const output = text(render());
+    expect(output.match(/حالة الموعد لا تثبت إتمام علاج التقويم/g)).toHaveLength(1);
+    expect(output).toContain("ليس سجل حضور فعليًا أو نسخة تاريخية للحالات");
+    expect(output).toContain("عدم ظهور المؤشر لا يثبت الحضور");
+    expect(output).toContain("2026-10-05T12:00:00.000000");
+    expect(output).toContain("Asia/Aden");
+    expect(output).toContain("الساعة المتكررة");
+    expect(text(patientRow(19))).not.toContain("تعارض حضور وغياب");
+  });
+  it("keeps an explicit conflict warning beside the affected patient and full stored slot precision", async () => {
+    await openBoard(fixture({ lastWasNoShow: true, attendanceContext: { ...attendanceContext, outcome: "conflict" } }));
+    const output = text(patientRow(19));
+    expect(output).toContain("تعارض حضور وغياب في وقت الموعد نفسه");
+    expect(output).toContain("2026-10-05T10:00:00.123456");
+    expect(output).toContain("يبقى مؤشر الغياب للمراجعة");
+  });
+  it("labels a date-only cutoff without pretending to replay historical statuses", async () => {
+    await openBoard(fixture({ attendanceContext: { ...attendanceContext, cutoff: {
+      kind: "date_only_before_midnight", instant: null, localDateTime: "2026-10-04T00:00:00.000000", timeZone: "Asia/Aden",
+    } } }));
+    expect(text(render())).toContain("قراءة بتاريخ فقط: تُستبعد مواعيد هذا اليوم");
+    expect(text(render())).toContain("لا تمثل هذه القراءة حالة السجل في ذلك التاريخ");
+  });
+});
+
+describe('fresh selected bucket print entry',()=>{
+ const printLinks=()=>elements(render()).filter(n=>n.type==='a'&&String(n.props.href).startsWith('/print/ortho-followups'));
+ it('carries only the selected bucket, not client rows/patient/time/phone',async()=>{
+  fetchMock.mockResolvedValue(new Response(JSON.stringify(feed(fixture()))));render();expect(printLinks()).toHaveLength(0);await settle();
+  expect(printLinks()).toHaveLength(1);expect(printLinks()[0].props.href).toBe('/print/ortho-followups?bucket=no_appointment');
+  expect(printLinks()[0].props.rel).toBe('noopener noreferrer');selectBucket('lapsed_8');expect(printLinks()[0].props.href).toBe('/print/ortho-followups?bucket=lapsed_8');
+ });
+ it('does not show print entry on failed initial board read',async()=>{
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({message:'Synthetic failure'}),{status:503}));render();await settle();expect(printLinks()).toHaveLength(0);
+ });
+ it('hides print entry during reload and after failure even when old rows remain',async()=>{
+  await openBoard(fixture());expect(printLinks()).toHaveLength(1);
+  let resolve!:(value:Response)=>void;fetchMock.mockImplementationOnce(()=>new Promise<Response>(r=>{resolve=r;}));
+  const modal=openBooking();(modal.props.onSuccess as ()=>void)();render();expect(printLinks()).toHaveLength(0);
+  resolve(new Response(JSON.stringify({message:'Synthetic reload failure'}),{status:503}));await settle();render();
+  expect(printLinks()).toHaveLength(0);expect(text(render())).toContain('مريض & تجريبي');
+ });
+
 });

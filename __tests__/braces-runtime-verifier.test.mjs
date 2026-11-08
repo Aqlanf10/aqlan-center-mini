@@ -52,16 +52,17 @@ describe("actual shipped runtime artifact proof", () => {
 
 const PG_ALIAS = ".next/node_modules/pg-587764f78a6c7a9c";
 const PGLITE_ALIAS = ".next/node_modules/@electric-sql/pglite-7966c14983af6418";
-async function addNextAlias(name = "pg", alias = PG_ALIAS) {
+const SHARP_ALIAS = ".next/node_modules/sharp-20c6a5da84e2135f";
+async function addNextAlias(name = "pg", alias = PG_ALIAS, version = "1.0.0") {
   const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
-  manifest.dependencies = { ...manifest.dependencies, [name]: "1.0.0" };
+  manifest.dependencies = { ...manifest.dependencies, [name]: version };
   await json("package.json", manifest);
   const lock = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
   lock.lockfileVersion = 3;
-  lock.packages = { ...lock.packages, "": manifest, [`node_modules/${name}`]: { version: "1.0.0" } };
+  lock.packages = { ...lock.packages, "": manifest, [`node_modules/${name}`]: { version } };
   await json("package-lock.json", lock);
   for (const base of ["", ".next/standalone/"]) {
-    await json(`${base}node_modules/${name}/package.json`, { name, version: "1.0.0" });
+    await json(`${base}node_modules/${name}/package.json`, { name, version });
     await put(`${base}node_modules/${name}/index.js`, "module.exports = {};\n");
     const full = path.join(root, base, alias);
     await mkdir(path.dirname(full), { recursive: true });
@@ -123,6 +124,77 @@ describe("narrow generated Next runtime module aliases", () => {
     const full = path.join(root, artifact, PG_ALIAS);
     await mkdir(path.dirname(full), { recursive: true }); await symlink(path.join(root, "node_modules/pg"), full);
     await expect(verifyRuntimeArtifacts(root)).rejects.toThrow(/symlink outside standalone/);
+  });
+});
+
+const changeJson = async (file, change) => {
+  const value = JSON.parse(await readFile(path.join(root, file), "utf8"));
+  change(value);
+  await json(file, value);
+};
+describe("locked production Sharp external alias", () => {
+  it.each([SHARP_ALIAS, ".next/node_modules/sharp-0123456789abcdef"])("binds %s to sharp@0.35.5, not the path-hash suffix", async (alias) => {
+    await addNextAlias(); await addNextAlias("@electric-sql/pglite", PGLITE_ALIAS);
+    await addNextAlias("sharp", alias, "0.35.5");
+    const proof = await verifyRuntimeArtifacts(root);
+    const packageBytes = await readFile(path.join(root, "node_modules/sharp/package.json"));
+    expect(proof.runtimeModuleAliases.map((entry) => entry.package).sort()).toEqual(["@electric-sql/pglite", "pg", "sharp"]);
+    expect(proof.runtimeModuleAliases.find((entry) => entry.package === "sharp")).toEqual({
+      alias, link: "../../node_modules/sharp", target: "node_modules/sharp", package: "sharp", version: "0.35.5", packageSha256: sha256(packageBytes),
+    });
+    expect(proof.files[".next/standalone/node_modules/sharp/package.json"]).toBe(sha256(packageBytes));
+    expect(proof.files[".next/standalone/node_modules/sharp/index.js"]).toBe(sha256("module.exports = {};\n"));
+  });
+  it.each([
+    ["undeclared production dependency", async () => changeJson("package.json", (m) => { delete m.dependencies.sharp; m.devDependencies.sharp = "0.35.5"; })],
+    ["missing root lock dependency", async () => changeJson("package-lock.json", (l) => { delete l.packages[""].dependencies.sharp; })],
+    ["different root lock declaration", async () => changeJson("package-lock.json", (l) => { l.packages[""].dependencies.sharp = "0.35.4"; })],
+    ["absent lock target", async () => changeJson("package-lock.json", (l) => { delete l.packages["node_modules/sharp"]; })],
+    ["development-only lock target", async () => changeJson("package-lock.json", (l) => { l.packages["node_modules/sharp"].dev = true; })],
+    ["linked lock target", async () => changeJson("package-lock.json", (l) => { l.packages["node_modules/sharp"].link = true; })],
+    ["spoofed lock name", async () => changeJson("package-lock.json", (l) => { l.packages["node_modules/sharp"].name = "other"; })],
+    ["different locked version", async () => changeJson("package-lock.json", (l) => { l.packages["node_modules/sharp"].version = "0.35.4"; })],
+    ["spoofed shipped name", async () => changeJson(".next/standalone/node_modules/sharp/package.json", (p) => { p.name = "other"; })],
+    ["different shipped version", async () => changeJson(".next/standalone/node_modules/sharp/package.json", (p) => { p.version = "0.35.4"; })],
+    ["changed build manifest bytes", async () => changeJson("node_modules/sharp/package.json", (p) => { p.extra = true; })],
+    ["different physical package", async () => { await addNextAlias(); await replaceLink(`.next/standalone/${SHARP_ALIAS}`, "../../node_modules/pg"); }],
+    ["project target outside shipped artifact", async () => replaceLink(`.next/standalone/${SHARP_ALIAS}`, "../../../../node_modules/sharp")],
+    ["absolute target", async () => replaceLink(`.next/standalone/${SHARP_ALIAS}`, path.join(root, ".next/standalone/node_modules/sharp"))],
+    ["noncanonical target path", async () => replaceLink(`.next/standalone/${SHARP_ALIAS}`, "../../node_modules/./sharp")],
+    ["alias chain", async () => { await rm(path.join(root, ".next/standalone/node_modules/sharp"), { recursive: true }); await symlink("../.next/node_modules/sharp-20c6a5da84e2135f", path.join(root, ".next/standalone/node_modules/sharp")); }],
+    ["symlinked manifest", async () => { await rm(path.join(root, ".next/standalone/node_modules/sharp/package.json")); await symlink(path.join(root, "node_modules/sharp/package.json"), path.join(root, ".next/standalone/node_modules/sharp/package.json")); }],
+    ["missing target code", async () => rm(path.join(root, ".next/standalone/node_modules/sharp/index.js"))],
+    ["extra braces bytes", async () => put(".next/standalone/node_modules/sharp/hidden.js", "require('braces')")],
+    ["extra renamed braces identity", async () => json(".next/standalone/node_modules/sharp/vendor/other/package.json", { name: "braces", version: "3.0.3" })],
+    ["missing NFT alias reference", async () => json(".next/server/chunk.js.nft.json", { version: 1, files: ["chunk.js"] })],
+    ["NFT references physical target but not alias", async () => json(".next/server/chunk.js.nft.json", { version: 1, files: ["../../node_modules/sharp/package.json"] })],
+    ["missing shipped alias", async () => rm(path.join(root, ".next/standalone", SHARP_ALIAS))],
+    ["missing build alias", async () => rm(path.join(root, SHARP_ALIAS))],
+    ["extra build alias", async () => symlink("../../node_modules/sharp", path.join(root, ".next/node_modules/sharp-1111111111111111"))],
+    ["duplicate shipped alias", async () => symlink("../../node_modules/sharp", path.join(root, ".next/standalone/.next/node_modules/sharp-1111111111111111"))],
+    ["source alias escape", async () => replaceLink(SHARP_ALIAS, "/tmp/nonexistent-runtime-alias-target")],
+  ])("rejects %s", async (_label, change) => {
+    await addNextAlias("sharp", SHARP_ALIAS, "0.35.5"); await change();
+    await expect(verifyRuntimeArtifacts(root)).rejects.toThrow();
+  });
+  it.each([
+    ".next/node_modules/sharp",
+    ".next/node_modules/sharp-20c6a5da84e2135f-extra",
+    ".next/node_modules/sharp-20C6A5DA84E2135F",
+    ".next/node_modules/sharp-20c6a5da84e2135",
+    ".next/node_modules/sharp-20c6a5da84e2135ff",
+    ".next/node_modules/sharp-20c6a5da84e2135f\n",
+    ".next/node_modules/sharp-20c6a5da84e2135f\r",
+    ".next/node_modules/@other/sharp-20c6a5da84e2135f",
+    ".next/server/node_modules/sharp-20c6a5da84e2135f",
+    ".next/node_modules/nested/sharp-20c6a5da84e2135f",
+  ])("rejects an unrecognized alias path: %s", async (alias) => {
+    await addNextAlias("sharp", alias, "0.35.5");
+    await expect(verifyRuntimeArtifacts(root)).rejects.toThrow(/unknown\/non-production runtime alias/);
+  });
+  it.each(["react", "eslint", "sharp-other"])("does not authorize another declared, locked and traced package: %s", async (name) => {
+    await addNextAlias(name, `.next/node_modules/${name}-20c6a5da84e2135f`);
+    await expect(verifyRuntimeArtifacts(root)).rejects.toThrow(/unknown\/non-production runtime alias/);
   });
 });
 

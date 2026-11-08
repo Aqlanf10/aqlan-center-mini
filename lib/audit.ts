@@ -92,9 +92,11 @@ export type AuditAction =
   | "ai.confirmation.execute"
   | "diagnosis.create" | "ortho.book_next"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
-  | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
+  | "ortho.followup_worklist" | "ortho.sessions_print" | "ortho.retainer_metadata" | "ortho.phase" | "ortho.close" | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "visit.create"
-  | "ortho.strategy_revision" | "ortho.assessment.append"
+  | "ortho.retention_submission" | "ortho.space_submission" | "ortho.facial_submission" | "ortho.problem_submission" | "ortho.problem_source.review" | "ortho.facial_revision"
+  | "ortho.space_print" | "ortho.journey_record" | "ortho.study_text_export" | "ortho.strategy_revision" | "ortho.assessment.append" | "ortho.assessment_open" | "ortho.treatment_start"
+  | "ortho.study_illustrated_export" | "ortho.study_submission"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
@@ -366,12 +368,30 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
   "ortho.case_create": "فتح حالة تقويم",
   "ortho.strategy_revision": "توثيق مراجعة خطة الحالة التقويمية",
+  "ortho.assessment_open": "فتح أو استكمال ملف تقييم تقويم دون بدء علاج",
+  "ortho.treatment_start": "توثيق بدء العلاج التقويمي الصريح",
+  "ortho.facial_submission": "حفظ حالة إرسال مراجعة الوجه",
+  "ortho.retention_submission": "حفظ حالة إرسال سجل التثبيت",
+  "ortho.space_submission": "حفظ حالة إرسال سجل المسافات والتماس",
+  "ortho.problem_submission": "حفظ حالة إرسال مراجعة مصدر التقويم",
+  "ortho.problem_source.review": "مراجعة مصدر وربطه بقائمة مشاكل التقويم",
+  "ortho.facial_revision": "حفظ مراجعة تحليل صورة الوجه",
+  "ortho.journey_record": "حفظ نسخة موثقة من سجل دراسة التقويم",
+  "ortho.study_submission": "تسجيل ومصالحة طلب حفظ دراسة التقويم",
+  "ortho.study_illustrated_export": "تصدير نسخة مصورة من دراسة التقويم المحفوظة",
+  "ortho.space_print": "إعداد طباعة سجل المسافات وIPR المحفوظ",
+  "ortho.study_text_export": "تصدير نسخة نصية من دراسة التقويم المحفوظة",
   "ortho.assessment.append": "حفظ مراجعة تقييم وقياسات الحالة التقويمية",
   "visit.create": "فتح زيارة اليوم",
   "service_material.set": "ربط خدمة بمادة استهلاك",
   "service_material.remove": "إزالة ربط خدمة بمادة",
   "recall.contact": "متابعة مريض (موعد فائت أو انقطاع)",
   "plan.installment_reminder": "تنبيه مريض بقسط مستحق",
+  "ortho.retainer_metadata": "تعديل بيانات المثبّت القديمة",
+  "ortho.followup_worklist": "إعداد قائمة متابعة التقويم",
+  "ortho.sessions_print": "إعداد طباعة تسلسل جلسات التقويم",
+  "ortho.phase": "تغيير مرحلة التقويم",
+  "ortho.close": "إغلاق حالة التقويم",
   "ortho.adjustment": "تسجيل شدّة تقويم",
   "ortho.plan_link": "ربط حالة التقويم باتفاقها المالي",
   "ortho.billing_decision": "قرار فوترة شدّة خارج العقد",

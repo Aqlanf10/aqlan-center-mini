@@ -42,6 +42,7 @@ export interface CephAnalysis {
   createdAt: string;
   completedBy: string | null;
   completedAt: string | null;
+  provenanceState?: "not_completed" | "unversioned" | "versioned" | "integrity_unavailable";
   findings: { anb: number | null; fma: number | null; wits: number | null } | null;
 }
 
@@ -163,11 +164,11 @@ export function PatientCeph({
   const session = useSession();
   // Same canonical principal/role/permission scope as the orthodontic parent.
   // Display-name-only changes must not dismiss an ordinary same-owner draft.
-  const authority = JSON.stringify(session ? [session.username, session.role, session.permissions ?? null] : null);
-  const owner = useMemo(createWriteOwner, [patientId, propOrthoCaseId, authority]);
+  const authority = JSON.stringify(session ? [session.userId ?? null, session.username, session.role, session.permissions ?? null] : null);
+  const owner = useMemo(() => createWriteOwner(), [patientId, propOrthoCaseId, authority]);
   // These endpoints and image options are patient-wide; case changes only
   // retire writes and change the summary projection, without another read.
-  const readOwner = useMemo(createReadOwner, [patientId, authority]);
+  const readOwner = useMemo(() => createReadOwner(), [patientId, authority]);
   const mayCreate = !!session?.username?.trim() && (session.role === "admin" || session.role === "reception"
     || (session.role === "doctor" && session.permissions?.canUploadXrays === true));
   useLayoutEffect(() => {
@@ -176,12 +177,15 @@ export function PatientCeph({
   }, [owner]);
   // Retire reads at commit, before a newer view can accept old response bodies.
   useLayoutEffect(() => readOwner.retire, [readOwner]);
-  const [analyses, setAnalyses] = useState<CephAnalysis[] | null>(null);
+  const [analysisRead, setAnalysisRead] = useState<{ owner: ReturnType<typeof createReadOwner>; data: CephAnalysis[] } | null>(null);
+  const analyses = analysisRead?.owner === readOwner ? analysisRead.data : null;
   const [imageSelection, setImageSelection] = useState<ImageSelection | null>(null);
   const images = imageSelection?.owner === readOwner ? imageSelection.images : [];
   const selectedDoc = imageSelection?.owner === readOwner ? imageSelection.selectedDoc : null;
-  const [orthoCases, setOrthoCases] = useState<OrthoCaseLite[]>([]);
-  const [refSets, setRefSets] = useState<RefSetLite[]>([]);
+  const [caseRead, setCaseRead] = useState<{ owner: ReturnType<typeof createReadOwner>; data: OrthoCaseLite[] } | null>(null);
+  const [referenceRead, setReferenceRead] = useState<{ owner: ReturnType<typeof createReadOwner>; data: RefSetLite[] } | null>(null);
+  const orthoCases = caseRead?.owner === readOwner ? caseRead.data : [];
+  const refSets = referenceRead?.owner === readOwner ? referenceRead.data : [];
 
   // نموذج الفحص الجديد
   const [, setFormRevision] = useState(0);
@@ -190,7 +194,8 @@ export function PatientCeph({
   const redrawForm = () => setFormRevision((value) => value + 1);
   /* مقارنة تحليلين (من مستودع الوكيل الآخر): تُختار بالتحديد من الجدول، ولا
      تُقارَن إلا المكتملة — المسودة أرقامها لم تُختم فمقارنتها حكمٌ على لا شيء. */
-  const [compareIds, setCompareIds] = useState<number[]>([]);
+  const [comparison, setComparison] = useState<{ read: typeof analysisRead; ids: number[] } | null>(null);
+  const compareIds = analyses !== null && comparison?.read === analysisRead ? comparison.ids : [];
 
   const smartPhase = useMemo(
     () => suggestCephPhase(currentPhase, currentPhase === "aligning" ? 1 : 0),
@@ -204,7 +209,11 @@ export function PatientCeph({
     propOrthoCaseId ? String(propOrthoCaseId) : "",
   );
   const [refSet, setRefSet] = useState("builtin_default");
-  const [error, setError] = useState<string | null>(null);
+  const [readFailure, setReadFailure] = useState<{ owner: ReturnType<typeof createReadOwner>; message: string } | null>(null);
+  const readError = readFailure?.owner === readOwner ? readFailure.message : null;
+  const [writeFailure, setWriteFailure] = useState<{ owner: ReturnType<typeof createWriteOwner>; message: string } | null>(null);
+  const error = writeFailure?.owner === owner ? writeFailure.message : null;
+  const setError = (message: string | null) => setWriteFailure(message === null ? null : { owner, message });
   const [filterThisCase, setFilterThisCase] = useState<boolean>(Boolean(propOrthoCaseId && embedded));
 
   // تحديث المرحلة المقترحة تلقائيًا عند تغير الحالة أو المرحلة
@@ -217,6 +226,8 @@ export function PatientCeph({
 
   const load = useCallback(async (operation: AbortController) => {
     const current = () => readOwner.current(operation);
+    if (!current()) return;
+    setReadFailure(null);
     try {
       const [cephRes, docsRes, orthoRes, refsRes] = await Promise.all([
         fetch(`/api/patients/${patientId}/ceph`, { signal: operation.signal }),
@@ -228,9 +239,10 @@ export function PatientCeph({
       if (cephRes.ok) {
         const data = await cephRes.json();
         if (!current()) return;
-        setAnalyses(data.analyses);
+        setAnalysisRead({ owner: readOwner, data: data.analyses });
       } else {
-        setError("تعذّر تحميل دراسات السيفالو.");
+        setAnalysisRead(null);
+        setReadFailure({ owner: readOwner, message: "تعذّر تحميل دراسات السيفالو." });
       }
       if (docsRes.ok) {
         const data = await docsRes.json();
@@ -243,19 +255,28 @@ export function PatientCeph({
           return { owner: readOwner, patientId, authority, images: imgs,
             selectedDoc: imgs.some((image) => image.id === selected) ? selected : imgs[0]?.id ?? null };
         });
+      } else {
+        setImageSelection(null);
       }
       if (orthoRes.ok) {
         const data = await orthoRes.json();
         if (!current()) return;
-        setOrthoCases((data.cases ?? []) as OrthoCaseLite[]);
+        setCaseRead({ owner: readOwner, data: (data.cases ?? []) as OrthoCaseLite[] });
+      } else {
+        setCaseRead(null);
       }
       if (refsRes.ok) {
         const data = await refsRes.json();
         if (!current()) return;
-        setRefSets((data.sets ?? []) as RefSetLite[]);
+        setReferenceRead({ owner: readOwner, data: (data.sets ?? []) as RefSetLite[] });
+      } else {
+        setReferenceRead(null);
       }
     } catch {
-      if (current()) setError("تعذّر الاتصال بالخادم.");
+      if (current()) {
+        setAnalysisRead(null); setImageSelection(null); setCaseRead(null); setReferenceRead(null);
+        setReadFailure({ owner: readOwner, message: "تعذّر الاتصال بالخادم." });
+      }
     }
   }, [patientId, authority, readOwner]);
 
@@ -384,7 +405,7 @@ export function PatientCeph({
       </div>
 
       {/* ملخص أحدث فحص معتمد إن وجد */}
-      {latestCompleted && latestCompleted.findings && (
+      {latestCompleted?.provenanceState === "versioned" && latestCompleted.findings && (
         <div data-testid="patient-ceph-summary" className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50/40 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div data-testid="patient-ceph-summary-header" className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
@@ -622,16 +643,16 @@ export function PatientCeph({
         </div>
       )}
 
-      {error && (
+      {(readError || error) && (
         <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
-          {error}
+          {readError || error}
         </div>
       )}
 
       {/* جدول وسجلات الدراسات السيفالومترية */}
       {analyses == null ? (
         <p className="rounded-xl border border-slate-200 bg-white p-4 text-center text-xs text-slate-500">
-          جارٍ تحميل سجلات السيفالومتري…
+          {readError ? "سجلات السيفالومتري غير متاحة؛ تعذّر تأكيد القراءة الحالية." : "جارٍ تحميل سجلات السيفالومتري…"}
         </p>
       ) : displayedAnalyses.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-6 text-center">
@@ -668,7 +689,7 @@ export function PatientCeph({
                 >
                   🔍 افتح المقارنة والتراكب
                 </Link>
-                <button type="button" onClick={() => setCompareIds([])}
+                <button type="button" onClick={() => { if (readOwner.active()) setComparison(null); }}
                   className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-[11px] font-bold text-slate-600">
                   إلغاء
                 </button>
@@ -692,7 +713,12 @@ export function PatientCeph({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {displayedAnalyses.map((a) => {
-                const st = STATUS_BADGE[a.status] ?? {
+                const unavailableHistory = a.status === "completed" && a.provenanceState !== "versioned";
+                const integrityUnavailable = unavailableHistory && a.provenanceState === "integrity_unavailable";
+                const st = unavailableHistory ? {
+                  label: integrityUnavailable ? "تعذّر التحقق من سلامة الاعتماد" : "اعتماد تاريخي غير موثّق الإصدار",
+                  cls: integrityUnavailable ? "bg-red-50 text-red-700 border-red-200" : "bg-amber-50 text-amber-700 border-amber-200",
+                } : STATUS_BADGE[a.status] ?? {
                   label: a.status,
                   cls: "bg-slate-50 text-slate-600 border-slate-200",
                 };
@@ -710,7 +736,7 @@ export function PatientCeph({
                 return (
                   <tr key={a.id} className="hover:bg-slate-50/70 transition-colors">
                     <td className="px-2 py-2.5 text-center">
-                      {a.status === "completed" ? (
+                      {a.status === "completed" && a.provenanceState === "versioned" ? (
                         <input
                           type="checkbox"
                           aria-label={`تحديد ${a.id} للمقارنة`}
@@ -718,14 +744,15 @@ export function PatientCeph({
                           checked={compareIds.includes(a.id)}
                           onChange={(event) => {
                             const checked = event.target.checked;
-                            setCompareIds((current) => {
-                              if (checked) return [...current, a.id].slice(-2);
-                              return current.filter((id) => id !== a.id);
+                            if (!readOwner.active() || !analysisRead || analysisRead.owner !== readOwner) return;
+                            setComparison((previous) => {
+                              const current = previous?.read === analysisRead ? previous.ids : [];
+                              return { read: analysisRead, ids: checked ? [...current, a.id].slice(-2) : current.filter((id) => id !== a.id) };
                             });
                           }}
                         />
                       ) : (
-                        <span className="text-[10px] text-slate-300" title="المسودة لا تُقارَن — أرقامها لم تُختم">—</span>
+                        <span className="text-[10px] text-slate-300" title={a.status === "completed" ? "المقارنة تتطلب سجل اعتماد موثّقًا وسليمًا" : "المسودة لا تُقارَن — أرقامها لم تُختم"}>—</span>
                       )}
                     </td>
                     <td className="px-3 py-2.5 font-mono font-bold text-slate-800">
@@ -771,7 +798,7 @@ export function PatientCeph({
                     </td>
 
                     <td className="px-3 py-2.5">
-                      {a.mmPerPixel != null ? (
+                      {unavailableHistory ? <span className="text-[11px] text-amber-700">{integrityUnavailable ? "غير متاح حتى مراجعة السجل" : "المعايرة التاريخية غير موثّقة"}</span> : a.mmPerPixel != null ? (
                         <span className="text-[11px] font-bold text-emerald-700">
                           ✓ {(1 / a.mmPerPixel).toFixed(1)} px/mm
                         </span>
@@ -783,7 +810,11 @@ export function PatientCeph({
                     </td>
 
                     <td className="px-3 py-2.5 font-mono text-[11px] text-slate-700">
-                      {a.findings ? (
+                      {unavailableHistory ? (
+                        <span className="font-sans text-amber-700">{integrityUnavailable
+                          ? "أُوقف عرض النتائج لعدم التحقق من سلامة السجل."
+                          : "سجل قديم بلا توثيق للوحدات والمراجع؛ لم يُعَد التحقق منه بأثر رجعي."}</span>
+                      ) : a.findings ? (
                         <span title="ANB · FMA · Wits">
                           ANB <strong className="text-navy-900">{fmt(a.findings.anb)}°</strong> · FMA {fmt(a.findings.fma)}° · W {fmt(a.findings.wits)}
                         </span>

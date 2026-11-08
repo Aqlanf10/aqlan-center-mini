@@ -10,8 +10,8 @@ import type { Role } from "../lib/roles";
 const hooks = vi.hoisted(() => ({
   values: [] as unknown[], cursor: 0, changed: false,
   memo: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
-  effects: new Map<number, { effect: () => void; deps?: readonly unknown[] }>(),
-  pending: [] as Array<() => void>,
+  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
+  layout: [] as Array<() => void>, passive: [] as Array<() => void>,
   session: { username: "synthetic-admin", role: "admin" as Role, permissions: { financeAccess: {} as Record<string, boolean> } },
 }));
 vi.mock("react", async (original) => {
@@ -25,6 +25,17 @@ vi.mock("react", async (original) => {
     const value = compute();
     hooks.memo.set(index, { value, deps });
     return value;
+  };
+  const effect = (callback: () => void | (() => void), deps: readonly unknown[] | undefined, layout: boolean) => {
+    const index = hooks.cursor++;
+    const previous = hooks.effects.get(index);
+    if (previous && same(previous.deps, deps)) return;
+    const entry = { deps, cleanup: undefined as (() => void) | undefined };
+    hooks.effects.set(index, entry);
+    (layout ? hooks.layout : hooks.passive).push(() => {
+      previous?.cleanup?.();
+      entry.cleanup = callback() || undefined;
+    });
   };
   return {
     ...react,
@@ -44,13 +55,8 @@ vi.mock("react", async (original) => {
     },
     useMemo: memo,
     useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
-    useEffect: (effect: () => void, deps?: readonly unknown[]) => {
-      const index = hooks.cursor++;
-      const previous = hooks.effects.get(index);
-      if (previous && same(previous.deps, deps)) return;
-      hooks.effects.set(index, { effect, deps });
-      hooks.pending.push(effect);
-    },
+    useEffect: (callback: () => void | (() => void), deps?: readonly unknown[]) => effect(callback, deps, false),
+    useLayoutEffect: (callback: () => void | (() => void), deps?: readonly unknown[]) => effect(callback, deps, true),
   };
 });
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
@@ -86,7 +92,8 @@ function render() {
     if (++rounds > 10) throw new Error("Hook render did not settle");
     hooks.cursor = 0; hooks.changed = false;
     tree = FinancePage();
-    hooks.pending.splice(0).forEach((effect) => effect());
+    hooks.layout.splice(0).forEach((effect) => effect());
+    hooks.passive.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
   return elements(tree);
 }
@@ -119,7 +126,7 @@ function accountingProps() {
 }
 beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false;
-  hooks.memo.clear(); hooks.effects.clear(); hooks.pending = [];
+  hooks.memo.clear(); hooks.effects.clear(); hooks.layout = []; hooks.passive = [];
   fetchMock.mockReset();
   hooks.session = { username: "synthetic-admin", role: "admin", permissions: { financeAccess: {} } };
   shiftReply = async () => response(cashPayload());
@@ -131,6 +138,7 @@ beforeEach(() => {
     const payloads: Record<string, unknown> = {
       "/api/shifts": { open: null, totals: { byCurrency: { YER: 0, SAR: 0, USD: 0 } }, expenses: [], payments: [], recent: [] },
       "/api/parties": [], "/api/finance/debts": { rows: [] }, "/api/plans": { plans: [] },
+      "/api/finance/lab-reconciliation?view=lab-balances-v1": { version: "lab-balances-v1", observedAt: "2030-01-01T00:00:00.000Z", labs: [] },
       "/api/finance/lab-reconciliation": { labs: [], risks: [], totalRisksCount: 0 },
       "/api/finance/commissions": { rows: [], totals: {} },
     };
@@ -140,6 +148,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
+  hooks.effects.forEach((entry) => entry.cleanup?.());
+  hooks.effects.clear(); hooks.layout = []; hooks.passive = [];
   expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   vi.unstubAllGlobals();
 });

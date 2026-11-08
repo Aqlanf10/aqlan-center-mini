@@ -1,0 +1,518 @@
+[
+  {
+    "version": "0001",
+    "name": "baseline_schema",
+    "filename": "0001_baseline_schema.sql",
+    "checksum": "471941f93a5a0964e6c93eb99b819f365b789fa3996a82ce89ff958e7292735c"
+  },
+  {
+    "version": "0002",
+    "name": "confirmation_claim_ttl_index",
+    "filename": "0002_confirmation_claim_ttl_index.sql",
+    "checksum": "8e82e58d93157e073a7dcdc3759464d407eb7ee78ab5427a144a4566b865cd41"
+  },
+  {
+    "version": "0003",
+    "name": "payment_idempotency_and_reversal",
+    "filename": "0003_payment_idempotency_and_reversal.sql",
+    "checksum": "2d7644b59b5d89129231df9b36fc7813aeae82012f5f870217cc70ca57e39705"
+  },
+  {
+    "version": "0004",
+    "name": "material_rate_history",
+    "filename": "0004_material_rate_history.sql",
+    "checksum": "e12bff312e49c6cb688b528ba74bfd9ae37f8973ab55d13d4b0af4ef1c554256"
+  },
+  {
+    "version": "0005",
+    "name": "financial_append_only",
+    "filename": "0005_financial_append_only.sql",
+    "checksum": "4d1aa4610f59a0ecc2be8de30623412e7d76cce0f4fef55495f7a1a40be001e5"
+  },
+  {
+    "version": "0006",
+    "name": "appointment_lifecycle",
+    "filename": "0006_appointment_lifecycle.sql",
+    "checksum": "ab43d938e78f119fec15612f0cf74ebdb77a0bbc1742830ea7049f037b265738"
+  },
+  {
+    "version": "0007",
+    "name": "appointment_services_and_capacity",
+    "filename": "0007_appointment_services_and_capacity.sql",
+    "checksum": "ca54ac08747340bf57d9e2db840b5f178cafad9b47735e401da053b06a540fa5"
+  },
+  {
+    "version": "0008",
+    "name": "appointment_chair_and_new_patient_snapshots",
+    "filename": "0008_appointment_chair_and_new_patient_snapshots.sql",
+    "checksum": "d48c166365763e51210b94743716013cb4585116d5be901d3da4fd79d2d9ad38"
+  },
+  {
+    "version": "0009",
+    "name": "waiting_list",
+    "filename": "0009_waiting_list.sql",
+    "checksum": "5adf1caf65e0d1fafb120ca6804a49a4e235d2cb2020a9367c19349a6ff4bc6c"
+  },
+  {
+    "version": "0010",
+    "name": "waiting_list_completion",
+    "filename": "0010_waiting_list_completion.sql",
+    "checksum": "e13dbc54a1d3c67901774683f35b58a8f92e2923acac8d0d9d14afabbd188b1e"
+  },
+  {
+    "version": "0011",
+    "name": "appointment_waiting_link",
+    "filename": "0011_appointment_waiting_link.sql",
+    "checksum": "2ed90959cf938aad7f1ca4c463940c365a696791cc194f27b9835144b8b7b3dd"
+  },
+  {
+    "version": "0012",
+    "name": "doctor_commission_history",
+    "filename": "0012_doctor_commission_history.sql",
+    "checksum": "935aeaa10093f1ecd92cd76d5739374fd0335886def5466acc6cf5f5958f6dc5"
+  },
+  {
+    "version": "0013",
+    "name": "supplier_payment_settlement",
+    "filename": "0013_supplier_payment_settlement.sql",
+    "checksum": "5c9b953ec9ed4a0fd37e866fd3680a5dbb8086781dd513e7117485c86a9bece1"
+  },
+  {
+    "version": "0014",
+    "name": "shift_close_expected_difference",
+    "filename": "0014_shift_close_expected_difference.sql",
+    "checksum": "9cea77e776682491c68f6b9a276e674721ef93147e0cf9a3a56d8b76c3f73bb5"
+  },
+  {
+    "version": "0015",
+    "name": "saved_reports",
+    "filename": "0015_saved_reports.sql",
+    "checksum": "11943e35fd386421d8796e01f6a814f24bd2ef0a606b2014e93175026189d7d5"
+  },
+  {
+    "version": "0016",
+    "name": "finance_controls",
+    "filename": "0016_finance_controls.sql",
+    "checksum": "95f686afd7d4aa3bfa8ad2b08680dbc38e2e33260a0ace30c6b5dfeb69fab12d"
+  },
+  {
+    "version": "0017",
+    "name": "stock_supplier_link",
+    "filename": "0017_stock_supplier_link.sql",
+    "checksum": "0c2f8d13421709bb10cf1916dc4a815dd587d33297ebff48265c590268dcafe5"
+  },
+  {
+    "version": "0018",
+    "name": "patient_demographics",
+    "filename": "0018_patient_demographics.sql",
+    "checksum": "d3302636a51c81c92facf9abe4cece7d5ec75ee81d919ec4dae75f32e3f0a971"
+  },
+  {
+    "version": "0019",
+    "name": "audit_source",
+    "filename": "0019_audit_source.sql",
+    "checksum": "e2d9d1f8a9a1ed5167f747a5e3ff6d07524c972dcae2522476ecfc26d14c1618"
+  },
+  {
+    "version": "0020",
+    "name": "expense_attachments",
+    "filename": "0020_expense_attachments.sql",
+    "checksum": "4eb9e583ef41f50c77bf59b3270d53572ffe58b7361cb9bad97d287932b65401"
+  },
+  {
+    "version": "0021",
+    "name": "patient_referrals",
+    "filename": "0021_patient_referrals.sql",
+    "checksum": "77bf64e5e4add9671de5d6d2cf2ed9053bed97d735f45e6be0ebdb0616bd0956"
+  },
+  {
+    "version": "0022",
+    "name": "patient_referral_source",
+    "filename": "0022_patient_referral_source.sql",
+    "checksum": "48eebf1b9bb30967abf0545e7359c66fc5d468ffe1f61738d48a86f8abaf4d2e"
+  },
+  {
+    "version": "0023",
+    "name": "opening_balance_currency",
+    "filename": "0023_opening_balance_currency.sql",
+    "checksum": "462d20ff9ce81629997d7e496ec16e26512b045ed912fedfd091ce84247f6d72"
+  },
+  {
+    "version": "0024",
+    "name": "legacy_archive",
+    "filename": "0024_legacy_archive.sql",
+    "checksum": "10234599fa312563c48fe358e6ad147edbeeb7bad50e7f97c7955eeaf51c61d1"
+  },
+  {
+    "version": "0025",
+    "name": "messaging_channels",
+    "filename": "0025_messaging_channels.sql",
+    "checksum": "43523ca1f21b789427219c4967d4179b321eebb733d77e8eb08cd047d1ff1d98"
+  },
+  {
+    "version": "0026",
+    "name": "visit_currency",
+    "filename": "0026_visit_currency.sql",
+    "checksum": "cd39a2d88d68bbadf66db85791cb86ce815e664f1f0123b06ef73c2b5045e68b"
+  },
+  {
+    "version": "0027",
+    "name": "medical_history",
+    "filename": "0027_medical_history.sql",
+    "checksum": "9b9c06adda890ec41168c9d7cd89a6def20f9ce6ca990f2bbe3fb2c2248cbf25"
+  },
+  {
+    "version": "0028",
+    "name": "patient_identity",
+    "filename": "0028_patient_identity.sql",
+    "checksum": "68eb3b3092b2dacf961859220f169fe729cc36a5c006375c97946a5c203048e4"
+  },
+  {
+    "version": "0029",
+    "name": "planned_visit_interval",
+    "filename": "0029_planned_visit_interval.sql",
+    "checksum": "4b6fdc44c0cc1f5c5e1d6c48c88cc816d3b34e318d65948e5992b111f64a1b40"
+  },
+  {
+    "version": "0030",
+    "name": "party_opening_balances",
+    "filename": "0030_party_opening_balances.sql",
+    "checksum": "e458044711fbebcd622e018fa12a86320faec0e5dbd09d634a68e01abe9cd7ba"
+  },
+  {
+    "version": "0031",
+    "name": "journal_line_currency",
+    "filename": "0031_journal_line_currency.sql",
+    "checksum": "f39a9a57326316d72a236efdcfd5f05cb370a60bfe484f2ac9641e3abc0dc7d5"
+  },
+  {
+    "version": "0032",
+    "name": "specialty_cases",
+    "filename": "0032_specialty_cases.sql",
+    "checksum": "7573e9db617dbdf7007366e73e52a475cf776a4875c3d43b0198821395e7e19b"
+  },
+  {
+    "version": "0033",
+    "name": "internal_referrals",
+    "filename": "0033_internal_referrals.sql",
+    "checksum": "bdd5c61494323aa77d5de18ea302e0b2da5cb5bc133a610e9dd717e68887faa4"
+  },
+  {
+    "version": "0034",
+    "name": "ortho_legacy_baseline",
+    "filename": "0034_ortho_legacy_baseline.sql",
+    "checksum": "ddfba160fc16aa0857a07b4fc091435c2510caead9563934108772a636537f47"
+  },
+  {
+    "version": "0035",
+    "name": "commission_case_overrides",
+    "filename": "0035_commission_case_overrides.sql",
+    "checksum": "4e648eac55cc8188224aada88d5a85d29019852f59c8d8cbbad88d0e01da6603"
+  },
+  {
+    "version": "0036",
+    "name": "visit_clearance",
+    "filename": "0036_visit_clearance.sql",
+    "checksum": "c0593b6ff09fc95e93efd22fb7efa57643210758095d32e6c046143ba0bbbea6"
+  },
+  {
+    "version": "0037",
+    "name": "patient_families",
+    "filename": "0037_patient_families.sql",
+    "checksum": "1ef399a1ea6d41cf51bd05889cbf31d16aaddb5ba2b3dfa74b4b82cab218956b"
+  },
+  {
+    "version": "0038",
+    "name": "legacy_balance_arrangements",
+    "filename": "0038_legacy_balance_arrangements.sql",
+    "checksum": "d2ee64f0b3236d7595de5443c0f05cb06aafcd20064e10a992014d29b2ab6f2e"
+  },
+  {
+    "version": "0039",
+    "name": "ortho_adjustment_billing_decision",
+    "filename": "0039_ortho_adjustment_billing_decision.sql",
+    "checksum": "1dd2066a86a123dcf778e20cad92ff8fa47a2d4656a40f9ec693b80b6a14274b"
+  },
+  {
+    "version": "0040",
+    "name": "endodontics",
+    "filename": "0040_endodontics.sql",
+    "checksum": "14f84d75b397b95fa25e8502d021b626fc38f973532125ffa8754ebeef10b142"
+  },
+  {
+    "version": "0041",
+    "name": "invoice_clinical_linkage",
+    "filename": "0041_invoice_clinical_linkage.sql",
+    "checksum": "3fb5db8869d1b051fc5b08aa7a25c2c00343df26b590e7e844f4de7f3f6a7337"
+  },
+  {
+    "version": "0042",
+    "name": "legacy_treatment_agreements",
+    "filename": "0042_legacy_treatment_agreements.sql",
+    "checksum": "32ab5f852a088cff1de7b7f876b0976b2d461b7ef67f9b3793e131773af486c8"
+  },
+  {
+    "version": "0043",
+    "name": "legacy_treatment_coverage",
+    "filename": "0043_legacy_treatment_coverage.sql",
+    "checksum": "8da7e57a474052dcef35a2269b4613d9a2839121c404130862b0e67dec78296f"
+  },
+  {
+    "version": "0045",
+    "name": "hr_staff",
+    "filename": "0045_hr_staff.sql",
+    "checksum": "c3ef983b19de9b33eb8d6c4460b8acbfe8a087321eb77252a6aece5b43b78970"
+  },
+  {
+    "version": "0046",
+    "name": "hr_tasks",
+    "filename": "0046_hr_tasks.sql",
+    "checksum": "b56c20c66b7b9616d67b2abc48823d4c27c7935e6da39088f1859eedae9db8ff"
+  },
+  {
+    "version": "0048",
+    "name": "hr_contracts_attendance_leaves",
+    "filename": "0048_hr_contracts_attendance_leaves.sql",
+    "checksum": "1b5d7a87e0d53d455b73363d0af45c0940c03a9fe10125ab9128eefab85eb241"
+  },
+  {
+    "version": "0049",
+    "name": "hr_payroll_disbursements",
+    "filename": "0049_hr_payroll_disbursements.sql",
+    "checksum": "7bdeeaf170029c845d56ca21e2836db746040a8490291b8fae3b2d3ad4b01e62"
+  },
+  {
+    "version": "0050",
+    "name": "hr_payroll_integrity",
+    "filename": "0050_hr_payroll_integrity.sql",
+    "checksum": "f273b970554c11aca74d65a9926a68f324d47d87d3e2983489715c16d6454075"
+  },
+  {
+    "version": "0051",
+    "name": "ortho_treatment_strategy",
+    "filename": "0051_ortho_treatment_strategy.sql",
+    "checksum": "44ff94771e962a48fa27d05de941e0c096d19000d66078a6fbe477ae4265157e"
+  },
+  {
+    "version": "0052",
+    "name": "ortho_assessment",
+    "filename": "0052_ortho_assessment.sql",
+    "checksum": "92113a0e96c51edc5596508c9b40f742df5bff38b0e80518504034bd74acbae2"
+  },
+  {
+    "version": "0056",
+    "name": "hr_employment_history",
+    "filename": "0056_hr_employment_history.sql",
+    "checksum": "cc87396b7d3cd5035c67f1dfa0f2dedbe2ed904a618722b12b833c969cf7c112"
+  },
+  {
+    "version": "0057",
+    "name": "hr_schedule_policy_versions",
+    "filename": "0057_hr_schedule_policy_versions.sql",
+    "checksum": "8e4bf0f0adf3d2284f64bd792b3903958ce6ed62923b4cb0c61ac405b82b8791"
+  },
+  {
+    "version": "0058",
+    "name": "hr_temporal_write_receipts",
+    "filename": "0058_hr_temporal_write_receipts.sql",
+    "checksum": "1c2c0a3582cb5777fe6cf063d0ba5d1bbe04ef6acbbf035382a7fceeb9a6b972"
+  },
+  {
+    "version": "0059",
+    "name": "invoice_debt_installments",
+    "filename": "0059_invoice_debt_installments.sql",
+    "checksum": "875201fa136c6dd2991a08eb17e5b94adfaa912186c17b40141389f7e447582e"
+  },
+  {
+    "version": "0060",
+    "name": "historical_treatment_documents",
+    "filename": "0060_historical_treatment_documents.sql",
+    "checksum": "1fbae0421b58835f4f6614a6371c5531c765a1d06e91e98c6b4db1c17aa8b8e1"
+  },
+  {
+    "version": "0061",
+    "name": "invoice_correction_lineage",
+    "filename": "0061_invoice_correction_lineage.sql",
+    "checksum": "52e2b083dd6be4c87f6470c5c2a824364b8373134b50a31afeed3f4edca0bdc7"
+  },
+  {
+    "version": "0063",
+    "name": "invoice_currency_reclassification",
+    "filename": "0063_invoice_currency_reclassification.sql",
+    "checksum": "19adaec13af17f3e7d78a6656daa4516983a1ac5186e3a55609153146b3119c4"
+  },
+  {
+    "version": "0064",
+    "name": "approved_agreement_principal",
+    "filename": "0064_approved_agreement_principal.sql",
+    "checksum": "aefc040a29c8b887a8eeca073103ce4268a8851b89e0025b406941e48f247655"
+  },
+  {
+    "version": "0065",
+    "name": "inventory_purchase_receipts",
+    "filename": "0065_inventory_purchase_receipts.sql",
+    "checksum": "4b7c79f4ce7b334e0f052cbd73d7fd2346c91ed5200081551f1a9f0cfd4b7808"
+  },
+  {
+    "version": "0066",
+    "name": "agreement_delta_amendments",
+    "filename": "0066_agreement_delta_amendments.sql",
+    "checksum": "28bd13b5ca9f34d9a9010aade759d91fb398b47f30a78433e5e663ce90464dac"
+  },
+  {
+    "version": "0067",
+    "name": "patient_appointment_history_index",
+    "filename": "0067_patient_appointment_history_index.sql",
+    "checksum": "4717e0a68ee8ba9aee745000c8561d4b9d6481f48f41c094518fac76c1bdacc6"
+  },
+  {
+    "version": "0068",
+    "name": "collection_attempt_retirements",
+    "filename": "0068_collection_attempt_retirements.sql",
+    "checksum": "07864df6fb6fb98742fd35efebcd2f33f23a1b26c90fb7df16f54605cf62aa42"
+  },
+  {
+    "version": "0069",
+    "name": "unpaid_currency_transitions",
+    "filename": "0069_unpaid_currency_transitions.sql",
+    "checksum": "c11d02aecc5d8644dbec1edea664ecb5ba63f3c21a53c77f06c5bb4007fbc714"
+  },
+  {
+    "version": "0078",
+    "name": "agreement_reconciliation",
+    "filename": "0078_agreement_reconciliation.sql",
+    "checksum": "e07a3b1540fe708d9d53c5bb2ba8ca1d733c991ddfe4315392a5b26c596ebf30"
+  },
+  {
+    "version": "0087",
+    "name": "agreement_reminder_metadata",
+    "filename": "0087_agreement_reminder_metadata.sql",
+    "checksum": "6b1464da6aa1d6969e19afcefe20389e1bac5fe09b803c57c60397915f753644"
+  },
+  {
+    "version": "0089",
+    "name": "lab_shade_specification",
+    "filename": "0089_lab_shade_specification.sql",
+    "checksum": "2dcd996f0ffb13a8e79dc98a807845f10e0f1b0447c805c2ed6afaace4f7e5fc"
+  },
+  {
+    "version": "0090",
+    "name": "booking_request_preferences",
+    "filename": "0090_booking_request_preferences.sql",
+    "checksum": "608eeee37b44a59cb4d26e915bd0b2610cf619103905be1fca0c2abe77c52e25"
+  },
+  {
+    "version": "0091",
+    "name": "prescribing_doctor_identity",
+    "filename": "0091_prescribing_doctor_identity.sql",
+    "checksum": "d075fd6222bf8204c2e7de2ea536b66c8f8db71178eaa70de2294f0dba227044"
+  },
+  {
+    "version": "0092",
+    "name": "prescribing_doctor_snapshot",
+    "filename": "0092_prescribing_doctor_snapshot.sql",
+    "checksum": "587529f146e1bf72fc654cff4fbacb0f233729efaadf26e44fdfde8e802af240"
+  },
+  {
+    "version": "0093",
+    "name": "prescription_issuance_commands",
+    "filename": "0093_prescription_issuance_commands.sql",
+    "checksum": "7bf8a45c76d1a52b0efa0fae0b0427fb33a079b2be1aced8fc2560e8cf8336dc"
+  },
+  {
+    "version": "0106",
+    "name": "ortho_assessment_verifier_2_2",
+    "filename": "0106_ortho_assessment_verifier_2_2.sql",
+    "checksum": "8e0d1ceac614c350363303e2be4be8a0372f1ecb741ebf9a394038f8aaadce79"
+  },
+  {
+    "version": "0108",
+    "name": "ortho_assessment_intake",
+    "filename": "0108_ortho_assessment_intake.sql",
+    "checksum": "b7808c15d5c3250e077916a37733229711d02ac9bd45c64b8acea1ad835ebc50"
+  },
+  {
+    "version": "0109",
+    "name": "ortho_adjustment_requests",
+    "filename": "0109_ortho_adjustment_requests.sql",
+    "checksum": "90bd89851e989564f0fbe6014618102a59061337d8187870bd016c8d8d558f2b"
+  },
+  {
+    "version": "0110",
+    "name": "ortho_assessment_verifier_2_2_1",
+    "filename": "0110_ortho_assessment_verifier_2_2_1.sql",
+    "checksum": "be34b0f0d0876dcdf1f6a315b66eb798b28fc1052f1053daea1380658464de8d"
+  },
+  {
+    "version": "0111",
+    "name": "ortho_case_study",
+    "filename": "0111_ortho_case_study.sql",
+    "checksum": "9aa1d545a93d3b81081d2ad42844157af90610d5da8f8a6c1d00e3aedc55bf27"
+  },
+  {
+    "version": "0112",
+    "name": "ortho_study_submissions",
+    "filename": "0112_ortho_study_submissions.sql",
+    "checksum": "53c0fc4b70eb351e215da2a2ebe9716c4357dc437496e0e9987623df7b111f99"
+  },
+  {
+    "version": "0113",
+    "name": "ceph_completion_provenance",
+    "filename": "0113_ceph_completion_provenance.sql",
+    "checksum": "9f2939bffc4df0d1d63bfb41be920f6b8621ab75f208b760d6d005175bf3a0e6"
+  },
+  {
+    "version": "0114",
+    "name": "ceph_completion_source_cas",
+    "filename": "0114_ceph_completion_source_cas.sql",
+    "checksum": "32848a5eb3efa109fa3a977692bb42b6aa2f127456a1d4ea677255f75c428168"
+  },
+  {
+    "version": "0115",
+    "name": "ortho_facial_revisions",
+    "filename": "0115_ortho_facial_revisions.sql",
+    "checksum": "c7829b602a54c0d6927b01649479bbdda02f8383ac14e1169e0b59408111d54e"
+  },
+  {
+    "version": "0116",
+    "name": "ortho_facial_submissions",
+    "filename": "0116_ortho_facial_submissions.sql",
+    "checksum": "ecd993c45857948516b49faa05048a9e36df3d6382337133a614dc963b36ed60"
+  },
+  {
+    "version": "0117",
+    "name": "ortho_problem_sources",
+    "filename": "0117_ortho_problem_sources.sql",
+    "checksum": "a3eadd1ba2339764baabce09faaeab8945d7df3cd157ca5bd28c1dee35e5d7e1"
+  },
+  {
+    "version": "0118",
+    "name": "ortho_problem_source_submissions",
+    "filename": "0118_ortho_problem_source_submissions.sql",
+    "checksum": "5482f663e892c09774f3ec6592631cf1eb473f187998b96a3788a6b8041bcca4"
+  },
+  {
+    "version": "0119",
+    "name": "ortho_space_ledger",
+    "filename": "0119_ortho_space_ledger.sql",
+    "checksum": "4728a00b93074c2092991c474b1b85cc15b8de048064b62016a2b9cf5eb7dcb2"
+  },
+  {
+    "version": "0120",
+    "name": "ortho_space_submissions",
+    "filename": "0120_ortho_space_submissions.sql",
+    "checksum": "db228b697e7d5a5dcb04269cb98190529e35386d7928c6a498444de41431f2ce"
+  },
+  {
+    "version": "0121",
+    "name": "ortho_retention_ledger",
+    "filename": "0121_ortho_retention_ledger.sql",
+    "checksum": "28aa4fbc1018456f2043d8dae280b1e72beb585f69f77b5011fe0b5d6101af3a"
+  },
+  {
+    "version": "0122",
+    "name": "ortho_retention_submissions",
+    "filename": "0122_ortho_retention_submissions.sql",
+    "checksum": "d565c4381a8ddcfa675ea174ec313963cf1cd66fc1bb9e91edd74f9c8c67f73e"
+  }
+]

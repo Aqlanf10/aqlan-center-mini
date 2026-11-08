@@ -1,0 +1,11 @@
+import {expect,it,vi,beforeEach} from 'vitest';
+const m=vi.hoisted(()=>({read:vi.fn(),session:{userId:7,username:'synthetic',role:'admin'}}));
+vi.mock('@/lib/ortho-facial-history-store',()=>({getFacialHistoryPage:m.read}));
+vi.mock('@/lib/ortho-journey-route',()=>({admitJourney:async()=>({ok:true,session:m.session}),journeyRouteOwner:async()=>({ok:true,session:m.session,patientId:1,orthoCaseId:2}),routeId:(v:unknown)=>typeof v==='string'&&/^[1-9]\d*$/.test(v)?Number(v):null,journeyRouteError:(status:number,code:string)=>Response.json({ok:false,code},{status,headers:{'Cache-Control':'private, no-store'}}),journeyResponse:(value:unknown,status:number)=>Response.json(value,{status,headers:{'Cache-Control':'private, no-store'}})}));
+import * as route from '../app/api/ortho/[id]/facial-analysis/history/route';
+const query=`patientId=1&documentId=5&beforeRevisionId=136&beforeContentHash=${'a'.repeat(64)}`;
+const get=(q:string)=>route.GET(new Request(`http://localhost/history?${q}`),{params:Promise.resolve({id:'2'})});
+beforeEach(()=>{vi.clearAllMocks();m.read.mockResolvedValue({ok:true});});
+it('exposes only GET and passes exact server scope/session plus cursor',async()=>{expect('POST' in route).toBe(false);const r=await get(query);expect(r.status).toBe(200);expect(r.headers.get('Cache-Control')).toBe('private, no-store');expect(m.read).toHaveBeenCalledWith(expect.objectContaining({session:m.session,patientId:1,orthoCaseId:2,documentId:5,beforeRevisionId:136,beforeContentHash:'a'.repeat(64)}));});
+it.each(['',`${query}&offset=30`,`${query}&patientId=2`,query.replace('beforeRevisionId=136','beforeRevisionId=0'),query.replace('a'.repeat(64),'BAD')])('refuses missing, duplicate or arbitrary pagination query%s',async q=>{expect((await get(q)).status).toBe(400);expect(m.read).not.toHaveBeenCalled();});
+it('returns private refusal without fake empty page',async()=>{m.read.mockResolvedValue({ok:false,status:403,code:'image_access_denied'});const r=await get(query);expect(r.status).toBe(403);expect(await r.json()).toEqual({ok:false,status:403,code:'image_access_denied'});});

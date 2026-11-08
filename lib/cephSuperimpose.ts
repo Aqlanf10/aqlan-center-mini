@@ -1,31 +1,14 @@
-import type { LandmarkCode, LandmarkMap } from "./ceph";
+import { cephHandedness, isFiniteCephPoint, type LandmarkCode, type LandmarkMap } from "./ceph";
 
 /**
- * التراكب — رسمُ تحليلين فوق بعضهما لتُرى الحركة بالعين.
- * (فكرة ومَخرَج مستودع الوكيل الآخر aqlan-center-main، معاد كتابته لنظام
- * إحداثياتنا: **بكسل الصورة الطبيعي + ملم/بكسل** لا كسورًا ونسب أبعاد.)
+ * Descriptive SN alignment in calibrated millimetres, returned in reference
+ * image pixels. The caller resolves reference/comparison orientation: these
+ * inputs are not inherently earlier/later acquisitions or treatment phases.
  *
- * الجدول يقول «SNA نزل ستّ درجات»؛ والتراكب يُري **أين تحرّك الوجه** — أنزل
- * الفكّ العلوي أم دار؟ أدارت الذقن للأمام أم نمت؟ وهذا ما يُقرأ في ثانية ولا
- * يُقرأ من عمودٍ من الأرقام.
- *
- * ### التسجيل: على قاعدة الجمجمة SN عند S
- *
- * وهي التراكب «العام» الكلاسيكي: تُثبَّت الصورتان على خطّ S→N ويُطابَق موضع S،
- * فما تحرّك بعد ذلك تحرّك فعلًا. واخترناها لأن معلميها (S وN) مطلوبان في كل
- * تتبّع — فتعمل على كل تحليل، بخلاف تراكب الفكّ العلوي الذي يحتاج ANS وPNS.
- *
- * ### وقاعدةُ القياس هي الحدّ الحاكم
- *
- * معالمنا ببكسلٍ طبيعي، فكلٌّ من التحليلين في فضائه الخاص: مختلفُ الأبعاد
- * ومختلفُ `mm_per_pixel`. فالحساب يجري في **فضاء المليمتر** — وهو المشترك الوحيد
- * الصادق بين الصورتين — ثم يُعاد الرسم ببكسل الصورة الأولى.
- *
- *   **لا تراكب بلا معايرةٍ على التحليلين معًا.**
- *
- * وقد يُغرى المرء بالتحجيم على طول SN حتى تتطابق الصورتان — وهذا **يمحو النموّ**:
- * قاعدة الجمجمة تطول في الطفل، فجعلُ طولها واحدًا في الصورتين يُلغي بالضبط ما
- * جاء التراكب ليُظهره. فلا تحجيم هنا أصلًا: المليمتر وحدةٌ واحدة في الرسمين.
+ * Each image uses its own mm-per-pixel calibration. SN lengths are not forced
+ * equal, so measured differences remain visible. Such a difference alone does
+ * not establish growth, treatment effect or true movement; interpretation also
+ * depends on acquisition metadata, calibration and landmark accuracy.
  */
 
 export interface SuperimposeInput {
@@ -36,12 +19,12 @@ export interface SuperimposeInput {
 }
 
 export interface Superimposition {
-  /** معالمُ التحليل الأحدث منقولةً إلى بكسل صورة الأقدم — تُرسم على صورتها. */
+  /** Comparison landmarks transformed into reference image pixels. */
   points: LandmarkMap;
-  /** طوله بالمليمتر في كلٍّ — فيُرى نموّ قاعدة الجمجمة رقمًا لا رسمًا فقط. */
+  /** Measured SN lengths in mm for reference/comparison, not inferred growth. */
   cranialBaseBefore: number;
   cranialBaseAfter: number;
-  /** ما دار به الأحدث ليستقيم على SN الأقدم — بالدرجات. */
+  /** Rotation of the comparison onto the reference SN line, in degrees. */
   rotationDegrees: number;
 }
 
@@ -57,12 +40,7 @@ const toMm = (point: { x: number; y: number }, mmPerPixel: number) =>
 const toBasePx = (point: { x: number; y: number }, mmPerPixel: number): { x: number; y: number } =>
   ({ x: point.x / mmPerPixel, y: -point.y / mmPerPixel });
 
-/**
- * يضع التحليل الأحدث على الأقدم.
- *
- * والترتيب معنيّ: `base` هي الأقدم التي تبقى مكانها وتُرسم عليها صورتها،
- * و`target` هي الأحدث التي تُنقل. والمستدعي هو من يرتّبهما زمنيًا.
- */
+/** Align comparison (target) onto reference (base); neither role implies time. */
 export function superimposeOnSN(base: SuperimposeInput, target: SuperimposeInput): SuperimposeResult {
   const baseS = base.points.S;
   const baseN = base.points.N;
@@ -84,10 +62,34 @@ export function superimposeOnSN(base: SuperimposeInput, target: SuperimposeInput
     };
   }
 
+  // Alignment needs actual finite coordinates, not atan2(0, 0)'s synthetic zero.
+  if ([...Object.values(base.points), ...Object.values(target.points)]
+      .some(point => point != null && !isFiniteCephPoint(point))) {
+    return { ok: false, message: "التراكب غير متاح: توجد إحداثيات معالم غير صالحة." };
+  }
+  const baseHandedness = cephHandedness(base.points);
+  const targetHandedness = cephHandedness(target.points);
+  if (baseHandedness == null || targetHandedness == null) {
+    return { ok: false, message: "التراكب يحتاج إطارًا تشريحيًا صالحًا من S وN وMe، دون نقاط متطابقة أو على خط واحد." };
+  }
+  if (baseHandedness !== targetHandedness) {
+    return { ok: false, message: "اتجاه الصورتين معكوس: وحِّد اتجاه الصورة ومعالمها قبل التراكب؛ لا يُصحَّح الانعكاس بدوران فقط." };
+  }
+
   const bs = toMm(baseS, base.mmPerPixel);
   const bn = toMm(baseN, base.mmPerPixel);
   const ts = toMm(targetS, target.mmPerPixel);
   const tn = toMm(targetN, target.mmPerPixel);
+
+  const spanOf = (from: { x: number; y: number }, to: { x: number; y: number }) =>
+    Math.hypot(to.x - from.x, to.y - from.y);
+  const baseSpan = spanOf(bs, bn);
+  const targetSpan = spanOf(ts, tn);
+  if (![bs, bn, ts, tn].every(isFiniteCephPoint)
+      || !Number.isFinite(baseSpan) || baseSpan <= 0
+      || !Number.isFinite(targetSpan) || targetSpan <= 0) {
+    return { ok: false, message: "التراكب غير متاح: طول S-N أو مقياسه غير صالح." };
+  }
 
   const baseAngle = Math.atan2(bn.y - bs.y, bn.x - bs.x);
   const targetAngle = Math.atan2(tn.y - ts.y, tn.x - ts.x);
@@ -99,25 +101,26 @@ export function superimposeOnSN(base: SuperimposeInput, target: SuperimposeInput
   for (const [code, point] of Object.entries(target.points)) {
     if (!point) continue;
     const p = toMm(point, target.mmPerPixel);
-    // الإزاحة إلى S، ثم الدوران، ثم الوضع عند S الأقدم — كله بالمليمتر.
+    // Translate to comparison S, rotate, then place at reference S, all in mm.
     const dx = p.x - ts.x;
     const dy = p.y - ts.y;
-    moved[code as LandmarkCode] = toBasePx(
+    const transformed = toBasePx(
       { x: bs.x + dx * cos - dy * sin, y: bs.y + dx * sin + dy * cos },
       base.mmPerPixel,
     );
+    if (!isFiniteCephPoint(p) || !isFiniteCephPoint(transformed)) {
+      return { ok: false, message: "التراكب غير متاح: التحويل بالمقياس الحالي ينتج إحداثيات غير صالحة." };
+    }
+    moved[code as LandmarkCode] = transformed;
   }
-
-  const spanOf = (from: { x: number; y: number }, to: { x: number; y: number }) =>
-    Math.hypot(to.x - from.x, to.y - from.y);
 
   return {
     ok: true,
     value: {
       points: moved,
-      // بالمليمتر لا بالبكسل — فرقُ الطولين هو نموّ قاعدة الجمجمة، ويُقرأ رقمًا.
-      cranialBaseBefore: spanOf(bs, bn),
-      cranialBaseAfter: spanOf(ts, tn),
+      // Descriptive measured lengths in mm; do not infer growth from their difference.
+      cranialBaseBefore: baseSpan,
+      cranialBaseAfter: targetSpan,
       rotationDegrees: (rotation * 180) / Math.PI,
     },
   };
@@ -147,7 +150,7 @@ export function referenceLines(points: LandmarkMap) {
   for (const [a, b, label] of REFERENCE_LINES) {
     const from = points[a];
     const to = points[b];
-    if (!from || !to) continue;
+    if (!isFiniteCephPoint(from) || !isFiniteCephPoint(to) || (from.x === to.x && from.y === to.y)) continue;
     lines.push({ from, to, label });
   }
   return lines;

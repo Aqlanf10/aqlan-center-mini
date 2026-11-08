@@ -1,3 +1,7 @@
+// This suite executes server routes in Node, outside Next's server-module resolver.
+// Keep the production server-only marker; supply only its server-context test stub.
+vi.mock("server-only", () => ({}));
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -32,13 +36,19 @@ vi.mock("@/lib/db", () => ({
   ensureSchema: vi.fn(async () => {}),
   createOrthoCase: vi.fn(async () => ({ ok: true, id: 10 })),
   createCephAnalysis: vi.fn(async () => ({ ok: true, id: 20 })),
+  createAuthorizedCephAnalysis: vi.fn(async () => ({ ok: true, id: 20 })),
   recordAdjustment: vi.fn(async () => ({ ok: true, id: 30 })),
   completeCephAnalysis: vi.fn(async () => ({ ok: true, measurements: [], summary: "ok" })),
   duplicateCephAnalysis: vi.fn(async () => ({ ok: true, id: 21 })),
+  duplicateAuthorizedCephAnalysis: vi.fn(async () => ({ ok: true, id: 21 })),
   discardCephAnalysis: vi.fn(async () => ({ ok: true })),
+  discardAuthorizedCephAnalysis: vi.fn(async () => ({ ok: true })),
   updateCephCalibration: vi.fn(async () => ({ ok: true })),
+  updateAuthorizedCephCalibration: vi.fn(async () => ({ ok: true })),
   updateCephLandmarks: vi.fn(async () => ({ ok: true })),
+  updateAuthorizedCephLandmarks: vi.fn(async () => ({ ok: true })),
   updateCephDiagnosis: vi.fn(async () => ({ ok: true })),
+  updateAuthorizedCephDiagnosis: vi.fn(async () => ({ ok: true })),
   listBookingRequests: vi.fn(async () => []),
   rejectBookingRequest: vi.fn(async () => ({ id: 1 })),
   listPatientDiagnoses: vi.fn(async () => []),

@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false},"include":["next-env.d.ts","components/OrthoPhotoComparison.tsx","__tests__/ortho-photo-comparison-ui.test.tsx","__tests__/patient-ortho-read-safety.test.tsx"],"exclude":["node_modules"]}

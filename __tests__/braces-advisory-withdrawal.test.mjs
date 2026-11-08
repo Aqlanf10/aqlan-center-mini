@@ -218,6 +218,26 @@ describe("withdrawn-mode verification on a synthetic installed tree", () => {
     expect(JSON.parse(await readFile(path.join(root, ".dependency-audit/exception-proof.json"), "utf8")).mode).toBe("withdrawn");
   });
 
+  it.each(["withdrawn", "active", "malformed"])("gateway recovery still requires all three official sources and %s proof validation", async (mode) => {
+    const calls = [];
+    const payloads = official({ advisory: mode === "active" ? activeAdvisory : mode === "malformed" ? {} : withdrawnAdvisory() });
+    const fetchImpl = async (target) => {
+      calls.push(target);
+      const status = calls.length === 1 ? 504 : 200;
+      const body = status === 504 ? "private gateway body" : JSON.stringify(await payloads(target));
+      return Object.defineProperty(new Response(body, { status, headers: { "content-type": "application/json" } }), "url", { value: target });
+    };
+    const pending = verify(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), { fetchJson: (target) => fetchOfficialJson(target, fetchImpl) });
+    if (mode === "withdrawn") expect((await pending).official.withdrawnAt).toBe(WITHDRAWN_AT);
+    else await expect(pending).rejects.toThrow(/BRACES_EXCEPTION_REJECTED/);
+    expect(calls).toEqual([
+      `https://api.github.com/advisories/${PIN.ghsa}`,
+      `https://api.github.com/advisories/${PIN.ghsa}`,
+      "https://api.github.com/advisories?ecosystem=npm&affects=braces%403.0.3&per_page=100",
+      "https://registry.npmjs.org/braces",
+    ]);
+  });
+
   it.each([
     ["patch drift", async () => writeFile(path.join(root, "vendor/braces-security.patch"), "tampered\n"), /patch content changed/],
     ["local archive integrity drift", async () => writeFile(path.join(root, "vendor/braces-3.0.3-local.tgz"), "tampered"), /local package archive changed/],

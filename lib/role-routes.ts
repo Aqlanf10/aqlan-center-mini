@@ -94,6 +94,7 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/patients" },
     { path: "/api/patients/[id]/ledger" },
     { path: "/api/patients/[id]/treatment-financial-context", methods: ["GET"] },
+    { path: "/api/patients/[id]/ortho-billing-decisions", methods: ["GET"] },
     // (P0-C) ترتيب تحصيل الرصيد السابق: يقرؤه ليقترح القسط عند القبض — والتفاوض للإدارة والاستقبال.
     { path: "/api/patients/[id]/legacy-balance-arrangement", methods: ["GET"] },
     // (P0-D) لوحة الوصول — يقرؤها الكاشير ليقبض القسط المقترح من مصدره الصحيح.
@@ -134,6 +135,7 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/patients" },
     { path: "/api/patients/[id]/ledger" },
     { path: "/api/patients/[id]/treatment-financial-context", methods: ["GET"] },
+    { path: "/api/patients/[id]/ortho-billing-decisions", methods: ["GET"] },
     { path: "/api/patients/[id]/legacy-balance-arrangement", methods: ["GET"] },
     { path: "/api/plans" },
     { path: "/api/reports" },
@@ -182,7 +184,8 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
   }
   const access: FinanceAccess = financeAccessFor(role, rawAccess);
   // Financial references follow patient-ledger authority, including normalized trailing slashes.
-  if (!access.viewPatientLedger && matches("/api/patients/[id]/treatment-financial-context", pathname)) return false;
+  if (!access.viewPatientLedger && (matches("/api/patients/[id]/treatment-financial-context", pathname)
+    || matches("/api/patients/[id]/ortho-billing-decisions", pathname))) return false;
   if (role === "cashier") {
     if (pathname === "/api/shifts" && (verb === "POST" || verb === "PATCH") && !access.operateShift) return false;
     if ((pathname === "/api/payments" || pathname === "/api/payments/attempts/retire") && verb === "POST" && !access.collectPayments) return false;

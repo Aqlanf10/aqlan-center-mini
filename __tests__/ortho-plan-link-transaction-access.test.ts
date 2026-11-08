@@ -1,0 +1,15 @@
+import {beforeEach,expect,it,vi} from 'vitest';
+import type {SessionPayload} from '../lib/auth';
+import type {DbClient} from '../lib/db';
+const mocks=vi.hoisted(()=>({find:vi.fn(),owns:vi.fn()}));
+vi.mock('../lib/db',()=>({findUserByUsername:mocks.find,doctorOwnsPatient:mocks.owns}));
+import {canChangeOrthoPlanLink} from '../lib/ortho-plan-link-access';
+const session:SessionPayload={userId:1,username:'synthetic',role:'doctor',partyId:7,expiresAt:Date.now()+3600000};
+const client={} as DbClient;
+beforeEach(()=>{vi.clearAllMocks();mocks.find.mockResolvedValue({isActive:true,partyId:7,permissions:{canViewAllPatients:true,canViewPlans:true,canEditPlans:true}});mocks.owns.mockResolvedValue(true);});
+it('preserves exact no-client call signatures',async()=>{expect(await canChangeOrthoPlanLink(session,8)).toBe(true);expect(mocks.find).toHaveBeenCalledWith('synthetic');expect(mocks.owns).toHaveBeenCalledWith(7,8);});
+it('routes both authority reads through caller transaction and lock mode',async()=>{expect(await canChangeOrthoPlanLink(session,8,client,'nowait')).toBe(true);expect(mocks.find).toHaveBeenCalledWith('synthetic',client);expect(mocks.owns).toHaveBeenCalledWith(7,8,client,'nowait');});
+it('does not substitute global clinical visibility for ownership',async()=>{mocks.owns.mockResolvedValue(false);expect(await canChangeOrthoPlanLink(session,8,client,'nowait')).toBe(false);});
+it.each(['canViewPlans','canEditPlans'])('requires current %s',async key=>{mocks.find.mockResolvedValue({isActive:true,partyId:7,permissions:{canViewPlans:true,canEditPlans:true,[key]:false}});expect(await canChangeOrthoPlanLink(session,8,client,'nowait')).toBe(false);expect(mocks.owns).not.toHaveBeenCalled();});
+it('propagates only transactional NOWAIT lock contention',async()=>{const busy=Object.assign(new Error('busy'),{code:'55P03'});mocks.owns.mockRejectedValue(busy);await expect(canChangeOrthoPlanLink(session,8,client,'nowait')).rejects.toBe(busy);expect(await canChangeOrthoPlanLink(session,8)).toBe(false);});
+it('refuses expired transaction authority before querying',async()=>{expect(await canChangeOrthoPlanLink({...session,expiresAt:0},8,client,'nowait')).toBe(false);expect(mocks.find).not.toHaveBeenCalled();});

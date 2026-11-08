@@ -139,7 +139,7 @@ function unmount() { scopes.forEach(retire); scopes.clear(); hooks.layout = []; 
 
 beforeEach(() => {
   unmount(); scopes = new Map(); componentIds = new Map(); hooks.changed = false; hooks.retiredWrites = 0;
-  hooks.session = { username: "synthetic-strategy-reader", displayName: "Synthetic strategy reader", role: "doctor", permissions: { ...DEFAULT_DOCTOR_PERMISSIONS } };
+  hooks.session = { userId: 94001, username: "synthetic-strategy-reader", displayName: "Synthetic strategy reader", role: "doctor", permissions: { ...DEFAULT_DOCTOR_PERMISSIONS } };
   props = { patientId: PATIENT_A, orthoCaseId: ids.orthoCaseId, referenceVisitId: 959761 };
   requests = []; unexpected = []; sequence = 0; confirmLeave.mockReset(); confirmLeave.mockReturnValue(false);
   vi.useFakeTimers(); vi.stubGlobal("window", { confirm: confirmLeave });
@@ -225,13 +225,14 @@ describe("Ortho strategy owner-bound component contract", () => {
     expect(writes()).toEqual([]);
   });
 
-  it.each(["patient", "case", "principal", "permission", "visit", "lifetime"] as const)("retires a held A response body after %s identity changes, including A→B→A", async kind => {
+  it.each(["patient", "case", "principal", "actorId", "permission", "visit", "lifetime"] as const)("retires a held A response body after %s identity changes, including A→B→A", async kind => {
     const firstLife = life(); props = { ...props, lifetime: firstLife };
     render(); const pending = gets()[0]; pending.headers(); await flush(); expect(pending.json).toHaveBeenCalledOnce();
     const originalProps = props, originalSession = hooks.session;
     if (kind === "patient") props = { ...props, patientId: PATIENT_B };
     else if (kind === "case") props = { ...props, orthoCaseId: STRATEGY_IDS.b.orthoCaseId };
     else if (kind === "principal") hooks.session = { ...hooks.session!, username: "synthetic-other-reader" };
+    else if (kind === "actorId") hooks.session = { ...hooks.session!, userId: 94002 };
     else if (kind === "permission") hooks.session = { ...hooks.session!, permissions: { ...hooks.session!.permissions!, canViewPlans: false } };
     else if (kind === "visit") props = { ...props, referenceVisitId: 959762 };
     else props = { ...props, lifetime: life() };
@@ -384,5 +385,30 @@ describe("Ortho strategy owner-bound component contract", () => {
     expect(content(render())).toContain("نتيجة الطلب السابق غير مؤكدة");
     click("تحديث سجل الخطة"); await answer(emptyStrategy(PATIENT_A));
     expect(lifetime.values).toEqual(before); expect(writes()).toHaveLength(1); expect(writes()[0].init?.body).toBe(command);
+  });
+});
+
+
+describe("saved strategy visit reference retirement", () => {
+  it("ignores retained history/reload callbacks after close and remount", async () => {
+    render(); await answer(strategyHistory(PATIENT_A));
+    const history = find(node => node.type === "select")[0];
+    const reload = button("تحديث سجل الخطة");
+    selectHistory(ids.revision1); const pending = gets().at(-1)!; pending.headers(); await flush();
+    unmount(); render(); await answer(emptyStrategy(PATIENT_A));
+    const count = gets().length;
+    (history.props.onChange as (event: unknown) => void)({ target: { value: ids.revision1 } });
+    (reload.props.onClick as () => void)();
+    pending.body(strategyHistory(PATIENT_A, "a", 1)); await flush();
+    expect(gets()).toHaveLength(count); expect(writes()).toHaveLength(0);
+    expect(content(render())).not.toContain(STRATEGY_TEXT.a.strategy);
+  });
+  it.each([401, 403])("clears saved reference on denied refresh %s", async status => {
+    render(); await answer(strategyHistory(PATIENT_A));
+    click("تحديث سجل الخطة");
+    expect(content(render())).not.toContain(STRATEGY_TEXT.a.strategy);
+    await answer({ message: "denied" }, gets().at(-1), status);
+    expect(content(render())).not.toContain(STRATEGY_TEXT.a.strategy);
+    expect(find(node => node.props.role === "alert")).toHaveLength(1); expect(writes()).toHaveLength(0);
   });
 });

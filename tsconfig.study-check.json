@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "components/PatientOrtho.tsx",
+    "components/OrthoCaseStudy*.tsx",
+    "components/OrthoSavedStudyReview.tsx",
+    "lib/ortho-case-study*.ts",
+    "lib/ortho-study*.ts",
+    "app/api/ortho/[id]/case-study/**/*.ts",
+    "__tests__/ortho-case-study*.ts",
+    "__tests__/ortho-study*.ts",
+    "components/OrthoStudy*.tsx",
+    "app/print/ortho-study/**/*.tsx",
+    "__tests__/ortho-study*.tsx",
+    "scripts/verify-study-pptx-local.ts",
+    "scripts/verify-study-illustrated-local.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ],
+  "extends": "./tsconfig.json"
+}

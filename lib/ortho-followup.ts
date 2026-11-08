@@ -85,6 +85,26 @@ export interface FollowupBookingContext {
   otherAppointments: NextAppointmentInfo[];
 }
 
+/**
+ * Patient-wide CURRENT appointment statuses ordered by scheduled local slot.
+ * This is not actual attendance-event history, a historical status snapshot, or
+ * evidence of completed orthodontic care. Repeated DST hours remain ambiguous.
+ */
+export interface FollowupAttendanceContext {
+  basis: "current_status_scheduled_slot";
+  cutoff: {
+    kind: "explicit_instant" | "captured_now" | "date_only_before_midnight";
+    /** UTC ISO instant, or null for a calendar-only exclusive midnight bound. */
+    instant: string | null;
+    /** Clinic wall-clock boundary, not an instant; PostgreSQL microsecond text. */
+    localDateTime: string;
+    timeZone: string;
+  };
+  /** Normalized DATE + TIME at full stored precision, never a UTC instant. */
+  latestScheduledLocal: string | null;
+  outcome: "none" | "attendance" | "no_show" | "conflict";
+}
+
 export interface FollowupCase {
   caseId: number;
   patientId: number;
@@ -102,15 +122,28 @@ export interface FollowupCase {
   nextAppointment: NextAppointmentInfo | null;
   /** Absence means an older/unverified projection, not absence of bookings. */
   bookingContext?: FollowupBookingContext;
-  /** هل آخر موعدٍ له كان غيابًا no_show؟ */
+  /** Optional for older callers. Current status/slot evidence, not a care record. */
+  attendanceContext?: FollowupAttendanceContext;
+  /** Latest eligible slot has no_show (including conflict). False is not proof of attendance. */
   lastWasNoShow: boolean;
 }
 
 export interface FollowupRow extends FollowupCase {
   buckets: FollowupBucket[];
-  /** التاريخ المستحق للشدّة القادمة بحساب nextWeeks — للعرض في القائمة. */
-  dueDate: string;
+  /** Adjustment-derived only. Retention recall is not available in this board. */
+  dueDate: string | null;
+  dueBasis: "adjustment_interval" | "retention_schedule_unavailable";
+  /** Adjustment/start age for active treatment, never a retention review clock. */
   daysSinceLast: number | null;
+}
+
+/**
+ * Phase and status can differ: setOrthoPhase does not transition status, while
+ * the retention phase explicitly means post-debond care. Neither state permits
+ * substituting an adjustment interval for a clinician-set retention schedule.
+ */
+export function isRetentionFollowup(row: Pick<FollowupCase, "status" | "phase">): boolean {
+  return row.status === "retention" || row.phase === "retention";
 }
 
 /**
@@ -126,9 +159,13 @@ export function classifyFollowups(input: {
 }): FollowupRow[] {
   return input.cases.map((row) => {
     const buckets: FollowupBucket[] = [];
+    const retention = isRetentionFollowup(row);
     const since = row.lastAdjustmentDate ?? row.startDate;
-    const daysSinceLast = daysBetween(since, input.today);
-    const dueDate = nextAdjustmentDate(since, row.nextWeeks);
+    // No operational retention recall/review source is wired here. Preserve raw
+    // history, but never infer recall from adjustment age, start, or a booking.
+    const daysSinceLast = retention ? null : daysBetween(since, input.today);
+    const dueDate = retention ? null : nextAdjustmentDate(since, row.nextWeeks);
+    const dueBasis: FollowupRow["dueBasis"] = retention ? "retention_schedule_unavailable" : "adjustment_interval";
 
     const appointment = row.nextAppointment ?? row.bookingContext?.pastUnresolvedAppointment ?? null;
     if (appointment) {
@@ -145,13 +182,15 @@ export function classifyFollowups(input: {
 
     if (row.lastWasNoShow) buckets.push("no_show");
 
-    if (daysSinceLast >= 56) buckets.push("lapsed_8");
-    else if (daysSinceLast >= 42) buckets.push("lapsed_6");
-    else if (daysSinceLast >= 28) buckets.push("lapsed_4");
+    if (daysSinceLast !== null) {
+      if (daysSinceLast >= 56) buckets.push("lapsed_8");
+      else if (daysSinceLast >= 42) buckets.push("lapsed_6");
+      else if (daysSinceLast >= 28) buckets.push("lapsed_4");
+    }
 
-    if (row.status === "retention") buckets.push("retention");
+    if (retention) buckets.push("retention");
 
-    return { ...row, buckets, dueDate, daysSinceLast };
+    return { ...row, buckets, dueDate, dueBasis, daysSinceLast };
   });
 }
 
@@ -180,9 +219,23 @@ export function groupByBucket(rows: FollowupRow[]): Map<FollowupBucket, Followup
   for (const row of rows) {
     for (const bucket of row.buckets) groups.get(bucket)?.push(row);
   }
-  // داخل كل قائمة: الأقدم انقطاعًا أولًا — من مضت عليه أشدّ قلقًا يُنادى أولًا.
+  // Display cohorts, not a cross-cohort clinical urgency ranking: keep active
+  // treatment's existing order first, then retention with no adjustment clock.
+  // A fixed cohort key also makes mixed-list comparison transitive.
   for (const [bucket, list] of groups) {
     list.sort((a, b) => {
+      const aRetention = isRetentionFollowup(a), bRetention = isRetentionFollowup(b);
+      if (aRetention !== bRetention) return aRetention ? 1 : -1;
+      if (aRetention) {
+        if (bucket === "today" || bucket === "tomorrow" || bucket === "this_week" || bucket === "upcoming" || bucket === "overdue") {
+          const aBooking = a.nextAppointment ?? a.bookingContext?.pastUnresolvedAppointment;
+          const bBooking = b.nextAppointment ?? b.bookingContext?.pastUnresolvedAppointment;
+          const byBooking = (aBooking?.date ?? "").localeCompare(bBooking?.date ?? "")
+            || (aBooking?.time ?? "").localeCompare(bBooking?.time ?? "");
+          if (byBooking !== 0) return byBooking;
+        }
+        return a.caseId - b.caseId || a.patientId - b.patientId;
+      }
       const aDate = a.lastAdjustmentDate ?? a.startDate;
       const bDate = b.lastAdjustmentDate ?? b.startDate;
       const byAge = aDate.localeCompare(bDate);

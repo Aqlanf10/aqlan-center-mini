@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KpiCard, StructuredTable, ActionButton , ToolConfirmationOffer } from "@/lib/ai-tools/types";
 
 export interface ChatMessage {
@@ -273,9 +273,7 @@ export default function AiStaffChatModal({
     return QUICK_PROMPTS.filter((p) => p.category === activeCategory);
   }, [activeCategory]);
 
-  if (!isOpen) return null;
-
-  const handleSend = async (customPrompt?: string) => {
+  const handleSend = useCallback(async (customPrompt?: string) => {
     const textToSend = (customPrompt || input).trim();
     if (!textToSend || busy) return;
 
@@ -352,7 +350,9 @@ export default function AiStaffChatModal({
     } finally {
       setBusy(false);
     }
-  };
+  }, [input, busy, messages, currentPatientId]);
+
+  if (!isOpen) return null;
 
   /**
    * تنفيذ إجراء مؤكد (P0.17): POST وحده، الرمز في جسم الطلب لا في روابط،

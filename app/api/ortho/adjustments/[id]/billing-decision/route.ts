@@ -50,7 +50,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       reason: typeof source.reason === "string" ? source.reason : null,
       invoiceNumber: typeof source.invoiceNumber === "string" ? source.invoiceNumber : null,
       actor: session.username, actorRole: session.role,
-    });
+    }, {patientId: owner.patient_id, session});
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: result.status });
     return NextResponse.json(result);
   } catch {

@@ -1,14 +1,25 @@
+import { commandOrthoPlanLink, OrthoPlanLinkRefusal } from "@/lib/ortho-plan-link-command";
+import { OrthoCloseAuthorityError } from "@/lib/ortho-close-authority";
+import { adjustmentEnumAdmissionError } from "@/lib/ortho-adjustment-enum-input";
+import { isAdjustmentVisitInput, ADJUSTMENT_VISIT_INPUT_ERROR } from "@/lib/ortho-adjustment-visit-input";
+import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "@/lib/ortho-adjustment-date";
+import { parseAdjustmentInterval, ADJUSTMENT_INTERVAL_ERROR } from "@/lib/ortho-adjustment-interval";
+import { adjustmentTextAdmissionError } from "@/lib/ortho-adjustment-text-input";
+import { OrthoRetainerAuthorityError } from '@/lib/ortho-retainer-authority';
+import { OrthoPhaseAuthorityError } from '@/lib/ortho-phase-authority';
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  CLINIC_TIME_ZONE, closeOrthoCase, findUserByUsername, getOrthoCase, linkOrthoCasePlan, recordAdjustment,
+  CLINIC_TIME_ZONE, closeOrthoCase, getOrthoCase, recordAdjustment,
   setOrthoPhase, setRetainer,
 } from "@/lib/db";
-import { isElasticClass, PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
+import { isElasticClass, PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL } from "@/lib/ortho";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { canChangeOrthoPlanLink } from "@/lib/ortho-plan-link-access";
+import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +70,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const text = (value: unknown, limit: number) =>
     typeof value === "string" && value.trim() ? value.trim().slice(0, limit) : null;
 
+  const requestKey = request.headers.get("Idempotency-Key");
+  if (!requestKey || !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) {
+    return NextResponse.json({ code: "ADJUSTMENT_REQUEST_KEY_REQUIRED",
+      message: "أعد فتح نموذج الشدّة للحصول على مفتاح حفظ آمن قبل التسجيل." }, { status: 400 });
+  }
+
   try {
     const result = await recordAdjustment({
       caseId,
@@ -74,13 +91,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       note: text(source.note, 300),
       recordedBy: session.username,
       actorRole: session.role,
+      request: { key: requestKey, patientId: found.patientId, session, newTextAdmissionError: adjustmentTextAdmissionError(source),
+        newEnumAdmissionError: adjustmentEnumAdmissionError(source),
+        newVisitAdmissionError: isAdjustmentVisitInput(source.visitId) ? null : ADJUSTMENT_VISIT_INPUT_ERROR,
+        omittedDateForReplay: source.doneOn == null,
+        newDateAdmissionError: source.doneOn == null || isAdjustmentDate(source.doneOn) ? null : ADJUSTMENT_DATE_ERROR,
+        newIntervalAdmissionError: source.nextWeeks == null || parseAdjustmentInterval(source.nextWeeks) !== null ? null : ADJUSTMENT_INTERVAL_ERROR },
     });
-    if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
+    if (!result.ok) return NextResponse.json({ message: result.message, ...(result.code ? { code: result.code } : {}) }, { status: result.status ?? 409 });
     // (CASE-1) شدّةٌ لهذه الزيارة موجودة سلفًا (نقرة مزدوجة/إعادة محاولة): تُعاد هي ولا يُدرج صفٌّ ثانٍ.
     // (VISIT-FLOW-1) visitId: زيارة اليوم التي رُبطت بها الشدّة (أو null) — لتقول الشاشة ذلك.
+    const receipt = { id: result.id, patientId: found.patientId, caseId, requestKey,
+      visitId: result.visitId, attachedToToday: result.attachedToToday };
     return result.created
-      ? NextResponse.json({ id: result.id, visitId: result.visitId, attachedToToday: result.attachedToToday }, { status: 201 })
-      : NextResponse.json({ id: result.id, existing: true, visitId: result.visitId, attachedToToday: result.attachedToToday }, { status: 200 });
+      ? NextResponse.json(receipt, { status: 201 })
+      : NextResponse.json({ ...receipt, existing: true, ...(result.replayed ? { replayed: true } : {}) }, { status: 200 });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل الشدّة." }, { status: 500 });
   }
@@ -109,30 +134,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     /* (P1-B) ربط الحالة باتفاقها المالي أو فكّه — يغيّر مصدر فوترة الشدّات القادمة، فلمن يملك الخطط. */
     if ("planId" in source) {
-      if (!["admin", "doctor", "reception"].includes(session.role)) {
-        return forbidden("ربط حالة التقويم بالاتفاق للإدارة والطبيب والاستقبال.");
+      if (!(await canChangeOrthoPlanLink(session, found.patientId))) {
+        return forbidden("غير مصرّح لك بربط حالة التقويم بخطة العلاج أو فكّ ارتباطها.");
       }
-      if (session.role === "doctor") {
-        const user = await findUserByUsername(session.username).catch(() => null);
-        if (user?.permissions && user.permissions.canEditPlans === false) {
-          return forbidden("غير مصرّح لك بتعديل خطط العلاج.");
-        }
-      }
-      const raw = source.planId;
-      const planId = raw === null ? null : Number(raw);
-      if (planId !== null && !(Number.isInteger(planId) && planId > 0)) {
-        return NextResponse.json({ message: "الخطة المختارة غير صالحة." }, { status: 400 });
-      }
-      const linked = await linkOrthoCasePlan({ caseId, planId, actor: session.username, actorRole: session.role });
-      if (!linked.ok) return NextResponse.json({ message: linked.message }, { status: linked.status });
-      return NextResponse.json(linked);
+      return NextResponse.json(await commandOrthoPlanLink(session, caseId, body), { headers: { "Cache-Control": "no-store" } });
     }
 
     if (typeof source.phase === "string") {
-      if (!Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase)) {
+      if (!PHASE_ORDER.includes(source.phase as keyof typeof PHASE_LABEL)) {
         return NextResponse.json({ message: "مرحلة غير معروفة." }, { status: 400 });
       }
-      const changed = await setOrthoPhase(caseId, source.phase as keyof typeof PHASE_LABEL);
+      const changed = await setOrthoPhase(caseId, source.phase as keyof typeof PHASE_LABEL, { patientId: found.patientId, session });
       if (!changed) return NextResponse.json({ message: "الحالة مغلقة أو غير موجودة." }, { status: 409 });
       return NextResponse.json({ ok: true });
     }
@@ -141,14 +153,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!Object.prototype.hasOwnProperty.call(RETAINER_LABEL, source.retainer)) {
         return NextResponse.json({ message: "نوع مثبّت غير معروف." }, { status: 400 });
       }
-      const explicitOn = typeof source.retainerOn === "string" && DATE_PATTERN.test(source.retainerOn)
-        ? source.retainerOn : null;
+      const hasDate = Object.prototype.hasOwnProperty.call(source, "retainerOn");
+      const rawDate = source.retainerOn;
+      if (hasDate && rawDate !== null && (
+        typeof rawDate !== "string" || !DATE_PATTERN.test(rawDate)
+        || rawDate.startsWith("0000-") || !Number.isFinite(Date.parse(rawDate))
+        || new Date(rawDate).toISOString().slice(0, 10) !== rawDate
+      )) {
+        return NextResponse.json({ message: "تاريخ تسليم المثبّت غير صالح." }, { status: 400 });
+      }
+      // An omitted date is unknown, never evidence of delivery today.
+      const explicitOn = typeof rawDate === "string" ? rawDate : null;
       const saved = await setRetainer({
         id: caseId,
         retainer: source.retainer as keyof typeof RETAINER_LABEL,
-        deliveredOn: source.retainer === "none" ? null : explicitOn ?? today,
-        preserveExistingDeliveryDate: explicitOn === null,
-      });
+        deliveredOn: source.retainer === "none" ? null : explicitOn,
+        preserveExistingDeliveryDate: !hasDate,
+      }, { patientId: found.patientId, session });
       if (!saved) return NextResponse.json({ message: "الحالة مغلقة أو غير موجودة." }, { status: 409 });
       return NextResponse.json({ ok: true });
     }
@@ -159,13 +180,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         status: source.status,
         actor: session.username,
         note: typeof source.note === "string" ? source.note.slice(0, 300) : null,
-      });
+      }, { patientId: found.patientId, session });
       if (!closed.ok) return NextResponse.json({ message: closed.message }, { status: 409 });
       return NextResponse.json({ ok: true });
     }
 
     return NextResponse.json({ message: "إجراء غير معروف." }, { status: 400 });
-  } catch {
+  } catch (error) {
+    if (error instanceof OrthoPlanLinkRefusal) return NextResponse.json({ message: error.message, code: error.code }, { status: error.status, headers: { "Cache-Control": "no-store" } });
+    if (error instanceof OrthoCloseAuthorityError || error instanceof OrthoPhaseAuthorityError || error instanceof OrthoRetainerAuthorityError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.status });
     return NextResponse.json({ message: "تعذّر تنفيذ الإجراء." }, { status: 500 });
   }
 }

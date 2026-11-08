@@ -12,12 +12,31 @@ describe("unregistered periodontal SQL source contract (SQL never executed)", ()
   it("does not register schema, a numbered migration, a route or an editor", () => {
     expect(readFileSync("lib/db.ts", "utf8")).not.toContain("PERIODONTAL_SQL");
     const files = readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name));
-    expect(files).toHaveLength(66);
+    expect(files).toHaveLength(86);
     expect(files).toContain("0066_agreement_delta_amendments.sql");
     expect(files).toContain("0067_patient_appointment_history_index.sql");
     expect(files).toContain("0068_collection_attempt_retirements.sql");
     expect(files).toContain("0069_unpaid_currency_transitions.sql");
     expect(files).toContain("0089_lab_shade_specification.sql");
+    expect(files).toContain("0108_ortho_assessment_intake.sql");
+    expect(files.filter(name => name >= "0106").sort()).toEqual([
+      "0106_ortho_assessment_verifier_2_2.sql",
+      "0108_ortho_assessment_intake.sql",
+      "0109_ortho_adjustment_requests.sql",
+      "0110_ortho_assessment_verifier_2_2_1.sql",
+      "0111_ortho_case_study.sql",
+      "0112_ortho_study_submissions.sql",
+      "0113_ceph_completion_provenance.sql",
+      "0114_ceph_completion_source_cas.sql",
+      "0115_ortho_facial_revisions.sql",
+      "0116_ortho_facial_submissions.sql",
+      "0117_ortho_problem_sources.sql",
+      "0118_ortho_problem_source_submissions.sql",
+      "0119_ortho_space_ledger.sql",
+      "0120_ortho_space_submissions.sql",
+      "0121_ortho_retention_ledger.sql",
+      "0122_ortho_retention_submissions.sql",
+    ]);
     expect(files.filter(name => /^005[12]_/.test(name)).sort()).toEqual(["0051_ortho_treatment_strategy.sql", "0052_ortho_assessment.sql"]);
     expect(readdirSync("migrations")).toContain("0061_invoice_correction_lineage.sql");
     expect(readdirSync("migrations").some((name) => name.includes("periodontal"))).toBe(false);

@@ -2,6 +2,8 @@ import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientOrtho, type AdjustmentForm } from "../components/PatientOrtho";
 import { RETAINER_LABEL } from "../lib/ortho";
+import { OrthoPackageLink } from "../components/OrthoPackageLink";
+import TreatmentFinancialContext from "../components/TreatmentFinancialContext";
 
 // Exercise PatientOrtho's real rendered button handlers with synthetic hook storage.
 // Child editors are not executed; fetch and the native prompt are fully mocked.
@@ -51,7 +53,7 @@ vi.mock("react", async (original) => {
   };
 });
 vi.mock("../components/SessionProvider", () => ({
-  useSession: () => ({ username: "synthetic-doctor", role: "doctor", permissions: {} }),
+  useSession: () => ({ username: "synthetic-doctor", role: "doctor", permissions: { canViewPlans: true, canEditPlans: true } }),
 }));
 vi.mock("../components/SettingsProvider", () => ({ useClinicName: () => "Synthetic clinic", useSetting: () => "" }));
 vi.mock("../components/LegacyOnboardingChecklist", () => ({ LegacyOnboardingChecklist: () => null }));
@@ -63,7 +65,7 @@ type Case = ComponentProps<typeof AdjustmentForm>["caseRow"];
 type Element = ReactElement<Record<string, unknown>>;
 const PATIENT_ID = 19;
 const CASE_ID = 41;
-const COMPLETE_LABEL = "أُكملت الحالة بنجاح وسُلّم المثبت";
+const COMPLETE_LABEL = "تسجيل إكمال الحالة";
 const DISCONTINUE_LABEL = "توقّفت الحالة";
 const COMPLETE_PROMPT = "ملاحظة على إكمال الحالة (اختياري)";
 const DISCONTINUE_PROMPT = "سبب التوقّف أو الإلغاء؟";
@@ -151,9 +153,39 @@ beforeEach(() => {
     if (url === `/api/patients/${PATIENT_ID}`) return Response.json({ patient: { id: PATIENT_ID, fullName: "Synthetic patient", phone: null } });
     throw new Error(`Unexpected synthetic read: ${url}`);
   });
-  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { prompt });
+  // The mounted workspace now owns a beforeunload recovery listener. Keep a
+  // real synthetic EventTarget rather than suppressing its effect or changing
+  // production lifecycle behavior to satisfy this older prompt-only harness.
+  const events = new EventTarget();
+  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", {
+    prompt, addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+    dispatchEvent: events.dispatchEvent.bind(events),
+  });
 });
 afterEach(async () => { await settle(); vi.unstubAllGlobals(); });
+
+describe("PatientOrtho preserves the legacy financial-link boundary", () => {
+  it("offers explicit existing-agreement selection without creating a financial source", async () => {
+    render(); await settle();
+    const tree = render();
+    const link = elements(tree).find((node) => node.type === OrthoPackageLink);
+    expect(link?.props).toMatchObject({ patientId: PATIENT_ID, caseId: CASE_ID, planId: null, canLink: true });
+    expect(text(tree)).toContain("ربط خطة علاج أو اتفاق قائم");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toEqual([]);
+  });
+
+  it("retains existing link management without promoting it to an invoice source", async () => {
+    caseRow = { ...fixture, planId: 51 };
+    render(); await settle();
+    const tree = render();
+    expect(elements(tree).find((node) => node.type === OrthoPackageLink)?.props)
+      .toMatchObject({ planId: 51, canLink: true });
+    expect(elements(tree).find((node) => node.type === TreatmentFinancialContext)?.props)
+      .toMatchObject({ patientId: PATIENT_ID, orthoCaseId: CASE_ID, canView: false });
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toEqual([]);
+  });
+});
 
 describe.each(["active", "retention"] as const)("PatientOrtho %s case completion prompt", (status) => {
   it("Cancel returns without a PATCH, reload, or local completion", async () => {

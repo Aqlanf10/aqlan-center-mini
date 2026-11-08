@@ -9,7 +9,9 @@ let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 let files: Awaited<ReturnType<typeof loadMigrationFiles>>;
 beforeEach(async () => {
   fixture = await openBackupTimestampFixture(process.env);
-  files = await loadMigrationFiles();
+  // Freeze this historical registration fixture at its target migrations.
+  // Later migrations require these tables and cannot form their predecessor.
+  files = (await loadMigrationFiles()).filter(file => file.version <= "0052");
   await migrate(fixture.source, { apply: true, files: files.filter(file => !["0051", "0052"].includes(file.version)) });
 });
 afterEach(async () => { await fixture?.close(); });

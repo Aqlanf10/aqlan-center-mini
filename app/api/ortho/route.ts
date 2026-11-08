@@ -1,12 +1,17 @@
+import { readOrthoCreateDuration } from "@/lib/ortho-create-duration";
+import { isDocumentAcquisitionDate } from "@/lib/document-acquisition-date";
+import { isClinicalId, parseClinicalId } from "@/lib/patient-navigation";
+import { OrthoCreateAuthorityError } from "@/lib/ortho-create-authority";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  CLINIC_TIME_ZONE, createOrthoCase, listOrthoCases, listPatientOrthoCases, recordAudit,
+  CLINIC_TIME_ZONE, createOrthoCase, listOrthoCases, listPatientOrthoCases,
 } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { canChangeOrthoPlanLink } from "@/lib/ortho-plan-link-access";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +22,6 @@ export const dynamic = "force-dynamic";
  * تتبع صلاحية مستندات المريض نفسها، ولا تمنع قراءة بقية السجل السريري.
  */
 
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ACCESS_BATCH_SIZE = 8;
 
 const APPLIANCES = ["fixed_metal", "fixed_ceramic", "aligners", "removable", "functional"];
@@ -32,9 +36,8 @@ export async function GET(request: Request) {
   if (!session) return denied();
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const filters = new URL(request.url).searchParams.getAll("patientId");
-  const patientId = filters.length === 0 ? null : Number(filters[0]);
-  if (filters.length > 1 || (patientId !== null
-    && (!/^[1-9]\d*$/.test(filters[0]) || !Number.isSafeInteger(patientId)))) {
+  const patientId = filters.length === 0 ? null : parseClinicalId(filters[0]);
+  if (filters.length > 1 || (filters.length === 1 && patientId === null)) {
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
   }
 
@@ -76,6 +79,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  // The direct handler enforces the same CLINIC boundary as the HTTP registry.
+  if (!["admin", "reception", "doctor"].includes(session.role)) {
+    return NextResponse.json({ message: "غير مصرّح لك بفتح حالة تقويم." }, { status: 403 });
+  }
 
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
@@ -83,30 +90,67 @@ export async function POST(request: Request) {
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
-  const patientId = Number(source.patientId);
-  if (!Number.isInteger(patientId) || patientId <= 0) {
+  // Identity admission is HTTP-only; keep trusted internal writer semantics.
+  const readId = (value: unknown) => typeof value === "string"
+    ? parseClinicalId(value) : isClinicalId(value) ? value : null;
+  const patientId = readId(source.patientId);
+  if (patientId === null) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
+  }
+  // Omission/null/blank means deliberately unlinked. Other supplied values must
+  // identify a plan exactly, never silently discard requested linkage.
+  const noPlan = source.planId == null || (typeof source.planId === "string" && source.planId.trim() === "");
+  const planId = noPlan ? null : readId(source.planId);
+  if (!noPlan && planId === null) {
+    return NextResponse.json({ message: "معرّف خطة العلاج غير صالح." }, { status: 400 });
   }
   if (!(await canAccessPatient(session, patientId))) {
     return NextResponse.json({ message: "غير مصرّح لك بفتح حالة تقويم لهذا المريض." }, { status: 403 });
   }
 
-  const appliance = typeof source.appliance === "string" && APPLIANCES.includes(source.appliance)
-    ? source.appliance : "fixed_metal";
-  const arches = typeof source.arches === "string" && ARCHES.includes(source.arches)
-    ? source.arches : "both";
-  const slot = typeof source.slot === "string" && SLOTS.includes(source.slot) ? source.slot : "022";
+  // Defaults apply only to omitted fields. Explicit malformed clinical choices
+  // must not silently become a different appliance, arch scope or bracket slot.
+  if (
+    (source.appliance !== undefined && (typeof source.appliance !== "string" || !APPLIANCES.includes(source.appliance))) ||
+    (source.arches !== undefined && (typeof source.arches !== "string" || !ARCHES.includes(source.arches))) ||
+    (source.slot !== undefined && (typeof source.slot !== "string" || !SLOTS.includes(source.slot)))
+  ) {
+    return NextResponse.json({ message: "اختر نوع الجهاز والفكين ومقاس الحاصرة من القيم المتاحة." }, { status: 400 });
+  }
+  const appliance = source.appliance === undefined ? "fixed_metal" : source.appliance;
+  const arches = source.arches === undefined ? "both" : source.arches;
+  const slot = source.slot === undefined ? "022" : source.slot;
 
-  const plannedMonths = Math.round(Number(source.plannedMonths ?? 18));
-  if (!Number.isFinite(plannedMonths) || plannedMonths < 1 || plannedMonths > 120) {
+  const plannedMonths = readOrthoCreateDuration(source.plannedMonths);
+  if (plannedMonths === null) {
     return NextResponse.json({ message: "المدة المتوقعة بين شهر و120 شهرًا." }, { status: 400 });
   }
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const startDate = typeof source.startDate === "string" && DATE_PATTERN.test(source.startDate)
-    ? source.startDate : today;
-  const rawPlan = Number(source.planId);
-  const planId = Number.isInteger(rawPlan) && rawPlan > 0 ? rawPlan : null;
+  // The optional native date input may be cleared. Only absence/blank uses
+  // clinic today; supplied dates must be exact Gregorian calendar dates.
+  const noStartDate = source.startDate == null || (typeof source.startDate === "string" && source.startDate.trim() === "");
+  if (!noStartDate && !isDocumentAcquisitionDate(source.startDate)) {
+    return NextResponse.json({ message: "أدخل تاريخ بداية ميلاديًا صحيحًا." }, { status: 400 });
+  }
+  const startDate = noStartDate ? today : source.startDate as string;
+  if (planId !== null && !(await canChangeOrthoPlanLink(session, patientId))) {
+    return NextResponse.json({ message: "غير مصرّح لك بربط حالة التقويم بخطة العلاج." }, { status: 403 });
+  }
+
+  // Keep the existing raw UTF-16 limits without truncating authored content.
+  // Null/omission and the writer's intentional trim/blank semantics stay intact.
+  // PostgreSQL cannot store NUL; lone surrogates would be silently replaced
+  // during UTF-8 encoding. Valid Unicode (including paired surrogates) is kept.
+  for (const [field, limit] of [["bracketSystem", 80], ["note", 300]] as const) {
+    const value = source[field];
+    if (value != null && (typeof value !== "string" || value.length > limit
+      || value.includes("\u0000") || /[\uD800-\uDFFF]/u.test(value))) {
+      return NextResponse.json({ message: field === "bracketSystem"
+        ? "نظام الحاصرات يجب أن يكون نصًا صالحًا لا يتجاوز 80 حرفًا."
+        : "الملاحظة يجب أن تكون نصًا صالحًا لا يتجاوز 300 حرفًا." }, { status: 400 });
+    }
+  }
 
   try {
     const created = await createOrthoCase({
@@ -114,22 +158,19 @@ export async function POST(request: Request) {
       appliance: appliance as never,
       arches: arches as never,
       slot: slot as never,
-      bracketSystem: typeof source.bracketSystem === "string" ? source.bracketSystem.slice(0, 80) : null,
+      bracketSystem: typeof source.bracketSystem === "string" ? source.bracketSystem : null,
       startDate,
       plannedMonths,
       planId,
-      note: typeof source.note === "string" ? source.note.slice(0, 300) : null,
+      note: typeof source.note === "string" ? source.note : null,
       createdBy: session.username,
-    });
+    }, { patientId, session });
     if (!created.ok) return NextResponse.json({ message: created.message }, { status: 409 });
-    // (TD-06) فتح حالة تقويم — من فتحها، ولأي مريض، وبأي جهاز.
-    await recordAudit({
-      action: "ortho.case_create", entity: "ortho_case", entityId: created.id,
-      details: { المريض: patientId, الجهاز: appliance, الفكان: arches, الخطة: planId ?? null, البداية: startDate },
-      actor: session.username, actorRole: session.role,
-    });
     return NextResponse.json({ id: created.id }, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof OrthoCreateAuthorityError) {
+      return NextResponse.json({ message: error.message, code: error.code }, { status: error.status });
+    }
     return NextResponse.json({ message: "تعذّر فتح الحالة. تأكد من المريض." }, { status: 500 });
   }
 }

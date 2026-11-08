@@ -1,0 +1,31 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "noEmit": true
+  },
+  "include": [
+    "app/api/prescriptions/route.ts",
+    "app/api/prescriptions/commands/[key]/route.ts",
+    "app/api/patients/[id]/prescriptions/saved/route.ts",
+    "app/print/prescription/[id]/page.tsx",
+    "app/api/ortho/[id]/plan-link/route.ts",
+    "lib/prescription-issuance.ts",
+    "lib/restore/staging.ts",
+    "scripts/verify-schema-ownership.ts",
+    "components/PwaRegister.tsx",
+    "components/ConsentModal.tsx",
+    "components/hr/ContractsPanel.tsx",
+    "components/hr/TasksPanel.tsx",
+    "components/patient/SummaryTab.tsx",
+    "components/PatientPlans.tsx",
+    "components/leadership/useLeadershipRead.ts",
+    "__tests__/panel-commit-lifecycles.test.tsx",
+    "__tests__/planned-visit-rebooking-ui.test.tsx",
+    "__tests__/leadership-read-ui.test.tsx",
+    "__tests__/patient-plans-visibility-lifecycle.test.tsx"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

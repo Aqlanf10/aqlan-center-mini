@@ -70,6 +70,7 @@ const study = (extra: Partial<CephAnalysis> = {}): CephAnalysis => ({
   calibration: { x1: 0, y1: 0, x2: 100, y2: 0, mm: 100 }, mmPerPixel: 1,
   note: null, createdBy: "synthetic-doctor", createdAt: "2026-01-01T08:00:00.000Z",
   completedBy: "synthetic-doctor", completedAt: "2026-01-01T09:00:00.000Z",
+  provenanceState: "versioned",
   findings: { anb: 4.2, fma: 25.1, wits: -1.3 }, ...extra,
 });
 let props: PatientCephProps;
@@ -122,6 +123,19 @@ beforeEach(() => {
 afterEach(() => { hooks.effects.forEach(effect => effect.cleanup?.()); vi.unstubAllGlobals(); });
 
 describe("PatientCeph signed summary follows the displayed scope", () => {
+  it.each([undefined, "unversioned", "not_completed", "integrity_unavailable"] as const)("withholds completed summary and units without verified provenance: %s", async provenanceState => {
+    analyses = [study({provenanceState})]; await ready();
+    expect(summary()).toBeUndefined();
+    const output = text(rows()[0]);
+    expect(output).not.toContain("4.2"); expect(output).not.toContain("25.1"); expect(output).not.toContain("-1.3");
+    expect(output).not.toContain("°"); expect(output).not.toContain("px/mm");
+    expect(output).toContain(provenanceState === "integrity_unavailable" ? "تعذّر التحقق من سلامة الاعتماد" : "اعتماد تاريخي غير موثّق الإصدار");
+    expect(nodes(rows()[0]).some(node=>node.type==="input" && node.props.type==="checkbox")).toBe(false);
+  });
+  it("does not replace a newer unversioned completion with an older witnessed summary", async () => {
+    analyses = [study({id:62,provenanceState:"unversioned"}),study()]; await ready();
+    expect(summary()).toBeUndefined(); expect(rows()).toHaveLength(2);
+  });
   it.each([CASE_B, null])("does not use a newer completed study linked to %s for case A", async orthoCaseId => {
     analyses = [
       study({ id: 64, status: "draft", findings: null }),

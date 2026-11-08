@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false,"noEmit":true},"include":["lib/ortho-adjustment-interval.ts","__tests__/ortho-adjustment-interval-precision.test.ts","__tests__/postgres/ortho-adjustment-interval.test.ts"],"exclude":["node_modules"]}

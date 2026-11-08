@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -27,12 +28,22 @@ let doctorId = 0;
 let adjustService = 0;
 let retainerService = 0;
 let sequence = 0;
+let doctorSession: SessionPayload;
+let receptionSession: SessionPayload;
+const adjustmentOwners = new Map<number, number>();
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
   await openShift({ openedBy: "cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
   doctorId = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'د. التقويم') RETURNING id`))[0].id;
+  const credential = "synthetic-outside-contract-credential";
+  for (const role of ["doctor", "reception"] as const) {
+    const username = `synthetic-outside-contract-${role}`;
+    const [{ id }] = await q<{ id: number }>("INSERT INTO users(username,display_name,password_hash,role,party_id) VALUES($1,'Synthetic decision actor',$2,$3,$4) RETURNING id", [username, credential, role, role === "doctor" ? doctorId : null]);
+    const session: SessionPayload = { userId: id, username, role, partyId: role === "doctor" ? doctorId : null, expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion(credential) };
+    if (role === "doctor") doctorSession = session; else receptionSession = session;
+  }
   adjustService = (await q<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, price_configured) VALUES ('شدّة تقويم (زيارة)', 'ortho', 10000, TRUE) RETURNING id`))[0].id;
   retainerService = (await q<{ id: number }>(
@@ -57,6 +68,7 @@ async function orthoVisit(options: { legacy?: boolean } = {}) {
     elastics: "none", elasticNote: null, done: "شدّة", nextWeeks: 4, note: null, recordedBy: "doctor", actorRole: "doctor",
   });
   if (!saved.ok) throw new Error(saved.message);
+  adjustmentOwners.set(saved.id, patientId);
   return { patientId, visitId: visit.id, adjustmentId: saved.id };
 }
 
@@ -71,13 +83,13 @@ describe("(P1-C) outside-contract adjustment decision", () => {
     expect((await visitWalkout(visitId))?.orthoAdjustment).toMatchObject({ billingClass: "OUTSIDE_CONTRACT", pendingDecision: true });
     expect((await listPendingOrthoDecisions()).map((row) => row.adjustmentId)).toContain(adjustmentId);
 
-    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "x", invoiceNumber: null, actor: "dr", actorRole: "doctor" }))
+    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "x", invoiceNumber: null, actor: "dr", actorRole: "doctor" }, { patientId: adjustmentOwners.get(adjustmentId)!, session: doctorSession }))
       .toMatchObject({ ok: false, status: 400 });
-    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "متابعة مجانية بعد كسر", invoiceNumber: null, actor: "dr", actorRole: "doctor" }))
+    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "متابعة مجانية بعد كسر", invoiceNumber: null, actor: "dr", actorRole: "doctor" }, { patientId: adjustmentOwners.get(adjustmentId)!, session: doctorSession }))
       .toEqual({ ok: true, decision: "no_charge" });
     expect((await visitWalkout(visitId))?.orthoAdjustment).toMatchObject({ billingClass: "NO_CHARGE", decision: "no_charge", pendingDecision: false });
     expect((await listPendingOrthoDecisions()).map((row) => row.adjustmentId)).not.toContain(adjustmentId);
-    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "مرة ثانية", invoiceNumber: null, actor: "dr", actorRole: "doctor" }))
+    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "مرة ثانية", invoiceNumber: null, actor: "dr", actorRole: "doctor" }, { patientId: adjustmentOwners.get(adjustmentId)!, session: doctorSession }))
       .toMatchObject({ ok: false, status: 409 });
     const [audit] = await q<{ details: Record<string, unknown> }>(
       `SELECT details FROM audit_log WHERE action = 'ortho.billing_decision' AND entity_id = $1`, [String(adjustmentId)]);
@@ -117,13 +129,13 @@ describe("(P1-C) outside-contract adjustment decision", () => {
     });
     const foreign = await sign(other.visitId);
     const [foreignInvoice] = await q<{ invoice_number: string }>(`SELECT invoice_number FROM invoices WHERE id = $1`, [foreign.invoiceId]);
-    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "billed", reason: null, invoiceNumber: foreignInvoice.invoice_number, actor: "reception", actorRole: "reception" }))
+    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "billed", reason: null, invoiceNumber: foreignInvoice.invoice_number, actor: "reception", actorRole: "reception" }, { patientId: adjustmentOwners.get(adjustmentId)!, session: receptionSession }))
       .toMatchObject({ ok: false, status: 409 });
     const { patientId } = (await q<{ patientId: number }>(`SELECT patient_id AS "patientId" FROM visits WHERE id = $1`, [visitId]))[0];
     const own = (await q<{ id: number; invoice_number: string }>(
       `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, created_by)
        VALUES ('INV-OC-OWN', $1, 'YER', 10000, 0, 'reception') RETURNING id, invoice_number`, [patientId]))[0];
-    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "billed", reason: null, invoiceNumber: own.invoice_number, actor: "reception", actorRole: "reception" }))
+    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "billed", reason: null, invoiceNumber: own.invoice_number, actor: "reception", actorRole: "reception" }, { patientId: adjustmentOwners.get(adjustmentId)!, session: receptionSession }))
       .toEqual({ ok: true, decision: "billed" });
     expect((await q<{ billing_invoice_id: number }>(`SELECT billing_invoice_id FROM ortho_adjustments WHERE id = $1`, [adjustmentId]))[0].billing_invoice_id).toBe(own.id);
   });
@@ -138,7 +150,7 @@ describe("(P1-C) outside-contract adjustment decision", () => {
     await q(`UPDATE ortho_cases SET legacy_financial_mode = 'per_session' WHERE id = (SELECT case_id FROM ortho_adjustments WHERE id = $1)`, [adjustmentId]);
     expect((await getClinicalVisit(visitId))?.ortho?.adjustmentBillingClass).toBe("LEGACY_INCLUDED");
     expect((await visitWalkout(visitId))?.orthoAdjustment?.billingClass).toBe("LEGACY_INCLUDED");
-    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "لا يلزم", invoiceNumber: null, actor: "dr", actorRole: "doctor" }))
+    expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "لا يلزم", invoiceNumber: null, actor: "dr", actorRole: "doctor" }, { patientId: adjustmentOwners.get(adjustmentId)!, session: doctorSession }))
       .toMatchObject({ ok: false, status: 409 });
   });
 

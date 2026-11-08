@@ -290,7 +290,7 @@ function OwnedTodayVisitTab({
     () => inlineSource && checkout?.invoiceId && checkout.remainingMinor > 0
       ? { id: checkout.invoiceId, baseCurrency: invoiceCurrency }
       : null,
-    [checkout?.invoiceId, checkout?.remainingMinor, invoiceCurrency, inlineSource],
+    [checkout, invoiceCurrency, inlineSource],
   );
   const todayInvoice = presetInvoice && checkout ? [{
     id: checkout.invoiceId as number,

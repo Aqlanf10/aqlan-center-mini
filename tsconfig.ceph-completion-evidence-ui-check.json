@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["next-env.d.ts", "components/CephSavedCompletionEvidence.tsx", "components/CephTracer.tsx", "app/print/ceph/[id]/page.tsx", "__tests__/ceph-saved-completion-evidence.test.tsx", "__tests__/ceph-tracer-reference-evidence.test.tsx", "__tests__/ceph-print-reference-evidence.test.tsx"],
+  "exclude": ["node_modules"]
+}

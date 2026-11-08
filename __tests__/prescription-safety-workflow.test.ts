@@ -26,7 +26,7 @@ const DRAFT_BODY = {
   diagnosis: "خراج لبي",
   notes: "",
   instructionsLang: "both",
-  items: [{ name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" }],
+  items: [{ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" }],
 };
 
 function draftOf(body: Record<string, unknown> = DRAFT_BODY): PrescriptionDraft {
@@ -212,7 +212,7 @@ describe("ربط الإقرار بالوصفة نفسها وبالتحذيرات
       now: T0,
     });
     const added = draftOf();
-    added.items.push({ name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" });
+    added.items.push({ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" });
     expect(
       verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: added, warnings: METRO_IN_PREGNANCY, now: T0 + 60 * 1000 }),
     ).toEqual({ ok: false, failure: "bad_signature" });
@@ -380,3 +380,15 @@ describe("قوالب الإجراءات والتشخيصات — لا أدوية
     expect(all).not.toContain("لا موانع");
   });
 });
+
+describe('durable issuance response reconciliation', () => {
+ it('never automatically prints an authorized replay', () => { expect(interpretPrescriptionSaveResponse(201, { id: 81, status: 'active', replayed: true })).toEqual({ kind: 'recoveredIssuance', prescriptionId: 81 }); });
+ it('blocks stale void replay and unknown commit instead of opening draft or official print', () => {
+  expect(interpretPrescriptionSaveResponse(201, { id: 81, status: 'void', replayed: true }).kind).toBe('issuanceBlocked');
+  expect(interpretPrescriptionSaveResponse(503, { code: 'issuance_outcome_unknown' }).kind).toBe('issuanceBlocked');
+ });
+});
+
+it('refuses a replay that omits its freshly checked status', () => { expect(interpretPrescriptionSaveResponse(201, { id: 81, replayed: true }).kind).toBe('issuanceBlocked'); });
+
+it.each([undefined, 0, -1, Number.MAX_SAFE_INTEGER + 1])('never falls through malformed replay id %s to automatic print', id => { expect(interpretPrescriptionSaveResponse(201, { id, status: 'active', replayed: true }).kind).toBe('issuanceBlocked'); });

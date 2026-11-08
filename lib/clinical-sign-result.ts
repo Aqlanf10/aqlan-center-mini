@@ -1,15 +1,15 @@
 import { isCurrency } from "./money";
 
 /** Validate the sign endpoint's checkout DTO before publishing a success receipt.
- * The request already owns visitId; any echoed identity must agree with it.
+ * A canonical success must identify the requested visit and its signed state.
  */
 export function isClinicalSignResult(value: unknown, visitId: number, patientId?: number | null): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
   const id = (one: unknown) => Number.isSafeInteger(one) && Number(one) > 0;
   const count = (one: unknown) => Number.isSafeInteger(one) && Number(one) >= 0;
-  if ((row.id !== undefined && row.id !== visitId)
-    || (row.status !== undefined && row.status !== "signed")
+  if (!id(visitId) || row.id !== visitId
+    || row.status !== "signed"
     || !(row.patientId === null || id(row.patientId))
     || (patientId != null && row.patientId !== patientId)
     || !(row.invoiceId === null || id(row.invoiceId))

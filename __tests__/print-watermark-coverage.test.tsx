@@ -1,8 +1,40 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { PrintDocumentWatermark } from "../components/PrintDocument";
+
+const reviewedPrintRoutes = [
+  "card/[id]/page.tsx",
+  "ceph-compare/page.tsx",
+  "ceph/[id]/page.tsx",
+  "commission-statement/[id]/page.tsx",
+  "consent/[id]/page.tsx",
+  "dossier/[id]/page.tsx",
+  "family-statement/[id]/page.tsx",
+  "hr/contracts/[id]/page.tsx",
+  "hr/payroll/[id]/page.tsx",
+  "hr/staff/page.tsx",
+  "hr/tasks/page.tsx",
+  "invoice/[id]/page.tsx",
+  "lab/[id]/page.tsx",
+  "ortho-followups/page.tsx",
+  "ortho-sessions/[id]/page.tsx",
+  "ortho-space/[id]/page.tsx",
+  "ortho-study/[id]/page.tsx",
+  "party/[id]/page.tsx",
+  "patient-card/[id]/page.tsx",
+  "plan/[id]/page.tsx",
+  "post-op/[id]/page.tsx",
+  "prescription/[id]/page.tsx",
+  "receipt/[id]/page.tsx",
+  "referral/[id]/page.tsx",
+  "report/page.tsx",
+  "shift/[id]/page.tsx",
+  "statement/[id]/page.tsx",
+  "voucher/[id]/page.tsx",
+  "walkout/[id]/page.tsx"
+];
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 describe("one shared print-document watermark across all paper families", () => {
@@ -20,13 +52,16 @@ describe("one shared print-document watermark across all paper families", () => 
     expect(html).toContain('data-logo-state="unavailable"'); expect(html).not.toContain("<img");
     expect(source("components/PrintDocumentWatermark.tsx")).toContain("onError={() => setFailed(true)}");
   });
-  it("covers all 25 dedicated routes through their existing shared identity renderers", () => {
+  it("covers the reviewed dedicated-route manifest through their existing shared identity renderers", () => {
     const pages: string[] = [];
     function visit(path: string) { for (const entry of readdirSync(path, { withFileTypes: true })) {
       const full = join(path, entry.name); if (entry.isDirectory()) visit(full); else if (entry.name === "page.tsx") pages.push(full);
     } }
     visit(new URL("../app/print", import.meta.url).pathname);
-    expect(pages).toHaveLength(25);
+    // Exact inventory catches both missing routes and unreviewed additions.
+    const root = new URL("../app/print", import.meta.url).pathname;
+    expect(pages.map(page => relative(root, page)).sort()).toEqual(reviewedPrintRoutes);
+    expect(pages.some(page => page.endsWith("/ortho-study/[id]/page.tsx"))).toBe(true);
     for (const page of pages) expect(readFileSync(page, "utf8")).toMatch(/PrintHeader|PrintableReportDocument/);
   });
   it("uses fixed-size agreement/page marks and retains compact paper choice", () => {
@@ -37,6 +72,22 @@ describe("one shared print-document watermark across all paper families", () => 
     expect(css).toContain("top: min(50%, 66mm)"); expect(css).toContain("top: min(50%, 97mm)");
     expect(css).not.toMatch(/@page[^}]*size:\s*A[56]/);
   });
+  it("restores physical A4 preview sizing without changing compact or Ortho paper contracts", () => {
+    const css = source("components/print-document.css");
+    expect(source("components/PrintDocumentWatermark.tsx")).toContain("<A4WatermarkPreview src={src} />");
+    expect(css).toContain('.a4-preview-canvas[data-a4-preview-paper="true"] { min-height: 297mm; }');
+    expect(css).toContain('[data-a4-preview-orientation="landscape"] { min-height: 210mm; }');
+    expect(css).toContain("width: 76mm; height: 65mm;");
+    expect(source("components/A4WatermarkPreview.tsx")).toContain('const COMPACT = ".sheet-a5, .sheet-a6";');
+    expect(source("components/A4WatermarkPreview.tsx")).toContain("associatedPrintAction(canvas)?.click()");
+  });
+  it("compensates numbered-page asymmetric margins without shifting compact sheets", () => {
+    const css = source("components/print-document.css");
+    expect(css).toContain("body:has(.print-brand-header):has(.hr-staff-sheet, .dossier-sheet, .cs-sheet) > .print-document-watermark { top: calc(50% + 3mm); }");
+    expect(css).toContain("body:has(.print-brand-header):has(.hr-tasks-sheet) > .print-document-watermark { top: calc(50% + 2mm); }");
+    expect(css).toContain("top: min(50%, 66mm)");
+    expect(css).toContain("top: min(50%, 97mm)");
+  });
   it("protects original QR, stored signature, and clinical pixels above decoration", () => {
     const css = source("components/print-document.css");
     expect(css).toContain(".print-watermark-protected, .sign-row, .print-document-signatures, [data-signature-img]");
@@ -46,6 +97,10 @@ describe("one shared print-document watermark across all paper families", () => 
     expect(source("app/print/consent/[id]/page.tsx")).toContain('<img data-signature-img src={`/api/documents/${resolution.documentId}`}');
     expect(source("app/print/lab/[id]/page.tsx")).toContain('className="print-watermark-protected" src={qrCodeDataUrl}');
     expect(source("app/print/ceph/[id]/page.tsx")).toContain('className="print-watermark-protected"');
+    expect(source("app/print/ortho-study/[id]/page.tsx")).toContain("<PrintHeader");
+    const illustratedStudy = source("components/OrthoIllustratedStudyPrint.tsx");
+    expect(illustratedStudy).toContain("<PrintHeader");
+    expect(illustratedStudy).toMatch(/<img\s+className="[^"]*\bprint-watermark-protected\b/);
     expect(source("app/print/print.css")).toContain("z-index: 50;"); // reprint warning remains above the decorative logo
   });
   it("exempts only the decorative singleton from modal sibling suppression", () => {

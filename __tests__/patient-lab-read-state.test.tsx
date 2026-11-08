@@ -334,6 +334,7 @@ describe.each(["headers", "body"] as const)("obsolete read at %s", (phase) => {
 
   it.each([
     { username: "synthetic-other", role: "admin" },
+    { userId: 902, username: "synthetic-admin", role: "admin" },
     { username: "synthetic-admin", role: "doctor" },
     { username: "synthetic-admin", role: "admin", permissions: { canEditPlans: true } },
   ] as Array<SessionInfo | null>)("retires stale principal data for %j", async (session) => {

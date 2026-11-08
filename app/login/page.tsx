@@ -185,6 +185,8 @@ export default function LoginPage() {
       // لا توكن يُستلم ولا يُخزَّن في JavaScript إطلاقاً.
       if (payload?.username) {
         setSession({
+          ...(Number.isSafeInteger(payload.userId) && payload.userId > 0 ? { userId: payload.userId } : {}),
+          ...(payload.permissions !== undefined ? { permissions: payload.permissions } : {}),
           username: payload.username,
           displayName: payload.displayName,
           role: payload.role,

@@ -1,3 +1,4 @@
+import reviewedMigrations from "../fixtures/reviewed-migration-manifest.json";
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -132,10 +133,17 @@ it('skips whole multiline historical registry rows and pins standard string esca
 it('preserves the destination ledger for a historical INSERT without a column list, as the predecessor did', async () => {
   await migrate(fixture.sqlTarget, { apply: true });
   const before = (await fixture.sqlTarget.query('SELECT to_jsonb(m)::text AS value FROM schema_migrations m ORDER BY version')).rows;
-  // Compatibility input outside current writer output: the previous filter
-  // excluded this registry statement, so narrowing it must not import metadata.
-  await writeFile(join(directory, 'columnless-registry.sql'),
+  // Historical columnless syntax remains compatible only with known provenance.
+  // Neither accepted metadata nor rejected unknown metadata may replace the target ledger.
+  const known = reviewedMigrations.find(file => file.version === "0058")!;
+  await writeFile(join(directory, 'unknown-columnless-registry.sql'),
     `BEGIN;\nINSERT INTO schema_migrations VALUES ('9999', 'synthetic historical', '${'0'.repeat(64)}', '2000-01-01T00:00:00Z', FALSE);\nCOMMIT;\n`);
+  await expect(promisify(execFile)(process.execPath, ['scripts/restore.mjs', join(directory, 'unknown-columnless-registry.sql')], {
+    env: { ...process.env, DATABASE_URL: fixture.sqlTarget.options.connectionString!, SKIP_SEED: 'true' },
+  })).rejects.toThrow('Unknown archived migration version: 9999');
+  expect((await fixture.sqlTarget.query('SELECT to_jsonb(m)::text AS value FROM schema_migrations m ORDER BY version')).rows).toEqual(before);
+  await writeFile(join(directory, 'columnless-registry.sql'),
+    `BEGIN;\nINSERT INTO schema_migrations VALUES ('${known.version}', '${known.name}', '${known.checksum}', '2000-01-01T00:00:00Z', FALSE);\nCOMMIT;\n`);
   const restored = await promisify(execFile)(process.execPath, ['scripts/restore.mjs', join(directory, 'columnless-registry.sql')], {
     env: { ...process.env, DATABASE_URL: fixture.sqlTarget.options.connectionString!, SKIP_SEED: 'true' },
   });

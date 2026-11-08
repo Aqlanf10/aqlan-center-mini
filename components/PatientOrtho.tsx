@@ -1,6 +1,16 @@
 "use client";
+import { OrthoComparison } from "./OrthoPhotoComparison";
+export { OrthoComparison } from "./OrthoPhotoComparison";
+import { OrthoDiagnosticNavigation } from "./OrthoDiagnosticNavigation";
+import OrthoSessionDetails from "./OrthoSessionDetails";
+import OrthoSessionBillingReview from "./OrthoSessionBillingReview";
+import { sessionExpectedFollowup, SESSION_FOLLOWUP_DISCLAIMER } from "@/lib/ortho-session-display";
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { readOpenAssessmentCommand, readStartTreatmentCommand, verifyIntakeReceipt, type OpenAssessmentCommand, type StartTreatmentCommand, type IntakeReceipt } from "@/lib/ortho-assessment-intake";
+import { adjustmentNewCommandError, createAdjustmentCommand, readAdjustmentCommand, completeAdjustmentCommand, retireAdjustmentCommand, isAdjustmentReceipt, type AdjustmentCommand } from "@/lib/ortho-adjustment-command";
+import { parseAdjustmentInterval } from "@/lib/ortho-adjustment-interval";
+import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "@/lib/ortho-adjustment-date";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
 import { OrthoPackageLink } from "./OrthoPackageLink";
@@ -15,8 +25,8 @@ import {
   type OrthoPhase, type RetainerType, type SlotSize,
 } from "@/lib/ortho";
 import {
-  PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, buildComparison, fullPhotoSetCheck, savedFullPhotoSetHistory,
-  suggestPhotoStage, type PhotoStage, type PhotoView, type StagePhoto,
+  PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, fullPhotoSetCheck, savedFullPhotoSetHistory,
+  suggestPhotoStage, type PhotoStage, type PhotoView,
 } from "@/lib/ortho-photos";
 import {
   friendlyDateLong, friendlyTime, orthoSessionBookedText, toWhatsAppNumber,
@@ -28,6 +38,9 @@ import { PatientDiagnosis } from "./PatientDiagnosis";
 import { OrthoCaseAssessmentV2, type AssessmentLifetimeV2 } from "./OrthoCaseAssessmentV2";
 import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
+import { OrthoCaseStudyMount } from "./OrthoCaseStudyMount";
+import { makeStudyMountOwner, type StudyMountOwner } from "@/lib/ortho-case-study-mount-owner";
+import { makeStudyRecoveryLedger } from "@/lib/ortho-case-study-recovery";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
@@ -80,9 +93,9 @@ interface Adjustment {
 }
 
 interface OrthoCase {
-  id: number; appliance: Appliance; arches: Arches; slot: SlotSize;
+  id: number; appliance: Appliance | null; arches: Arches | null; slot: SlotSize | null;
   bracketSystem: string | null; status: CaseStatus; phase: OrthoPhase;
-  startDate: string; plannedMonths: number;
+  startDate: string | null; plannedMonths: number | null;
   upperWire: string | null; lowerWire: string | null; planId: number | null;
   retainer: RetainerType | null; retainerOn: string | null; note: string | null;
   closedAt: string | null; closedBy: string | null; closedNote: string | null;
@@ -96,16 +109,17 @@ interface OrthoCase {
     monthsElapsed: number; monthsPlanned: number; monthsRemaining: number;
     percent: number; overdue: boolean; adjustments: number;
     lastAdjustment: string | null; daysSinceLast: number | null;
-  };
+  } | null;
 }
 
-type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention";
+type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention" | "presentation";
 
 const PILLAR_TABS: { key: OrthoPillar; label: string; icon: string }[] = [
   { key: "wires", label: "مسار الأسلاك والشدّات", icon: "⚡" },
   { key: "diagnostics", label: "السجلات والسيفالومتري (WebCeph)", icon: "📐" },
   { key: "prescription", label: "خطة العلاج والميكانيكا", icon: "⚙️" },
   { key: "retention", label: "التثبيت والاستبقاء", icon: "🛡️" },
+  { key: "presentation", label: "دراسة الحالة المحفوظة", icon: "📋" },
 ];
 
 function monthsText(months: number): string {
@@ -145,7 +159,7 @@ type OrthoReadState = "loading" | "ready" | "error" | "denied";
 type Draft = { values: Map<string, unknown>; edits: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean; dirty: boolean;
   strategyView: { readonly readVersion: number; subscribe(listener: () => void): () => void; notify(refresh?: boolean): void; clear(): void };
   settleField(name: string, value: unknown): void;
-  activate: () => void; markUncertain: () => void; trackEdit: (name: string, previous: unknown, next: unknown) => void;
+  activate: () => void; markUncertain: () => void; markConfirmed: () => void; trackEdit: (name: string, previous: unknown, next: unknown) => void;
 };
 type Mutation = { draft: Draft; sequence: number; denial: number; active: boolean };
 type OrthoOwner = {
@@ -154,6 +168,7 @@ type OrthoOwner = {
   controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null;
   cases: OrthoCase[]; drafts: Map<string, Draft>; mutations: Set<Mutation>;
   assessments: Map<number, AssessmentOwnerV2>;
+  studies: Map<number, StudyMountOwner>; studyRecovery: ReturnType<typeof makeStudyRecoveryLedger>;
   deny: () => void;
   activate: () => void; activateStandaloneDraft: (key: string, draft: Draft) => void; retire: () => void;
   bindDenial: (deny: () => void) => void; denyRead: () => void;
@@ -164,10 +179,10 @@ type OrthoOwner = {
 };
 const OrthoOwnerContext = createContext<OrthoOwner | null>(null);
 /** Mutable lifecycle storage owns its transitions; hooks only read it or call its methods. */
-function makeOwner(standalone = false): OrthoOwner {
+function makeOwner(standalone = false, studyRecovery = makeStudyRecoveryLedger()): OrthoOwner {
   const owner: OrthoOwner = { active: false, denied: false, clinical: standalone, contact: standalone, standalone,
     readSequence: 0, mutationSequence: 0, denialSequence: 0, controller: null, timer: null,
-    cases: [], drafts: new Map(), assessments: new Map(), mutations: new Set(), deny: () => {},
+    cases: [], drafts: new Map(), assessments: new Map(), studies: new Map(), studyRecovery, mutations: new Set(), deny: () => {},
     activate: () => { owner.active = true; },
     activateStandaloneDraft: (key, draft) => {
       owner.active = true; owner.clinical = true; owner.contact = true;
@@ -179,6 +194,7 @@ function makeOwner(standalone = false): OrthoOwner {
       owner.denied = true; owner.clinical = false; owner.contact = false;
       owner.denialSequence++; owner.controller?.abort(); owner.cases = [];
       for (const assessment of owner.assessments.values()) assessment.invalidateRead();
+      for (const study of owner.studies.values()) study.invalidateRead();
       owner.clearTimer();
       for (const operation of owner.mutations) {
         operation.active = false; operation.draft.markUncertain();
@@ -186,6 +202,7 @@ function makeOwner(standalone = false): OrthoOwner {
     },
     beginRead: (controller) => {
       for (const assessment of owner.assessments.values()) assessment.invalidateRead();
+      for (const study of owner.studies.values()) study.invalidateRead();
       owner.controller?.abort();
       if (owner.timer !== null) clearTimeout(owner.timer);
       owner.controller = controller;
@@ -195,6 +212,7 @@ function makeOwner(standalone = false): OrthoOwner {
     },
     retireRead: () => {
       for (const assessment of owner.assessments.values()) assessment.invalidateRead();
+      for (const study of owner.studies.values()) study.invalidateRead();
       owner.controller?.abort(); owner.readSequence++; owner.clearTimer();
       owner.clinical = false; owner.contact = false; owner.cases = [];
     },
@@ -229,6 +247,7 @@ function makeDraft(): Draft {
     },
     activate: () => { draft.active = true; },
     markUncertain: () => { draft.uncertain = true; },
+    markConfirmed: () => { draft.uncertain = false; },
     trackEdit: (name, previous, next) => {
       // Opening/closing the booking form changes presentation, not its data.
       if (name === "booking") return;
@@ -264,9 +283,11 @@ function retireOwner(owner: OrthoOwner) {
   for (const key of owner.drafts.keys()) disposeDraft(owner, key);
   for (const assessment of owner.assessments.values()) assessment.retire();
   owner.assessments.clear();
+  for (const study of owner.studies.values()) study.retire();
+  owner.studies.clear();
 }
 function sessionScope(session: SessionInfo | null) {
-  return JSON.stringify(session ? [session.username, session.role, session.permissions ?? null] : null);
+  return JSON.stringify(session ? [session.userId ?? null, session.username, session.role, session.permissions ?? null] : null);
 }
 function currentMutation(owner: OrthoOwner, operation: Mutation | null): operation is Mutation {
   return !!operation && owner.active && !owner.denied && operation.active && operation.draft.active
@@ -307,6 +328,7 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
   useLayoutEffect(() => {
     if (!parent) owner.activateStandaloneDraft(key, draft);
     lease.activate();
+    render(value => value + 1);
     return () => { lease.retire(); if (!parent) owner.retire(); };
   }, [owner, parent, lease, draft, key]);
   const redraw = () => { if (lease.active && owner.active) render((value) => value + 1); };
@@ -347,10 +369,442 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
       return true;
     },
     uncertain: () => { draft.markUncertain(); redraw(); },
+    acknowledge: (operation: Mutation, values: Record<string, unknown>) => {
+      if (!currentMutation(owner, operation)) return;
+      draft.markConfirmed();
+      for (const [name, value] of Object.entries(values)) draft.settleField(name, value);
+      redraw();
+    },
     finish: (operation: Mutation) => { endMutation(owner, operation); redraw(); },
     release: (url: string) => { if (draft.urls.delete(url)) URL.revokeObjectURL(url); },
   };
 }
+import { readProblemSourceRead } from "@/lib/ortho-problem-source-client";
+import { readProblemSourceCommand, type ProblemSourceCandidate, type ProblemSourceCommand, type ProblemSourceRead } from "@/lib/ortho-problem-sources";
+import { canonicalJourneyJSON } from "@/lib/ortho-case-journey-json";
+
+import { bootstrapProblemRecovery, submitProblemAndAcknowledge, cancelProblemAndAcknowledge, problemCommandIdentity, type ProblemSaveExpectation } from "@/lib/ortho-problem-submission-client";
+import type { ProblemSubmissionRecovery } from "@/lib/ortho-problem-submission-contract";
+
+import OrthoSpaceLedger, { type SpaceEditorCommand } from "./OrthoSpaceLedger";
+import { verifySpaceRead, type SpaceLedgerRead } from "@/lib/ortho-space-client";
+import { readSpacePersistenceCommand, type SpacePersistenceCommand } from "@/lib/ortho-space-command";
+import { bootstrapSpaceRecovery, submitSpaceAndAcknowledge, cancelSpaceAndAcknowledge, spaceCommandIdentity, type SpaceSaveExpectation } from "@/lib/ortho-space-submission-client";
+import type { SpaceSubmissionRecovery } from "@/lib/ortho-space-submission-contract";
+
+/** Recovery metadata is loaded before clinical source inventory. A restricted
+ * source cannot erase the server request or turn an unreadable ledger into zero. */
+export function OrthoSpacePanel({ patientId, row }: { patientId: number; row: OrthoCase }) {
+  const form = useOrthoDraft(`space-ledger:${row.id}`, patientId, row.id), { owner, draft } = form;
+  const [document, setDocument] = form.field<SpaceEditorCommand | null>("document", null);
+  const [pending] = form.field<SpacePersistenceCommand | null>("pending", null);
+  const [expected] = form.field<SpaceSaveExpectation | null>("expected", null);
+  const [reconcile] = form.field<{action: "save" | "cancel"; expected: SpaceSaveExpectation | null; binding: Pick<SpaceSaveExpectation, "scope" | "actorId">; identity: NonNullable<SpaceSubmissionRecovery["recovery"]>["identity"]} | null>("reconcile", null);
+  const [metadata, setMetadata] = useState<SpaceSubmissionRecovery | null>(null);
+  const [loadedRead, setRead] = useState<SpaceLedgerRead | null>(null);
+  const [error, setError] = useState(""), [version, reload] = useState(0);
+  const [conflict, setConflict] = useState(false);
+  const empty = {document: null, pending: null, expected: null, reconcile: null};
+  const bound = form.viewActive() && metadata?.actorId === form.session?.userId && metadata?.scope.patientId === patientId && metadata?.scope.orthoCaseId === row.id;
+  const read = bound ? loadedRead : null;
+  const adopt = (value: SpaceSubmissionRecovery) => {
+    const r = value.recovery;
+    if (r?.state === "pending" || r?.state === "committed") {
+      const local = draft.values.get("pending");
+      if (local && canonicalJourneyJSON(local) !== canonicalJourneyJSON(r.expected.command) || !local && draft.values.get("document")) {setConflict(true); return;}
+      form.commit("pending", r.expected.command); form.commit("expected", r.expected); form.commit("document", r.expected.command); form.uncertain();
+    }
+    const local = draft.values.get("pending") as SpacePersistenceCommand | null;
+    setConflict(!!local && !!r?.identity && local.clientRequestId !== r.identity.commandId);
+  };
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), ORTHO_PARENT_READ_TIMEOUT_MS);
+    const current = () => active && form.viewActive() && draft.active;
+    void (async () => {try {
+      setMetadata(null); setRead(null);
+      const binding = await bootstrapSpaceRecovery({patientId, orthoCaseId: row.id}, {current, deny: () => owner.deny()}, controller.signal);
+      if (!current()) return;
+      if (binding.actorId !== form.session?.userId) {owner.deny(); return;}
+      setMetadata(binding); adopt(binding);
+      const response = await fetch(`/api/ortho/${row.id}/space-ledger?patientId=${patientId}`, {credentials: "same-origin", cache: "no-store", signal: controller.signal});
+      if (!current()) return;
+      if (response.status === 401) {owner.deny(); return;}
+      if (response.status !== 200 || response.redirected || !response.headers.get("cache-control")?.split(",").some(s => s.trim().toLowerCase() === "no-store")) throw Error("space_read_failed");
+      const text = await response.text();
+      if (new TextEncoder().encode(text).length > 8 * 1024 * 1024) throw Error("space_response_limit");
+      const value = await verifySpaceRead(JSON.parse(text), patientId, row.id, binding);
+      if (!value) throw Error("space_read_invalid");
+      if (current()) {setRead(value); setError("");}
+    } catch {if (current()) {setRead(null); setError("تعذّر التحقق من سجل المسافات؛ لم يُعتبر فارغاً. يبقى طلب الاستعادة متاحاً للتحقق أو الإلغاء.");}}
+    finally {clearTimeout(timer);}})();
+    return () => {active = false; clearTimeout(timer); controller.abort();};
+  }, [owner, draft, patientId, row.id, version]);
+  const save = async (retry: boolean, serverConflict = false) => {
+    const serverRequest = metadata?.recovery;
+    const matches = !!reconcile?.identity && serverRequest?.identity?.commandId === reconcile.identity.commandId && serverRequest.identity.requestFingerprint === reconcile.identity.requestFingerprint;
+    const serverExpected = serverConflict ? reconcile?.action === "save" ? reconcile.expected : (conflict && !reconcile || matches) && (serverRequest?.state === "pending" || serverRequest?.state === "committed") ? serverRequest.expected : null : null;
+    if (!bound || !metadata || conflict && !serverExpected || retry && !serverExpected && (!pending || metadata.recovery?.state === "blocked" || metadata.recovery?.state === "cancelled") || !retry && (!read?.writable || metadata.recovery || draft.uncertain)) return;
+    const parsed = readSpacePersistenceCommand(serverExpected?.command ?? (retry ? pending : document));
+    if (!parsed.ok) {setError("أكمل مبررات الخطة والتماسات أو اختر جلسة فعلية محفوظة ووثّق القياس. اترك المجهول فارغاً؛ لا تكرر تقديرات متداخلة."); return;}
+    const frozen = serverExpected ?? (retry ? expected : {scope: metadata.scope, actorId: metadata.actorId, command: parsed.value});
+    if (!frozen) return;
+    const operation = serverExpected ? (draft.uncertain ? form.beginRetry(true) : form.begin(true)) : retry ? form.beginRetry(true) : form.begin(!!read?.writable); if (!operation) return;
+    if (!serverExpected) {form.commit("pending", frozen.command); form.commit("expected", frozen);}
+    else form.commit("reconcile", {action: "save", expected: frozen, binding: {scope: frozen.scope, actorId: frozen.actorId}, identity: reconcile?.identity ?? metadata.recovery?.identity});
+    setError("");
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const r = metadata.recovery;
+      await submitSpaceAndAcknowledge({...frozen, current: () => form.current(operation), deny: status => {
+        if (status === 403) {setRead(null); setMetadata(null); reload(n => n + 1);} else owner.deny();
+      }}, frozen, serverExpected && reconcile?.identity ? reconcile.identity : r && r.state !== "blocked" ? r.identity : undefined, controller.signal);
+      if (!form.current(operation)) return;
+      form.acknowledge(operation, serverExpected ? {reconcile: null} : empty); if (serverExpected && pending) form.uncertain(); setRead(null); setMetadata(null); reload(n => n + 1);
+    } catch {if (form.current(operation)) {form.uncertain(); setError("لم تتأكد نتيجة الحفظ والإقرار؛ احتُفظ بالطلب نفسه. أعد التحقق دون تسجيل حدث جديد.");}}
+    finally {clearTimeout(timer); form.finish(operation);}
+  };
+  const cancel = async (serverConflict = false) => {
+    if (!bound || !metadata || draft.busy) return;
+    const r = metadata.recovery;
+    if (!(serverConflict && reconcile) && (!pending || !conflict) && (r?.state === "committed" || r?.state === "blocked" && !r.canCancel)) return;
+    if (!window.confirm("إلغاء الطلب المعلّق والتخلص من مسودته؟ لا يحذف ذلك أي حدث محفوظ.")) return;
+    const operation = draft.uncertain ? form.beginRetry(true) : form.begin(true); if (!operation) return;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const identity = serverConflict ? reconcile?.identity ?? r?.identity : pending ? await spaceCommandIdentity(pending) : r?.identity;
+      if (!identity) throw Error("space_identity_missing");
+      const binding = serverConflict ? reconcile?.binding ?? metadata : expected ?? metadata;
+      if (serverConflict) form.commit("reconcile", {action: "cancel", expected: reconcile?.expected ?? null, binding: {scope: binding.scope, actorId: binding.actorId}, identity});
+      await cancelSpaceAndAcknowledge({...binding, current: () => form.current(operation), deny: () => owner.deny()}, identity,
+        r?.state === "cancelled" && r.identity.commandId === identity.commandId && r.identity.requestFingerprint === identity.requestFingerprint, controller.signal);
+      if (!form.current(operation)) return;
+      form.acknowledge(operation, serverConflict ? {reconcile: null} : empty); if (serverConflict && pending) form.uncertain(); setRead(null); setMetadata(null); reload(n => n + 1);
+    } catch {if (form.current(operation)) {form.uncertain(); setError("لم يتأكد إلغاء الطلب. أعد القراءة والتحقق؛ لم يُحذف حدث محفوظ.");}}
+    finally {clearTimeout(timer); form.finish(operation);}
+  };
+  const discard = () => {if (!pending && !reconcile && !metadata?.recovery && form.editable() && (!draft.dirty || window.confirm("تجاهل مسودة المسافات غير المرسلة؟"))) form.settle("document", null);};
+  const restore = () => {
+    if (!bound || !metadata || pending || reconcile || draft.busy || !window.confirm("تجاهل المسودة المحلية غير المرسلة واستعادة طلب الخادم؟")) return;
+    form.commit("document", null); adopt(metadata);
+  };
+  const recovery = bound ? metadata?.recovery : null;
+  const matchingReconcile = !!reconcile?.identity && recovery?.identity?.commandId === reconcile.identity.commandId && recovery.identity.requestFingerprint === reconcile.identity.requestFingerprint;
+  const recoveryCommand = !bound ? null : reconcile?.action === "save" ? reconcile.expected?.command ?? null : recovery?.state === "pending" || recovery?.state === "committed" ? recovery.expected.command : null;
+  const amountText = (n: number | null) => n === null ? "غير معلوم" : `${n / 1000} mm`;
+  const control = "min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-40";
+  return <section aria-label="استعادة سجل المسافات" className="my-4 min-w-0 space-y-3">
+    <p className="text-xs">المسودة غير المرسلة لا تُستعاد بعد إغلاق الصفحة. الطلب المسجل في الخادم يُستعاد قبل قراءة المصادر؛ الإقرار يحرر الطلب ولا يحذف الحدث. لا يُنشئ هذا السجل زيارة أو خطة علاج أو فاتورة تلقائياً.</p>
+    <button type="button" className={control} disabled={draft.busy || !form.viewActive()} onClick={() => {setRead(null); reload(n => n + 1);}}>تحديث سجل المسافات</button>
+    {error && <p role="alert">{error}</p>}
+    {recoveryCommand && <div aria-label="ملخص طلب المسافات المستعاد" className="rounded-lg border p-3 text-sm">
+      <p>طلب {recovery?.state === "committed" && (!reconcile || matchingReconcile) ? "محفوظ ينتظر الإقرار" : "معلّق؛ إعادة الطلب قد تنفذه"} · الفك {recoveryCommand.content.arch === "upper" ? "العلوي" : "السفلي"}</p>
+      <p>السبب: {recoveryCommand.reason}</p>
+      {recoveryCommand.content.kind === "plan" ? <><p>ميزانية مخططة · مرجع #{recoveryCommand.content.baseline.id} · استراتيجية #{recoveryCommand.content.strategyRevisionId}</p><p>{recoveryCommand.content.rationale}</p><p>البدائل: {recoveryCommand.content.alternatives}</p><details><summary>تفاصيل الخطة المستعادة ومقاديرها</summary>
+        {recoveryCommand.content.contacts.map(c => <p key={c.teeth.join("-")}>تماس <bdi>{c.teeth.join("-")}</bdi> · المخطط <bdi>{amountText(c.plannedUm)}</bdi> · المكسب الإضافي <bdi>{amountText(c.budgetGainUm)}</bdi> · حد الطبيب <bdi>{amountText(c.clinicianLimitUm)}</bdi> · {c.note}</p>)}
+        {recoveryCommand.content.gains.map(g => <p key={g.key}>{g.label} · {g.method} · <bdi>{amountText(g.estimateUm)}</bdi> · {g.included ? "محتسب" : "غير محتسب"} · التداخل: {g.overlapGroup} · {g.rationale}</p>)}
+        {recoveryCommand.content.uses.map(u => <p key={u.key}>{u.label} · الاستخدام الإضافي <bdi>{amountText(u.amountUm)}</bdi></p>)}
+      </details></> : <><p>IPR منفذ · تماس <bdi>{recoveryCommand.content.teeth.join("-")}</bdi> · جلسة #{recoveryCommand.content.adjustmentId} · المقدار <bdi>{recoveryCommand.content.performedUm === null ? "غير معلوم" : `${recoveryCommand.content.performedUm / 1000} mm`}</bdi></p><p>{recoveryCommand.schemaVersion === 2 ? `${recoveryCommand.expectedSession.occurredOn} · زيارة #${recoveryCommand.expectedSession.visitId} · ${recoveryCommand.expectedSession.recordedBy}` : ""}</p><p>{recoveryCommand.content.measurementNote}</p></>}
+    </div>}
+    {(reconcile?.action === "save" && !(matchingReconcile && recovery?.state === "cancelled") || matchingReconcile && recovery?.state === "committed" || conflict && recoveryCommand && !reconcile) && <button type="button" className={control} disabled={draft.busy || !bound} onClick={() => void save(true, true)}>إعادة طلب الخادم والإقرار مع إبقاء الطلب المحلي</button>}
+    {(reconcile?.action === "cancel" && !(matchingReconcile && recovery?.state === "committed") || matchingReconcile && recovery?.state === "cancelled" || conflict && (recovery?.state === "pending" || recovery?.state === "cancelled" || recovery?.state === "blocked" && recovery.canCancel) && !reconcile) && <button type="button" className={control} disabled={draft.busy || !bound} onClick={() => void cancel(true)}>إلغاء طلب الخادم مع إبقاء الطلب المحلي</button>}
+    {conflict && <p role="alert">توجد مسودة محلية وطلب مختلف في الخادم؛ لم نستبدل أياً منهما.</p>}
+    {conflict && !pending && !reconcile && <button type="button" className={control} disabled={draft.busy} onClick={restore}>استعادة طلب المسافات بدلاً من المسودة المحلية</button>}
+    {recovery?.state === "blocked" && <p role="alert">طلب الاستعادة محجوب؛ لا يمكن عرضه أو إعادته بصلاحية المصادر الحالية.</p>}
+    {pending && !conflict && !reconcile && recovery?.state !== "blocked" && recovery?.state !== "cancelled" && <button type="button" className={control} disabled={draft.busy || !bound} onClick={() => void save(true)}>التحقق من طلب المسافات والإقرار بنتيجته</button>}
+    {!reconcile && !conflict && (pending || recovery?.state === "cancelled" || recovery?.state === "pending" || recovery?.state === "blocked" && recovery.canCancel) && recovery?.state !== "committed" && <button type="button" className={control} disabled={draft.busy || !bound} onClick={() => void cancel()}>إلغاء طلب المسافات والإقرار</button>}
+    {read && <OrthoSpaceLedger data={read} draft={document} writable={form.editable() && read.writable && !metadata?.recovery && !conflict && !pending && !reconcile} busy={draft.busy} uncertain={draft.uncertain}
+      update={setDocument} discard={discard} save={() => void save(false)} />}
+  </section>;
+}
+
+import OrthoRetentionLedger, { RetentionEventDetails } from "./OrthoRetentionLedger";
+import { verifyRetentionRead, type RetentionLedgerRead } from "@/lib/ortho-retention-client";
+import { readRetentionPersistenceCommand, type RetentionPersistenceCommand } from "@/lib/ortho-retention-command";
+import { bootstrapRetentionRecovery, submitRetentionAndAcknowledge, cancelRetentionAndAcknowledge, retentionCommandIdentity, type RetentionSaveExpectation } from "@/lib/ortho-retention-submission-client";
+import type { RetentionSubmissionRecovery } from "@/lib/ortho-retention-submission-contract";
+
+/** Recovery metadata is loaded before clinical source inventory. A restricted
+ * source cannot erase the server request or turn an unreadable ledger into zero. */
+export function OrthoRetentionPanel({ patientId, row }: { patientId: number; row: OrthoCase }) {
+  const form = useOrthoDraft(`retention-ledger:${row.id}`, patientId, row.id), { owner, draft } = form;
+  const [document, setDocument] = form.field<RetentionPersistenceCommand | null>("document", null);
+  const [pending] = form.field<RetentionPersistenceCommand | null>("pending", null);
+  const [expected] = form.field<RetentionSaveExpectation | null>("expected", null);
+  const [reconcile] = form.field<{action: "save" | "cancel"; expected: RetentionSaveExpectation | null; binding: Pick<RetentionSaveExpectation, "scope" | "actorId">; identity: NonNullable<RetentionSubmissionRecovery["recovery"]>["identity"]} | null>("reconcile", null);
+  const [metadata, setMetadata] = useState<RetentionSubmissionRecovery | null>(null);
+  const [loadedRead, setRead] = useState<RetentionLedgerRead | null>(null);
+  const [error, setError] = useState(""), [version, reload] = useState(0);
+  const [conflict, setConflict] = useState(false);
+  const empty = {document: null, pending: null, expected: null, reconcile: null};
+  const bound = form.viewActive() && metadata?.actorId === form.session?.userId && metadata?.scope.patientId === patientId && metadata?.scope.orthoCaseId === row.id;
+  const read = bound ? loadedRead : null;
+  const adopt = (value: RetentionSubmissionRecovery) => {
+    const r = value.recovery;
+    if (r?.state === "pending" || r?.state === "committed") {
+      const local = draft.values.get("pending");
+      if (local && canonicalJourneyJSON(local) !== canonicalJourneyJSON(r.expected.command) || !local && draft.values.get("document")) {setConflict(true); return;}
+      form.commit("pending", r.expected.command); form.commit("expected", r.expected); form.commit("document", r.expected.command); form.uncertain();
+    }
+    const local = draft.values.get("pending") as RetentionPersistenceCommand | null;
+    setConflict(!!local && !!r?.identity && local.clientRequestId !== r.identity.commandId);
+  };
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), ORTHO_PARENT_READ_TIMEOUT_MS);
+    const generation = owner.readSequence, denial = owner.denialSequence;
+    const alive = () => active && generation === owner.readSequence && denial === owner.denialSequence && form.viewActive() && draft.active;
+    const current = () => alive() && !controller.signal.aborted;
+    void (async () => {try {
+      setMetadata(null); setRead(null);
+      const binding = await bootstrapRetentionRecovery({patientId, orthoCaseId: row.id}, {current, deny: () => owner.deny()}, controller.signal);
+      if (!current()) return;
+      if (binding.actorId !== form.session?.userId) {owner.deny(); return;}
+      setMetadata(binding); adopt(binding);
+      const response = await fetch(`/api/ortho/${row.id}/retention-ledger?patientId=${patientId}`, {credentials: "same-origin", cache: "no-store", signal: controller.signal});
+      if (!current()) return;
+      if (response.status === 401) {owner.deny(); return;}
+      if (response.status !== 200 || response.redirected || !response.headers.get("cache-control")?.split(",").some(s => s.trim().toLowerCase() === "no-store")) throw Error("retention_read_failed");
+      const text = await response.text();
+      // Bounded history is projected again into currentEvents and device delivery.
+      // 4 MiB persisted content may legitimately exceed 8 MiB on the wire.
+      if (new TextEncoder().encode(text).length > 16 * 1024 * 1024) throw Error("retention_response_limit");
+      const value = await verifyRetentionRead(JSON.parse(text), patientId, row.id, binding);
+      if (!value) throw Error("retention_read_invalid");
+      if (current()) {setRead(value); setError("");}
+    } catch {if (alive()) {setRead(null); setError("تعذّر التحقق من سجل التثبيت؛ لم يُعتبر فارغاً. يبقى طلب الاستعادة متاحاً للتحقق أو الإلغاء.");}}
+    finally {clearTimeout(timer);}})();
+    return () => {active = false; clearTimeout(timer); controller.abort();};
+  }, [owner, draft, patientId, row.id, row.status, owner.readSequence, version]);
+  const save = async (retry: boolean, serverConflict = false) => {
+    const serverRequest = metadata?.recovery;
+    const matches = !!reconcile?.identity && serverRequest?.identity?.commandId === reconcile.identity.commandId && serverRequest.identity.requestFingerprint === reconcile.identity.requestFingerprint;
+    const serverExpected = serverConflict ? reconcile?.action === "save" ? reconcile.expected : (conflict && !reconcile || matches) && (serverRequest?.state === "pending" || serverRequest?.state === "committed") ? serverRequest.expected : null : null;
+    if (!bound || !metadata || conflict && !serverExpected || retry && !serverExpected && (!pending || metadata.recovery?.state === "blocked" || metadata.recovery?.state === "cancelled") || !retry && (row.status === "assessment" || !read?.writable || metadata.recovery || draft.uncertain)) return;
+    const parsed = readRetentionPersistenceCommand(serverExpected?.command ?? (retry ? pending : document));
+    if (!parsed.ok) {setError("أكمل بيانات الحدث وسبب التوثيق ومصدر التاريخ؛ لا تستنتج تاريخاً أو حالة جهاز غير موثقة."); return;}
+    const frozen = serverExpected ?? (retry ? expected : {scope: metadata.scope, actorId: metadata.actorId, command: parsed.value});
+    if (!frozen) return;
+    const operation = serverExpected ? (draft.uncertain ? form.beginRetry(true) : form.begin(true)) : retry ? form.beginRetry(true) : form.begin(!!read?.writable); if (!operation) return;
+    if (!serverExpected) {form.commit("pending", frozen.command); form.commit("expected", frozen);}
+    else form.commit("reconcile", {action: "save", expected: frozen, binding: {scope: frozen.scope, actorId: frozen.actorId}, identity: reconcile?.identity ?? metadata.recovery?.identity});
+    setError("");
+    const generation = owner.readSequence;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const r = metadata.recovery;
+      await submitRetentionAndAcknowledge({...frozen, current: () => !controller.signal.aborted && generation === owner.readSequence && form.viewActive() && form.current(operation), deny: status => {
+        if (status === 403) {setRead(null); setMetadata(null); reload(n => n + 1);} else owner.deny();
+      }}, frozen, serverExpected && reconcile?.identity ? reconcile.identity : r && r.state !== "blocked" ? r.identity : undefined, controller.signal);
+      if (generation !== owner.readSequence || !form.viewActive() || !form.current(operation)) return;
+      form.acknowledge(operation, serverExpected ? {reconcile: null} : empty); if (serverExpected && pending) form.uncertain(); setRead(null); setMetadata(null); reload(n => n + 1);
+    } catch {if (form.current(operation)) {form.uncertain(); setError("لم تتأكد نتيجة الحفظ والإقرار؛ احتُفظ بالطلب نفسه. أعد التحقق دون تسجيل حدث جديد.");}}
+    finally {clearTimeout(timer); form.finish(operation);}
+  };
+  const cancel = async (serverConflict = false) => {
+    if (!bound || !metadata || draft.busy) return;
+    const r = metadata.recovery;
+    if (!(serverConflict && reconcile) && (!pending || !conflict) && (r?.state === "committed" || r?.state === "blocked" && !r.canCancel)) return;
+    if (!window.confirm("إلغاء الطلب المعلّق والتخلص من مسودته؟ لا يحذف ذلك أي حدث محفوظ.")) return;
+    const operation = draft.uncertain ? form.beginRetry(true) : form.begin(true); if (!operation) return;
+    const generation = owner.readSequence;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const identity = serverConflict ? reconcile?.identity ?? r?.identity : pending ? await retentionCommandIdentity(pending) : r?.identity;
+      if (!identity) throw Error("retention_identity_missing");
+      const binding = serverConflict ? reconcile?.binding ?? metadata : expected ?? metadata;
+      if (serverConflict) form.commit("reconcile", {action: "cancel", expected: reconcile?.expected ?? null, binding: {scope: binding.scope, actorId: binding.actorId}, identity});
+      await cancelRetentionAndAcknowledge({...binding, current: () => !controller.signal.aborted && generation === owner.readSequence && form.viewActive() && form.current(operation), deny: () => owner.deny()}, identity,
+        r?.state === "cancelled" && r.identity.commandId === identity.commandId && r.identity.requestFingerprint === identity.requestFingerprint, controller.signal);
+      if (generation !== owner.readSequence || !form.viewActive() || !form.current(operation)) return;
+      form.acknowledge(operation, serverConflict ? {reconcile: null} : empty); if (serverConflict && pending) form.uncertain(); setRead(null); setMetadata(null); reload(n => n + 1);
+    } catch {if (form.current(operation)) {form.uncertain(); setError("لم يتأكد إلغاء الطلب. أعد القراءة والتحقق؛ لم يُحذف حدث محفوظ.");}}
+    finally {clearTimeout(timer); form.finish(operation);}
+  };
+  const discard = () => {if (!pending && !reconcile && !metadata?.recovery && form.editable() && (!draft.dirty || window.confirm("تجاهل مسودة التثبيت غير المرسلة؟"))) form.settle("document", null);};
+  const restore = () => {
+    if (!bound || !metadata || pending || reconcile || draft.busy || !window.confirm("تجاهل المسودة المحلية غير المرسلة واستعادة طلب الخادم؟")) return;
+    form.commit("document", null); adopt(metadata);
+  };
+  const recovery = bound ? metadata?.recovery : null;
+  const matchingReconcile = !!reconcile?.identity && recovery?.identity?.commandId === reconcile.identity.commandId && recovery.identity.requestFingerprint === reconcile.identity.requestFingerprint;
+  const recoveryCommand = !bound ? null : reconcile?.action === "save" ? reconcile.expected?.command ?? null : recovery?.state === "pending" || recovery?.state === "committed" ? recovery.expected.command : null;
+  const control = "min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-40";
+  return <section aria-label="استعادة سجل التثبيت" className="my-4 min-w-0 space-y-3">
+    <p className="text-xs">المسودة غير المرسلة لا تُستعاد بعد إغلاق الصفحة. الطلب المسجل في الخادم يُستعاد قبل قراءة المصادر؛ الإقرار يحرر الطلب ولا يحذف الحدث. لا يُنشئ هذا السجل زيارة أو خطة علاج أو فاتورة تلقائياً.</p>
+    <button type="button" className={control} disabled={draft.busy || !form.viewActive()} onClick={() => {setRead(null); reload(n => n + 1);}}>تحديث سجل التثبيت</button>
+    {error && <p role="alert">{error}</p>}
+    {recoveryCommand && <div aria-label="ملخص طلب التثبيت المستعاد" className="rounded-lg border p-3 text-sm">
+      <p>طلب {recovery?.state === "committed" && (!reconcile || matchingReconcile) ? "محفوظ ينتظر الإقرار" : "معلّق؛ إعادة الطلب قد تنفذه"}</p>
+      <p>الفك {recoveryCommand.arch === "upper" ? "العلوي" : recoveryCommand.arch === "lower" ? "السفلي" : "غير معلوم"} · رأس السجل المتوقع: {recoveryCommand.expectedHeadId ?? "لا يوجد"}</p>
+      {recoveryCommand.supersedesEntryId !== null && <p>تصحيح الحدث #{recoveryCommand.supersedesEntryId} · {recoveryCommand.archCorrectionReason}</p>}
+      <p>السبب: {recoveryCommand.reason}</p>
+      <RetentionEventDetails event={recoveryCommand.content} />
+    </div>}
+    {(reconcile?.action === "save" && !(matchingReconcile && recovery?.state === "cancelled") || matchingReconcile && recovery?.state === "committed" || conflict && recoveryCommand && !reconcile) && <button type="button" className={control} disabled={draft.busy || !bound} onClick={() => void save(true, true)}>إعادة طلب الخادم والإقرار مع إبقاء الطلب المحلي</button>}
+    {(reconcile?.action === "cancel" && !(matchingReconcile && recovery?.state === "committed") || matchingReconcile && recovery?.state === "cancelled" || conflict && (recovery?.state === "pending" || recovery?.state === "cancelled" || recovery?.state === "blocked" && recovery.canCancel) && !reconcile) && <button type="button" className={control} disabled={draft.busy || !bound} onClick={() => void cancel(true)}>إلغاء طلب الخادم مع إبقاء الطلب المحلي</button>}
+    {conflict && <p role="alert">توجد مسودة محلية وطلب مختلف في الخادم؛ لم نستبدل أياً منهما.</p>}
+    {conflict && !pending && !reconcile && <button type="button" className={control} disabled={draft.busy} onClick={restore}>استعادة طلب التثبيت بدلاً من المسودة المحلية</button>}
+    {recovery?.state === "blocked" && <p role="alert">طلب الاستعادة محجوب؛ لا يمكن عرضه أو إعادته بصلاحية المصادر الحالية.</p>}
+    {pending && !conflict && !reconcile && recovery?.state !== "blocked" && recovery?.state !== "cancelled" && <button type="button" className={control} disabled={draft.busy || !bound} onClick={() => void save(true)}>التحقق من طلب التثبيت والإقرار بنتيجته</button>}
+    {!reconcile && !conflict && (pending || recovery?.state === "cancelled" || recovery?.state === "pending" || recovery?.state === "blocked" && recovery.canCancel) && recovery?.state !== "committed" && <button type="button" className={control} disabled={draft.busy || !bound} onClick={() => void cancel()}>إلغاء طلب التثبيت والإقرار</button>}
+    {read && <OrthoRetentionLedger data={read} draft={document} writable={form.editable() && row.status !== "assessment" && read.writable && !metadata?.recovery && !conflict && !pending && !reconcile} busy={draft.busy} uncertain={draft.uncertain}
+      update={setDocument} discard={discard} save={() => void save(false)} />}
+  </section>;
+}
+
+export function OrthoProblemSourcesPanel({ patientId, row, visible }: { patientId: number; row: OrthoCase; visible: boolean }) {
+  const form = useOrthoDraft(`problem-sources:${row.id}`, patientId, row.id), { owner, draft } = form;
+  const [selected, setSelected] = form.field<ProblemSourceCandidate | null>("selected", null);
+  const [expectedReviewId, setExpectedReview] = form.field<number | null>("expectedReviewId", null);
+  const [action, setAction] = form.field<"create" | "link">("action", "create"), [label, setLabel] = form.field("label", "");
+  const [problemId, setProblemId] = form.field("problemId", ""), [reason, setReason] = form.field("reason", "");
+  const [confirmed, setConfirmed] = form.field("confirmed", false), [pending] = form.field<ProblemSourceCommand | null>("pending", null);
+  const [loadedRead, setRead] = useState<ProblemSourceRead | null>(null), [error, setError] = useState(""), [readVersion, reload] = useState(0);
+  const [metadata, setMetadata] = useState<ProblemSubmissionRecovery | null>(null);
+  const read = owner.active && !owner.denied && metadata?.actorId === form.session?.userId && metadata?.scope.patientId === patientId && metadata?.scope.orthoCaseId === row.id ? loadedRead : null;
+  const [recoveryConflict, setRecoveryConflict] = useState(false);
+  const [expected] = form.field<ProblemSaveExpectation | null>("expected", null);
+  const url = `/api/ortho/${row.id}/problem-sources`;
+  const empty = { selected: null, expectedReviewId: null, pending: null, expected: null, label: "", problemId: "", reason: "", action: "create", confirmed: false };
+  const adopt = (value: ProblemSubmissionRecovery) => {
+    const recovered = value.recovery;
+    if (recovered?.state === "pending" || recovered?.state === "committed") {
+      const local = draft.values.get("pending") as ProblemSourceCommand | null;
+      if (local && canonicalJourneyJSON(local) !== canonicalJourneyJSON(recovered.expected.command) || !local && !!draft.values.get("selected")) { setRecoveryConflict(true); return; }
+      form.commit("pending", recovered.expected.command); form.commit("expected", recovered.expected); form.uncertain();
+    }
+    setRecoveryConflict(false);
+  };
+  useEffect(() => {
+    if (!visible) return;
+    let active = true; const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), ORTHO_PARENT_READ_TIMEOUT_MS);
+    const current = () => active && owner.active && !owner.denied && draft.active;
+    void (async () => { try {
+      setMetadata(null);
+      const binding = await bootstrapProblemRecovery({patientId, orthoCaseId: row.id}, {current, deny: () => owner.deny()}, controller.signal);
+      if (!current()) return;
+      if (binding.actorId !== form.session?.userId) { owner.deny(); return; }
+      setMetadata(binding); adopt(binding);
+      const response = await fetch(`${url}?patientId=${patientId}`, { cache: "no-store", signal: controller.signal });
+      if (!current()) return;
+      if (response.status === 401) { owner.deny(); return; }
+      if (response.status === 403) throw Error("source_access_denied");
+      if (!response.ok || response.redirected || !response.headers.get("cache-control")?.includes("no-store")) throw Error("read_failed");
+      const value = readProblemSourceRead(await response.json(), { patientId, orthoCaseId: row.id });
+      if (value.clinicalCaseId !== binding.scope.clinicalCaseId) throw Error("scope_changed");
+      if (current()) { setRead(value); setError(""); }
+    } catch { if (current()) { setRead(null); setError("تعذّرت قراءة مصادر قائمة المشاكل؛ لم يُعتبر السجل فارغاً. أعد القراءة."); } }
+    finally { clearTimeout(timeout); } })();
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+  }, [owner, draft, patientId, row.id, url, readVersion, visible]);
+  const choose = (identity: string) => {
+    const candidate = read?.candidates.find(c => c.identity === identity); if (!candidate || !form.editable() || !metadata || metadata.recovery || recoveryConflict) return;
+    const previous = read?.reviews.find(r => r.sourceIdentity === identity);
+    setSelected(candidate); setExpectedReview(previous?.id ?? null); setLabel(candidate.proposedLabel ?? "");
+    setAction(previous ? "link" : "create"); setProblemId(previous ? String(previous.problemId) : ""); setConfirmed(false);
+  };
+  const save = async (retry: boolean) => {
+    const command = retry && pending ? pending : readProblemSourceCommand({ schemaVersion: 1, commandId: crypto.randomUUID(), source: selected?.ref,
+      expectedReviewId, action, problemId: action === "link" ? Number(problemId) : null, label: action === "create" ? label : null, reason, clinicianReviewed: confirmed });
+    if (!command || !metadata || metadata.actorId !== form.session?.userId || recoveryConflict || retry && (metadata.recovery?.state === "blocked" || metadata.recovery?.state === "cancelled") || !retry && (!read?.writable || metadata.recovery)) { setError("اختر المصدر، وحدد المشكلة وسبب الربط، ثم أكد مراجعتك السريرية."); return; }
+    const frozen = retry ? expected : {scope: metadata.scope, actorId: metadata.actorId, command};
+    if (!frozen) return;
+    const operation = retry ? form.beginRetry(!!pending) : form.begin(!!read?.writable); if (!operation) return;
+    form.commit("pending", command); form.commit("expected", frozen); setError(""); const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      const recovered = metadata.recovery;
+      const identity = recovered && recovered.state !== "blocked" ? recovered.identity : undefined;
+      await submitProblemAndAcknowledge({...frozen, current: () => form.current(operation), deny: status => {
+        if (status === 403) { setRead(null); setMetadata(null); reload(v => v + 1); }
+        else owner.deny();
+      }}, frozen, identity, controller.signal);
+      if (!form.current(operation)) return;
+      form.acknowledge(operation, empty);
+      setMetadata(null);
+      owner.drafts.get(`strategy:${row.id}`)?.strategyView.notify(true);
+      setRead(null); reload(v => v + 1);
+    } catch { if (form.current(operation)) { form.uncertain(); setError("لم تتأكد نتيجة الحفظ؛ أعد نفس الطلب المحفوظ حتى لا تتكرر المشكلة."); } }
+    finally { clearTimeout(timeout); form.finish(operation); }
+  };
+  const cancel = async () => {
+    if (!metadata || metadata.actorId !== form.session?.userId) return;
+    const r = metadata.recovery;
+    if ((!pending || !recoveryConflict) && (r?.state === "committed" || r?.state === "blocked" && !r.canCancel)) return;
+    if (!window.confirm("إلغاء الطلب المعلّق والتخلص من مسودته؟ لا يحذف ذلك أي مشكلة محفوظة.")) return;
+    const operation = draft.uncertain ? form.beginRetry(true) : form.begin(true); if (!operation) return;
+    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      const identity = pending ? await problemCommandIdentity(pending) : r?.identity;
+      if (!identity) throw Error("missing_identity");
+      const binding = expected ?? metadata;
+      await cancelProblemAndAcknowledge({...binding, current: () => form.current(operation), deny: () => owner.deny()}, identity, r?.state === "cancelled" && r.identity.commandId === identity.commandId && r.identity.requestFingerprint === identity.requestFingerprint, controller.signal);
+      if (!form.current(operation)) return;
+      form.acknowledge(operation, empty); setMetadata(null); setRead(null); reload(v => v + 1);
+    } catch { if (form.current(operation)) { form.uncertain(); setError("لم يتأكد إلغاء الطلب؛ أعد القراءة والتحقق. لم تُحذف مشكلة محفوظة."); } }
+    finally {clearTimeout(timeout); form.finish(operation);}
+  };
+  const discardLocalAndRestore = () => {
+    if (!metadata || !form.viewActive() || metadata.actorId !== form.session?.userId || pending || draft.busy || !window.confirm("تجاهل المسودة المحلية غير المرسلة واستعادة طلب الخادم؟ لا يمكن استرجاع هذه المسودة.")) return;
+    for (const [key, value] of Object.entries(empty)) form.commit(key, value);
+    adopt(metadata);
+  };
+  const control = "min-h-11 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-60";
+  const current = read?.candidates.find(c => c.identity === selected?.identity);
+  const stale = !!selected && !!read && (!current?.available || canonicalJourneyJSON(current.ref) !== canonicalJourneyJSON(selected.ref));
+  const writable = form.editable() && !!read?.writable && !!metadata && !metadata.recovery && !recoveryConflict;
+  const latest = read?.reviews.filter((r, i, all) => all.findIndex(x => x.sourceIdentity === r.sourceIdentity) === i) ?? [];
+  const linkedProblems = [...new Set(latest.map(r => r.problemId))];
+  return <section aria-label="مصادر قائمة المشاكل الموحدة" className="my-4 space-y-3 rounded-xl border border-navy-200 bg-slate-50 p-3">
+    <h4 className="font-bold">من الفحص والتحاليل إلى قائمة المشاكل</h4>
+    <p className="text-xs">المصادر: التقييم المحفوظ والتشخيص السريري وتفسير السيفالو المعتمد بشاهد الصورة. مراجعات الوجه المستقلة ليست ضمن هذه القائمة بعد. يمكن استعادة الطلب الذي اكتمل تسجيله في سجل استعادة الخادم بعد إعادة فتح الصفحة، والتحقق منه أو إلغاؤه صراحة. المسودة غير المرسلة لا تُستعاد بعد إغلاق الصفحة. الإقرار بالنتيجة يحرر الطلب ولا يحذف المشكلة المحفوظة.</p>
+    <p className="text-sm">احفظ الفحص أو القراءة أولاً، ثم راجع المصدر هنا واربطه بمشكلة موجودة أو دوّن المشكلة مرة واحدة. القياس أو نتيجة الحساب لا يصبح تشخيصاً نهائياً تلقائياً.</p>
+    {error && <p role="alert">{error}</p>}
+    <button type="button" className={control} disabled={draft.busy || !form.caseGranted()} onClick={() => { setRead(null); reload(v => v + 1); }}>تحديث مصادر المشاكل</button>
+    {read && <p className="text-xs">{read.problems.length} مشكلة في الحالة · {read.candidates.filter(c => c.available).length} مصدر محفوظ متاح للمراجعة. غياب المصدر لا يعني نتيجة طبيعية.</p>}
+    <fieldset disabled={!writable} className="space-y-3">
+      <label className="block">مصدر المشكلة<select aria-label="مصدر المشكلة" className={control} value={selected?.identity ?? ""} onChange={e => choose(e.target.value)}>
+        <option value="">اختر مصدراً محفوظاً…</option>{[...new Set(read?.candidates.map(c => c.category) ?? [])].map(category => <optgroup key={category} label={category}>{read?.candidates.filter(c => c.category === category).map(c => <option key={c.identity} value={c.identity} disabled={!c.available}>{c.title}{c.site ? ` · ${c.site}` : ""}</option>)}</optgroup>)}
+      </select></label>
+      {selected && read && metadata?.recovery?.state !== "blocked" && !recoveryConflict && <>
+        <div className="space-y-1 rounded-lg border bg-white p-3"><p className="font-bold">{selected.title}</p><p className="whitespace-pre-wrap break-words">{selected.summary}</p>
+          <p className="text-xs">موضع المصدر: {selected.site ?? "الحالة؛ لم يحدد سن أو جانب"} · مسجل المصدر: {selected.sourceActor}</p><p className="text-xs">تسجيل المصدر: {selected.sourceDate} · مرجع #{selected.ref.id}</p></div>
+        {stale && <p role="alert">للمصدر نسخة أحدث أو لم يعد متاحاً؛ مسودتك باقية على نسختها السابقة. اختر النسخة الحالية صراحة بعد مراجعتها.</p>}
+        {stale && current?.available && <button type="button" className={control} onClick={() => choose(current.identity)}>اختيار النسخة الحالية للمراجعة</button>}
+        <label className="block">طريقة ربط المشكلة<select aria-label="طريقة ربط المشكلة" className={control} value={action} onChange={e => { setAction(e.target.value as "create" | "link"); setConfirmed(false); }}>
+          <option value="create" disabled={expectedReviewId !== null}>تسجيل مشكلة جديدة بعد المراجعة</option><option value="link">ربط بمشكلة موجودة دون إعادة كتابتها</option></select></label>
+        {action === "create" ? <label className="block">المشكلة بعد مراجعة الطبيب<textarea className={control} rows={3} maxLength={2000} value={label} onChange={e => { setLabel(e.target.value); setConfirmed(false); }} /></label>
+          : <label className="block">المشكلة الموجودة<select aria-label="المشكلة الموجودة" className={control} value={problemId} onChange={e => { setProblemId(e.target.value); setConfirmed(false); }}><option value="">اختر المشكلة…</option>{read?.problems.filter(p => p.status === "active").map(p => <option key={p.id} value={p.id}>{p.label}{p.site ? ` · ${p.site}` : ""}</option>)}</select></label>}
+        <label className="block">سبب مراجعة وربط المصدر<textarea className={control} rows={2} maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} /></label>
+        <label className="flex min-h-11 items-center gap-2"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />راجعت المصدر وأقرّ ارتباطه بهذه المشكلة</label>
+        <button type="button" className={control} disabled={stale || !confirmed || !selected.available} onClick={() => void save(false)}>حفظ المشكلة ومراجعة مصدرها</button>
+      </>}
+    </fieldset>
+    {pending && expected && read && !recoveryConflict && metadata?.recovery?.state !== "blocked" && <div aria-label="الطلب المحفوظ للاستعادة" className="rounded-lg border bg-white p-3">
+      <p>الطلب المستعاد أو غير المؤكد: {pending.action === "create" ? pending.label : `ربط بالمشكلة #${pending.problemId}`}</p>
+      <p className="whitespace-pre-wrap">سبب المراجعة: {pending.reason}</p>
+      <p className="text-xs">مرجع المصدر #{pending.source.id} · {pending.source.member} · لا يُرسل الطلب مجدداً إلا باختيارك الصريح.</p>
+    </div>}
+    {recoveryConflict && <p role="alert">يوجد طلب آخر محفوظ على الخادم؛ لم تُستبدل مسودتك المحلية.</p>}
+    {recoveryConflict && !pending && <button type="button" className={control} disabled={draft.busy} onClick={discardLocalAndRestore}>تجاهل المسودة المحلية واستعادة طلب الخادم</button>}
+    {metadata?.recovery?.state === "blocked" && <p role="alert">الطلب غير متاح للمراجعة حالياً؛ لا يمكن بدء طلب آخر قبل تسويته.</p>}
+    {draft.uncertain && pending && <button type="button" className={control} disabled={draft.busy || !expected || !metadata || recoveryConflict || metadata.recovery?.state === "blocked" || metadata.recovery?.state === "cancelled"} onClick={() => void save(true)}>التحقق بإعادة نفس طلب المشكلة</button>}
+    {(pending || metadata?.recovery) && <button type="button" className={control} disabled={draft.busy || !metadata || (!pending || !recoveryConflict) && (metadata.recovery?.state === "committed" || metadata.recovery?.state === "blocked" && !metadata.recovery.canCancel)} onClick={() => void cancel()}>إلغاء الطلب غير المحفوظ وتأكيد النتيجة</button>}
+    {!!linkedProblems.length && <div aria-label="المشاكل المرتبطة ومراجعة مصادرها" className="space-y-2">{linkedProblems.map(id => {
+      const related = latest.filter(r => r.problemId === id), currentLabel = read?.problems.find(p => p.id === id)?.label ?? related[0].problemLabel;
+      return <article key={id} aria-label={`المشكلة المرتبطة ${id}`} className="rounded-lg border bg-white p-3">
+        <h5 className="font-bold">{currentLabel}</h5><p className="text-xs">المشكلة #{id} · {related.length} مصادر مرتبطة</p>
+        {related.map(r => <div key={r.id} className="mt-3 border-t pt-3">
+          <p className="text-sm font-bold">{r.source.category} · {r.source.title}</p><p className="text-xs">راجعها {r.createdBy}{r.source.site ? ` · ${r.source.site}` : ""}</p>
+          {r.problemLabel !== currentLabel && <p className="text-xs">نص المشكلة وقت مراجعة المصدر: {r.problemLabel}</p>}
+          <p>{r.currentSourceState === "current" ? "المصدر يطابق النسخة المراجعة" : r.currentSourceState === "newer_version" ? "للمصدر نسخة أحدث تحتاج مراجعتك؛ لم تتغير المشكلة المحفوظة" : "المصدر غير متاح حالياً؛ بقيت المشكلة ومراجعتها محفوظتين"}</p>
+          <details><summary className="min-h-11 cursor-pointer py-2">تاريخ مراجعات المصدر</summary>{read?.reviews.filter(x => x.sourceIdentity === r.sourceIdentity).map(x => <p key={x.id} className="whitespace-pre-wrap break-words text-xs">#{x.id} · {x.createdAt} · {x.createdBy} · {x.reason} · {x.source.summary}</p>)}</details>
+        </div>)}
+      </article>;
+    })}</div>}
+  </section>;
+}
+
 function UncertainWrite({ draft }: { draft: Draft }) {
   return draft.uncertain ? <p role="alert" data-testid="ortho-write-uncertain" className="mt-2 text-xs font-bold text-amber-900">
     تعذّر تأكيد نتيجة الطلب السابق. قد يكون نُفّذ؛ راجع السجل بعد إعادة التحميل قبل فتح نموذج جديد. إعادة التحميل لا تعيد إرسال الطلب.
@@ -363,7 +817,7 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   const ids = new Set<number>();
   for (const row of list) {
     if (!row || typeof row !== "object" || row.patientId !== patientId || !Number.isSafeInteger(row.id) || row.id <= 0
-      || ids.has(row.id) || !Array.isArray(row.adjustments) || !row.progress
+      || ids.has(row.id) || !Array.isArray(row.adjustments) || (row.phase !== "assessment" && !row.progress)
       || row.adjustments.some((entry: unknown) => {
         if (!entry || typeof entry !== "object") return true;
         const one = entry as Partial<Adjustment>;
@@ -372,8 +826,9 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
           || !Array.isArray(one.photos) || !Number.isFinite(one.nextWeeks);
       })
       || !Object.hasOwn(CASE_STATUS_LABEL, row.status) || !Object.hasOwn(PHASE_LABEL, row.phase)
-      || !Object.hasOwn(APPLIANCE_LABEL, row.appliance) || !Object.hasOwn(ARCHES_LABEL, row.arches)
-      || !Object.hasOwn(SLOT_LABEL, row.slot)) throw new Error("تعذّر التحقق من حالات التقويم.");
+      || (row.status === "assessment" && row.phase !== "assessment") || (row.phase === "assessment" && !["assessment", "discontinued"].includes(row.status))
+      || (row.phase === "assessment" ? row.appliance !== null || row.arches !== null || row.slot !== null || row.startDate !== null || row.plannedMonths !== null || row.progress !== null
+        : !Object.hasOwn(APPLIANCE_LABEL, row.appliance) || !Object.hasOwn(ARCHES_LABEL, row.arches) || !(row.slot === null && !usesArchwires(row.appliance)) && !Object.hasOwn(SLOT_LABEL, row.slot))) throw new Error("تعذّر التحقق من حالات التقويم.");
     ids.add(row.id);
   }
   return list as OrthoCase[];
@@ -391,12 +846,17 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
 }) {
   const session = useSession();
   const authority = sessionScope(session);
-  const owner = useMemo(() => makeOwner(), [patientId, authority]);
+  // The ledger outlives authority/patient owners, while its own keys quarantine
+  // every byte by immutable actor, patient, case and bridge identity.
+  const [studyRecovery] = useState(makeStudyRecoveryLedger);
+  const owner = useMemo(() => makeOwner(false, studyRecovery), [patientId, authority, studyRecovery]);
   useLayoutEffect(() => { owner.activate(); return () => owner.retire(); }, [owner]);
   const canLeave = useCallback(() => {
     if (!owner.active) return false;
     const drafts = [...owner.drafts.values()].filter((draft) => draft.active);
     const assessments = [...owner.assessments.values()];
+    const studies = [...owner.studies.values()];
+    if (studies.some(study => study.busy || study.uncertain)) return false;
     if (assessments.some(assessment => !assessment.canLeave(() => true))) return false;
     if (owner.mutations.size > 0 || drafts.some((draft) => draft.busy)) return false;
     if (drafts.some((draft) => draft.uncertain)) {
@@ -405,11 +865,20 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
     // A confirmed booking is retained for its receipt, not an unsaved form.
     // Initial field defaults never mark a draft dirty. Confirming departure
     // only permits navigation; the existing owner cleanup disposes the draft.
-    return !assessments.some(assessment => assessment.needsUnloadWarning())
+    return !owner.studyRecovery.needsUnloadWarning()
+      && !studies.some(study => study.needsUnloadWarning())
+      && !assessments.some(assessment => assessment.needsUnloadWarning())
       && !drafts.some((draft) => draft.dirty && !draft.values.get("booked") && draft.values.get("signed") !== true)
       || window.confirm("هناك عمل غير محفوظ في التقويم. هل تريد تجاهله ومغادرة القسم؟");
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (owner.studyRecovery.needsUnloadWarning() || [...owner.studies.values()].some(study => study.needsUnloadWarning())) { event.preventDefault(); event.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [owner]);
   return <OrthoOwnerContext.Provider value={owner}>
     <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onOpenAccount={onOpenAccount} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
@@ -451,13 +920,14 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     setError("غير مصرّح لك بعرض كابينة التقويم لهذا المريض.");
   }, [owner]);
   useLayoutEffect(() => { owner.bindDenial(deny); }, [owner, deny]);
+  const readUsername = session?.username, readRole = session?.role;
   const load = useCallback(() => {
     if (!owner.active) return;
     const controller = new AbortController();
     const sequence = owner.beginRead(controller);
     const current = () => owner.active && owner.readSequence === sequence && !controller.signal.aborted;
     setReadState("loading"); setPatient(null); setError(null);
-    if (!session?.username?.trim() || !["admin", "doctor", "reception", "assistant"].includes(session.role)) {
+    if (!readUsername?.trim() || !["admin", "doctor", "reception", "assistant"].includes(readRole ?? "")) {
       deny(); return;
     }
     let finished = 0;
@@ -501,7 +971,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     };
     // Independent continuations: no stalled peer or JSON body can postpone denial.
     void read("clinical"); void read("contact");
-  }, [owner, patientId, session?.username, session?.role, deny]);
+  }, [owner, patientId, readUsername, readRole, deny]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -514,7 +984,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
   const currentCase = (id: number) => currentView() && owner.cases.some((row) => row.id === id);
   const safeError = (message: string | null) => { if (owner.active && !owner.denied) setError(message); };
 
-  const open = cases.find((row) => row.status === "active" || row.status === "retention");
+  const open = cases.find((row) => row.status === "assessment" || row.status === "active" || row.status === "retention");
   const unsignedTodayVisitId = cases.filter((row) => context?.orthoCaseId === undefined || row.id === context.orthoCaseId).flatMap((row) => row.adjustments)
     .find((entry) => entry.doneOn === today && entry.visitId !== null && !entry.visitSigned)?.visitId ?? null;
   const savedCaseAvailable = saved !== null && cases.some((row) => row.id === saved.caseId);
@@ -613,6 +1083,14 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
         />
       ) : null}
 
+      {(session?.role === "admin" || session?.role === "doctor") && (!saved || savedCaseAvailable) && (adjusting === null || cases.some(row => row.id === adjusting)) && (!open || owner.drafts.get("assessment-intake")?.uncertain) &&
+        <IntakeCommandForm patientId={patientId} onSaved={receipt => {
+          if (!owner.active || owner.denied) return;
+          disposeDraft(owner, "assessment-intake");
+          setActivePillars(previous => ({ ...previous, [receipt.orthoCaseId]: "diagnostics" }));
+          refreshAfterConfirmedChange();
+          onContextChange?.({ patientId, orthoCaseId: receipt.orthoCaseId, clinicalCaseId: receipt.clinicalCaseId, pillar: "diagnostics" });
+        }} />}
       {/* زر فتح حالة تقويم جديدة إن لم تكن هناك حالة قائمة */}
       {!open ? (
         <div className="rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-4">
@@ -690,7 +1168,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
           {visibleCases.map((row) => {
             const live = row.status === "active" || row.status === "retention";
             const wires = wiresFor(row.slot);
-            const currentPillar: OrthoPillar = activePillars[row.id] ?? (context?.orthoCaseId === row.id ? context.pillar : undefined) ?? "wires";
+            const currentPillar: OrthoPillar = activePillars[row.id] ?? (context?.orthoCaseId === row.id ? context.pillar : undefined) ?? (row.phase === "assessment" ? "diagnostics" : "wires");
 
             const FinancialContextContainer = currentPillar === "prescription" ? "details" : "div";
 
@@ -698,7 +1176,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
               <li
                 key={row.id}
                 className={`rounded-2xl border shadow-xs overflow-hidden transition-all ${
-                  live ? "border-navy-200 bg-white" : "border-slate-200 bg-slate-50/70 opacity-80"
+                  (live || row.status === "assessment") ? "border-navy-200 bg-white" : "border-slate-200 bg-slate-50/70 opacity-80"
                 }`}
               >
                 {/* رأس الحالة التقويمية */}
@@ -709,11 +1187,11 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                         #{row.id}
                       </span>
                       <span className="text-base font-black text-navy-900">
-                        {APPLIANCE_LABEL[row.appliance]} · {ARCHES_LABEL[row.arches]}
+                        {row.appliance === null ? "الجهاز غير مسجل" : APPLIANCE_LABEL[row.appliance]} · {row.arches === null ? "نطاق العلاج غير مسجل" : ARCHES_LABEL[row.arches]}
                       </span>
                       {row.bracketSystem && (
                         <span className="rounded-md bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700 font-mono" dir="ltr">
-                          {row.bracketSystem} · {SLOT_LABEL[row.slot]}
+                          {row.bracketSystem} · {row.slot === null ? "غير مسجل" : SLOT_LABEL[row.slot]}
                         </span>
                       )}
                       {row.baselineKind === "legacy" ? (
@@ -740,6 +1218,9 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </div>
 
                   {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
+                  {session && ["admin", "doctor", "reception"].includes(session.role) && Number.isSafeInteger(session.userId) && Number(session.userId) > 0 ?
+                    <OrthoSessionBillingReview key={`${row.id}:${renderRead}:${session.userId}`} owner={owner} readVersion={renderRead}
+                      patientId={patientId} orthoCaseId={row.id} actorId={Number(session.userId)} expectedAccess={session.role === "doctor" ? "clinical" : "clinical_financial"} /> : null}
                   <FinancialContextContainer data-testid="ortho-financial-context" className={currentPillar === "prescription" ? "mt-2" : undefined}>
                     {currentPillar === "prescription" ? <summary className="min-h-11 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs font-bold text-slate-700">
                       مرجع الحالة المالي وشمول الشدّة
@@ -753,14 +1234,21 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </FinancialContextContainer>
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
-                      <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">رابط خطة أقساط قديم · للتوافق فقط</summary>
+                      <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">ربط خطة علاج أو اتفاق قائم</summary>
                         <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
-                          canLink={row.planId !== null && (session?.role === "admin" || session?.role === "reception"
-                            || (session?.role === "doctor" && session.permissions?.canEditPlans !== false))}
+                          canLink={(session?.role === "admin" || session?.role === "reception"
+                            || (session?.role === "doctor" && session.permissions?.canViewPlans === true && session.permissions?.canEditPlans === true))}
                           onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
                       </details>
                     ) : null}
 
+                  {(session?.role === "admin" || session?.role === "doctor") && (row.status === "assessment" || owner.drafts.get(`treatment-start:${row.id}`)?.uncertain) &&
+                    <details className="mt-3"><summary className="min-h-11 cursor-pointer rounded-lg border bg-white p-3 text-sm font-bold">بعد اكتمال التقييم: توثيق بدء العلاج</summary>
+                      <IntakeCommandForm patientId={patientId} caseRow={row} onSaved={() => {
+                        if (currentView()) { disposeDraft(owner, `treatment-start:${row.id}`); refreshAfterConfirmedChange(); }
+                      }} />
+                    </details>}
+                  {row.progress ? <>
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
                   <div className={`mt-3 grid ${currentPillar === "prescription" ? "grid-cols-4 [&>div]:py-1 sm:[&>div]:py-2" : "grid-cols-2 sm:grid-cols-4"} gap-2 text-center text-xs`}>
                     <div className="rounded-xl bg-white p-2 border border-slate-200/80">
@@ -806,6 +1294,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       style={{ width: `${Math.min(100, row.progress.percent)}%` }}
                     />
                   </div>
+                  </> : <p className="mt-3 rounded-lg border bg-white p-3 text-sm">ملف تقييم فقط؛ لم يُسجل بدء علاج أو جهاز أو مدة علاج.</p>}
                 </div>
 
                 {/* أشرطة الأركان الأربعة التخصصية (Pillar Navigation) */}
@@ -844,7 +1333,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                               الأسلاك الحالية على الكرسي
                             </span>
                             <span className="text-[11px] font-bold text-amber-300">
-                              {SLOT_LABEL[row.slot]}
+                              {row.slot === null ? "غير مسجل" : SLOT_LABEL[row.slot]}
                             </span>
                           </div>
                           <div className="grid grid-cols-2 gap-3 text-center">
@@ -932,6 +1421,11 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                           <h4 className="mb-3 text-xs font-extrabold text-navy-900">
                             سجل الشدّات السابقة وألبومات الجلسات ({row.adjustments.length})
                           </h4>
+                          <a href={`/print/ortho-sessions/${row.id}?patientId=${patientId}`} target="_blank" rel="noopener noreferrer"
+                            className="mb-2 inline-flex min-h-11 items-center rounded border border-slate-300 px-3 text-xs font-bold">
+                            طباعة التسلسل المسجل لجلسات هذه الحالة
+                          </a>
+                          <p className="mb-2 text-[11px] text-slate-500">الطباعة قراءة جديدة مصرح بها، وليست نسخة تاريخية مجمدة من هذه الشاشة. لا تتضمن صوراً أو مبالغ مالية.</p>
                           <ul className="space-y-2">
                             {row.adjustments.map((entry, index) => (
                               <li key={entry.id} className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
@@ -952,9 +1446,12 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                                 <p className="mt-1 text-[11px] text-slate-500">
                                   {ELASTIC_LABEL[entry.elastics]}
                                   {entry.elasticNote ? ` · ${entry.elasticNote}` : ""}
-                                  {" · القادم "}{friendlyDateLong(nextAdjustmentDate(entry.doneOn, entry.nextWeeks))}
+                                  {" · التاريخ المتوقع وفق الفترة المسجلة: "}<bdi dir="ltr">{sessionExpectedFollowup(entry.doneOn, entry.nextWeeks) ?? "غير معلوم"}</bdi>
                                   {" · "}{entry.recordedBy}
                                 </p>
+
+                                <p className="mt-1 text-[11px] text-slate-500">{SESSION_FOLLOWUP_DISCLAIMER}</p>
+                                <OrthoSessionDetails entry={entry} />
 
                                 {/* صور الجلسة */}
                                 {row.photosVisible !== false && entry.photos.length > 0 ? (
@@ -1000,19 +1497,20 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
 
                   {/* ────────────────── الركن الثاني: السجلات والتشخيص السيفالومتري ────────────────── */}
                   {currentPillar === "diagnostics" && (
-                    <div className="space-y-4">
+                    <OrthoDiagnosticNavigation ownerIdentity={owner} orthoCaseId={row.id} readVersion={renderRead}
+                      active={() => currentView() && owner.cases.some(entry => entry.id === row.id)}>
                       {/* معرض سجلات الحالة والأشعة المعياري الـ 12 كمنصة WebCeph */}
-                      <section>
+                      <section data-ortho-diagnostic-section="records" tabIndex={-1} aria-label="السجلات والصور" className="scroll-mt-4">
                         <WebCephRecordsGrid
                           patientId={patientId}
                           orthoCaseId={row.id}
                           currentPhase={row.phase}
-                          startDate={row.startDate}
+                          startDate={row.startDate ?? undefined}
                         />
                       </section>
 
                       {/* السيفالومتري ومخطط ويب سيف (WebCeph Station) */}
-                      <section className="rounded-2xl border border-navy-100 bg-slate-50/50 p-3.5">
+                      <section data-ortho-diagnostic-section="ceph" tabIndex={-1} aria-label="السيفالومتري" className="scroll-mt-4 rounded-2xl border border-navy-100 bg-slate-50/50 p-3.5">
                         <PatientCeph
                           patientId={patientId}
                           orthoCaseId={row.id}
@@ -1022,22 +1520,26 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       </section>
 
                       {/* التوثيق الفوتوغرافي ومقارنة المراحل (Before / Progress / After) */}
-                      <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
-                        <OrthoComparison patientId={patientId} orthoCaseId={row.id} photosVisible={row.photosVisible} />
+                      <section data-ortho-diagnostic-section="comparison" tabIndex={-1} aria-label="مقارنة الصور" className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3.5">
+                        <OrthoComparison patientId={patientId} orthoCaseId={row.id} photosVisible={row.photosVisible}
+                          ownerIdentity={owner} readVersion={renderRead} active={() => currentView() && owner.cases.some(item => item.id === row.id)} />
                       </section>
 
                       {/* التحليل السريري للفكين وتصنيف الحالة (Malocclusion Diagnosis) */}
-                      <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
+                      <section data-ortho-diagnostic-section="assessment" tabIndex={-1} aria-label="التشخيص والتقييم والقياسات" className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3.5">
                         <PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={safeError} />
+                        {owner.clinical && <OrthoProblemSourcesPanel patientId={patientId} row={row} visible={currentPillar === "diagnostics"} />}
                         <OrthoAssessmentPanelV2 patientId={patientId} caseRow={row} />
+                        <a className="inline-flex min-h-11 items-center rounded-lg border px-3 py-2 text-sm font-bold" href={`/ortho/${row.id}/facial?patientId=${patientId}`}>تحليل صورة الوجه اليدوي المرتبط بالمصدر</a>
                       </section>
-                    </div>
+                    </OrthoDiagnosticNavigation>
                   )}
 
                   {/* ────────────────── الركن الثالث: الخطة والميكانيكا الحيوية ────────────────── */}
                   {currentPillar === "prescription" && (
                     <div className="space-y-2 sm:space-y-4">
                       <OrthoStrategyPanel patientId={patientId} caseRow={row} />
+                      <OrthoSpacePanel patientId={patientId} row={row} />
                       <div className="rounded-2xl border border-slate-200 bg-white px-2 py-1 sm:p-4">
                         <h4 className="mb-1 text-xs sm:mb-3 font-black text-navy-900">
                           وصفة الجهاز والمواصفات الميكانيكية
@@ -1045,15 +1547,15 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                         <div className="grid grid-cols-1 gap-0.5 text-xs sm:grid-cols-3 sm:gap-3">
                           <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
                             <span className="text-xs text-slate-500 font-bold sm:block">نوع الجهاز</span>
-                            <span className="min-w-0 break-words font-black text-navy-900">{APPLIANCE_LABEL[row.appliance]}</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{row.appliance === null ? "الجهاز غير مسجل" : APPLIANCE_LABEL[row.appliance]}</span>
                           </div>
                           <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
                             <span className="text-xs text-slate-500 font-bold sm:block">الفكّان المعالجان</span>
-                            <span className="min-w-0 break-words font-black text-navy-900">{ARCHES_LABEL[row.arches]}</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{row.arches === null ? "نطاق العلاج غير مسجل" : ARCHES_LABEL[row.arches]}</span>
                           </div>
                           <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
                             <span className="text-xs text-slate-500 font-bold sm:block">مقاس الشق (Slot)</span>
-                            <span className="min-w-0 break-words font-black text-navy-900">{SLOT_LABEL[row.slot]}</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{row.slot === null ? "غير مسجل" : SLOT_LABEL[row.slot]}</span>
                           </div>
                           <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
                             <span className="text-xs text-slate-500 font-bold sm:block">فلسفة البراكيت</span>
@@ -1063,11 +1565,11 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                           </div>
                           <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
                             <span className="text-xs text-slate-500 font-bold sm:block">تاريخ البدء</span>
-                            <span className="min-w-0 break-words font-black text-navy-900">{friendlyDateLong(row.startDate)}</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{row.startDate === null ? "غير مسجل" : friendlyDateLong(row.startDate)}</span>
                           </div>
                           <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
                             <span className="text-xs text-slate-500 font-bold sm:block">المدة المخططة</span>
-                            <span className="min-w-0 break-words font-black text-navy-900">{row.plannedMonths} شهرًا</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{row.plannedMonths === null ? "غير مسجل" : `${row.plannedMonths} شهرًا`}</span>
                           </div>
                         </div>
 
@@ -1082,26 +1584,30 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   )}
 
                   {/* ────────────────── الركن الرابع: التثبيت والاستبقاء ────────────────── */}
+                  {currentPillar === "presentation" && <OrthoStudyPanel patientId={patientId} caseId={row.id} patientName={patient?.name ?? ""} />}
                   {currentPillar === "retention" && (
                     <div className="space-y-4">
+                      <OrthoRetentionPanel patientId={patientId} row={row} />
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="mb-3 flex items-center justify-between">
                           <h4 className="text-xs font-black text-navy-900">
-                            المثبّتات والاستقرار ومنع الارتداد (Relapse Prevention)
+                            بيانات المثبّت القديمة وإدارة مرحلة الحالة
                           </h4>
                           <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-black ${
                             row.retainer && row.retainer !== "none"
                               ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                               : "bg-amber-50 text-amber-800 border-amber-200"
                           }`}>
-                            {row.retainer ? RETAINER_LABEL[row.retainer] : "لم يُسجَّل مثبت بعد"}
+                            {row.retainer ? `البيانات القديمة: ${RETAINER_LABEL[row.retainer]}` : "لم تُسجّل بيانات المثبّت القديمة"}
                           </span>
                         </div>
+
+                        <p className="mb-3 text-xs text-slate-600">هذه البيانات مستقلة عن أحداث التسليم والمراجعة أعلاه؛ غيابها لا يعني عدم تسليم مثبت، ولا تُحدّث تلقائياً من السجل الوثائقي.</p>
 
                         {live && (
                           <div className="rounded-xl bg-slate-50 p-3 border border-slate-200">
                             <p className="mb-2 text-xs font-bold text-slate-700">
-                              اختر نوع المثبّت المسلّم للمريض:
+                              تحديث نوع المثبّت في البيانات القديمة فقط (لا يسجّل حدث تسليم ولا يغيّر سجل التثبيت الوثائقي أو مرحلة الحالة):
                             </p>
                             <div className="flex flex-wrap gap-2 mb-3">
                               {(Object.keys(RETAINER_LABEL) as RetainerType[]).map((type) => (
@@ -1114,7 +1620,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                                       : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
                                   }`}
                                 >
-                                  {RETAINER_LABEL[type]}
+                                  تحديث البيانات القديمة: {RETAINER_LABEL[type]}
                                 </button>
                               ))}
                             </div>
@@ -1129,7 +1635,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                                 }}
                                 className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-black text-white hover:bg-emerald-700 shadow-xs transition-colors"
                               >
-                                ✓ أُكملت الحالة بنجاح وسُلّم المثبت
+                                تسجيل إكمال الحالة
                               </button>
                               <button
                                 onClick={async () => {
@@ -1408,7 +1914,7 @@ function NewCase({ patientId, today, onSaved, onError }: {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (saving || form.draft.uncertain) return;
-    const operation = form.begin(!form.owner.cases.some((row) => row.status === "active" || row.status === "retention"));
+    const operation = form.begin(!form.owner.cases.some((row) => row.status === "assessment" || row.status === "active" || row.status === "retention"));
     if (!operation) return;
     onError(null);
     try {
@@ -1416,7 +1922,8 @@ function NewCase({ patientId, today, onSaved, onError }: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId, appliance, arches, slot, bracketSystem, startDate,
-          plannedMonths: Number(plannedMonths) || 18,
+          // Keep intentional blank default; let HTTP admission validate the exact authored value.
+          plannedMonths: plannedMonths.trim() === "" ? 18 : plannedMonths,
         }),
       });
       if (!form.checkHeaders(response, operation)) return;
@@ -1524,14 +2031,50 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   const [elasticNote, setElasticNote] = form.field("elasticNote", previousAdjustment ? previousAdjustment.elasticNote ?? "" : baselineElasticNote);
   const [done, setDone] = form.field("done", "");
   const [nextWeeks, setNextWeeks] = form.field("nextWeeks", String(previousAdjustment?.nextWeeks ?? 4));
+  const intervalWeeks = parseAdjustmentInterval(nextWeeks);
+  const dateValid = isAdjustmentDate(doneOn);
   const saving = form.draft.busy;
+  // Persistence follows the immutable actor, not changing grants. The draft's
+  // separate sessionScope still invalidates handlers on every authority change.
+  const actorId = form.session?.userId;
+  const hasActor = Number.isSafeInteger(actorId) && Number(actorId) > 0;
+  const authority = hasActor ? `user:${actorId}` : "";
+  const commandScope = useMemo(() => ({ patientId, caseId: caseRow.id, authority }), [patientId, caseRow.id, authority]);
+  // Durable recovery has a render snapshot and a synchronous callback authority.
+  // Never publish another scope during render, including an abandoned render.
+  type CommandState = { scope: typeof commandScope; command: AdjustmentCommand | null; blocked: boolean };
+  const commandRef = useRef<CommandState | null>(null);
+  const commandPublication = useMemo(() => ({ scope: commandScope, draft: form.draft }), [commandScope, form.draft]);
+  const committedCommandPublication = useRef<object | null>(null);
+  const [commandSnapshot, setCommandSnapshot] = useState<CommandState | null>(null);
+  const commandState = commandSnapshot?.scope === commandScope ? commandSnapshot : { scope: commandScope, command: null, blocked: true };
+  const publishCommand = (next: CommandState) => {
+    if (committedCommandPublication.current !== commandPublication) return;
+    commandRef.current = next; setCommandSnapshot(next);
+  };
+  useLayoutEffect(() => {
+    committedCommandPublication.current = commandPublication;
+    try {
+      if (!commandScope.authority) throw new Error("Missing immutable actor identity");
+      const command = readAdjustmentCommand(sessionStorage, commandScope);
+      publishCommand({ scope: commandScope, command, blocked: false });
+      if (command) form.uncertain();
+    } catch { publishCommand({ scope: commandScope, command: null, blocked: true }); form.uncertain(); }
+    return () => {
+      if (committedCommandPublication.current === commandPublication) {
+        committedCommandPublication.current = null; commandRef.current = null;
+      }
+    };
+    // The draft/authority lifetime owns recovery, not an asynchronous parent refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commandPublication]);
 
   const [queue, setQueue] = form.field<QueuedPhoto[]>("queue", []);
   const [stage, setStage] = form.field<PhotoStage>("stage", () =>
-    suggestPhotoStage({
+    caseRow.phase !== "assessment" && caseRow.startDate !== null ? suggestPhotoStage({
       date: today, startDate: caseRow.startDate, phase: caseRow.phase,
       isFirstSession: caseRow.adjustments.length === 0,
-    }),
+    }) : "initial",
   );
   const cameraInput = useRef<HTMLInputElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
@@ -1547,39 +2090,65 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     if (added.length > 0) setQueue((current) => [...current, ...added]);
   };
 
-  const submit = async (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent, reconcile = false) => {
     event.preventDefault();
-    if (!elastics) {
+    const commandState = commandRef.current;
+    if (!commandState || commandState.scope !== commandScope) return;
+    if (commandState.blocked || !hasActor || !form.session?.username?.trim()
+      || !["doctor", "admin"].includes(form.session.role)) return;
+    const recovered = commandState.command !== null;
+    if (recovered && !reconcile) return;
+    if (!recovered && !elastics) {
       if (form.editable()) onError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
       return;
     }
-    const operation = form.begin(caseRow.status === "active" || caseRow.status === "retention");
+    if (!recovered) {
+      if (!dateValid) {
+        if (form.editable()) onError(ADJUSTMENT_DATE_ERROR);
+        return;
+      }
+      if (intervalWeeks === null) {
+        if (form.editable()) onError("أدخل عددًا صحيحًا من أسبوع إلى 52 أسبوعًا؛ لم يبدأ الحفظ ولم تتغير القيمة المدخلة.");
+        return;
+      }
+      const inputError = adjustmentNewCommandError({
+        doneOn, upperWire, lowerWire, elastics, elasticNote, done, nextWeeks: intervalWeeks!,
+      });
+      if (inputError) { if (form.editable()) onError(inputError); return; }
+    }
+    const allowed = caseRow.status === "active" || caseRow.status === "retention";
+    const operation = recovered ? form.beginRetry(allowed) : form.begin(allowed);
     if (!operation) return;
-    const submittedPhotos = [...queue];
+    const submittedPhotos = recovered ? [] : [...queue];
     onError(null);
     try {
-      const response = await fetch(`/api/ortho/${caseRow.id}`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ doneOn, upperWire, lowerWire, elastics, elasticNote, done,
-          nextWeeks: Number(nextWeeks) || 4 }),
+      const command = commandState.command ?? createAdjustmentCommand(sessionStorage, commandScope, {
+        doneOn, upperWire, lowerWire, elastics, elasticNote, done, nextWeeks: intervalWeeks!,
       });
-      if (!form.checkHeaders(response, operation)) return;
-      const payload = await response.json().catch(() => null);
-      if (!form.current(operation)) return;
-      if (!response.ok) {
-        if (response.status >= 500) form.uncertain();
-        onError(payload?.message ?? "تعذّر التسجيل."); return;
+      publishCommand({ ...commandState, command });
+      const frozen = JSON.parse(command.body) as { doneOn: string; nextWeeks: number };
+      let receipt = command.receipt;
+      if (!receipt) {
+        const response = await fetch(`/api/ortho/${command.scope.caseId}`, {
+          method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": command.key }, body: command.body,
+        });
+        if (!form.checkHeaders(response, operation)) return;
+        const payload = await response.json().catch(() => null);
+        if (!form.current(operation)) return;
+        if (!response.ok || !isAdjustmentReceipt(payload, command)) {
+          form.uncertain(); onError(payload?.message ?? "تعذّر تأكيد تسجيل الشدّة. أعد التحقق بنفس الطلب المحفوظ."); return;
+        }
+        // Durable mutation authority can survive the form being concealed. Persist
+        // its receipt even then, but publish UI only to this committed form lifetime.
+        const acknowledged = completeAdjustmentCommand(sessionStorage, command, payload);
+        publishCommand({ ...commandState, command: acknowledged });
+        receipt = payload;
       }
-      const adjustmentId = payload?.id;
-      if (!Number.isSafeInteger(adjustmentId) || adjustmentId <= 0) {
-        form.uncertain(); onError("تم قبول الطلب دون مرجع شدّة يمكن التحقق منه. راجع السجل قبل أي محاولة جديدة."); return;
-      }
-      const visitId = Number.isInteger(payload?.visitId) && payload.visitId > 0 ? Number(payload.visitId) : null;
+      const adjustmentId = receipt.id;
+      const visitId = receipt.visitId;
       let uploaded = 0; let failed = 0;
       for (const photo of submittedPhotos) {
         if (!form.current(operation)) return;
-        // A refresh is not authority to start another command. Preserve the
-        // queued files and the no-replay latch if the submitted chain is interrupted.
         if (!form.caseGranted() || !mayUpload(form.session)) {
           form.uncertain(); onError("سُجّلت الشدّة؛ توقف رفع الصور حتى مراجعة الصلاحية والسجل. لا تعِد تسجيل الشدّة."); return;
         }
@@ -1587,13 +2156,13 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
           const uploadForm = new FormData();
           uploadForm.set("file", photo.file);
           uploadForm.set("kind", "photo");
-          uploadForm.set("title", `صورة جلسة ${friendlyDateLong(doneOn)}`);
-          uploadForm.set("takenOn", doneOn);
-          uploadForm.set("orthoCaseId", String(caseRow.id));
+          uploadForm.set("title", `صورة جلسة ${friendlyDateLong(frozen.doneOn)}`);
+          uploadForm.set("takenOn", frozen.doneOn);
+          uploadForm.set("orthoCaseId", String(command.scope.caseId));
           uploadForm.set("adjustmentId", String(adjustmentId));
           uploadForm.set("photoStage", stage);
           if (photo.view) uploadForm.set("photoView", photo.view);
-          const upload = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body: uploadForm });
+          const upload = await fetch(`/api/patients/${command.scope.patientId}/documents`, { method: "POST", body: uploadForm });
           if (!form.checkHeaders(upload, operation)) return;
           if (upload.ok) uploaded++; else failed++;
         } catch {
@@ -1602,13 +2171,35 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         }
       }
       if (!form.current(operation)) return;
-      if (failed > 0) onError(`رُفعت ${uploaded} صورة وفشل ${failed} — أعد المحاولة من المستندات.`);
-      for (const photo of submittedPhotos) form.release(photo.preview);
+      if (recovered) onError("تم تأكيد الشدّة المحفوظة. راجع مرفقاتها في السجل؛ لم تُعد محاولة رفع الصور تلقائيًا.");
+      else if (failed > 0) onError(`رُفعت ${uploaded} صورة وفشل ${failed} — راجع المستندات قبل إعادة رفع أي صورة.`);
+      for (const photo of queue) form.release(photo.preview);
       form.commit("queue", []);
-      onSaved({ adjustmentId, caseId: caseRow.id, doneOn, nextWeeks: Number(nextWeeks) || 4, photosUploaded: uploaded, visitId });
-    } catch {
-      if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد نتيجة تسجيل الشدّة. راجع السجل قبل تكرارها."); }
+      form.uncertain(); // Keep the durable acknowledgement until explicit new intent.
+      onSaved({ adjustmentId, caseId: command.scope.caseId, doneOn: frozen.doneOn,
+        nextWeeks: frozen.nextWeeks, photosUploaded: uploaded, visitId });
+    } catch (error) {
+      if (form.current(operation)) {
+        form.uncertain();
+        onError(error instanceof Error ? error.message : "تعذّر تأكيد نتيجة تسجيل الشدّة. أعد التحقق من الطلب المحفوظ.");
+      }
     } finally { form.finish(operation); }
+  };
+  const startNew = () => {
+    const commandState = commandRef.current;
+    if (!commandState || commandState.scope !== commandScope) return;
+    if (!commandState.command?.receipt || commandState.blocked || !hasActor || !form.session?.username?.trim()
+      || !["doctor", "admin"].includes(form.session.role)) return;
+    const operation = form.beginRetry(caseRow.status === "active" || caseRow.status === "retention");
+    if (!operation) return;
+    try {
+      retireAdjustmentCommand(sessionStorage, commandState.command);
+      for (const photo of queue) form.release(photo.preview);
+      form.commit("queue", []);
+      publishCommand({ ...commandState, command: null });
+      onError(null);
+    } catch { form.uncertain(); onError("تعذّر بدء شدّة جديدة بأمان. راجع السجل."); }
+    finally { form.finish(operation); }
   };
 
   const options = [...new Set([...wires.map((wire) => wire.code),
@@ -1618,7 +2209,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     patientId, orthoCaseId: caseRow.id, adjustments: caseRow.adjustments, today, asOfDate: doneOn,
     photosVisible: form.caseGranted() ? caseRow.photosVisible : undefined,
   });
-  const fullSet = savedPhotoHistory.status === "ready" ? fullPhotoSetCheck({
+  const fullSet = savedPhotoHistory.status === "ready" && caseRow.phase !== "assessment" && caseRow.startDate !== null ? fullPhotoSetCheck({
     sessionDate: doneOn,
     startDate: caseRow.startDate,
     lastFullSetDate: savedPhotoHistory.latest?.takenOn ?? null,
@@ -1631,7 +2222,14 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   return (
     <form onSubmit={submit} className="rounded-2xl border border-brand-orange bg-orange-50/50 p-4 shadow-xs">
       <p className="mb-2 text-xs font-black text-slate-800">تسجيل شدّة وتعديل جديد</p>
-      <UncertainWrite draft={form.draft} />
+      {commandState.blocked ? <p role="alert">تعذّر التحقق من الطلب المحفوظ أو تخزينه. راجع السجل قبل تسجيل شدّة جديدة.</p> : null}
+      {commandState.command ? <p role="status" data-testid="ortho-write-uncertain">
+        {commandState.command.receipt ? `تم حفظ الشدّة رقم ${commandState.command.receipt.id}. راجع المرفقات قبل رفعها مجددًا.`
+          : "يوجد طلب شدّة غير مؤكّد. التحقق يعيد نفس الطلب دون إنشاء شدّة أخرى أو إعادة رفع الصور."}
+      </p> : <UncertainWrite draft={form.draft} />}
+      {commandState.command?.receipt ? <button type="button" data-testid="adjustment-new-intent" disabled={saving} onClick={startNew}>
+        تسجيل شدّة جديدة مستقلة
+      </button> : null}
 
       {usesArchwires(caseRow.appliance) ? (
         <div className="mb-2 flex flex-wrap gap-2">
@@ -1800,107 +2398,21 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       </div>
 
       <p className="mb-2 text-[10px] text-slate-500">
-        الموعد المقترح: {friendlyDateLong(nextAdjustmentDate(doneOn, Number(nextWeeks) || 4))}
+        {!dateValid ? "موعد المتابعة المقترح غير متاح حتى إدخال تاريخ جلسة صحيح." : intervalWeeks === null ? "موعد المتابعة المقترح غير متاح حتى إدخال عدد صحيح من أسبوع إلى 52 أسبوعًا." : <>الموعد المقترح: {friendlyDateLong(nextAdjustmentDate(doneOn, intervalWeeks))}</>}
       </p>
 
-      <button type="submit" disabled={saving || form.draft.uncertain}
+      <button type={commandState.command ? "button" : "submit"}
+        data-testid={commandState.command ? "adjustment-reconcile" : undefined}
+        onClick={commandState.command ? (event) => submit(event, true) : undefined}
+        disabled={saving || commandState.blocked || (form.draft.uncertain && !commandState.command)}
         className="w-full rounded-xl bg-brand-orange py-2.5 text-xs font-black text-white hover:bg-amber-600 disabled:opacity-50">
-        {saving ? "جارٍ الحفظ والرفع…" : "احفظ الشدّة والصور"}
+        {saving ? "جارٍ الحفظ والرفع…" : commandState.command ? "تحقّق من الشدّة المحفوظة" : "احفظ الشدّة والصور"}
       </button>
     </form>
   );
 }
 
 /* ═══════════════ مقارنة Before / Progress / After ═══════════════ */
-
-export function OrthoComparison({ photosVisible, ...props }: {
-  patientId: number; orthoCaseId: number; photosVisible?: boolean;
-}) {
-  if (photosVisible === false) {
-    return (
-      <p role="status" className="text-xs text-slate-600">
-        صور الجلسات محجوبة حسب صلاحياتك. لا يمكن تحديد وجود الصور أو مقارنة مراحلها من هذا العرض.
-      </p>
-    );
-  }
-  return <OrthoComparisonContent {...props} />;
-}
-
-function OrthoComparisonContent({ patientId, orthoCaseId }: { patientId: number; orthoCaseId: number }) {
-  const [photos, setPhotos] = useState<StagePhoto[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/patients/${patientId}/documents`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error("تعذّر التحميل.");
-      const documents = (payload.documents ?? []) as {
-        id: number; isImage: boolean; orthoCaseId: number | null;
-        photoStage: string | null; photoView: string | null;
-        takenOn: string | null; uploadedAt: string;
-      }[];
-      setPhotos(documents
-        .filter((document) => document.orthoCaseId === orthoCaseId && document.isImage)
-        .map((document) => ({
-          id: document.id,
-          stage: (document.photoStage ?? "progress") as PhotoStage,
-          view: (document.photoView ?? null) as PhotoView | null,
-          takenOn: document.takenOn,
-          uploadedAt: document.uploadedAt,
-        })));
-    } catch {
-      setPhotos([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [patientId, orthoCaseId]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const columns = useMemo(() => buildComparison(photos), [photos]);
-  const withPhotos = columns.filter((column) => column.count > 0);
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-xs font-black text-navy-900 flex items-center gap-1.5">
-          <span>📸</span> التوثيق الفوتوغرافي ومقارنة المراحل (Before / Progress / After)
-        </h4>
-        <span className="text-[10px] text-slate-500 font-bold">
-          {photos.length} صورة مسجلة
-        </span>
-      </div>
-
-      {loading ? (
-        <p className="text-xs text-slate-400">جارٍ التحميل…</p>
-      ) : withPhotos.length < 2 ? (
-        <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500 text-center">
-          التقط صورًا في مراحل التقويم المختلفة (ما قبل العلاج، أثناء الشدّات، وبعد العلاج) لتفعيل المقارنة التطورية الفورية.
-        </p>
-      ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {withPhotos.map((column) => (
-            <div key={column.stage} className="text-center rounded-xl bg-slate-50 p-2 border border-slate-100">
-              <p className="mb-1 text-[11px] font-bold text-slate-700">{column.label}</p>
-              {column.featured ? (
-                <a href={`/api/documents/${column.featured.id}`} target="_blank" rel="noopener">
-                  <img src={`/api/documents/${column.featured.id}`}
-                    alt={column.label}
-                    className="aspect-square w-full rounded-xl bg-slate-900 object-cover" />
-                </a>
-              ) : (
-                <div className="aspect-square w-full rounded-xl bg-slate-200" />
-              )}
-              <p className="mt-1 text-[10px] text-slate-500">{column.count} صورة</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ═══════════════ (CASE-1) الحالة السابقة (قبل النظام) ═══════════════ */
 
@@ -1969,7 +2481,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
     event.preventDefault();
     if (saving || form.draft.uncertain) return;
     if (!financialMode) { onError("اختر كيف عومل المال قبل النظام."); return; }
-    const operation = form.begin((form.session?.role === "admin" || form.session?.role === "doctor") && !form.owner.cases.some((row) => row.status === "active" || row.status === "retention"));
+    const operation = form.begin((form.session?.role === "admin" || form.session?.role === "doctor") && !form.owner.cases.some((row) => row.status === "assessment" || row.status === "active" || row.status === "retention"));
     if (!operation) return;
     onError(null);
     try {
@@ -2188,4 +2700,66 @@ function OwnedAssessmentV2({ patientId, caseRow, sectionView }: { patientId: num
     begin: owner.begin, beginRetry: owner.beginRetry,
   };
   return <OrthoCaseAssessmentV2 patientId={patientId} orthoCaseId={caseRow.id} lifetime={lifetime} sectionView={sectionView} />;
+}
+
+/** A saved clinical identity is created once; treatment requires its own explicit command. */
+function IntakeCommandForm({patientId,caseRow,onSaved}:{patientId:number;caseRow?:OrthoCase;onSaved:(receipt:IntakeReceipt)=>void}){
+ const starting=!!caseRow,form=useOrthoDraft(caseRow?`treatment-start:${caseRow.id}`:"assessment-intake",patientId,caseRow?.id),{draft}=form;
+ const [reason,setReason]=form.field("reason","");
+ const [appliance,setAppliance]=form.field<Appliance|"">("appliance","");const [arches,setArches]=form.field<Arches|"">("arches","");const [slot,setSlot]=form.field<SlotSize|"">("slot","");
+ const [startDate,setStartDate]=form.field("startDate","");const [months,setMonths]=form.field("months","");const [bracketSystem,setBracket]=form.field("bracketSystem","");const [confirmed,setConfirmed]=form.field("confirmed",false);
+ const [pending]=form.field<OpenAssessmentCommand|StartTreatmentCommand|null>("pending",null),[error,setError]=useState("");
+ const save=async(retry:boolean)=>{
+  let command:OpenAssessmentCommand|StartTreatmentCommand;
+  try{command=retry&&pending?pending:starting?readStartTreatmentCommand({schemaVersion:1,clientRequestId:crypto.randomUUID(),reason,confirmed,appliance,arches,slot:appliance&&usesArchwires(appliance)?slot:null,startDate,plannedMonths:Number(months),bracketSystem:appliance&&usesArchwires(appliance)?bracketSystem:""}):readOpenAssessmentCommand({schemaVersion:1,clientRequestId:crypto.randomUUID(),reason});}
+  catch{setError(starting?"اختر بيانات بدء العلاج الفعلية وتاريخه ومدته، واكتب السبب ثم أكّد القرار.":"اكتب سبب فتح ملف التقييم.");return;}
+  const actorId=form.session?.userId,allowed=!!actorId&&(!starting||caseRow?.status==="assessment");
+  const operation=retry?form.beginRetry(!!pending&&!!actorId):form.begin(allowed);if(!operation||!actorId)return;
+  form.commit("pending",command);setError("");const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);let saved:IntakeReceipt|null=null;
+  try{
+   const response=await fetch(starting?`/api/ortho/${caseRow!.id}/treatment-start`:"/api/ortho/intake",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({patientId,command}),signal:controller.signal});
+   if(!form.checkHeaders(response,operation))return;const raw=await response.json();if(!form.current(operation))return;
+   if(!retry&&!response.ok&&!response.redirected&&[400,404,409].includes(response.status)&&raw?.ok===false){form.commit("pending",null);setError(typeof raw.message==="string"?raw.message:"لم يقبل الحفظ؛ راجع بيانات الحالة.");return;}
+   if(response.redirected||!response.ok)throw Error("unconfirmed");
+   saved=await verifyIntakeReceipt(raw,{patientId,actorId,command,orthoCaseId:caseRow?.id},response.status);
+   if(!form.current(operation))return;form.acknowledge(operation,{pending:null,reason:""});
+  }catch{if(form.current(operation)){form.uncertain();setError("لم تتأكد نتيجة الطلب. احتُفظ بطلبك؛ تحقّق بإعادة الطلب نفسه لتجنب التكرار.");}}
+  finally{clearTimeout(timer);form.finish(operation);}
+  if(saved&&form.caseGranted())onSaved(saved);
+ };
+ const actorKnown=Number.isSafeInteger(form.session?.userId)&&Number(form.session?.userId)>0;
+ const disabled=!form.editable()||!actorKnown;
+ return <section aria-label={starting?"توثيق بدء العلاج":"فتح ملف تقييم تقويم"} className="space-y-3 rounded-xl border border-navy-300 bg-white p-4">
+  <h3 className="font-black text-navy-900">{starting?"توثيق بدء العلاج على الحالة نفسها":"بدء تقييم حالة تقويم"}</h3>
+  <p className="text-sm">{starting?"يسجل القرار بدء العلاج على ملف التقييم الحالي مع إبقاء فحصه وصوره وخطته. توثيق الإجراءات والزيارة والاتفاق يتم في مواضعه المستقلة.":"يفتح ملفاً للمقابلة والفحص والصور والخطة دون افتراض جهاز أو بدء علاج. إذا كانت للمريض حالة مفتوحة ستُفتح الحالة نفسها."}</p>
+  {starting&&<><div className="grid gap-3 sm:grid-cols-2">
+   <label>الجهاز عند بدء العلاج<select aria-label="الجهاز عند بدء العلاج" className="block min-h-11 w-full rounded-lg border p-2" value={appliance} disabled={disabled} onChange={e=>{setAppliance(e.target.value as Appliance|"");setSlot("");setBracket("");setConfirmed(false);}}><option value="">اختر الجهاز الفعلي…</option>{Object.entries(APPLIANCE_LABEL).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
+   <label>الفك المعالج عند البدء<select aria-label="الفك المعالج عند البدء" className="block min-h-11 w-full rounded-lg border p-2" value={arches} disabled={disabled} onChange={e=>{setArches(e.target.value as Arches|"");setConfirmed(false);}}><option value="">اختر النطاق الفعلي…</option>{Object.entries(ARCHES_LABEL).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
+   {appliance&&usesArchwires(appliance)&&<><label>مقاس الشق عند البدء<select aria-label="مقاس الشق عند البدء" className="block min-h-11 w-full rounded-lg border p-2" value={slot} disabled={disabled} onChange={e=>{setSlot(e.target.value as SlotSize|"");setConfirmed(false);}}><option value="">اختر المقاس…</option>{Object.entries(SLOT_LABEL).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label>نظام الحاصرات الموثق<input className="block min-h-11 w-full rounded-lg border p-2" value={bracketSystem} disabled={disabled} onChange={e=>{setBracket(e.target.value);setConfirmed(false);}} maxLength={80}/></label></>}
+   <label>تاريخ بدء العلاج الفعلي<input aria-label="تاريخ بدء العلاج الفعلي" className="block min-h-11 w-full rounded-lg border p-2" type="date" value={startDate} disabled={disabled} onChange={e=>{setStartDate(e.target.value);setConfirmed(false);}}/></label>
+   <label>المدة المتوقعة عند البدء بالأشهر<input aria-label="المدة المتوقعة عند البدء بالأشهر" className="block min-h-11 w-full rounded-lg border p-2" type="number" min={1} max={120} value={months} disabled={disabled} onChange={e=>{setMonths(e.target.value);setConfirmed(false);}}/></label>
+  </div><label className="flex min-h-11 items-center gap-2"><input type="checkbox" disabled={disabled} checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>أؤكد أن العلاج بدأ فعلياً بهذه البيانات</label></>}
+  <label className="block">{starting?"سبب توثيق بدء العلاج":"سبب فتح التقييم"}<input aria-label={starting?"سبب توثيق بدء العلاج":"سبب فتح التقييم"} className="block min-h-11 w-full rounded-lg border p-2" maxLength={500} value={reason} disabled={disabled} onChange={e=>setReason(e.target.value)}/></label>
+  {!actorKnown&&<p role="alert" className="text-sm text-amber-900">تعذّر تأكيد هوية الحساب؛ أعد تحميل الصفحة أو سجّل الدخول من جديد قبل حفظ التقييم.</p>}
+  {error&&<p role="alert" className="text-sm text-amber-900">{error}</p>}
+  {draft.uncertain&&pending?<button type="button" disabled={draft.busy} className="min-h-11 rounded-lg border px-3" onClick={()=>void save(true)}>التحقق من فتح الحالة أو بدء العلاج بنفس الطلب</button>:<button type="button" disabled={disabled||starting&&caseRow?.status!=="assessment"} className="min-h-11 rounded-lg bg-navy-800 px-4 text-white" onClick={()=>void save(false)}>{starting?"حفظ بدء العلاج على هذه الحالة":"فتح ملف التقييم"}</button>}
+ </section>;
+}
+
+/** Drafts and unresolved commands remain owned by the patient/account workspace, not the tab. */
+function OrthoStudyPanel({ patientId, caseId, patientName }: { patientId: number; caseId: number; patientName: string }) {
+  const parent = useContext(OrthoOwnerContext)!;
+  const session = useSession();
+  const [binding, setBinding] = useState<StudyMountOwner | null>(null);
+  useLayoutEffect(() => {
+    const actorId = session?.userId;
+    if (!actorId || !Number.isSafeInteger(actorId)) return;
+    const authorized = () => parent.active && !parent.denied && parent.clinical && parent.cases.some(row => row.id === caseId);
+    const writable = () => authorized() && (session.role === "admin" || session.role === "doctor");
+    const owner = parent.studies.get(caseId) ?? makeStudyMountOwner({ patientId, orthoCaseId: caseId, actorId,
+      ownerKey: `${actorId}:${patientId}:${caseId}:study`, recovery: parent.studyRecovery, authorized, writable, deny: () => parent.deny() });
+    parent.studies.set(caseId, owner); owner.activate(); setBinding(owner);
+  }, [parent, patientId, caseId, session?.userId, session?.role]);
+  if (!binding) return <p role="alert">تعذّر تأكيد هوية الحساب لفتح دراسة الحالة. أعد تحميل الصفحة أو سجّل الدخول من جديد.</p>;
+  return <OrthoCaseStudyMount owner={binding} patientName={patientName} confirmDiscard={() => window.confirm("هل تريد تجاهل التعديلات غير المحفوظة؟")} />;
 }

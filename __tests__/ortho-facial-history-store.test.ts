@@ -1,0 +1,14 @@
+import {beforeEach,expect,it,vi} from 'vitest';
+import {syntheticFace} from './fixtures/ortho-facial-analysis';
+const m=vi.hoisted(()=>({rows:[] as Record<string,unknown>[],anchor:{} as Record<string,unknown>,decode:vi.fn(),query:vi.fn()}));
+vi.mock('@/lib/ortho-case-journey-authority',()=>({journeyTransaction:async(_write:boolean,run:(c:unknown)=>unknown)=>run({query:m.query}),authorizeJourney:async()=>({userId:7,canViewImages:true}),assertJourneyCurrent:vi.fn(),lockJourneyOwner:async()=>({patientId:1,orthoCaseId:2,clinicalCaseId:3}),journeyFail:(_status:number,code:string)=>{throw Error(code);}}));
+vi.mock('@/lib/ortho-facial-store',()=>({lockFacialDocumentSource:async()=>({id:5}),readStoredFacialRevision:m.decode}));
+vi.mock('@/lib/ortho-facial-image',()=>({facialImageBasis:async()=>({basis:syntheticFace().image})}));
+import {getFacialHistoryPage} from '../lib/ortho-facial-history-store';
+import {FACIAL_HISTORY_LIMITS} from '../lib/ortho-facial-history';
+const request={patientId:1,orthoCaseId:2,session:{} as never,documentId:5,beforeRevisionId:136,beforeContentHash:'a'.repeat(64)};
+beforeEach(()=>{vi.clearAllMocks();m.anchor={id:136,version:36,clinicalCaseId:3,contentHash:'a'.repeat(64),command:{expectedHeadId:135,content:syntheticFace()}};m.rows=Array.from({length:31},(_,i)=>({id:135-i,version:35-i,clinicalCaseId:3,command:{expectedHeadId:134-i,content:syntheticFace()}}));m.query.mockImplementation(async(sql:string)=>({rows:sql.includes('WHERE id=')?[m.anchor]:m.rows}));m.decode.mockImplementation(row=>row);});
+it('validates the31st sentinel instead of announcing more for a broken chain',async()=>{m.rows[30].id=999;await expect(getFacialHistoryPage(request)).rejects.toThrow('facial_history_invalid');});
+it('refuses missing internal and terminal rows',async()=>{m.rows.splice(2,1);await expect(getFacialHistoryPage(request)).rejects.toThrow('facial_history_invalid');m.rows=[];await expect(getFacialHistoryPage(request)).rejects.toThrow('facial_history_invalid');});
+it('rejects oversized anchor before decoding saved content',async()=>{m.anchor.extra='x'.repeat(FACIAL_HISTORY_LIMITS.rowBytes);await expect(getFacialHistoryPage(request)).rejects.toThrow('facial_history_too_large');expect(m.decode).not.toHaveBeenCalled();});
+it('rejects total payload budget rather than truncating records',async()=>{for(const row of m.rows)row.extra='x'.repeat(80000);await expect(getFacialHistoryPage(request)).rejects.toThrow('facial_history_too_large');expect(m.decode).toHaveBeenCalledTimes(1);});

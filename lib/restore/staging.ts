@@ -155,6 +155,17 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     return result; // لا استعادة قاعدة أصلًا (P1.12)
   }
 
+  // Shared restore provenance contract from #490/a818f1e8: reject before connecting.
+  let migrationFiles: Awaited<ReturnType<typeof loadMigrationFiles>>;
+  let prepared: ReturnType<typeof prepareBackupSql>;
+  try {
+    migrationFiles = await loadMigrationFiles();
+    prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), {migrationFiles});
+  } catch (error) {
+    result.errors.push(error instanceof Error ? error.message : "Archived migration provenance refused.");
+    return result;
+  }
+
   const client = new Client(restoreClientConfigFor(options.targetUrl));
   try {
     await client.connect();
@@ -172,21 +183,20 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     // ── الخطوة ٣: المخطط من نظام الهجرات (بلا بذور أبدًا) — قاعدة فارغة.
     // كل فشل من هنا فصاعدًا يُبلَّغ نتيجةً (ok=false + errors) لا استثناءً يُرمى —
     // فالسطر الذي يُفشله يهمّ من يشغّل الاستعادة، والهدف المعزول يُتخلّص منه بأمان.
-    const migrationFiles = await loadMigrationFiles();
     const migrationPool = clientAsPool(client);
     try {
+      // Both migration SQL (including Unicode escapes) and archive data require
+      // deterministic literal semantics, even when the target database defaults off.
+      await client.query("SET standard_conforming_strings = on");
       const migrationRun = await migrate(migrationPool, { apply: true, files: migrationFiles });
       result.migrationsApplied = migrationRun.appliedVersions;
 
     // ── الخطوة ٤: بيانات SQL — مع استبعاد صفوف تسجيل الهجرات نفسها:
     // حالة الهجرات في الهدف تُعرَّف بما طبَّقته الخطوة ٣ (الملفات الحالية)، لا
     // بلقطة النسخة — فتُستعاد نسخة قديمة على كود أحدث فتظل حالة المخطط صحيحة.
-    const sqlText = Buffer.from(validated.sql).toString("utf8");
-      const prepared = prepareBackupSql(sqlText);
       result.skippedMigrationRecordLines = prepared.skippedMigrationRecordLines;
       result.sqlRowsStatementLines = prepared.sqlRowsStatementLines;
       const dataSql = prepared.dataSql;
-      await client.query("SET standard_conforming_strings = on");
       await client.query("BEGIN");
       try {
         const cyclicKeys = await nonDeferrableCyclicForeignKeys(client);

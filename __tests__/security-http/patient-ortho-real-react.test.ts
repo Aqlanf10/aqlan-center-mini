@@ -132,7 +132,7 @@ async function replayCallback(page: Page, key: string) {
 async function prepareBooking(page: Page) {
   await grant(page); const form = await adjustment(page); await allow(page, "POST", mutationPath); await submitTwice(form);
   const saved = await latestWrite(page, mutationPath);
-  await page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 934101, visitId: null }), saved.id);
+  await page.evaluate((id) => window.__patientOrthoFixture.respondAdjustment(id, { id: 934101, visitId: null }), saved.id);
   await state(page, "loading"); await grant(page);
   await panel(page).getByRole("button", { name: /حجز الموعد المقترح الآن/ }).click();
   await panel(page).getByLabel("تاريخ الجلسة القادمة", { exact: true }).fill("2026-11-23");
@@ -378,7 +378,7 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       expect((await writes(f.page)).filter((one) => one.path === mutationPath)).toHaveLength(1);
       expect(write.submitted).toMatchObject({ upperWire: "016 NiTi", lowerWire: "012 NiTi", elastics: "class_ii",
         elasticNote: "private-draft elastic note", done: "private-draft adjustment", doneOn: "2026-10-03", nextWeeks: 5 });
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 934101, visitId: null }), write.id);
+      await f.page.evaluate((id) => window.__patientOrthoFixture.respondAdjustment(id, { id: 934101, visitId: null }), write.id);
       const upload = await latestWrite(f.page, photoPath);
       const data = Object.fromEntries(upload.submitted as Array<[string, unknown]>);
       expect(data.file).toMatchObject({ fileId: prior.created[0].fileId, name: prior.created[0].name, size: prior.created[0].size });
@@ -410,7 +410,7 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       const command = await latestWrite(f.page, mutationPath);
       expect(command.submitted).toMatchObject({ ...regimen, done: completedWork, doneOn: "2026-10-04" });
       await f.page.evaluate(({ id, savedAdjustmentId, savedVisitId }) => {
-        window.__patientOrthoFixture.respond(id, { id: savedAdjustmentId, visitId: savedVisitId });
+        window.__patientOrthoFixture.respondAdjustment(id, { id: savedAdjustmentId, visitId: savedVisitId });
       }, { id: command.id, savedAdjustmentId, savedVisitId });
       // Exercise the parent's actual confirmed-save disposal and React unmount,
       // rather than clearing a simulated subset of hooks or resetting the fixture.
@@ -440,6 +440,8 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       expect(await panel(f.page).getByLabel("ما نُفّذ في الشدّة", { exact: true }).inputValue()).toBe("");
       expect(await panel(f.page).getByLabel("تاريخ الشدّة", { exact: true }).inputValue()).toBe("2026-10-04");
       expect(await panel(f.page).locator('img[src^="blob:"]').count()).toBe(0);
+      expect(await panel(f.page).getByTestId("adjustment-new-intent").isEnabled()).toBe(true);
+      await panel(f.page).getByTestId("adjustment-new-intent").click();
       expect(await panel(f.page).getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).isEnabled()).toBe(true);
       expect(await originalForm!.evaluate((element) => element.isConnected)).toBe(false);
       expect((await writes(f.page)).filter((one) => one.path === mutationPath)).toHaveLength(1);
@@ -461,7 +463,7 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
         await state(f.page, "denied");
       } else { await f.page.locator("#patient-aba").click(); await state(f.page, "loading"); }
       await hidden(f.page);
-      await f.page.evaluate((id) => window.__patientOrthoFixture.body(id, { id: 934101, visitId: 937101 }), write.id);
+      await f.page.evaluate((id) => window.__patientOrthoFixture.adjustmentBody(id, { id: 934101, visitId: 937101 }), write.id);
       expect(await writes(f.page)).toHaveLength(1);
       if (retirement === "denial") await retry(f.page);
       await grant(f.page);
@@ -480,7 +482,7 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       await grant(f.page); const form = await adjustment(f.page); await addPhotos(f.page, 2);
       await allow(f.page, "POST", mutationPath); await allow(f.page, "POST", photoPath);
       await submitTwice(form); const write = await latestWrite(f.page, mutationPath);
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 934101 }), write.id);
+      await f.page.evaluate((id) => window.__patientOrthoFixture.respondAdjustment(id, { id: 934101, visitId: null }), write.id);
       const upload = await latestWrite(f.page, photoPath);
       await refresh(f.page); const ids = await pair(f.page);
       await f.page.evaluate((id) => window.__patientOrthoFixture.headers(id, 401), ids.ortho);
@@ -551,7 +553,7 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       await grant(f.page); const form = await adjustment(f.page);
       await allow(f.page, "POST", mutationPath); await submitTwice(form);
       const write = await latestWrite(f.page, mutationPath);
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 934101 }), write.id);
+      await f.page.evaluate((id) => window.__patientOrthoFixture.respondAdjustment(id, { id: 934101, visitId: null }), write.id);
       await state(f.page, "loading"); let ids = await pair(f.page);
       await f.page.evaluate((id) => { const api = window.__patientOrthoFixture; api.respond(id, api.caseBody()); }, ids.ortho);
       await state(f.page, "ready");
@@ -645,7 +647,7 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       await refresh(f.page); await grant(f.page, { empty: true });
       expect(await panel(f.page).locator('img[src^="blob:"]').count()).toBe(0);
       expect(await panel(f.page).getByLabel("ما نُفّذ في الشدّة", { exact: true }).count()).toBe(0);
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 934101, visitId: 937101 }), command.id);
+      await f.page.evaluate((id) => window.__patientOrthoFixture.respondAdjustment(id, { id: 934101, visitId: 937101 }), command.id);
       await expect.poll(() => panel(f.page).locator('[data-testid="ortho-write-uncertain"]').count()).toBe(1);
       await noSavedAppointment(f.page);
       expect((await writes(f.page)).filter((one) => one.path === photoPath)).toHaveLength(0);
@@ -656,7 +658,8 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       expect(await panel(f.page).locator('img[src^="blob:"]').evaluateAll((images) => images.map((image) => image.getAttribute("src"))))
         .toEqual(before.created.map((one) => one.url));
       expect(await panel(f.page).locator('[data-testid="ortho-write-uncertain"]').count()).toBe(1);
-      expect(await panel(f.page).getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).isDisabled()).toBe(true);
+      expect(await panel(f.page).getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).count()).toBe(0);
+      expect(await panel(f.page).getByTestId("adjustment-reconcile").isEnabled()).toBe(true);
       await replayCallback(f.page, "adjustment-before-case-withdrawal"); await submitTwice(form);
       expect(await writes(f.page)).toHaveLength(1); expect((await snapshot(f.page)).revoked).toEqual([]);
       await f.page.locator("#toggle-probe").click();
@@ -783,7 +786,7 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       expect(await panel(f.page).textContent()).toContain("وُقّعت زيارة اليوم"); expect(await sign.count()).toBe(0);
       const form = await adjustment(f.page); await allow(f.page, "POST", mutationPath); await submitTwice(form);
       const write = await latestWrite(f.page, mutationPath);
-      await f.page.evaluate(({ id, visitId }) => window.__patientOrthoFixture.respond(id, { id: 934101, visitId }), { id: write.id, visitId });
+      await f.page.evaluate(({ id, visitId }) => window.__patientOrthoFixture.respondAdjustment(id, { id: 934101, visitId }), { id: write.id, visitId });
       await state(f.page, "loading"); await grant(f.page, { unsigned: true });
       await panel(f.page).getByRole("button", { name: /حجز الموعد المقترح الآن/ }).click();
       await panel(f.page).getByLabel("تاريخ الجلسة القادمة", { exact: true }).fill("2026-11-23");
@@ -918,7 +921,7 @@ describe("PatientOrtho saved photo completeness in mounted real React", () => {
       expect(await form.textContent()).not.toContain("ناقص:");
       await allow(f.page, "POST", mutationPath); await allow(f.page, "POST", photoPath, 8);
       await submitTwice(form); const saved = await latestWrite(f.page, mutationPath);
-      await f.page.evaluate(id => window.__patientOrthoFixture.respond(id, { id: 934101, visitId: null }), saved.id);
+      await f.page.evaluate(id => window.__patientOrthoFixture.respondAdjustment(id, { id: 934101, visitId: null }), saved.id);
       for (let index = 0; index < 8; index++) {
         await expect.poll(async () => (await writes(f.page)).filter(row => row.path === photoPath).length).toBe(index + 1);
         const upload = (await writes(f.page)).filter(row => row.path === photoPath).at(-1)!;

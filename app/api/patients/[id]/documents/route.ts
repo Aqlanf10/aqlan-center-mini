@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { ClinicalMutationAuthorityError } from "@/lib/clinical-mutation-authority";
+import { isDocumentAcquisitionDate } from "@/lib/document-acquisition-date";
 import {
-  DocumentAssociationError, getSettings, listPatientDocuments, recordAudit, recordDocument,
+  DocumentAssociationError, getSettings, listPatientDocuments, recordAudit, recordAuthorizedDocument,
   validateDocumentAssociations,
 } from "@/lib/db";
 import { putFile, storageStatus } from "@/lib/files";
@@ -26,7 +28,6 @@ export const dynamic = "force-dynamic";
  * لأن الطبيب يبني عليه.
  */
 
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -109,7 +110,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const rawTitle = typeof form.get("title") === "string" ? String(form.get("title")).trim() : "";
   const title = (rawTitle || file.name || "مستند").slice(0, 120);
   const rawNote = typeof form.get("note") === "string" ? String(form.get("note")).trim() : "";
-  const rawTaken = typeof form.get("takenOn") === "string" ? String(form.get("takenOn")) : "";
+  const takenValues = form.getAll("takenOn");
+  const rawTaken = takenValues[0];
+  // Unknown remains absent/empty. An explicit invalid or ambiguous date must
+  // not become unknown silently or reach file storage before a database error.
+  if (takenValues.length > 1 || (rawTaken !== undefined && rawTaken !== "" && !isDocumentAcquisitionDate(rawTaken))) {
+    return NextResponse.json({ message: "تاريخ التصوير غير صالح؛ أدخل تاريخًا صحيحًا أو اتركه غير معلوم." }, { status: 400 });
+  }
+  const takenOn = typeof rawTaken === "string" && rawTaken !== "" ? rawTaken : null;
   /* (Codex P1 on #291) A signed consent's structured note (JSON from the consent form) is its record: the reprint reads it
      strictly (`parseStoredConsent`). It is kept whole up to a bound, never cut at 300 characters into invalid JSON, and a
      structured record the reprint could not read is refused before anything is written. A free-text note (a scanned paper
@@ -119,7 +127,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: CONSENT_NOTE_INVALID_MESSAGE }, { status: 400 });
   }
   const note = !rawNote ? null : consentRecord ? rawNote : rawNote.slice(0, DOCUMENT_NOTE_LIMIT);
-  const takenOn = DATE_PATTERN.test(rawTaken) ? rawTaken : null;
   // ربط صور التقويم: الحالة والشدّة التي صُوّرت فيها ودورُها ووجهُها — وألبوم
   // الجلسة يُبنى من هذا الربط، فالصورة التي بلا ربطٍ تضيع في الشبكة كلها.
   // Empty optional fields remain absent; malformed explicit references fail closed.
@@ -164,7 +171,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
        فالمستندُ PDF لا أبعاد صورة له. */
     const dimensions = imageSize(bytes);
     const stored = await putFile(bytes, check.extension);
-    const document = await recordDocument({
+    const document = await recordAuthorizedDocument({
       patientId, visitId, kind, title,
       mimeType: file.type,
       sizeBytes: stored.sizeBytes,
@@ -172,25 +179,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       storageKey: stored.key,
       note,
       takenOn,
-      uploadedBy: session.username,
       orthoCaseId,
       adjustmentId,
       photoStage,
       photoView,
       width: dimensions?.width ?? null,
       height: dimensions?.height ?? null,
-    });
-    void recordAudit({
-      action: "document.upload",
-      entity: "patient_documents",
-      entityId: document.id,
-      entityLabel: title,
-      details: { المريض: patientId, النوع: kind, الحجم: document.sizeBytes },
-      actor: session.username,
-      actorRole: session.role,
-    });
+    }, session);
     return NextResponse.json(document, { status: 201 });
   } catch (error) {
+    if (error instanceof ClinicalMutationAuthorityError) {
+      return NextResponse.json({ message: error.message }, { status: error.status });
+    }
     if (error instanceof DocumentAssociationError) {
       return NextResponse.json({ message: error.message }, { status: 400 });
     }

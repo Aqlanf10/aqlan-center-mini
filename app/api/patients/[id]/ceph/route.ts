@@ -1,8 +1,9 @@
+import {ClinicalMutationAuthorityError} from '@/lib/clinical-mutation-authority';
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  createCephAnalysis, listPatientCephAnalyses,
+  createAuthorizedCephAnalysis, listPatientCephAnalyses,
   type CephPhase,
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
@@ -90,17 +91,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     : null;
 
   try {
-    const created = await createCephAnalysis({
-      patientId, documentId, createdBy: session.username,
+    const created = await createAuthorizedCephAnalysis({
+      patientId, documentId,
       orthoCaseId,
       phase,
       xrayDate: dateOrNull(source.xrayDate),
       device: textOrNull(source.device, 120),
       refSet: textOrNull(source.refSet, 60),
-    });
+    }, {patientId,documentId,session});
     if (!created.ok) return NextResponse.json({ message: created.message }, { status: 409 });
     return NextResponse.json({ id: created.id, duplicateWarning }, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof ClinicalMutationAuthorityError) return NextResponse.json({message:error.message},{status:error.status});
     return NextResponse.json({ message: "تعذّر فتح التحليل. تأكد من المستند." }, { status: 500 });
   }
 }

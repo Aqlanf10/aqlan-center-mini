@@ -39,6 +39,7 @@ function readResponse(command: PurchaseCommand, stillCurrent: () => boolean) {
  * button is useful but is not the synchronous reservation or server receipt. */
 export function useDurablePurchaseAttempt(itemId: number | null) {
   const session = useSession(), actor = session?.username ?? "";
+  const role = session?.role;
   const enabled = !!actor && itemId !== null && (session?.role === "admin" || session?.role === "reception");
   const token = useMemo(() => ({ actor, itemId, session }), [actor, itemId, session]);
   const [state, setState] = useState<State>(empty);
@@ -84,7 +85,7 @@ export function useDurablePurchaseAttempt(itemId: number | null) {
       if (lifetime.current !== token || version !== readVersion.current) return;
       const identity = me as { id?: number; username?: string; role?: string } | null;
       if (!response.ok || response.redirected || !identity || !Number.isSafeInteger(identity.id) || identity.id! <= 0
-        || identity.username !== actor || identity.role !== session?.role
+        || identity.username !== actor || identity.role !== role
         || principal.current?.token === token && principal.current.id !== identity.id) {
         publish({ ...empty, token, error: "تعذّر التحقق من الجلسة أو تغيّرت. أعد تحميل الصفحة وسجّل الدخول بالحساب الذي بدأ الشراء لاستعادة طلبه." });
         // Revoke this execution generation, not just the rendered view. Older
@@ -105,7 +106,7 @@ export function useDurablePurchaseAttempt(itemId: number | null) {
         publish({ ...old, error: PURCHASE_STORAGE_ERROR });
       }
     }
-  }, [actor, itemId, enabled, token, adopt, publish, session?.role]);
+  }, [actor, itemId, enabled, token, adopt, publish, role]);
   useEffect(() => {
     if (!enabled) return;
     void refresh();

@@ -2,6 +2,9 @@ import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientOrtho, type AdjustmentForm } from "../components/PatientOrtho";
 import type { SessionInfo } from "../components/SessionProvider";
+import type { StudyMountOwner } from "../lib/ortho-case-study-mount-owner";
+import { syntheticStudyCommand } from "./fixtures/ortho-case-study";
+import { readAdjustmentCommand } from "../lib/ortho-adjustment-command";
 import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
 
 // STATUS: UNRUN. Source-authored deterministic regressions. Actual parent,
@@ -14,10 +17,11 @@ type Scope = {
   memos: Map<number, { deps?: readonly unknown[]; value: unknown }>;
 };
 const hooks = vi.hoisted(() => ({
-  current: null as Scope | null, changed: false, retiredWrites: 0,
+  cephProbe: false, current: null as Scope | null, changed: false, retiredWrites: 0,
   layout: [] as Array<() => void>, passive: [] as Array<() => void>,
   session: null as SessionInfo | null, contexts: new Map<unknown, unknown>(),
   existingRefresh: null as (() => void) | null,
+  studyMount: null as StudyMountOwner | null,
 }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 vi.mock("../components/SettingsProvider", () => ({ useClinicName: () => "Synthetic clinic", useSetting: () => "" }));
@@ -25,12 +29,20 @@ vi.mock("../components/LegacyOnboardingChecklist", () => ({ LegacyOnboardingChec
 vi.mock("../components/OrthoPackageLink", () => ({ OrthoPackageLink: ({ onChanged }: { onChanged: () => void }) => {
   hooks.existingRefresh = onChanged; return null;
 } }));
-vi.mock("../components/PatientCeph", () => ({ PatientCeph: () => null }));
+vi.mock("../components/PatientCeph", async () => {
+  const React = await import("react");
+  return { PatientCeph: function PatientCephProbe() {
+    const [value, setValue] = React.useState("");
+    return hooks.cephProbe ? React.createElement("input", { "aria-label": "synthetic-ceph-draft", value,
+      onChange: (event: { target: { value: string } }) => setValue(event.target.value) }) : null;
+  } };
+});
 vi.mock("../components/PatientDiagnosis", () => ({ PatientDiagnosis: () => null }));
 // This suite isolates parent reads/prescription truth, like the other specialist
 // leaves above. The new editors have separate actual HTTP/React acceptance.
 vi.mock("../components/OrthoTreatmentStrategy", () => ({ OrthoTreatmentStrategy: () => null }));
 vi.mock("../components/OrthoCaseAssessmentV2", () => ({ OrthoCaseAssessmentV2: () => null }));
+vi.mock("../components/OrthoCaseStudyMount", () => ({ OrthoCaseStudyMount: ({ owner }: { owner: StudyMountOwner }) => { hooks.studyMount = owner; return null; } }));
 vi.mock("../components/WebCephRecordsGrid", () => ({ WebCephRecordsGrid: () => null }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
@@ -76,15 +88,16 @@ vi.mock("react", async (original) => {
 type Element = ReactElement<Record<string, unknown>>;
 type Component = (props: Record<string, unknown>) => ReactNode;
 type Case = ComponentProps<typeof AdjustmentForm>["caseRow"];
-type ResponseLike = { ok: boolean; status: number; json: () => Promise<unknown> };
-type Pending = { id: number; url: string; method: string; init?: RequestInit; json: ReturnType<typeof vi.fn>;
+type ResponseLike = { ok: boolean; status: number; json: () => Promise<unknown> }
+  & Pick<Response, "headers" | "redirected" | "text">;
+type Pending = { id: number; url: string; method: string; init?: RequestInit; json: ReturnType<typeof vi.fn>; text: ReturnType<typeof vi.fn>;
   headers: (status: number) => void; body: (value: unknown) => void; fail: (message?: string) => void };
 function deferred<T>() {
   let resolve!: (value: T) => void; let reject!: (error: Error) => void;
   const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
   return { promise, resolve, reject };
 }
-const principalA = (): SessionInfo => ({ username: "synthetic-ortho-a", role: "doctor", displayName: "Synthetic A",
+const principalA = (): SessionInfo => ({ userId: 7, username: "synthetic-ortho-a", role: "doctor", displayName: "Synthetic A",
   permissions: { ...DEFAULT_DOCTOR_PERMISSIONS } });
 // Contract bound, kept local so the semantic preimage counterfactual below can
 // import the frozen pre-fix component, which has no new timeout export.
@@ -212,7 +225,14 @@ function pair() {
   const patient = reads().filter((one) => /^\/api\/patients\/\d+$/.test(one.url)).at(-1);
   expect(ortho).toBeDefined(); expect(patient).toBeDefined(); return { ortho: ortho!, patient: patient! };
 }
-function respond(request: Pending, body: unknown, status = 200) { request.headers(status); request.body(body); }
+function respond(request: Pending, body: unknown, status = 200) {
+  if (request.url === "/api/ortho/41" && request.method === "POST" && body && typeof body === "object") {
+    const value = body as { visitId?: number };
+    body = { patientId, caseId: 41, requestKey: new Headers(request.init?.headers).get("Idempotency-Key"),
+      visitId: null, attachedToToday: !!value.visitId, ...body };
+  }
+  request.headers(status); request.body(body);
+}
 async function grant(empty = false) {
   const current = pair(); respond(current.ortho, { cases: empty ? [] : [fixture()] }); respond(current.patient, contact()); await flush();
   expect(workspace().props["data-read-state"]).toBe("ready");
@@ -234,25 +254,36 @@ function addPhoto(name = "synthetic.png") {
 }
 
 beforeEach(() => {
+  hooks.cephProbe = false;
   unmount(); scopes = new Map(); componentIds = new Map(); executed = new Set(); hooks.changed = false; hooks.retiredWrites = 0;
-  patientId = 19; hooks.session = principalA(); hooks.existingRefresh = null; requests = []; unexpected = []; fetchMock.mockReset(); createURL.mockReset(); revokeURL.mockReset();
+  patientId = 19; hooks.session = principalA(); hooks.existingRefresh = null; hooks.studyMount = null; requests = []; unexpected = []; fetchMock.mockReset(); createURL.mockReset(); revokeURL.mockReset();
   navigationRegistration = null; navigationRegistrations = []; delayNavigationCleanup = false; delayedNavigationCleanup = [];
   confirmLeave.mockReset(); confirmLeave.mockReturnValue(false);
-  vi.stubGlobal("window", { confirm: confirmLeave, prompt: vi.fn() });
+  const storage = new Map<string, string>();
+  vi.stubGlobal("sessionStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) });
+  const windowEvents = new EventTarget();
+  vi.stubGlobal("window", { confirm: confirmLeave, prompt: vi.fn(), addEventListener: windowEvents.addEventListener.bind(windowEvents),
+    removeEventListener: windowEvents.removeEventListener.bind(windowEvents), dispatchEvent: windowEvents.dispatchEvent.bind(windowEvents) });
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-04T06:00:00Z"));
   createURL.mockImplementation(() => `blob:synthetic-ortho-${createURL.mock.calls.length}`);
   vi.spyOn(URL, "createObjectURL").mockImplementation(createURL);
   vi.spyOn(URL, "revokeObjectURL").mockImplementation(revokeURL);
   fetchMock.mockImplementation((url, init) => {
     const method = init?.method ?? "GET";
-    if (method === "GET" && url === "/api/parties?kind=doctor") return Promise.resolve({ ok: true, status: 200, json: async () => [{ id: 71, name: "Synthetic responsible doctor" }] });
-    const isRead = method === "GET" && (/^\/api\/ortho\?patientId=(19|20)$/.test(url) || /^\/api\/patients\/(19|20)$/.test(url));
-    const isWrite = ["POST", "PATCH"].includes(method) && ["/api/ortho", "/api/ortho/41", "/api/ortho/baseline",
+    if (method === "GET" && url === "/api/parties?kind=doctor") return Promise.resolve(new Response(JSON.stringify([{ id: 71, name: "Synthetic responsible doctor" }])));
+    // The local panels now bootstrap durable recovery before reading their own
+    // clinical content. Keep those reads deferred and observable, just like the
+    // parent reads; do not stub the panels, guards, or recovery verifiers.
+    const isRead = method === "GET" && (/^\/api\/ortho\?patientId=(19|20)$/.test(url) || /^\/api\/patients\/(19|20)$/.test(url)
+      || /^\/api\/ortho\/41\/(space-ledger|problem-sources)\/recovery\?patientId=(19|20)$/.test(url));
+    const isWrite = ["POST", "PATCH"].includes(method) && ["/api/ortho", "/api/ortho/41", "/api/ortho/baseline", "/api/ortho/intake", "/api/ortho/41/treatment-start",
       "/api/appointments", "/api/visits/61/clinical", "/api/patients/19/documents", "/api/patients/20/documents"].includes(url);
     if (!isRead && !isWrite) { unexpected.push(`${method} ${url}`); return Promise.reject(new Error("Unexpected synthetic request")); }
     const head = deferred<ResponseLike>(); const body = deferred<unknown>(); const json = vi.fn(() => body.promise);
-    requests.push({ id: requests.length + 1, url, method, init, json,
-      headers: (status) => head.resolve({ ok: status >= 200 && status < 300, status, json }),
+    const text = vi.fn(async () => JSON.stringify(await body.promise));
+    requests.push({ id: requests.length + 1, url, method, init, json, text,
+      headers: (status) => head.resolve({ ok: status >= 200 && status < 300, status, json, text,
+        redirected: false, headers: new Headers({ "cache-control": "private, no-store" }) }),
       body: body.resolve, fail: (message = "Synthetic transport failure") => head.reject(new TypeError(message)) });
     // AbortSignal is recorded but intentionally ignored by transport completion.
     return head.promise;
@@ -374,7 +405,7 @@ describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () =>
     expect(registered.guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
     writes()[0].headers(200); await flush();
     expect(registered.guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
-    writes()[0].body({ id: 81 }); await pending; await flush();
+    respond(writes()[0], { id: 81 }); await pending; await flush();
     expect(registered.guard()).toBe(true); expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toHaveLength(1);
   });
 
@@ -419,7 +450,7 @@ describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () =>
     const registered = currentNavigation(); expect(registered.guard()).toBe(true);
     const captured = button("وقّع الزيارة وأرسله للاستقبال").props.onClick as () => void;
     captured(); expect(registered.guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
-    respond(writes()[0], { patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); await flush();
+    respond(writes()[0], { id: 61, status: "signed", patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); await flush();
     expect(text(render())).toContain("وُقّعت زيارة اليوم"); expect(registered.guard()).toBe(true);
     expect(confirmLeave).not.toHaveBeenCalled(); captured(); await flush(); expect(writes()).toHaveLength(1);
   });
@@ -547,7 +578,9 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
     expect(text(render())).not.toContain("Roth / MBT");
     expect(row).toEqual(before);
     expect(writes()).toEqual([]);
-    expect(reads()).toHaveLength(2);
+    expect(reads().map(request => request.url)).toEqual([
+      "/api/ortho?patientId=19", "/api/patients/19", "/api/ortho/41/space-ledger/recovery?patientId=19",
+    ]);
   });
 
   it.each(["Roth", "MBT 022", "Roth / MBT", "وصفة خاصة مسجّلة", "  Custom / prescribed  "])(
@@ -598,6 +631,59 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
     expect(text(render())).toContain("Original plan notes");
     expect(row).toEqual(before);
     expect(writes()).toEqual([]);
+  });
+});
+
+describe.each([
+  { endpoint: "space-ledger", label: "خطة العلاج والميكانيكا", panel: "OrthoSpacePanel" },
+  { endpoint: "problem-sources", label: "السجلات والسيفالومتري (WebCeph)", panel: "OrthoProblemSourcesPanel" },
+])("PatientOrtho $endpoint recovery read ownership", ({ endpoint, label, panel }) => {
+  const metadata = () => ({ ok: true, actorId: 7,
+    scope: { patientId: 19, orthoCaseId: 41, clinicalCaseId: 51 }, recovery: null });
+  async function openRecovery() {
+    render(); hidden("loading");
+    expect(reads().map(request => request.url)).toEqual(["/api/ortho?patientId=19", "/api/patients/19"]);
+    await grant(); click(control(label));
+    expect(executed.has(panel)).toBe(true);
+    const request = reads().at(-1)!;
+    expect(request.url).toBe(`/api/ortho/41/${endpoint}/recovery?patientId=19`);
+    expect(request.init).toMatchObject({ credentials: "same-origin", cache: "no-store" });
+    expect(request.init?.signal?.aborted).toBe(false);
+    return request;
+  }
+  it("waits for verified recovery metadata without reading clinical content or writing on mount", async () => {
+    const request = await openRecovery(); await flush();
+    expect(reads()).toHaveLength(3); expect(writes()).toEqual([]);
+    expect(request.text).not.toHaveBeenCalled();
+    unmount(); expect(request.init?.signal?.aborted).toBe(true);
+  });
+  it.each([401, 403])("denies the parent at recovery %i headers before reading a stalled body", async status => {
+    const request = await openRecovery(); request.headers(status); await flush(); hidden("denied");
+    expect(request.json).not.toHaveBeenCalled(); expect(request.text).not.toHaveBeenCalled();
+    expect(request.init?.signal?.aborted).toBe(true);
+    request.body(metadata()); await flush(); hidden("denied");
+    expect(reads()).toHaveLength(3); expect(writes()).toEqual([]); expect(hooks.retiredWrites).toBe(0);
+  });
+  it("ignores late recovery headers after the parent withdraws its clinical grant", async () => {
+    const request = await openRecovery(); const current = refresh();
+    expect(request.init?.signal?.aborted).toBe(true);
+    respond(current.patient, contact()); respond(current.ortho, {}, 503); await flush(); hidden("error");
+    respond(request, metadata()); await flush(); hidden("error");
+    expect(request.text).not.toHaveBeenCalled(); expect(reads()).toHaveLength(5);
+    expect(writes()).toEqual([]); expect(hooks.retiredWrites).toBe(0);
+  });
+  it("ignores an old actor's recovery body after principal replacement", async () => {
+    const request = await openRecovery(); request.headers(200); await flush();
+    expect(request.text).toHaveBeenCalledOnce();
+    hooks.session = { ...principalA(), userId: 8, username: "synthetic-ortho-b" }; render(); hidden("loading");
+    expect(request.init?.signal?.aborted).toBe(true);
+    request.body(metadata()); await flush(); hidden("loading");
+    expect(reads()).toHaveLength(5); expect(writes()).toEqual([]); expect(hooks.retiredWrites).toBe(0);
+  });
+  it("denies a recovery actor mismatch before requesting clinical content", async () => {
+    const request = await openRecovery(); respond(request, { ...metadata(), actorId: 8 });
+    await flush(); hidden("denied");
+    expect(reads()).toHaveLength(3); expect(writes()).toEqual([]); expect(hooks.retiredWrites).toBe(0);
   });
 });
 
@@ -792,11 +878,20 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     if (phase === "adjustment") respond(command, { id: 81 });
     else respond(writes()[1], {});
     await pending; await flush();
+    // View retirement must not discard a verified durable receipt or publish into
+    // the removed form. The parent mutation may finish while this view is absent.
+    const recovered = readAdjustmentCommand(sessionStorage, { patientId, caseId: 41, authority: `user:${hooks.session!.userId}` });
+    expect(recovered?.receipt?.id).toBe(81);
+    expect(recovered?.key).toBe(new Headers(command.init?.headers).get("Idempotency-Key"));
+    expect(recovered?.body).toBe(command.init?.body);
+    expect(hooks.retiredWrites).toBe(0);
     expect(writes()).toHaveLength(phase === "adjustment" ? 1 : 2);
     expect(text(render())).not.toContain("الجلسة القادمة المقترحة");
     expect(revokeURL).not.toHaveBeenCalled();
     refresh(); await grant(); expect(fields()).toEqual(before);
     expect(elements(render()).some((node) => node.props["data-testid"] === "ortho-write-uncertain")).toBe(true);
+    expect(text(render())).toContain("تم حفظ الشدّة رقم 81");
+    expect(elements(render()).some((node) => node.props["data-testid"] === "adjustment-new-intent")).toBe(true);
     await submit(oldForm); await submit(); await flush();
     expect(writes()).toHaveLength(phase === "adjustment" ? 1 : 2);
     expect(createURL.mock.calls).toEqual([[first], [second]]); expect(revokeURL).not.toHaveBeenCalled();
@@ -808,7 +903,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
       visitId: 61, visitSigned: false, doneOn: "2026-10-04" }] });
     render(); const current = pair(); respond(current.ortho, { cases: [row] }); respond(current.patient, contact()); await flush();
     const oldSign = button("وقّع الزيارة وأرسله للاستقبال"); const captured = oldSign.props.onClick as () => void;
-    captured(); expect(writes()).toHaveLength(1); respond(writes()[0], { patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); await drain();
+    captured(); expect(writes()).toHaveLength(1); respond(writes()[0], { id: 61, status: "signed", patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); await drain();
     // The completion flag must be read from the live draft before a render too.
     captured(); await flush(); expect(writes()).toHaveLength(1);
     expect(text(render())).toContain("وُقّعت زيارة اليوم");
@@ -829,7 +924,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
       visitId: 61, visitSigned: false, doneOn: "2026-10-04" }] });
     render(); const initial = pair(); respond(initial.ortho, { cases: [row] }); respond(initial.patient, contact()); await flush();
     const sign = button("وقّع الزيارة وأرسله للاستقبال"); const captured = sign.props.onClick as () => void;
-    captured(); respond(writes()[0], { patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); await flush();
+    captured(); respond(writes()[0], { id: 61, status: "signed", patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); await flush();
     expect(text(render())).toContain("وُقّعت زيارة اليوم");
     if (replacement === "denial") { pair().patient.headers(403); await flush(); hidden("denied"); }
     else {
@@ -841,7 +936,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     captured(); await flush(); expect(writes()).toHaveLength(1);
   });
 
-  it.each([null, {}])("does not publish or replay a malformed successful sign %j", async (payload) => {
+  it.each([null, {}, { patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }, { id: 61, patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }])("does not publish or replay a malformed successful sign %j", async (payload) => {
     const prior = fixture(); const row = fixture(19, { adjustments: [{ ...prior.adjustments[0],
       visitId: 61, visitSigned: false, doneOn: "2026-10-04" }] });
     render(); const initial = pair(); respond(initial.ortho, { cases: [row] }); respond(initial.patient, contact()); await flush();
@@ -923,6 +1018,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     expect(control("أسابيع حتى الشدّة القادمة").props.value).toBe("2");
     expect(control("ما نُفّذ في الشدّة").props.value).toBe("");
     await submit(oldForm); expect(writes()).toHaveLength(1);
+    click(button("تسجيل شدّة جديدة مستقلة"));
     const next = submit(); expect(writes()).toHaveLength(2);
     expect(JSON.parse(String(writes()[1].init!.body))).toMatchObject({ elastics: "vertical", elasticNote: "Updated regimen instructions", nextWeeks: 2, done: "" });
     respond(writes()[1], {}, 409); await next; await flush(); expect(hooks.retiredWrites).toBe(0);
@@ -959,4 +1055,156 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     expect(scopes.size).toBe(0); expect(hooks.retiredWrites).toBe(0); expect(writes()).toEqual([]);
     expect(revokeURL).toHaveBeenCalledExactlyOnceWith("blob:synthetic-ortho-1");
   });
+});
+
+
+describe("assessment-only intake and explicit treatment UI", () => {
+  it("explains missing actor identity and disables intake instead of silently ignoring a click", async () => {
+    hooks.session = { ...principalA(), userId: undefined };
+    await mount(true);
+    expect(button("فتح ملف التقييم").props.disabled).toBe(true);
+    expect(text(render())).toContain("تعذّر تأكيد هوية الحساب");
+    expect(writes()).toEqual([]);
+  });
+  it("does not write on mount and sends only a diagnostic command after an explicit action", async () => {
+    hooks.session = { ...principalA(), userId: 7 };
+    await mount(true);
+    expect(writes()).toEqual([]);
+    edit("سبب فتح التقييم", "Synthetic diagnostic assessment");
+    const open = button("فتح ملف التقييم");
+    expect(open.props.disabled).toBe(false);
+    click(open); await flush();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].url).toBe("/api/ortho/intake");
+    const body = JSON.parse(writes()[0].init!.body as string);
+    expect(body.patientId).toBe(19);
+    expect(Object.keys(body.command).sort()).toEqual(["clientRequestId", "reason", "schemaVersion"]);
+    (open.props.onClick as () => void)(); await flush();
+    expect(writes()).toHaveLength(1);
+  });
+  it("keeps the exact intake request across an uncertain response and explicit retry", async () => {
+    hooks.session = { ...principalA(), userId: 7 };
+    await mount(true); edit("سبب فتح التقييم", "Synthetic lost-response assessment");
+    click(button("فتح ملف التقييم")); await flush();
+    const original = writes()[0]; original.fail(); await flush();
+    expect(control("سبب فتح التقييم").props.disabled).toBe(true);
+    click(button("التحقق من فتح الحالة أو بدء العلاج بنفس الطلب")); await flush();
+    expect(writes()).toHaveLength(2);
+    expect(writes()[1].init!.body).toBe(original.init!.body);
+  });
+  it("renders an assessment without invented treatment progress and requires explicit start facts", async () => {
+    hooks.session = { ...principalA(), userId: 7 };
+    render(); const current = pair();
+    respond(current.ortho, { cases: [{ ...fixture(), status: "assessment", phase: "assessment", appliance: null, arches: null,
+      slot: null, startDate: null, plannedMonths: null, progress: null }] });
+    respond(current.patient, contact()); await flush();
+    expect(workspace().props["data-read-state"]).toBe("ready");
+    expect(text(render())).toContain("ملف تقييم فقط");
+    expect(text(render())).not.toContain("انقضى من العلاج");
+    expect(writes()).toEqual([]);
+    click(button("حفظ بدء العلاج على هذه الحالة")); await flush();
+    expect(writes()).toEqual([]);
+    expect(text(render())).toContain("اختر بيانات بدء العلاج الفعلية");
+  });
+});
+
+
+describe("saved-study recovery through actual PatientOrtho account ownership", () => {
+  async function bind() {
+    click(control("دراسة الحالة المحفوظة"));
+    const mount = hooks.studyMount!; expect(mount).not.toBeNull();
+    await mount.beginRead()!.accept({ ok: true, patientId: 19, orthoCaseId: 41, clinicalCaseId: 51,
+      template: syntheticStudyCommand().content.template, revision: null, head: null, canAppend: true, history: [] });
+    return mount.study!;
+  }
+  it("retains unsent bytes under the exact actor/scope across permission-owner replacement", async () => {
+    await mount(); const before = await bind(); before.change("synthetic unsubmitted private study");
+    hooks.session = { ...principalA(), permissions: { ...DEFAULT_DOCTOR_PERMISSIONS, canViewXrays: false } };
+    render(); await grant(); const after = await bind();
+    expect(after).not.toBe(before); expect(after.document).toBe("synthetic unsubmitted private study"); expect(after.dirty).toBe(true);
+  });
+  it("quarantines an unresolved request from another actor and restores its exact bytes on return", async () => {
+    await mount(); const before = await bind(); before.change("synthetic unresolved study");
+    const operation = before.begin({ actorId: 7, scope: { patientId: 19, orthoCaseId: 41, clinicalCaseId: 51 }, previousVersion: 0, command: syntheticStudyCommand() })!;
+    const body = operation.body; operation.markUncertain(); operation.finish();
+    hooks.session = { ...principalA(), userId: 8, username: "synthetic-other-actor" }; render(); await grant(); const foreign = await bind();
+    expect(foreign.document).toBe(""); expect(foreign.recoveryBlocked).toBe(true); expect(foreign.beginRetry()).toBeNull();
+    hooks.session = principalA(); render(); await grant(); const returned = await bind();
+    const retry = returned.beginRetry()!; expect(retry).not.toBeNull(); expect(retry.body).toBe(body); retry.markUncertain(); retry.finish();
+  });
+});
+
+describe('recorded session detail and chronology entry',()=>{
+ it('exposes saved detail and exact case print scope without signing or finance additions',async()=>{
+  await mount();const tree=render(),link=one(n=>n.type==='a'&&n.props.href==='/print/ortho-sessions/41?patientId=19',tree);
+  expect(link.props.target).toBe('_blank');expect(link.props.rel).toContain('noopener');
+  expect(text(tree)).toContain('تفاصيل الجلسة المسجلة #51');expect(text(tree)).toContain('لا توجد زيارة مرتبطة؛ حالة التوقيع غير معلومة');
+  expect(text(tree)).toContain('التاريخ المتوقع وفق الفترة المسجلة: 2026-10-16');expect(text(tree)).toContain('ليس موعداً محجوزاً');
+ });
+ it('withdraws session detail and print entry during failed owner refresh',async()=>{
+  await mount();await failClinical();const tree=render();expect(text(tree)).not.toContain('تفاصيل الجلسة المسجلة #51');
+  expect(elements(tree).some(n=>n.type==='a'&&String(n.props.href).startsWith('/print/ortho-sessions/'))).toBe(false);
+ });
+ it('renders separately saved note/phase and linked signature without inferring current case phase',async()=>{
+  render();const current=pair(),row=fixture();row.adjustments[0]={...row.adjustments[0],phase:'aligning',note:'SYNTHETIC_HISTORICAL_NOTE',visitId:61,visitSigned:false};
+  respond(current.ortho,{cases:[row]});respond(current.patient,contact());await flush();const tree=render();expect(text(tree)).toContain('SYNTHETIC_HISTORICAL_NOTE');expect(text(tree)).toContain('الزيارة المرتبطة غير موقّعة وفق القراءة الحالية');
+  expect(elements(tree).some(n=>n.type==='button'&&text(n).includes('توقيع'))).toBe(false);
+ });
+});
+
+describe("diagnostic section jump navigation", () => {
+  it("exposes four in-page controls without hiding existing sections or issuing requests", async () => {
+    render(); await grant(); click(control("السجلات والسيفالومتري (WebCeph)"));
+    const nav = elements(render()).filter(node => node.type === "nav" && node.props["aria-label"] === "الانتقال بين أقسام التشخيص");
+    expect(nav).toHaveLength(1);
+    expect(elements(nav[0]).filter(node => node.type === "button")).toHaveLength(4);
+    const sections = elements(render()).filter(node => node.props["data-ortho-diagnostic-section"]);
+    expect(sections.map(node => node.props["data-ortho-diagnostic-section"])).toEqual(["records", "ceph", "comparison", "assessment"]);
+    expect(sections.every(node => node.props.hidden === undefined && node.props.tabIndex === -1)).toBe(true);
+  });
+  const attach = () => {
+    const target = { isConnected: true, focus: vi.fn(), scrollIntoView: vi.fn() };
+    const root = { isConnected: true, contains: () => true, querySelector: vi.fn(() => target) };
+    const wrapper = one(node => node.props["data-testid"] === "ortho-diagnostic-navigation");
+    (wrapper.props.ref as { current: unknown }).current = root;
+    return { target, root };
+  };
+  it("retains mounted child state and pending reads through every jump", async () => {
+    hooks.cephProbe = true; await mount(); click(control("السجلات والسيفالومتري (WebCeph)"));
+    edit("synthetic-ceph-draft", "unsaved synthetic text");
+    const beforeScopes = new Map(scopes), beforeRequests = requests.length;
+    const pending = reads().find(request => request.url.includes("problem-sources/recovery"))!;
+    const { target } = attach();
+    for (const label of ["السجلات والصور", "السيفالومتري", "مقارنة الصور", "التشخيص والتقييم والقياسات"]) click(button(label));
+    expect(control("synthetic-ceph-draft").props.value).toBe("unsaved synthetic text");
+    expect(requests).toHaveLength(beforeRequests); expect(writes()).toHaveLength(0);
+    expect(target.focus).toHaveBeenCalledTimes(4);
+    for (const [key, value] of beforeScopes) expect(scopes.get(key)).toBe(value);
+    expect(pending.init?.signal?.aborted).toBe(false);
+    respond(pending, { message: "Synthetic delayed recovery read failure" }, 500); await flush();
+    expect(control("synthetic-ceph-draft").props.value).toBe("unsaved synthetic text"); expect(writes()).toHaveLength(0);
+    expect(hooks.retiredWrites).toBe(0);
+  });
+  it("retires old jump callbacks during parent refresh and after revalidation", async () => {
+    await mount(); click(control("السجلات والسيفالومتري (WebCeph)")); const { target } = attach();
+    const old = button("السيفالومتري"); refresh();
+    (old.props.onClick as () => void)(); expect(target.focus).not.toHaveBeenCalled();
+    await grant(); (old.props.onClick as () => void)(); expect(target.focus).not.toHaveBeenCalled();
+  });
+
+});
+
+
+describe('photo comparison parent read ownership',()=>{
+ const source={id:91,patientId:19,orthoCaseId:41,title:'synthetic comparison source',isImage:true,photoStage:'initial',photoView:null,takenOn:null,uploadedAt:'2026-01-01T00:00:00.000Z',removedAt:null,note:null};
+ async function open(){render();const current=pair();respond(current.ortho,{cases:[fixture(19,{photosVisible:true})]});respond(current.patient,contact());await flush();click(control('السجلات والسيفالومتري (WebCeph)'));await flush();}
+ it('withdraws loaded comparison images during parent refresh and denied reread',async()=>{
+  const base=fetchMock.getMockImplementation()!;fetchMock.mockImplementation((url,init)=>url==='/api/patients/19/documents'&&(!init?.method||init.method==='GET')?Promise.resolve(new Response(JSON.stringify({documents:[source]}),{headers:{'content-type':'application/json'}})):base(url,init));
+  await open();expect(elements(render()).some(n=>n.type==='img'&&n.props.src==='/api/documents/91')).toBe(true);
+  const current=refresh();expect(elements(render()).filter(n=>n.type==='img')).toHaveLength(0);respond(current.patient,contact());respond(current.ortho,{},403);await flush();expect(elements(render()).filter(n=>n.type==='img')).toHaveLength(0);expect(writes()).toHaveLength(0);
+ });
+ it('does not revive a pending comparison after parent reload',async()=>{
+  const held=deferred<Response>(),base=fetchMock.getMockImplementation()!;fetchMock.mockImplementation((url,init)=>url==='/api/patients/19/documents'&&(!init?.method||init.method==='GET')?held.promise:base(url,init));
+  await open();refresh();held.resolve(new Response(JSON.stringify({documents:[source]}),{headers:{'content-type':'application/json'}}));await flush();expect(elements(render()).filter(n=>n.type==='img')).toHaveLength(0);expect(writes()).toHaveLength(0);
+ });
 });

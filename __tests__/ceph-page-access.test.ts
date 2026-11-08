@@ -89,3 +89,60 @@ it("admits the comparison patient read only after authorizing both studies", asy
   }
   expect(getPatient).toHaveBeenCalledWith(42);
 });
+
+it.each([
+  ['reception', true, true], ['doctor', false, true], ['doctor', true, false], ['admin', true, false],
+] as const)('passes explicit clinical read-only capability for %s (upload %s)', async (role, upload, expectedReadOnly) => {
+  vi.mocked(requireSession).mockResolvedValue({ ...session, role });
+  vi.mocked(canAccessPatient).mockImplementation(async (_session, _id, permission) => permission === 'canViewXrays' || upload);
+  vi.mocked(getCephStudy).mockResolvedValue({ analysis: { id: 1, documentId: 51, patientId: 42, status: 'draft', refSet: '' }, landmarks: [], measurements: [], diagnosis: null } as never);
+  vi.mocked(getPatient).mockResolvedValue({ fullName: 'Synthetic patient', birthYear: null } as never);
+  vi.mocked(getCephReferenceSet).mockResolvedValue(null);
+  const page = await workspace();
+  const children = page.props.children as Array<{ props?: { readOnly?: boolean; analysis?: { status: string } } }>;
+  const tracer = children.find(child => child?.props?.analysis);
+  expect(tracer?.props?.readOnly).toBe(expectedReadOnly);
+  expect(tracer?.props?.analysis?.status).toBe('draft');
+});
+
+it("passes the exact draft source reference snapshot and never rereads mutable reference catalog", async () => {
+  vi.mocked(canAccessPatient).mockResolvedValue(true);
+  const completionSources={state:"available",identity:{schemaVersion:1,documentId:51,imageSha256:"a".repeat(64),referenceSetKey:"saved",
+    referenceSetSha256:"b".repeat(64),engineVersion:"v1",engineSourceSha256:"c".repeat(64)},
+    referenceSet:{key:"saved",name:"Viewed source reference",version:"saved-v1",values:[{code:"SNA",mean:93,sd:6}]}};
+  vi.mocked(getCephStudy).mockResolvedValue({analysis:{id:1,documentId:51,patientId:42,status:"draft",refSet:"saved"},landmarks:[],measurements:[],diagnosis:null,completionSources} as never);
+  vi.mocked(getPatient).mockResolvedValue({fullName:"Synthetic",birthYear:null} as never);
+  const page=await workspace();
+  const children=page.props.children as Array<{key?:string;props?:{analysis?:unknown;completionSources?:unknown;refValues?:unknown;refSetName?:string}}>;
+  const tracer=children.find(child=>child?.props?.analysis);
+  expect(tracer?.props?.completionSources).toBe(completionSources);
+  expect(tracer?.props?.refValues).toEqual({SNA:{mean:93,sd:6}});
+  expect(tracer?.props?.refSetName).toBe("Viewed source reference");
+  expect(tracer?.key).toContain(completionSources.identity.imageSha256);
+  expect(getCephReferenceSet).not.toHaveBeenCalled();
+});
+
+it("remounts the review when a returned source identity changes, even with identical analysis and document IDs", async () => {
+  vi.mocked(canAccessPatient).mockResolvedValue(true);
+  vi.mocked(getPatient).mockResolvedValue({fullName:"Synthetic",birthYear:null} as never);
+  const identity={schemaVersion:1,documentId:51,imageSha256:"a".repeat(64),referenceSetKey:"saved",referenceSetSha256:"b".repeat(64),engineVersion:"v1",engineSourceSha256:"c".repeat(64)};
+  const fixture={analysis:{id:1,documentId:51,patientId:42,status:"draft",refSet:"saved"},landmarks:[],measurements:[],diagnosis:null,
+    completionSources:{state:"available",identity,referenceSet:{key:"saved",name:"Saved",values:[]}}};
+  vi.mocked(getCephStudy).mockResolvedValue(fixture as never);
+  const first=await workspace();
+  vi.mocked(getCephStudy).mockResolvedValue({...fixture,completionSources:{...fixture.completionSources,identity:{...identity,referenceSetSha256:"d".repeat(64)}}} as never);
+  const second=await workspace();
+  const child=(page:typeof first)=>(page.props.children as Array<{key?:string;props?:{analysis?:unknown}}>).find(row=>row?.props?.analysis);
+  expect(child(first)?.key).not.toBe(child(second)?.key);
+  expect(getCephReferenceSet).not.toHaveBeenCalled();
+});
+
+it('remounts same-name actor replacements and write-permission changes without reusing the old queue owner',async()=>{
+ vi.mocked(canAccessPatient).mockResolvedValue(true);
+ vi.mocked(getCephStudy).mockResolvedValue({analysis:{id:1,documentId:51,patientId:42,status:'draft',refSet:''},landmarks:[],measurements:[],diagnosis:null} as never);
+ vi.mocked(getPatient).mockResolvedValue({fullName:'Synthetic',birthYear:null} as never);
+ const tracer=async()=>{const page=await workspace();return (page.props.children as Array<{key?:string;props?:{actorId?:number;analysis?:unknown}}>).find(c=>c?.props?.analysis)!;};
+ const first=await tracer();expect(first.props?.actorId).toBe(1);
+ vi.mocked(requireSession).mockResolvedValue({...session,userId:2});const next=await tracer();expect(next.props?.actorId).toBe(2);expect(next.key).not.toBe(first.key);
+ vi.mocked(canAccessPatient).mockImplementation(async(_s,_id,permission)=>permission==='canViewXrays');expect((await tracer()).key).not.toBe(next.key);
+});

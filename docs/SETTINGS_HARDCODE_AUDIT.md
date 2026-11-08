@@ -73,7 +73,7 @@ today, max = MAX_DAYS_AHEAD)`). فمَن يستدعي بلا إعدادٍ يبق
 | `SCRYPT_KEY_LENGTH = 64` | `lib/auth.ts` |
 | `DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/` (٢٧ موضعًا) | مسارات `app/api/**` |
 | `MONTH = 30.44`, `MONTH_DAYS = 30.44` | `lib/ortho.ts`, `lib/ortho-photos.ts` |
-| `NOISE_FLOOR = 0.5` (أرضيّة ضجيج القياس السيفالوميّ) | `lib/cephCompare.ts` |
+| أُزيل حدّ الضجيج العام للمقارنة السيفالومترية؛ الفروق وصفية دون حكم بالدلالة السريرية | `lib/cephCompare.ts` |
 | `FULL_RATE_BP = 10_000` (نقطة الأساس) | `lib/materialRate.ts` |
 | `BASELINE_VERSION`, `MIGRATION_ADVISORY_LOCK_KEY`, نمط اسم الهجرة | `lib/migrations.ts` |
 | حدود الطول في الوصفة والتشخيص (`MAX_ITEMS`, `MAX_FIELD`, `MAX_TEXT`, `FIELD_LIMIT`) | `lib/prescription.ts`, `lib/diagnosis.ts` |

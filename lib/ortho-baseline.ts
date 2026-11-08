@@ -1,5 +1,6 @@
+import { adjustmentTextAdmissionError } from "./ortho-adjustment-text-input";
 import {
-  APPLIANCE_LABEL, ARCHES_LABEL, PHASE_LABEL, SLOT_LABEL, daysBetween, isElasticClass,
+  APPLIANCE_LABEL, ARCHES_LABEL, PHASE_LABEL, ELASTIC_LABEL, SLOT_LABEL, daysBetween,
   type Appliance, type Arches, type ElasticClass, type OrthoPhase, type SlotSize,
 } from "./ortho";
 
@@ -198,13 +199,33 @@ export function checkOrthoSessionDraft(
   if (value === undefined || value === null) return { ok: true, value: null };
   if (typeof value !== "object" || Array.isArray(value)) return { ok: false, message: "بيانات جلسة التقويم غير صالحة." };
   const source = value as Record<string, unknown>;
-  const caseId = Number(source.caseId);
-  if (!Number.isInteger(caseId) || caseId <= 0) return { ok: false, message: "حالة التقويم غير محددة." };
-  const nextWeeks = Math.round(Number(source.nextWeeks ?? 4));
-  if (!Number.isFinite(nextWeeks) || nextWeeks < 1 || nextWeeks > 52) {
+  // A supplied session must name one exact SERIAL/int4 case identity. Never
+  // select a case by coercing a boolean/array or rounding fractional string text.
+  const rawCaseId = source.caseId;
+  const caseId = typeof rawCaseId === "number"
+    || (typeof rawCaseId === "string" && /^\d+$/.test(rawCaseId.trim())) ? Number(rawCaseId) : NaN;
+  if (!Number.isSafeInteger(caseId) || caseId <= 0 || caseId > 2_147_483_647) {
+    return { ok: false, message: "حالة التقويم غير محددة." };
+  }
+  // HTTP authoring admission, not historical decoding. Retain the intentional
+  // missing/null default, but never round or coerce a supplied clinical interval.
+  // Decimal-digit strings avoid Number rounding near-integer fractional text.
+  const rawWeeks = source.nextWeeks ?? 4;
+  const nextWeeks = typeof rawWeeks === "number"
+    || (typeof rawWeeks === "string" && /^\d+$/.test(rawWeeks.trim())) ? Number(rawWeeks) : NaN;
+  if (!Number.isInteger(nextWeeks) || nextWeeks < 1 || nextWeeks > 52) {
     return { ok: false, message: "المدة حتى الشدّة القادمة بين أسبوع و52 أسبوعًا." };
   }
-  const phase = typeof source.phase === "string" && source.phase in PHASE_LABEL ? source.phase as OrthoPhase : null;
+  const textError = adjustmentTextAdmissionError(source);
+  if (textError) return { ok: false, message: textError };
+  if (source.phase != null && (typeof source.phase !== "string" || !Object.hasOwn(PHASE_LABEL, source.phase))) {
+    return { ok: false, message: "مرحلة جلسة التقويم غير صالحة؛ اختر قيمة معروفة أو اتركها غير محددة." };
+  }
+  if (source.elastics != null && (typeof source.elastics !== "string" || !Object.hasOwn(ELASTIC_LABEL, source.elastics))) {
+    return { ok: false, message: "صنف مطاطات الجلسة غير صالح؛ اختر قيمة معروفة." };
+  }
+  const phase = (source.phase ?? null) as OrthoPhase | null;
+  const elastics = (source.elastics ?? "none") as ElasticClass;
   return {
     ok: true,
     value: {
@@ -212,7 +233,7 @@ export function checkOrthoSessionDraft(
       phase,
       upperWire: text(source.upperWire, 40),
       lowerWire: text(source.lowerWire, 40),
-      elastics: isElasticClass(source.elastics) ? source.elastics : "none",
+      elastics,
       elasticNote: text(source.elasticNote, 120),
       done: text(source.done, 400),
       nextWeeks,
