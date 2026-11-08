@@ -32,14 +32,19 @@ function sourceMentionsBraces(value) {
 }
 
 // Turbopack's traced external aliases are directory symlinks. They are NOT
-// permission to follow arbitrary links in the shipped filesystem. These are the
-// two package identities observed in this application's production NFT output.
-const generatedAlias = /^\.next\/node_modules\/(pg|@electric-sql\/pglite)-[0-9a-f]{16}$/;
+// permission to follow arbitrary links in the shipped filesystem. Next 16.4.2's
+// references/external_module.rs hashes the package directory path (XXH3), not its
+// contents. The suffix is only a shape check; production identity, destination,
+// physical inventory and matching build/shipped NFT evidence are required below.
+// Sharp is a direct production dependency used by the ortho image processors and
+// an automatic external in Next's dist/lib/server-external-packages.jsonc.
+// Keep this reviewed set explicit: other declared/locked packages are not enough.
+const generatedAlias = /^\.next\/node_modules\/(pg|@electric-sql\/pglite|sharp)-[0-9a-f]{16}$/;
 
 async function inspectModuleAlias(full, artifactRoot, manifest, lock) {
   const relative = slash(path.relative(artifactRoot, full));
   const match = generatedAlias.exec(relative);
-  invariant(match && isRecord(manifest.dependencies) && Object.hasOwn(manifest.dependencies, match[1])
+  invariant(match && match[0] === relative && isRecord(manifest.dependencies) && Object.hasOwn(manifest.dependencies, match[1])
     && typeof manifest.dependencies[match[1]] === "string" && manifest.dependencies[match[1]].length > 0,
   `unknown/non-production runtime alias: ${relative}`);
   const name = match[1];
