@@ -351,7 +351,16 @@ jobs:
         run: npm ci
       - name: Verify environment contract
         run: npm run verify:environment
+      # This isolated runner repeats Next's full-project TypeScript check.
+      # Recheck runner/cgroup headroom and scope the heap just as in quality.
+      - name: Verify built-app HTTP build typecheck memory capacity
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: node scripts/typecheck-memory.mjs
+
       - name: Production build for built-app HTTP tests
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build
       - name: Build read-only preflight artifact for HTTP runtime verification
         run: npm run build:preflight
