@@ -22337,8 +22337,10 @@ export async function removePlanItemOn(
   const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
   if (!allowed.ok) { return allowed; }
 
-  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
-    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL}`, [itemId]);
+  // Scope the lineage check to the already-authorized plan before reading financial history.
+  // Otherwise an out-of-plan item ID can reveal whether that other patient's item was billed.
+  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1 AND i.plan_id = $2
+    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL}`, [itemId, planId]);
   if (financial) { return { ok: false, message: "البند له سجل مالي أو اتفاق تاريخي محفوظ؛ لا يُحذف." }; }
   const { rows: [removed] } = await client.query<PlanItemAuditRow>(
     `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2 RETURNING ${PLAN_ITEM_AUDIT_COLUMNS}`, [itemId, planId],
