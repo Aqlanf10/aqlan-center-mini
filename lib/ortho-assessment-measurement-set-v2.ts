@@ -10,8 +10,29 @@ export type DraftAnalysisSelectionV2={state:"draft";id:string;measurementSetId:s
 export interface AssessmentDraftV2 {
   schemaVersion:2;observations:AssessmentObservationSetV2;measurementSets:AssessmentMeasurementSetV2[];analyses:DraftAnalysisSelectionV2[];
 }
+export type VersionedDraftAnalysisSelectionV2 = DraftAnalysisSelectionV2 | {
+  state:"draft";id:string;measurementSetId:string;method:"tanaka_johnston_1974";arch:"upper"|"lower";
+};
+export interface VersionedAssessmentDraftV2 extends Omit<AssessmentDraftV2,"analyses"> {
+  analyses:VersionedDraftAnalysisSelectionV2[];
+}
 const fail=(code:string):Checked<never>=>({ok:false,code});
+/** Legacy 2.1 creator/engine admission stays pinned to its original method set. */
 export function checkAssessmentDraftV2(raw:unknown):Checked<AssessmentDraftV2>{
+  const parsed=checkDraft(raw,false);if(!parsed.ok)return parsed;
+  const analyses:DraftAnalysisSelectionV2[]=[];
+  for(const selection of parsed.value.analyses){
+    if(selection.method==="tanaka_johnston_1974")return fail("unsupported_analysis_selection");
+    analyses.push(selection);
+  }
+  return {ok:true,value:{...parsed.value,analyses}};
+}
+/** Structural parser for versioned authoring, explicit engines and persisted reads.
+ * This does not grant command, source or database authority. */
+export function checkVersionedAssessmentDraftV2(raw:unknown):Checked<VersionedAssessmentDraftV2>{
+  return checkDraft(raw, true);
+}
+function checkDraft(raw:unknown, allowVersionedTanaka:boolean):Checked<VersionedAssessmentDraftV2>{
   if(!plain(raw)||!keys(raw,["schemaVersion","observations","measurementSets","analyses"])||raw.schemaVersion!==2
     ||!Array.isArray(raw.measurementSets)||raw.measurementSets.length>12||!Array.isArray(raw.analyses)||raw.analyses.length>36)return fail("invalid_assessment_draft");
   const observations=checkAssessmentObservationSetV2(raw.observations);if(!observations.ok)return observations;
@@ -34,13 +55,13 @@ export function checkAssessmentDraftV2(raw:unknown):Checked<AssessmentDraftV2>{
       if(field!==null&&(!observationIdV2(field)||!all.some(o=>o.id===field&&o.definition==="arch_available_space"&&o.target.kind==="arch"&&o.target.arch===arch)))return fail("invalid_available_reference");}
     measurementSets.push({id:s.id,toothWidthObservationIds:s.toothWidthObservationIds as string[],upperAvailableObservationId:s.upperAvailableObservationId as string|null,lowerAvailableObservationId:s.lowerAvailableObservationId as string|null});
   }
-  const analyses:DraftAnalysisSelectionV2[]=[];
+  const analyses:VersionedDraftAnalysisSelectionV2[]=[];
   for(const a of raw.analyses){
     if(!plain(a)||!observationIdV2(a.id)||!observationIdV2(a.measurementSetId)||a.state!=="draft"
       ||analyses.some(x=>x.id===a.id)||!measurementSets.some(s=>s.id===a.measurementSetId))return fail("invalid_analysis_selection");
     const common={state:"draft" as const,id:a.id,measurementSetId:a.measurementSetId};
-    if(a.method==="arch_space"&&keys(a,["state","id","measurementSetId","method","arch"])&&(a.arch==="upper"||a.arch==="lower"))
-      analyses.push({...common,method:"arch_space",arch:a.arch});
+    if((a.method==="arch_space"||(allowVersionedTanaka&&a.method==="tanaka_johnston_1974"))&&keys(a,["state","id","measurementSetId","method","arch"])&&(a.arch==="upper"||a.arch==="lower"))
+      analyses.push({...common,method:a.method,arch:a.arch});
     else if((a.method==="bolton_anterior"||a.method==="bolton_overall")&&keys(a,["state","id","measurementSetId","method"]))analyses.push({...common,method:a.method});
     else if(typeof a.method==="string"&&DISABLED_ASSESSMENT_METHODS.some(m=>m===a.method)&&keys(a,["state","id","measurementSetId","method"]))
       analyses.push({...common,method:a.method as typeof DISABLED_ASSESSMENT_METHODS[number]});

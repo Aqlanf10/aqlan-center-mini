@@ -20,6 +20,11 @@ export interface CanonicalRecordReadRule {
 }
 
 export const CANONICAL_RECORD_READS = Object.freeze({
+  /** Inactive facial readers: no route/default composition or new grants. */
+  "read:ortho.facial.analysis": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view", "clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
+  "read:ortho.facial.history": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view", "clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
+  "read:ortho.facial.recovery": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
+  "read:ortho.facial.image": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view", "clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/ceph/compare and /superimpose: two saved studies, each in the patient scope. */
   "read:ceph.compare": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
   "read:ceph.superimpose": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),

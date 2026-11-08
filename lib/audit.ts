@@ -98,6 +98,7 @@ export type AuditAction =
   | "ortho.followup_coverage.append" | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "ortho.case_update" | "visit.create" | "visit.link"
   | "ortho.strategy_revision" | "ortho.assessment.append"
+  | "ortho.facial_submission" | "ortho.facial_revision"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* (M2 slice 21) معالجة طلبات الحجز الإلكتروني بالهوية الموحّدة: التأكيد والرفض. */
@@ -382,6 +383,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.case_create": "فتح حالة تقويم",
   "ortho.case_update": "تحديث مرحلة أو مثبت أو إقفال حالة تقويم",
   "ortho.strategy_revision": "توثيق مراجعة خطة الحالة التقويمية",
+  "ortho.facial_submission": "حفظ حالة إرسال مراجعة الوجه",
+  "ortho.facial_revision": "حفظ مراجعة تحليل صورة الوجه",
   "ortho.assessment.append": "حفظ مراجعة تقييم وقياسات الحالة التقويمية",
   "visit.create": "فتح زيارة اليوم",
   "visit.link": "ربط زيارة بملف مريض",
