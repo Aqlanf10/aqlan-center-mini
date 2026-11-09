@@ -4,6 +4,8 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getPool, ensureSchema, listServices, recordAudit } from "@/lib/db";
 import { canManageInventory } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { canonicalServicesRoute } from "@/lib/canonical-services-http";
+import { commandCanonicalServiceMaterialRemove, commandCanonicalServiceMaterialSet, readCanonicalServiceMaterials } from "@/lib/canonical-services";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +18,14 @@ const denied = () =>
  * الربط يُعرَّف مرة، ثم يخصم النظام تلقائيًا عند توقيع كل زيارة. وهذه الشاشة
  * لمن يدير المخزون (المدير والاستقبال) — الطبيب يرى أثر الخصم في سجل المريض
  * لا يعدّل تعريفه.
+ *
+ * M2 slice 96: a canonical session reads with finance.cost-prices.view and writes with
+ * settings.operational.edit (the map), each write and its audit in one transaction.
  */
 
 export async function GET(request: Request) {
+  const canonical = await canonicalServicesRoute(null, handle => readCanonicalServiceMaterials(handle, new URL(request.url).searchParams), "تعذّر تحميل ربط الخدمات بالمواد.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const serviceIdRaw = Number(new URL(request.url).searchParams.get("serviceId"));
@@ -57,6 +64,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const canonical = await canonicalServicesRoute(request, (handle, body) => commandCanonicalServiceMaterialSet(handle, body), "تعذّر حفظ الربط.", 201);
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageInventory(session.role)) {
@@ -120,6 +129,8 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const canonical = await canonicalServicesRoute(null, handle => commandCanonicalServiceMaterialRemove(handle, new URL(request.url).searchParams.get("id")), "تعذّر حذف الربط.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageInventory(session.role)) {

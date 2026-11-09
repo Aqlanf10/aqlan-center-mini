@@ -6,6 +6,8 @@ import { parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { readPriceBatch } from "@/lib/servicePricing";
+import { canonicalServicesRoute } from "@/lib/canonical-services-http";
+import { commandCanonicalServicePriceBatch } from "@/lib/canonical-services";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,9 @@ export const dynamic = "force-dynamic";
  * لا شيء منها: رقمٌ خاطئ في سطرٍ واحد يردّها كلَّها باسم صاحبه.
  */
 export async function POST(request: Request) {
+  // M2 slice 96: finance.service-prices.edit; the "before" prices read under the row locks.
+  const canonical = await canonicalServicesRoute(request, (handle, body) => commandCanonicalServicePriceBatch(handle, body), "تعذّر حفظ الدفعة.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

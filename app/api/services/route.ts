@@ -10,6 +10,8 @@ import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { readForeignPrices } from "@/lib/service-foreign-prices";
 import { catalogPricesByCurrency, foreignRatesFromSettings } from "@/lib/service-pricing";
+import { canonicalServicesRoute } from "@/lib/canonical-services-http";
+import { commandCanonicalServiceCreate, readCanonicalServiceCatalogue, readCanonicalServices } from "@/lib/canonical-services";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,12 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  /* M2 slice 96 (G4-3): a canonical session reads prices with finance.service-prices.view;
+     ?catalogue=1 is the price-free clinical catalogue for clinical.visits.document. */
+  const params = new URL(request.url).searchParams;
+  const canonical = await canonicalServicesRoute(null, handle => params.get("catalogue") === "1"
+    ? readCanonicalServiceCatalogue(handle) : readCanonicalServices(handle, params), "تعذّر تحميل قائمة الأسعار.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   /* صلاحيات الوكيل المساعد: لائحة الأسعار من «المالية المخفية» — الطبيب يراها
@@ -48,6 +56,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // M2 slice 96: finance.service-prices.edit, the audit in the same transaction.
+  const canonical = await canonicalServicesRoute(request, (handle, body) => commandCanonicalServiceCreate(handle, body), "تعذّر حفظ الخدمة.", 201);
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role)) {

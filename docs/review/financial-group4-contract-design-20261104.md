@@ -484,3 +484,45 @@ A plan outside the scope is treated exactly like a missing one:
 - `own` outside reads like missing for a single plan; in the bulk form only the plans inside the scope are stamped and counted.
 - A race in which the patient leaves the scope while the reminder waits for the plan row.
 - Revocation.
+
+## 15. Slice 96 — the service catalogue, prices and service materials (G4-3)
+
+Written before the code (stand-in agent, 2026-11-09). The routes are `GET/POST /api/services`, `PATCH /api/services/[id]`, `POST /api/services/prices`, `POST /api/services/provisional`, and `GET/POST/DELETE /api/service-materials`. They are reference data, not patient records, so there is no record scope.
+
+### Admission
+
+| Read or write | Grant | Never enough |
+|---|---|---|
+| The priced list (`GET /api/services`) | `finance.service-prices.view`; `invoiceQuotes` also need `finance.invoices.create` | `clinical.visits.document`, `finance.cost-prices.view`, any role label, the legacy `canViewServicePrices` flag |
+| The clinical catalogue (`?catalogue=1`, G4-3) | `clinical.visits.document` | the price grant alone (it reads the priced list instead), a label |
+| Catalogue and price writes | `finance.service-prices.edit` (it requires the view grant, so the legacy bodies stay) | the view grants, `finance.invoices.create`, a label |
+| Material links, read | `finance.cost-prices.view` | `settings.operational.edit` alone, the price grants |
+| Material links, write | `settings.operational.edit` | the cost grant, the price editor, a label |
+
+The priced list without its grant is refused. It is never answered with prices blanked. The clinical catalogue is built from an allowlist (`id, name, category, sortOrder`, active services only); it is never a priced row with fields removed.
+
+### Writers and locks
+
+- `createServiceWith`, `updateServiceWith`, `priceServiceBatchOn` and `fillProvisionalServicePricesOn` run on the admitted transaction. The legacy wrappers delegate to them.
+- PATCH locks the row before it reads the audit's "before".
+- The batch locks the named rows in id order and reads the previous prices under those locks.
+- The provisional fill locks the catalogue in id order and computes its fills from it.
+- A material link holds the service and the item `FOR SHARE ... AND is_active`.
+- Every audit row commits with its write.
+
+### What decides nothing
+
+- Role labels.
+- `permissions.canViewServicePrices`.
+- `workflow.doctor_financial_view` (G4-6).
+
+### Tests required before the commit
+
+- Permit, refuse and revoke for every read.
+- The catalogue allowlist: exact keys, no price-like field.
+- Every write by its grant, with the actor's audit; the neighbouring grants refused.
+- Validation writes nothing; a missing row is 404.
+- A refusing audit rolls back.
+- The batch's row-lock race records the committed "before".
+- The material link's deactivation race refuses.
+- The provisional fill counts and audits only written rows. The shared legacy writer fix is proved failure-first on the base.

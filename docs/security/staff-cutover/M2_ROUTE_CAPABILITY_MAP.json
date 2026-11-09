@@ -5361,8 +5361,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 96: one admitted settings.operational.edit transaction; missing is 404; service_material.remove audited with the write."
  },
  {
   "route": "/api/service-materials",
@@ -5377,8 +5377,15 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 96: one owning snapshot under finance.cost-prices.view (the map); the legacy body. The legacy path is unchanged (the proxy admits the clinic labels; the handler checks no role).",
+  "projection": {
+   "legacy": "the handler has no role check; the proxy matrix admits the clinic labels (admin, reception, doctor), each reading every link.",
+   "groups": {
+    "links": "service-to-material links with quantities — only with finance.cost-prices.view"
+   },
+   "rows": "service material links (reference data, not patient records)"
+  }
  },
  {
   "route": "/api/service-materials",
@@ -5392,8 +5399,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 96: one admitted settings.operational.edit transaction; the service and the item held FOR SHARE (active) until the link commits, so a link never lands on a concurrently deactivated service; service_material.set audited with the write."
  },
  {
   "route": "/api/services",
@@ -5409,8 +5416,17 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 96 (G4-3; contract section 15): one owning snapshot under finance.service-prices.view; the legacy body (services with priceIn); invoiceQuotes only with finance.invoices.create as well (legacy: the money labels); without the price grant refused (403), never a list with prices blanked. ?catalogue=1 is the price-free clinical catalogue under clinical.visits.document: active services through the allowlist id, name, category, sortOrder only. Role labels and permissions.canViewServicePrices decide nothing.",
+  "projection": {
+   "legacy": "doctor read prices only with permissions.canViewServicePrices; the money labels read prices and the money-handling labels also got invoiceQuotes.",
+   "groups": {
+    "prices": "services with prices, priceIn — only with finance.service-prices.view",
+    "invoiceQuotes": "the invoice FX snapshot quotes — only with finance.service-prices.view and finance.invoices.create",
+    "catalogue": "?catalogue=1: id, name, category, sortOrder of active services — clinical.visits.document; no price, cost, flag or FX field"
+   },
+   "rows": "service catalogue (reference data, not patient records)"
+  }
  },
  {
   "route": "/api/services",
@@ -5423,8 +5439,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 96: one admitted finance.service-prices.edit transaction; the legacy validation and body; service.create audited with the write."
  },
  {
   "route": "/api/services/[id]",
@@ -5437,8 +5453,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 96: one admitted finance.service-prices.edit transaction; the service row locked before the audit's before-state is read; service.update (changed fields only) audited with the write; missing is 404."
  },
  {
   "route": "/api/services/prices",
@@ -5451,8 +5467,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 96: one admitted finance.service-prices.edit transaction; all or nothing (readPriceBatch); every named row locked in id order and the previous prices read under those locks, so service.prices.batch records what the batch replaced (legacy read them before the transaction); services.price_batch and service.prices.batch audited with the write."
  },
  {
   "route": "/api/services/provisional",
@@ -5465,8 +5481,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 96: one admitted finance.service-prices.edit transaction; the catalogue locked in id order and the fills computed from it; only the rows actually written are counted and audited (services.provisional, service.prices.provisional) with the write."
  },
  {
   "route": "/api/settings",

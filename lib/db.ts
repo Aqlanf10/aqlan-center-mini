@@ -8735,9 +8735,10 @@ export async function getSettings(): Promise<SettingsMap> {
  * Read settings on the caller's transaction client without consulting or publishing
  * process cache. The caller initializes schema first and owns the transaction.
  */
-/** Settings over a caller-owned query facade (no cache, no ensureSchema). */
-export async function getSettingsWith(q: Pick<DbClient, "query">): Promise<SettingsMap> {
-  return readSettings(q);
+/** Settings over a caller-owned query facade (no cache, no ensureSchema). `options` as
+ * getSettingsInTransaction (M2 slice 96: the invoice FX snapshot on a read snapshot). */
+export async function getSettingsWith(q: Pick<DbClient, "query">, options: { requireStoredExchangeRates?: boolean } = {}): Promise<SettingsMap> {
+  return readSettings(q, options);
 }
 
 export async function getSettingsInTransaction(
@@ -9530,12 +9531,18 @@ export async function getService(id: number): Promise<Service | null> {
   return rows[0] ? toService(rows[0]) : null;
 }
 
-export async function createService(input: {
+export interface ServiceCreateInput {
   name: string; category: string | null; priceMinor: number;
   priceSarMinor?: number | null; priceUsdMinor?: number | null;
-}): Promise<Service> {
+}
+export async function createService(input: ServiceCreateInput): Promise<Service> {
   await ensureSchema();
-  const { rows } = await getPool().query<ServiceRow>(
+  return createServiceWith(getPool(), input);
+}
+
+/** createService on a caller's client (M2 slice 96: the canonical operation's own transaction). */
+export async function createServiceWith(q: Pick<DbClient, "query">, input: ServiceCreateInput): Promise<Service> {
+  const { rows } = await q.query<ServiceRow>(
     `INSERT INTO services (name, category, price_minor, price_configured, price_sar_minor, price_usd_minor)
      VALUES ($1, $2::text, $3, $4, $5::bigint, $6::bigint) RETURNING ${SERVICE_COLUMNS}`,
     [input.name, input.category, input.priceMinor, input.priceMinor > 0, input.priceSarMinor ?? null, input.priceUsdMinor ?? null],
@@ -9543,13 +9550,19 @@ export async function createService(input: {
   return toService(rows[0]);
 }
 
-export async function updateService(id: number, input: {
+export interface ServiceUpdateInput {
   name?: string; category?: string | null; priceMinor?: number; isActive?: boolean;
   /** (DAY1) undefined يُبقي، null يمسح (فيعود التحويل بسعر الصرف). */
   priceSarMinor?: number | null; priceUsdMinor?: number | null;
-}): Promise<Service | null> {
+}
+export async function updateService(id: number, input: ServiceUpdateInput): Promise<Service | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ServiceRow>(
+  return updateServiceWith(getPool(), id, input);
+}
+
+/** updateService on a caller's client (M2 slice 96). The statement is unchanged. */
+export async function updateServiceWith(q: Pick<DbClient, "query">, id: number, input: ServiceUpdateInput): Promise<Service | null> {
+  const { rows } = await q.query<ServiceRow>(
     `UPDATE services SET
        name             = COALESCE($2::text, name),
        category         = CASE WHEN $3::boolean THEN $4::text ELSE category END,
@@ -9622,23 +9635,10 @@ export async function priceServiceBatch(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: found } = await client.query<{ id: number; name: string }>(
-      `SELECT id, name FROM services WHERE id = ANY($1::int[]) FOR UPDATE`,
-      [prices.map((price) => price.id)],
-    );
-    const nameById = new Map(found.map((row) => [row.id, row.name]));
-    for (const price of prices) {
-      if (!nameById.has(price.id)) {
-        await client.query("ROLLBACK");
-        return { ok: false, message: `خدمة رقم ${price.id} غير موجودة.` };
-      }
-    }
-    for (const price of prices) {
-      await client.query(
-        `UPDATE services SET price_minor = $2, price_configured = TRUE, price_provisional = FALSE
-          WHERE id = $1`,
-        [price.id, price.priceMinor],
-      );
+    const result = await priceServiceBatchOn(client, prices);
+    if (!result.ok) {
+      await client.query("ROLLBACK");
+      return result;
     }
     await client.query("COMMIT");
     void recordAudit({
@@ -9647,7 +9647,7 @@ export async function priceServiceBatch(
       details: { عدد_الخدمات: prices.length },
       actor,
     });
-    return { ok: true, updated: prices.length };
+    return { ok: true, updated: result.updated };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -9657,40 +9657,88 @@ export async function priceServiceBatch(
 }
 
 /**
+ * The batch price writer on a caller's transaction (M2 slice 96). It locks every named
+ * service row in id order (a fixed order: two batches never deadlock on each other) and
+ * reads each service's previous price under that lock, so an audit built from `previous`
+ * reports what the batch actually replaced. A missing id refuses the whole batch before
+ * any row is written; the caller rolls back.
+ */
+export async function priceServiceBatchOn(
+  client: Pick<DbClient, "query">,
+  prices: { id: number; priceMinor: number }[],
+): Promise<{ ok: true; updated: number; previous: { id: number; name: string; priceMinor: number }[] } | { ok: false; message: string }> {
+  if (prices.length === 0) return { ok: false, message: "لا أسعار في الدفعة." };
+  const { rows: found } = await client.query<{ id: number; name: string; price_minor: string }>(
+    `SELECT id, name, price_minor FROM services WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
+    [prices.map((price) => price.id)],
+  );
+  const byId = new Map(found.map((row) => [row.id, row]));
+  for (const price of prices) {
+    if (!byId.has(price.id)) return { ok: false, message: `خدمة رقم ${price.id} غير موجودة.` };
+  }
+  for (const price of prices) {
+    await client.query(
+      `UPDATE services SET price_minor = $2, price_configured = TRUE, price_provisional = FALSE
+        WHERE id = $1`,
+      [price.id, price.priceMinor],
+    );
+  }
+  return {
+    ok: true, updated: prices.length,
+    previous: prices.map((price) => { const row = byId.get(price.id)!; return { id: row.id, name: row.name, priceMinor: toMinor(row.price_minor) }; }),
+  };
+}
+
+/**
  * ملء الأسعار التخمينية — للتجربة وحدها، وتُوسَم بذلك.
  *
  * **وما سُعّر لا يُمسّ**: من سعّر خدمةً بيده قرّر، وكتابةُ تخمينٍ فوقه تمحو قراره.
+ *
+ * `filled` and `applied` report only the rows actually written (M2 slice 96 fix): a
+ * service priced by hand between the caller's list and this write is skipped by the guard
+ * and is never counted or audited as filled.
  */
 export async function fillProvisionalServicePrices(
   fills: { id: number; priceMinor: number }[],
   actor: string,
-): Promise<{ ok: true; filled: number } | { ok: false; message: string }> {
+): Promise<{ ok: true; filled: number; applied: { id: number; priceMinor: number }[] } | { ok: false; message: string }> {
   await ensureSchema();
   if (fills.length === 0) return { ok: false, message: "لا خدمات بلا سعر تناسب التخميني." };
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    for (const fill of fills) {
-      await client.query(
-        `UPDATE services SET price_minor = $2, price_provisional = TRUE
-          WHERE id = $1 AND NOT price_configured`,
-        [fill.id, fill.priceMinor],
-      );
-    }
+    const applied = await fillProvisionalServicePricesOn(client, fills);
     await client.query("COMMIT");
     void recordAudit({
       action: "services.provisional", entity: "services", entityId: 0,
       entityLabel: "أسعار تخمينية موسومة",
-      details: { عدد_الخدمات: fills.length },
+      details: { عدد_الخدمات: applied.length },
       actor,
     });
-    return { ok: true, filled: fills.length };
+    return { ok: true, filled: applied.length, applied };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+/** The provisional fill on a caller's transaction (M2 slice 96): the rows it actually wrote. */
+export async function fillProvisionalServicePricesOn(
+  client: Pick<DbClient, "query">,
+  fills: { id: number; priceMinor: number }[],
+): Promise<{ id: number; priceMinor: number }[]> {
+  const applied: { id: number; priceMinor: number }[] = [];
+  for (const fill of [...fills].sort((a, b) => a.id - b.id)) {
+    const { rows } = await client.query<{ id: number }>(
+      `UPDATE services SET price_minor = $2, price_provisional = TRUE
+        WHERE id = $1 AND NOT price_configured RETURNING id`,
+      [fill.id, fill.priceMinor],
+    );
+    if (rows[0]) applied.push({ id: fill.id, priceMinor: fill.priceMinor });
+  }
+  return applied;
 }
 
 // ── نسب إهلاك المواد (من مستودع الوكيل الآخر) ────────────────────────────────

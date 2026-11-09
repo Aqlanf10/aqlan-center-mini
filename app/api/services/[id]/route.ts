@@ -7,10 +7,16 @@ import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { readForeignPrices } from "@/lib/service-foreign-prices";
+import { canonicalServicesRoute } from "@/lib/canonical-services-http";
+import { commandCanonicalServiceUpdate } from "@/lib/canonical-services";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 96: finance.service-prices.edit; the row locked before the audit's "before".
+  const { id: canonicalId } = await context.params;
+  const canonical = await canonicalServicesRoute(request, (handle, body) => commandCanonicalServiceUpdate(handle, canonicalId, body), "تعذّر حفظ التعديل.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
