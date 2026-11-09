@@ -159,6 +159,7 @@ import {
   type BatchResult, type MovementKind, type StockStatus,
 } from "./inventory";
 import { costNow, issuedCostMinor, movementCostsAtIndexes, type CostedMovement } from "./inventoryCost";
+import { postgresDateOnly } from "./postgres-date-only";
 import { quantityAtoms, QUANTITY_SCALE } from "./inventory-domain/quantities";
 import { proportionalCostMinor } from "./inventory-domain/treatment-cost";
 import { hashPassword } from "./auth";
@@ -26711,8 +26712,9 @@ function toMovement(row: InventoryMovementRow): InventoryMovement {
     itemId: row.item_id,
     kind: row.kind as MovementKind,
     qty: Number(row.qty),
+    // A DATE column: its civil day, never shifted through UTC (stand-in batch fix 2026-11-09).
     expiryDate: row.expiry_date
-      ? new Date(row.expiry_date).toISOString().slice(0, 10)
+      ? postgresDateOnly(row.expiry_date)
       : null,
     reason: row.reason,
     visitId: row.visit_id,
@@ -27027,7 +27029,7 @@ export async function listPatientMaterialsWith(q: Pick<DbClient, "query">, patie
   );
   return rows.map((r) => ({
     id: r.id, itemId: r.item_id, itemName: r.item_name, category: r.category, unit: r.unit, kind: r.kind,
-    qty: Number(r.qty), expiryDate: r.expiry_date ? String(r.expiry_date).slice(0, 10) : null,
+    qty: Number(r.qty), expiryDate: r.expiry_date ? postgresDateOnly(r.expiry_date) : null,
     reason: r.reason, visitId: r.visit_id, createdBy: r.created_by, createdAt: r.created_at.toISOString(),
   }));
 }

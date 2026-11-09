@@ -63,7 +63,7 @@ Report: [work-services-catalogue-slice96-20261109.md](work-services-catalogue-sl
 | Failure-first: legacy provisional over-count | failed on `8586f991` (`filled: 2` for one row written); passes with the fix |
 | Failure-first: batch "before" race | failed with the legacy pre-lock read (9100 recorded instead of 9300); passes |
 | Failure-first: material/deactivation race | failed with the unlocked check; passes |
-| PG neighbours (18 files) | see the batch 1 addendum below |
+| PG neighbours (18 files: inventory, commission, day1 currency, display, visit/plan UX, lab pricing, documents, invoice create, plan items/writes, receipts, settings, visit documentation) | 195/196. The one failure (`inventory-audit` "expiring soon … longer than 30 days") **fails identically on the untouched base `8586f991`**. It is a real date defect, fixed in batch 1b below. |
 | `tsc --noEmit` | pass |
 | ESLint on the changed files | 0 errors; the 8 warnings are the existing ones in `lib/db.ts` |
 | Inventory | regenerated: NOT_READY, 420 methods; no drift |
@@ -76,3 +76,22 @@ Report: [work-services-catalogue-slice96-20261109.md](work-services-catalogue-sl
 - My slice touches no orthodontic or cephalometric file.
 - `lib/db.ts` is also changed by Dot's `review/ortho-ceph-current-source-20261107` (#530, 1672 changed lines) and `fix/ceph-canvas-loupe-20261105` (#529, 87 lines). None of their hunks touch the functions changed here: `createService`/`updateService`/`priceServiceBatch`/`fillProvisionalServicePrices`/`getSettingsWith` and the new `…With`/`…On` writers. A textual conflict is unlikely, but the file is shared.
 - Both Dot branches are based on `main`. #506 itself already carries Claude's orthodontic and cephalometric canonical slices (29–64, including ceph 53–55 and 59–60). That pre-existing #506 ↔ #530 overlap is not created by this work. It needs the owner and Dot to decide the integration order before any merge.
+
+## Batch 1b — inventory DATE columns keep their civil day (defect found by the neighbour run)
+
+node-postgres returns a PostgreSQL `DATE` as a local-midnight JavaScript `Date`. Two readers mishandled it.
+
+| Reader | Defect | Visible in CI (UTC)? |
+|---|---|---|
+| `toMovement` (`lib/db.ts`): every inventory movement and batch expiry (legacy screens, alerts, item detail) | `new Date(d).toISOString().slice(0,10)`: one day **early** when the server process runs east of UTC (Asia/Aden) | no, hidden by the UTC runner |
+| `listPatientMaterialsWith` (M2 slice 82, canonical patient materials) | `String(d).slice(0,10)` gives `"Thu Dec 31"`, not a date | **yes, in every zone** |
+
+- **Fix:** both use the existing `postgresDateOnly` helper (`lib/postgres-date-only.ts`), as the cephalometric and backup readers already do.
+- **New test:** `__tests__/postgres/inventory-date-only.test.ts` (8 cases) runs the writer/reader and the slice-82 read under Asia/Aden, Pacific/Kiritimati, America/Los_Angeles and UTC, restoring `TZ` after each case.
+- **Failure-first:**
+  - Before the fix: the movement read returned `2026-11-10` for `2026-11-11` in Asia/Aden, and the slice-82 read returned `Thu Dec 31` in all four zones. The log is kept locally.
+  - After the fix: 8/8, plus `inventory-audit` 4/4 in the Aden zone.
+
+### Local environment notes (batch 1b)
+
+The agent host restarted twice. A local PostgreSQL started from a tool task was killed with the task. It is now started detached with `pg_ctl` (loopback only, my own data directory). No test result from an interrupted run is counted.
