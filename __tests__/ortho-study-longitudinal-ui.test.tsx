@@ -40,7 +40,7 @@ function fixture() {
   const owner = makeStudyOwner({ ...scope, actorId: 7, recovery: makeStudyRecoveryLedger(), authorized: () => true, writable: () => false, deny: denied });
   owner.activate();
   const revision: StudyEditorRevision = { ...scope, id: 91, version: 1, kind: "draft", contentHash: "a".repeat(64), actorId: 7,
-    predecessorId: null, documentedFromId: null, baseDocumentedId: null, createdAt: "2026-10-01T00:00:00.000Z", reason: "Synthetic saved study", authoredHash: "b".repeat(64),
+    predecessorId: null, documentedFromId: null, baseDocumentedId: null, createdAt: "2026-10-01T00:00:00.000Z", capturedAt: "2026-10-01T00:00:00.000Z", caseStatusAtCapture: "active", reason: "Synthetic saved study", authoredHash: "b".repeat(64),
     authored: { template: { key: "full-orthodontic-case", version: CASE_TEMPLATE_VERSION, contentHash: STUDY_TEMPLATE_HASH }, identityDisclosure: "case_only",
       sources: [{ key: "ceph1", kind: "ceph_study", id: 61, version: null, contentHash: "c".repeat(64) }, { key: "ceph2", kind: "ceph_study", id: 62, version: null, contentHash: "d".repeat(64) }],
       groups: [{ id: "timepoint_T1", label: "T1 historical", phase: "T1", sourceKeys: ["ceph1"], occurrence: { occurredOn: "2020-02-29", dateProvenance: "historical_source", sourceNote: "Synthetic historical card" } },

@@ -15,6 +15,7 @@ function expectation(): StudySaveExpectation {
 function saved(expected: StudySaveExpectation, replayed = false) {
   return { ok: true, replayed, ...scope, revision: { ...scope, actorId: expected.actorId, id: 91, version: 1, kind: "draft", contentHash: "a".repeat(64),
     predecessorId: null, documentedFromId: null, baseDocumentedId: null, createdAt: "2026-10-01T00:00:00.000Z",
+    capturedAt: "2026-10-01T00:00:00.000Z", caseStatusAtCapture: "active",
     reason: expected.command.reason, authored: expected.command.content, authoredHash: journeyContentHash(expected.command.content) } };
 }
 const acknowledgment = (expected:StudySaveExpectation) => ({ok:true,scope:expected.scope,actorId:expected.actorId,

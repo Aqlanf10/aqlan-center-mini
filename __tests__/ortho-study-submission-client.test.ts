@@ -23,6 +23,7 @@ const json = (value: unknown, status = 200, cache = 'no-store') => new Response(
 function saved(value = expected(), replayed = false) {
   return { ok: true, replayed, ...scope, revision: { ...scope, actorId: 7, id: 91, version: 1, kind: 'draft', contentHash: 'a'.repeat(64), predecessorId: null,
     documentedFromId: null, baseDocumentedId: null, createdAt: '2026-10-01T00:00:00.000Z', reason: value.command.reason,
+    capturedAt: '2026-10-01T00:00:00.000Z', caseStatusAtCapture: 'active',
     authored: value.command.content, authoredHash: journeyContentHash(value.command.content) } };
 }
 function setup() {

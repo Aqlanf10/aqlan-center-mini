@@ -6,7 +6,7 @@ import type {StudySavedContent} from './ortho-case-study-capture';
 import {studyTextPresentation,type StudyTextPresentation,type StudyTextPage} from './ortho-study-text-export';
 import {planOrthoMediaGeometry,type OrthoStudyMediaUseDraft} from './ortho-study-media';
 import type {StudyGroupDraft} from './ortho-case-study';
-export const STUDY_ILLUSTRATED_RENDERER='ortho-illustrated-v6-space-prefix-provenance';
+export const STUDY_ILLUSTRATED_RENDERER='ortho-illustrated-v7-capture-context';
 export const STUDY_ILLUSTRATED_LIMITS=Object.freeze({images:40,pages:300,bytes:24*1024*1024});
 const viewLabels:Record<OrthoStudyMediaUseDraft['view'],string>={unassigned:'منظر غير محدد','face-rest':'الوجه في الراحة','face-smile':'الابتسامة',profile:'الوجه الجانبي','intraoral-front':'داخل الفم — أمامي','intraoral-right':'داخل الفم — يمين','intraoral-left':'داخل الفم — يسار','occlusal-upper':'إطباقي علوي','occlusal-lower':'إطباقي سفلي',panoramic:'بانوراما',cephalometric:'سيفالومتري',other:'منظر آخر'};
 export interface StudyIllustratedImage {

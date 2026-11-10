@@ -1,10 +1,20 @@
 import { caseLayout } from "./ortho-case-template";
 import type { StudySourceKind } from "./ortho-case-study";
+import type { CaseStatus } from "./ortho";
 
 /** Display-only language. Never part of clinical content, hashes or save commands. */
 export type StudyDisplayLocale = "ar" | "en";
 export const STUDY_DISPLAY_LOCALE_KEY = "aqlan.orthoStudy.displayLocale";
 export const STUDY_ENGLISH = {
+  "سياق التقاط الدراسة المحفوظة": "Saved study capture context",
+  "حالة التقويم عند التقاط الدراسة:": "Orthodontic case status when the study was captured:",
+  "وقت التقاط الدراسة (UTC):": "Study captured at (UTC):",
+  "تصف هذه البيانات وقت الالتقاط المحفوظ. توثيق نسخة لاحقًا يحافظ على هذا السياق.": "These facts describe the saved capture. Documenting a revision later preserves this context.",
+  "قيد التقييم": "Assessment",
+  "جارية": "Active",
+  "تثبيت": "Retention",
+  "مكتملة": "Completed",
+  "متوقّفة": "Discontinued",
   "اختر قسم التشخيص أو الأهداف أو المشكلات والاستراتيجية لعرض مراجعة المصدر.": "Choose diagnosis, objectives, or problems and strategy to display a source review.",
   "اختر مراجعة محفوظة للمصدر. تُعرض المشكلة والملاحظة كما وثقهما الطبيب وقت المراجعة، دون استبدالهما بالبيانات الحالية.": "Choose a saved source review. The problem and observation are shown as the clinician recorded them at review, without replacement by current data.",
   "مراجعات مصادر المشكلات أدناه تاريخية؛ وجودها في الدراسة لا يعني اعتمادًا سريريًا جديدًا.": "Problem-source reviews below are historical; including them in this study is not a new clinical approval.",
@@ -92,6 +102,10 @@ export const STUDY_ENGLISH = {
 } as const;
 export type StudyMessage = keyof typeof STUDY_ENGLISH;
 export const studyText = (locale: StudyDisplayLocale, message: StudyMessage): string => locale === "en" ? STUDY_ENGLISH[message] : message;
+const capturedStatusLabels: Record<CaseStatus, StudyMessage> = {
+  assessment: "قيد التقييم", active: "جارية", retention: "تثبيت", completed: "مكتملة", discontinued: "متوقّفة",
+};
+export const studyCapturedStatusLabel = (status: CaseStatus, locale: StudyDisplayLocale): string => studyText(locale, capturedStatusLabels[status]);
 export const studyDirection = (locale: StudyDisplayLocale) => locale === "ar" ? "rtl" : "ltr";
 export const readStudyDisplayLocale = (value: unknown): StudyDisplayLocale => value === "en" ? "en" : "ar";
 export const studyLayoutTitle = (key: string, locale: StudyDisplayLocale): string => {

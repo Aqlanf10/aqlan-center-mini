@@ -1,6 +1,6 @@
 import { wrapStudyTextLine } from "./ortho-study-display";
 import { projectStudyTimepoints } from "./ortho-case-study-timepoints";
-import { studySourceName } from "./ortho-case-presentation-i18n";
+import { studyCapturedStatusLabel, studySourceName } from "./ortho-case-presentation-i18n";
 import { caseLayout } from "./ortho-case-template";
 import type { JourneyScope } from "./ortho-case-journey-records";
 import type { StudyRevision } from "./ortho-case-study-history";
@@ -9,7 +9,7 @@ import { projectStudyRecordedFacts } from "./ortho-case-study-recorded-facts";
 
 import { studyLongitudinalExportPages } from "./ortho-study-longitudinal-export";
 
-export const STUDY_TEXT_RENDERER = "ortho-text-v6-space-prefix-provenance";
+export const STUDY_TEXT_RENDERER = "ortho-text-v7-capture-context";
 export interface StudyTextPage { title: string; lines: string[]; sourceKeys: string[] }
 export interface StudyTextPresentation { caseId: number; revisionId: number; revisionHash: string; version: number; kind: "draft" | "documented"; capturedAt: string; pages: StudyTextPage[] }
 
@@ -25,6 +25,14 @@ export function studyTextPresentation(revision: StudyRevision<StudySavedContent>
     }
   };
   const includedPanels = revision.content.authored.panels.filter(panel => panel.included && (panelId === undefined || panel.instanceId === panelId));
+  // Provenance must not make an otherwise empty selection exportable. Panel-only
+  // projections omit this page so illustrated assembly includes it exactly once.
+  if (!includedPanels.length) throw new Error("study_text_export_empty");
+  if (panelId === undefined) append("سياق التقاط الدراسة المحفوظة", [
+    `حالة التقويم عند التقاط الدراسة: ${studyCapturedStatusLabel(revision.content.caseStatusAtCapture, "ar")}`,
+    `وقت التقاط الدراسة (UTC): ${revision.content.capturedAt}`,
+    "تصف هذه البيانات وقت الالتقاط المحفوظ. توثيق نسخة لاحقًا يحافظ على هذا السياق.",
+  ], []);
   const exportedKeys = new Set(includedPanels.filter(panel => panel.state === "available").flatMap(panel => panel.sourceKeys));
   // Excluded panels do not leak their source metadata via the timepoint appendix.
   for (const point of panelId === undefined ? projectStudyTimepoints(revision.content.authored) : []) {

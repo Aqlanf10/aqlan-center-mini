@@ -5,7 +5,7 @@ import { OrthoStudyTimepoints } from "./OrthoStudyTimepoints";
 import OrthoStudyLongitudinalReview from "./OrthoStudyLongitudinalReview";
 import type { StudyOwner } from "@/lib/ortho-case-study-owner";
 import type { StudyEditorRevision } from "@/lib/ortho-case-study-editor-contract";
-import { studyLayoutTitle, studyText, type StudyDisplayLocale, type StudyMessage } from "@/lib/ortho-case-presentation-i18n";
+import { studyCapturedStatusLabel, studyLayoutTitle, studyText, type StudyDisplayLocale, type StudyMessage } from "@/lib/ortho-case-presentation-i18n";
 import { readStudyPanelReview, type StudyPanelReview } from "@/lib/ortho-case-study-review-contract";
 interface Props { locale?: StudyDisplayLocale; owner: StudyOwner; readVersion: number; revision: StudyEditorRevision }
 export default function OrthoSavedStudyReview(props: Props) {
@@ -15,6 +15,11 @@ export default function OrthoSavedStudyReview(props: Props) {
   const panel = revision.authored.panels.find(value => value.instanceId === selected) ?? revision.authored.panels[0];
   return <section className="min-w-0 rounded border p-3 space-y-2" aria-label={t("مراجعة الدراسة المحفوظة")}>
     <h3>{t("مراجعة النسخة المحفوظة")} {revision.version} — {t(revision.kind === "draft" ? "مسودة" : "موثقة")}</h3>
+    <div className="rounded border bg-slate-50 p-3 text-sm space-y-1" aria-label={t("سياق التقاط الدراسة المحفوظة")}>
+      <p>{t("حالة التقويم عند التقاط الدراسة:")} {studyCapturedStatusLabel(revision.caseStatusAtCapture, locale)}</p>
+      <p>{t("وقت التقاط الدراسة (UTC):")} <time dateTime={revision.capturedAt} dir="ltr">{revision.capturedAt}</time></p>
+      <p>{t("تصف هذه البيانات وقت الالتقاط المحفوظ. توثيق نسخة لاحقًا يحافظ على هذا السياق.")}</p>
+    </div>
     <p>{t("هذا العرض من النسخة المحفوظة المحددة. التعديلات المحلية لا تظهر فيه قبل الحفظ؛ توثيق الدراسة لا يعني اعتمادًا سريريًا جديدًا.")}</p>
     {revision.authored.sources.some(source => source.kind === "problem_review") && <p>{t("مراجعات مصادر المشكلات أدناه تاريخية؛ وجودها في الدراسة لا يعني اعتمادًا سريريًا جديدًا.")}</p>}
     <OrthoStudyTimepoints content={revision.authored} editable={false} locale={locale} onChange={() => false} />

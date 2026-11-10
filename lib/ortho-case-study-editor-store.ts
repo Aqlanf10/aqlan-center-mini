@@ -12,7 +12,8 @@ function editorRevision(revision: StudyRevision<StudySavedContent>): StudyEditor
   return { patientId: revision.patientId, orthoCaseId: revision.orthoCaseId, clinicalCaseId: revision.clinicalCaseId,
     id: revision.id, actorId: revision.actorId, version: revision.version, kind: revision.kind, contentHash: revision.contentHash,
     predecessorId: revision.predecessorId, documentedFromId: revision.documentedFromId, baseDocumentedId: revision.baseDocumentedId,
-    createdAt: revision.createdAt, reason: revision.reason, authoredHash: journeyContentHash(revision.content.authored), authored: revision.content.authored };
+    createdAt: revision.createdAt, capturedAt: revision.content.capturedAt, caseStatusAtCapture: revision.content.caseStatusAtCapture,
+    reason: revision.reason, authoredHash: journeyContentHash(revision.content.authored), authored: revision.content.authored };
 }
 export async function getOrthoStudyEditor(input: JourneyOwnerInput & { revisionId?: number }) {
   const result = await getOrthoCaseStudy(input); if (!result.ok) return result;

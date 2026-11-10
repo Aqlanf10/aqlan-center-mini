@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "pg";
 import JSZip from "jszip";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { syntheticStudyCommand } from "../fixtures/ortho-case-study";
-import { authedGet, authedMutation, baseUrl, harness, type Session } from "./_server";
+import { authedGet, authedMutation, baseUrl, harness, loginStaff, TEST_USERS, type Session } from "./_server";
 
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser;
 beforeAll(async () => {
@@ -41,12 +44,12 @@ async function createStudy(patientId: number) {
     commandId: command.clientRequestId, requestFingerprint: receipt.identity.requestFingerprint, action: "acknowledge" }));
   expect(ack.status).toBe(200);
   const query = `patientId=${patientId}&revisionId=${revisionId}`;
-  return { caseId, revisionId, marker, read: `${route}?${query}`,
+  return { caseId, revisionId, capturedAt: saved.revision.content.capturedAt as string, marker, read: `${route}?${query}`,
     outputs: [`${route}/text-pptx?${query}`, `${route}/illustrated-pptx?${query}`,
       `/print/ortho-study/${caseId}?${query}`, `/print/ortho-study/${caseId}?${query}&mode=illustrated`] };
 }
 
-async function rejectOutputs(study: Awaited<ReturnType<typeof createStudy>>, session: Session) {
+async function rejectOutputs(study: Awaited<ReturnType<typeof createStudy>>, session: Pick<Session, "cookie">) {
   for (const url of study.outputs) {
     const response = await authedGet(url, session);
     const illustratedPrint = url.endsWith("&mode=illustrated");
@@ -91,7 +94,14 @@ it.each(["doctorA", "reception"] as const)("%s keeps saved-study access while fo
         const zip = await JSZip.loadAsync(await response.arrayBuffer());
         const slides = await Promise.all(Object.values(zip.files).filter(file => /^ppt\/slides\/slide\d+\.xml$/.test(file.name)).map(file => file.async("string")));
         expect(slides.join("\n")).toContain(study.marker);
-      } else expect(await response.text()).toContain(study.marker);
+        expect(slides.join("\n")).toContain("سياق التقاط الدراسة المحفوظة");
+        expect(slides.join("\n")).toContain("حالة التقويم عند التقاط الدراسة: مكتملة");
+      } else {
+        const html = await response.text();
+        expect(html).toContain(study.marker);
+        expect(html).toContain("سياق التقاط الدراسة المحفوظة");
+        expect(html).toContain("حالة التقويم عند التقاط الدراسة: مكتملة");
+      }
     }
     await grant(false);
     await rejectOutputs(study, h.sessions[role]);
@@ -162,6 +172,12 @@ it.each([390, 1280])("shows current export controls on the saved case only after
       throw error;
     });
     for (const label of labels) expect(await page.getByRole("link", { name: label, exact: true }).count()).toBe(0);
+    const capture = page.getByLabel("سياق التقاط الدراسة المحفوظة", { exact: true });
+    expect(await capture.innerText()).toContain("حالة التقويم عند التقاط الدراسة: مكتملة");
+    expect(await capture.locator("time").getAttribute("datetime")).toBe(study.capturedAt);
+    await capture.scrollIntoViewIfNeeded();
+    expect(await capture.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    await capture.screenshot({ path: `.settings-ui-artifacts/ortho-study-capture-context-${width}.png` });
     await setGrant(true); await page.reload();
     await page.getByRole("button", { name: "دراسة الحالة المحفوظة" }).click();
     for (const label of labels) {
@@ -184,4 +200,73 @@ it.each([390, 1280])("shows current export controls on the saved case only after
     await context.close();
     await db.query("UPDATE users SET permissions=$1 WHERE username='secdoctora'", [original]);
   }
+});
+
+
+it("renders the saved capture context once on a separate PDF page in both print modes", async () => {
+  const study = await createStudy(h.seeded.patientAId);
+  const directory = await mkdtemp(join(tmpdir(), "synthetic-study-print-"));
+  const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, locale: "ar-YE" });
+  const [name, ...cookie] = h.sessions.admin.cookie.split("=");
+  await context.addCookies([{ name, value: cookie.join("="), url: baseUrl }]);
+  const unexpected: string[] = [], errors: string[] = [];
+  await context.route("**/*", route => {
+    const request = route.request();
+    if (new URL(request.url()).origin !== baseUrl || !["GET", "HEAD", "OPTIONS"].includes(request.method())) {
+      unexpected.push(`${request.method()} ${new URL(request.url()).pathname}`); return route.abort();
+    }
+    return route.continue();
+  });
+  try {
+    for (const [index, mode] of ["text", "illustrated"].entries()) {
+      const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
+      const response = await page.goto(`${baseUrl}${study.outputs[index + 2]}`);
+      expect(response?.status()).toBe(200);
+      await page.getByText("سياق التقاط الدراسة المحفوظة", { exact: true }).waitFor({ timeout: 20000 });
+      expect(await page.getByText("سياق التقاط الدراسة المحفوظة", { exact: true }).count()).toBe(1);
+      expect(await page.locator("main").innerText()).toContain("حالة التقويم عند التقاط الدراسة: مكتملة");
+      await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(image => image.decode().catch(() => undefined))); });
+      const pdf = join(directory, `${mode}.pdf`);
+      await page.pdf({ path: pdf, format: "A4", preferCSSPageSize: true, printBackground: true });
+      const info = execFileSync("pdfinfo", [pdf], { encoding: "utf8" });
+      const physicalPages = Number(info.match(/^Pages:\s+(\d+)/m)?.[1]);
+      if (physicalPages !== 2) {
+        console.error("Synthetic print pagination", mode, JSON.stringify({ physicalPages,
+          text: execFileSync("pdftotext", ["-layout", pdf, "-"], { encoding: "utf8" }),
+          geometry: await page.evaluate(() => ({ mainPadding: getComputedStyle(document.querySelector("main")!).padding,
+            sections: [...document.querySelectorAll("main section")].map(node => ({ height: node.getBoundingClientRect().height, breakAfter: getComputedStyle(node).breakAfter })) })) }));
+      }
+      expect(physicalPages).toBe(2);
+      const extract = (physicalPage: number) => execFileSync("pdftotext", ["-f", String(physicalPage), "-l", String(physicalPage), "-layout", pdf, "-"], { encoding: "utf8" }).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+      const first = extract(1), second = extract(2);
+      expect(first).toContain(study.capturedAt); expect(first).not.toContain(study.marker);
+      expect(first).toContain("1 / 2"); expect(second).toContain("2 / 2");
+      expect(second).toContain(study.capturedAt);
+      expect(second).toContain(study.marker);
+      execFileSync("pdftoppm", ["-f", "1", "-singlefile", "-scale-to", "1100", "-png", pdf, `.settings-ui-artifacts/ortho-study-capture-print-${mode}`]);
+      await page.close();
+    }
+    expect(errors).toEqual([]); expect(unexpected).toEqual([]);
+  } finally { await context.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+it.each(["doctor", "reception"] as const)("an existing administrator cookie loses implicit export after downgrade to %s", async role => {
+  const original = (await db.query("SELECT role,permissions FROM users WHERE username='secadmin'")).rows[0] as { role: string; permissions: string | null };
+  const study = await createStudy(h.seeded.patientAId);
+  const retainedReadAccess = { canViewAllPatients: true, canViewPlans: true, canViewXrays: true, canExportOrthoStudies: false };
+  try {
+    expect((await authedGet(study.outputs[0], h.sessions.admin)).status).toBe(200);
+    await db.query("UPDATE users SET role=$1,permissions=$2 WHERE username='secadmin'", [role, JSON.stringify(retainedReadAccess)]);
+    // Role changes invalidate the old cookie; they do not silently renew it.
+    expect((await authedGet(study.read, h.sessions.admin)).status).toBe(401);
+    for (const url of study.outputs.slice(0, 2)) {
+      const denied = await authedGet(url, h.sessions.admin);
+      expect(denied.status).toBe(401); expect(await denied.text()).not.toContain(study.marker);
+    }
+    const current = await loginStaff(TEST_USERS.admin.username, TEST_USERS.admin.password);
+    expect((await authedGet(study.read, current)).status).toBe(200);
+    await rejectOutputs(study, current);
+    await db.query("UPDATE users SET permissions=$1 WHERE username='secadmin'", [JSON.stringify({ ...retainedReadAccess, canExportOrthoStudies: true })]);
+    expect((await authedGet(study.outputs[0], current)).status).toBe(200);
+  } finally { await db.query("UPDATE users SET role=$1,permissions=$2 WHERE username='secadmin'", [original.role, original.permissions]); }
 });

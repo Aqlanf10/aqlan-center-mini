@@ -25,7 +25,8 @@ describe("saved clinical text export", () => {
     expect(output.pages.length).toBeGreaterThan(1);
     expect(output.pages.every(page => page.lines.length <= 12 && page.lines.every(line => Array.from(line).length <= 100))).toBe(true);
     expect(output.pages.flatMap(page => page.lines).join("")).toContain(comment);
-    expect(output.pages[0].lines[0]).toContain("غير مسجل");
+    expect(output.pages[0].title).toBe("سياق التقاط الدراسة المحفوظة");
+    expect(output.pages[1].lines[0]).toContain("غير مسجل");
     expect(JSON.stringify(saved)).toBe(before);
     expect(output.revisionHash).toBe(saved.contentHash);
   });
@@ -37,10 +38,34 @@ describe("saved clinical text export", () => {
   });
   it("produces editable native RTL text and exact revision provenance in Office XML without images", async () => {
     const saved = revision(), value = studyTextPresentation(saved, scope), zip = await JSZip.loadAsync(await renderStudyTextPptx(value));
-    const slide = await zip.file("ppt/slides/slide1.xml")!.async("text");
+    const slide = (await Promise.all(Object.keys(zip.files).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name)).map(name => zip.file(name)!.async("text")))).join("");
     expect(slide).toContain("<a:t>"); expect(slide).toContain("اصطناعي &lt; &amp; &gt;"); expect(slide).toContain('rtl="1"');
     expect(Object.keys(zip.files).filter(name => /^ppt\/media\/[^/]+$/.test(name))).toEqual([]);
     expect(await zip.file("ppt/notesSlides/notesSlide1.xml")!.async("text")).toContain(saved.contentHash);
+  });
+  it.each([
+    ["assessment", "قيد التقييم"], ["active", "جارية"], ["retention", "تثبيت"], ["completed", "مكتملة"], ["discontinued", "متوقّفة"],
+  ] as const)("renders immutable %s capture context once, independent of later documentation", (status, label) => {
+    const saved = revision(); saved.content.caseStatusAtCapture = status;
+    saved.contentHash = journeyContentHash(saved.content);
+    const documented = { ...saved, id: 6, version: 2, kind: "documented" as const, predecessorId: saved.id, documentedFromId: saved.id, createdAt: "2026-11-10T15:00:00.000Z" };
+    const before = JSON.stringify(documented), output = studyTextPresentation(documented, scope);
+    const context = output.pages.filter(page => page.title === "سياق التقاط الدراسة المحفوظة");
+    expect(context).toHaveLength(1);
+    expect(context[0].lines).toContain(`حالة التقويم عند التقاط الدراسة: ${label}`);
+    expect(context[0].lines).toContain(`وقت التقاط الدراسة (UTC): ${saved.content.capturedAt}`);
+    expect(context[0].sourceKeys).toEqual([]);
+    expect(context[0].lines.join(" ")).not.toContain(documented.createdAt);
+    expect(output.revisionHash).toBe(saved.contentHash);
+    expect(JSON.stringify(documented)).toBe(before);
+    expect(studyTextPresentation(documented, scope, false, "interview1").pages.some(page => page.title === context[0].title)).toBe(false);
+  });
+  it("does not make an empty or fully excluded study exportable by adding capture context", () => {
+    const saved = revision(); saved.content.authored.panels = [];
+    expect(() => studyTextPresentation(saved, scope)).toThrow("study_text_export_empty");
+    saved.content.authored.panels = revision().content.authored.panels;
+    saved.content.authored.panels[0].included = false;
+    expect(() => studyTextPresentation(saved, scope)).toThrow("study_text_export_empty");
   });
 });
 

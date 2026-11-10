@@ -60,3 +60,19 @@ it("identifies saved problem reviews as historical without injecting local sourc
   expect(words(tree)).toContain("Problem-source reviews below are historical");
   expect(words(tree)).toContain("not a new clinical approval");
 });
+it.each([
+  ["ar", "completed", "مكتملة"], ["en", "completed", "Completed"],
+  ["ar", "discontinued", "متوقّفة"], ["en", "active", "Active"],
+] as const)("shows exact %s saved lifecycle %s without replacing its time with documentation time", (locale, status, label) => {
+  const revision = studyPreviewFixture();
+  revision.caseStatusAtCapture = status; revision.capturedAt = "2020-02-29T12:34:56.000Z";
+  revision.createdAt = "2026-11-10T00:00:00.000Z"; revision.kind = "documented";
+  revision.authored.panels = []; revision.authored.mediaUses = [];
+  const before = JSON.stringify(revision), tree = OrthoSavedStudyReview({ owner: makeOwner(), revision, readVersion: 0, locale });
+  expect(words(tree)).toContain(label);
+  expect(words(tree)).toContain(revision.capturedAt);
+  expect(words(tree)).not.toContain(revision.createdAt);
+  expect(nodes(tree).find(node => node.type === "time")?.props.dateTime).toBe(revision.capturedAt);
+  expect(words(tree)).toContain(locale === "en" ? "Documenting a revision later preserves this context" : "توثيق نسخة لاحقًا يحافظ على هذا السياق");
+  expect(JSON.stringify(revision)).toBe(before);
+});

@@ -10,7 +10,7 @@ function fixture() {
     panels: [{ instanceId: "cover1", layoutKey: "cover", included: true, state: "not_recorded", sourceKeys: [], images: [], comment: "" }] };
   const metadata = { id: 91, version: 1, kind: "draft", contentHash: "a".repeat(64), createdAt: "2026-10-01T00:00:00.000Z",
     predecessorId: null, documentedFromId: null, baseDocumentedId: null };
-  const revision = { ...scope, ...metadata, actorId: 7, reason: "Synthetic study draft", authoredHash: journeyContentHash(authored), authored };
+  const revision = { ...scope, ...metadata, capturedAt: "2026-10-01T00:00:00.000Z", caseStatusAtCapture: "active", actorId: 7, reason: "Synthetic study draft", authoredHash: journeyContentHash(authored), authored };
   return { ok: true, ...scope, template, revision, history: [metadata], head: { id: 91, contentHash: metadata.contentHash }, canAppend: true };
 }
 describe("strict saved-study editor projection", () => {
@@ -48,6 +48,31 @@ describe("strict saved-study editor projection", () => {
     expect(() => readStudyEditorRead({ ...valid, history: [first, { ...documented, contentHash: "b".repeat(64) }] }, scope)).toThrow();
     expect(() => readStudyEditorRead({ ...valid, history: [first, { ...documented, baseDocumentedId: 91 }] }, scope)).toThrow();
     expect(() => readStudyEditorRead({ ...valid, history: [first, { ...documented, documentedFromId: 999 }] }, scope)).toThrow();
+  });
+  it.each(["assessment", "active", "retention", "completed", "discontinued"])("preserves the exact saved capture status %s", caseStatusAtCapture => {
+    const input = fixture(); input.revision.caseStatusAtCapture = caseStatusAtCapture;
+    expect(readStudyEditorRead(input, scope).revision).toMatchObject({ caseStatusAtCapture, capturedAt: input.revision.capturedAt });
+  });
+  it.each([undefined, null, "closed", "reopened", ["completed"], true])("rejects invalid capture status %s", caseStatusAtCapture => {
+    const input = fixture();
+    expect(() => readStudyEditorRead({ ...input, revision: { ...input.revision, caseStatusAtCapture } }, scope)).toThrow();
+  });
+  it.each([undefined, null, "2026-10-01", "2026-02-30T00:00:00.000Z", "2026-10-01T00:00:00+00:00", 0])("rejects invalid capture timestamp %s", capturedAt => {
+    const input = fixture();
+    expect(() => readStudyEditorRead({ ...input, revision: { ...input.revision, capturedAt } }, scope)).toThrow();
+  });
+  it("rejects the old response shape rather than inventing capture context", () => {
+    const input = fixture(), revision: Record<string, unknown> = { ...input.revision };
+    delete revision.capturedAt; delete revision.caseStatusAtCapture;
+    expect(() => readStudyEditorRead({ ...input, revision }, scope)).toThrow();
+  });
+  it("keeps capture context independent of later documented revision metadata and strict history", () => {
+    const input = fixture(), first = input.history[0];
+    const documented = { ...first, id: 92, version: 2, kind: "documented", predecessorId: 91, documentedFromId: 91, createdAt: "2026-11-10T00:00:00.000Z" };
+    const response = { ...input, history: [first, documented], head: { id: 92, contentHash: first.contentHash }, revision: { ...input.revision, ...documented } };
+    expect(readStudyEditorRead(response, scope).revision).toMatchObject({ createdAt: documented.createdAt, capturedAt: first.createdAt, caseStatusAtCapture: "active", contentHash: first.contentHash });
+    expect(() => readStudyEditorRead({ ...response, history: [first, { ...documented, extra: true }] }, scope)).toThrow();
+    expect(() => readStudyEditorRead({ ...response, history: [first, { ...documented, contentHash: "b".repeat(64) }] }, scope)).toThrow();
   });
 });
 

@@ -23,11 +23,11 @@ export default async function OrthoStudyPrint({ params, searchParams }: { params
   if (!fresh.ok || fresh.revision?.id !== revisionId || fresh.revision.contentHash !== value.revisionHash) notFound();
   return <main dir="rtl" className="mx-auto max-w-5xl space-y-5 bg-white p-5 text-slate-900">
     <div className="print:hidden space-y-2"><h1 className="text-xl font-bold">عرض الحالة — نسخة نصية</h1><p>تُطبع النسخة المحفوظة المختارة. هذه نسخة سريرية داخل الملف، ولا تشمل الصور أو إخفاء الهوية للنشر التعليمي.</p><OrthoStudyPrintButton /></div>
-    {value.pages.map((page, index) => <section key={index} className="break-after-page border p-6 print:border-0">
+    {value.pages.map((page, index) => <section key={index} className="break-after-page last:break-after-auto border p-6 print:border-0">
       <PrintHeader settings={settings} title={page.title} />
       <p className="my-3 text-sm">الحالة {value.caseId} · الإصدار {value.version} · {value.kind === "draft" ? "مسودة" : "نسخة موثقة"} · نسخة نصية</p>
       <div className="space-y-2">{page.lines.map((line, n) => <p key={n} className="whitespace-pre-wrap break-words" dir="auto">{isolateStudyDateTokens(line) || "\u00a0"}</p>)}</div>
-      <footer className="mt-5 border-t pt-2 text-xs text-slate-600"><p>{index + 1} / {value.pages.length} · محفوظة في {value.capturedAt}</p><p dir="ltr" className="break-all">SHA256: {value.revisionHash}</p><p>المراجع: {page.sourceKeys.join("، ") || "لا توجد مراجع مختارة"}</p></footer>
+      <footer className="mt-5 border-t pt-2 text-xs text-slate-600"><p><bdi dir="ltr">{index + 1} / {value.pages.length}</bdi> · محفوظة في <bdi dir="ltr" data-study-captured-at>{value.capturedAt}</bdi></p><p dir="ltr" className="break-all">SHA256: {value.revisionHash}</p><p>المراجع: {page.sourceKeys.join("، ") || "لا توجد مراجع مختارة"}</p></footer>
     </section>)}
   </main>;
 }

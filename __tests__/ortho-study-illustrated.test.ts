@@ -27,6 +27,9 @@ describe('illustrated saved clinical export',()=>{
   const p=await fixture(),before=JSON.stringify(p.revision),images:Buffer[]=[];
   const value=await illustrateSavedStudy(p.revision,p.scope,async(use,frame)=>{const r=await renderStudyImage(p.bytes,use.recipe,frame);images.push(r.png);return r;});
   expect(JSON.stringify(p.revision)).toBe(before);expect(images).toHaveLength(2);expect(images[0]).not.toEqual(images[1]);
+  const context=value.pages.filter(page=>page.title==='سياق التقاط الدراسة المحفوظة');
+  expect(context).toHaveLength(1);expect(context[0].lines).toContain('حالة التقويم عند التقاط الدراسة: قيد التقييم');
+  expect(context[0].lines).toContain(`وقت التقاط الدراسة (UTC): ${p.revision.content.capturedAt}`);
   expect(value.pages.flatMap(p=>p.lines).join('')).toContain('ع🙂'.repeat(600));
   expect(value.pages.flatMap(p=>p.lines).join('')).toContain('تاريخ المجموعة: غير معروف');
   const zip=await JSZip.loadAsync(await renderIllustratedStudyPptx(value));
@@ -34,6 +37,7 @@ describe('illustrated saved clinical export',()=>{
   expect(media).toHaveLength(2);for(const png of images)expect(media.some(b=>b.equals(png))).toBe(true);expect(media.some(b=>b.equals(p.bytes))).toBe(false);
   const xml=(await Promise.all(Object.keys(zip.files).filter(k=>/^ppt\/slides\/slide\d+\.xml$/.test(k)).map(k=>zip.file(k)!.async('text')))).join('');
   expect(xml).toContain('Synthetic saved comment &lt;script&gt;');expect(xml).toContain('<a:t>');expect(xml).toContain('rtl="1"');
+  expect(xml).toContain('حالة التقويم عند التقاط الدراسة: قيد التقييم');
   const notes=(await Promise.all(Object.keys(zip.files).filter(k=>/^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(k)).map(k=>zip.file(k)!.async('text')))).join('');
   for(const page of value.pages.filter(p=>p.image)){expect(notes).toContain(page.image!.sourceSha256);expect(notes).toContain(page.image!.geometrySha256);expect(notes).toContain(page.image!.renditionSha256);}
   expect(Object.keys(zip.files).some(k=>/embeddings/.test(k)&&!zip.files[k].dir)).toBe(false);
@@ -75,5 +79,7 @@ describe('illustrated saved clinical export',()=>{
   await expect(illustrateSavedStudy(p.revision,p.scope,async()=>{throw Error('must not render');})).rejects.toThrow('image_limit');
   face.images=images;face.included=false;
   const out=await illustrateSavedStudy(p.revision,p.scope,async()=>{throw Error('must not render excluded image');});expect(out.pages.every(p=>!p.image)).toBe(true);
+  p.revision.content.authored.panels.forEach(panel=>{panel.included=false;});
+  await expect(illustrateSavedStudy(p.revision,p.scope,async()=>{throw Error('must not render excluded image');})).rejects.toThrow('study_text_export_empty');
  });
 });

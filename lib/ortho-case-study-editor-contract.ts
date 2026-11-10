@@ -3,10 +3,13 @@
 import { CASE_TEMPLATE_VERSION } from "./ortho-case-template";
 import { readStudyDraftContent, STUDY_TEMPLATE_KEY, type StudyDraftContent, type StudyRevisionRef } from "./ortho-case-study";
 import { journeyHash, journeyId, type JourneyScope } from "./ortho-case-journey-records";
+import { permitsOrthoDocumentation } from "./ortho-documentation-context";
+import type { CaseStatus } from "./ortho";
 export interface StudyEditorRevision extends JourneyScope {
   id: number; version: number; kind: "draft" | "documented"; contentHash: string; actorId: number;
   predecessorId: number | null; documentedFromId: number | null; baseDocumentedId: number | null;
-  createdAt: string; reason: string; authoredHash: string; authored: StudyDraftContent;
+  createdAt: string; capturedAt: string; caseStatusAtCapture: CaseStatus;
+  reason: string; authoredHash: string; authored: StudyDraftContent;
 }
 export interface StudyEditorHistory {
   id: number; version: number; kind: "draft" | "documented"; contentHash: string; createdAt: string;
@@ -40,10 +43,14 @@ function metadata(raw: Record<string, unknown>): StudyEditorHistory {
     predecessorId: raw.predecessorId, documentedFromId: raw.documentedFromId, baseDocumentedId: raw.baseDocumentedId };
 }
 export function readStudyEditorRevision(raw: unknown, expected: JourneyScope): StudyEditorRevision {
-  const value = object(raw, ["patientId", "orthoCaseId", "clinicalCaseId", "id", "version", "kind", "contentHash", "predecessorId", "documentedFromId", "baseDocumentedId", "createdAt", "actorId", "reason", "authoredHash", "authored"]);
+  const value = object(raw, ["patientId", "orthoCaseId", "clinicalCaseId", "id", "version", "kind", "contentHash", "predecessorId", "documentedFromId", "baseDocumentedId", "createdAt", "capturedAt", "caseStatusAtCapture", "actorId", "reason", "authoredHash", "authored"]);
   scope(value, expected); const info = metadata(value);
+  // Capture time/status belong to immutable content, not this revision's later
+  // documentation time or today's case. Missing older response shapes fail closed.
+  if (!timestamp(value.capturedAt) || !permitsOrthoDocumentation(value.caseStatusAtCapture)) throw new Error("invalid_study_capture_context");
   if (!journeyId(value.actorId) || !journeyHash(value.authoredHash) || typeof value.reason !== "string" || !value.reason.trim() || value.reason.length > 500) throw new Error("invalid_study_editor_revision");
-  return { ...expected, ...info, actorId: value.actorId, reason: value.reason, authoredHash: value.authoredHash, authored: readStudyDraftContent(value.authored) };
+  return { ...expected, ...info, capturedAt: value.capturedAt, caseStatusAtCapture: value.caseStatusAtCapture,
+    actorId: value.actorId, reason: value.reason, authoredHash: value.authoredHash, authored: readStudyDraftContent(value.authored) };
 }
 export function readStudyEditorSaved(raw: unknown, expected: JourneyScope): StudyEditorSaved {
   const value = object(raw, ["ok", "replayed", "patientId", "orthoCaseId", "clinicalCaseId", "revision"]); scope(value, expected);

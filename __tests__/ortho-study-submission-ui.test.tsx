@@ -33,7 +33,7 @@ function fixture(ledger: StudyRecoveryLedger = makeStudyRecoveryLedger(), writab
   const expected: StudySaveExpectation = { scope, actorId: 7, previousVersion: 0, command: { schemaVersion: 1, clientRequestId: 'synthetic_ui_command_001', kind: 'draft', expectedHead: null,
     baseDocumentedRevision: null, documentedFrom: null, reason: 'Synthetic submitted text', content: { template, identityDisclosure: 'case_only', sources: [], groups: [], mediaUses: [], panels: [], comment: 'Synthetic note' } } };
   const metadata = { id: 91, version: 1, kind: 'draft', contentHash: 'a'.repeat(64), createdAt: '2026-10-01T00:00:00.000Z', predecessorId: null, documentedFromId: null, baseDocumentedId: null };
-  const editor = { ok: true, ...scope, template, revision: { ...scope, ...metadata, actorId: 7, reason: expected.command.reason, authored: expected.command.content, authoredHash: journeyContentHash(expected.command.content) },
+  const editor = { ok: true, ...scope, template, revision: { ...scope, ...metadata, capturedAt: '2026-10-01T00:00:00.000Z', caseStatusAtCapture: 'active', actorId: 7, reason: expected.command.reason, authored: expected.command.content, authoredHash: journeyContentHash(expected.command.content) },
     head: { id: metadata.id, contentHash: metadata.contentHash }, history: [metadata], canAppend: true };
   const identity = { id: 11, commandId: expected.command.clientRequestId, requestFingerprint: journeyContentHash(expected.command) };
   const owner = makeStudyOwner({ ...scope, actorId: 7, recovery: ledger, authorized: () => true, writable: () => writable, deny() {} }); owner.activate();

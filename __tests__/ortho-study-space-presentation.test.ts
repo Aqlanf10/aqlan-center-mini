@@ -67,7 +67,10 @@ describe('captured space/IPR study presentation',()=>{
   const text=studyTextPresentation(f.revision,scope),illustrated=await illustrateSavedStudy(f.revision,scope,render);
   expect(illustrated.pages).toEqual(text.pages);expect(render).not.toHaveBeenCalled();expect(JSON.stringify(f.revision)).toBe(before);
   expect(text.pages.flatMap(p=>p.lines).join('')).toContain('SYNTHETIC_ORIGINAL_SESSION_ACTOR');
-  expect(text.pages.every(p=>p.sourceKeys.length===1&&p.sourceKeys[0]===f.selection.key)).toBe(true);
+  const context=text.pages.filter(p=>p.title==='سياق التقاط الدراسة المحفوظة');
+  expect(context).toHaveLength(1);expect(context[0].sourceKeys).toEqual([]);
+  const spacePages=text.pages.filter(p=>p!==context[0]);expect(spacePages.length).toBeGreaterThan(0);
+  expect(spacePages.every(p=>p.sourceKeys.length===1&&p.sourceKeys[0]===f.selection.key)).toBe(true);
  });
  it('excludes all snapshot facts and stage source hashes when its panel is excluded',async()=>{
   const f=spaceStudyFixture();f.content.authored.panels[0].included=false;f.content.authored.panels.push({instanceId:'other',layoutKey:'interview',included:true,state:'not_recorded',sourceKeys:[],images:[],comment:'VISIBLE_SAFE_COMMENT'});
