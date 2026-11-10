@@ -8,6 +8,13 @@ import { STUDY_EXPORT_ARCHIVE_LIMITS, STUDY_EXPORT_FAILURES, STUDY_EXPORT_FORMAT
 interface Props { patientId: number; orthoCaseId: number; revisionId: number; revisionHash: string }
 const control = "min-h-11 rounded border px-3 py-2 disabled:opacity-50";
 const states: Record<StudyExportJob["state"], string> = { queued: "بانتظار تشغيلك", running: "قيد تجهيز الملف", ready: "جاهز للتنزيل", failed: "تعذر تجهيز الملف", cancelled: "ملغى" };
+const reservationNotices: Record<StudyExportJob["state"], string> = {
+  queued: "حُفظ طلب التصدير. اضغط «تجهيز الملف» لتشغيله.",
+  running: "الطلب قيد تجهيز الملف. حدّث الحالة لمراجعة النتيجة.",
+  ready: "الملف جاهز؛ يمكنك تنزيله من القائمة.",
+  failed: "تعذر تجهيز هذا الطلب. راجع السبب قبل إعادة المحاولة.",
+  cancelled: "هذا الطلب ملغى. يمكنك إنشاء طلب جديد عند الحاجة.",
+};
 const failures: Record<string, string> = {
   render_failed: "تعذر تجهيز الملف؛ يمكنك إعادة المحاولة.", render_limit: "تجاوز العرض حجم التصدير المسموح. راجع محتوى النسخة المحفوظة.",
   storage_unavailable: "تخزين الملفات غير متاح حاليًا.", storage_failed: "تعذر حفظ ملف التصدير.", authority_changed: "تغيرت صلاحيات الوصول؛ حدّث الصفحة للتحقق.",
@@ -112,7 +119,7 @@ function ArchiveWorkspace(props: Props & { actorId?: number }) {
           || kind === "run" && row.id !== job!.id) throw Error("invalid_response");
         setJobs(previous => [row, ...previous.filter(item => item.id !== row.id)].slice(0, 25));
         if (kind === "reserve") { pendingRef.current = null; setPending(null); }
-        setNotice(kind === "reserve" ? "حُفظ طلب التصدير. اضغط «تجهيز الملف» لتشغيله." : row.state === "ready" ? "حُفظ الملف وهو جاهز للتنزيل." : "حدّث الحالة لمراجعة نتيجة التشغيل.");
+        setNotice(kind === "reserve" ? reservationNotices[row.state] : row.state === "ready" ? "حُفظ الملف وهو جاهز للتنزيل." : "حدّث الحالة لمراجعة نتيجة التشغيل.");
       }
     } catch { if (current(token)) setNotice("لم يتأكد الطلب. احتُفظ باختيارك؛ حدّث الحالة أو أعد نفس الطلب."); }
     finally { clearTimeout(timer); controllers.current.delete(controller); if (current(token)) { lock.current = null; setBusy(false); } }
@@ -139,7 +146,9 @@ function ArchiveWorkspace(props: Props & { actorId?: number }) {
         {more && <p>تُعرض أحدث 25 نتيجة لهذه النسخة.</p>}
         <ul className="space-y-2">{jobs.map(job => <li key={job.id} className="rounded border p-2">
           <p>{job.format === "text-pptx" ? "PowerPoint نصي" : "PowerPoint مصور"} · {states[job.state]}</p>
-          <p className="text-xs">طلب رقم <bdi>{job.id}</bdi> · <bdi>{job.createdAt}</bdi></p>
+          <p className="text-xs">طلب رقم <bdi>{job.id}</bdi></p>
+          <p className="text-xs">أُنشئ <time dateTime={job.createdAt} title={job.createdAt} dir="ltr" className="inline-block whitespace-nowrap tabular-nums">
+            {new Date(job.createdAt).toISOString().slice(0, 16).replace("T", " · ")} UTC</time></p>
           {job.failureCode && <p>{failures[job.failureCode]}</p>}
           {job.state === "ready" && job.artifact && <a className={control} href={`${endpoint}/${job.id}/download?patientId=${props.patientId}`}>تنزيل الملف المحفوظ · {job.artifact.pageCount} صفحات</a>}
           {job.creatorId === props.actorId && ["queued", "running", "failed"].includes(job.state) && <button type="button" className={control} disabled={busy}

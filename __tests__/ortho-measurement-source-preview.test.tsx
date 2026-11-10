@@ -44,6 +44,30 @@ beforeEach(() => {
   });
 });
 describe("bulk measurement source replacement review", () => {
+  it("clears selected targets on measurement group change while preserving every recorded value and source", () => {
+    draft.payload.measurementSets.push({ ...draft.payload.measurementSets[0], id: "second", toothWidthObservationIds: [...draft.payload.measurementSets[0].toothWidthObservationIds] });
+    select("اختيار السن 12 لجلسة القياس"); click("المصدر والتاريخ: السن 11");
+    const before = structuredClone(draft);
+    const group = nodes(render()).find(node => node.type === "select" && node.props.value === "current")!;
+    (group.props.onChange as (event: unknown) => void)({ target: { value: "second" } });
+    expect(preview()).toBeUndefined(); expect(change).not.toHaveBeenCalled(); expect(draft).toEqual(before);
+    expect(text(render())).toContain("أُلغي اختيار المدخلات عند تغيير مجموعة القياسات");
+    click("المصدر والتاريخ: السن 11"); expect(preview()).toBeUndefined();
+    const target = nodes(render()).find(node => node.type === "label" && text(node) === "اختيار السن 12 لجلسة القياس")!;
+    expect(nodes(target).find(node => node.type === "input")?.props.checked).toBe(false);
+  });
+  it("clears selected targets when adding a group without copying or changing measurement provenance", () => {
+    select("اختيار السن 12 لجلسة القياس"); click("المصدر والتاريخ: السن 11"); const before = structuredClone(draft);
+    click("إضافة مجموعة قياسات غير معبأة"); expect(change).toHaveBeenCalledTimes(1);
+    const next = change.mock.calls[0][0] as MeasurementEditorDraftV2;
+    expect(next.values).toEqual(before.values); expect(next.payload.observations).toEqual(before.payload.observations);
+    expect(next.payload.measurementSets).toHaveLength(before.payload.measurementSets.length + 1);
+    draft = next; expect(preview()).toBeUndefined();
+    expect(text(render())).toContain("أُلغي اختيار المدخلات عند تغيير مجموعة القياسات");
+    const group = nodes(render()).find(node => node.type === "select" && node.props.value === next.payload.measurementSets.at(-1)!.id)!;
+    (group.props.onChange as (event: unknown) => void)({ target: { value: "current" } });
+    click("المصدر والتاريخ: السن 11"); expect(preview()).toBeUndefined();
+  });
   it("lets the doctor opt out a selected target inside the preview without writing or changing other selections", () => {
     select("اختيار السن 12 لجلسة القياس"); select("اختيار السن 13 لجلسة القياس"); click("المصدر والتاريخ: السن 11");
     const labels = nodes(preview()).filter(node => node.type === "label");

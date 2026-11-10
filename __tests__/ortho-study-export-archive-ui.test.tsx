@@ -137,6 +137,29 @@ describe("saved study export archive", () => {
     expect(nodes(render()).filter(node => node.type === "button").map(textOf)).not.toContain("تجهيز الملف");
   });
 
+  it("shows an explicit compact UTC time while retaining the complete capture timestamp", async () => {
+    const createdAt = "2026-11-10T02:40:31.084Z";
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [job({ createdAt })], next: null })); await open();
+    const time = nodes(render()).find(node => node.type === "time")!;
+    expect(time.props.dateTime).toBe(createdAt); expect(time.props.title).toBe(createdAt); expect(time.props.dir).toBe("ltr");
+    expect(textOf(time)).toBe("2026-11-10 · 02:40 UTC");
+  });
+
+  it.each([
+    ["ready", "الملف جاهز؛ يمكنك تنزيله من القائمة.", { sha256: "b".repeat(64), sizeBytes: 123, pageCount: 2, createdAt: "2026-11-10T01:00:00.000Z" }],
+    ["running", "الطلب قيد تجهيز الملف. حدّث الحالة لمراجعة النتيجة.", null],
+    ["failed", "تعذر تجهيز هذا الطلب. راجع السبب قبل إعادة المحاولة.", null],
+    ["cancelled", "هذا الطلب ملغى. يمكنك إنشاء طلب جديد عند الحاجة.", null],
+  ])("describes an exact reserve replay in returned state %s without demanding a missing prepare button", async (state, expected, artifact) => {
+    await open(); fetchMock.mockRejectedValueOnce(Error("Synthetic lost reserve acknowledgement"));
+    click("حفظ طلب تصدير جديد"); await flush(); const reserveBody = posts()[0][1].body;
+    fetchMock.mockImplementation(async () => ok({ ok: true, job: job({ state, generation: 1, artifact, failureCode: state === "failed" ? "render_failed" : null }) }));
+    click("التحقق بإعادة نفس طلب التصدير"); await flush();
+    expect(posts()[1][1].body).toBe(reserveBody); expect(textOf(render())).toContain(expected);
+    expect(textOf(render())).not.toContain("اضغط «تجهيز الملف»");
+    expect(posts().some(([url]) => String(url).endsWith("/run"))).toBe(false);
+  });
+
   it("recovers a generation conflict through an explicit refresh without an automatic rerun", async () => {
     fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [job({ generation: 2 })], next: null })); await open();
     fetchMock.mockImplementation(async () => ({ ok: false, status: 409, json: async () => ({ message: "raw/private-error" }) }));

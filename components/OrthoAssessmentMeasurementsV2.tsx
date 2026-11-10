@@ -27,6 +27,7 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
   const [selected, setSelected] = useState(draft.payload.measurementSets[0]?.id ?? "");
   const [metadataId, setMetadataId] = useState<string | null>(null), [targets, setTargets] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   const editable = owner?.renderEditable === true, rows = draft.payload.observations.observations;
   const set = draft.payload.measurementSets.find(s => s.id === selected), metadata = metadataId ? draft.values[metadataId] : null;
   const publish = (next: MeasurementEditorDraftV2) => { if (owner?.active() && owner.editable()) onChange(next); };
@@ -94,12 +95,19 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
     </details>
     {!editable && <p role="status">القياسات للقراءة فقط في السياق الحالي.</p>}
     <div className="grid gap-2 sm:grid-cols-2"><label>مجموعة القياسات<select className={control} value={selected} onChange={event => {
-      if (!owner || owner.active()) { setSelected(event.target.value); setMetadataId(null); }
+      if ((!owner || owner.active()) && event.target.value !== selected) {
+        setSelected(event.target.value); setMetadataId(null); setTargets([]); setMessage(null);
+        setSelectionNotice(targets.length ? "أُلغي اختيار المدخلات عند تغيير مجموعة القياسات. بقيت القيم ومصادرها في المسودة دون تغيير." : null);
+      }
     }}>{draft.payload.measurementSets.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}</select></label>
       <label>الفاصل العشري<select className={control} disabled={!editable} value={draft.decimal} onChange={event => publish(changeMeasurementDecimalV2(draft, event.target.value as MeasurementEditorDraftV2["decimal"]))}>
         <option value=".">نقطة .</option><option value="٫">فاصل عربي ٫</option><option value=",">فاصلة ,</option></select></label></div>
+    {selectionNotice && <p role="status" className="text-sm">{selectionNotice}</p>}
     <button type="button" className={control} disabled={!editable || draft.payload.measurementSets.length >= 12} onClick={() => {
-      const next = addMeasurementSetV2(draft); if (next && owner?.active() && owner.editable()) { publish(next); setSelected(next.payload.measurementSets.at(-1)!.id); setMetadataId(null); }
+      const next = addMeasurementSetV2(draft); if (next && owner?.active() && owner.editable()) {
+        publish(next); setSelected(next.payload.measurementSets.at(-1)!.id); setMetadataId(null); setTargets([]); setMessage(null);
+        setSelectionNotice(targets.length ? "أُلغي اختيار المدخلات عند تغيير مجموعة القياسات. بقيت القيم ومصادرها في المسودة دون تغيير." : null);
+      }
     }}>إضافة مجموعة قياسات غير معبأة</button>
     {draft.payload.observations.dentitionObservationId ? valueInput(draft.payload.observations.dentitionObservationId, "الأسنان", false, true) : missing({ kind: "dentition" }, "نوع الأسنان")}
     {!set ? <p role="alert">اختر مجموعة قياسات صحيحة.</p> : (["upper", "lower"] as const).map(arch => <details key={arch} open={arch === "upper"} className="rounded-xl border p-3">
