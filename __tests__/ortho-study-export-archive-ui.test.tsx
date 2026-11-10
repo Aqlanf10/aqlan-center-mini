@@ -148,6 +148,63 @@ describe("saved study export archive", () => {
     expect(JSON.parse(posts()[1][1].body).expectedGeneration).toBe(3);
   });
 
+  it.each([
+    ["study_export_runtime_unavailable", "غير متاح في بيئة التشغيل الحالية"],
+    ["study_export_busy", "خدمة تجهيز الملفات مشغولة حاليًا"],
+    ["study_export_publication_unconfirmed", "لم يتأكد حفظ الملف النهائي"],
+  ])("shows fixed actionable guidance for %s without inventing a changed revision", async (code, expected) => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [job()], next: null })); await open();
+    fetchMock.mockImplementation(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, code, message: "/private/raw-secret" }) }));
+    click("تجهيز الملف"); await flush();
+    expect(textOf(render())).toContain(expected); expect(textOf(render())).not.toContain("تغيرت حالة الطلب أو النسخة");
+    expect(textOf(render())).not.toContain("raw-secret"); expect(posts()).toHaveLength(1);
+    expect(nodes(render()).filter(node => node.type === "a")).toHaveLength(0);
+  });
+
+  it("uses a verified failed run receipt without losing a separate unresolved reserve request", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [job()], next: null })); await open();
+    fetchMock.mockRejectedValueOnce(Error("Synthetic lost reservation")); click("حفظ طلب تصدير جديد"); await flush();
+    const reserveBody = posts()[0][1].body;
+    fetchMock.mockImplementation(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, code: "study_export_failed",
+      job: job({ generation: 1, state: "failed", failureCode: "storage_unavailable" }), message: "/private/raw-secret" }) }));
+    click("تجهيز الملف"); await flush();
+    expect(textOf(render())).toContain("تخزين الملفات غير متاح حاليًا");
+    expect(textOf(render())).not.toContain("raw-secret"); expect(button("التحقق بإعادة نفس طلب التصدير")).toBeDefined();
+    fetchMock.mockImplementation(async () => ok({ ok: true, job: job({ generation: 2, state: "running" }) }));
+    click("إعادة محاولة تجهيز الملف"); await flush();
+    expect(JSON.parse(posts()[2][1].body).expectedGeneration).toBe(1);
+    fetchMock.mockRejectedValueOnce(Error("Synthetic lost reservation again"));
+    click("التحقق بإعادة نفس طلب التصدير"); await flush();
+    expect(posts()[3][1].body).toBe(reserveBody);
+  });
+
+  it.each(["/private/raw-secret", "constructor"])("ignores a non-allowlisted failure code %s", async code => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [job()], next: null })); await open();
+    fetchMock.mockImplementation(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, code, message: "/private/raw-secret" }) }));
+    click("تجهيز الملف"); await flush();
+    expect(textOf(render())).toContain("لم يكتمل الطلب"); expect(textOf(render())).not.toContain("raw-secret");
+    expect(textOf(render())).not.toContain("constructor"); expect(posts()).toHaveLength(1);
+  });
+
+  it("rejects a failed receipt from a different saved source revision", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [job()], next: null })); await open();
+    fetchMock.mockImplementation(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, code: "study_export_failed",
+      job: job({ revisionHash: "b".repeat(64), generation: 9, state: "failed", failureCode: "storage_failed" }) }) }));
+    click("تجهيز الملف"); await flush();
+    expect(textOf(render())).toContain("لم يتأكد الطلب"); expect(textOf(render())).not.toContain("تعذر حفظ ملف التصدير");
+    expect(button("تجهيز الملف")).toBeDefined();
+  });
+
+  it("ignores a failure receipt decoded after source permission ownership changes", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [job()], next: null })); await open();
+    let resolve!: (value: unknown) => void;
+    fetchMock.mockImplementation(async () => ({ ok: false, status: 409, json: () => new Promise(done => { resolve = done; }) }));
+    click("تجهيز الملف"); await flush();
+    hooks.session = { ...hooks.session!, permissions: { ...hooks.session!.permissions, canViewImaging: false } as SessionInfo["permissions"] }; render();
+    resolve({ ok: false, code: "study_export_failed", job: job({ generation: 1, state: "failed", failureCode: "authority_changed" }) }); await flush();
+    expect(textOf(render())).toBe("ملفات التصدير المحفوظة"); expect(posts()).toHaveLength(1);
+  });
+
   it("ignores a delayed reserve acknowledgement after changing permission ownership", async () => {
     await open(); let resolve!: (value: unknown) => void;
     fetchMock.mockImplementation(() => new Promise(done => { resolve = done; }));

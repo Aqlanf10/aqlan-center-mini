@@ -13,6 +13,12 @@ const failures: Record<string, string> = {
   storage_unavailable: "تخزين الملفات غير متاح حاليًا.", storage_failed: "تعذر حفظ ملف التصدير.", authority_changed: "تغيرت صلاحيات الوصول؛ حدّث الصفحة للتحقق.",
   lease_expired: "انتهت مهلة التشغيل؛ حدّث الحالة قبل إعادة المحاولة.", renderer_unavailable: "صيغة هذا الطلب غير متاحة للتشغيل حاليًا.",
 };
+const requestFailures = {
+  study_export_runtime_unavailable: "تجهيز ملفات التصدير غير متاح في بيئة التشغيل الحالية. يحتاج إعداد التشغيل إلى مراجعة المسؤول.",
+  study_export_busy: "خدمة تجهيز الملفات مشغولة حاليًا. انتظر قليلًا ثم حدّث الحالة قبل إعادة المحاولة.",
+  study_export_publication_unconfirmed: "لم يتأكد حفظ الملف النهائي. حدّث حالة الطلب قبل إعادة التجهيز؛ لا تنشئ طلبًا جديدًا.",
+  study_export_failed: "تعذر تجهيز الملف. راجع حالة الطلب وسبب التعذر قبل إعادة المحاولة.",
+} as const;
 const positive = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0;
 const hash = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const timestamp = (value: unknown): value is string => typeof value === "string" && Number.isFinite(Date.parse(value));
@@ -77,7 +83,18 @@ function ArchiveWorkspace(props: Props & { actorId?: number }) {
         setDenied(true); setJobs([]); setNotice("لم تعد صلاحية التصدير أو الوصول متاحة. حدّث الصفحة للتحقق من الجلسة."); return;
       }
       if (!response.ok) {
-        setNotice(response.status === 409 ? "تغيرت حالة الطلب أو النسخة. حدّث قائمة الملفات قبل إعادة المحاولة."
+        const raw: unknown = await response.json(); if (!current(token)) return;
+        const code = raw && typeof raw === "object" && !Array.isArray(raw) && "ok" in raw && raw.ok === false
+          && "code" in raw && typeof raw.code === "string" && Object.hasOwn(requestFailures, raw.code)
+          ? raw.code as keyof typeof requestFailures : null;
+        if (code === "study_export_failed" && kind === "run" && raw && typeof raw === "object" && "job" in raw) {
+          const row = receipt(raw.job, props);
+          if (row.id !== job!.id || row.creatorId !== job!.creatorId || row.format !== job!.format
+            || row.state !== "failed" || row.generation < job!.generation) throw Error("invalid_receipt");
+          setJobs(previous => [row, ...previous.filter(item => item.id !== row.id)].slice(0, 25));
+        }
+        setNotice(code ? requestFailures[code] : response.status === 409
+          ? "لم يكتمل الطلب. حدّث حالة الملفات قبل إعادة المحاولة."
           : "لم يتأكد الطلب. احتُفظ باختيارك؛ حدّث الحالة أو أعد نفس الطلب."); return;
       }
       const raw: unknown = await response.json(); if (!current(token)) return;
