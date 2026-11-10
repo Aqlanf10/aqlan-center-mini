@@ -1,9 +1,10 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrthoCaseAssessmentV2, type AssessmentLifetimeV2, type OrthoCaseAssessmentV2Props } from "../components/OrthoCaseAssessmentV2";
+import OrthoSavedClinicalFindings from "../components/OrthoSavedClinicalFindings";
 import type { SessionInfo } from "../components/SessionProvider";
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "../lib/ortho-assessment-owner-v2";
-import { readAssessmentEditorV2 } from "../lib/ortho-assessment-editor-v2";
+import { assessmentEditorCommandV2, readAssessmentEditorV2 } from "../lib/ortho-assessment-editor-v2";
 import { createPersistedAssessmentV2, assessmentJsonHash } from "../lib/ortho-assessment-persisted-v2";
 import type { MeasurementEditorDraftV2 } from "../lib/ortho-assessment-measurement-editor-v2";
 // Actual component handlers, real editor validators and real mutation owner.
@@ -130,6 +131,22 @@ beforeEach(() => {
 afterEach(() => { retireView(); owner.retire(); vi.unstubAllGlobals(); });
 
 describe("assessment save feedback across workup sections", () => {
+  it("places correction before saved details and reuses the saved complaint without another question or write", async () => {
+    await startDraft(); reason("Synthetic first review");
+    findings(draft => Object.assign(draft.values.clinical_chiefComplaint,{state:"recorded",text:"Exact saved complaint",dateState:"unknown",dateReason:"Synthetic unknown date",method:"direct_examination",methodDescription:"Synthetic interview"}));
+    const command=assessmentEditorCommandV2(readAssessmentEditorV2(owner.document)!)!;
+    const stored=createPersistedAssessmentV2(command.content);if(!stored.ok)throw Error(stored.code);
+    const revision={...scope,schemaVersion:2,id:4,version:1,supersedesRevisionId:null,recordedPatientId:1,recordingContext:"current",createdBy:"Synthetic recorder",createdAt:"2026-11-01T00:00:00.000Z",reason:command.reason,content:stored.value,contentHash:assessmentJsonHash(stored.value)};
+    owner.settle("");fetchMock.mockImplementation(async()=>({ok:true,status:200,redirected:false,json:async()=>({...ready,history:[revision],revision})}));
+    click("تحديث سجل التقييم");await flush();
+    const tree=nodes(render(),true),actionIndex=tree.findIndex(node=>node.type==='button'&&textOf(node)==='فتح مراجعة تصحيحية من النسخة الحالية');
+    expect(actionIndex).toBeGreaterThan(-1);expect(actionIndex).toBeLessThan(tree.findIndex(node=>node.type===OrthoSavedClinicalFindings));
+    expect(posts()).toHaveLength(0);expect(owner.document).toBe("");
+    click("فتح مراجعة تصحيحية من النسخة الحالية");
+    expect(readAssessmentEditorV2(owner.document)?.measurements.values.clinical_chiefComplaint.text).toBe("Exact saved complaint");
+    expect(posts()).toHaveLength(0);
+  });
+
   it("identifies only the missing reason, preserves untouched fields, and permits correction without filling them", async () => {
     await startDraft(); const before = owner.document;
     expect(feedback()).toBeUndefined(); click(saveLabel); await flush();

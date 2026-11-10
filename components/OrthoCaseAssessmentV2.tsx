@@ -162,6 +162,8 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
       {!!data.history.length && <label className="block">نسخة التقييم<select className={`${control} w-full`} value={selected ?? data.history[0].id}
         disabled={!!draft || !!lifetime?.busy || !!lifetime?.uncertain} onChange={event => { if (currentDraft() && !draft && !latest.current?.busy && !latest.current?.uncertain) setSelected(Number(event.target.value)); }}>
         {data.history.map(row => <option key={row.id} value={row.id}>نسخة {row.version} · {row.createdAt.slice(0, 10)} · {row.createdBy}</option>)}</select></label>}
+      {!draft && !malformed && data.revision?.schemaVersion !== 1 && <button className={control} type="button" disabled={!writable || data.revision?.id !== data.history[0]?.id} onClick={begin}>
+        {data.revision ? "فتح مراجعة تصحيحية من النسخة الحالية" : "بدء تقييم غير معبأ"}</button>}
       {(sectionView === undefined || sectionView === "measurements") && data.state === "ready" && data.revision && <OrthoSavedModelReview data={data} expected={{patientId, orthoCaseId, clinicalCaseId: data.clinicalCaseId, revisionId: data.revision.id}}/>}
       {data.revision && (sectionView === undefined || sectionView === "interview" || sectionView === "extraoral" || sectionView === "intraoral") && <OrthoSavedClinicalFindings revision={data.revision} section={sectionView} sourceStates={data.sourceStates} />}
       {data.revision ? <details className="rounded-lg border p-3" data-testid="assessment-v2-saved"><summary className="min-h-11 cursor-pointer">السجل المحفوظ: نسخة {data.revision.version}</summary>
@@ -178,8 +180,6 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
       {data.sources.imaging === "restricted" && <p>مراجع الصور والأشعة مقيدة بالصلاحية الحالية.</p>}
       {data.sources.truncated && <p>قائمة المصادر محدودة؛ غياب مصدر من القائمة لا يعني أنه غير موجود.</p>}
       {data.revision?.schemaVersion === 1 && <p role="status">نسخة تاريخية بالإصدار الأول محفوظة للقراءة. الترقية تحتاج نقلًا صريحًا للقيم ومصادرها؛ لا تحويل تلقائي.</p>}
-      {!draft && !malformed && data.revision?.schemaVersion !== 1 && <button className={control} type="button" disabled={!writable || data.revision?.id !== data.history[0]?.id} onClick={begin}>
-        {data.revision ? "فتح مراجعة تصحيحية من النسخة الحالية" : "بدء تقييم غير معبأ"}</button>}
     </>}
     {draft && <div data-testid="assessment-v2-draft" className="space-y-3">
       {stale && <p role="alert">تغير رأس السجل. بقيت المسودة مرتبطة بسابقتها؛ لم تُنقل إلى نسخة جديدة تلقائيًا.</p>}

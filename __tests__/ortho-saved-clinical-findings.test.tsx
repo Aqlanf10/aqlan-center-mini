@@ -19,3 +19,56 @@ describe('saved clinical findings presentation',()=>{
  it.each(['observation_v2','legacy_field_v1'] as const)('preserves %s copy lineage and changed source without fetching',kind=>{const row:AssessmentObservationV2=populated(),source={kind:'document' as const,id:12,version:'historical-source'};row.provenance={...row.provenance!,sources:[source],performer:{state:'documented',attribution:'Original performer'},copiedFrom:kind==='observation_v2'?{kind,revisionId:8,contentHash:'b'.repeat(64),observationId:'original_observation'}:{kind,revisionId:8,contentHash:'b'.repeat(64),fieldPath:'original.path'}};const value=html([row],{sourceStates:[{source,state:'changed'}]});for(const exact of ['Original performer','historical-source','تغير المصدر','b'.repeat(64),kind==='observation_v2'?'original_observation':'original.path'])expect(value).toContain(exact);expect(value).not.toContain('<a ');});
  it('uses selected historical revision metadata only and refuses legacy interpretation',()=>{const historical=revision([populated()]);historical.id=19;historical.version=3;expect(html([],{revision:historical})).toContain('المراجعة #19');expect(html([],{revision:{...historical,schemaVersion:1} as unknown as Props['revision']})).toContain('دون تحويل أو تفسير تلقائي');});
 });
+
+// Semantic collapsed-tree projection, not browser layout proof.
+function visibleText(node:React.ReactNode):string {
+ if(typeof node==='string'||typeof node==='number')return String(node);
+ if(Array.isArray(node))return node.map(visibleText).join('');
+ if(!React.isValidElement(node))return '';
+ const element=node as React.ReactElement<{children?:React.ReactNode;open?:boolean}>;
+ if(typeof element.type==='function')return visibleText((element.type as (props:unknown)=>React.ReactNode)(element.props));
+ if(element.type==='details'&&!element.props.open){const summary=React.Children.toArray(element.props.children).find(child=>React.isValidElement(child)&&child.type==='summary');return visibleText(summary);}
+ return visibleText(element.props.children);
+}
+const visible=(rows:AssessmentObservationV2[],props:Partial<Props>={})=>visibleText(<OrthoSavedClinicalFindings revision={revision(rows)} sourceStates={[]} {...props}/>);
+
+describe('compact saved documentation overview',()=>{
+ it('shows the exact saved complaint in the interview overview without treating unknown or conflicting values as a complaint',()=>{
+  const row=populated();
+  for(const section of [undefined,'interview'] as const){const value=visible([row],{section});expect(value).toContain('الشكوى الرئيسية المحفوظة');expect(value).toContain('  Saved\nnegative finding <script>  ');}
+  expect(visible([row],{section:'extraoral'})).not.toContain('Saved');
+  expect(visible([{...row,value:{state:'unknown',reason:'Synthetic unknown'}}])).not.toContain('الشكوى الرئيسية المحفوظة');
+  expect(visible([{...row,target:{kind:'arch',arch:'upper'}}])).not.toContain('الشكوى الرئيسية المحفوظة');
+ });
+
+ it('keeps exact stored details expandable while summarizing only canonical fields',()=>{
+  const rows=CLINICAL_FIELDS_V2.map(([field])=>blankClinicalObservationV2(field));rows[0]=populated();
+  const value=visible(rows,{section:'interview'});
+  expect(value).toContain('موثق: 1');expect(value).toContain('غير مسجل: 4');
+  expect(value).not.toContain('معرف الملاحظة:');expect(value).not.toContain('Exact method');
+  expect(html(rows,{section:'interview'})).toContain('Exact method');expect(html(rows)).toContain('Saved');
+  expect(value).not.toMatch(/جاهز|100%|اكتمال/);
+ });
+ it('keeps absent, not-recorded and every explicit nonmeasurement state distinct',()=>{
+  const rows=CLINICAL_FIELDS_V2.filter(([, ,group])=>group==='intraoral').slice(0,6).map(([field],index)=>({...blankClinicalObservationV2(field),value:index===0?{state:'not_recorded' as const}:{state:(['unknown','not_measured','unavailable','not_applicable','tooth_absent'] as const)[index-1],reason:'Synthetic reason'}}));
+  const value=visible(rows,{section:'intraoral'});
+  for(const label of ['غير مسجل: 1','غير معلوم: 1','لم يُقَس / لم يُقيّم: 1','غير متاح: 1','لا ينطبق: 1','السن مفقود: 1','لا يوجد مدخل: 8'])expect(value).toContain(label);
+  expect(value).not.toContain('0 mm');
+ });
+ it('keeps scope/definition conflicts visible and never counts them as a recorded finding',()=>{
+  const row={...populated(),target:{kind:'arch' as const,arch:'upper' as const}};
+  const value=visible([row],{section:'interview'});
+  expect(value).toContain('الشكوى الرئيسية');expect(value).toContain('هوية المدخل تحتاج مراجعة');
+  expect(value).toContain('هوية مختلفة: 1');expect(value).not.toContain('موثق: 1');
+  expect(html([row])).toContain('Exact authored &lt;label&gt;');
+ });
+ it.each(['changed','unavailable','unreported'] as const)('keeps %s source warnings visible with details collapsed, including additional observations',state=>{
+  const source={kind:'document' as const,id:12,version:'exact-stored-version'};const row:AssessmentObservationV2=populated();
+  row.provenance={...row.provenance!,sources:[source]};
+  const props:Partial<Props>={sourceStates:state==='unreported'?[]:[{source,state}]};
+  const value=visible([row,{...row,id:'custom-observation'}],props);
+  expect(value).toContain(state==='changed'?'تغير المصدر':state==='unavailable'?'غير متاح':'لم تُقدّم حالة لهذا المرجع');
+  expect(value).toContain('مستند #12');expect(value).toContain('ملاحظات إضافية: تحتاج مراجعة المصدر');
+  expect(html([row],props)).toContain('exact-stored-version');
+ });
+});
