@@ -44,6 +44,29 @@ function extractionRow(html: string) {
     ?? html.match(/<tr\b[^>]*>(?:(?!<\/tr>)[\s\S])*?<span[^>]*>EI_KIM_1996<\/span>(?:(?!<\/tr>)[\s\S])*?<\/tr>/)?.[0];
 }
 describe("quarantined historical cephalometric output", () => {
+  it.each(["FMA", "YAXIS_FH"])("keeps frozen %s growth notes out of live and historical presentation", (code) => {
+    const raw = computeAll({}, NaN).filter(row => row.code === code).map(row => ({ ...row, value: 35 }));
+    const original = JSON.stringify(raw);
+    const legacyNote = raw[0].note;
+    expect(legacyNote).toBeTruthy();
+    const live = presentCephMeasurements(raw, null);
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({ code, value: 35, note: undefined });
+    const enriched = enrichPresentedCephMeasurements(live, { [code]: { mean: 25, sd: 3 } }, false);
+    expect(enriched[0].note).toBeUndefined();
+    const saved = [{ code, value: 27 }];
+    for (const provenance of [undefined, versioned(saved)]) {
+      const before = JSON.stringify(provenance);
+      const historical = presentCephMeasurements(raw, saved, provenance);
+      expect(historical).toHaveLength(1);
+      expect(historical[0]).toMatchObject({ code, value: 27, interpretationAr: "", status: null });
+      expect(historical[0].note).not.toContain(legacyNote!);
+      expect(historical[0].note).toContain(provenance ? "إصدار الحساب" : CEPH_LEGACY_NOTICE);
+      expect(JSON.stringify(provenance)).toBe(before);
+    }
+    expect(JSON.stringify(raw)).toBe(original);
+    expect(saved).toEqual([{ code, value: 27 }]);
+  });
   it("never restores or grades a saved extraction number and preserves other sealed values", () => {
     const archive = Object.freeze(study.measurements.map(row => Object.freeze({ ...row })));
     const display = presentCephMeasurements(computeAll({}, 0.1), archive);
