@@ -64,11 +64,11 @@ it.each([390, 1280])('keeps unknown legacy durations explicit and avoids invente
     await form.getByRole('combobox', { name: 'النظام المالي السابق', exact: true }).selectOption('opening_balance');
     const objectives = 'Synthetic remaining objectives preserved through validation';
     await form.getByRole('textbox', { name: 'الأهداف المتبقية', exact: true }).fill(objectives);
-    await form.getByRole('textbox', { name: 'السلك العلوي الحالي', exact: true }).fill('Synthetic recorded wire');
+    await form.getByLabel('السلك العلوي الحالي', { exact: true }).fill('Synthetic recorded wire');
     const unchanged = async () => {
       expect(posts).toHaveLength(0); expect(await counts(patientId)).toEqual(empty);
       expect(await form.getByRole('textbox', { name: 'الأهداف المتبقية', exact: true }).inputValue()).toBe(objectives);
-      expect(await form.getByRole('textbox', { name: 'السلك العلوي الحالي', exact: true }).inputValue()).toBe('Synthetic recorded wire');
+      expect(await form.getByLabel('السلك العلوي الحالي', { exact: true }).inputValue()).toBe('Synthetic recorded wire');
       expect(await form.getByRole('combobox', { name: 'النظام المالي السابق', exact: true }).inputValue()).toBe('opening_balance');
     };
     await save.click(); await page.getByText('الأشهر المنقضية: أدخل عددًا صحيحًا بين 0 و120؛ الفراغ ليس صفرًا.', { exact: true }).waitFor();
