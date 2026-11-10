@@ -23842,7 +23842,7 @@ export async function orthoFollowupBoard(today: string, asOf?: Date, client?: Db
   if (!client) await ensureSchema();
   const { rows } = await (client ?? getPool()).query<{
     case_id: number; patient_id: number; full_name: string; phone: string | null;
-    status: string; phase: string; start_date: Date; last_adjustment_date: string | null;
+    status: string; phase: string; baseline_kind: string | null; start_date: Date; last_adjustment_date: string | null;
     next_weeks: number | null; upper_wire: string | null; lower_wire: string | null;
     clinical_case_id: number | null; bookings: ProjectedFollowupBooking[];
     has_no_show: boolean; has_attendance: boolean; last_scheduled_local: string | null; cutoff_local: string;
@@ -23921,7 +23921,7 @@ export async function orthoFollowupBoard(today: string, asOf?: Date, client?: Db
           GROUP BY ap.patient_id
      )
      SELECT c.id AS case_id, c.patient_id, p.full_name, p.phone, c.status, c.phase,
-            c.start_date, a.last_adjustment_date, a.next_weeks,
+            c.start_date, c.baseline_kind, a.last_adjustment_date, a.next_weeks,
             a.upper_wire, a.lower_wire, bridge.id AS clinical_case_id,
             COALESCE(bookings.items, '[]'::jsonb) AS bookings,
             COALESCE(attendance.has_no_show, FALSE) AS has_no_show,
@@ -23961,6 +23961,7 @@ export async function orthoFollowupBoard(today: string, asOf?: Date, client?: Db
       status: row.status as "active" | "retention",
       phase: row.phase,
       startDate,
+      baselineKind: row.baseline_kind === "legacy" ? "legacy" : null,
       lastAdjustmentDate: row.last_adjustment_date,
       nextWeeks: row.next_weeks ?? 4,
       upperWire: row.upper_wire,

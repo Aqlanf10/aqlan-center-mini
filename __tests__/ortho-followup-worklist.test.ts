@@ -24,3 +24,12 @@ it('refuses the byte cap with valid multibyte names below the row cap',()=>{
  const cases=Array.from({length:500},(_,i)=>({...row,caseId:i+1,patientName:'界'.repeat(1000)}));
  expect(()=>project(cases)).toThrowError(expect.objectContaining({code:'worklist_limit'}));
 });
+it('prints legacy unknown history without a manufactured due date or lapsed cohort',()=>{
+ const legacy={...row,baselineKind:'legacy' as const,startDate:'2020-01-01',lastAdjustmentDate:null};
+ expect(project([legacy]).rows[0]).toMatchObject({dueDate:null,lastAdjustmentDate:null,dueBasis:'legacy_adjustment_history_unknown'});
+ for(const bucket of ['lapsed_4','lapsed_6','lapsed_8'])expect(project([legacy],bucket).rows).toEqual([]);
+});
+
+it('rejects unknown legacy baseline markers rather than silently treating them as new cases',()=>{
+ expect(()=>project([{...row,baselineKind:'imported' as never}])).toThrowError(expect.objectContaining({code:'invalid_worklist'}));
+});

@@ -6,7 +6,7 @@ export type WorklistAppointment=Pick<NextAppointmentInfo,'id'|'date'|'time'|'sta
 export interface OrthoFollowupWorklistRow {
  retentionContext?:FollowupCase['retentionContext'];
  patientId:number;caseId:number;patientName:string;status:'active'|'retention';phase:string;
- lastAdjustmentDate:string|null;dueDate:string|null;dueBasis:'adjustment_interval'|'retention_schedule_unavailable';
+ lastAdjustmentDate:string|null;dueDate:string|null;dueBasis:'adjustment_interval'|'retention_schedule_unavailable'|'legacy_adjustment_history_unknown';
  nextAppointment:WorklistAppointment|null;pastUnresolvedAppointment:WorklistAppointment|null;
  reviewAppointmentCount:number;otherAppointmentCount:number;
  attendance:{outcome:FollowupAttendanceContext['outcome'];latestScheduledLocal:string|null;cutoffLocalDateTime:string};
@@ -23,14 +23,14 @@ function appointment(value:NextAppointmentInfo|null):WorklistAppointment|null{
  return {id:value.id,date:value.date,time:value.time,status:value.status};
 }
 /** Uses canonical classification, then projects only the selected current cases.
- * Due dates may use the board's start-date/default interval fallback; they are
+ * Nonlegacy due dates may use the board's start-date/default interval fallback; they are
  * not universally a saved clinician instruction or evidence of a booking. */
 export function projectOrthoFollowupWorklist(board:FollowupCase[],input:{bucket:unknown;today:string;asOf:Date;actorId:number;timeZone:string}):OrthoFollowupWorklist{
  if(!isFollowupWorklistBucket(input.bucket))throw new OrthoFollowupWorklistError(400,'invalid_worklist_bucket');
  if(!id(input.actorId)||!day(input.today)||!(input.asOf instanceof Date)||!Number.isFinite(input.asOf.getTime())||clinicDateString(input.asOf,input.timeZone)!==input.today)invalid();
  const seen=new Set<number>();
  // Validate classification inputs before running the unchanged classifier.
- for(const r of board){if(!id(r.caseId)||seen.has(r.caseId)||!id(r.patientId)||typeof r.patientName!=='string'||!r.patientName.trim()||r.patientName.length>1000||!['active','retention'].includes(r.status)||typeof r.phase!=='string'||r.phase.length>100||!day(r.startDate)||r.lastAdjustmentDate!==null&&!day(r.lastAdjustmentDate)||!Number.isInteger(r.nextWeeks)||r.nextWeeks<1||r.nextWeeks>52||typeof r.lastWasNoShow!=='boolean')invalid();seen.add(r.caseId);}
+ for(const r of board){if(!id(r.caseId)||seen.has(r.caseId)||!id(r.patientId)||typeof r.patientName!=='string'||!r.patientName.trim()||r.patientName.length>1000||!['active','retention'].includes(r.status)||typeof r.phase!=='string'||r.phase.length>100||!day(r.startDate)||r.baselineKind!==undefined&&r.baselineKind!==null&&r.baselineKind!=='legacy'||r.lastAdjustmentDate!==null&&!day(r.lastAdjustmentDate)||!Number.isInteger(r.nextWeeks)||r.nextWeeks<1||r.nextWeeks>52||typeof r.lastWasNoShow!=='boolean')invalid();seen.add(r.caseId);}
  const selected=groupByBucket(classifyFollowups({cases:board,today:input.today})).get(input.bucket)??[];
  if(selected.length>500)invalid('worklist_limit');
  const rows=selected.map(r=>{

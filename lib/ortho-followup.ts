@@ -115,6 +115,8 @@ export interface FollowupCase {
   status: FollowupCaseStatus;
   phase: string;
   startDate: string;
+  /** Optional for older callers; the server always supplies the persisted legacy marker or null. */
+  baselineKind?: "legacy" | null;
   /** تاريخ آخر شدّة — وقد لا توجد شدّة بعد لحالةٍ فُتحت حديثًا. */
   lastAdjustmentDate: string | null;
   nextWeeks: number;
@@ -132,9 +134,9 @@ export interface FollowupCase {
 
 export interface FollowupRow extends FollowupCase {
   buckets: FollowupBucket[];
-  /** Adjustment-derived only. Retention recall is not available in this board. */
+  /** No inferred date for retention or legacy care with no recorded adjustment. */
   dueDate: string | null;
-  dueBasis: "adjustment_interval" | "retention_schedule_unavailable";
+  dueBasis: "adjustment_interval" | "retention_schedule_unavailable" | "legacy_adjustment_history_unknown";
   /** Adjustment/start age for active treatment, never a retention review clock. */
   daysSinceLast: number | null;
 }
@@ -147,6 +149,8 @@ export interface FollowupRow extends FollowupCase {
 export function isRetentionFollowup(row: Pick<FollowupCase, "status" | "phase">): boolean {
   return row.status === "retention" || row.phase === "retention";
 }
+
+export const LEGACY_ADJUSTMENT_HISTORY_UNKNOWN = "الحالة بدأت قبل النظام؛ تاريخ آخر جلسة تقويم غير مسجل. لا يمكن تقدير الاستحقاق أو مدة الانقطاع.";
 
 /**
  * يصنّف كل حالة إلى قوائمها.
@@ -162,12 +166,14 @@ export function classifyFollowups(input: {
   return input.cases.map((row) => {
     const buckets: FollowupBucket[] = [];
     const retention = isRetentionFollowup(row);
+    const unknownLegacyHistory = row.baselineKind === "legacy" && row.lastAdjustmentDate === null;
     const since = row.lastAdjustmentDate ?? row.startDate;
     // No operational retention recall/review source is wired here. Preserve raw
     // history, but never infer recall from adjustment age, start, or a booking.
-    const daysSinceLast = retention ? null : daysBetween(since, input.today);
-    const dueDate = retention ? null : nextAdjustmentDate(since, row.nextWeeks);
-    const dueBasis: FollowupRow["dueBasis"] = retention ? "retention_schedule_unavailable" : "adjustment_interval";
+    const daysSinceLast = retention || unknownLegacyHistory ? null : daysBetween(since, input.today);
+    const dueDate = retention || unknownLegacyHistory ? null : nextAdjustmentDate(since, row.nextWeeks);
+    const dueBasis: FollowupRow["dueBasis"] = retention ? "retention_schedule_unavailable"
+      : unknownLegacyHistory ? "legacy_adjustment_history_unknown" : "adjustment_interval";
 
     const appointment = row.nextAppointment ?? row.bookingContext?.pastUnresolvedAppointment ?? null;
     if (appointment) {
@@ -222,13 +228,16 @@ export function groupByBucket(rows: FollowupRow[]): Map<FollowupBucket, Followup
     for (const bucket of row.buckets) groups.get(bucket)?.push(row);
   }
   // Display cohorts, not a cross-cohort clinical urgency ranking: keep active
-  // treatment's existing order first, then retention with no adjustment clock.
+  // treatment's existing order first, then unknown legacy history, then retention.
+  // Neither unknown cohort uses the stored/derived start date as a care clock.
   // A fixed cohort key also makes mixed-list comparison transitive.
   for (const [bucket, list] of groups) {
     list.sort((a, b) => {
-      const aRetention = isRetentionFollowup(a), bRetention = isRetentionFollowup(b);
-      if (aRetention !== bRetention) return aRetention ? 1 : -1;
-      if (aRetention) {
+      const cohort = (row: FollowupRow) => isRetentionFollowup(row) ? 2
+        : row.dueBasis === "legacy_adjustment_history_unknown" ? 1 : 0;
+      const aCohort = cohort(a), bCohort = cohort(b);
+      if (aCohort !== bCohort) return aCohort - bCohort;
+      if (aCohort !== 0) {
         if (bucket === "today" || bucket === "tomorrow" || bucket === "this_week" || bucket === "upcoming" || bucket === "overdue") {
           const aBooking = a.nextAppointment ?? a.bookingContext?.pastUnresolvedAppointment;
           const bBooking = b.nextAppointment ?? b.bookingContext?.pastUnresolvedAppointment;

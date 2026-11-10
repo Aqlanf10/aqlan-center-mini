@@ -26,3 +26,10 @@ it('scope change refusal contains no old worklist',async()=>{m.prepare.mockRejec
 it('valid empty result remains qualified to selected authorized scope',async()=>{m.prepare.mockResolvedValue({...report(),rows:[]});const html=renderToStaticMarkup(await Page(input()));expect(html).toContain('ضمن صلاحية القراءة الحالية');expect(html).toContain('لا يعني ذلك خلو السجل');});
 it('retention unavailable never fabricates a recall from adjustment interval',async()=>{const r=report();r.bucket='retention';Object.assign(r.rows[0],{status:'retention',phase:'retention',dueDate:null,dueBasis:'retention_schedule_unavailable'});m.prepare.mockResolvedValue(r);const html=renderToStaticMarkup(await Page(input({bucket:'retention'})));expect(html).toContain('موعد مراجعة التثبيت غير متاح');expect(html).not.toContain('2026-11-20');});
 it.each(['attendance','no_show','none'] as const)('does not turn patient-wide %s status into treatment completion',async outcome=>{const r=report();r.rows[0].attendance.outcome=outcome;m.prepare.mockResolvedValue(r);const html=renderToStaticMarkup(await Page(input()));expect(html).toContain('ليس سجل حضور فعلياً');expect(html).toContain('إتمام علاج');});
+it('explains unknown legacy adjustment history without presenting a due date or no-care assertion',async()=>{
+ const r=report();Object.assign(r.rows[0],{dueDate:null,dueBasis:'legacy_adjustment_history_unknown'});m.prepare.mockResolvedValue(r);
+ const html=renderToStaticMarkup(await Page(input()));
+ expect(html).toContain('الحالة بدأت قبل النظام؛ تاريخ آخر جلسة تقويم غير مسجل');
+ expect(html).toContain('لا يمكن تقدير الاستحقاق أو مدة الانقطاع');
+ expect(html).not.toContain('2026-11-20');expect(html).toContain('09:15');
+});

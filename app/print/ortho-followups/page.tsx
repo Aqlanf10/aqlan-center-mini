@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { requireSession } from '@/lib/session';
 import { getSettingsSafe } from '@/lib/db';
-import { BUCKET_LABEL, BUCKET_ORDER, isRetentionFollowup, type FollowupBucket } from '@/lib/ortho-followup';
+import { BUCKET_LABEL, BUCKET_ORDER, isRetentionFollowup, LEGACY_ADJUSTMENT_HISTORY_UNKNOWN, type FollowupBucket } from '@/lib/ortho-followup';
 import { OrthoRetentionFollowupContext } from '@/components/OrthoRetentionFollowupContext';
 import { PHASE_LABEL } from '@/lib/ortho';
 import { prepareOrthoFollowupWorklist, OrthoFollowupWorklistError, type OrthoFollowupWorklist } from '@/lib/ortho-followup-worklist';
@@ -38,13 +38,13 @@ export default async function OrthoFollowupWorklistPage({searchParams}:{searchPa
     <p>قراءة حالية جديدة قد تختلف عن الشاشة السابقة. إعداد هذه الصفحة لا يثبت طباعتها أو إرسالها أو التواصل مع المرضى.</p>
     <p>وقت الإعداد: <bdi dir="ltr">{report.asOf}</bdi> · يوم العيادة: <bdi dir="ltr">{report.today}</bdi> · المنطقة الزمنية: <bdi dir="ltr">{report.timeZone}</bdi></p>
     <p>عدد الحالات في القائمة المختارة: {report.rows.length}. قد تظهر الحالة في قوائم أخرى أيضاً؛ هذا ليس عدداً فريداً للمرضى عبر القوائم.</p>
-    <p>التاريخ المتوقع أدناه تقدير مشتق من منطق اللوحة، وقد يعتمد على تاريخ بدء الحالة أو فترة افتراضية قدرها أربعة أسابيع عند غياب جلسة مسجلة. ليس موعداً محجوزاً أو خطة استدعاء موثقة للتثبيت.</p>
+    <p>التاريخ المتوقع أدناه تقدير مشتق من منطق اللوحة، وقد يعتمد للحالات غير المسجلة كحالات سابقة للنظام على تاريخ بدء الحالة أو فترة افتراضية قدرها أربعة أسابيع عند غياب جلسة مسجلة. ليس موعداً محجوزاً أو خطة استدعاء موثقة للتثبيت.</p>
     <p>مؤشر الموعد يصف الحالة الحالية لأحدث وقت موعد للمريض، وليس سجل حضور فعلياً أو إثبات إتمام علاج هذه الحالة. التوقيت المحلي المتكرر لا يميّز لحظتي الساعة عند تغيير التوقيت الصيفي.</p>
     {!report.rows.length ? <p role="status">لا توجد حالات مطابقة لهذه القائمة ضمن صلاحية القراءة الحالية. لا يعني ذلك خلو السجل من حالات أو مواعيد أخرى.</p> : report.rows.map(row => <section key={row.caseId} className="min-w-0 space-y-2 border-t pt-3 break-inside-avoid">
       <h2 className="font-bold whitespace-pre-wrap">{row.patientName} · المريض #{row.patientId} · حالة التقويم #{row.caseId}</h2>
       <p>حالة الملف الحالية: {row.status === 'retention' ? 'تثبيت' : 'علاج نشط'} · المرحلة الحالية: {Object.hasOwn(PHASE_LABEL,row.phase) ? PHASE_LABEL[row.phase as keyof typeof PHASE_LABEL] : row.phase}</p>
       <p>آخر جلسة مسجلة: {row.lastAdjustmentDate ? <bdi dir="ltr">{row.lastAdjustmentDate}</bdi> : 'غير مسجلة؛ لا يثبت ذلك عدم إجراء علاج سابق'}</p>
-      {isRetentionFollowup(row)?<OrthoRetentionFollowupContext context={row.retentionContext} print/>:<p>التاريخ المتوقع المشتق من اللوحة: {row.dueDate ? <bdi dir="ltr">{row.dueDate}</bdi> : 'غير متاح'}</p>}
+      {isRetentionFollowup(row)?<OrthoRetentionFollowupContext context={row.retentionContext} print/>:row.dueBasis==='legacy_adjustment_history_unknown'?<p>{LEGACY_ADJUSTMENT_HISTORY_UNKNOWN}</p>:<p>التاريخ المتوقع المشتق من اللوحة: {row.dueDate ? <bdi dir="ltr">{row.dueDate}</bdi> : 'غير متاح'}</p>}
       <p>الموعد القادم المحدد للمتابعة: <BookingLine booking={row.nextAppointment}/></p>
       <p>الموعد السابق غير المحسوم: {row.pastUnresolvedAppointment ? <BookingLine booking={row.pastUnresolvedAppointment}/> : 'لا يوجد موعد سابق غير محسوم في القراءة؛ ليس إثبات حضور'}</p>
       <p>مواعيد تحتاج مراجعة الربط: {row.reviewAppointmentCount} · مواعيد أخرى للمريض: {row.otherAppointmentCount}. لا يعني غياب موعد متابعة محدد غياب جميع المواعيد.</p>

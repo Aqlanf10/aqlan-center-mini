@@ -5,7 +5,7 @@ import {
   friendlyDateLong, friendlyTime, reminderText, toWhatsAppNumber, unbookedFollowupText,
 } from "@/lib/reminders";
 import { clinicDateString, getAppointmentTypeLabel } from "@/lib/schedule";
-import { isRetentionFollowup, sinceAdjustmentText } from "@/lib/ortho-followup";
+import { isRetentionFollowup, sinceAdjustmentText, LEGACY_ADJUSTMENT_HISTORY_UNKNOWN } from "@/lib/ortho-followup";
 import {
   BUCKET_LABEL, BUCKET_ORDER, BUCKET_TONE,
   type FollowupBucket, type FollowupRow,
@@ -192,6 +192,8 @@ export default function OrthoFollowupPage() {
                     <div className="mt-0.5 text-[11px] text-slate-600">
                       <OrthoRetentionFollowupContext context={row.retentionContext}/>
                     </div>
+                  ) : row.dueBasis === "legacy_adjustment_history_unknown" ? (
+                    <p className="mt-0.5 text-[11px] text-slate-600">{LEGACY_ADJUSTMENT_HISTORY_UNKNOWN}</p>
                   ) : (
                     <p className="mt-0.5 text-[11px] text-slate-500">
                       آخر شدّ: {row.lastAdjustmentDate ? friendlyDateLong(row.lastAdjustmentDate) : "بلا شدّات"} ({sinceAdjustmentText(row.daysSinceLast)})

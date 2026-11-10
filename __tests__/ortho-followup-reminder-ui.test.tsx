@@ -555,3 +555,14 @@ describe('fresh selected bucket print entry',()=>{
  });
 
 });
+it('shows unknown legacy history instead of an invented adjustment age while preserving booking actions', async () => {
+  const [legacy] = classifyFollowups({ today: TODAY, cases: [fixture({ baselineKind: 'legacy', startDate: '2020-01-01', lastAdjustmentDate: null })] });
+  await openBoard(legacy);
+  const output = text(render());
+  expect(output).toContain('الحالة بدأت قبل النظام؛ تاريخ آخر جلسة تقويم غير مسجل');
+  expect(output).toContain('لا يمكن تقدير الاستحقاق أو مدة الانقطاع');
+  expect(output).not.toContain('بلا شدّات'); expect(output).not.toContain('منذ ٨ أسابيع');
+  expect(decodedMessage()).toBe(unbookedFollowupText(legacy.patientName));
+  openBooking(legacy.patientId);
+  expectReadOnlyFeedRequests(1);
+});

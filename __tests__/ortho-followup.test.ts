@@ -177,3 +177,48 @@ describe("النصّ العربي للانقطاع", () => {
     expect(sinceAdjustmentText(30)).toBe("قبل 4 أسابيع");
   });
 });
+
+describe('legacy care history is not an inferred lapse clock', () => {
+  it.each(['2020-01-01', '2026-07-15', '2026-08-01'])('does not infer age, due date or lapse from legacy start %s', startDate => {
+    const original = row({ baselineKind: 'legacy', startDate, lastAdjustmentDate: null });
+    const [result] = classifyFollowups({ cases: [original], today: TODAY });
+    expect(result).toMatchObject({ dueDate: null, daysSinceLast: null, dueBasis: 'legacy_adjustment_history_unknown', buckets: ['no_appointment'] });
+    expect(result.startDate).toBe(startDate); expect(original.lastAdjustmentDate).toBeNull();
+  });
+  it.each([
+    ['today', '2026-09-01'], ['tomorrow', '2026-09-02'], ['this_week', '2026-09-06'], ['upcoming', '2026-10-01'], ['overdue', '2026-08-01'],
+  ])('preserves actual %s booking and no-show evidence despite unknown care history', (bucket, date) => {
+    const appointment = { id: 3, date, time: '09:00', status: 'booked' };
+    const [result] = classifyFollowups({ cases: [row({ baselineKind: 'legacy', startDate: '2020-01-01', lastAdjustmentDate: null, nextAppointment: appointment, lastWasNoShow: true })], today: TODAY });
+    expect(result.buckets).toEqual([bucket, 'no_show']); expect(result.nextAppointment).toEqual(appointment);
+    expect(result.dueDate).toBeNull(); expect(result.daysSinceLast).toBeNull();
+  });
+  it('uses the first actually recorded adjustment for legacy age and due date, retaining retention precedence', () => {
+    const actual = row({ baselineKind: 'legacy', startDate: '2020-01-01', lastAdjustmentDate: '2026-07-20', nextWeeks: 6 });
+    const [active, retention] = classifyFollowups({ cases: [actual, { ...actual, status: 'retention', lastAdjustmentDate: null }], today: TODAY });
+    expect(active).toMatchObject({ dueDate: '2026-08-31', daysSinceLast: 43, dueBasis: 'adjustment_interval', buckets: ['no_appointment', 'lapsed_6'] });
+    expect(retention).toMatchObject({ dueDate: null, daysSinceLast: null, dueBasis: 'retention_schedule_unavailable', buckets: ['no_appointment', 'retention'] });
+  });
+  it('sorts unknown history stably after known active care and before retention without using legacy start dates', () => {
+    const cases = [row({ caseId: 6, baselineKind: 'legacy', startDate: '1900-01-01', lastAdjustmentDate: null }),
+      row({ caseId: 4, baselineKind: 'legacy', startDate: '2026-08-31', lastAdjustmentDate: null }),
+      row({ caseId: 3, status: 'retention' }), row({ caseId: 5, lastAdjustmentDate: '2026-08-01' })];
+    expect(groupByBucket(classifyFollowups({ cases, today: TODAY })).get('no_appointment')!.map(value => value.caseId)).toEqual([5, 4, 6, 3]);
+  });
+  it('retains the existing start-date fallback for nonlegacy and older callers', () => {
+    for (const baselineKind of [undefined, null]) {
+      const [result] = classifyFollowups({ cases: [row({ baselineKind, lastAdjustmentDate: null, startDate: '2026-08-01' })], today: TODAY });
+      expect(result).toMatchObject({ dueDate: '2026-08-29', daysSinceLast: 31, dueBasis: 'adjustment_interval' });
+    }
+  });
+});
+
+it('orders unknown-history same-day bookings by actual appointment time without using their derived start dates', () => {
+  const cases = [row({ caseId: 2, baselineKind: 'legacy', startDate: '1900-01-01', lastAdjustmentDate: null,
+    nextAppointment: { id: 20, date: TODAY, time: '15:00', status: 'booked' } }),
+  row({ caseId: 9, baselineKind: 'legacy', startDate: '2026-08-31', lastAdjustmentDate: null,
+    nextAppointment: { id: 21, date: TODAY, time: '09:00', status: 'booked' } })];
+  expect(groupByBucket(classifyFollowups({ cases, today: TODAY })).get('today')!.map(value => value.caseId)).toEqual([9, 2]);
+  expect(classifyFollowups({ cases: [{ ...cases[0], phase: 'retention' }], today: TODAY })[0])
+    .toMatchObject({ dueBasis: 'retention_schedule_unavailable', dueDate: null, daysSinceLast: null, buckets: ['today', 'retention'] });
+});

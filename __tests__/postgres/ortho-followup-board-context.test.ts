@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { assertPostgresMajorOrThrow, postgresMajorFromVersionNum } from "../../lib/env-contract";
+import { classifyFollowups } from "../../lib/ortho-followup";
 import { validatePostgresTestTarget } from "./_safe-target";
 
 /**
@@ -708,5 +709,40 @@ describe("existing planned-session / plan-item / clinical-case read projection",
     const foreignPatient = await patient();
     await q("UPDATE visits SET signed_at=NULL, signed_by=NULL, patient_id=$2, status='in_chair' WHERE id=$1", [visit.id, foreignPatient]);
     expect((await boardRow(target.caseId)).bookingContext.reviewAppointments[0].reason).toBe("unresolved_planned_visit_record");
+  });
+});
+
+
+describe("legacy baseline follow-up history", () => {
+  it("hydrates the stored baseline marker and preserves booking/absence facts without inventing a lapse or writing data", async () => {
+    const legacy = await fixture({ startDate: "2020-01-01" });
+    const ordinary = await fixture();
+    await q("UPDATE ortho_cases SET baseline_kind='legacy' WHERE id=$1", [legacy.caseId]);
+    const booking = await appointment(legacy.patientId, { date: "2026-10-04" });
+    await appointment(legacy.patientId, { date: "2026-10-03", status: "no_show" });
+    const before = await databaseSnapshot();
+    const legacyRow = await boardRow(legacy.caseId);
+    expect(legacyRow).toMatchObject({ baselineKind: "legacy", startDate: "2020-01-01", lastAdjustmentDate: null, lastWasNoShow: true });
+    expect(legacyRow.bookingContext.pastUnresolvedAppointment).toMatchObject({ id: booking });
+    expect(classifyFollowups({ cases: [legacyRow], today: TODAY })[0]).toMatchObject({
+      dueDate: null, daysSinceLast: null, dueBasis: "legacy_adjustment_history_unknown", buckets: ["overdue", "no_show"],
+    });
+    expect((await boardRow(ordinary.caseId)).baselineKind).toBeNull();
+    expect(await databaseSnapshot()).toEqual(before);
+  });
+
+  it("resumes the clock from a real recorded adjustment while preserving legacy dates and retention semantics", async () => {
+    const legacy = await fixture({ startDate: "2020-01-01" });
+    const retention = await fixture({ status: "retention", startDate: "2020-01-01" });
+    await q("UPDATE ortho_cases SET baseline_kind='legacy' WHERE id=ANY($1::int[])", [[legacy.caseId, retention.caseId]]);
+    await q(`INSERT INTO ortho_adjustments (case_id, done_on, next_weeks, upper_wire, recorded_by)
+      VALUES ($1, '2026-08-24', 6, 'Synthetic recorded wire', $2)`, [legacy.caseId, ACTOR]);
+    const before = await databaseSnapshot();
+    const rows = classifyFollowups({ cases: [await boardRow(legacy.caseId), await boardRow(retention.caseId)], today: TODAY });
+    expect(rows[0]).toMatchObject({ baselineKind: "legacy", startDate: "2020-01-01", lastAdjustmentDate: "2026-08-24", daysSinceLast: 42,
+      dueDate: TODAY, dueBasis: "adjustment_interval", buckets: ["no_appointment", "lapsed_6"] });
+    expect(rows[1]).toMatchObject({ baselineKind: "legacy", dueDate: null, daysSinceLast: null,
+      dueBasis: "retention_schedule_unavailable", buckets: ["no_appointment", "retention"] });
+    expect(await databaseSnapshot()).toEqual(before);
   });
 });
