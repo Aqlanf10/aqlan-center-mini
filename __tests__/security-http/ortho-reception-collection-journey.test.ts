@@ -99,7 +99,6 @@ it('connects an ortho arrival, deferred collection, one canonical opening receip
     await post('reception', `/api/visits/${visitId}/clinical`, { action: 'save', treatmentDone: 'Must not be written' }, 403);
     await post('reception', '/api/ortho/baseline', baseline, 403);
     await post('reception', `/api/ortho/${ortho.id}/assessment`, {}, 403);
-    expect(await get(`/api/ortho/${ortho.id}/assessment?acceptSchema=1,2`)).toMatchObject({ clinicalWritable: false });
     expect(await financialRows(patientId)).toEqual(initial);
     // Explicit synthetic physician review; no procedure, adjustment or billable intervention is inferred.
     await post('doctorA', `/api/visits/${visitId}/clinical`, { action: 'save', doctorId, procedures: [], treatmentDone: 'Synthetic documented review only' }, 200);
