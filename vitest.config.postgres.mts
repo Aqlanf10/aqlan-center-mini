@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
  *    صريحًا لا نجاحًا صامتًا على قاعدةٍ لا يفرضها CI أصلاً.
  */
 export default defineConfig({
+  envDir: false,
   resolve: {
     alias: {
       "@": fileURLToPath(new URL(".", import.meta.url)),
@@ -26,9 +27,7 @@ export default defineConfig({
     pool: "forks",
     fileParallelism: false,
     maxConcurrency: 1,
-    forks: {
-      singleFork: true,
-    },
+    maxWorkers: 1,
     testTimeout: 180_000,
     hookTimeout: 180_000,
   },

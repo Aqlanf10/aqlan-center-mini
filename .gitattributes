@@ -1,0 +1,6 @@
+# Keep source hashes and text contracts identical on Windows and Unix.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+# Historical review evidence must retain its original bytes.
+docs/review/** -text

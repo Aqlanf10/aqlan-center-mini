@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolve } from "node:path";
 import {
   evaluateStorageDurability, isProductionRuntime, readProcMounts,
 } from "../lib/storage-readiness";
@@ -75,7 +76,7 @@ describe("جاهزية التخزين الدائم", () => {
     const decision = evaluateStorageDurability();
     expect(decision.level).toBe("ready");
     expect(decision.durable).toBe(true);
-    expect(decision.verifiedRoot).toBe("/data");
+    expect(decision.verifiedRoot).toBe(resolve("/data"));
   });
 
   it("جذر صريح لكن المسار خارجه ⇒ غير دائم (احتواء حقيقي لا startsWith)", () => {
@@ -181,7 +182,7 @@ describe("جذر قرص Railway من بيانات المنصة (P1-FINAL-4)", ()
     const decision = evaluateStorageDurability({ mountsSource: RAILWAY_MOUNTS });
     expect(decision.level).toBe("ready");
     expect(decision.durable).toBe(true);
-    expect(decision.verifiedRoot).toBe("/data");
+    expect(decision.verifiedRoot).toBe(resolve("/data"));
   });
 
   it("mount=/data وdocs=/app/data ⇒ NOT durable — الاحتواء بالمكوّنات لا البادئة", () => {
@@ -227,7 +228,7 @@ describe("جذر قرص Railway من بيانات المنصة (P1-FINAL-4)", ()
     const decision = evaluateStorageDurability({ mountsSource: RAILWAY_MOUNTS });
     expect(decision.level).toBe("ready");
     expect(decision.durable).toBe(true);
-    expect(decision.verifiedRoot).toBe("/data");
+    expect(decision.verifiedRoot).toBe(resolve("/data"));
   });
 
   it("Railway بلا RAILWAY_VOLUME_MOUNT_PATH وبلا قرص مثبت فعلًا ⇒ fail closed", () => {

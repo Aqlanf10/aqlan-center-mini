@@ -2,13 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Runs the REAL scripts/restore.mjs with an inert, no-network pg import probe.
 // A nonexistent backup archive distinguishes pre-read guard exit 2 from read exit 1.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const restore = path.resolve(here, '../restore.mjs');
-const preload = path.resolve(here, 'pg-probe-preload.mjs');
+const preload = pathToFileURL(path.resolve(here, 'pg-probe-preload.mjs')).href;
 const missing = path.resolve(here, 'DO-NOT-CREATE-PATIENT-ARCHIVE.sql');
 const good = 'postgresql://fixture:fixture@127.0.0.1:5432/backup_dst_synthetic007';
 function invoke(url, extra = {}) {

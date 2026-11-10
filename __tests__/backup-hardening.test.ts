@@ -120,7 +120,7 @@ describe("(G) فحص هوية الأرشيف", () => {
   });
 
   it("resolveBackupArchivePath يحلّ داخل مجلد النسخ حصرًا — ولا مسار للمعرّف المرفوض", () => {
-    const backupDir = "/data/backups";
+    const backupDir = path.resolve("/data/backups");
     expect(resolveBackupArchivePath(backupDir, VALID_ID_NEWER)).toBe(path.join(backupDir, VALID_ID_NEWER));
     expect(() => resolveBackupArchivePath(backupDir, "../documents/anything")).toThrow();
     expect(() => resolveBackupArchivePath(backupDir, "/etc/evil.tar.gz")).toThrow();

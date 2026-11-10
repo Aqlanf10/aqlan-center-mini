@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { extractOfficialBracesFixture, loadOfficialBracesFixture, OFFICIAL_BRACES_ARCHIVE, verifyFixtureDirectory } from "../scripts/dependency-review/braces-fixture.mjs";
@@ -21,7 +21,7 @@ function files(root: string): string[] {
 
 describe("local braces patch provenance", () => {
   it("attests every candidate file and refuses an unrecorded addition", () => {
-    const actual = Object.fromEntries(files(candidate).map((path) => [relative(candidate, path), sha256(path)]));
+    const actual = Object.fromEntries(files(candidate).map((path) => [relative(candidate, path).split(sep).join("/"), sha256(path)]));
     expect(actual).toEqual(provenance.patch.source_sha256);
   });
 

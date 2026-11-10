@@ -40,6 +40,7 @@
     "setup:gemini": "tsx scripts/setup-gemini-provider.ts",
     "start": "node .next/standalone/server.js",
     "test": "vitest run",
+    "test:windows": "vitest run --config vitest.config.windows.mts",
     "test:postgres": "vitest run --config vitest.config.postgres.mts",
     "test:security-http": "vitest run --config vitest.config.security.mts",
     "test:contract-print": "vitest run --config vitest.config.print-visual.mts",

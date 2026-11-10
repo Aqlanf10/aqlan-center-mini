@@ -8,11 +8,25 @@ import { buildMimeMessage, sendMail, type SmtpTransport } from "../lib/smtp-clie
  */
 
 let server: net.Server | null = null;
-afterEach(() => { server?.close(); server = null; });
+const sockets = new Set<net.Socket>();
+afterEach(async () => {
+  const current = server;
+  server = null;
+  for (const socket of sockets) socket.destroy();
+  sockets.clear();
+  if (current?.listening) await new Promise<void>((resolve, reject) => current.close((error) => error ? reject(error) : resolve()));
+});
 
 async function fakeServer(options: { starttls: boolean; authOk?: boolean }): Promise<{ port: number; log: string[] }> {
   const log: string[] = [];
   server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", (error: NodeJS.ErrnoException) => {
+      // The client deliberately closes an insecure SMTP connection. Windows
+      // may report that expected peer refusal as a reset on this fake server.
+      if (error.code !== "ECONNRESET") throw error;
+    });
     let inData = false;
     let buffer = "";
     socket.write("220 fake ESMTP\r\n");

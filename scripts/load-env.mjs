@@ -7,8 +7,8 @@ import { existsSync, readFileSync } from "node:fs";
  *   DATABASE_URL=postgresql://… npm run verify:clinical
  */
 const file = new URL("../.env.local", import.meta.url);
-if (existsSync(file)) {
-  for (const line of readFileSync(file, "utf8").split("\n")) {
+if (process.env.NODE_ENV !== "test" && existsSync(file)) {
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
     const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
     if (!match) continue;
     const [, key, raw] = match;

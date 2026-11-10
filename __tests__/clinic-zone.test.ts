@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { CLINIC_ZONE_FALLBACK, isKnownZone, resolveClinicZone } from "../lib/clinicZone";
 import { clinicDateString } from "../lib/schedule";
 
@@ -42,7 +42,7 @@ describe("توقيت العيادة", () => {
     const offenders: string[] = [];
     for (const dir of GUARDED_DIRS) {
       for (const file of sourceFiles(dir)) {
-        const rel = relative(ROOT, file);
+        const rel = relative(ROOT, file).split(sep).join("/");
         if (rel === SOURCE) continue;
         if (zone.test(readFileSync(file, "utf8"))) offenders.push(rel);
       }

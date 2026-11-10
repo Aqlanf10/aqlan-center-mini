@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
  *    ومصفوفة RBAC لا تُثبت إلا على طلب HTTP حقيقي عبر التطبيق المبني.
  */
 export default defineConfig({
+  envDir: false,
   resolve: {
     alias: {
       "@": fileURLToPath(new URL(".", import.meta.url)),
@@ -29,9 +30,7 @@ export default defineConfig({
     pool: "forks",
     fileParallelism: false,
     maxConcurrency: 1,
-    forks: {
-      singleFork: true,
-    },
+    maxWorkers: 1,
     // مستعبِر الخادم مفرد عبر الملفات كلها: بلا إعادة استيراد لكل ملف —
     // إعادة التهيئة كانت تُسقط القاعدة تحت خادم الجولة السابقة.
     isolate: false,
