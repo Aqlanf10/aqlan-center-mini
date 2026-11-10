@@ -70,6 +70,19 @@ async function rejectOutputs(study: Awaited<ReturnType<typeof createStudy>>, ses
 }
 
 const money = async () => (await db.query("SELECT (SELECT count(*)::int FROM invoices) invoices,(SELECT count(*)::int FROM payments) payments,(SELECT count(*)::int FROM patient_opening_balances) opening")).rows;
+// Reassemble a complete synthetic sentinel across deliberate line wrapping.
+// This does not normalize clinical numbers, source hashes or stored evidence.
+const joinedSentinelText = (text: string) => text.replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+async function fullPrintBodyText(html: string) {
+  const page = await browser.newPage();
+  try {
+    await page.route("**/*", route => route.abort());
+    return await page.evaluate(source => {
+      const document = new DOMParser().parseFromString(source, "text/html");
+      return [...document.querySelectorAll('[data-print-region="body"]')].map(node => node.textContent ?? "").join("\n");
+    }, html);
+  } finally { await page.close(); }
+}
 
 it.each(["doctorA", "reception"] as const)("%s keeps saved-study access while all exports require a current grant", async role => {
   const username = role === "doctorA" ? "secdoctora" : "secreception";
@@ -103,7 +116,8 @@ it.each(["doctorA", "reception"] as const)("%s keeps saved-study access while al
         expect(slides.join("\n")).toContain("حالة التقويم عند التقاط الدراسة: مكتملة");
       } else {
         const html = await response.text();
-        expect(html).toContain(study.marker);
+        if (url.endsWith("&mode=full")) expect(joinedSentinelText(await fullPrintBodyText(html))).toContain(study.marker);
+        else expect(html).toContain(study.marker);
         expect(html).toContain("سياق التقاط الدراسة المحفوظة");
         expect(html).toContain("حالة التقويم عند التقاط الدراسة: مكتملة");
       }
@@ -253,7 +267,7 @@ it("renders the saved capture context once on a separate PDF page in every print
       expect(first).toContain(study.capturedAt); expect(first).not.toContain(study.marker);
       expect(first).toContain("1 / 2"); expect(second).toContain("2 / 2");
       expect(second).toContain(study.capturedAt);
-      expect(second).toContain(study.marker);
+      expect(joinedSentinelText(second)).toContain(study.marker);
       execFileSync("pdftoppm", ["-f", "1", "-singlefile", "-scale-to", "1100", "-png", pdf, `.settings-ui-artifacts/ortho-study-capture-print-${mode}`]);
       await page.close();
     }
