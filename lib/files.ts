@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
-import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { link, lstat, mkdir, open, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { isSafeKey, storageKey } from "./storage";
 
@@ -147,3 +148,108 @@ export async function removeFileByKey(key: string): Promise<boolean> {
   }
 }
 
+/** Archive roots are provisioned by deployment, never by the first export.
+ * Their directory entries must already be durable on the configured volume.
+ * This preflight deliberately does not create directories or run upload probes. */
+export async function immutableStorageRootIsProvisioned(): Promise<boolean> {
+  const directory = configuredDirectory();
+  if (!directory) return false;
+  try {
+    const info = await lstat(directory);
+    return info.isDirectory() && !info.isSymbolicLink() && await realpath(directory) === directory;
+  } catch { return false; }
+}
+
+/** Immutable export storage. Existing upload helpers intentionally retain their
+ * behavior. The storage root must be application-owned; no user-supplied paths
+ * are accepted. Reject symlink roots, shards and leaves before accessing bytes. */
+async function immutableParent(key: string, create: boolean): Promise<string> {
+  const directory = configuredDirectory();
+  if (!directory || !isSafeKey(key) || await realpath(directory) !== directory) throw new Error("IMMUTABLE_FILE_INVALID");
+  const root = await lstat(directory);
+  if (!root.isDirectory() || root.isSymbolicLink()) throw new Error("IMMUTABLE_FILE_INVALID");
+  let parent = directory;
+  for (const part of key.split("/").slice(0, -1)) {
+    parent = join(parent, part);
+    if (create) try { await mkdir(parent, { mode: 0o700 }); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const info = await lstat(parent);
+    if (!info.isDirectory() || info.isSymbolicLink() || await realpath(parent) !== parent) throw new Error("IMMUTABLE_FILE_INVALID");
+    if (create) {
+      // Sync even an existing shard: it may have just been made by a concurrent
+      // writer, or left by a previous attempt whose parent fsync failed.
+      const ancestor = await open(dirname(parent), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      try { await ancestor.sync(); } finally { await ancestor.close(); }
+    }
+  }
+  return parent;
+}
+
+async function verifiedHandleBytes(file: Awaited<ReturnType<typeof open>>, sha256: string, sizeBytes: number): Promise<Buffer> {
+  const before = await file.stat();
+  if (!before.isFile() || before.size !== sizeBytes) throw new Error("IMMUTABLE_FILE_INVALID");
+  const bytes = Buffer.alloc(sizeBytes + 1);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const read = await file.read(bytes, offset, bytes.length - offset, offset);
+    if (!read.bytesRead) break;
+    offset += read.bytesRead;
+  }
+  const after = await file.stat();
+  // Publishing/unlinking another hardlink changes ctime without changing bytes.
+  // Do not reject a valid concurrent dedup on link-count metadata alone.
+  if (offset !== sizeBytes || after.size !== sizeBytes || after.mtimeMs !== before.mtimeMs ||
+      createHash("sha256").update(bytes.subarray(0, offset)).digest("hex") !== sha256) throw new Error("IMMUTABLE_FILE_INVALID");
+  return bytes.subarray(0, offset);
+}
+
+function immutableReferenceValid(key: string, sha256: string, sizeBytes: number): boolean {
+  return isSafeKey(key) && /^[0-9a-f]{64}$/.test(sha256) && key.split("/").at(-1)?.split(".")[0] === sha256 &&
+    key.startsWith(`${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/`) && Number.isSafeInteger(sizeBytes) && sizeBytes > 0 && sizeBytes <= 25 * 1024 * 1024;
+}
+
+/** Same-handle, no-follow read with an exact bounded length and digest check. */
+export async function readImmutableFileByKey(key: string, sha256: string, sizeBytes: number): Promise<Buffer> {
+  if (!immutableReferenceValid(key, sha256, sizeBytes)) throw new Error("IMMUTABLE_FILE_INVALID");
+  const parent = await immutableParent(key, false);
+  const file = await open(join(parent, key.split("/").at(-1)!), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try { return await verifiedHandleBytes(file, sha256, sizeBytes); } finally { await file.close(); }
+}
+
+/** Publish complete bytes once. A collision is accepted only after reading and
+ * verifying the existing file. Never replace or remove a final file, even if
+ * publication succeeded but a later fsync failed. */
+export async function putImmutableFile(bytes: Uint8Array, extension: string): Promise<StoredFile> {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 1 || bytes.byteLength > 25 * 1024 * 1024 || !/^[a-z0-9]{1,8}$/.test(extension)) throw new Error("IMMUTABLE_FILE_INVALID");
+  const snapshot = Buffer.from(bytes);
+  const sha256 = createHash("sha256").update(snapshot).digest("hex");
+  const key = storageKey(sha256, extension);
+  const parent = await immutableParent(key, true);
+  const destination = join(parent, key.split("/").at(-1)!);
+  const temporary = join(parent, `.export-${randomUUID()}.tmp`);
+  let file: Awaited<ReturnType<typeof open>> | undefined;
+  let created = false;
+  try {
+    file = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
+    created = true;
+    await file.writeFile(snapshot);
+    await file.sync();
+    await verifiedHandleBytes(file, sha256, snapshot.length);
+    await file.close(); file = undefined;
+    // Recheck shard safety before linking; roots/shards are application-owned.
+    await immutableParent(key, false);
+    let deduplicated = false;
+    try { await link(temporary, destination); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      deduplicated = true;
+    }
+    await readImmutableFileByKey(key, sha256, snapshot.length);
+    const directory = await open(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try { await directory.sync(); } finally { await directory.close(); }
+    return { key, sha256, sizeBytes: snapshot.length, deduplicated };
+  } finally {
+    await file?.close().catch(() => undefined);
+    if (created) await unlink(temporary).catch(() => undefined);
+  }
+}
