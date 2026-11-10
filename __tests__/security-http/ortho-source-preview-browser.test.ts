@@ -57,7 +57,9 @@ describe("built measurement session provenance preview", () => {
       expect(await page.getByRole("checkbox", { name: "اختيار السن 12 لجلسة القياس", exact: true }).isChecked()).toBe(true);
       expect(await page.getByRole("checkbox", { name: "اختيار السن 13 لجلسة القياس", exact: true }).isChecked()).toBe(true);
       expect(await preview.innerText()).toBe(reviewText); expect(writes).toEqual([]);
-      await preview.getByRole("checkbox", { name: "إبقاء FDI 13 ضمن التطبيق", exact: true }).uncheck();
+      // Opt-out removes this preview row immediately; click then verify the retained
+      // editor checkbox and preview membership instead of waiting on a removed input.
+      await preview.getByRole("checkbox", { name: "إبقاء FDI 13 ضمن التطبيق", exact: true }).click();
       expect(await page.getByRole("checkbox", { name: "اختيار السن 13 لجلسة القياس", exact: true }).isChecked()).toBe(false);
       expect(await preview.getByRole("checkbox").count()).toBe(1);
       await preview.scrollIntoViewIfNeeded();
