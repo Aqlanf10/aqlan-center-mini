@@ -26,11 +26,12 @@ $env:DATABASE_URL = 'postgresql://ci:ci@127.0.0.1:54329/postgres?sslmode=disable
 $env:TEST_DATABASE_URL = 'postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable'
 pwsh -File .\scripts\local.ps1 run typecheck
 pwsh -File .\scripts\local.ps1 run lint
+pwsh -File .\scripts\local.ps1 run test:windows
 pwsh -File .\scripts\local.ps1 run test:postgres
 ```
 
 تحتاج بوابات المتصفح Chromium الخاص بـPlaywright، وتحتاج فحوص الطباعة أدوات Poppler (`pdfinfo` و`pdftotext` و`pdftoppm`) في PATH. لا يُعدّ غياب هذه المتطلبات نجاحًا للفحوص.
 
-تُشغّل البوابة الشاملة `npm run verify:full` في بيئة Linux المتوافقة مع النشر. بعض اختبارات حزم النشر تعتمد على Bash وروابط ملفات POSIX النسبية؛ لا يُعدّ تشغيلها على Windows بديلًا عن إثباتها على Linux. يحافظ مسار CI الأساسي على تلك الفحوص كاملة، ويضيف `windows-development.yml` فحوصًا مستقلة لأدوات Windows والنسخ الاحتياطي وحواجز تشغيل الرحلات.
+تُشغّل البوابة الشاملة `npm run verify:full` في بيئة Linux المتوافقة مع النشر. يشغّل `test:windows` اختبارات التطبيق والوحدات وأدوات التطوير، ويستثني ست مجموعات لإثبات حزم نشر Linux تعتمد على Bash وروابط POSIX النسبية ومطابقة مسارات تتبع Next على Linux. تبقى المجموعات الست كاملة في `npm test` ومسار CI الأساسي، ويشغّل `windows-development.yml` مجموعة Windows بشكل مستقل. لا يعني استثناء إثبات نشر Linux من فحص Windows إلغاء إثباته قبل النشر.
 
 على جهاز محدود الذاكرة، شغّل فحص الأنواع والاختبارات والبناء بالتتابع. لا تشغّل خادم التطوير أثناء هذه الفحوص. احتفظ بمساحة كافية للبناء وقاعدة الاختبار والملفات المؤقتة، ويمكن توجيه `TEMP` و`TMP` إلى قرص آخر. لا تستخدم `USE_LOCAL_DB=true` لبوابات PostgreSQL؛ فهو مخصص لتجربة مؤقتة في الذاكرة.

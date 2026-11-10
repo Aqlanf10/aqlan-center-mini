@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
@@ -29,7 +29,7 @@ describe("scoped minimatch fix without a lint toolchain migration", () => {
     expect(lock.packages["node_modules/eslint"].version).toBe("9.39.5");
     expect(lock.packages["node_modules/eslint-plugin-react-hooks"].version).toBe("6.1.1");
     expect(manifest.engines.node).toBe(">=22 <23");
-    expect(fromEstree.resolve("minimatch")).toContain(`${fixedPath}/`);
+    expect(fromEstree.resolve("minimatch").split(sep).join("/")).toContain(`${fixedPath}/`);
   });
 
   it.each(["eslint", "@eslint/config-array", "@eslint/eslintrc"])(

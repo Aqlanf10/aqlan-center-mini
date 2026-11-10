@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import path from "node:path";
 import {
   isSameOrInside, resolveInsideBase, validateDestinationBatch, validateRelativePath,
 } from "../lib/safe-path";
@@ -10,7 +11,7 @@ import {
  * المسارات المتشعبة، الأسماء التي تتشارك بادئة الأساس، والوجهات المكررة.
  */
 
-const BASE = "/data/documents";
+const BASE = path.resolve("/data/documents");
 
 describe("تحقق المسار النسبي", () => {
   it("يقبل مسارًا نسبيًا عاديًا ويطبّعه", () => {
@@ -57,7 +58,7 @@ describe("الحل داخل الأساس — بلا startsWith", () => {
   it("يحل مسارًا سليمًا داخل الأساس ويعيد المسار المطلق", () => {
     const result = resolveInsideBase(BASE, "ab/cd/hash.png");
     expect(result.ok).toBe(true);
-    expect(result.resolved).toBe(`${BASE}/ab/cd/hash.png`);
+    expect(result.resolved).toBe(path.join(BASE, "ab/cd/hash.png"));
   });
 
   it("الحالة التي يخدع فيها startsWith: أساس /data ومسار يخرج منه", () => {

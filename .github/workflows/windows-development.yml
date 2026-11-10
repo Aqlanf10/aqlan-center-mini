@@ -8,7 +8,7 @@ on:
 jobs:
   windows_tooling:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       NODE_OPTIONS: --max-old-space-size=3072
       CLINIC_TIME_ZONE: Asia/Aden
@@ -24,13 +24,5 @@ jobs:
       - run: npm ci
       - name: Verify selected Node and npm runtime
         run: ./scripts/local.ps1 run verify:environment
-      - name: Verify Windows tools, backup integrity, and operational entry guards
-        run: >-
-          npm test -- --testTimeout 30000
-          __tests__/windows-tooling.test.ts
-          __tests__/environment-parity.test.ts
-          __tests__/verify-ci-orchestrator.test.ts
-          __tests__/verification-entry-safety.test.ts
-          __tests__/backup-hardening.test.ts
-          __tests__/production-backup.test.ts
-          __tests__/backup-atomic-retry.test.ts
+      - name: Verify application units and Windows development tools
+        run: npm run test:windows
