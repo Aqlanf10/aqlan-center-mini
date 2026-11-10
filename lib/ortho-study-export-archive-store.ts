@@ -1,6 +1,7 @@
 /** Private durable export receipts. All reads/publication re-enter canonical saved
  * study authority; stored provenance is evidence, never an authorization grant. */
 import { randomUUID } from 'node:crypto';
+import { requireSession } from './session';
 import { insertAuditRow, type DbClient } from './db';
 import { journeyFail, journeyTransaction, type JourneyOwnerInput } from './ortho-case-journey-authority';
 import { readOrthoCaseStudyOn } from './ortho-case-study-store';
@@ -37,6 +38,24 @@ interface JobRow {
 interface ArtifactRow { job_id: number; storage_key: string; sha256: string; size_bytes: number; page_count: number; created_at: Date; manifest: unknown; manifest_sha256: string }
 const bad = (code = 'invalid_study_export') => journeyFail(400, code);
 const nonnegative = (v: number) => Number.isSafeInteger(v) && v >= 0;
+/** Canonical source checks precede archive locks. Their session may expire during
+ * a later job/audit wait; recheck the signed request, never the input's expiry.
+ * The user SHARE lock is already held, so this does not invert source lock order. */
+async function requireArchiveSession(client: DbClient, input: JourneyOwnerInput) {
+  const session = await requireSession(client);
+  if (!session || session.expiresAt < Date.now() || session.userId !== input.session.userId
+    || session.username !== input.session.username || session.role !== input.session.role)
+    journeyFail(401, 'session_expired');
+}
+/** Covers reads, mutations and early replay returns after their final awaited
+ * receipt/audit work, before the existing transaction helper commits anything. */
+function archiveTransaction<T extends { ok: true }>(input: JourneyOwnerInput, write: boolean, body: (client: DbClient) => Promise<T>) {
+  return journeyTransaction(write, async client => {
+    const result = await body(client);
+    await requireArchiveSession(client, input);
+    return result;
+  });
+}
 async function fence(client: DbClient) {
   await client.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [PURCHASE_RESET_FENCE]);
   await client.query(`LOCK TABLE ${ORTHO_STUDY_HISTORY_TABLES.join(', ')} IN ROW EXCLUSIVE MODE`);
@@ -66,6 +85,7 @@ async function prepared(client: DbClient, input: JourneyOwnerInput & { jobId: nu
   const saved = await readOrthoCaseStudyOn(client, { ...input, revisionId: discovery?.revision_id, exportAccess: true });
   if (!discovery) journeyFail(404, 'study_export_not_found');
   const row = (await client.query<JobRow>('SELECT * FROM ortho_study_export_jobs WHERE id=$1 FOR UPDATE', [input.jobId])).rows[0];
+  await requireArchiveSession(client, input);
   if (!row || row.patient_id !== saved.patientId || row.ortho_case_id !== saved.orthoCaseId || row.clinical_case_id !== saved.clinicalCaseId
     || saved.revision?.id !== row.revision_id || saved.revision.contentHash !== row.revision_sha256
     || journeyContentHash(row.command) !== row.request_fingerprint) journeyFail(409, 'study_export_scope_changed');
@@ -79,7 +99,7 @@ function requireLease(row: JobRow, lease: StudyExportLease) {
 export async function reserveStudyExport(input: JourneyOwnerInput & { command: unknown }) {
   let command: StudyExportCommand;
   try { command = readStudyExportCommand(input.command); } catch { return { ok: false as const, status: 400, code: 'invalid_study_export_command', message: 'طلب تصدير غير صالح.' }; }
-  return journeyTransaction(true, async client => {
+  return archiveTransaction(input, true, async client => {
     await fence(client);
     const saved = await readOrthoCaseStudyOn(client, { ...input, revisionId: command.revisionId, exportAccess: true });
     if (saved.revision?.contentHash !== command.revisionHash) journeyFail(409, 'study_export_revision_changed');
@@ -95,7 +115,7 @@ export async function reserveStudyExport(input: JourneyOwnerInput & { command: u
   });
 }
 export async function listStudyExports(input: JourneyOwnerInput & { revisionId: number; after?: number }) {
-  return journeyTransaction(false, async client => {
+  return archiveTransaction(input, false, async client => {
     if (!journeyId(input.revisionId) || input.after !== undefined && !journeyId(input.after)) bad();
     await fence(client);
     const saved = await readOrthoCaseStudyOn(client, { ...input, exportAccess: true });
@@ -105,7 +125,7 @@ export async function listStudyExports(input: JourneyOwnerInput & { revisionId: 
   });
 }
 export async function claimStudyExport(input: JourneyOwnerInput & { jobId: number; expectedGeneration: number }) {
-  return journeyTransaction(true, async client => {
+  return archiveTransaction(input, true, async client => {
     if (!nonnegative(input.expectedGeneration)) bad();
     await fence(client); const preparedJob = await prepared(client, input, true), { row } = preparedJob;
     if (row.state === 'ready' || row.state === 'cancelled') return { ok: true as const, job: await receipt(client,row), lease: null, revision: null, scope: preparedJob.scope };
@@ -121,7 +141,7 @@ export async function claimStudyExport(input: JourneyOwnerInput & { jobId: numbe
   });
 }
 export async function publishStudyExport(input: JourneyOwnerInput & { lease: StudyExportLease; artifact: StudyExportArtifactReference & { pageCount: number; renditions: StudyExportRendition[] } }) {
-  return journeyTransaction(true, async client => {
+  return archiveTransaction(input, true, async client => {
     await fence(client); const { row, revision } = await prepared(client, { ...input, jobId: input.lease.jobId }, true);
     requireLease(row,input.lease);
     const a = input.artifact;
@@ -151,7 +171,7 @@ export async function publishStudyExport(input: JourneyOwnerInput & { lease: Stu
   });
 }
 export async function failStudyExport(input: JourneyOwnerInput & { lease: StudyExportLease; code: StudyExportFailure }) {
-  return journeyTransaction(true, async client => {
+  return archiveTransaction(input, true, async client => {
     if (!STUDY_EXPORT_FAILURES.includes(input.code)) bad();
     await fence(client); const { row }=await prepared(client,{...input,jobId:input.lease.jobId},true); requireLease(row,input.lease);
     const failed=(await client.query<JobRow>(`UPDATE ortho_study_export_jobs SET state='failed',failure_code=$2,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING *`,[row.id,input.code])).rows[0];
@@ -159,7 +179,7 @@ export async function failStudyExport(input: JourneyOwnerInput & { lease: StudyE
   });
 }
 export async function cancelStudyExport(input: JourneyOwnerInput & { jobId:number; expectedGeneration:number }) {
-  return journeyTransaction(true,async client=>{
+  return archiveTransaction(input, true,async client=>{
     if(!nonnegative(input.expectedGeneration))bad();
     await fence(client);const {row}=await prepared(client,input,true);
     if(row.generation!==input.expectedGeneration)journeyFail(409,'study_export_generation_changed');
@@ -170,7 +190,7 @@ export async function cancelStudyExport(input: JourneyOwnerInput & { jobId:numbe
   });
 }
 export async function readStudyExportArtifact(input: JourneyOwnerInput & {jobId:number}) {
-  return journeyTransaction(false,async client=>{
+  return archiveTransaction(input, false,async client=>{
     await fence(client);const {row}=await prepared(client,input),a=await artifact(client,row.id);
     if(row.state!=='ready'||!a)journeyFail(409,'study_export_not_ready');
     if(journeyContentHash(a.manifest)!==a.manifest_sha256)journeyFail(500,'invalid_study_export_manifest');
