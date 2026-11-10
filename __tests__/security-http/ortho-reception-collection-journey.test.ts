@@ -210,5 +210,31 @@ it('denies reception current, historical and problem-source assessment reads whi
   const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Aden', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const appointments = await get(`/api/appointments?date=${date}`);
   expect(Array.isArray(appointments)).toBe(true); expect(JSON.stringify(appointments)).not.toContain(canary);
+  const context = await browser.newContext({ viewport: { width: 390, height: 1000 }, locale: 'ar-YE', serviceWorkers: 'block' });
+  const [cookieName, ...cookieValue] = h.sessions.reception.cookie.split('=');
+  await context.addCookies([{ name: cookieName, value: cookieValue.join('='), url: baseUrl }]);
+  const assessmentRequests: string[] = [], blocked: string[] = [], errors: string[] = [];
+  context.on('request', request => {
+    const url = new URL(request.url());
+    if (url.origin === baseUrl && url.pathname === `/api/ortho/${caseId}/assessment`) assessmentRequests.push(`${request.method()} ${url.pathname}${url.search}`);
+  });
+  await context.route('**/*', async route => {
+    const request = route.request(), url = new URL(request.url());
+    if (url.origin === baseUrl && ['GET', 'HEAD'].includes(request.method())) return route.continue();
+    blocked.push(`${request.method()} ${url.origin}${url.pathname}`); await route.abort();
+  });
+  const page = await context.newPage(); page.setDefaultTimeout(20000); page.on('pageerror', error => errors.push(error.message));
+  try {
+    await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=ortho&orthoCaseId=${caseId}&pillar=diagnostics`);
+    // Wait for the selected case and diagnostics to render, not an empty/loading page.
+    await page.getByText(`#${caseId}`, { exact: true }).first().waitFor();
+    await page.getByRole('region', { name: 'السجلات والصور', exact: true }).waitFor();
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(await page.getByRole('button', { name: 'فتح التقييم السريري والقياسات', exact: true }).count()).toBe(0);
+    expect(await page.getByTestId('ortho-case-assessment-v2').count()).toBe(0);
+    expect(await page.getByRole('region', { name: 'نتائج المقابلة والفحص المحفوظة', exact: true }).count()).toBe(0);
+    expect(await page.locator('body').innerText()).not.toContain(canary);
+    expect(assessmentRequests).toEqual([]); expect(blocked).toEqual([]); expect(errors).toEqual([]);
+  } finally { await context.close(); }
   expect(await revisionRows()).toEqual(before);
 }, 120000);
