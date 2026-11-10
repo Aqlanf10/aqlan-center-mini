@@ -1,8 +1,10 @@
 import {BUCKET_ORDER,classifyFollowups,groupByBucket,type FollowupBucket,type FollowupCase,type FollowupAttendanceContext,type NextAppointmentInfo} from './ortho-followup';
 import {clinicDateString} from './schedule';
+import {readRetentionFollowupContext} from './ortho-retention-followup-context';
 export class OrthoFollowupWorklistError extends Error {constructor(readonly status:400|409,readonly code:string){super(code);}}
 export type WorklistAppointment=Pick<NextAppointmentInfo,'id'|'date'|'time'|'status'>;
 export interface OrthoFollowupWorklistRow {
+ retentionContext?:FollowupCase['retentionContext'];
  patientId:number;caseId:number;patientName:string;status:'active'|'retention';phase:string;
  lastAdjustmentDate:string|null;dueDate:string|null;dueBasis:'adjustment_interval'|'retention_schedule_unavailable';
  nextAppointment:WorklistAppointment|null;pastUnresolvedAppointment:WorklistAppointment|null;
@@ -33,8 +35,10 @@ export function projectOrthoFollowupWorklist(board:FollowupCase[],input:{bucket:
  if(selected.length>500)invalid('worklist_limit');
  const rows=selected.map(r=>{
   const b=r.bookingContext,a=r.attendanceContext;
+  const retentionContext=r.retentionContext===undefined?undefined:readRetentionFollowupContext(r.retentionContext);
+  if(retentionContext===null)invalid('invalid_retention_followup_context');
   if(!b||b.verified!==true||!Array.isArray(b.reviewAppointments)||!Array.isArray(b.otherAppointments)||!a||a.basis!=='current_status_scheduled_slot'||a.cutoff.kind!=='explicit_instant'||a.cutoff.instant!==input.asOf.toISOString()||a.cutoff.timeZone!==input.timeZone||!local(a.cutoff.localDateTime)||a.latestScheduledLocal!==null&&!local(a.latestScheduledLocal)||!['none','attendance','no_show','conflict'].includes(a.outcome))invalid();
-  return {patientId:r.patientId,caseId:r.caseId,patientName:r.patientName,status:r.status,phase:r.phase,lastAdjustmentDate:r.lastAdjustmentDate,dueDate:r.dueDate,dueBasis:r.dueBasis,nextAppointment:appointment(r.nextAppointment),pastUnresolvedAppointment:appointment(b.pastUnresolvedAppointment),reviewAppointmentCount:b.reviewAppointments.length,otherAppointmentCount:b.otherAppointments.length,attendance:{outcome:a.outcome,latestScheduledLocal:a.latestScheduledLocal,cutoffLocalDateTime:a.cutoff.localDateTime}};
+  return {patientId:r.patientId,caseId:r.caseId,patientName:r.patientName,status:r.status,phase:r.phase,lastAdjustmentDate:r.lastAdjustmentDate,dueDate:r.dueDate,dueBasis:r.dueBasis,...(retentionContext?{retentionContext}:{}),nextAppointment:appointment(r.nextAppointment),pastUnresolvedAppointment:appointment(b.pastUnresolvedAppointment),reviewAppointmentCount:b.reviewAppointments.length,otherAppointmentCount:b.otherAppointments.length,attendance:{outcome:a.outcome,latestScheduledLocal:a.latestScheduledLocal,cutoffLocalDateTime:a.cutoff.localDateTime}};
  });
  const result={bucket:input.bucket,today:input.today,asOf:input.asOf.toISOString(),timeZone:input.timeZone,actorId:input.actorId,rows};
  if(new TextEncoder().encode(JSON.stringify(result)).length>1048576)invalid('worklist_limit');

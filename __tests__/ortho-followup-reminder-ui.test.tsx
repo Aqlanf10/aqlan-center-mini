@@ -2,11 +2,13 @@ import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import OrthoFollowupPage from "../app/ortho/page";
 import { QuickAppointmentModal } from "../components/QuickAppointmentModal";
+import { OrthoRetentionFollowupContext } from "../components/OrthoRetentionFollowupContext";
 import { BUCKET_LABEL, BUCKET_ORDER, classifyFollowups, type FollowupBucket, type FollowupRow } from "../lib/ortho-followup";
 import { friendlyDate, friendlyDateLong, friendlyTime, reminderText, unbookedFollowupText } from "../lib/reminders";
 
 // Actual board output and booking-success callback, with synthetic hook storage.
-// Leaf components do not execute. Fetch is mocked; links are inspected, never opened.
+// Only the pure retention context leaf executes; hooked leaves stay isolated.
+// Fetch is mocked; links are inspected, never opened.
 const hooks = vi.hoisted(() => ({
   values: [] as unknown[], cursor: 0, changed: false,
   memos: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
@@ -79,7 +81,12 @@ function elements(node: ReactNode): Element[] {
 function text(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(text).join("");
-  if (node && typeof node === "object" && "props" in node) return text((node as Element).props.children as ReactNode);
+  if (node && typeof node === "object" && "props" in node) {
+    if ((node as Element).type === OrthoRetentionFollowupContext) {
+      return text(OrthoRetentionFollowupContext((node as ReactElement<Parameters<typeof OrthoRetentionFollowupContext>[0]>).props));
+    }
+    return text((node as Element).props.children as ReactNode);
+  }
   return "";
 }
 function render(): ReactNode {
@@ -297,8 +304,12 @@ describe("orthodontic board follow-up message", () => {
       expect(text(visible)).toContain(service);
       expect(text(visible)).not.toContain(otherService);
       const hrefs = elements(visible).map((node) => node.props.href).filter(Boolean);
-      expect(hrefs).toContain(`/patients/${row.patientId}?tab=treatment`);
-      expect(hrefs).not.toContain(`/patients/${otherRow.patientId}?tab=treatment`);
+      const caseLink = elements(visible).find(node => node.type === "a" && text(node) === "ملف التقويم");
+      expect(caseLink).toBeDefined();
+      const caseUrl = new URL(caseLink!.props.href as string, "https://synthetic.invalid");
+      expect(caseUrl.pathname).toBe(`/patients/${row.patientId}`);
+      expect(Object.fromEntries(caseUrl.searchParams)).toEqual({ tab: "treatment", sub: "ortho", patientId: String(row.patientId), orthoCaseId: String(row.caseId) });
+      expect(hrefs.some(href => String(href).startsWith(`/patients/${otherRow.patientId}?`))).toBe(false);
       expect(hrefs).toContain(`/appointments?date=${date}`);
       expect(hrefs).not.toContain(`/appointments?date=${otherDate}`);
       const whatsapp = links(visible); expect(whatsapp).toHaveLength(1);
@@ -369,10 +380,10 @@ describe("actual follow-up page retention recall truth", () => {
     cases: [fixture({ status: "retention", phase: "retention", ...changes })] })[0];
   const expectUnknownRecall = (visible: ReactNode) => {
     const description = text(visible);
-    expect(description).toContain("متابعة التثبيت");
-    expect(description).toContain("استحقاق التثبيت وآخر مراجعة غير متاحين في هذه اللوحة");
-    expect(description).toContain("مراجعة الطبيب لتحديد جدول المتابعة");
-    expect(description).toContain("الحجز لا يحدد استحقاق التثبيت ولا يثبت إتمام مراجعة التثبيت");
+    expect(description).toContain("موعد مراجعة التثبيت غير متاح");
+    expect(description).toContain("تعذّر التحقق من تعليمات التثبيت أو مصادرها");
+    expect(description).toContain("لم يُفترض من فاصل الشدّات");
+    expect(description).toContain("الحجز لا يثبت إتمام مراجعة التثبيت");
     expect(description).not.toContain("آخر شدّ:");
     expect(description).not.toContain(" · الاستحقاق: ");
     expect(description).not.toMatch(/قبل \d+ أسابيع|بلا شدّات|Invalid Date|null/);

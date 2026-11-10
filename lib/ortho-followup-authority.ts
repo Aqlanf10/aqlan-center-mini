@@ -3,6 +3,7 @@ import {getPool,findUserByUsername,doctorOwnedPatientIds,orthoFollowupBoard,inse
 import {revalidateSessionInTransaction} from './session';
 import {projectOrthoFollowupWorklist} from './ortho-followup-worklist-contract';
 import type {FollowupBucket} from './ortho-followup';
+import {enrichRetentionFollowupContext} from './ortho-retention-followup-read';
 export class OrthoFollowupAuthorityError extends Error {
  constructor(readonly status:401|403|409,message:string){super(message);}
 }
@@ -31,6 +32,7 @@ export async function readAuthorizedOrthoFollowupBoard(session:SessionPayload,to
   }
   let board=await orthoFollowupBoard(today,asOf,client);
   if(partyId!==null){const owned=await doctorOwnedPatientIds(partyId,[...new Set(board.map(row=>row.patientId))],client);board=board.filter(row=>owned.has(row.patientId));}
+  board=await enrichRetentionFollowupContext(client,current,board);
   if(preparation){
    const worklist=projectOrthoFollowupWorklist(board,{bucket:preparation.worklistBucket,today,asOf,timeZone:CLINIC_TIME_ZONE,actorId:current.userId});
    await insertAuditRow(client,{action:'ortho.followup_worklist',entity:'ortho_cases',actor:current.username,actorRole:current.role,details:{event:'prepared_followup_worklist',bucket:worklist.bucket,caseCount:worklist.rows.length,today,asOf:worklist.asOf,timeZone:worklist.timeZone}});

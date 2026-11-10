@@ -1195,6 +1195,20 @@ jobs:
 
       # Exact synthetic /ortho board captures and decoded-link/geometry evidence.
       # Never upload cookies, browser state, traces, HAR or a whole directory.
+      - name: Upload synthetic guided case and retention context evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-guided-case-retention-ui
+          path: |
+            .settings-ui-artifacts/ortho-workup-390.png
+            .settings-ui-artifacts/ortho-workup-1280.png
+            .settings-ui-artifacts/ortho-retention-context-390.png
+            .settings-ui-artifacts/ortho-retention-context-1280.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload truthful orthodontic follow-up invitation evidence
         if: always()
         uses: actions/upload-artifact@v4

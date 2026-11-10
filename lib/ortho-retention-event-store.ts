@@ -8,6 +8,7 @@ import {decodeRetentionSavedContent,type RetentionSavedContent} from './ortho-re
 import type {RetentionPersistenceCommand} from './ortho-retention-command';
 import {journeyHash,journeyId} from './ortho-case-journey-records';
 import type {RetentionDocumentWitness} from './ortho-retention-document-witness';
+import type {RetentionRevision} from './ortho-retention-persistence-history';
 interface DocumentRow {id:number;patient_id:number;ortho_case_id:number;sha256:string;title:string;mime_type:string;size_bytes:number;width:number|null;height:number|null}
 export const RETENTION_SOURCE_LIMITS=Object.freeze({documents:256,metadataBytes:1048576,documentMetadataBytes:65536});
 async function readDocuments(client:DbClient,owner:JourneyOwner,selection:{ids:number[]}|{afterId:number}):Promise<DocumentRow[]>{
@@ -26,6 +27,19 @@ function documentWitness(r:DocumentRow):RetentionDocumentWitness {
  if(!journeyId(r.id)||!journeyHash(r.sha256)||!Number.isSafeInteger(r.size_bytes)||r.size_bytes<0)journeyFail(500,'retention_document_identity');
  return {id:r.id,patientId:r.patient_id,orthoCaseId:r.ortho_case_id,sha256:r.sha256,metadataHash:journeyContentHash({title:r.title,mimeType:r.mime_type,sizeBytes:r.size_bytes,width:r.width,height:r.height})};
 }
+/** Shared full-history source policy. Caller supplies its authorized owner and
+ * transaction; this does not grant patient access or start another snapshot. */
+export async function readRetentionSourceEvidence(client:DbClient,owner:JourneyOwner,history:readonly RetentionRevision[],canViewImages:boolean,additionalIds:readonly number[]=[]){
+ const ids=[...new Set([...history.flatMap(r=>r.content.payload.documentIds),...additionalIds])].sort((a,b)=>a-b);
+ if(ids.length>RETENTION_SOURCE_LIMITS.documents)journeyFail(409,'retention_source_budget');
+ if(ids.length&&!canViewImages)journeyFail(403,'retention_images_restricted');
+ const rows=ids.length?await readDocuments(client,owner,{ids}):[];
+ const documents=new Map<number,RetentionDocumentWitness>();
+ for(const r of rows)documents.set(r.id,documentWitness(r));
+ const sourceMatches=history.flatMap(r=>r.content.payload.documentIds.map(id=>({entryId:r.id,documentId:id,
+  identityMatch:'savedVersion' in r.content?journeyContentHash(r.content.documentWitnesses.find(w=>w.id===id))===journeyContentHash(documents.get(id)):null})));
+ return {documents,sourceMatches};
+}
 /** Read-only scoped picker. The cursor is a document ID, never a guessed source URL. */
 export async function getRetentionDocumentChoices(input:JourneyOwnerInput&{afterId?:number}){return journeyTransaction(false,async client=>{
  if(input.afterId!==undefined&&!journeyId(input.afterId))journeyFail(400,'invalid_retention_document_cursor');
@@ -40,19 +54,10 @@ export async function getRetentionDocumentChoices(input:JourneyOwnerInput&{after
 async function prepare(client:DbClient,input:JourneyOwnerInput,write:boolean,command?:RetentionPersistenceCommand,historicalOnly=false){
  const authority=await authorizeJourney(client,input,write);
  const discovered=await discoverJourneyOwner(client,input),history=await retentionHistory(client,discovered);
- const ids=[...new Set([...history.revisions.flatMap(r=>r.content.payload.documentIds),...(command?.content.documentIds??[])])].sort((a,b)=>a-b);
- if(ids.length>RETENTION_SOURCE_LIMITS.documents)journeyFail(409,'retention_source_budget');
- if(ids.length&&!authority.canViewImages)journeyFail(403,'retention_images_restricted');
- const rows=ids.length?await readDocuments(client,discovered,{ids}):[];
- const documents=new Map<number,RetentionDocumentWitness>();
- for(const r of rows){
-  documents.set(r.id,documentWitness(r));
- }
+ const {documents,sourceMatches}=await readRetentionSourceEvidence(client,discovered,history.revisions,authority.canViewImages,command?.content.documentIds);
  const owner=await lockJourneyOwner(client,input,write);
  if(owner.clinicalCaseId!==discovered.clinicalCaseId||owner.patientId!==discovered.patientId||owner.status!==discovered.status)journeyFail(409,'retention_owner_changed');
  // Historical source bytes may evolve, but never substitute them for captured proof.
- const sourceMatches=history.revisions.flatMap(r=>r.content.payload.documentIds.map(id=>({entryId:r.id,documentId:id,
-  identityMatch:'savedVersion' in r.content?journeyContentHash(r.content.documentWitnesses.find(w=>w.id===id))===journeyContentHash(documents.get(id)):null})));
  if(command&&!historicalOnly){
   if(owner.status==='assessment')journeyFail(409,'retention_case_not_treatment');
   if(journeyContentHash(command.expectedDocuments)!==journeyContentHash(command.content.documentIds.map(id=>documents.get(id))))journeyFail(409,'retention_document_changed');

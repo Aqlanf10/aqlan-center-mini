@@ -106,6 +106,8 @@ export interface FollowupAttendanceContext {
 }
 
 export interface FollowupCase {
+  /** Recorded instructions/reviews only; never an operational due/fulfillment ledger. */
+  retentionContext?: import('./ortho-retention-followup-context').RetentionFollowupContext;
   caseId: number;
   patientId: number;
   patientName: string;
