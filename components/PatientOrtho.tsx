@@ -42,6 +42,7 @@ import { OrthoCaseAssessmentV2, type AssessmentLifetimeV2 } from "./OrthoCaseAss
 import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import { OrthoCaseStudyMount } from "./OrthoCaseStudyMount";
+import { OrthoCaseReopen, type OrthoReopenLifetime, type ReopenDraft, type ReopenExpectation, type ReopenReview } from "./OrthoCaseReopen";
 import { makeStudyMountOwner, type StudyMountOwner } from "@/lib/ortho-case-study-mount-owner";
 import { makeStudyRecoveryLedger } from "@/lib/ortho-case-study-recovery";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
@@ -1261,6 +1262,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     </div>
                   </div>
 
+                  {(session?.role === "admin" || session?.role === "doctor") && <OrthoReopenPanel patientId={patientId} caseRow={row}
+                    onChanged={() => { if (currentCase(row.id)) refreshAfterConfirmedChange(); }} />}
                   {row.baselineKind === "legacy" ? currentPillar === "prescription"
                     ? <details className="mt-2 rounded-lg border border-amber-200 bg-amber-50/40 px-3"><summary className="min-h-11 cursor-pointer py-3 text-xs font-bold">سياق الحالة السابقة والأهداف المتبقية</summary><LegacyBaselineSummary row={row} /></details>
                     : <LegacyBaselineSummary row={row} /> : null}
@@ -2723,6 +2726,37 @@ function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow
   };
   return <OrthoTreatmentStrategy patientId={patientId} orthoCaseId={caseRow.id}
     caseTitle={`تقويم ${(caseRow.appliance === null ? "الجهاز غير مسجل" : APPLIANCE_LABEL[caseRow.appliance])} · ${(caseRow.arches === null ? "نطاق العلاج غير مسجل" : ARCHES_LABEL[caseRow.arches])}`} lifetime={lifetime} />;
+}
+
+/** Reopen drafts share the workspace lifetime and its navigation/mutation guards. */
+function OrthoReopenPanel({ patientId, caseRow, onChanged }: { patientId: number; caseRow: OrthoCase; onChanged(): void }) {
+  const form = useOrthoDraft(`reopen:${caseRow.id}`, patientId, caseRow.id);
+  const [, setReason] = form.field("reason", ""), [, setTarget] = form.field<ReopenDraft["target"]>("target", "");
+  form.field<ReopenReview | null>("review", null); form.field<ReopenExpectation | null>("pending", null);
+  form.field<ReopenDraft["lastReceipt"]>("lastReceipt", null);
+  const [, redraw] = useState(0);
+  useLayoutEffect(() => form.draft.strategyView.subscribe(() => redraw(value => value + 1)), [form.draft]);
+  const lifetime: OrthoReopenLifetime = {
+    identity: form.draft, active: form.viewActive, editable: form.editable, busy: form.draft.busy,
+    read: () => Object.fromEntries(["reason", "target", "review", "pending", "lastReceipt"].map(key => [key, form.draft.values.get(key)])) as unknown as ReopenDraft,
+    change: (field, value) => { if (field === "reason") setReason(value); else setTarget(value as ReopenDraft["target"]); },
+    commit: values => { for (const [key, value] of Object.entries(values)) form.commit(key, value); },
+    resolve: (expected, receipt) => {
+      if (!form.viewActive() || canonicalJourneyJSON(form.draft.values.get("pending")) !== canonicalJourneyJSON(expected)) return false;
+      form.draft.markConfirmed();
+      if (receipt) for (const [key, value] of Object.entries({ reason: "", target: "", review: null, pending: null, lastReceipt: receipt })) form.draft.settleField(key, value);
+      else { form.draft.values.set("pending", null); form.draft.values.set("review", null); }
+      form.draft.strategyView.notify(); return true;
+    },
+    begin: retry => {
+      const allowed = form.session?.role === "admin" || form.session?.role === "doctor";
+      const operation = retry ? form.beginRetry(allowed) : form.begin(allowed);
+      return operation ? { current: () => form.current(operation), uncertain: form.uncertain,
+        finish: () => { form.finish(operation); form.draft.strategyView.notify(); } } : null;
+    },
+    deny: () => form.owner.deny(),
+  };
+  return <OrthoCaseReopen patientId={patientId} orthoCaseId={caseRow.id} lifetime={lifetime} onChanged={onChanged} />;
 }
 
 /** Dedicated assessment lifetime survives parent reads and pillar remounts.
