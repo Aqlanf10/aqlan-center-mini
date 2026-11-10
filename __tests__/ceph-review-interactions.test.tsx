@@ -91,6 +91,9 @@ beforeEach(() => {
       createdBy: "synthetic", createdAt: "2026-01-01", completedBy: null, completedAt: null, findings: null },
     initialLandmarks: REQUIRED_LANDMARKS.map(code => ({ code, ...validPoints[code]!, source: code === "S" ? "suggested" : "manual" })),
     stamped: null, refValues: null, refSetName: null, diagnosis: null,
+    correctionSource: { state: "available", token: { schemaVersion: 1, analysisId: 71, patientId: 11, orthoCaseId: null, documentId: 51, sourceSha256: "c".repeat(64) },
+      origin: { schemaVersion: 1, parentAnalysisId: 71, recordedPatientId: 11, orthoCaseId: null, documentId: 51,
+        parentCompletion: { state: "unversioned", reason: "historical_completion_without_witness" }, sourceSnapshotSha256: "c".repeat(64) } },
     completionSources: {state:"available",identity:{schemaVersion:1,documentId:51,imageSha256:"a".repeat(64),referenceSetKey:"builtin_default",
       referenceSetSha256:"b".repeat(64),engineVersion:CEPH_ENGINE_VERSION,engineSourceSha256:CEPH_ENGINE_SOURCE_SHA256},
       referenceSet:{key:"builtin_default",name:"Viewed reference",population:null,ageMin:null,ageMax:null,sex:null,version:"v1",active:true,values:[]}},
@@ -765,4 +768,47 @@ describe('committed tracer authority survives abandoned render', () => {
     expect(edits()).toHaveLength(1);
     expect(edits()[0]).toEqual({ landmarks: [{ code: 'S', x: 100, y: 200, source: 'manual' }], expectedLandmarks: [{ code: 'S', x: 100, y: 200, source: 'suggested' }] });
   });
+});
+
+
+describe("correction command uses the opened source", () => {
+  it("sends the exact reviewed token once without rewriting the completed study", async () => {
+    props = { ...props, analysis: { ...props.analysis, status: "completed" }, stamped: [] };
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 88 }) });
+    loaded(); click("نسخة تصحيح جديدة"); await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/ceph/71/duplicate");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ schemaVersion: 1,
+      expectedCorrectionSource: props.correctionSource?.state === "available" ? props.correctionSource.token : null });
+    expect(window.location.href).toBe("/ceph/88");
+  });
+  it.each(["missing", "unavailable", "wrong-case", "wrong-image", "invalid-hash", "wrong-origin"])("blocks %s correction identity even through a direct handler", async kind => {
+    props = { ...props, analysis: { ...props.analysis, status: "completed" }, stamped: [] };
+    if (kind === "missing") props.correctionSource = undefined;
+    else if (kind === "unavailable") props.correctionSource = { state: "unavailable", reason: "source_unavailable" };
+    else if (props.correctionSource?.state === "available") {
+      if (kind === "wrong-case") props.correctionSource.token.orthoCaseId = 99;
+      if (kind === "wrong-image") props.correctionSource.token.documentId = 99;
+      if (kind === "invalid-hash") props.correctionSource.token.sourceSha256 = "invalid";
+      if (kind === "wrong-origin") props.correctionSource.origin.parentAnalysisId = 99;
+    }
+    loaded(); expect(button("نسخة تصحيح جديدة").props.disabled).toBe(true); click("نسخة تصحيح جديدة"); await flush();
+    expect(fetchMock).not.toHaveBeenCalled(); expect(confirmation).not.toHaveBeenCalled();
+    expect(text(render())).toContain("أعد فتح الدراسة للتحقق");
+  });
+  it("retires an earlier enabled handler when the current source changes", async () => {
+    props = { ...props, analysis: { ...props.analysis, status: "completed" }, stamped: [] };
+    loaded(); const old = button("نسخة تصحيح جديدة").props.onClick as () => void;
+    if (props.correctionSource?.state !== "available") throw Error("fixture");
+    props = { ...props, correctionSource: { ...props.correctionSource, token: { ...props.correctionSource.token, sourceSha256: "d".repeat(64) } } };
+    render(); old(); click("نسخة تصحيح جديدة"); await flush(); expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+it("shows explicit correction ancestry without upgrading legacy approval", () => {
+  if (props.correctionSource?.state !== "available") throw Error("fixture");
+  props = { ...props, analysis: { ...props.analysis, id: 88, correctionOrigin: props.correctionSource.origin } };
+  expect(text(render())).toContain("نسخة تصحيح مرتبطة");
+  expect(text(render())).toContain("لا يعيد اعتماده");
+  expect(nodes(render()).some(node => node.props.href === "/ceph/71")).toBe(true);
 });

@@ -3,6 +3,7 @@
 import { assessCephCalculationReadiness } from "@/lib/ceph-calculation-readiness";
 import { CephSavedCompletionEvidence } from "./CephSavedCompletionEvidence";
 import { parseCephSourceIdentity, sameCephSourceIdentity, type CephCompletionSources } from "@/lib/ceph-source-review";
+import { parseCephCorrectionOrigin, parseCephCorrectionSourceToken, sameCephCorrectionSource, type CephCorrectionSourceRead, type CephCorrectionOrigin } from "@/lib/ceph-correction-origin";
 import type { CephProvenanceRead } from "@/lib/ceph-completion-provenance";
 import { cephDocumentImageUrl, CEPH_IMAGE_UNAVAILABLE_NOTICE } from "@/lib/ceph-image-source";
 import { normalizeCephDiagnosis, parseCephCompletionDiagnosis, type CephCompletionDiagnosis, type CephCompletionSnapshot } from "@/lib/ceph-completion-snapshot";
@@ -38,6 +39,7 @@ interface AnalysisProp {
   createdAt: string;
   completedBy: string | null;
   completedAt: string | null;
+  correctionOrigin?: CephCorrectionOrigin | null;
   findings: { anb: number | null; fma: number | null; wits: number | null } | null;
 }
 
@@ -103,6 +105,7 @@ export function CephTracer({
   diagnosis: suppliedDiagnosis,
   provenance,
   completionSources,
+  correctionSource,
   readOnly = false,
   actorId,
 }: {
@@ -116,12 +119,29 @@ export function CephTracer({
   diagnosis: DiagnosisProp | null;
   provenance?: CephProvenanceRead;
   completionSources?: CephCompletionSources;
+  correctionSource?: CephCorrectionSourceRead;
   /** Server-resolved UI capability; API authorization remains authoritative. */
   readOnly?: boolean;
   /** Immutable identity supplied by the authorized server workspace. */
   actorId?: number;
 }) {
   const completed = analysis.status === "completed";
+  const ancestry = parseCephCorrectionOrigin(analysis.correctionOrigin);
+  // A correction is bound to the completed source actually opened here. A later
+  // server bundle must never silently replace the command's reviewed identity.
+  const [viewedCorrection] = useState(() => correctionSource?.state === "available"
+    ? { token: parseCephCorrectionSourceToken(correctionSource.token), origin: parseCephCorrectionOrigin(correctionSource.origin) } : null);
+  const correctionToken = viewedCorrection?.token;
+  const correctionOrigin = viewedCorrection?.origin;
+  const correctionReady = !!correctionToken && !!correctionOrigin
+    && correctionToken.analysisId === analysis.id && correctionToken.patientId === analysis.patientId
+    && correctionToken.orthoCaseId === analysis.orthoCaseId && correctionToken.documentId === analysis.documentId
+    && correctionOrigin.parentAnalysisId === correctionToken.analysisId
+    && correctionOrigin.recordedPatientId === correctionToken.patientId
+    && correctionOrigin.orthoCaseId === correctionToken.orthoCaseId && correctionOrigin.documentId === correctionToken.documentId
+    && correctionOrigin.sourceSnapshotSha256 === correctionToken.sourceSha256
+    && correctionSource?.state === "available" && sameCephCorrectionSource(correctionToken, correctionSource.token)
+    && JSON.stringify(correctionOrigin) === JSON.stringify(parseCephCorrectionOrigin(correctionSource.origin));
   // Keep the source identity and reference catalog from this mounted review.
   // A changed server bundle requires reopening, never an invisible submit refresh.
   const [viewedSources] = useState<CephCompletionSources | undefined>(() => completionSources
@@ -157,7 +177,7 @@ export function CephTracer({
   const locked = completed || readOnly || completing;
   // Lifecycle reads/actions exist for completed studies too; the drawing queue
   // owner is intentionally inactive there and cannot own these requests.
-  const viewScope = JSON.stringify([editScope, provenance]);
+  const viewScope = JSON.stringify([editScope, provenance, correctionSource]);
   const [initialViewScope] = useState(viewScope);
   const viewOwner = useMemo(() => ({ scope: viewScope }), [viewScope]);
   const viewRuntime = useRef<{ owner: typeof viewOwner | null; active: boolean; sent: boolean; retired: boolean; request: object | null }>({ owner: null, active: false, sent: false, retired: false, request: null });
@@ -770,13 +790,14 @@ export function CephTracer({
   };
 
   const duplicate = async () => {
-    if (!completed) return;
+    if (!completed || !correctionReady || !correctionToken) return;
     const ticket = beginDirectRequest(); if (!ticket) return;
     if (!window.confirm("فتح نسخة تصحيح عن هذا التحليل المعتمد؟")) { if (currentDirectRequest(ticket)) viewRuntime.current.request = null; return; }
     if (!currentDirectRequest(ticket)) return;
     viewRuntime.current.sent = true; setSaving(true);
     try {
-      const res = await fetch(`/api/ceph/${analysis.id}/duplicate`, { method: "POST" });
+      const res = await fetch(`/api/ceph/${analysis.id}/duplicate`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schemaVersion: 1, expectedCorrectionSource: correctionToken }) });
       if (!currentDirectRequest(ticket)) return;
       const data = await res.json().catch(() => ({}));
       if (!currentDirectRequest(ticket)) return;
@@ -1229,13 +1250,22 @@ export function CephTracer({
           <button
             type="button"
             onClick={() => void duplicate()}
-            disabled={saving || directRetired}
+            disabled={saving || directRetired || !correctionReady}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
           >
             نسخة تصحيح جديدة
           </button>
         )}
       </div>
+
+      {ancestry && <p className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm">
+        نسخة تصحيح مرتبطة بـ <Link className="underline" href={`/ceph/${ancestry.parentAnalysisId}`}>الدراسة <bdi>{ancestry.parentAnalysisId}</bdi></Link>.
+        تبقى نتائج الدراسة السابقة محفوظة مستقلّة.
+        {ancestry.parentCompletion.state === "unversioned" && " الاعتماد التاريخي السابق بلا شاهد مصدر محفوظ؛ هذا الربط لا يعيد اعتماده."}
+      </p>}
+      {completed && !correctionReady && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+        تعذّر تثبيت مصدر نسخة التصحيح. أعد فتح الدراسة للتحقق قبل إنشاء نسخة جديدة.
+      </p>}
 
       {/* شريط مسار العمل السيفالومتري كمنصة WebCeph (WebCeph 3-Stage Stepper) */}
       <div className="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-xs">

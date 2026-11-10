@@ -67,6 +67,7 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
         refValues={refSet ? Object.fromEntries(refSet.values.map(row => [row.code, {mean:row.mean,sd:row.sd}])) : null}
         refSetName={refSet?.name ?? null}
         completionSources={study.completionSources}
+        correctionSource={study.correctionSource}
         provenance={study.provenance}
         diagnosis={study.diagnosis}
       />
