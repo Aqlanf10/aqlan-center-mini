@@ -162,7 +162,7 @@ export class ProtectedOrthoAdjustmentHistoryError extends Error {
 }
 
 /** Saved authored history and retry proofs cannot be removed before identity reuse. */
-export const ORTHO_STUDY_HISTORY_TABLES = ["ortho_case_study_revisions", "ortho_study_submissions"] as const;
+export const ORTHO_STUDY_HISTORY_TABLES = ["ortho_case_study_revisions", "ortho_study_submissions", "ortho_study_export_jobs", "ortho_study_export_artifacts"] as const;
 export class ProtectedOrthoStudyHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد حفظ دراسة تقويم؛ يجب الاحتفاظ بمراجعاتها ومفاتيحها. لم يُمسح شيء."); this.name = "ProtectedOrthoStudyHistoryError"; }
 }

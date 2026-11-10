@@ -134,7 +134,7 @@ it("blocks direct mutations, mismatched ownership, TRUNCATE and reset before bac
   await expect(f.pool.query("UPDATE ortho_case_study_revisions SET patient_id=$2 WHERE id=$1", [saved.revision.id, other.patientId])).rejects.toThrow("ownership");
   await expect(f.pool.query("UPDATE ortho_cases SET patient_id=$2 WHERE id=$1", [owner.orthoCaseId, other.patientId])).rejects.toThrow("ownership");
   await expect(f.pool.query("UPDATE clinical_cases SET specialty='general' WHERE id=$1", [owner.clinicalCaseId])).rejects.toThrow();
-  await expect(f.pool.query("TRUNCATE ortho_case_study_revisions, ortho_study_submissions")).rejects.toThrow("append-only");
+  await expect(f.pool.query("TRUNCATE ortho_case_study_revisions, ortho_study_submissions, ortho_study_export_jobs, ortho_study_export_artifacts")).rejects.toThrow("append-only");
   let backed = false;
   await expect(f.db.resetClinicData({ actor: session.username, actorRole: session.role }, async () => { backed = true; return { ok: false, failure: "must not reach backup" }; })).rejects.toBeInstanceOf(ProtectedOrthoStudyHistoryError);
   expect(backed).toBe(false); expect(await stored(owner.orthoCaseId)).toEqual(before);
@@ -195,7 +195,7 @@ it("fences reset behind an in-flight study save without deadlock or history loss
   try {
     await expect.poll(async () => (await f.pool.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT id FROM patients WHERE id=%FOR NO KEY UPDATE') waiting")).rows[0].waiting, { timeout: 5000 }).toBe(true);
     pendingReset = f.db.resetClinicData({ actor: session.username, actorRole: session.role }, async () => { backupCalled = true; return { ok: false, failure: "must not back up protected history" }; }).then(value => value, error => error);
-    await expect.poll(async () => (await f.pool.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query='LOCK TABLE ortho_case_study_revisions, ortho_study_submissions IN EXCLUSIVE MODE') waiting")).rows[0].waiting, { timeout: 5000 }).toBe(true);
+    await expect.poll(async () => (await f.pool.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query='LOCK TABLE ortho_case_study_revisions, ortho_study_submissions, ortho_study_export_jobs, ortho_study_export_artifacts IN EXCLUSIVE MODE') waiting")).rows[0].waiting, { timeout: 5000 }).toBe(true);
     await client.query("COMMIT");
     expect(await pendingSave).toMatchObject({ ok: true });
     expect(await pendingReset).toBeInstanceOf(ProtectedOrthoStudyHistoryError);

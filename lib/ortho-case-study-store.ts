@@ -16,7 +16,12 @@ const decodeOnlyPolicy: StudyContentPolicy<StudySavedContent> = { decode: decode
 
 /** exportAccess is server-owned intent, never parsed from request parameters. */
 export async function getOrthoCaseStudy(input: JourneyOwnerInput & { revisionId?: number; exportAccess?: true }) {
-  return journeyTransaction(false, async client => {
+  return journeyTransaction(false, client => readOrthoCaseStudyOn(client, input));
+}
+/** Canonical transaction-local read, including current session, independent export
+ * grant, complete selected/head source authority and lock order. Archive publication
+ * calls this before taking its job row lock; no alternate permission engine. */
+export async function readOrthoCaseStudyOn(client: DbClient, input: JourneyOwnerInput & { revisionId?: number; exportAccess?: true }) {
     if (input.revisionId !== undefined && !journeyId(input.revisionId)) journeyFail(400, "invalid_study_revision");
     const authority = await authorizeJourney(client, input, false);
     if (input.exportAccess && authority.canExportStudies !== true) journeyFail(403, "study_export_forbidden");
@@ -42,7 +47,7 @@ export async function getOrthoCaseStudy(input: JourneyOwnerInput & { revisionId?
       revision: selected, head: head ? { id: head.id, contentHash: head.contentHash } : null, canAppend: authority.canWrite,
       history: revisions.map(r => ({ id: r.id, version: r.version, kind: r.kind, contentHash: r.contentHash,
         createdAt: r.createdAt, predecessorId: r.predecessorId, documentedFromId: r.documentedFromId, baseDocumentedId: r.baseDocumentedId })) };
-  });
+
 }
 
 /** Transaction-local preparation shared by durable reservation, recovery and

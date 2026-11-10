@@ -701,3 +701,22 @@ The reviewed candidate chain also retains the preceding study, facial and
 problem-source dependencies. A code rollback is not permission to remove stored
 history, migration registry entries or backups. No live database changes were
 made for this documentation update.
+
+## 0123 — private orthodontic study export archive
+
+`0123_ortho_study_export_archive.sql` adds export jobs and immutable artifact
+metadata. A job binds the original patient, orthodontic/clinical case, creator,
+immutable saved-study revision/hash, exact request key, format and server renderer
+binding. Generation/token leases fence stale workers; publication and artifact
+metadata commit atomically. Deferred constraints permit whole-snapshot restore
+without dropping the identity/publication checks. Source authority is rechecked
+by the canonical study reader on reservation, rendering claims, publication and
+download. Existing clinical study data and financial records are not rewritten.
+
+The runtime mirror is byte-identical and registered in `ensureSchema`. Export
+files are included in the full-backup physical-file metadata union. Jobs prevent
+patient merge and clinic reset; published metadata and job identities cannot be
+erased. An expired running job restored after interruption remains recoverable
+only by its creator with current authorization and a new fenced generation.
+This migration provides the archive backend; route/runner/renderer integration
+and final-head CI remain separate acceptance requirements.

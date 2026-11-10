@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 147,
-    "columns": 1908,
-    "constraints": 2441,
-    "indexes": 480,
-    "triggers": 177
+    "tables": 149,
+    "columns": 1935,
+    "constraints": 2499,
+    "indexes": 484,
+    "triggers": 186
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -2786,6 +2786,12 @@
         }
       },
       "triggers": {
+        "ortho_export_clinical_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
         "ortho_facial_bridge_scope": {
           "timing": "AFTER",
           "events": [
@@ -11445,6 +11451,12 @@
         }
       },
       "triggers": {
+        "ortho_export_revision_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
         "ortho_study_final_state": {
           "timing": "AFTER",
           "events": [
@@ -11657,6 +11669,12 @@
         }
       },
       "triggers": {
+        "ortho_export_case_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
         "ortho_facial_case_scope": {
           "timing": "AFTER",
           "events": [
@@ -13847,6 +13865,293 @@
           "events": [
             "DELETE",
             "UPDATE"
+          ]
+        }
+      }
+    },
+    "ortho_study_export_artifacts": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "job_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "manifest": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "manifest_sha256": {
+          "type": "text",
+          "nullable": false
+        },
+        "page_count": {
+          "type": "int4",
+          "nullable": false
+        },
+        "sha256": {
+          "type": "text",
+          "nullable": false
+        },
+        "size_bytes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "storage_key": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "job_id"
+      ],
+      "unique": [],
+      "checks": [
+        "ortho_study_export_artifacts_check",
+        "ortho_study_export_artifacts_manifest_check",
+        "ortho_study_export_artifacts_manifest_sha256_check",
+        "ortho_study_export_artifacts_page_count_check",
+        "ortho_study_export_artifacts_sha256_check",
+        "ortho_study_export_artifacts_size_bytes_check",
+        "ortho_study_export_artifacts_storage_key_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "job_id"
+          ],
+          "refTable": "ortho_study_export_jobs",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "ortho_study_export_artifacts_pkey": {
+          "columns": [
+            "job_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "ortho_export_artifact_binding": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "ortho_export_artifact_mutation": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_export_artifact_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "ortho_study_export_jobs": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "clinical_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "command": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "command_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "failure_code": {
+          "type": "text",
+          "nullable": true
+        },
+        "format": {
+          "type": "text",
+          "nullable": false
+        },
+        "generation": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "lease_expires_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "lease_token": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "ortho_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "render_binding": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "request_fingerprint": {
+          "type": "text",
+          "nullable": false
+        },
+        "revision_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "revision_sha256": {
+          "type": "text",
+          "nullable": false
+        },
+        "state": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "ortho_case_id",
+          "actor_user_id",
+          "command_id"
+        ]
+      ],
+      "checks": [
+        "ortho_study_export_jobs_check",
+        "ortho_study_export_jobs_check1",
+        "ortho_study_export_jobs_check2",
+        "ortho_study_export_jobs_check3",
+        "ortho_study_export_jobs_command_check",
+        "ortho_study_export_jobs_command_id_check",
+        "ortho_study_export_jobs_failure_code_check",
+        "ortho_study_export_jobs_format_check",
+        "ortho_study_export_jobs_generation_check",
+        "ortho_study_export_jobs_render_binding_check",
+        "ortho_study_export_jobs_request_fingerprint_check",
+        "ortho_study_export_jobs_revision_sha256_check",
+        "ortho_study_export_jobs_state_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "clinical_case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "revision_id"
+          ],
+          "refTable": "ortho_case_study_revisions",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "ortho_case_id"
+          ],
+          "refTable": "ortho_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "ortho_study_export_jobs_case_revision": {
+          "columns": [
+            "ortho_case_id",
+            "revision_id",
+            "id"
+          ],
+          "unique": false
+        },
+        "ortho_study_export_jobs_ortho_case_id_actor_user_id_command_key": {
+          "columns": [
+            "ortho_case_id",
+            "actor_user_id",
+            "command_id"
+          ],
+          "unique": true
+        },
+        "ortho_study_export_jobs_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "ortho_export_job_binding": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        "ortho_export_job_mutation": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_export_job_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
           ]
         }
       }

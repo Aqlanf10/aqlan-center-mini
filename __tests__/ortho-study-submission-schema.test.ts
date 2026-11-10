@@ -11,7 +11,7 @@ describe("additive orthodontic study submission journal", () => {
     expect(runtime).toContain('version: "0112", name: "ortho_study_submissions", filename: "0112_ortho_study_submissions.sql", sql: ORTHO_STUDY_SUBMISSION_SQL');
   });
   it("protects retained proofs and fences reset in writer order", () => {
-    expect(ORTHO_STUDY_HISTORY_TABLES).toEqual(["ortho_case_study_revisions", "ortho_study_submissions"]);
+    expect(ORTHO_STUDY_HISTORY_TABLES).toEqual(["ortho_case_study_revisions", "ortho_study_submissions", "ortho_study_export_jobs", "ortho_study_export_artifacts"]);
     expect(RESET_KEEP_TABLES).toContain("ortho_study_submissions");
     expect(RESET_WIPE_TABLES).not.toContain("ortho_study_submissions");
     expect(ORTHO_STUDY_SUBMISSION_SQL).toContain("ortho_study_submission_no_truncate BEFORE TRUNCATE");

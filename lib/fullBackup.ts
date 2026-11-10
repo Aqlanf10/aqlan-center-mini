@@ -145,6 +145,17 @@ async function readDocumentMetadata(source: Queryable): Promise<BackupDocument[]
   )) as unknown as { rows: { present: boolean }[] };
   const sql = probe.rows[0]?.present ? DOCUMENT_AND_ATTACHMENT_METADATA_SQL : DOCUMENT_METADATA_SQL;
   const { rows } = (await source.query(sql)) as unknown as { rows: BackupDocument[] };
+  // Private rendered exports are durable files too. Probe supports older snapshots
+  // without changing their schema or silently dropping newer archive payloads.
+  const exportsProbe = (await source.query(
+    "SELECT to_regclass('public.ortho_study_export_artifacts') IS NOT NULL AS present",
+  )) as unknown as { rows: { present: boolean }[] };
+  if (exportsProbe.rows[0]?.present) {
+    const exports = (await source.query(
+      "SELECT 'ortho-export-' || job_id AS id, storage_key, sha256, size_bytes FROM ortho_study_export_artifacts ORDER BY job_id",
+    )) as unknown as { rows: BackupDocument[] };
+    rows.push(...exports.rows);
+  }
   // The configured branding photo is not a patient document. Include it even
   // when hidden: hiding controls public delivery, never backup retention.
   const configured = (await source.query(

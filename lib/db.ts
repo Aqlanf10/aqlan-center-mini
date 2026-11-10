@@ -33,6 +33,7 @@ import { cephComparisonProjectionSha256 } from "./ceph-comparison-projection";
 import { authorizeCephCompletion } from "./ceph-completion-access";
 import { captureCephCompletionWitness, readCephCompletionSources, readCephCompletionProvenance, readCephCorrectionSourceProvenance, cephProvenanceHash, type CephProvenanceRead } from "./ceph-completion-provenance";
 import { ORTHO_STUDY_SUBMISSION_SQL } from "./ortho-study-submission-schema";
+import { ORTHO_STUDY_EXPORT_ARCHIVE_SQL } from "./ortho-study-export-archive-schema";
 import { ORTHO_CASE_STUDY_SQL } from "./ortho-case-study-schema";
 import { ORTHO_ASSESSMENT_INTAKE_SQL } from "./ortho-assessment-intake-schema";
 import { normalizeCephDiagnosis, parseCephCalibrationState, sameCephCalibrationState, parseCephCompletionDiagnosis, parseCephCompletionSnapshot, sameCephCompletionSnapshot, type CephCalibrationState, type CephCompletionDiagnosis, type CephCompletionSnapshot } from "./ceph-completion-snapshot";
@@ -2175,6 +2176,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0120", name: "ortho_space_submissions", filename: "0120_ortho_space_submissions.sql", sql: ORTHO_SPACE_SUBMISSION_SQL, checksum: checksumOf(ORTHO_SPACE_SUBMISSION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0121", name: "ortho_retention_ledger", filename: "0121_ortho_retention_ledger.sql", sql: ORTHO_RETENTION_LEDGER_SQL, checksum: checksumOf(ORTHO_RETENTION_LEDGER_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0122", name: "ortho_retention_submissions", filename: "0122_ortho_retention_submissions.sql", sql: ORTHO_RETENTION_SUBMISSION_SQL, checksum: checksumOf(ORTHO_RETENTION_SUBMISSION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0123", name: "ortho_study_export_archive", filename: "0123_ortho_study_export_archive.sql", sql: ORTHO_STUDY_EXPORT_ARCHIVE_SQL, checksum: checksumOf(ORTHO_STUDY_EXPORT_ARCHIVE_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -5430,6 +5432,14 @@ export async function mergeDuplicatePatient(
     if (facialSubmissions.count > 0) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "source_has_clinical_command_history", counts: { orthoFacialSubmissions: facialSubmissions.count } };
+    }
+
+    // Export receipts and immutable artifacts bind both identities permanently.
+    const { rows: [studyExports] } = await client.query<{ count: number }>(
+      "SELECT COUNT(*)::int AS count FROM ortho_study_export_jobs WHERE patient_id=ANY($1::int[])", [[sourceId, targetId]]);
+    if (studyExports.count > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "source_has_clinical_command_history", counts: { orthoStudyExports: studyExports.count } };
     }
 
     // Both patient rows are locked before this check, as they are by submission writers.

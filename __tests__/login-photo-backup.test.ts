@@ -36,6 +36,7 @@ function sourceFor(value?: string) {
   const calls: string[] = [];
   const source = { query: async (sql: string, values?: unknown[]) => {
     calls.push(sql);
+    if (sql.includes("to_regclass('public.ortho_study_export_artifacts')")) return { rows: [{ present: false }] };
     if (sql.startsWith("SELECT to_regclass")) return { rows: [{ present: true }] };
     if (sql.startsWith("SELECT 'doc-'")) return { rows: [] };
     if (sql === "SELECT value FROM settings WHERE key = $1") {
