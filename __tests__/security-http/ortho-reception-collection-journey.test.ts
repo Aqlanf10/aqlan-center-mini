@@ -3,6 +3,8 @@ import { Client } from 'pg';
 import { chromium, type Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { formatMoney } from '../../lib/money';
+import { blankClinicalObservationV2 } from '../../lib/ortho-assessment-clinical-fields';
+import { assessmentCommandV2 } from '../fixtures/ortho-assessment-schema2';
 import { authedGet, authedMutation, baseUrl, harness } from './_server';
 
 // Real HTTP baseline/opening setup and explicit doctor review/signature; real
@@ -157,3 +159,56 @@ it('connects an ortho arrival, deferred collection, one canonical opening receip
     expect(errors).toEqual([]); expect(unexpected).toEqual([]);
   } finally { await context.close(); }
 }, 180000);
+
+// Requires the separate clinical-read privacy fix in the product build. This
+// assertion must fail against a build that still admits reception assessment reads.
+it('denies reception current, historical and problem-source assessment reads while preserving physician and front-desk access', async () => {
+  const doctorId = (await db.query(`SELECT party_id FROM users WHERE username='secdoctora'`)).rows[0].party_id;
+  const patientId = Number((await db.query(`INSERT INTO patients(patient_number,full_name,primary_doctor_id)
+    VALUES($1,'Synthetic assessment privacy acceptance',$2) RETURNING id`, [randomUUID(), doctorId])).rows[0].id);
+  const intake = await post('doctorA', '/api/ortho/intake', { patientId, command: {
+    schemaVersion: 1, clientRequestId: randomUUID(), reason: 'Synthetic privacy acceptance intake',
+  } });
+  const caseId = intake.orthoCaseId, canary = `SYNTHETIC_PRIVATE_ASSESSMENT_${randomUUID()}`;
+  const command = assessmentCommandV2(); command.commandId = randomUUID();
+  const complaint = { ...blankClinicalObservationV2('chiefComplaint'), value: { state: 'recorded' as const, text: `${canary}_historical` },
+    occurredOn: { state: 'unknown' as const, reason: 'Synthetic observation date deliberately unknown' },
+    provenance: { performer: { state: 'documented' as const, attribution: 'Synthetic physician' },
+      method: { kind: 'direct_examination' as const, version: 1 as const, description: 'Synthetic privacy acceptance observation' }, sources: [], copiedFrom: null } };
+  command.content.observations.observations.push(complaint);
+  const historical = await post('doctorA', `/api/ortho/${caseId}/assessment`, command);
+  const next = structuredClone(command); next.commandId = randomUUID(); next.expectedRevisionId = historical.revision.id;
+  next.reason = 'Synthetic explicit correction; historical value remains preserved';
+  next.content.observations.observations.find(row => row.id === complaint.id)!.value = { state: 'recorded', text: `${canary}_current` };
+  const current = await post('doctorA', `/api/ortho/${caseId}/assessment`, next);
+  expect(current.revision.id).not.toBe(historical.revision.id);
+  const revisionRows = async () => (await db.query('SELECT id,content_hash FROM ortho_assessment_revisions WHERE ortho_case_id=$1 ORDER BY id', [caseId])).rows;
+  const before = await revisionRows(); expect(before).toHaveLength(2);
+  for (const [suffix, id, text] of [
+    ['', current.revision.id, `${canary}_current`],
+    [`&revisionId=${historical.revision.id}`, historical.revision.id, `${canary}_historical`],
+  ] as const) {
+    const path = `/api/ortho/${caseId}/assessment?acceptSchema=1,2${suffix}`;
+    const denied = await authedGet(path, h.sessions.reception);
+    expect(denied.status).toBe(403); expect(await denied.text()).not.toContain(canary);
+    const allowed = await authedGet(path, h.sessions.doctorA); expect(allowed.status).toBe(200);
+    const body = await allowed.json(); expect(body.revision.id).toBe(id);
+    expect(body.revision.content.draft.observations.observations.find((row: { id: string }) => row.id === complaint.id).value)
+      .toEqual({ state: 'recorded', text });
+  }
+  await post('reception', `/api/ortho/${caseId}/assessment`, next, 403);
+  const problems = `/api/ortho/${caseId}/problem-sources?patientId=${patientId}`;
+  const problemDenied = await authedGet(problems, h.sessions.reception);
+  expect(problemDenied.status).toBe(403); expect(await problemDenied.text()).not.toContain(canary);
+  const problemAllowed = await authedGet(problems, h.sessions.doctorA); expect(problemAllowed.status).toBe(200);
+  expect(await problemAllowed.text()).toContain(`${canary}_current`);
+  expect(await revisionRows()).toEqual(before);
+  await post('reception', '/api/opening-balances', { patientId, amount: '12000', currency: 'YER', note: 'Synthetic independent financial access' });
+  const ledger = await get(`/api/patients/${patientId}/ledger`);
+  expect(ledger.openings).toEqual([expect.objectContaining({ currency: 'YER', amountMinor: 12000 })]);
+  expect(JSON.stringify(ledger)).not.toContain(canary);
+  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Aden', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const appointments = await get(`/api/appointments?date=${date}`);
+  expect(Array.isArray(appointments)).toBe(true); expect(JSON.stringify(appointments)).not.toContain(canary);
+  expect(await revisionRows()).toEqual(before);
+}, 120000);
