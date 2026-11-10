@@ -33,6 +33,14 @@ function visibleText(node:React.ReactNode):string {
 const visible=(rows:AssessmentObservationV2[],props:Partial<Props>={})=>visibleText(<OrthoSavedClinicalFindings revision={revision(rows)} sourceStates={[]} {...props}/>);
 
 describe('compact saved documentation overview',()=>{
+ it('isolates the exact ISO recording date from RTL text without changing observation dates',()=>{
+  const selected=revision([populated()]);selected.createdAt='2026-11-10T15:32:00.000Z';
+  const value=html([],{revision:selected});
+  expect(value).toContain('تسجيل <bdi dir="ltr">2026-11-10</bdi>');
+  expect(value).toContain('<bdi dir="ltr">2026-11-10T15:32:00.000Z</bdi>');
+  expect(value).toContain('غير معلوم');expect(value).toContain('No recorded date');
+ });
+
  it('shows the exact saved complaint in the interview overview without treating unknown or conflicting values as a complaint',()=>{
   const row=populated();
   for(const section of [undefined,'interview'] as const){const value=visible([row],{section});expect(value).toContain('الشكوى الرئيسية المحفوظة');expect(value).toContain('  Saved\nnegative finding <script>  ');}

@@ -51,7 +51,7 @@ export default function OrthoSavedClinicalFindings({revision,section,sourceState
  const complaint=definitions.find(d=>d.field==='chiefComplaint'&&d.matched)?.row;
  return <section aria-label="نتائج المقابلة والفحص المحفوظة" className="min-w-0 space-y-3 rounded-lg border p-3" dir="rtl">
  <h4 className="font-bold">نتائج المقابلة والفحص المحفوظة</h4>
- <p className="text-xs">المراجعة #{revision.id} · النسخة {revision.version} · تسجيل {revision.createdAt.slice(0,10)}</p>
+ <p className="text-xs">المراجعة #{revision.id} · النسخة {revision.version} · تسجيل <bdi dir="ltr">{revision.createdAt.slice(0,10)}</bdi></p>
  <p className="text-xs">ملخص توثيق النسخة المختارة، وليس اعتمادًا سريريًا. غير المسجل أو غير المعلوم لا يعني نتيجة طبيعية.</p>
  {(!section||section==='interview')&&complaint?.value.state==='recorded'&&<p className="whitespace-pre-wrap break-words text-sm"><strong>الشكوى الرئيسية المحفوظة: </strong>{complaint.value.text}</p>}
  {(['history','facial','intraoral'] as const).filter(group=>!section||group===groupFor[section]).map(group=>{
