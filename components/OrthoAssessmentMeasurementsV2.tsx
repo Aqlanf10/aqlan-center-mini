@@ -114,15 +114,15 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
     {metadata && metadataId && <section aria-label="مصدر القياس وتاريخه" className="space-y-2 rounded-xl border bg-slate-50 p-3">
       <h4 className="font-bold">مصدر {rows.find(o => o.id === metadataId)?.label} وتاريخه</h4>
       <p className="text-xs">لا يُفترض تاريخ اليوم أو اسم المسجّل كمنفذ للفحص.</p>
-      <label>حالة تاريخ الفحص<select className={control} disabled={!editable} value={metadata.dateState} onChange={e => patch(metadataId, { dateState: e.target.value as MeasurementValueDraftV2["dateState"] })}>
+      <label>حالة تاريخ الفحص<select aria-label="حالة تاريخ الفحص" className={control} disabled={!editable} value={metadata.dateState} onChange={e => patch(metadataId, { dateState: e.target.value as MeasurementValueDraftV2["dateState"] })}>
         <option value="">اختر الحالة…</option><option value="known">معلوم</option><option value="unknown">غير معلوم</option></select></label>
       {metadata.dateState === "known" ? <label>تاريخ الفحص المعلوم<input type="date" className={control} value={metadata.date} disabled={!editable} onChange={e => patch(metadataId, { date: e.target.value })} /></label>
         : metadata.dateState === "unknown" ? <label>سبب غياب تاريخ الفحص<input className={control} value={metadata.dateReason} disabled={!editable} onChange={e => patch(metadataId, { dateReason: e.target.value })} /></label> : null}
-      <label>طريقة القياس<select className={control} value={metadata.method} disabled={!editable} onChange={e => patch(metadataId, { method: e.target.value as MeasurementValueDraftV2["method"] })}>
+      <label>طريقة القياس<select aria-label="طريقة القياس" className={control} value={metadata.method} disabled={!editable} onChange={e => patch(metadataId, { method: e.target.value as MeasurementValueDraftV2["method"] })}>
         <option value="">اختر الطريقة…</option><option value="direct_examination">فحص مباشر</option><option value="manual_record_measurement">قياس سجل</option><option value="external_report">تقرير خارجي</option>
         {metadata.copiedFrom && <option value="legacy_revision">نسخة تاريخية</option>}</select></label>
       <label>وصف طريقة القياس<input className={control} value={metadata.methodDescription} disabled={!editable} onChange={e => patch(metadataId, { methodDescription: e.target.value })} /></label>
-      <label>حالة منفذ الفحص<select className={control} value={metadata.performer} disabled={!editable} onChange={e => patch(metadataId, { performer: e.target.value as MeasurementValueDraftV2["performer"] })}>
+      <label>حالة منفذ الفحص<select aria-label="حالة منفذ الفحص" className={control} value={metadata.performer} disabled={!editable} onChange={e => patch(metadataId, { performer: e.target.value as MeasurementValueDraftV2["performer"] })}>
         <option value="unknown">غير معلوم</option><option value="documented">إسناد موثق</option></select></label>
       {metadata.performer === "documented" && <label>إسناد منفذ الفحص<input className={control} value={metadata.performerAttribution} disabled={!editable} onChange={e => patch(metadataId, { performerAttribution: e.target.value })} /></label>}
       <fieldset><legend>المصادر المصرح بها وإصداراتها</legend>{sources.map(s => <label className="flex min-h-11 items-center gap-2 break-all text-xs" key={keyOf(s)}>

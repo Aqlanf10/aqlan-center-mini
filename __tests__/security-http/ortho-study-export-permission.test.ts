@@ -93,7 +93,10 @@ it.each(["doctorA", "reception"] as const)("%s keeps saved-study access while fo
         expect(response.headers.get("content-type")).toContain("presentationml");
         const zip = await JSZip.loadAsync(await response.arrayBuffer());
         const slides = await Promise.all(Object.values(zip.files).filter(file => /^ppt\/slides\/slide\d+\.xml$/.test(file.name)).map(file => file.async("string")));
-        expect(slides.join("\n")).toContain(study.marker);
+        // Native editable text wraps long tokens across separate text runs.
+        // Reconstruct all visible run text and require the complete original marker.
+        const visibleText = slides.flatMap(xml => [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(match => match[1])).join("");
+        expect(visibleText).toContain(study.marker);
         expect(slides.join("\n")).toContain("سياق التقاط الدراسة المحفوظة");
         expect(slides.join("\n")).toContain("حالة التقويم عند التقاط الدراسة: مكتملة");
       } else {
