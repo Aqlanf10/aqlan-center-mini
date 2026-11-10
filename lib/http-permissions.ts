@@ -169,7 +169,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ortho/[id]/retention-ledger": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/retention-ledger/recovery": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/retention-ledger/documents": { GET: CLINIC },
-  "/api/ortho/[id]/assessment": { GET: CLINIC, POST: CLINICAL },
+  "/api/ortho/[id]/assessment": { GET: CLINICAL, POST: CLINICAL },
   "/api/ortho/[id]/facial-analysis/recovery": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/facial-analysis/history": { GET: CLINIC },
   "/api/ortho/[id]/facial-analysis": { GET: CLINIC, POST: CLINICAL },

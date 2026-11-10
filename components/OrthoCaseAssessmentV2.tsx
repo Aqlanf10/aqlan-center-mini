@@ -35,6 +35,9 @@ function SavedFields({ value, path = "" }: { value: unknown; path?: string }) {
 }
 export function OrthoCaseAssessmentV2(props: OrthoCaseAssessmentV2Props) {
   const session = useSession();
+  // Do not mount a read lifetime or retain a rendered clinical snapshot for a
+  // non-clinical session. The server independently enforces the same boundary.
+  if (session?.role !== "admin" && session?.role !== "doctor") return null;
   const authority = JSON.stringify([session?.userId, session?.username, session?.role, session?.permissions ?? null]);
   return <Workspace key={`${props.patientId}:${props.orthoCaseId}:${props.clinicalCaseId ?? "unresolved"}:${authority}`} {...props} />;
 }

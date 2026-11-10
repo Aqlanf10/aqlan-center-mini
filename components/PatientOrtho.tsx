@@ -1589,8 +1589,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                         <div hidden={!!workup && workup.section !== "diagnosis"}><PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={safeError} /></div>
                         {owner.clinical && (!workup || workup.section === "diagnosis") && <OrthoProblemSourcesPanel patientId={patientId} row={row} visible={currentPillar === "diagnostics"} />}
                         <div hidden={!!workup && (workup.section === "diagnosis" || workup.section === "ceph")}>
-                          <OrthoAssessmentPanelV2 patientId={patientId} caseRow={row}
-                            sectionView={workup?.section === "records" ? "radiographs" : workup?.section === "diagnosis" || workup?.section === "ceph" ? undefined : workup?.section} />
+                          {owner.clinical && <OrthoAssessmentPanelV2 patientId={patientId} caseRow={row}
+                            sectionView={workup?.section === "records" ? "radiographs" : workup?.section === "diagnosis" || workup?.section === "ceph" ? undefined : workup?.section} />}
                         </div>
                         {(!workup || workup.section === "extraoral") && <a className="inline-flex min-h-11 items-center rounded-lg border px-3 py-2 text-sm font-bold" href={`/ortho/${row.id}/facial?patientId=${patientId}`}>تحليل صورة الوجه اليدوي المرتبط بالمصدر</a>}
                       </section>
@@ -2771,9 +2771,9 @@ function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView }: { patientId
   const session = useSession();
   const canWrite = session?.role === "admin" || session?.role === "doctor";
   const [opened, setOpened] = useState(() => parent.assessments.has(caseRow.id));
+  if (!canWrite) return null;
   if (!opened) return <button type="button" className="mb-4 min-h-11 rounded-lg border px-3 py-2 text-sm"
     onClick={() => { if (parent.active && !parent.denied && parent.clinical) setOpened(true); }}>فتح التقييم السريري والقياسات</button>;
-  if (!canWrite) return <OrthoCaseAssessmentV2 patientId={patientId} orthoCaseId={caseRow.id} sectionView={sectionView} />;
   return <OwnedAssessmentV2 patientId={patientId} caseRow={caseRow} sectionView={sectionView} />;
 }
 function OwnedAssessmentV2({ patientId, caseRow, sectionView }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" | "radiographs" }) {

@@ -98,6 +98,7 @@ function render(sectionView?: "measurements" | "interview" | "extraoral" | "intr
   for (let round = 0; round < 20; round++) {
     hooks.cursor = 0; hooks.changed = false;
     const wrapper = OrthoCaseAssessmentV2({ patientId: 1, orthoCaseId, lifetime: life(), sectionView });
+    if (!wrapper) { retireView(); return null; }
     if (outerKey !== wrapper.key) { retireView(); outerKey = wrapper.key; }
     const tree = (wrapper.type as (input: unknown) => ReactNode)(wrapper.props);
     hooks.pending.splice(0).forEach(effect => effect());
@@ -227,4 +228,23 @@ describe('saved clinical findings admission',()=>{
  it('changes displayed revision only after selected historical read succeeds',async()=>{install();ready.history=[{id:6,version:2,createdAt:'2026-01-02',createdBy:'Synthetic'},{id:5,version:1,createdAt:'2026-01-01',createdBy:'Synthetic'}];render();await flush();let resolve!:(value:unknown)=>void;fetchMock.mockImplementation(()=>new Promise(r=>resolve=r));const select=nodes(render()).find(n=>n.type==='select')!;(select.props.onChange as (e:unknown)=>void)({target:{value:'6'}});expect(panels(render())).toHaveLength(0);expect(fetchMock.mock.calls.at(-1)?.[0]).toContain('revisionId=6');const historical={...(ready.revision as object),id:6,version:2};resolve({ok:true,status:200,redirected:false,json:async()=>({...ready,revision:historical})});await flush();expect(panels(render())[0].props.revision).toBe(historical);});
  it('rejects late saved reads across same-name principal ABA',async()=>{install();hooks.session={...hooks.session!,userId:71};let resolve!:(value:unknown)=>void;fetchMock.mockImplementationOnce(()=>new Promise(r=>resolve=r)).mockImplementation(()=>new Promise(()=>{}));render();hooks.session={...hooks.session!,userId:72};render();hooks.session={...hooks.session!,userId:71};render();resolve({ok:true,status:200,redirected:false,json:async()=>ready});await flush();expect(panels(render())).toHaveLength(0);expect(parent.document).toBe('');});
 
+});
+
+
+describe('assessment clinical privacy at component admission', () => {
+  it.each(['reception', 'cashier', 'accountant', 'assistant'] as const)('does not mount or fetch the assessment for %s', role => {
+    hooks.session = { username: 'synthetic-restricted', role, permissions: null };
+    expect(render()).toBeNull(); expect(fetchMock).not.toHaveBeenCalled();
+    expect(hooks.effects.size).toBe(0);
+  });
+  it('does not mount an assessment without a current session', () => {
+    hooks.session = null; expect(render()).toBeNull(); expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it('unmounts loaded clinical data and retires callbacks immediately after a reception downgrade', async () => {
+    await startDraft(); const oldReason = reasonHandler(), before = parent.document, requests = fetchMock.mock.calls.length;
+    hooks.session = { username: 'synthetic-doctor', role: 'reception', permissions: null };
+    expect(render()).toBeNull(); oldReason({ target: { value: 'stale-clinical-edit' } }); await flush();
+    expect(render()).toBeNull(); expect(parent.document).toBe(before); expect(fetchMock).toHaveBeenCalledTimes(requests);
+    expect(beginLease).not.toHaveBeenCalled(); expect(hooks.effects.size).toBe(0);
+  });
 });

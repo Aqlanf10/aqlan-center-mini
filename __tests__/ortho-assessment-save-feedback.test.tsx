@@ -94,6 +94,7 @@ function render() {
   for (let round = 0; round < 20; round++) {
     hooks.cursor = 0; hooks.changed = false;
     const wrapper = OrthoCaseAssessmentV2({ ...scope, lifetime: life(), sectionView: section });
+    if (!wrapper) { retireView(); return null; }
     if (outerKey !== wrapper.key) { retireView(); outerKey = wrapper.key; }
     const tree = (wrapper.type as (input: unknown) => ReactNode)(wrapper.props);
     hooks.pending.splice(0).forEach(effect => effect());

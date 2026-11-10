@@ -35,9 +35,16 @@ export function addStudySessionVisitTargets(cache: StudyAssessmentAccess, ids: r
   for (const id of ids) cache.sessionVisitIds.add(id);
   if (cache.sessionVisitIds.size > 128) journeyFail(409, "study_session_reference_limit");
 }
+function requireAssessmentClinicalRead(authority: JourneyAuthority) {
+  // An export grant or broad patient/image access does not authorize copied
+  // assessment facts. Apply this only when an assessment enters the source union.
+  if (authority.session.role !== "admin" && authority.session.role !== "doctor")
+    journeyFail(403, "study_assessment_clinical_restricted");
+}
 export async function prepareStudyAssessmentAccess(client: DbClient, scope: JourneyScope, authority: JourneyAuthority,
   revisions: readonly AnyAssessmentRevision[], cache: StudyAssessmentAccess): Promise<void> {
   if (cache.current !== null) journeyFail(500, "study_source_union_already_locked");
+  if (revisions.length) requireAssessmentClinicalRead(authority);
   for (const revision of [...revisions].sort((a, b) => a.id - b.id)) {
     if (revision.orthoCaseId !== scope.orthoCaseId || revision.clinicalCaseId !== scope.clinicalCaseId) journeyFail(403, "study_assessment_scope_restricted");
     const key = cacheKey(revision); if (cache.closures.has(key)) continue;
@@ -74,6 +81,7 @@ export async function lockStudySourceUnion(client: DbClient, scope: JourneyScope
 }
 export function requirePreparedAssessmentAccess(cache: StudyAssessmentAccess, revision: AnyAssessmentRevision,
   authority: JourneyAuthority, exactCurrentSources: boolean): boolean {
+  requireAssessmentClinicalRead(authority);
   const graph = cache.graphs.get(cacheKey(revision));
   if (!graph) journeyFail(500, "study_assessment_access_not_prepared");
   if (graph.states.some(s => s.state === "unavailable" || exactCurrentSources && s.state !== "available")) journeyFail(exactCurrentSources ? 409 : 403, "study_assessment_sources_changed");

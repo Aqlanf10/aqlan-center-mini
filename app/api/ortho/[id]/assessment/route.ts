@@ -7,10 +7,10 @@ import { ensureSchema, getPool } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
-async function scope(context: JourneyRouteContext, write: boolean) {
+async function scope(context: JourneyRouteContext) {
   const session = await requireSession();
   if (!session) return { ok: false as const, response: journeyRouteError(401, "session_expired") };
-  if (!["admin", "doctor", "reception"].includes(session.role) || write && session.role === "reception") {
+  if (!["admin", "doctor"].includes(session.role)) {
     return { ok: false as const, response: journeyRouteError(403, "clinical_access_denied") };
   }
   const orthoCaseId = routeId((await context.params).id);
@@ -23,7 +23,7 @@ async function scope(context: JourneyRouteContext, write: boolean) {
 }
 export async function GET(request: Request, context: JourneyRouteContext) {
   try {
-    const owner = await scope(context, false); if (!owner.ok) return owner.response;
+    const owner = await scope(context); if (!owner.ok) return owner.response;
     const query = orthoQuery(request, ["acceptSchema", "revisionId"]);
     const revisionId = query?.has("revisionId") ? routeId(query.get("revisionId")) : undefined;
     if (!query || revisionId === null) return journeyRouteError(400, "invalid_query");
@@ -33,7 +33,7 @@ export async function GET(request: Request, context: JourneyRouteContext) {
 }
 export async function POST(request: Request, context: JourneyRouteContext) {
   try {
-    const owner = await scope(context, true); if (!owner.ok) return owner.response;
+    const owner = await scope(context); if (!owner.ok) return owner.response;
     if (!orthoQuery(request, [])) return journeyRouteError(400, "invalid_query");
     const command = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
     return orthoResult(await appendOrthoAssessment({ ...owner, command }), true);

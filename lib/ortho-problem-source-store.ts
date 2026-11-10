@@ -12,9 +12,13 @@ function matchOwner(a: JourneyOwner, b: JourneyOwner) {
   if (a.patientId !== b.patientId || a.orthoCaseId !== b.orthoCaseId || a.clinicalCaseId !== b.clinicalCaseId || a.recordingContext !== b.recordingContext) journeyFail(409, "case_changed");
 }
 async function savedReviews(client: DbClient, owner: JourneyOwner, actor: JourneyAuthority): Promise<Saved[]> {
-  const meta = (await client.query<{ n: string; bytes: string; images: boolean }>(`SELECT count(*)::text n,coalesce(sum(octet_length(source_snapshot::text)),0)::text bytes,
-    coalesce(bool_or(source_snapshot->>'requiresImages'='true'),false) images FROM ortho_problem_source_reviews WHERE ortho_case_id=$1`, [owner.orthoCaseId])).rows[0];
+  const meta = (await client.query<{ n: string; bytes: string; images: boolean; assessments: boolean }>(`SELECT count(*)::text n,coalesce(sum(octet_length(source_snapshot::text)),0)::text bytes,
+    coalesce(bool_or(source_snapshot->>'requiresImages'='true'),false) images,
+    coalesce(bool_or(source_snapshot->'ref'->>'kind' IN ('assessment_observation','assessment_analysis')),false) assessments FROM ortho_problem_source_reviews WHERE ortho_case_id=$1`, [owner.orthoCaseId])).rows[0];
   if (Number(meta.n) > 500 || Number(meta.bytes) > 2097152) journeyFail(409, "problem_history_budget");
+  // An immutable review can retain clinical assessment text after its current
+  // source disappears. Deny before loading snapshots, not only candidates.
+  if (meta.assessments && actor.session.role !== "admin" && actor.session.role !== "doctor") journeyFail(403, "problem_assessment_clinical_restricted");
   if (meta.images && !actor.canViewImages) journeyFail(403, "problem_images_restricted");
   const rows = (await client.query<Saved>("SELECT * FROM ortho_problem_source_reviews WHERE ortho_case_id=$1 ORDER BY id DESC LIMIT 501", [owner.orthoCaseId])).rows;
   if (rows.length !== Number(meta.n)) journeyFail(409, "problem_history_changed");

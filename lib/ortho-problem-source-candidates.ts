@@ -33,6 +33,7 @@ export async function readProblemSourceCandidates(client: DbClient, scope: Journ
     const cephSources = studies.map(s => ({kind:"ceph_study" as const,id:Number(s.id)}));
     const meta = (await client.query<{ id: number; bytes: number }>("SELECT id,octet_length(content::text) AS bytes FROM ortho_assessment_revisions WHERE patient_id=$1 AND ortho_case_id=$2 ORDER BY version DESC LIMIT 1", [scope.patientId, scope.orthoCaseId])).rows[0];
     if (meta) {
+      if (actor.session.role !== "admin" && actor.session.role !== "doctor") journeyFail(403, "problem_assessment_clinical_restricted");
       admit(meta.bytes);
       const row = (await client.query<AssessmentStoredRow>(`SELECT ${ASSESSMENT_COLUMNS} FROM ortho_assessment_revisions WHERE id=$1 AND patient_id=$2 AND ortho_case_id=$3`, [meta.id, scope.patientId, scope.orthoCaseId])).rows[0];
       const revision = decodeAssessmentStoredRow(row, scope);

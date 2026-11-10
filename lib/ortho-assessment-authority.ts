@@ -32,8 +32,7 @@ export async function authorizeAssessment(client: DbClient, input: AssessmentOwn
   if (!actor || !actor.isActive || actor.id !== session.userId || actor.role !== session.role
     || actor.username.toLowerCase() !== session.username.toLowerCase()) assessmentFail(401,"session_expired","تعذّر التحقق من الحساب الحالي.");
   const clinicalWritable = session.role === "doctor" || session.role === "admin";
-  if (!clinicalWritable && session.role !== "reception") assessmentFail(403,"clinical_read_denied","عرض التقييم غير متاح لهذا الدور.");
-  if (write && !clinicalWritable) assessmentFail(403,"clinical_edit_denied","تدوين التقييم متاح للطبيب والمدير فقط.");
+  if (!clinicalWritable) assessmentFail(403,write ? "clinical_edit_denied" : "clinical_read_denied","التقييم السريري متاح للطبيب والمدير فقط.");
   if (!patient.rows[0]) assessmentFail(404,"patient_not_found","لم يُعثر على ملف المريض.");
   if (!await canAccessPatient(session,input.patientId,undefined,client)) assessmentFail(403,"patient_access_denied","غير مصرّح لك بملف هذا المريض.");
   const imagingVisible = await canAccessPatient(session,input.patientId,"canViewXrays",client);
