@@ -19,9 +19,18 @@ $npmEntry = $env:npm_execpath
 if (-not $npmEntry -or -not (Test-Path -LiteralPath $npmEntry)) {
     $installedNpm = Get-Command npm -ErrorAction Stop
     $npmEntry = Join-Path (Split-Path -Parent $installedNpm.Source) 'node_modules\npm\bin\npm-cli.js'
+    $npmPrefixScript = Join-Path (Split-Path -Parent $npmEntry) 'npm-prefix.js'
+    if (Test-Path -LiteralPath $npmPrefixScript) {
+        $npmGlobalPrefix = & $selectedNode $npmPrefixScript
+        if ($LASTEXITCODE -eq 0 -and $npmGlobalPrefix) {
+            $npmGlobalEntry = Join-Path $npmGlobalPrefix.Trim() 'node_modules\npm\bin\npm-cli.js'
+            if (Test-Path -LiteralPath $npmGlobalEntry) { $npmEntry = $npmGlobalEntry }
+        }
+    }
 }
 if (-not (Test-Path -LiteralPath $npmEntry)) { throw 'npm-cli.js was not found. Install npm first.' }
 
 $env:PATH = (Split-Path -Parent $selectedNode) + [IO.Path]::PathSeparator + $env:PATH
+$env:npm_execpath = $npmEntry
 & $selectedNode $npmEntry @NpmArguments
 exit $LASTEXITCODE

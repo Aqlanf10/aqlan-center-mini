@@ -51,4 +51,21 @@ describe("portable development tools", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual(["true", "a b", "shell"]);
   });
+
+  it("honors a global npm upgrade behind a bundled npm shim", () => {
+    const bundled = fixture();
+    const upgraded = fixture();
+    const bundledBin = join(bundled, "node_modules", "npm", "bin");
+    const upgradedBin = join(upgraded, "node_modules", "npm", "bin");
+    mkdirSync(bundledBin, { recursive: true });
+    mkdirSync(upgradedBin, { recursive: true });
+    writeFileSync(join(bundledBin, "npm-cli.js"), "console.log('10.9.9')");
+    writeFileSync(join(bundledBin, "npm-prefix.js"), `console.log(${JSON.stringify(upgraded)})`);
+    writeFileSync(join(upgradedBin, "npm-cli.js"), "console.log('11.0.0')");
+    const [executable, ...args] = npmCommand(["--version"], { Path: bundled });
+    expect(args[0]).toBe(join(upgradedBin, "npm-cli.js"));
+    const result = spawnSync(executable, args, { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe("11.0.0");
+  });
 });
