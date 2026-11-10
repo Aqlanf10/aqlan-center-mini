@@ -520,5 +520,11 @@
     "name": "ortho_study_export_archive",
     "filename": "0123_ortho_study_export_archive.sql",
     "checksum": "01fd8820028c96207c1adbb6f0b2953bcc44e98e6c63cccf38ecaef67c982c07"
+  },
+  {
+    "version": "0124",
+    "name": "ceph_correction_lineage",
+    "filename": "0124_ceph_correction_lineage.sql",
+    "checksum": "0d1d94a2003db6599dee120be75c3ff092ad4a19f4e1c911cbde1aa9fc845355"
   }
 ]
