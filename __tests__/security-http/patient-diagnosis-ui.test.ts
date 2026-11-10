@@ -36,7 +36,10 @@ function caseCard(page: Page, key: "A" | "B") {
   return page.locator("li").filter({ has: page.getByText(new RegExp(`^DIAG-CASE-${key}\\s*·`)) });
 }
 function diagnosisPanel(card: Locator, page: Page) {
-  return card.locator("section").filter({ has: page.getByRole("heading", { name: /التشخيص السريري لهذه الحالة/ }) });
+  // The assessment section also contains problem sources and their independent
+  // alerts/controls. Keep all assertions inside PatientDiagnosis itself.
+  return card.locator('[data-ortho-diagnostic-section="assessment"] > div')
+    .filter({ has: page.getByRole("heading", { name: /التشخيص السريري لهذه الحالة/ }) });
 }
 const draftLabels = ["الصنف الهيكلي", "الصنف السني", "الازدحام", "البعد الأفقي", "الإطباق", "ملاحظات التشخيص", "سبب التحديث"];
 async function expectBlankDraft(panel: Locator) {
@@ -107,7 +110,7 @@ describe("case-scoped diagnosis on the built RTL patient page", () => {
       expect(f.writes).toEqual([]);
       await skeletalChoices.list.getByRole("option", { name: "Class II", exact: true }).click();
       expect(await skeletal.inputValue()).toBe("Class II");
-      expect(await panel.getByRole("combobox").count()).toBe(0);
+      expect(await panel.getByRole("combobox", { name: "بحث في الاختيارات — الصنف الهيكلي", exact: true }).count()).toBe(0);
       expect(await skeletal.evaluate(element => element === document.activeElement)).toBe(true);
       const skeletalValue = `Class II؛ تفصيل سريري تجريبي ${width}`;
       await skeletal.fill(skeletalValue); // A chosen description stays editable.
@@ -154,7 +157,7 @@ describe("case-scoped diagnosis on the built RTL patient page", () => {
       expect(activeId).toBeTruthy();
       expect(await dentalChoices.list.getByRole("option", { name: "Class II Div 2", exact: true }).getAttribute("id")).toBe(activeId);
       await dentalChoices.search.press("Escape");
-      expect(await panel.getByRole("combobox").count()).toBe(0);
+      expect(await panel.getByRole("combobox", { name: "بحث في الاختيارات — الصنف السني", exact: true }).count()).toBe(0);
       expect(await panel.getByLabel("الصنف السني", { exact: true }).inputValue()).toBe("");
 
       const crowding = panel.getByLabel("الازدحام", { exact: true });

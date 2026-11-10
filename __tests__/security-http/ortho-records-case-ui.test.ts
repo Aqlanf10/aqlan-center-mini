@@ -2,8 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { Client } from "pg";
 import { mkdir, writeFile } from "node:fs/promises";
-import { baseUrl, harness, TEST_USERS } from "./_server";
+import { createHash } from "node:crypto";
+import { dirname, join } from "node:path";
+import sharp from "sharp";
+import { authedGet, authedMutation, baseUrl, harness, TEST_USERS } from "./_server";
 import { computeAll, REQUIRED_LANDMARKS, type LandmarkMap } from "../../lib/ceph";
+import type { CephSourceIdentity } from "../../lib/ceph-source-review";
 
 // Built-app acceptance in the existing isolated CI harness. Source links and
 // case records are real synthetic DB rows; image bytes alone are intercepted.
@@ -11,17 +15,26 @@ import { computeAll, REQUIRED_LANDMARKS, type LandmarkMap } from "../../lib/ceph
 let browser: Browser, db: Client;
 let h: Awaited<ReturnType<typeof harness>>;
 let patient: number, caseA: number, caseB: number;
-let currentPhoto: number, historicalPhoto: number, unassignedPhoto: number, currentXray: number, referenceStudy: number, pretreatmentStudy: number;
+let submittedSources: CephSourceIdentity;
+let syntheticImage: { sha256: string; byteLength: number };
+let currentPhoto: number, historicalPhoto: number, unassignedPhoto: number, currentXray: number, referenceStudy: number, pretreatmentStudy: number, historicalStudy: number;
 const stamp = Date.now();
 // Existing verify-ceph synthetic geometry, never patient measurements. A signed
 // pretreatment reference has calibration, confirmed landmarks and stamped values.
-const signedLandmarks: LandmarkMap = {
+const originalLandmarks: LandmarkMap = {
   S: { x: 0, y: 0 }, N: { x: 69, y: -8 }, A: { x: 67.57, y: 51.98 }, B: { x: 63.84, y: 79.85 },
   Pog: { x: 64.03, y: 86.87 }, Me: { x: 60, y: 105 }, Gn: { x: 61.5, y: 95.5 }, Go: { x: -17.03, y: 69.08 },
   Or: { x: 60, y: -25 }, Po: { x: 0, y: -25 }, U1A: { x: 60, y: 34 }, U1: { x: 74.08, y: 71.44 },
   L1A: { x: 68, y: 64 }, L1: { x: 49, y: 99.2 }, OcclA: { x: 70, y: 48 }, OcclP: { x: 0, y: 35.3 },
   D: { x: 62, y: 95 }, Co: { x: -45, y: 38 }, ANS: { x: 78, y: 44 }, PNS: { x: -5, y: 36 },
 };
+// Translation preserves geometry while keeping every point inside the source.
+const signedLandmarks: LandmarkMap = Object.fromEntries(Object.entries(originalLandmarks).map(([code, point]) => {
+  if (!point) throw new Error(`Missing synthetic landmark ${code}`);
+  return [code, { x: point.x + 80, y: point.y + 60 }];
+}));
+const historicalMeasurements = [{ code: "ANB", value: 2 }, { code: "FMA", value: 25 }, { code: "WITS", value: -1 }];
+const historicalDiagnosis = "استنتاج تاريخي تجريبي محفوظ بلا شاهد إصدار — ليس تشخيص مريض";
 const snapshot = async () => ({
   documents: (await db.query("SELECT * FROM patient_documents WHERE patient_id=$1 ORDER BY id", [patient])).rows,
   analyses: (await db.query("SELECT * FROM ceph_analyses WHERE patient_id=$1 ORDER BY id", [patient])).rows,
@@ -31,12 +44,14 @@ const snapshot = async () => ({
     WHERE a.patient_id=$1 ORDER BY m.analysis_id,m.id`, [patient])).rows,
   diagnoses: (await db.query(`SELECT d.* FROM ceph_diagnoses d JOIN ceph_analyses a ON a.id=d.analysis_id
     WHERE a.patient_id=$1 ORDER BY d.analysis_id`, [patient])).rows,
+  provenance: (await db.query(`SELECT p.* FROM ceph_completion_provenance p JOIN ceph_analyses a ON a.id=p.analysis_id
+    WHERE a.patient_id=$1 ORDER BY p.analysis_id`, [patient])).rows,
   cases: (await db.query("SELECT * FROM ortho_cases WHERE patient_id=$1 ORDER BY id", [patient])).rows,
   plans: (await db.query("SELECT * FROM treatment_plans WHERE patient_id=$1 ORDER BY id", [patient])).rows,
 });
 
 beforeAll(async () => {
-  h = await harness(); db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect();
+  h = await harness(); expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http"); db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect();
   const doctor = (await db.query<{ party_id: number }>("SELECT party_id FROM users WHERE username=$1", [TEST_USERS.doctorA.username])).rows[0].party_id;
   patient = (await db.query<{ id: number }>(`INSERT INTO patients (patient_number,full_name,primary_doctor_id)
     VALUES ($1,'مريض سجلات تقويم تجريبي — ليس حقيقياً',$2) RETURNING id`, [`RECUI-${stamp}`, doctor])).rows[0].id;
@@ -53,29 +68,62 @@ beforeAll(async () => {
   historicalPhoto = await insertDocument(caseB, "صورة الحالة السابقة التجريبية", "profile", "2026-10-03");
   unassignedPhoto = await insertDocument(null, "صورة مرجعية غير مرتبطة تجريبية", "lateral_ceph", "2026-10-04");
   currentXray = await insertDocument(caseA, "أشعة الحالة الحالية التجريبية", "lateral_ceph", "2026-10-01");
-  referenceStudy = (await db.query<{ id: number }>(`INSERT INTO ceph_analyses
-    (patient_id,document_id,ortho_case_id,status,created_by)
-    VALUES ($1,$2,$3,'draft','synthetic-records-ui') RETURNING id`, [patient, currentXray, caseB])).rows[0].id;
-  // Respect ceph_analyses_one_draft: historical pretreatment is completed,
-  // not a second draft. Seed its signed snapshot atomically in the isolated DB.
+  // Completion captures stored image metadata, not file bytes. Seed a real PNG
+  // too: the HTTP test independently verifies its hash-bound download. Browser
+  // tiles remain intercepted only for the visual acceptance tests.
+  const bytes = await sharp({ create: { width: 256, height: 256, channels: 3, background: "#dbeafe" } }).png().toBuffer();
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  syntheticImage = { sha256: hash, byteLength: bytes.byteLength };
+  const key = `${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash}.png`;
+  const file = join(process.cwd(), ".sec-http-storage", "documents", key);
+  await mkdir(dirname(file), { recursive: true }); await writeFile(file, bytes);
+  await db.query("UPDATE patient_documents SET sha256=$2,storage_key=$3,size_bytes=$4,width=256,height=256 WHERE id=$1",
+    [unassignedPhoto, hash, key, bytes.length]);
+  // Deliberately keep a separate legacy completion without a witness. It must
+  // never acquire findings just because another study has verified provenance.
+  historicalStudy = (await db.query<{ id: number }>(`INSERT INTO ceph_analyses
+    (patient_id,document_id,ortho_case_id,status,phase,created_by,completed_by,completed_at)
+    VALUES ($1,$2,$3,'completed','pretreatment',$4,$4,NOW()) RETURNING id`,
+    [patient, historicalPhoto, caseB, TEST_USERS.doctorA.username])).rows[0].id;
+  for (const row of historicalMeasurements) {
+    await db.query("INSERT INTO ceph_measurements (analysis_id,code,value) VALUES ($1,$2,$3)",
+      [historicalStudy, row.code, row.value]);
+  }
+  await db.query("INSERT INTO ceph_diagnoses (analysis_id,final_dx,created_by) VALUES ($1,$2,$3)",
+    [historicalStudy, historicalDiagnosis, TEST_USERS.doctorA.username]);
+  // Complete the synthetic T1 before inserting the reference draft, respecting
+  // the patient-wide one-draft index. Only the application stamps measurements
+  // and provenance; SQL seeds draft inputs, never a manufactured witness.
   expect(REQUIRED_LANDMARKS.every(code => signedLandmarks[code] !== undefined)).toBe(true);
-  const measurements = computeAll(signedLandmarks, 1).filter(row => row.value !== null);
+  for (const point of Object.values(signedLandmarks)) {
+    expect(point).toBeDefined();
+    expect(point!.x).toBeGreaterThan(0); expect(point!.x).toBeLessThan(256);
+    expect(point!.y).toBeGreaterThan(0); expect(point!.y).toBeLessThan(256);
+  }
+  const originalMeasurements = computeAll(originalLandmarks, 1);
+  const translatedMeasurements = computeAll(signedLandmarks, 1);
+  expect(translatedMeasurements.map(row => row.code)).toEqual(originalMeasurements.map(row => row.code));
+  translatedMeasurements.forEach((row, index) => {
+    const original = originalMeasurements[index];
+    if (original.value === null) expect(row.value).toBeNull();
+    else {
+      expect(row.value).not.toBeNull();
+      expect(row.value!).toBeCloseTo(original.value, 10);
+    }
+  });
+  const measurements = translatedMeasurements.filter(row => row.value !== null);
   expect(measurements.map(row => row.code)).toEqual(expect.arrayContaining(["ANB", "FMA", "WITS"]));
   await db.query("BEGIN");
   try {
     pretreatmentStudy = (await db.query<{ id: number }>(`INSERT INTO ceph_analyses
-      (patient_id,document_id,ortho_case_id,status,phase,created_by,completed_by,completed_at,
+      (patient_id,document_id,ortho_case_id,status,phase,created_by,
        cal_x1,cal_y1,cal_x2,cal_y2,cal_mm,mm_per_pixel)
-      VALUES ($1,$2,NULL,'completed','pretreatment',$3,$3,NOW(),0,0,100,0,100,1) RETURNING id`,
+      VALUES ($1,$2,NULL,'draft','pretreatment',$3,80,60,180,60,100,1) RETURNING id`,
     [patient, unassignedPhoto, TEST_USERS.doctorA.username])).rows[0].id;
     for (const [code, point] of Object.entries(signedLandmarks)) {
       if (!point) throw new Error(`Missing synthetic landmark ${code}`);
       await db.query(`INSERT INTO ceph_landmarks (analysis_id,code,x,y,source,confirmed_by)
         VALUES ($1,$2,$3,$4,'manual',$5)`, [pretreatmentStudy, code, point.x, point.y, TEST_USERS.doctorA.username]);
-    }
-    for (const row of measurements) {
-      await db.query("INSERT INTO ceph_measurements (analysis_id,code,value) VALUES ($1,$2,$3)",
-        [pretreatmentStudy, row.code, row.value]);
     }
     await db.query(`INSERT INTO ceph_diagnoses (analysis_id,final_dx,created_by)
       VALUES ($1,'استنتاج تجريبي محفوظ — ليس تشخيص مريض',$2)`, [pretreatmentStudy, TEST_USERS.doctorA.username]);
@@ -84,6 +132,22 @@ beforeAll(async () => {
     await db.query("ROLLBACK");
     throw error;
   }
+  const draftRead = await authedGet(`/api/ceph/${pretreatmentStudy}`, h.sessions.doctorA);
+  expect(draftRead.status).toBe(200);
+  const draft = await draftRead.json();
+  expect(draft.completionSources.state).toBe("available");
+  expect(draft.provenance.state).toBe("not_completed");
+  submittedSources = draft.completionSources.identity;
+  const { patientId, documentId, refSet, calibration, mmPerPixel } = draft.analysis;
+  const completion = await authedMutation(`/api/ceph/${pretreatmentStudy}/complete`, h.sessions.doctorA, "POST", JSON.stringify({
+    expectedSnapshot: { patientId, documentId, refSet, calibration, mmPerPixel,
+      landmarks: draft.landmarks, diagnosis: draft.diagnosis },
+    expectedSources: submittedSources,
+  }));
+  expect(completion.status, await completion.text()).toBe(200);
+  referenceStudy = (await db.query<{ id: number }>(`INSERT INTO ceph_analyses
+    (patient_id,document_id,ortho_case_id,status,created_by)
+    VALUES ($1,$2,$3,'draft','synthetic-records-ui') RETURNING id`, [patient, currentXray, caseB])).rows[0].id;
   const seeded = await snapshot();
   expect(seeded.analyses.filter(row => row.status === "draft")).toHaveLength(1);
   expect(seeded.analyses.find(row => String(row.id) === String(pretreatmentStudy))).toMatchObject({
@@ -91,9 +155,15 @@ beforeAll(async () => {
     completed_by: TEST_USERS.doctorA.username, completed_at: expect.any(Date), mm_per_pixel: 1,
   });
   expect(seeded.landmarks).toHaveLength(Object.keys(signedLandmarks).length);
-  expect(seeded.measurements).toHaveLength(measurements.length);
-  expect(seeded.diagnoses).toHaveLength(1);
-  browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
+  expect(seeded.measurements.filter(row => String(row.analysis_id) === String(pretreatmentStudy))).toHaveLength(measurements.length);
+  expect(seeded.measurements.filter(row => String(row.analysis_id) === String(historicalStudy))
+    .map(({ code, value }) => ({ code, value })).sort((a, b) => a.code.localeCompare(b.code)))
+    .toEqual(historicalMeasurements);
+  expect(seeded.diagnoses.filter(row => String(row.analysis_id) === String(pretreatmentStudy))).toHaveLength(1);
+  expect(seeded.diagnoses.filter(row => String(row.analysis_id) === String(historicalStudy)))
+    .toEqual([expect.objectContaining({ final_dx: historicalDiagnosis })]);
+  expect(seeded.provenance).toHaveLength(1);
+  expect(String(seeded.provenance[0].analysis_id)).toBe(String(pretreatmentStudy));
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
 
@@ -140,6 +210,7 @@ async function captureViewport(page: Page, target: Locator, filename: string) {
   await page.screenshot({ path: `.settings-ui-artifacts/${filename}` });
 }
 async function fixture(width: number) {
+  browser ??= await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
   const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block" });
   const [name, ...value] = h.sessions.admin.cookie.split("="); await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const unexpected: string[] = [], errors: string[] = [];
@@ -172,6 +243,44 @@ async function fixture(width: number) {
 }
 
 describe("exact-case orthodontic record slots on the built RTL patient page", () => {
+  it("verifies the genuine completion witness and withholds historical findings through HTTP without writes", async () => {
+    const before = await snapshot();
+    const read = await authedGet(`/api/ceph/${pretreatmentStudy}`, h.sessions.doctorA);
+    expect(read.status).toBe(200);
+    const completed = await read.json();
+    expect(completed.provenance.state).toBe("versioned");
+    expect(completed.provenance.witness.schemaVersion).toBe(2);
+    expect(completed.provenance.witness.image).toEqual({
+      documentId: Number(unassignedPhoto), sha256: syntheticImage.sha256, width: 256, height: 256,
+    });
+    expect(completed.provenance.witness.sourceReview).toEqual({ schemaVersion: 1, identity: submittedSources });
+    expect(submittedSources.documentId).toBe(Number(unassignedPhoto));
+    expect(submittedSources.imageSha256).toBe(syntheticImage.sha256);
+    const imageRead = await authedGet(`/api/documents/${unassignedPhoto}?cephSource=${syntheticImage.sha256}`, h.sessions.doctorA);
+    expect(imageRead.status).toBe(200);
+    expect(imageRead.headers.get("content-type")).toBe("image/png");
+    expect(imageRead.headers.get("content-length")).toBe(String(syntheticImage.byteLength));
+    const downloaded = Buffer.from(await imageRead.arrayBuffer());
+    expect(downloaded.byteLength).toBe(syntheticImage.byteLength);
+    expect(createHash("sha256").update(downloaded).digest("hex")).toBe(syntheticImage.sha256);
+    expect(completed.provenance.witness.actor.username).toBe(TEST_USERS.doctorA.username);
+    expect(completed.provenance.witness.measurements.map((row: { code: string }) => row.code))
+      .toEqual(expect.arrayContaining(["ANB", "FMA", "WITS"]));
+    const legacyRead = await authedGet(`/api/ceph/${historicalStudy}`, h.sessions.doctorA);
+    expect(legacyRead.status).toBe(200);
+    const legacy = await legacyRead.json();
+    expect(legacy.provenance).toMatchObject({ state: "unversioned" });
+    expect(legacy.measurements).toEqual(expect.arrayContaining(historicalMeasurements.map(row => expect.objectContaining(row))));
+    expect(legacy.diagnosis.finalDx).toBe(historicalDiagnosis);
+    const list = await authedGet(`/api/patients/${patient}/ceph`, h.sessions.doctorA);
+    expect(list.status).toBe(200);
+    const { analyses } = await list.json();
+    expect(analyses.find((row: { id: number }) => String(row.id) === String(pretreatmentStudy)))
+      .toMatchObject({ provenanceState: "versioned", findings: { anb: expect.any(Number), fma: expect.any(Number), wits: expect.any(Number) } });
+    expect(analyses.find((row: { id: number }) => String(row.id) === String(historicalStudy)))
+      .toMatchObject({ provenanceState: "unversioned", findings: null });
+    expect(await snapshot()).toEqual(before);
+  });
   it.each([1280, 390])("keeps historical/unassigned records explicit and captures the exact-case grid at %s", async width => {
     const before = await snapshot(), f = await fixture(width);
     try {
@@ -226,6 +335,9 @@ describe("exact-case orthodontic record slots on the built RTL patient page", ()
       await oldPanel.getByTestId("ortho-record-slot-profile").locator("img").waitFor();
       expect(await oldPanel.getByTestId("ortho-record-slot-profile").locator("img").getAttribute("src")).toBe(`/api/documents/${historicalPhoto}`);
       expect(await oldPanel.locator(`img[src="/api/documents/${currentPhoto}"]`).count()).toBe(0);
+      const oldCard = caseCard(f.page, "B");
+      await oldCard.getByText("اعتماد تاريخي غير موثّق الإصدار", { exact: true }).waitFor();
+      expect(await oldCard.getByTestId("patient-ceph-summary").count()).toBe(0);
       expect(await snapshot()).toEqual(before); expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
     } finally { await f.context.close(); }
   });
