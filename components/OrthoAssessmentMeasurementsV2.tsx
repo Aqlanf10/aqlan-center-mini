@@ -1,6 +1,6 @@
 "use client";
 import { observationInputHintV2 } from "@/lib/ortho-assessment-input-hints-v2";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { measurementSourcePreview } from "@/lib/ortho-measurement-source-preview";
 import { UPPER_MEASUREMENT_TEETH, LOWER_MEASUREMENT_TEETH, measurementReadinessV2, toggleMeasurementAnalysisV2,
   changeMeasurementDecimalV2, applyMeasurementSessionV2, addMeasurementSetV2, linkMeasurementInputV2, matchesMeasurementInputV2,
@@ -28,6 +28,13 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
   const [metadataId, setMetadataId] = useState<string | null>(null), [targets, setTargets] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
+  const metadataPanel = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const panel = metadataPanel.current;
+    if (!metadataId || !panel) return;
+    panel.focus({ preventScroll: true });
+    panel.scrollIntoView({ block: "start", behavior: "instant" });
+  }, [metadataId]);
   const editable = owner?.renderEditable === true, rows = draft.payload.observations.observations;
   const set = draft.payload.measurementSets.find(s => s.id === selected), metadata = metadataId ? draft.values[metadataId] : null;
   const publish = (next: MeasurementEditorDraftV2) => { if (owner?.active() && owner.editable()) onChange(next); };
@@ -119,7 +126,7 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
       {(() => { const id = arch === "upper" ? set.upperAvailableObservationId : set.lowerAvailableObservationId;
         return id ? valueInput(id, arch === "upper" ? "المساحة المتاحة العلوية" : "المساحة المتاحة السفلية") : missing({ kind: "available", arch }, `المساحة ${arch}`); })()}
     </details>)}
-    {metadata && metadataId && <section aria-label="مصدر القياس وتاريخه" className="space-y-2 rounded-xl border bg-slate-50 p-3">
+    {metadata && metadataId && <section ref={metadataPanel} tabIndex={-1} aria-label="مصدر القياس وتاريخه" className="scroll-mt-24 space-y-2 rounded-xl border bg-slate-50 p-3">
       <h4 className="font-bold">مصدر {rows.find(o => o.id === metadataId)?.label} وتاريخه</h4>
       <p className="text-xs">لا يُفترض تاريخ اليوم أو اسم المسجّل كمنفذ للفحص.</p>
       <label>حالة تاريخ الفحص<select aria-label="حالة تاريخ الفحص" className={control} disabled={!editable} value={metadata.dateState} onChange={e => patch(metadataId, { dateState: e.target.value as MeasurementValueDraftV2["dateState"] })}>
@@ -138,7 +145,7 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
           sources: metadata.sources.some(o => keyOf(o) === keyOf(s)) ? metadata.sources.filter(o => keyOf(o) !== keyOf(s)) : [...metadata.sources, { kind: s.kind, id: s.id, version: s.version }] })} />{s.label} · {s.version}</label>)}</fieldset>
       {metadata.sources.filter(s => !sources.some(o => keyOf(o) === keyOf(s))).map(s => <p className="break-all text-xs" key={keyOf(s)}>مرجع محفوظ يحتاج تحققًا: {s.kind} #{s.id} · {s.version}</p>)}
       {metadata.copiedFrom && <p className="break-all text-xs">نسخة أصلية #{metadata.copiedFrom.revisionId} · {metadata.copiedFrom.contentHash}</p>}
-      {sourcePreview?.ok && <section aria-label="مراجعة تطبيق مصدر الجلسة" className="space-y-3 rounded-lg border border-amber-300 bg-white p-3">
+      {sourcePreview?.ok && <section aria-label="مراجعة تطبيق مصدر الجلسة" className="scroll-mt-24 space-y-3 rounded-lg border border-amber-300 bg-white p-3">
         <h5 className="font-bold">راجع التغييرات قبل التطبيق</h5>
         <p className="text-sm">ستُستبدل الحقول المعروضة فقط في القياسات المختارة. راجع ملاءمة وصف الطريقة لكل قياس؛ أرقام القياسات لا تتغير.</p>
         {sourcePreview.targets.map(target => <div key={target.id} className="space-y-2 rounded-lg border p-2">

@@ -4,11 +4,17 @@ import { OrthoAssessmentMeasurementsV2 } from "../components/OrthoAssessmentMeas
 import { blankMeasurementEditorV2, type MeasurementEditorDraftV2 } from "../lib/ortho-assessment-measurement-editor-v2";
 // Actual component handlers and real editor validation. Hook storage/window
 // confirmation are synthetic; browser interaction is a separate acceptance gate.
-const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0 }));
+const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, dependencies: new Map<number, readonly unknown[]>(), effects: [] as Array<() => void> }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(), useState(initial: unknown) {
   const index = hooks.cursor++;
   if (!(index in hooks.values)) hooks.values[index] = typeof initial === "function" ? initial() : initial;
   return [hooks.values[index], (next: unknown) => { hooks.values[index] = typeof next === "function" ? next(hooks.values[index]) : next; }];
+}, useRef(initial: unknown) {
+  const index = hooks.cursor++; if (!(index in hooks.values)) hooks.values[index] = { current: initial }; return hooks.values[index];
+}, useLayoutEffect(effect: () => void, dependencies: readonly unknown[]) {
+  const index = hooks.cursor++, previous = hooks.dependencies.get(index);
+  if (!previous || dependencies.some((value, offset) => !Object.is(value, previous[offset]))) hooks.effects.push(effect);
+  hooks.dependencies.set(index, dependencies);
 } }));
 type Element = ReactElement<Record<string, unknown>>;
 const nodes = (node: ReactNode): Element[] => Array.isArray(node) ? node.flatMap(nodes)
@@ -17,8 +23,14 @@ const text = (node: ReactNode): string => typeof node === "string" || typeof nod
   : Array.isArray(node) ? node.map(text).join("") : node && typeof node === "object" && "props" in node ? text((node as Element).props.children as ReactNode) : "";
 let draft: MeasurementEditorDraftV2, permitted: boolean;
 const change = vi.fn(), confirm = vi.fn();
-function render() { hooks.cursor = 0; return OrthoAssessmentMeasurementsV2({ draft, onChange: change, sources: [],
-  owner: { renderEditable: permitted, active: () => true, editable: () => permitted } }); }
+const panelElement = { focus: vi.fn(), scrollIntoView: vi.fn() };
+function render() {
+  hooks.cursor = 0; const tree = OrthoAssessmentMeasurementsV2({ draft, onChange: change, sources: [],
+    owner: { renderEditable: permitted, active: () => true, editable: () => permitted } });
+  const panel = nodes(tree).find(node => node.props["aria-label"] === "مصدر القياس وتاريخه");
+  if (panel?.props.ref && typeof panel.props.ref === "object") (panel.props.ref as { current: unknown }).current = panelElement;
+  hooks.effects.splice(0).forEach(effect => effect()); return tree;
+}
 function click(label: string) {
   const button = nodes(render()).find(node => node.type === "button" && text(node) === label);
   if (!button) throw Error(`Missing button: ${label}`);
@@ -34,7 +46,9 @@ function preview() { return nodes(render()).find(node => node.props["aria-label"
 const apply = () => { const button = nodes(render()).find(node => node.type === "button" && text(node).startsWith("تطبيق مصدر الجلسة على"))!; (button.props.onClick as () => void)(); };
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
-  hooks.values.length = 0; permitted = true; change.mockReset(); confirm.mockReset().mockReturnValue(true);
+  hooks.values.length = 0; hooks.dependencies.clear(); hooks.effects.length = 0;
+  panelElement.focus.mockReset(); panelElement.scrollIntoView.mockReset();
+  permitted = true; change.mockReset(); confirm.mockReset().mockReturnValue(true);
   vi.stubGlobal("window", { confirm }); draft = blankMeasurementEditorV2();
   for (const [id, date] of [["width_11", "2026-10-01"], ["width_12", "2026-09-01"], ["width_13", "2026-09-02"]]) Object.assign(draft.values[id], {
     state: "measured", numberText: id === "width_11" ? "7.5" : "8.1", dateState: "known", date,
@@ -44,6 +58,18 @@ beforeEach(() => {
   });
 });
 describe("bulk measurement source replacement review", () => {
+  it("focuses and reveals newly opened source details below the sticky header without jumping on each edit", () => {
+    render(); expect(panelElement.focus).not.toHaveBeenCalled();
+    click("المصدر والتاريخ: السن 11"); render();
+    expect(panelElement.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+    expect(panelElement.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: "start", behavior: "instant" });
+    const panel = nodes(render()).find(node => node.props["aria-label"] === "مصدر القياس وتاريخه")!;
+    expect(panel.props.tabIndex).toBe(-1); expect(panel.props.className).toContain("scroll-mt-24");
+    draft = structuredClone(draft); draft.values.width_11.methodDescription = "Synthetic edited method"; render();
+    expect(panelElement.focus).toHaveBeenCalledTimes(1); expect(panelElement.scrollIntoView).toHaveBeenCalledTimes(1);
+    click("المصدر والتاريخ: السن 12"); render(); expect(panelElement.focus).toHaveBeenCalledTimes(2);
+    click("إغلاق تفاصيل المصدر"); render(); expect(panelElement.focus).toHaveBeenCalledTimes(2); expect(change).not.toHaveBeenCalled();
+  });
   it("clears selected targets on measurement group change while preserving every recorded value and source", () => {
     draft.payload.measurementSets.push({ ...draft.payload.measurementSets[0], id: "second", toothWidthObservationIds: [...draft.payload.measurementSets[0].toothWidthObservationIds] });
     select("اختيار السن 12 لجلسة القياس"); click("المصدر والتاريخ: السن 11");
