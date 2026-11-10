@@ -182,7 +182,7 @@ it('denies reception current, historical and problem-source assessment reads whi
   next.content.observations.observations.find(row => row.id === complaint.id)!.value = { state: 'recorded', text: `${canary}_current` };
   const current = await post('doctorA', `/api/ortho/${caseId}/assessment`, next);
   expect(current.revision.id).not.toBe(historical.revision.id);
-  const revisionRows = async () => (await db.query('SELECT id,content_hash FROM ortho_assessment_revisions WHERE ortho_case_id=$1 ORDER BY id', [caseId])).rows;
+  const revisionRows = async () => (await db.query('SELECT id,content_sha256 FROM ortho_assessment_revisions WHERE ortho_case_id=$1 ORDER BY id', [caseId])).rows;
   const before = await revisionRows(); expect(before).toHaveLength(2);
   for (const [suffix, id, text] of [
     ['', current.revision.id, `${canary}_current`],
