@@ -1,4 +1,5 @@
 import { isolateStudyDateTokens } from "@/lib/ortho-study-display";
+import FullStudyPrint from "@/components/OrthoFullStudyPrint";
 import IllustratedStudyPrint from "@/components/OrthoIllustratedStudyPrint";
 import { PrintHeader } from "@/components/PrintHeader";
 import { getSettingsSafe } from "@/lib/db";
@@ -12,7 +13,8 @@ export const dynamic = "force-dynamic";
 export default async function OrthoStudyPrint({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await requireSession(), query = await searchParams;
   const orthoCaseId = routeId((await params).id), patientId = routeId(query.patientId), revisionId = routeId(query.revisionId);
-  if (!session || !orthoCaseId || !patientId || !revisionId || Object.keys(query).some(key => key !== "patientId" && key !== "revisionId" && key !== "mode") || query.mode !== undefined && query.mode !== "illustrated") notFound();
+  if (!session || !orthoCaseId || !patientId || !revisionId || Object.keys(query).some(key => key !== "patientId" && key !== "revisionId" && key !== "mode") || query.mode !== undefined && query.mode !== "illustrated" && query.mode !== "full") notFound();
+  if (query.mode === "full") return <FullStudyPrint session={session} orthoCaseId={orthoCaseId} patientId={patientId} revisionId={revisionId} />;
   if (query.mode === "illustrated") return <IllustratedStudyPrint session={session} orthoCaseId={orthoCaseId} patientId={patientId} revisionId={revisionId} />;
   const result = await getOrthoCaseStudy({ session, patientId, orthoCaseId, revisionId, exportAccess: true });
   if (!result.ok || !result.revision) notFound();

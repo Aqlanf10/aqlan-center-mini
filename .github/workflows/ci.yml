@@ -1449,6 +1449,26 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic full-study outputs only; no refusal samples, traces,
+      # cookies, raw logs, browser state, patient data or directory wildcards.
+      - name: Upload synthetic full-study print evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-full-study-print
+          path: |
+            .settings-ui-artifacts/ortho-full-print/all-layouts.pdf
+            .settings-ui-artifacts/ortho-full-print/collage-wide.pdf
+            .settings-ui-artifacts/ortho-full-print/all-layouts-first.png
+            .settings-ui-artifacts/ortho-full-print/collage-wide-first.png
+            .settings-ui-artifacts/ortho-full-print/all-layouts-mapping.json
+            .settings-ui-artifacts/ortho-full-print/collage-wide-mapping.json
+            .settings-ui-artifacts/ortho-full-print/all-layouts-geometry.json
+            .settings-ui-artifacts/ortho-full-print/collage-wide-geometry.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   # A failed, skipped or cancelled required job never produces a green gate.
   required_completion:
     name: Required CI gates (fail closed)
