@@ -12,6 +12,9 @@ import { reserveStudyExport, claimStudyExport, publishStudyExport, readStudyExpo
 import { journeyContentHash } from '../../lib/ortho-case-journey-hash';
 import { fullBackupBlocks } from '../../lib/fullBackup';
 import { stagedRestore } from '../../lib/restore/staging';
+import { readTarGzEntries, documentEntryName } from '../../lib/restore/archive';
+import { validateBackupArchive } from '../../lib/restore/validate';
+import { tarHeader, tarPadding, tarEnd } from '../../lib/tar';
 const request=vi.hoisted(()=>({token:''}));
 vi.mock('next/headers',()=>({cookies:async()=>({get:(name:string)=>name==='aqlan_flow_session'?{value:request.token}:undefined}),headers:async()=>new Headers()}));
 let f:Awaited<ReturnType<typeof openBackupTimestampFixture>>,db:typeof import('../../lib/db'),directory='';
@@ -50,6 +53,41 @@ beforeAll(async()=>{
  }finally{client.release();}
 });
 afterAll(async()=>{try{await db?.resetPoolForTesting();}finally{vi.unstubAllEnvs();await f?.close();if(directory)await rm(directory,{recursive:true,force:true});}});
+it.each(['omitted','replaced'] as const)('refuses cutover for %s PPTX with a self-consistent manifest while SQL still references original bytes',async(mode)=>{
+ const original=await readTarGzEntries(join(directory,'backup.tar.gz'));
+ const sql=original.entries.get('database.sql')!.data;
+ expect(Buffer.from(sql).toString('utf8')).toContain('ortho_study_export_artifacts');
+ expect(Buffer.from(sql).toString('utf8')).toContain(reference.sha256);
+ const manifest=JSON.parse(Buffer.from(original.entries.get('manifest.json')!.data).toString('utf8'));
+ expect(manifest.documents.some((document:{storageKey:string})=>document.storageKey===reference.storageKey)).toBe(true);
+ expect(original.entries.has(documentEntryName(reference.storageKey))).toBe(true);
+ const replacement=Buffer.from('Coordinated synthetic replacement bytes; no patient data');
+ if(mode==='omitted')manifest.documents=manifest.documents.filter((document:{storageKey:string})=>document.storageKey!==reference.storageKey);
+ else manifest.documents=manifest.documents.map((document:{storageKey:string})=>document.storageKey===reference.storageKey?{...document,sha256:createHash('sha256').update(replacement).digest('hex'),sizeBytes:replacement.length}:document);
+ const blocks:Uint8Array[]=[];
+ for(const name of original.order){
+  if(mode==='omitted'&&name===documentEntryName(reference.storageKey))continue;
+  const data=name==='manifest.json'?Buffer.from(JSON.stringify(manifest)):mode==='replaced'&&name===documentEntryName(reference.storageKey)?replacement:original.entries.get(name)!.data;
+  blocks.push(tarHeader(name,data.length,new Date('2026-11-10T00:00:00.000Z')),data,tarPadding(data.length));
+ }
+ blocks.push(tarEnd());const archivePath=join(directory,`synthetic-${mode}-study.tar.gz`);
+ await writeFile(archivePath,gzipSync(Buffer.concat(blocks)));
+ const variant=await readTarGzEntries(archivePath);
+ expect(Buffer.from(variant.entries.get('database.sql')!.data)).toEqual(Buffer.from(sql));
+ expect(validateBackupArchive(variant,{documentsDir:join(directory,'missing-study-documents')})).toMatchObject({ok:true});
+ const sourceBefore=await snapshot(f.source);await db.resetPoolForTesting();
+ // Only this fixture-owned isolated target is reused. Failed replay rolls back
+ // every data row, leaving the migrated empty schema for the second negative.
+ const restored=await stagedRestore({archivePath,targetUrl:f.sqlTarget.options.connectionString!,stagingDir:join(directory,'missing-study-documents'),allowNonEmptyTarget:true});
+ expect(restored.validationErrors).toEqual([]);
+ expect(restored.readyForCutover).toBe(false);expect(restored.ok).toBe(false);
+ expect(restored.errors.join(' ')).toContain('دراسة التقويم');
+ expect(restored.documentsRestored).toBe(0);expect(restored.documentsVerified).toBe(0);
+ expect(restored.cutoverSteps).toEqual([]);
+ await expect(readFile(join(directory,'missing-study-documents',reference.storageKey))).rejects.toMatchObject({code:'ENOENT'});
+ expect(await snapshot(f.sqlTarget)).toEqual({jobs:[],artifacts:[]});
+ expect(await snapshot(f.source)).toEqual(sourceBefore);
+});
 it('restores queued/running/ready receipts, exact manifests and private bytes, then reclaims expired work safely',async()=>{
  await db.resetPoolForTesting();const restored=await stagedRestore({archivePath:join(directory,'backup.tar.gz'),targetUrl:f.archiveTarget.options.connectionString!,stagingDir:join(directory,'documents')});
  expect(restored.errors).toEqual([]);expect(restored.ok).toBe(true);

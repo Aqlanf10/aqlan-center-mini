@@ -224,6 +224,22 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
         );
         const photoProblem = loginPhotoRestoreProblem(photoSettings[0]?.value ?? "", validated.documents);
         if (photoProblem) throw new Error(photoProblem);
+        // A self-consistent tar/manifest can still omit both a study export and
+        // its manifest entry. Replayed SQL rows are the authority: every saved
+        // artifact must have verified bytes before committing or staging files.
+        // Latest migrations create this table for legacy backups too (zero rows).
+        const { rows: studyArtifacts } = await client.query<{ storage_key: string; sha256: string; size_bytes: number }>(
+          "SELECT storage_key, sha256, size_bytes FROM ortho_study_export_artifacts",
+        );
+        const archivedDocuments = new Map(validated.documents.map(document => [document.relativePath, document]));
+        for (const artifact of studyArtifacts) {
+          const document = archivedDocuments.get(artifact.storage_key);
+          if (!document || document.manifest.storageKey !== artifact.storage_key
+              || document.manifest.sha256 !== artifact.sha256 || document.sha256 !== artifact.sha256
+              || document.manifest.sizeBytes !== artifact.size_bytes || document.bytes.byteLength !== artifact.size_bytes) {
+            throw new Error("ملف دراسة التقويم المحفوظة مفقود أو لا يطابق بياناته المستعادة؛ الاستعادة مرفوضة.");
+          }
+        }
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK").catch(() => {});
