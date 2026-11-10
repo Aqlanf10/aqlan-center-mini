@@ -115,6 +115,10 @@ it.each([390, 1280])("reads persisted retention instructions on the built board 
     await expect.poll(() => closure.innerText()).toContain(`جهاز #${fixture.deviceId}`);
     expect(await closure.innerText()).toContain("بيانات المثبّت القديمة: غير مسجلة");
     expect(await closure.innerText()).toContain("2026-10-01");
+    const deliveryDate = closure.locator('bdi[dir="ltr"]').filter({ hasText: "2026-10-01" });
+    expect(await deliveryDate.count()).toBe(1);
+    expect(await deliveryDate.innerText()).toBe("2026-10-01");
+    expect(await deliveryDate.evaluate(node => getComputedStyle(node).direction)).toBe("ltr");
     expect(await closure.innerText()).toContain("لا يوجد حدث فك جهاز في السجل المقروء");
     expect(await closure.innerText()).toContain("لا يثبت اكتمال العلاج");
     const photos = closure.getByRole("region", { name: "صور مسجّلة لمرحلة فك الجهاز", exact: true });

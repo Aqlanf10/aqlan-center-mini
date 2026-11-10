@@ -110,6 +110,8 @@ describe("one workup path over the existing record owners", () => {
       expect(exactDetails).toContain("المنفذ الموثق: غير معلوم");
       await toggle.click(); await expect.poll(() => originalComplaint.isVisible()).toBe(false);
       expect(await historyDetails.getAttribute("open")).toBeNull(); expect(await savedComplaint.isVisible()).toBe(true);
+      await savedFindings.scrollIntoViewIfNeeded();
+      await savedFindings.screenshot({ path: `.settings-ui-artifacts/ortho-saved-assessment-${width}.png` });
       expect(writes).toEqual(mutations);
       expect((await db.query("SELECT count(*)::int n FROM ortho_assessment_revisions WHERE ortho_case_id=$1", [orthoCaseId])).rows[0].n).toBe(1);
       expect(writes).toEqual(mutations);

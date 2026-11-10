@@ -205,6 +205,7 @@ it.each([390, 1280])("shows current export controls on the saved case only after
       expect(target.searchParams.get("patientId")).toBe(String(h.seeded.patientAId));
       expect(target.searchParams.get("revisionId")).toBe(String(study.revisionId));
       expect(target.pathname).toContain(`/${study.caseId}`);
+      if (label === "معاينة الدراسة المصورة / PDF") expect(target.searchParams.get("mode")).toBe("full");
     }
     const controls = page.getByRole("link", { name: labels[1], exact: true }).locator("..");
     await controls.scrollIntoViewIfNeeded();
