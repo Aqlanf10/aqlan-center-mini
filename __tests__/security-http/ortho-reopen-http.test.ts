@@ -1,16 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
+import { mkdir } from 'node:fs/promises';
+import { chromium, type Browser } from 'playwright';
+import { CASE_STATUS_LABEL } from '../../lib/ortho';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createSessionToken, readSessionToken } from '../../lib/auth';
 import { authedGet, authedMutation, baseUrl, harness, type Session } from './_server';
-let h:Awaited<ReturnType<typeof harness>>, db:Client, doctorId:number;
+let h:Awaited<ReturnType<typeof harness>>, db:Client, doctorId:number, browser:Browser;
 beforeAll(async()=>{
  h=await harness();expect(new URL(h.seeded.dbUrl).pathname).toBe('/aqlan_sec_http');
  db=new Client({connectionString:h.seeded.dbUrl,ssl:false});await db.connect();
  doctorId=(await db.query("SELECT party_id FROM users WHERE username='secdoctora'")).rows[0].party_id;
  expect(Number.isSafeInteger(doctorId)&&doctorId>0).toBe(true);
+ browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined});
+ await mkdir('.settings-ui-artifacts',{recursive:true});
 });
-afterAll(async()=>{await db?.end();});
+afterAll(async()=>{await browser?.close();await db?.end();});
 async function fixture(open=false){
  const patientId=(await db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'Synthetic reopen HTTP patient',$2) RETURNING id",[randomUUID(),doctorId])).rows[0].id as number;
  const caseId=(await db.query(`INSERT INTO ortho_cases(patient_id,status,phase,retainer,retainer_on,upper_wire,created_by,closed_at,closed_by,closed_note)
@@ -114,4 +119,51 @@ it('rejects a signed session that expires during an observed case lock wait with
  }finally{await blocker.query('ROLLBACK');await blocker.end();await pending.catch(()=>undefined);}
  const refused=await pending;expect(refused.status).toBe(401);expect(await refused.json()).toMatchObject({code:'session_expired'});
  expect(await caseRow(f)).toEqual(before);expect(await events(f)).toEqual([]);
+});
+
+it.each([390,1280])('reopens the same case through explicit browser review and recovers a lost committed response at %ipx',async width=>{
+ const f=await fixture(),before=await caseRow(f),beforeCounts=await counts(f);
+ const context=await browser.newContext({viewport:{width,height:1000},locale:'ar-YE'});
+ const [name,...cookie]=h.sessions.admin.cookie.split('=');await context.addCookies([{name,value:cookie.join('='),url:baseUrl}]);
+ const page=await context.newPage(),errors:string[]=[],posts:string[]=[];page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));
+ let dropped=false;
+ await page.route(`**${f.path}`,async route=>{
+  if(route.request().method()!=='POST'){await route.continue();return;}
+  posts.push(route.request().postData()!);
+  if(!dropped){dropped=true;const response=await route.fetch();expect(response.status()).toBe(201);await route.abort('failed');}
+  else await route.continue();
+ });
+ try{
+  await page.goto(`${baseUrl}/patients/${f.patientId}?tab=treatment&sub=ortho&orthoCaseId=${f.caseId}`);
+  const summary=page.getByText('حالة التقويم: الإغلاق وإعادة الفتح',{exact:true});await summary.click();
+  const current=page.getByRole('region',{name:'حالة التقويم الحالية',exact:true});await current.waitFor();
+  expect(await current.innerText()).toContain(CASE_STATUS_LABEL.completed);
+  const target=page.getByLabel('الحالة المقصودة لإعادة فتح التقويم',{exact:true});expect(await target.inputValue()).toBe('');
+  await target.selectOption('retention');await page.getByLabel('سبب إعادة فتح حالة التقويم',{exact:true}).fill('Synthetic browser follow-up after explicit closure review');
+  const confirm=page.getByRole('button',{name:'تأكيد إعادة فتح حالة التقويم',exact:true});expect(await confirm.isDisabled()).toBe(true);
+  await page.getByRole('checkbox',{name:'راجعت حالة التقويم وبيانات الإغلاق الحالية واخترت الحالة المقصودة',exact:true}).check();
+  await confirm.evaluate((node:HTMLButtonElement)=>{node.click();node.click();});
+  await page.getByRole('region',{name:'طلب إعادة الفتح غير المحسوم',exact:true}).waitFor();
+  await expect.poll(()=>posts.length).toBe(1);
+  await expect.poll(async()=>await page.getByRole('button',{name:'التحقق من نتيجة الطلب وقراءة الحالة الحالية',exact:true}).isEnabled()).toBe(true);
+  expect(await events(f)).toHaveLength(1);
+  await page.getByRole('button',{name:'التحقق من نتيجة الطلب وقراءة الحالة الحالية',exact:true}).click();
+  await expect.poll(async()=>(await caseRow(f)).status).toBe('retention');
+  await expect.poll(async()=>page.getByRole('region',{name:'طلب إعادة الفتح غير المحسوم',exact:true}).count()).toBe(0);
+  await expect.poll(async()=>current.innerText()).toContain(CASE_STATUS_LABEL.retention);
+  expect(posts).toHaveLength(1);expect(nonLifecycle(await caseRow(f))).toEqual(nonLifecycle(before));expect(await counts(f)).toEqual(beforeCounts);
+  expect((await events(f))[0]).toMatchObject({previous_closed_by:'Historical synthetic clinician',previous_closed_note:'Historical synthetic closure'});
+  // Current closure after a successful earlier receipt remains authoritative.
+  expect((await authedMutation(`/api/ortho/${f.caseId}`,h.sessions.admin,'PATCH',JSON.stringify({status:'completed',note:'Synthetic browser subsequent closure'}))).status).toBe(200);
+  await page.getByRole('button',{name:'تحديث حالة التقويم',exact:true}).click();
+  await expect.poll(async()=>current.innerText()).toContain('Synthetic browser subsequent closure');
+  expect(await current.innerText()).toContain(CASE_STATUS_LABEL.completed);expect(await target.inputValue()).toBe('');
+  expect(posts).toHaveLength(1);expect(await events(f)).toHaveLength(1);
+  const panel=page.locator('details').filter({has:page.getByText('حالة التقويم: الإغلاق وإعادة الفتح',{exact:true})});
+  await panel.scrollIntoViewIfNeeded();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await panel.screenshot({path:`.settings-ui-artifacts/ortho-reopen-${width}.png`});
+  await page.reload();await page.getByText('حالة التقويم: الإغلاق وإعادة الفتح',{exact:true}).click();
+  await expect.poll(async()=>current.innerText()).toContain('Synthetic browser subsequent closure');expect(posts).toHaveLength(1);
+  expect(await counts(f)).toEqual(beforeCounts);expect(errors).toEqual([]);
+ }finally{await context.close();}
 });
