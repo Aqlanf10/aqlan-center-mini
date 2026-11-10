@@ -16,6 +16,7 @@ export function OrthoFullStudyPrintReadiness() {
     const loading = () => apply(false);
     document.fonts.addEventListener('loading', loading);
     document.fonts.addEventListener('loadingdone', check);
+    document.fonts.addEventListener('loadingerror', check);
     const images = [...root.querySelectorAll<HTMLImageElement>('[data-print-sheet] img')];
     images.forEach(image => { image.addEventListener('load', check); image.addEventListener('error', loading); });
     // Direct Ctrl+P must recheck the actual print-media layout, not merely trust
@@ -26,7 +27,7 @@ export function OrthoFullStudyPrintReadiness() {
       if (!cancelled) requestAnimationFrame(check);
     }).catch(() => { if (!cancelled) apply(false); });
     return () => { cancelled = true; observer.disconnect(); document.fonts.removeEventListener('loading', loading);
-      document.fonts.removeEventListener('loadingdone', check); images.forEach(image => { image.removeEventListener('load', check); image.removeEventListener('error', loading); });
+      document.fonts.removeEventListener('loadingdone', check); document.fonts.removeEventListener('loadingerror', check); images.forEach(image => { image.removeEventListener('load', check); image.removeEventListener('error', loading); });
       window.removeEventListener('beforeprint', check); media.removeEventListener('change', check); root.dataset.printReady = 'false'; };
   }, []);
   return <div ref={marker}>

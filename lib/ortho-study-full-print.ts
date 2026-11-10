@@ -6,8 +6,8 @@ import { FULL_STUDY_BODY, FULL_STUDY_LIMITS, fullStudyPageNotes, fullStudyTableP
 /** A browser-print profile, not a replacement for the immutable PPTX contract.
  * Physical dimensions are mm; source layout dimensions remain inches. */
 export const FULL_STUDY_PRINT = Object.freeze({ renderer: 'ortho-full-print-v1', paperWidth: 297, paperHeight: 210,
-  margin: 10, width: 254, height: 190, headerHeight: 36, metaTop: 36, metaHeight: 7,
-  bodyTop: 43, bodyHeight: 120, footerTop: 165, footerHeight: 25, bodyWidth: FULL_STUDY_BODY.w * 25.4,
+  margin: 10, width: 254, height: 190, headerHeight: 44, metaTop: 44, metaHeight: 7,
+  bodyTop: 51, bodyHeight: 112, footerTop: 165, footerHeight: 25, bodyWidth: FULL_STUDY_BODY.w * 25.4,
   sheets: 300, payloadBytes: 40 * 1024 * 1024 });
 export const FULL_STUDY_PRINT_CONTRACT = journeyContentHash(FULL_STUDY_PRINT);
 export interface PrintSourceFragment {

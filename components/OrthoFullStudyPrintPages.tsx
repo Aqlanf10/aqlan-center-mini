@@ -28,6 +28,7 @@ export function OrthoFullStudyPrintPages({ value, settings }: { value: FullStudy
 .full-study-print .full-print-hash { direction:ltr; unicode-bidi:isolate; overflow-wrap:anywhere; }
 @media print {
  @page ortho-full-study { size:A4 landscape; margin:${G.margin}mm; }
+ .print-root:has(.full-study-print), .full-study-print { page:ortho-full-study; }
  .full-study-print .study-print-controls { display:none!important; }
  .full-study-print:not([data-print-ready="true"]) .full-print-sheets { display:none!important; }
  .full-study-print:not([data-print-ready="true"]) .study-print-not-ready { display:block!important; }
@@ -36,7 +37,7 @@ export function OrthoFullStudyPrintPages({ value, settings }: { value: FullStudy
 }
 `}</style>
     <div className="study-print-controls"><h1>دراسة الحالة — نسخة سريرية مصورة</h1><p>قد تزيد أوراق الطباعة عن شرائح العرض لحفظ الترويسة ووضوح المحتوى. النص والصور قد يحددان الهوية؛ هذه النسخة ليست مجهولة الهوية وليست للنشر التعليمي.</p></div>
-    <OrthoFullStudyPrintReadiness />
+    <div data-print-readiness-host><OrthoFullStudyPrintReadiness /></div>
     <div className="full-print-sheets">{value.sheets.map((sheet, index) => <section key={index} data-print-sheet data-source-page={sheet.sourcePageIndex + 1} className="full-print-sheet">
       <div data-print-region="header" className="full-print-header"><div data-print-content><PrintHeader settings={settings} title={`${sheet.title}${sheet.continuationCount > 1 ? ` — جزء الطباعة ${sheet.continuation} من ${sheet.continuationCount}` : ''}`} compact strictIdentity /></div></div>
       <div data-print-region="meta" className="full-print-meta"><p data-print-content>الحالة {value.caseId} · الإصدار {value.version} · {value.kind === 'draft' ? 'مسودة' : 'نسخة موثقة'}{sheet.modelUnapproved ? ' · حساب غير معتمد سريريًا' : ''}</p></div>

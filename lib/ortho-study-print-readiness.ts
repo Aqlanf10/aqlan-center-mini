@@ -4,6 +4,16 @@ export function fullStudyPrintFits(root: HTMLElement): boolean {
   const sheets = [...root.querySelectorAll<HTMLElement>('[data-print-sheet]')];
   if (!sheets.length || sheets.length > 300 || document.fonts.status !== 'loaded') return false;
   if ([...root.querySelectorAll<HTMLImageElement>('[data-print-sheet] img')].some(image => !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0)) return false;
+  // FontFaceSet.status returns 'loaded' even when a declared webfont failed.
+  // Refuse a failed family actually used by this printout; unrelated unused
+  // declarations do not make an otherwise complete document unavailable.
+  const failed: string[] = [];
+  document.fonts.forEach(face => { if (face.status === 'error') failed.push(face.family.replace(/["']/g, '').toLowerCase()); });
+  if (failed.length) {
+    const families = new Set([root, ...root.querySelectorAll<HTMLElement>('[data-print-content]')]
+      .flatMap(node => getComputedStyle(node).fontFamily.split(',').map(family => family.trim().replace(/["']/g, '').toLowerCase())));
+    if (failed.some(family => families.has(family))) return false;
+  }
   const tolerance = 1;
   for (const sheet of sheets) {
     const frame = sheet.getBoundingClientRect();
