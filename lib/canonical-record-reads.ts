@@ -38,6 +38,9 @@ export const CANONICAL_RECORD_READS = Object.freeze({
    * read-only previews of the pre-system treatment writers. */
   "read:legacy.record": Object.freeze({ record: "patient", need: Object.freeze(["finance.legacy.record"] as const), anyOf: Object.freeze([]) }),
   "read:legacy.void": Object.freeze({ record: "patient", need: Object.freeze(["finance.legacy.void"] as const), anyOf: Object.freeze([]) }),
+  /** POST /api/patients/[id]/historical-documents/preview (M2 slice 95c): the read-only preview of
+   * the historical document writer; the reader also requires finance.patient-ledger.view. */
+  "read:history.record": Object.freeze({ record: "patient", need: Object.freeze(["patients.history.record"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]/legacy, /legacy-onboarding, /legacy-treatments and
    * /historical-documents (M2 slice 95a, G4-2): the clinical description with the patient record
    * read; every amount with finance.patient-ledger.view; plan sources with clinical.plans.view. */
