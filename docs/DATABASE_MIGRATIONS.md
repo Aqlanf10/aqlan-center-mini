@@ -720,3 +720,33 @@ erased. An expired running job restored after interruption remains recoverable
 only by its creator with current authorization and a new fenced generation.
 This migration provides the archive backend; route/runner/renderer integration
 and final-head CI remain separate acceptance requirements.
+
+## 0124 — structured cephalometric correction lineage
+
+`0124_ceph_correction_lineage.sql` adds nullable original-analysis identity,
+source envelope and fingerprint fields. Correction drafts retain the original
+case/image and source proof without rewriting original clinical data, notes or
+completion hashes. Legacy analyses remain explicitly unversioned; existing
+notes are not interpreted as historical approval or backfilled ancestry.
+Scope, immutable origin, final-state and bounded ancestry checks protect the
+relationship. Deferred validation supports complete-snapshot restore. The exact
+runtime mirror is registered with its checksum; saved-study capture4 preserves
+the underlying earlier witness strength. Migration execution does not itself
+establish clinical or operational acceptance.
+
+## 0125 — explicit orthodontic case reopening
+
+`0125_ortho_case_reopen.sql` adds a lifecycle version and an immutable reopening
+command journal. The version covers status and closure fields only; unrelated
+phase/device edits are preserved and are not presented as a whole-case CAS.
+A terminal-to-open change requires exact preserved closure evidence and a
+matching journal entry. Nullable legacy closure facts and timestamp precision
+are retained without invented historical dates. Scope constraints protect the
+original patient and clinical-case bridge; complete-snapshot restore uses
+deferred checks. The application requires current clinical authority and an
+explicit target/reason, with same-command replay returning both the historical
+receipt and separately read current state. The generic clinical-case row,
+appointments, visits, treatment data and financial records are not rewritten by
+this operation. Merge/reset preflight protects command history. No production
+or staging database was changed; local PostgreSQL verification and final-head
+CI are separate evidence.

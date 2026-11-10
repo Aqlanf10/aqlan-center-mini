@@ -45,6 +45,32 @@ it('refuses a restored job pinned to a different renderer contract without silen
  expect((await fixture.pool.query('SELECT state,generation,render_binding FROM ortho_study_export_jobs WHERE id=$1',[restored.id])).rows[0]).toMatchObject({state:'queued',generation:0,render_binding:{contractHash:'0'.repeat(64)}});
  expect((await fixture.pool.query('SELECT count(*)::int n FROM ortho_study_export_artifacts WHERE job_id=$1',[restored.id])).rows[0].n).toBe(0);
 });
+it('reads a restored ready artifact with an older renderer without regenerating or changing its bytes reference',async()=>{
+ const s=await seed(),current=await claimed(s);
+ expect((await publishStudyExport({...s.scope,lease:current.lease!,artifact})).ok).toBe(true);
+ const command={...s.command,clientRequestId:randomUUID()},client=await fixture.pool.connect();
+ let id:number;
+ try {
+  await client.query('BEGIN');
+  const restored=(await client.query(`INSERT INTO ortho_study_export_jobs(patient_id,ortho_case_id,clinical_case_id,actor_user_id,revision_id,revision_sha256,command_id,command,request_fingerprint,format,render_binding,state,generation)
+    SELECT patient_id,ortho_case_id,clinical_case_id,actor_user_id,revision_id,revision_sha256,$2,$3::jsonb,$4,format,
+      jsonb_set(jsonb_set(render_binding,'{renderer}',to_jsonb($5::text)),'{contractHash}',to_jsonb($6::text)),'ready',1
+    FROM ortho_study_export_jobs WHERE id=$1 RETURNING id,render_binding`,
+    [current.job.id,command.clientRequestId,JSON.stringify(command),journeyContentHash(command),'synthetic-previous-renderer','0'.repeat(64)])).rows[0];
+  id=restored.id;
+  const original=(await client.query('SELECT manifest FROM ortho_study_export_artifacts WHERE job_id=$1',[current.job.id])).rows[0].manifest;
+  const manifest={...original,jobId:id,renderBinding:restored.render_binding};
+  await client.query(`INSERT INTO ortho_study_export_artifacts(job_id,sha256,storage_key,size_bytes,page_count,manifest,manifest_sha256)
+    VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)`,[id,artifact.sha256,artifact.storageKey,artifact.sizeBytes,artifact.pageCount,JSON.stringify(manifest),journeyContentHash(manifest)]);
+  await client.query('COMMIT');
+ }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+ const before=(await fixture.pool.query('SELECT * FROM ortho_study_export_artifacts WHERE job_id=$1',[id])).rows;
+ expect(await readStudyExportArtifact({...s.scope,jobId:id})).toMatchObject({ok:true,job:{state:'ready'},reference:{storageKey:artifact.storageKey,sha256,sizeBytes:bytes.length}});
+ expect(await claimStudyExport({...s.scope,jobId:id,expectedGeneration:1})).toMatchObject({ok:true,lease:null,job:{state:'ready'}});
+ expect((await fixture.pool.query('SELECT * FROM ortho_study_export_artifacts WHERE job_id=$1',[id])).rows).toEqual(before);
+ // Transactional metadata fixture only; actual rendered-file bytes and downloads
+ // are exercised separately by the built archive browser/HTTP suite.
+});
 it('reserves exactly one job for concurrent exact retry and rejects reused intent keys',async()=>{
  const s=await seed();const attempts=await Promise.all(Array.from({length:4},()=>reserveStudyExport({...s.scope,command:s.command})));
  expect(attempts.every(x=>x.ok)).toBe(true);expect(new Set(attempts.flatMap(x=>x.ok?[x.job.id]:[])).size).toBe(1);

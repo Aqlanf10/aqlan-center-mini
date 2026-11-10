@@ -20,6 +20,7 @@ import { getOrthoStudySourceChoices } from "../../lib/ortho-case-study-inventory
 import { getOrthoCaseStudy } from "../../lib/ortho-case-study-store";
 import type { StudyRevisionRef, StudySourceKind } from "../../lib/ortho-case-study";
 import { journeyContentHash } from "../../lib/ortho-case-journey-hash";
+import type { ModelAnalysisEvidence } from "../../lib/ortho-study-model-analysis-evidence";
 import { reserveStudyExport, readStudyExportArtifact } from "../../lib/ortho-study-export-archive-store";
 import { runStudyExport } from "../../lib/ortho-study-export-runner";
 import { readStudyExportArtifactBytes } from "../../lib/ortho-study-export-artifact-storage";
@@ -61,13 +62,21 @@ async function pptxEvidence(bytes: Uint8Array) {
   expect(slideNames.length).toBeGreaterThan(1);
   expect(noteNames).toHaveLength(slideNames.length);
   const slides = (await Promise.all(slideNames.map(name => zip.file(name)!.async("string")))).join("\n");
-  const notes = (await Promise.all(noteNames.map(name => zip.file(name)!.async("string")))).join("\n");
+  const noteXml = await Promise.all(noteNames.map(name => zip.file(name)!.async("string")));
+  const notes = noteXml.join("\n");
+  const decode = (value: string) => value.replaceAll("&quot;", '"').replaceAll("&apos;", "'")
+    .replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+  const modelAnalyses = noteXml.flatMap(xml => {
+    const payload = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(match => decode(match[1])).find(text => text.startsWith("{"));
+    expect(payload).toBeDefined();
+    return (JSON.parse(payload!) as { modelAnalyses: ModelAnalysisEvidence[] }).modelAnalyses;
+  });
   expect(slides.includes("<a:tbl>")).toBe(true); // Actual editable clinical tables, not synthetic placeholder bytes.
   // Native text wraps into multiple runs. Reconstruct text instead of requiring
   // a phrase to occupy one XML run (or dumping the entire package on failure).
   const slideText = [...slides.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(match => match[1])
-    .join("").replaceAll("&quot;", '"').replaceAll("&apos;", "'").replaceAll("&amp;", "&").replace(/\s/g, "");
-  return { slideText, notes, pageCount: slideNames.length };
+    .join("").replaceAll("&quot;", '"').replaceAll("&apos;", "'").replaceAll("&amp;", "&").replace(/[\s\u2066-\u2069]/g, "");
+  return { slideText, notes, modelAnalyses, pageCount: slideNames.length };
 }
 
 // O40 documentary subset: saved analyses remain draft/unapproved. This does not
@@ -160,7 +169,11 @@ it("recomputes shared measurements into an explicitly reviewed new study while p
   const firstStudy = await documentStudy([["assessment", initial.revision.id], ["problem_review", firstReview.reviewId], ["strategy", firstStrategy.revision.revisionId]], null);
   const firstArchive = await archive(firstStudy);
   expect(firstArchive.evidence.slideText.includes("Syntheticoriginalapproach")).toBe(true);
-  expect(firstArchive.evidence.slideText.includes('"requiredMm":70')).toBe(true);
+  expect(firstArchive.evidence.slideText).toContain("المسافةالمطلوبة70mm");
+  expect(firstArchive.evidence.slideText).not.toContain('"requiredMm"');
+  const firstUpperEvidence = firstArchive.evidence.modelAnalyses.find(row => row.exactWitness.selection.id === "space_upper");
+  expect(firstUpperEvidence?.exactWitness.stored).toEqual(resultOf(initial.revision, "space_upper"));
+  expect(firstUpperEvidence?.source).toMatchObject({ id: initial.revision.id, contentHash: initial.revision.contentHash });
   expect(firstArchive.evidence.notes).toContain(initial.revision.contentHash);
   const oldArtifactRow = (await f.pool.query("SELECT * FROM ortho_study_export_artifacts WHERE job_id=$1", [firstArchive.job.id])).rows;
   const originalReview = (await getOrthoProblemSources(owner));
@@ -222,7 +235,11 @@ it("recomputes shared measurements into an explicitly reviewed new study while p
   const secondArchive = await archive(secondStudy);
   expect(secondArchive.evidence.slideText.includes("Syntheticrevisedapproach")).toBe(true);
   expect(secondArchive.evidence.slideText.includes("Syntheticoriginalapproach")).toBe(false);
-  expect(secondArchive.evidence.slideText.includes('"requiredMm":71')).toBe(true);
+  expect(secondArchive.evidence.slideText).toContain("المسافةالمطلوبة71mm");
+  expect(secondArchive.evidence.slideText).not.toContain('"requiredMm"');
+  const correctedUpperEvidence = secondArchive.evidence.modelAnalyses.find(row => row.exactWitness.selection.id === "space_upper");
+  expect(correctedUpperEvidence?.exactWitness.stored).toEqual(resultOf(corrected.revision, "space_upper"));
+  expect(correctedUpperEvidence?.source).toMatchObject({ id: corrected.revision.id, contentHash: corrected.revision.contentHash });
   expect(secondArchive.evidence.notes).toContain(corrected.revision.contentHash);
   expect(secondArchive.reference.sha256).not.toBe(firstArchive.reference.sha256);
 
