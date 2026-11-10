@@ -76,9 +76,17 @@ it('direct print stays fail-closed without hydration, with overlong identity, br
    }
    if(scenario==='failed-font'){
     await page.route('**/failed.woff2',route=>route.fulfill({status:404,body:''}));
-    await page.evaluate(()=>{const style=document.createElement('style');style.textContent='@font-face{font-family:SyntheticFailed;src:url(http://synthetic.invalid/failed.woff2)}.full-study-print{font-family:SyntheticFailed,Arial!important}';document.head.append(style);});
+    // An individual font can fail before the whole FontFaceSet settles. Hold
+    // another real font request to reproduce that ordering without CPU timing.
+    let releaseFont!:()=>void, settlingRequested=false;
+    const settling=new Promise<void>(resolve=>{releaseFont=resolve;});
+    await page.route('**/settling.woff2',async route=>{settlingRequested=true;await settling;await route.fulfill({status:404,body:''});});
+    await page.evaluate(()=>{const style=document.createElement('style');style.textContent='@font-face{font-family:SyntheticFailed;src:url(http://synthetic.invalid/failed.woff2)}@font-face{font-family:SyntheticSettling;src:url(http://synthetic.invalid/settling.woff2)}.full-study-print{font-family:SyntheticFailed,SyntheticSettling,Arial!important}';document.head.append(style);});
     await expect.poll(()=>page.evaluate(()=>[...document.fonts].some(font=>font.family==='SyntheticFailed'&&font.status==='error'))).toBe(true);
-    expect(await page.evaluate(()=>document.fonts.status)).toBe('loaded');
+    await expect.poll(()=>settlingRequested).toBe(true);
+    expect(await page.evaluate(()=>document.fonts.status)).toBe('loading');
+    releaseFont();
+    await expect.poll(()=>page.evaluate(()=>document.fonts.status),{timeout:5000}).toBe('loaded');
    }
    await page.emulateMedia({media:'print'});await page.evaluate(()=>window.dispatchEvent(new Event('beforeprint')));
    await expect.poll(()=>page.locator('[data-full-study-print]').getAttribute('data-print-ready')).toBe('false');
