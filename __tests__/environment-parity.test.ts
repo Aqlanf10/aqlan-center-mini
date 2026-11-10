@@ -34,7 +34,7 @@ import { CLINIC_ZONE_FALLBACK, resolveClinicZone } from "../lib/clinicZone";
  */
 
 const repoRoot = join(__dirname, "..");
-const readRepoFile = (relative: string): string => readFileSync(join(repoRoot, relative), "utf8");
+const readRepoFile = (relative: string): string => readFileSync(join(repoRoot, relative), "utf8").replace(/\r\n/g, "\n");
 const packageJson = JSON.parse(readRepoFile("package.json")) as {
   engines?: { node?: string; npm?: string };
   scripts?: Record<string, string>;

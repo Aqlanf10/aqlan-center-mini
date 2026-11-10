@@ -27,8 +27,8 @@ export default defineConfig({
     pool: "forks",
     fileParallelism: false,
     maxConcurrency: 1,
-    forks: {
-      singleFork: true,
-    },
+    maxWorkers: 1,
+    // Cold module loading on Windows is slower; retain the existing Linux budget.
+    testTimeout: process.platform === "win32" ? 30_000 : 5_000,
   },
 });

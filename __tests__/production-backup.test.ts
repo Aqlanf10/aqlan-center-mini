@@ -177,8 +177,8 @@ describe("لا رمز خام في السجلات ولا في الحالة", () =
 
 describe("احتواء الوجهات داخل جذر القرص الدائم", () => {
   it("backups ابنٌ حقيقي داخل الجذر", () => {
-    expect(resolveBackupDirectory("/data")).toBe("/data/backups");
-    expect(resolveBackupDirectory("/data/")).toBe("/data/backups");
+    expect(resolveBackupDirectory("/data")).toBe(path.resolve("/data/backups"));
+    expect(resolveBackupDirectory("/data/")).toBe(path.resolve("/data/backups"));
   });
 
   it("/data-evil ليست داخل /data (لا startsWith الساذج)", () => {
@@ -206,12 +206,14 @@ describe("حارس symlink — لا خروج من دليل المستندات", 
       const legit = await readDocumentWithRealpathGuard(legitKey, docs);
       expect(legit.toString("utf8")).toBe(legitContent);
 
-      // الرابط الرمزي الذي يخرج: mkdir + symlink لملف خارجي في مفتاحٍ صالح النمط.
-      const outsideFile = path.join(outside, "secret.txt");
-      await write(outsideFile, "classified");
-      const escapedKey = "aa/bb/" + "f".repeat(64) + ".png";
-      await mkdir(path.join(docs, "aa/bb"), { recursive: true });
-      await symlink(outsideFile, path.join(docs, escapedKey));
+      // A linked parent escapes to a real external document. Directory junctions
+      // exercise the same realpath guard on Windows without symlink privileges.
+      const shard = legitKey.startsWith("aa/") ? "bb" : "aa";
+      const filename = "f".repeat(64) + ".png";
+      const escapedKey = `${shard}/bb/${filename}`;
+      await mkdir(path.join(outside, "bb"), { recursive: true });
+      await write(path.join(outside, "bb", filename), "classified");
+      await symlink(outside, path.join(docs, shard), process.platform === "win32" ? "junction" : "dir");
 
       await expect(readDocumentWithRealpathGuard(escapedKey, docs)).rejects.toThrow(/رابط رمزي/);
     } finally {

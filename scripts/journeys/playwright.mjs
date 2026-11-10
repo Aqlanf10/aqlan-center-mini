@@ -29,4 +29,5 @@ export async function loadChromium() {
 }
 
 /** المتصفّح المثبَّت في هذه البيئة، وإلا فما تجده Playwright بنفسها. */
-export const executablePath = process.env.PLAYWRIGHT_CHROMIUM ?? "/opt/pw-browsers/chromium";
+export const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+  ?? process.env.PLAYWRIGHT_CHROMIUM ?? undefined;

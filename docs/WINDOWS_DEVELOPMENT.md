@@ -1,0 +1,36 @@
+# التطوير على Windows
+
+المتطلبات هي Node.js 22 وnpm 10.9–11، وقاعدة PostgreSQL 18 للفحوص التي تحتاج قاعدة فعلية. لا تغيّر إصدار المشروع إلى إصدار Node الموجود على الجهاز؛ استخدم الإصدار المحدد في `.nvmrc`.
+
+## اختيار بيئة التشغيل الصحيحة
+
+من جذر المشروع في PowerShell:
+
+```powershell
+pwsh -File .\scripts\local.ps1 run verify:environment
+pwsh -File .\scripts\local.ps1 run dev
+```
+
+يبحث المشغّل عن Node 22 المثبت، أو نسخة مساحة العمل في `../runtime/node_modules/node/bin/node.exe`. ويمكن اختيار نسخة محمولة صراحةً عبر `AQLAN_NODE_BINARY`. تُستخدم هذه النسخة أيضًا لتشغيل npm والعمليات التابعة، دون تغيير إعدادات الجهاز العامة.
+
+تحافظ `.gitattributes` على تنسيق مصدر موحد بين Windows وLinux، وهو ضروري لاختبارات النصوص وبصمات الملفات المراجعة. يُستدعى npm من ملف JavaScript عبر Node، وتستخدم رحلات التحقق نسخة tsx المثبتة في المشروع؛ لا تعتمد على تشغيل ملفات `npm.cmd` و`npx.cmd` مباشرةً كملفات تنفيذية.
+
+## الفحص بقاعدة مستقلة
+
+جهّز PostgreSQL 18 محليًا على المنفذ 54329 مع حساب `ci` وكلمة مرور `ci` وقاعدة `aqlan_p1_test`، أو استخدم خدمة `pg18` في `docker-compose.yml`. هذه قيم لقاعدة اختبار محلية فقط.
+
+```powershell
+$env:USE_LOCAL_DB = 'false'
+$env:CLINIC_TIME_ZONE = 'Asia/Aden'
+$env:DATABASE_URL = 'postgresql://ci:ci@127.0.0.1:54329/postgres?sslmode=disable'
+$env:TEST_DATABASE_URL = 'postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable'
+pwsh -File .\scripts\local.ps1 run typecheck
+pwsh -File .\scripts\local.ps1 run lint
+pwsh -File .\scripts\local.ps1 run test:postgres
+```
+
+تحتاج بوابات المتصفح Chromium الخاص بـPlaywright، وتحتاج فحوص الطباعة أدوات Poppler (`pdfinfo` و`pdftotext` و`pdftoppm`) في PATH. لا يُعدّ غياب هذه المتطلبات نجاحًا للفحوص.
+
+تُشغّل البوابة الشاملة `npm run verify:full` في بيئة Linux المتوافقة مع النشر. بعض اختبارات حزم النشر تعتمد على Bash وروابط ملفات POSIX النسبية؛ لا يُعدّ تشغيلها على Windows بديلًا عن إثباتها على Linux. يحافظ مسار CI الأساسي على تلك الفحوص كاملة، ويضيف `windows-development.yml` فحوصًا مستقلة لأدوات Windows والنسخ الاحتياطي وحواجز تشغيل الرحلات.
+
+على جهاز محدود الذاكرة، شغّل فحص الأنواع والاختبارات والبناء بالتتابع. لا تشغّل خادم التطوير أثناء هذه الفحوص. احتفظ بمساحة كافية للبناء وقاعدة الاختبار والملفات المؤقتة، ويمكن توجيه `TEMP` و`TMP` إلى قرص آخر. لا تستخدم `USE_LOCAL_DB=true` لبوابات PostgreSQL؛ فهو مخصص لتجربة مؤقتة في الذاكرة.

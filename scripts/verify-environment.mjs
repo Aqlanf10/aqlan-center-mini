@@ -3,6 +3,7 @@ import "./load-env.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { npmCommand } from "./npm-command.mjs";
 import {
   CI_REQUIRED_NPM_MAJOR,
   CLINIC_TIME_ZONE_CONTRACT,
@@ -50,7 +51,8 @@ const nodeViolation = checkNodeContract(process.version);
 if (nodeViolation) fail(nodeViolation.rule, nodeViolation.message);
 
 // ── 2) إصدار npm ─────────────────────────────────────────────────────────────
-const npmVersion = spawnSync("npm", ["--version"], { encoding: "utf8" });
+const [npmExecutable, ...npmArguments] = npmCommand(["--version"]);
+const npmVersion = spawnSync(npmExecutable, npmArguments, { encoding: "utf8" });
 if (npmVersion.error || npmVersion.status !== 0) {
   fail("npm.unavailable", "تعذّر استدعاء npm — لا يمكن التحقق من عقد مدير الحزم.");
 } else {

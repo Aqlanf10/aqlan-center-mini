@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import "./load-env.mjs";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { npmCommand } from "./npm-command.mjs";
 import {
   GATE_DATABASE_URL_ENV_NAMES,
   checkDatabaseUrlForGates,
@@ -192,18 +193,18 @@ async function preflight() {
       `schema/current-schema-contract.pg18.json غير مقروء — بوابة التوليد تحتاج الملف الملتزم موجودًا (تُستعاد نسخته بعد التوليد).`,
     );
   }
-  // Chromium: نستعلم مسار التنفيذ من playwright نفسه — لا تخمينَ للمسارات.
+  // Test the same headless launch used by the journeys. executablePath() alone
+  // points to full Chromium even when a valid headless-shell install is present.
   try {
     const playwright = await import("playwright");
-    const executable = playwright.chromium.executablePath();
-    if (!existsSync(executable)) {
-      problems.push(
-        `Chromium غير مثبَّت (${executable}) — رحلات المتصفح واختبارات الأمن تحتاجه:\n`
-        + "    npx playwright install --with-deps chromium",
-      );
-    }
-  } catch {
-    problems.push("تعذّر قراءة حزمة playwright — شغّل npm ci أولًا.");
+    const browser = await playwright.chromium.launch({
+      headless: true,
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ?? process.env.PLAYWRIGHT_CHROMIUM,
+    });
+    await browser.close();
+  } catch (error) {
+    problems.push("تعذّر تشغيل Chromium — شغّل npm ci ثم npx playwright install chromium. "
+      + String(error?.message ?? error));
   }
   return problems;
 }
@@ -212,7 +213,9 @@ function runStep(step, context) {
   return new Promise((resolve) => {
     const started = Date.now();
     console.log(`\n═══ بوابة كاملة · ${step.name} ═══`);
-    const child = spawn(step.command[0], step.command.slice(1), {
+    const [executable, ...args] = step.command[0] === "npm"
+      ? npmCommand(step.command.slice(1)) : step.command;
+    const child = spawn(executable, args, {
       stdio: "inherit",
       cwd: repoRoot,
       env: process.env,

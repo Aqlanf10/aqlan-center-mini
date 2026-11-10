@@ -3,6 +3,7 @@ import { open, readFile, rename, rm, stat, unlink } from "node:fs/promises";
 import { createGzip } from "node:zlib";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 import { isSameOrInside, resolveInsideBase } from "./safe-path";
 
@@ -178,7 +179,19 @@ export async function atomicWriteJson(filePath: string, data: unknown): Promise<
     await file.close().catch(() => {});
   }
   try {
-    await rename(tmpPath, filePath);
+    // Windows can briefly deny replacement while another writer/scanner holds
+    // the destination. Retry the same atomic rename; never unlink the old file.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(tmpPath, filePath);
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (process.platform !== "win32" || attempt >= 6
+          || !["EPERM", "EACCES", "EBUSY"].includes(code ?? "")) throw error;
+        await delay(10 * 2 ** attempt);
+      }
+    }
   } catch (error) {
     await rm(tmpPath, { force: true }).catch(() => {});
     throw error;

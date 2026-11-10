@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
  */
 const file = new URL("../.env.local", import.meta.url);
 if (existsSync(file)) {
-  for (const line of readFileSync(file, "utf8").split("\n")) {
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
     const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
     if (!match) continue;
     const [, key, raw] = match;

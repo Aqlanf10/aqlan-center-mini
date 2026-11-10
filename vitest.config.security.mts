@@ -29,9 +29,7 @@ export default defineConfig({
     pool: "forks",
     fileParallelism: false,
     maxConcurrency: 1,
-    forks: {
-      singleFork: true,
-    },
+    maxWorkers: 1,
     // مستعبِر الخادم مفرد عبر الملفات كلها: بلا إعادة استيراد لكل ملف —
     // إعادة التهيئة كانت تُسقط القاعدة تحت خادم الجولة السابقة.
     isolate: false,
