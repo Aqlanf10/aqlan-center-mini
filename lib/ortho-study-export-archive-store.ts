@@ -8,12 +8,17 @@ import { canonicalJourneyJSON, journeyContentHash } from './ortho-case-journey-h
 import { journeyHash, journeyId } from './ortho-case-journey-records';
 import { ORTHO_STUDY_HISTORY_TABLES, PURCHASE_RESET_FENCE } from './clinic-reset';
 import { STUDY_TEXT_RENDERER } from './ortho-study-text-export';
-import { STUDY_ILLUSTRATED_RENDERER } from './ortho-study-illustrated';
+import { FULL_STUDY_RENDERER, FULL_STUDY_CONTRACT_HASH } from './ortho-study-full-layout';
+import { CASE_TEMPLATE_IDENTITY } from './ortho-case-template';
 import { readStudyExportCommand, STUDY_EXPORT_ARCHIVE_LIMITS as LIMITS, STUDY_EXPORT_FAILURES,
   type StudyExportCommand, type StudyExportFailure, type StudyExportFormat, type StudyExportJob } from './ortho-study-export-archive-contract';
 
 export const STUDY_ARCHIVE_RENDERERS: Readonly<Record<StudyExportFormat, string>> = Object.freeze({
-  'text-pptx': STUDY_TEXT_RENDERER, 'illustrated-pptx': STUDY_ILLUSTRATED_RENDERER,
+  'text-pptx': STUDY_TEXT_RENDERER, 'illustrated-pptx': FULL_STUDY_RENDERER,
+});
+export const STUDY_ARCHIVE_CONTRACTS: Readonly<Record<StudyExportFormat, string>> = Object.freeze({
+  'text-pptx': journeyContentHash({ renderer: STUDY_TEXT_RENDERER, template: CASE_TEMPLATE_IDENTITY }),
+  'illustrated-pptx': FULL_STUDY_CONTRACT_HASH,
 });
 export interface StudyExportLease { jobId: number; generation: number; token: string; expiresAt: string }
 export interface StudyExportArtifactReference { storageKey: string; sha256: string; sizeBytes: number }
@@ -25,7 +30,7 @@ export interface StudyExportRendition {
 interface JobRow {
   id: number; patient_id: number; ortho_case_id: number; clinical_case_id: number; actor_user_id: number;
   revision_id: number; revision_sha256: string; command_id: string; command: StudyExportCommand; request_fingerprint: string;
-  format: StudyExportFormat; render_binding: { language: 'ar'; privacy: 'clinical'; renderer: string; template: unknown };
+  format: StudyExportFormat; render_binding: { language: 'ar'; privacy: 'clinical'; renderer: string; contractHash: string; template: unknown };
   state: StudyExportJob['state']; generation: number; lease_token: string | null; lease_expires_at: Date | null;
   failure_code: StudyExportFailure | null; created_at: Date; updated_at: Date;
 }
@@ -78,7 +83,7 @@ export async function reserveStudyExport(input: JourneyOwnerInput & { command: u
     await fence(client);
     const saved = await readOrthoCaseStudyOn(client, { ...input, revisionId: command.revisionId, exportAccess: true });
     if (saved.revision?.contentHash !== command.revisionHash) journeyFail(409, 'study_export_revision_changed');
-    const binding = { language: 'ar', privacy: 'clinical', renderer: STUDY_ARCHIVE_RENDERERS[command.format], template: saved.revision.content.authored.template };
+    const binding = { language: 'ar', privacy: 'clinical', renderer: STUDY_ARCHIVE_RENDERERS[command.format], contractHash: STUDY_ARCHIVE_CONTRACTS[command.format], template: saved.revision.content.authored.template };
     await client.query(`INSERT INTO ortho_study_export_jobs(patient_id,ortho_case_id,clinical_case_id,actor_user_id,revision_id,revision_sha256,command_id,command,request_fingerprint,format,render_binding)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11::jsonb) ON CONFLICT(ortho_case_id,actor_user_id,command_id) DO NOTHING`,
     [saved.patientId,saved.orthoCaseId,saved.clinicalCaseId,input.session.userId,command.revisionId,command.revisionHash,command.clientRequestId,canonicalJourneyJSON(command),journeyContentHash(command),command.format,canonicalJourneyJSON(binding)]);
@@ -105,7 +110,7 @@ export async function claimStudyExport(input: JourneyOwnerInput & { jobId: numbe
     await fence(client); const preparedJob = await prepared(client, input, true), { row } = preparedJob;
     if (row.state === 'ready' || row.state === 'cancelled') return { ok: true as const, job: await receipt(client,row), lease: null, revision: null, scope: preparedJob.scope };
     if (row.generation !== input.expectedGeneration) journeyFail(409, 'study_export_generation_changed');
-    if (row.render_binding.renderer !== STUDY_ARCHIVE_RENDERERS[row.format]) journeyFail(409, 'study_export_renderer_unavailable');
+    if (row.render_binding.renderer !== STUDY_ARCHIVE_RENDERERS[row.format] || row.render_binding.contractHash !== STUDY_ARCHIVE_CONTRACTS[row.format]) journeyFail(409, 'study_export_renderer_unavailable');
     const claimed = (await client.query<JobRow>(`UPDATE ortho_study_export_jobs SET state='running',generation=generation+1,lease_token=$2,
       lease_expires_at=clock_timestamp()+INTERVAL '60 seconds',failure_code=NULL,updated_at=clock_timestamp()
       WHERE id=$1 AND (state IN ('queued','failed') OR (state='running' AND lease_expires_at<=clock_timestamp())) RETURNING *`, [row.id,randomUUID()])).rows[0];

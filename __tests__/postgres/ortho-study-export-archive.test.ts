@@ -6,6 +6,7 @@ import { saveConfirmedStudy } from '../helpers/ortho-study-submit';
 import { openPeriodontalFixture } from './_periodontal-fixture';
 import { reserveStudyExport, claimStudyExport, publishStudyExport, failStudyExport, cancelStudyExport, listStudyExports, readStudyExportArtifact } from '../../lib/ortho-study-export-archive-store';
 import { ProtectedOrthoStudyHistoryError } from '../../lib/clinic-reset';
+import { journeyContentHash } from '../../lib/ortho-case-journey-hash';
 const request=vi.hoisted(()=>({token:''}));
 vi.mock('next/headers',()=>({cookies:async()=>({get:(name:string)=>name==='aqlan_flow_session'?{value:request.token}:undefined}),headers:async()=>new Headers()}));
 let fixture:Awaited<ReturnType<typeof openPeriodontalFixture>>;
@@ -34,6 +35,16 @@ async function claimed(s:Awaited<ReturnType<typeof seed>>){const job=await reser
 const bytes=Buffer.from('Synthetic artifact payload for transactional store tests (not a rendered PPTX)');
 const sha256=createHash('sha256').update(bytes).digest('hex');
 const artifact={storageKey:`${sha256.slice(0,2)}/${sha256.slice(2,4)}/${sha256}.pptx`,sha256,sizeBytes:bytes.length,pageCount:1,renditions:[]};
+it('refuses a restored job pinned to a different renderer contract without silently changing its intent', async () => {
+ const s=await seed(),job=await reserved(s),command={...s.command,clientRequestId:randomUUID()};
+ const restored=(await fixture.pool.query(`INSERT INTO ortho_study_export_jobs(patient_id,ortho_case_id,clinical_case_id,actor_user_id,revision_id,revision_sha256,command_id,command,request_fingerprint,format,render_binding)
+   SELECT patient_id,ortho_case_id,clinical_case_id,actor_user_id,revision_id,revision_sha256,$2,$3::jsonb,$4,format,
+   jsonb_set(render_binding,'{contractHash}',to_jsonb($5::text)) FROM ortho_study_export_jobs WHERE id=$1 RETURNING id`,
+ [job.id,command.clientRequestId,JSON.stringify(command),journeyContentHash(command),'0'.repeat(64)])).rows[0];
+ expect(await claimStudyExport({...s.scope,jobId:restored.id,expectedGeneration:0})).toMatchObject({ok:false,code:'study_export_renderer_unavailable'});
+ expect((await fixture.pool.query('SELECT state,generation,render_binding FROM ortho_study_export_jobs WHERE id=$1',[restored.id])).rows[0]).toMatchObject({state:'queued',generation:0,render_binding:{contractHash:'0'.repeat(64)}});
+ expect((await fixture.pool.query('SELECT count(*)::int n FROM ortho_study_export_artifacts WHERE job_id=$1',[restored.id])).rows[0].n).toBe(0);
+});
 it('reserves exactly one job for concurrent exact retry and rejects reused intent keys',async()=>{
  const s=await seed();const attempts=await Promise.all(Array.from({length:4},()=>reserveStudyExport({...s.scope,command:s.command})));
  expect(attempts.every(x=>x.ok)).toBe(true);expect(new Set(attempts.flatMap(x=>x.ok?[x.job.id]:[])).size).toBe(1);
