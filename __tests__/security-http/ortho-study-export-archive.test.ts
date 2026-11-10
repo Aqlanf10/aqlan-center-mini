@@ -163,5 +163,23 @@ it.each([390, 1280])('archives the selected saved revision through explicit brow
     await panel.scrollIntoViewIfNeeded();
     await mkdir('.settings-ui-artifacts', { recursive: true });
     await panel.screenshot({ path: `.settings-ui-artifacts/ortho-archive-${width}.png` });
+    // Seed queued history through the real reserve API, then recover the original
+    // ready artifact from page two. Paging must never start any queued export.
+    for (let index = 0; index < 26; index++) {
+      expect((await authedMutation(study.route, h.sessions.admin, 'POST', JSON.stringify(body(study, 'text-pptx')))).status).toBe(201);
+    }
+    await page.getByRole('button', { name: 'تحديث حالة الملفات', exact: true }).click();
+    await expect.poll(() => panel.locator('li').count()).toBe(25);
+    expect(await link.count()).toBe(0);
+    const older = page.getByRole('button', { name: 'عرض ملفات أقدم', exact: true }); await older.click();
+    await expect.poll(() => panel.locator('li').count()).toBe(27);
+    expect(await link.getAttribute('href')).toBe(href); expect(await older.count()).toBe(0);
+    expect(createHash('sha256').update(await (await context.request.get(`${baseUrl}${href}`)).body()).digest('hex')).toBe(firstHash);
+    expect(writes).toHaveLength(2);
+    expect((await db.query("SELECT state,count(*)::int n FROM ortho_study_export_jobs WHERE ortho_case_id=$1 GROUP BY state ORDER BY state", [study.caseId])).rows)
+      .toEqual([{ state: 'queued', n: 26 }, { state: 'ready', n: 1 }]);
+    await page.getByRole('button', { name: 'تحديث حالة الملفات', exact: true }).click();
+    await expect.poll(() => panel.locator('li').count()).toBe(25);
+    expect(await link.count()).toBe(0); expect(writes).toHaveLength(2); expect(errors).toEqual([]);
   } finally { await context.close(); }
 });

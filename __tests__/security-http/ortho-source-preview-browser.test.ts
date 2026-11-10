@@ -13,15 +13,30 @@ beforeAll(async () => {
   await mkdir(".settings-ui-artifacts", { recursive: true });
 });
 afterAll(async () => { await browser?.close(); await db?.end(); });
+async function sourcePanelVisible(page: Page) {
+  const panel = page.getByRole("region", { name: "مصدر القياس وتاريخه", exact: true });
+  expect(await panel.evaluate(element => element === document.activeElement)).toBe(true);
+  expect(await panel.evaluate(element => {
+    const top = element.getBoundingClientRect().top;
+    const overlayBottom = Math.max(0, ...Array.from(document.querySelectorAll(".sticky")).map(node => {
+      const rect = node.getBoundingClientRect();
+      return getComputedStyle(node).position === "sticky" && rect.width > 0 && rect.top <= 1 ? rect.bottom : 0;
+    }));
+    return top >= overlayBottom && top < innerHeight;
+  })).toBe(true);
+}
 async function measurement(page: Page, tooth: number, value: string, date: string, method: string, operator: string) {
   await page.getByRole("combobox", { name: `حالة السن ${tooth}`, exact: true }).selectOption("measured");
   await page.getByLabel(`قيمة السن ${tooth} (mm)`, { exact: true }).fill(value);
   await page.getByRole("button", { name: `المصدر والتاريخ: السن ${tooth}`, exact: true }).click();
+  await sourcePanelVisible(page);
   const metadata = page.getByRole("region", { name: "مصدر القياس وتاريخه", exact: true });
   await metadata.getByLabel("حالة تاريخ الفحص", { exact: true }).selectOption("known");
   await metadata.getByLabel("تاريخ الفحص المعلوم", { exact: true }).fill(date);
   await metadata.getByLabel("طريقة القياس", { exact: true }).selectOption("manual_record_measurement");
-  await metadata.getByLabel("وصف طريقة القياس", { exact: true }).fill(method);
+  const description = metadata.getByLabel("وصف طريقة القياس", { exact: true });
+  await description.fill(method);
+  expect(await description.evaluate(element => element === document.activeElement)).toBe(true);
   await metadata.getByLabel("حالة منفذ الفحص", { exact: true }).selectOption("documented");
   await metadata.getByLabel("إسناد منفذ الفحص", { exact: true }).fill(operator);
 }
@@ -62,7 +77,12 @@ describe("built measurement session provenance preview", () => {
       await preview.getByRole("checkbox", { name: "إبقاء FDI 13 ضمن التطبيق", exact: true }).click();
       expect(await page.getByRole("checkbox", { name: "اختيار السن 13 لجلسة القياس", exact: true }).isChecked()).toBe(false);
       expect(await preview.getByRole("checkbox").count()).toBe(1);
-      await preview.scrollIntoViewIfNeeded();
+      await preview.evaluate(element => element.scrollIntoView({ block: "start", behavior: "instant" }));
+      expect(await preview.locator("h5").evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        const visible = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return visible === element || !!visible && element.contains(visible);
+      })).toBe(true);
       expect(await preview.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await preview.screenshot({ path: `.settings-ui-artifacts/ortho-source-preview-${width}.png` });
