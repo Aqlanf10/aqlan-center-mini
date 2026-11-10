@@ -1,0 +1,134 @@
+"use client";
+
+import { useLayoutEffect, useRef, useState } from "react";
+import { useSession } from "./SessionProvider";
+import { canExportOrthoStudy } from "@/lib/ortho-study-export-access";
+import { STUDY_EXPORT_ARCHIVE_LIMITS, STUDY_EXPORT_FAILURES, STUDY_EXPORT_FORMATS, type StudyExportCommand, type StudyExportFormat, type StudyExportJob } from "@/lib/ortho-study-export-archive-contract";
+
+interface Props { patientId: number; orthoCaseId: number; revisionId: number; revisionHash: string }
+const control = "min-h-11 rounded border px-3 py-2 disabled:opacity-50";
+const states: Record<StudyExportJob["state"], string> = { queued: "بانتظار تشغيلك", running: "قيد تجهيز الملف", ready: "جاهز للتنزيل", failed: "تعذر تجهيز الملف", cancelled: "ملغى" };
+const failures: Record<string, string> = {
+  render_failed: "تعذر تجهيز الملف؛ يمكنك إعادة المحاولة.", render_limit: "تجاوز العرض حجم التصدير المسموح. راجع محتوى النسخة المحفوظة.",
+  storage_unavailable: "تخزين الملفات غير متاح حاليًا.", storage_failed: "تعذر حفظ ملف التصدير.", authority_changed: "تغيرت صلاحيات الوصول؛ حدّث الصفحة للتحقق.",
+  lease_expired: "انتهت مهلة التشغيل؛ حدّث الحالة قبل إعادة المحاولة.", renderer_unavailable: "صيغة هذا الطلب غير متاحة للتشغيل حاليًا.",
+};
+const positive = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0;
+const hash = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+const timestamp = (value: unknown): value is string => typeof value === "string" && Number.isFinite(Date.parse(value));
+/** Whitelist the public receipt; never render server paths, arbitrary messages or manifests. */
+function receipt(raw: unknown, scope: Props): StudyExportJob {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw Error("invalid_receipt");
+  const job = raw as StudyExportJob;
+  if (!positive(job.id) || job.revisionId !== scope.revisionId || job.revisionHash !== scope.revisionHash
+    || !STUDY_EXPORT_FORMATS.includes(job.format) || !Object.hasOwn(states, job.state) || !positive(job.creatorId)
+    || !Number.isSafeInteger(job.generation) || job.generation < 0 || !timestamp(job.createdAt) || !timestamp(job.updatedAt)
+    || !(job.failureCode === null || STUDY_EXPORT_FAILURES.includes(job.failureCode))) throw Error("invalid_receipt");
+  const artifact = job.artifact;
+  if (artifact !== null && (!artifact || typeof artifact !== "object" || !hash(artifact.sha256) || !positive(artifact.sizeBytes)
+    || artifact.sizeBytes > STUDY_EXPORT_ARCHIVE_LIMITS.bytes || !positive(artifact.pageCount)
+    || artifact.pageCount > STUDY_EXPORT_ARCHIVE_LIMITS.pages || !timestamp(artifact.createdAt))) throw Error("invalid_receipt");
+  if ((job.state === "ready") !== (artifact !== null)) throw Error("invalid_receipt");
+  return { id: job.id, revisionId: job.revisionId, revisionHash: job.revisionHash, format: job.format, state: job.state,
+    generation: job.generation, creatorId: job.creatorId, createdAt: job.createdAt, updatedAt: job.updatedAt, failureCode: job.failureCode,
+    artifact: artifact ? { sha256: artifact.sha256, sizeBytes: artifact.sizeBytes, pageCount: artifact.pageCount, createdAt: artifact.createdAt } : null };
+}
+
+export function OrthoStudyExportArchive(props: Props) {
+  const session = useSession();
+  if (!canExportOrthoStudy(session) || !hash(props.revisionHash)) return null;
+  // A changed identity, role or saved revision retires all in-flight response owners.
+  const identity = `${session?.userId ?? "unknown"}:${session?.username}:${session?.role}:${JSON.stringify(session?.permissions ?? null)}`;
+  return <ArchiveWorkspace key={`${identity}:${props.patientId}:${props.orthoCaseId}:${props.revisionId}:${props.revisionHash}`}
+    {...props} actorId={session?.userId} />;
+}
+
+function ArchiveWorkspace(props: Props & { actorId?: number }) {
+  const [open, setOpen] = useState(false), [jobs, setJobs] = useState<StudyExportJob[]>([]);
+  const [format, setFormat] = useState<StudyExportFormat>("illustrated-pptx");
+  const [busy, setBusy] = useState(false), [loaded, setLoaded] = useState(false), [more, setMore] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null), [denied, setDenied] = useState(false);
+  const [pending, setPending] = useState<StudyExportCommand | null>(null);
+  const mounted = useRef(false), lock = useRef<object | null>(null), controllers = useRef(new Set<AbortController>());
+  const pendingRef = useRef<StudyExportCommand | null>(null);
+  const endpoint = `/api/ortho/${props.orthoCaseId}/case-study/exports`;
+  useLayoutEffect(() => {
+    const activeControllers = controllers.current;
+    mounted.current = true;
+    return () => { mounted.current = false; lock.current = null; for (const controller of activeControllers) controller.abort(); activeControllers.clear(); };
+  }, []);
+  const current = (token: object) => mounted.current && lock.current === token;
+  async function request(kind: "list" | "reserve" | "run", job?: StudyExportJob) {
+    if (!mounted.current || lock.current || denied || kind !== "list" && !positive(props.actorId)) return;
+    if (kind === "run" && (!job || job.creatorId !== props.actorId || !["queued", "running", "failed"].includes(job.state))) return;
+    const token = {}; lock.current = token; setBusy(true); setNotice(null);
+    const controller = new AbortController(); controllers.current.add(controller);
+    const timer = setTimeout(() => controller.abort(), kind === "run" ? 90_000 : 20_000);
+    let url = `${endpoint}?patientId=${props.patientId}&revisionId=${props.revisionId}`, body: unknown;
+    if (kind === "reserve") {
+      const command = pendingRef.current ?? { schemaVersion: 1 as const, clientRequestId: crypto.randomUUID(), revisionId: props.revisionId, revisionHash: props.revisionHash, format };
+      pendingRef.current = command; setPending(command); url = endpoint; body = { patientId: props.patientId, command };
+    } else if (kind === "run") { url = `${endpoint}/${job!.id}/run`; body = { patientId: props.patientId, expectedGeneration: job!.generation }; }
+    try {
+      const response = await fetch(url, { method: kind === "list" ? "GET" : "POST", credentials: "same-origin", redirect: "error", cache: "no-store",
+        signal: controller.signal, ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
+      if (!current(token)) return;
+      if (response.status === 401 || response.status === 403) {
+        setDenied(true); setJobs([]); setNotice("لم تعد صلاحية التصدير أو الوصول متاحة. حدّث الصفحة للتحقق من الجلسة."); return;
+      }
+      if (!response.ok) {
+        setNotice(response.status === 409 ? "تغيرت حالة الطلب أو النسخة. حدّث قائمة الملفات قبل إعادة المحاولة."
+          : "لم يتأكد الطلب. احتُفظ باختيارك؛ حدّث الحالة أو أعد نفس الطلب."); return;
+      }
+      const raw: unknown = await response.json(); if (!current(token)) return;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw) || !("ok" in raw) || raw.ok !== true) throw Error("invalid_response");
+      if (kind === "list") {
+        if (!("jobs" in raw) || !Array.isArray(raw.jobs) || raw.jobs.length > 25 || !("next" in raw)
+          || !(raw.next === null || positive(raw.next))) throw Error("invalid_response");
+        const rows = raw.jobs.map(value => receipt(value, props));
+        if (new Set(rows.map(row => row.id)).size !== rows.length) throw Error("invalid_response");
+        setJobs(rows); setLoaded(true); setMore(raw.next !== null);
+      } else {
+        if (!("job" in raw)) throw Error("invalid_response");
+        const row = receipt(raw.job, props);
+        if (kind === "reserve" && (row.creatorId !== props.actorId || row.format !== pendingRef.current?.format)
+          || kind === "run" && row.id !== job!.id) throw Error("invalid_response");
+        setJobs(previous => [row, ...previous.filter(item => item.id !== row.id)].slice(0, 25));
+        if (kind === "reserve") { pendingRef.current = null; setPending(null); }
+        setNotice(kind === "reserve" ? "حُفظ طلب التصدير. اضغط «تجهيز الملف» لتشغيله." : row.state === "ready" ? "حُفظ الملف وهو جاهز للتنزيل." : "حدّث الحالة لمراجعة نتيجة التشغيل.");
+      }
+    } catch { if (current(token)) setNotice("لم يتأكد الطلب. احتُفظ باختيارك؛ حدّث الحالة أو أعد نفس الطلب."); }
+    finally { clearTimeout(timer); controllers.current.delete(controller); if (current(token)) { lock.current = null; setBusy(false); } }
+  }
+  return <details className="w-full rounded border p-3" onToggle={event => {
+    setOpen(event.currentTarget.open);
+    // Opening performs only a read; subsequent recovery is explicit.
+    if (event.currentTarget.open && !loaded && !denied) void request("list");
+  }}>
+    <summary className="cursor-pointer font-semibold">ملفات التصدير المحفوظة</summary>
+    {open && <div className="mt-3 space-y-3">
+      <p>تصدير هذه النسخة المحفوظة فقط. يبدأ التجهيز عند ضغط الزر؛ لا يوجد تشغيل تلقائي في الخلفية.</p>
+      {notice && <p role="status">{notice}</p>}
+      {!denied && <>
+        <button type="button" className={control} disabled={busy} onClick={() => void request("list")}>تحديث حالة الملفات</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <label>نوع الملف <select aria-label="نوع ملف التصدير المحفوظ" className={control} value={format} disabled={busy || !!pending}
+            onChange={event => setFormat(event.target.value as StudyExportFormat)}><option value="illustrated-pptx">PowerPoint مصور</option><option value="text-pptx">PowerPoint نصي</option></select></label>
+          <button type="button" className={control} disabled={busy || !positive(props.actorId)} onClick={() => void request("reserve")}>{pending ? "التحقق بإعادة نفس طلب التصدير" : "حفظ طلب تصدير جديد"}</button>
+        </div>
+        {pending && <p>طلب الحفظ غير محسوم؛ إعادة المحاولة تستخدم الطلب نفسه لمنع التكرار.</p>}
+        {!positive(props.actorId) && <p>حدّث الصفحة لإثبات هوية الجلسة قبل إنشاء طلب أو تشغيله.</p>}
+        {loaded && jobs.length === 0 && <p>لا توجد ملفات محفوظة لهذه النسخة بعد.</p>}
+        {more && <p>تُعرض أحدث 25 نتيجة لهذه النسخة.</p>}
+        <ul className="space-y-2">{jobs.map(job => <li key={job.id} className="rounded border p-2">
+          <p>{job.format === "text-pptx" ? "PowerPoint نصي" : "PowerPoint مصور"} · {states[job.state]}</p>
+          <p className="text-xs">طلب رقم <bdi>{job.id}</bdi> · <bdi>{job.createdAt}</bdi></p>
+          {job.failureCode && <p>{failures[job.failureCode]}</p>}
+          {job.state === "ready" && job.artifact && <a className={control} href={`${endpoint}/${job.id}/download?patientId=${props.patientId}`}>تنزيل الملف المحفوظ · {job.artifact.pageCount} صفحات</a>}
+          {job.creatorId === props.actorId && ["queued", "running", "failed"].includes(job.state) && <button type="button" className={control} disabled={busy}
+            onClick={() => void request("run", job)}>{job.state === "queued" ? "تجهيز الملف" : "إعادة محاولة تجهيز الملف"}</button>}
+        </li>)}</ul>
+      </>}
+    </div>}
+  </details>;
+}
