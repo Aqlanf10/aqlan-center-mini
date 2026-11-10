@@ -46,6 +46,16 @@ function receipt(raw: unknown, scope: Props): StudyExportJob {
     generation: job.generation, creatorId: job.creatorId, createdAt: job.createdAt, updatedAt: job.updatedAt, failureCode: job.failureCode,
     artifact: artifact ? { sha256: artifact.sha256, sizeBytes: artifact.sizeBytes, pageCount: artifact.pageCount, createdAt: artifact.createdAt } : null };
 }
+function mergeJobPages(previous: readonly StudyExportJob[], incoming: readonly StudyExportJob[]): StudyExportJob[] {
+  const merged = new Map(previous.map(job => [job.id, job]));
+  for (const job of incoming) {
+    const existing = merged.get(job.id);
+    if (existing && (existing.revisionId !== job.revisionId || existing.revisionHash !== job.revisionHash
+      || existing.creatorId !== job.creatorId || existing.format !== job.format || existing.createdAt !== job.createdAt)) throw Error("invalid_receipt_identity");
+    merged.set(job.id, job);
+  }
+  return [...merged.values()].sort((left, right) => right.id - left.id);
+}
 
 export function OrthoStudyExportArchive(props: Props) {
   const session = useSession();
@@ -59,11 +69,12 @@ export function OrthoStudyExportArchive(props: Props) {
 function ArchiveWorkspace(props: Props & { actorId?: number }) {
   const [open, setOpen] = useState(false), [jobs, setJobs] = useState<StudyExportJob[]>([]);
   const [format, setFormat] = useState<StudyExportFormat>("illustrated-pptx");
-  const [busy, setBusy] = useState(false), [loaded, setLoaded] = useState(false), [more, setMore] = useState(false);
+  const [busy, setBusy] = useState(false), [loaded, setLoaded] = useState(false), [nextCursor, setNextCursor] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null), [denied, setDenied] = useState(false);
   const [pending, setPending] = useState<StudyExportCommand | null>(null);
   const mounted = useRef(false), lock = useRef<object | null>(null), controllers = useRef(new Set<AbortController>());
   const pendingRef = useRef<StudyExportCommand | null>(null);
+  const jobsRef = useRef<StudyExportJob[]>([]), cursorRef = useRef<number | null>(null);
   const endpoint = `/api/ortho/${props.orthoCaseId}/case-study/exports`;
   useLayoutEffect(() => {
     const activeControllers = controllers.current;
@@ -71,23 +82,26 @@ function ArchiveWorkspace(props: Props & { actorId?: number }) {
     return () => { mounted.current = false; lock.current = null; for (const controller of activeControllers) controller.abort(); activeControllers.clear(); };
   }, []);
   const current = (token: object) => mounted.current && lock.current === token;
-  async function request(kind: "list" | "reserve" | "run", job?: StudyExportJob) {
-    if (!mounted.current || lock.current || denied || kind !== "list" && !positive(props.actorId)) return;
+  const replaceJobs = (next: StudyExportJob[]) => { jobsRef.current = next; setJobs(next); };
+  async function request(kind: "list" | "older" | "reserve" | "run", job?: StudyExportJob) {
+    const reading = kind === "list" || kind === "older", after = kind === "older" ? cursorRef.current : null;
+    if (!mounted.current || lock.current || denied || !reading && !positive(props.actorId) || kind === "older" && !positive(after)) return;
     if (kind === "run" && (!job || job.creatorId !== props.actorId || !["queued", "running", "failed"].includes(job.state))) return;
     const token = {}; lock.current = token; setBusy(true); setNotice(null);
     const controller = new AbortController(); controllers.current.add(controller);
     const timer = setTimeout(() => controller.abort(), kind === "run" ? 90_000 : 20_000);
     let url = `${endpoint}?patientId=${props.patientId}&revisionId=${props.revisionId}`, body: unknown;
-    if (kind === "reserve") {
+    if (kind === "older") url += `&after=${after}`;
+    else if (kind === "reserve") {
       const command = pendingRef.current ?? { schemaVersion: 1 as const, clientRequestId: crypto.randomUUID(), revisionId: props.revisionId, revisionHash: props.revisionHash, format };
       pendingRef.current = command; setPending(command); url = endpoint; body = { patientId: props.patientId, command };
     } else if (kind === "run") { url = `${endpoint}/${job!.id}/run`; body = { patientId: props.patientId, expectedGeneration: job!.generation }; }
     try {
-      const response = await fetch(url, { method: kind === "list" ? "GET" : "POST", credentials: "same-origin", redirect: "error", cache: "no-store",
+      const response = await fetch(url, { method: reading ? "GET" : "POST", credentials: "same-origin", redirect: "error", cache: "no-store",
         signal: controller.signal, ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
       if (!current(token)) return;
       if (response.status === 401 || response.status === 403) {
-        setDenied(true); setJobs([]); setNotice("لم تعد صلاحية التصدير أو الوصول متاحة. حدّث الصفحة للتحقق من الجلسة."); return;
+        setDenied(true); replaceJobs([]); setNotice("لم تعد صلاحية التصدير أو الوصول متاحة. حدّث الصفحة للتحقق من الجلسة."); return;
       }
       if (!response.ok) {
         const raw: unknown = await response.json(); if (!current(token)) return;
@@ -98,7 +112,7 @@ function ArchiveWorkspace(props: Props & { actorId?: number }) {
           const row = receipt(raw.job, props);
           if (row.id !== job!.id || row.creatorId !== job!.creatorId || row.format !== job!.format
             || row.state !== "failed" || row.generation < job!.generation) throw Error("invalid_receipt");
-          setJobs(previous => [row, ...previous.filter(item => item.id !== row.id)].slice(0, 25));
+          replaceJobs(mergeJobPages(jobsRef.current, [row]));
         }
         setNotice(code ? requestFailures[code] : response.status === 409
           ? "لم يكتمل الطلب. حدّث حالة الملفات قبل إعادة المحاولة."
@@ -106,18 +120,21 @@ function ArchiveWorkspace(props: Props & { actorId?: number }) {
       }
       const raw: unknown = await response.json(); if (!current(token)) return;
       if (!raw || typeof raw !== "object" || Array.isArray(raw) || !("ok" in raw) || raw.ok !== true) throw Error("invalid_response");
-      if (kind === "list") {
-        if (!("jobs" in raw) || !Array.isArray(raw.jobs) || raw.jobs.length > 25 || !("next" in raw)
+      if (reading) {
+        if (!("jobs" in raw) || !Array.isArray(raw.jobs) || raw.jobs.length > STUDY_EXPORT_ARCHIVE_LIMITS.list || !("next" in raw)
           || !(raw.next === null || positive(raw.next))) throw Error("invalid_response");
         const rows = raw.jobs.map(value => receipt(value, props));
-        if (new Set(rows.map(row => row.id)).size !== rows.length) throw Error("invalid_response");
-        setJobs(rows); setLoaded(true); setMore(raw.next !== null);
+        if (rows.some((row, index) => index > 0 && row.id >= rows[index - 1].id || after !== null && row.id >= after)
+          || raw.next !== (rows.length === STUDY_EXPORT_ARCHIVE_LIMITS.list ? rows.at(-1)!.id : null)) throw Error("invalid_response");
+        const merged = mergeJobPages(jobsRef.current, rows);
+        replaceJobs(kind === "older" ? merged : rows); setLoaded(true);
+        cursorRef.current = raw.next; setNextCursor(raw.next);
       } else {
         if (!("job" in raw)) throw Error("invalid_response");
         const row = receipt(raw.job, props);
         if (kind === "reserve" && (row.creatorId !== props.actorId || row.format !== pendingRef.current?.format)
           || kind === "run" && row.id !== job!.id) throw Error("invalid_response");
-        setJobs(previous => [row, ...previous.filter(item => item.id !== row.id)].slice(0, 25));
+        replaceJobs(mergeJobPages(jobsRef.current, [row]));
         if (kind === "reserve") { pendingRef.current = null; setPending(null); }
         setNotice(kind === "reserve" ? reservationNotices[row.state] : row.state === "ready" ? "حُفظ الملف وهو جاهز للتنزيل." : "حدّث الحالة لمراجعة نتيجة التشغيل.");
       }
@@ -143,7 +160,6 @@ function ArchiveWorkspace(props: Props & { actorId?: number }) {
         {pending && <p>طلب الحفظ غير محسوم؛ إعادة المحاولة تستخدم الطلب نفسه لمنع التكرار.</p>}
         {!positive(props.actorId) && <p>حدّث الصفحة لإثبات هوية الجلسة قبل إنشاء طلب أو تشغيله.</p>}
         {loaded && jobs.length === 0 && <p>لا توجد ملفات محفوظة لهذه النسخة بعد.</p>}
-        {more && <p>تُعرض أحدث 25 نتيجة لهذه النسخة.</p>}
         <ul className="space-y-2">{jobs.map(job => <li key={job.id} className="rounded border p-2">
           <p>{job.format === "text-pptx" ? "PowerPoint نصي" : "PowerPoint مصور"} · {states[job.state]}</p>
           <p className="text-xs">طلب رقم <bdi>{job.id}</bdi></p>
@@ -154,6 +170,7 @@ function ArchiveWorkspace(props: Props & { actorId?: number }) {
           {job.creatorId === props.actorId && ["queued", "running", "failed"].includes(job.state) && <button type="button" className={control} disabled={busy}
             onClick={() => void request("run", job)}>{job.state === "queued" ? "تجهيز الملف" : "إعادة محاولة تجهيز الملف"}</button>}
         </li>)}</ul>
+        {nextCursor !== null && <button type="button" className={control} disabled={busy} onClick={() => void request("older")}>عرض ملفات أقدم</button>}
       </>}
     </div>}
   </details>;

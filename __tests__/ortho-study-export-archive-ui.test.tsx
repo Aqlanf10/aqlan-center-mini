@@ -89,6 +89,8 @@ const button = (label: string) => { const found = nodes(render()).find(node => n
   if (!found) throw Error(`Missing ${label}`); return found; };
 const click = (label: string) => { const found = button(label); expect(found.props.disabled).not.toBe(true); (found.props.onClick as () => void)(); render(); };
 const posts = () => fetchMock.mock.calls.filter(([, init]) => init.method === "POST");
+const pageOfJobs = (highest: number, count: number) => Array.from({ length: count }, (_, offset) => job({ id: highest - offset }));
+const visibleJobIds = () => nodes(render()).filter(node => node.type === "li").map(row => Number(textOf(nodes(row).find(node => node.type === "bdi"))));
 beforeEach(() => {
   retire(); props = { patientId: 1, orthoCaseId: 2, revisionId: 3, revisionHash: "a".repeat(64) };
   hooks.session = { userId: 7, username: "Synthetic", role: "doctor", permissions: { canExportOrthoStudies: true } as SessionInfo["permissions"] };
@@ -97,6 +99,93 @@ beforeEach(() => {
 afterEach(() => { retire(); vi.unstubAllGlobals(); });
 
 describe("saved study export archive", () => {
+  it("loads older pages only on explicit clicks with the same scope and no duplicate rows or POST", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(60, 25), next: 36 })); await open();
+    expect(visibleJobIds()).toHaveLength(25); expect(fetchMock).toHaveBeenCalledTimes(1);
+    let resolve!: (value: unknown) => void; fetchMock.mockImplementation(() => new Promise(done => { resolve = done; }));
+    const older = button("عرض ملفات أقدم").props.onClick as () => void; older(); older();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/ortho/2/case-study/exports?patientId=1&revisionId=3&after=36");
+    resolve(ok({ ok: true, jobs: pageOfJobs(35, 25), next: 11 })); await flush();
+    expect(visibleJobIds()).toHaveLength(50); expect(new Set(visibleJobIds()).size).toBe(50);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(10, 10), next: null }));
+    click("عرض ملفات أقدم"); await flush();
+    expect(fetchMock.mock.calls[2][0]).toContain("after=11"); expect(visibleJobIds()).toEqual(Array.from({ length: 60 }, (_, index) => 60 - index));
+    expect(nodes(render()).filter(node => node.type === "button").map(textOf)).not.toContain("عرض ملفات أقدم"); expect(posts()).toHaveLength(0);
+  });
+
+  it("keeps loaded jobs and the exact cursor after a lost older-page response", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(50, 25), next: 26 })); await open();
+    const before = visibleJobIds(); fetchMock.mockRejectedValueOnce(Error("Synthetic lost page response"));
+    click("عرض ملفات أقدم"); await flush(); expect(visibleJobIds()).toEqual(before);
+    const failedUrl = fetchMock.mock.calls[1][0];
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(25, 25), next: 1 }));
+    click("عرض ملفات أقدم"); await flush(); expect(fetchMock.mock.calls[2][0]).toBe(failedUrl);
+    expect(visibleJobIds()).toHaveLength(50); expect(posts()).toHaveLength(0);
+  });
+
+  it("resets pagination on successful explicit refresh and starts at the newest page after remount", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(50, 25), next: 26 })); await open();
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(25, 25), next: 1 })); click("عرض ملفات أقدم"); await flush();
+    const loaded = visibleJobIds(); fetchMock.mockRejectedValueOnce(Error("Synthetic failed refresh"));
+    click("تحديث حالة الملفات"); await flush(); expect(visibleJobIds()).toEqual(loaded); expect(button("عرض ملفات أقدم")).toBeDefined();
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(70, 25), next: 46 })); click("تحديث حالة الملفات"); await flush();
+    expect(fetchMock.mock.calls.at(-1)![0]).not.toContain("after="); expect(visibleJobIds()).toEqual(Array.from({ length: 25 }, (_, index) => 70 - index));
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(45, 25), next: 21 })); click("عرض ملفات أقدم"); await flush();
+    expect(fetchMock.mock.calls.at(-1)![0]).toContain("after=46");
+    retire(); fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(70, 25), next: 46 }));
+    render(); const readsBefore = fetchMock.mock.calls.length; await open();
+    expect(fetchMock).toHaveBeenCalledTimes(readsBefore + 1); expect(fetchMock.mock.calls.at(-1)![0]).not.toContain("after=");
+    expect(visibleJobIds()).toHaveLength(25); expect(posts()).toHaveLength(0);
+  });
+
+  it("discards a delayed older page when the selected saved revision changes", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(50, 25), next: 26 })); await open();
+    let resolve!: (value: unknown) => void; fetchMock.mockImplementation(() => new Promise(done => { resolve = done; }));
+    click("عرض ملفات أقدم"); const signal = fetchMock.mock.calls.at(-1)![1].signal as AbortSignal;
+    props = { ...props, revisionId: 4, revisionHash: "b".repeat(64) }; render(); expect(signal.aborted).toBe(true);
+    resolve(ok({ ok: true, jobs: pageOfJobs(25, 25), next: 1 })); await flush(); expect(visibleJobIds()).toHaveLength(0);
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [], next: null })); await open();
+    expect(fetchMock.mock.calls.at(-1)![0]).toBe("/api/ortho/2/case-study/exports?patientId=1&revisionId=4"); expect(posts()).toHaveLength(0);
+  });
+
+  it.each([
+    ["wrong page tail", pageOfJobs(50, 25), 27],
+    ["short page with cursor", pageOfJobs(50, 2), 49],
+    ["full page without cursor", pageOfJobs(50, 25), null],
+    ["unordered page", [job({ id: 10 }), job({ id: 11 })], null],
+    ["duplicate page identity", [job({ id: 10 }), job({ id: 10 })], null],
+  ])("rejects an invalid page contract: %s", async (_label, jobs, next) => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs, next })); await open();
+    expect(visibleJobIds()).toHaveLength(0); expect(textOf(render())).toContain("لم يتأكد الطلب"); expect(posts()).toHaveLength(0);
+  });
+
+  it("rejects a page that does not advance below the requested cursor without losing history", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(50, 25), next: 26 })); await open();
+    const before = visibleJobIds(); fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(26, 25), next: 2 }));
+    click("عرض ملفات أقدم"); await flush(); expect(visibleJobIds()).toEqual(before); expect(textOf(render())).toContain("لم يتأكد الطلب");
+  });
+
+  it("deduplicates a recovered job on its older page and preserves loaded history after run mutations", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(50, 25), next: 26 })); await open();
+    fetchMock.mockImplementation(async () => ok({ ok: true, job: job({ id: 10 }) })); click("حفظ طلب تصدير جديد"); await flush();
+    expect(visibleJobIds()).toHaveLength(26);
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(25, 25), next: 1 })); click("عرض ملفات أقدم"); await flush();
+    expect(visibleJobIds()).toHaveLength(50); expect(new Set(visibleJobIds()).size).toBe(50);
+    fetchMock.mockImplementation(async () => ok({ ok: true, job: job({ id: 50, generation: 1, state: "running" }) }));
+    click("تجهيز الملف"); await flush(); expect(visibleJobIds()).toHaveLength(50); expect(visibleJobIds()).toContain(1);
+    fetchMock.mockImplementation(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, code: "study_export_failed", job: job({ id: 50, generation: 2, state: "failed", failureCode: "render_failed" }) }) }));
+    click("إعادة محاولة تجهيز الملف"); await flush(); expect(visibleJobIds()).toHaveLength(50); expect(visibleJobIds()).toContain(1);
+  });
+
+  it("rejects a changed immutable identity for an already loaded job", async () => {
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: pageOfJobs(50, 25), next: 26 })); await open();
+    fetchMock.mockImplementation(async () => ok({ ok: true, job: job({ id: 10 }) })); click("حفظ طلب تصدير جديد"); await flush();
+    const before = visibleJobIds(), older = pageOfJobs(25, 25); older.find(row => row.id === 10)!.creatorId = 99;
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: older, next: 1 })); click("عرض ملفات أقدم"); await flush();
+    expect(visibleJobIds()).toEqual(before); expect(textOf(render())).toContain("لم يتأكد الطلب");
+  });
   it("stays collapsed without fetching and performs only a scoped GET on opening", async () => {
     expect(textOf(render())).toBe("ملفات التصدير المحفوظة"); expect(fetchMock).not.toHaveBeenCalled();
     await open(); expect(fetchMock).toHaveBeenCalledTimes(1); expect(posts()).toHaveLength(0);
