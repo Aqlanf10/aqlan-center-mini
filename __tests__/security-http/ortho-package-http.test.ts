@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, harness } from "./_server";
 
 /**
  * (P1-B) ربط حالة التقويم باتفاقها على التطبيق المبني: للإدارة والطبيب والاستقبال فقط،
@@ -16,6 +16,22 @@ const stamp = Date.now();
 
 const patch = (session: { cookie: string }, body: unknown) =>
   authedMutation(`/api/ortho/${caseId}`, session, "PATCH", JSON.stringify(body));
+
+async function observe(session = h.sessions.reception) {
+  const response = await authedGet(`/api/ortho/${caseId}/plan-link`, session);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
+  const body = await response.json();
+  expect(body.caseId).toBe(caseId);
+  expect(body.observedVersion).toMatch(/^[a-f0-9]{64}$/);
+  return body.observedVersion as string;
+}
+
+async function linkState() {
+  return (await db.query(`SELECT plan_id,
+    (SELECT count(*)::int FROM audit_log WHERE action = 'ortho.plan_link' AND entity_id = $1::text) AS audits
+    FROM ortho_cases WHERE id = $1::int`, [String(caseId)])).rows[0];
+}
 
 async function arabic(response: Response) {
   const body = await response.json().catch(() => ({})) as { message?: string };
@@ -46,30 +62,48 @@ afterAll(async () => { await db?.end(); });
 
 describe("(P1-B) linking an orthodontic case to its agreement over HTTP", () => {
   it("finance-only roles cannot link", async () => {
-    const response = await patch(h.sessions.cashier, { planId });
+    const before = await linkState();
+    const response = await patch(h.sessions.cashier, { planId, expectedVersion: await observe() });
     expect([401, 403]).toContain(response.status);
     await arabic(response);
+    expect(await linkState()).toEqual(before);
   });
 
   it("another patient's plan is refused in Arabic", async () => {
-    const response = await patch(h.sessions.reception, { planId: foreignPlan });
+    const response = await patch(h.sessions.reception, { planId: foreignPlan, expectedVersion: await observe() });
     expect(response.status).toBe(409);
     await arabic(response);
     expect((await db.query(`SELECT plan_id FROM ortho_cases WHERE id = $1`, [caseId])).rows[0].plan_id).toBeNull();
   });
 
   it("an invalid plan id is a 400 in Arabic", async () => {
-    const response = await patch(h.sessions.reception, { planId: "abc" });
+    const response = await patch(h.sessions.reception, { planId: "abc", expectedVersion: await observe() });
     expect(response.status).toBe(400);
     await arabic(response);
   });
 
-  it("reception links the patient's own agreement — funded, audited", async () => {
+  it("refuses an unobserved link without changing the case or audit", async () => {
+    const before = await linkState();
     const response = await patch(h.sessions.reception, { planId });
+    expect(response.status).toBe(400);
+    await arabic(response);
+    expect(await linkState()).toEqual(before);
+  });
+
+  it("reception links the patient's own agreement with the current observation and audits it", async () => {
+    const expectedVersion = await observe();
+    const response = await patch(h.sessions.reception, { planId, expectedVersion });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, changed: true, funded: true });
+    expect(await response.json()).toEqual({ ok: true, caseId, planId, changed: true });
     expect((await db.query(`SELECT plan_id FROM ortho_cases WHERE id = $1`, [caseId])).rows[0].plan_id).toBe(planId);
     expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'ortho.plan_link' AND entity_id = $1`,
       [String(caseId)])).rows[0].n).toBe(1);
+
+    // The old observation cannot authorize a later unlink or create another audit.
+    const before = await linkState();
+    const stale = await patch(h.sessions.reception, { planId: null, expectedVersion });
+    expect(stale.status).toBe(409);
+    await arabic(stale);
+    expect(await linkState()).toEqual(before);
   });
 });

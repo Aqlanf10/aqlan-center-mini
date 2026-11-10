@@ -22,7 +22,7 @@ beforeAll(async()=>{temporary=mkdtempSync(join(tmpdir(),'space-browser-'));const
 afterAll(async()=>{await browser?.close();if(temporary)rmSync(temporary,{recursive:true,force:true});});
 const hash=(v:unknown)=>createHash('sha256').update(canonicalJourneyJSON(v)).digest('hex');
 const scope={patientId:1,orthoCaseId:2,clinicalCaseId:3},actorId=4;
-const baseline={ref:{kind:'assessment_analysis',id:5,member:'arch-space:upper',version:`sha256:${'a'.repeat(64)}`},arch:'upper',discrepancyMm:-1.25,estimated:false};
+const baseline={ref:{kind:'assessment_analysis',id:5,member:'space_upper',version:`sha256:${'a'.repeat(64)}`},arch:'upper',discrepancyMm:-1.25,estimated:false};
 const strategy={...scope,recordedPatientId:1,id:6,schemaVersion:1,version:1,supersedesRevisionId:null,recordingContext:'current',createdAt:'2026-11-06T00:00:00.000Z',createdBy:'Synthetic doctor',reason:'Synthetic plan',rows:[{problem:{id:8,label:'Synthetic problem',site:null},objective:'Synthetic objective',strategy:'Synthetic strategy',planItems:[],rationale:'Synthetic rationale'}]};
 async function open(width:number,lose='none'){
  const context=await browser.newContext({viewport:{width,height:1000},locale:'ar',serviceWorkers:'block'}),page=await context.newPage();const requests:string[]=[],bodies:any[]=[],history:any[]=[],errors:string[]=[];let recovery:any=null,receipt:any=null,acks=0;

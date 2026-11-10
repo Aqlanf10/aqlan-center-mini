@@ -120,7 +120,7 @@ async function open(width: number, targetPatientId = patientId) {
     await page.goto(`${baseUrl}/patients/${targetPatientId}?tab=ortho`, { waitUntil: "domcontentloaded" });
     await expect.poll(() => pending.length).toBe(1);
     const panel = page.getByRole("region", { name: "اتفاق التقويم", exact: true });
-    await page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact: true }).click();
+    await page.getByText("ربط خطة علاج أو اتفاق قائم", { exact: true }).click();
     await panel.waitFor();
     return {
       context, page, panel, pending,
@@ -149,7 +149,7 @@ async function expectUnknown(panel: Locator) {
   expect(text).not.toContain("لا اتفاق مالي مربوط بالحالة");
   expect(text).not.toContain("الشدّات مشمولة بالأقساط");
   expect(await panel.getByRole("button", { name: /^(فكّ الربط|اربط)$/ }).count()).toBe(0);
-  expect(await panel.getByRole("combobox", { name: "اختر اتفاق الأقساط", exact: true }).count()).toBe(0);
+  expect(await panel.getByRole("combobox", { name: "اختر اتفاقًا قائمًا", exact: true }).count()).toBe(0);
   expect(await panel.getByRole("link", { name: "أنشئ اتفاق تقويم من تبويب الخطط", exact: true }).count()).toBe(0);
 }
 
@@ -274,7 +274,7 @@ describe("orthodontic agreement read state in the real RTL UI", () => {
       await expectUnknown(f.panel);
       const payload = await f.realRead();
       expect(payload.plans).toEqual([]);
-      await f.panel.getByText("لا يوجد رابط خطة أقساط قديم", { exact: true }).waitFor();
+      await f.panel.getByText("لم تُربط خطة علاج بهذه الحالة", { exact: true }).waitFor();
       expect(await f.panel.innerText()).toContain("هذا الرابط ليس مطلوبًا للفاتورة أو الاتفاق السابق");
       expect(await f.panel.innerText()).not.toContain("لا اتفاق مالي مربوط بالحالة");
       expect(await f.panel.getByRole("link", { name: "أنشئ اتفاق تقويم من تبويب الخطط", exact: true }).count()).toBe(0);

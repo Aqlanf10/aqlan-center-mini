@@ -159,7 +159,7 @@ async function captureWarning(page: Page, warning: Locator, width: number) {
 
 describe("PatientCeph delayed writes on the real built patient page", () => {
   for (const mode of ["cancel", "pillar"] as const) {
-    it.each([1280, 390])("retires a delayed POST after " + mode + " at %ipx", async (width) => {
+    it.each([1280, 390])((mode === "cancel" ? "retires a delayed POST after explicit cancel" : "blocks pillar departure during a delayed POST, then retires it on explicit cancel") + " at %ipx", async (width) => {
       const before = await storedState(), f = await fixture(width);
       try {
         f.arm("hold"); await f.card.getByRole("button", { name: OPEN, exact: true }).click();
@@ -170,7 +170,14 @@ describe("PatientCeph delayed writes on the real built patient page", () => {
           await f.card.getByRole("button", { name: "إلغاء", exact: true }).click();
           await f.card.getByRole("button", { name: NEW, exact: true }).waitFor();
         } else {
-          // Released e2ef tab names; no dependency on PR250-only controls.
+          // Presentation navigation cannot discard an in-flight owned write.
+          await f.card.getByRole("button", { name: /مسار/ }).click();
+          expect(await f.card.getByRole("button", { name: "جارٍ فتح كابينة الرسم…", exact: true }).isDisabled()).toBe(true);
+          expect(await f.card.getByRole("button", { name: "إلغاء", exact: true }).isVisible()).toBe(true);
+          expect(f.posts).toHaveLength(1);
+          expect(f.navigationAttempts).toEqual([]);
+          await f.card.getByRole("button", { name: "إلغاء", exact: true }).click();
+          await f.card.getByRole("button", { name: NEW, exact: true }).waitFor();
           await f.card.getByRole("button", { name: /مسار/ }).click();
           await expect.poll(() => f.card.getByRole("button", { name: NEW, exact: true }).count()).toBe(0);
         }
