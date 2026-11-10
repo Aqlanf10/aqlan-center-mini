@@ -15,7 +15,7 @@ export function OrthoStudyExportLinks({ patientId, orthoCaseId, revisionId, revi
     <a className={control} target="_blank" rel="noopener noreferrer" href={`/print/ortho-study/${orthoCaseId}?patientId=${patientId}&revisionId=${revisionId}`}>طباعة النسخة المحفوظة / PDF نصي</a>
     <a className={control} href={`/api/ortho/${orthoCaseId}/case-study/text-pptx?patientId=${patientId}&revisionId=${revisionId}`}>PowerPoint نصي قابل للتحرير</a>
     <a className={control} href={`/api/ortho/${orthoCaseId}/case-study/illustrated-pptx?patientId=${patientId}&revisionId=${revisionId}`}>PowerPoint مصور قابل للتحرير</a>
-    <a className={control} target="_blank" rel="noopener noreferrer" href={`/print/ortho-study/${orthoCaseId}?patientId=${patientId}&revisionId=${revisionId}&mode=illustrated`}>معاينة الدراسة المصورة / PDF</a>
+    <a className={control} target="_blank" rel="noopener noreferrer" href={`/print/ortho-study/${orthoCaseId}?patientId=${patientId}&revisionId=${revisionId}&mode=full`}>معاينة الدراسة المصورة / PDF</a>
     <p className="w-full">التصدير للنسخة المحفوظة المعروضة فقط؛ الصور وإخفاء الهوية للتعليم غير مشمولين في النسخة النصية.</p>
     {revisionHash && <OrthoStudyExportArchive patientId={patientId} orthoCaseId={orthoCaseId} revisionId={revisionId} revisionHash={revisionHash} />}
   </div>;
