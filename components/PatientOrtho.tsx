@@ -1262,7 +1262,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     </div>
                   </div>
 
-                  {(session?.role === "admin" || session?.role === "doctor") && <OrthoReopenPanel patientId={patientId} caseRow={row}
+                  {currentPillar !== "prescription" && (session?.role === "admin" || session?.role === "doctor") && <OrthoReopenPanel patientId={patientId} caseRow={row}
                     onChanged={() => { if (currentCase(row.id)) refreshAfterConfirmedChange(); }} />}
                   {row.baselineKind === "legacy" ? currentPillar === "prescription"
                     ? <details className="mt-2 rounded-lg border border-amber-200 bg-amber-50/40 px-3"><summary className="min-h-11 cursor-pointer py-3 text-xs font-bold">سياق الحالة السابقة والأهداف المتبقية</summary><LegacyBaselineSummary row={row} /></details>
@@ -2734,11 +2734,12 @@ function OrthoReopenPanel({ patientId, caseRow, onChanged }: { patientId: number
   const [, setReason] = form.field("reason", ""), [, setTarget] = form.field<ReopenDraft["target"]>("target", "");
   form.field<ReopenReview | null>("review", null); form.field<ReopenExpectation | null>("pending", null);
   form.field<ReopenDraft["lastReceipt"]>("lastReceipt", null);
+  form.field("expanded", false);
   const [, redraw] = useState(0);
   useLayoutEffect(() => form.draft.strategyView.subscribe(() => redraw(value => value + 1)), [form.draft]);
   const lifetime: OrthoReopenLifetime = {
     identity: form.draft, active: form.viewActive, editable: form.editable, busy: form.draft.busy,
-    read: () => Object.fromEntries(["reason", "target", "review", "pending", "lastReceipt"].map(key => [key, form.draft.values.get(key)])) as unknown as ReopenDraft,
+    read: () => Object.fromEntries(["expanded", "reason", "target", "review", "pending", "lastReceipt"].map(key => [key, form.draft.values.get(key)])) as unknown as ReopenDraft,
     change: (field, value) => { if (field === "reason") setReason(value); else setTarget(value as ReopenDraft["target"]); },
     commit: values => { for (const [key, value] of Object.entries(values)) form.commit(key, value); },
     resolve: (expected, receipt) => {

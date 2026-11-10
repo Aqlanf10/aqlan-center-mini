@@ -65,7 +65,7 @@ const textOf = (node: ReactNode): string => typeof node === "string" || typeof n
   : Array.isArray(node) ? node.map(textOf).join("") : node && typeof node === "object" && "props" in node ? textOf((node as Element).props.children as ReactNode) : "";
 const scope = { patientId: 1, orthoCaseId: 2, clinicalCaseId: 3 };
 let props: { patientId: number; orthoCaseId: number }, state: ReopenDraft, lifecycle: OrthoLifecycleSnapshot;
-let active: boolean, busy: boolean, uncertain: boolean, outerKey: string | null;
+let active: boolean, busy: boolean, uncertain: boolean, ownerViewAvailable: boolean, outerKey: string | null;
 const changed = vi.fn(), fetchMock = vi.fn(), denied = vi.fn();
 let lifetime: OrthoReopenLifetime;
 const ok = (body: unknown, status = 200) => ({ ok: true, status, json: async () => body });
@@ -80,6 +80,7 @@ function retire() {
   hooks.effects.forEach(effect => effect.cleanup?.()); hooks.values.length = 0; hooks.effects.clear(); hooks.memos.clear(); hooks.pending.length = 0; outerKey = null;
 }
 function render(): ReactNode {
+  if (!ownerViewAvailable) { retire(); return null; }
   for (let round = 0; round < 30; round++) {
     hooks.cursor = 0; hooks.changed = false;
     const wrapper = OrthoCaseReopen({ ...props, lifetime, onChanged: changed });
@@ -102,8 +103,8 @@ const submit = "تأكيد إعادة فتح حالة التقويم", retry = "
 const posts = () => fetchMock.mock.calls.filter(([, init]) => init.method === "POST");
 async function prepare(target = "active") { await open(); input("الحالة المقصودة لإعادة فتح التقويم", target); input("سبب إعادة فتح حالة التقويم", "سبب اصطناعي موثق"); review(); }
 beforeEach(() => {
-  retire(); props = { patientId: 1, orthoCaseId: 2 }; active = true; busy = false; uncertain = false;
-  state = { reason: "", target: "", review: null, pending: null, lastReceipt: null };
+  retire(); props = { patientId: 1, orthoCaseId: 2 }; active = true; busy = false; uncertain = false; ownerViewAvailable = true;
+  state = { expanded: false, reason: "", target: "", review: null, pending: null, lastReceipt: null };
   lifecycle = { version: 0, status: "completed", phase: "finishing", closedAt: null, closedBy: null, closedNote: null };
   changed.mockReset(); denied.mockReset().mockImplementation(() => { active = false; });
   hooks.session = { userId: 7, username: "Synthetic", role: "doctor", permissions: null };
@@ -113,7 +114,7 @@ beforeEach(() => {
     commit: values => { if (active) { state = { ...state, ...values }; hooks.changed = true; } },
     resolve: (expected, receipt) => {
       if (!active || canonicalJourneyJSON(state.pending) !== canonicalJourneyJSON(expected)) return false;
-      uncertain = false; state = receipt ? { reason: "", target: "", review: null, pending: null, lastReceipt: receipt } : { ...state, pending: null, review: null };
+      uncertain = false; state = receipt ? { ...state, reason: "", target: "", review: null, pending: null, lastReceipt: receipt } : { ...state, pending: null, review: null };
       hooks.changed = true; return true;
     },
     begin: isRetry => {
@@ -169,6 +170,35 @@ describe("explicit same-case orthodontic reopening", () => {
     click("التحقق من نتيجة الطلب وقراءة الحالة الحالية"); await flush();
     expect(fetchMock.mock.calls.at(-1)![0]).toContain(`requestId=${expected.command.clientRequestId}`);
     expect(posts()).toHaveLength(1); expect(state.pending).toBeNull(); expect(uncertain).toBe(false); expect(changed).toHaveBeenCalledTimes(1);
+  });
+  it("restores the expanded panel after recovery refresh remount and obtains a fresh authoritative read", async () => {
+    await prepare(); fetchMock.mockRejectedValueOnce(Error("Synthetic lost response")); click(submit); await flush();
+    const expected = state.pending!, row = await saved(expected), sharedIdentity = lifetime.identity;
+    fetchMock.mockImplementation(async () => ok(reading({ receipt: row, current: { ...lifecycle, version: 1, status: "active" } })));
+    changed.mockImplementation(() => { active = false; ownerViewAvailable = false; retire(); });
+    click("التحقق من نتيجة الطلب وقراءة الحالة الحالية"); await flush();
+    expect(render()).toBeNull(); expect(changed).toHaveBeenCalledTimes(1); expect(state.pending).toBeNull();
+    expect(state.lastReceipt).toEqual(row); expect(posts()).toHaveLength(1);
+    const callCount = fetchMock.mock.calls.length;
+    let resolve!: (response: unknown) => void;
+    fetchMock.mockImplementation(() => new Promise(done => { resolve = done; }));
+    active = true; ownerViewAvailable = true;
+    const restored = render(); expect(lifetime.identity).toBe(sharedIdentity);
+    expect(nodes(restored).find(node => node.type === "details")?.props.open).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(callCount + 1);
+    expect(fetchMock.mock.calls.at(-1)![0]).not.toContain("requestId=");
+    expect(nodes(restored).some(node => node.props["aria-label"] === "حالة التقويم الحالية")).toBe(false);
+    expect(textOf(restored)).toContain("ليس إثباتًا للحالة الحالية");
+    lifecycle = { ...lifecycle, version: 2, status: "completed", closedNote: "إغلاق أحدث بعد الاستعادة" };
+    resolve(ok(reading())); await flush();
+    expect(nodes(render()).some(node => node.props["aria-label"] === "حالة التقويم الحالية")).toBe(true);
+    expect(textOf(render())).toContain("إغلاق أحدث بعد الاستعادة"); expect(posts()).toHaveLength(1);
+    expect(changed).toHaveBeenCalledTimes(1); expect(fetchMock).toHaveBeenCalledTimes(callCount + 1);
+    const details = nodes(render()).find(node => node.type === "details")!;
+    (details.props.onToggle as (event: unknown) => void)({ currentTarget: { open: false } }); render();
+    retire(); render(); await flush();
+    expect(nodes(render()).find(node => node.type === "details")?.props.open).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(callCount + 1);
   });
   it("does not resolve a missing or mismatched recovery receipt", async () => {
     await prepare(); fetchMock.mockRejectedValueOnce(Error("Synthetic lost response")); click(submit); await flush();

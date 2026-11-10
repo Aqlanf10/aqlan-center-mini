@@ -10,7 +10,7 @@ import type { JourneyScope } from "@/lib/ortho-case-journey-records";
 export interface ReopenExpectation { scope: JourneyScope; actorId: number; command: OrthoReopenCommand }
 export interface ReopenReview { scope: JourneyScope; actorId: number; current: OrthoLifecycleSnapshot }
 export interface ReopenDraft {
-  reason: string; target: OrthoReopenTarget | ""; review: ReopenReview | null;
+  expanded: boolean; reason: string; target: OrthoReopenTarget | ""; review: ReopenReview | null;
   pending: ReopenExpectation | null; lastReceipt: OrthoReopenReceipt | null;
 }
 export interface ReopenOperation { current(): boolean; uncertain(): void; finish(): void }
@@ -83,7 +83,7 @@ export function OrthoCaseReopen(props: Props) {
 }
 function ReopenWorkspace(props: Props & { actorId: number }) {
   const { lifetime } = props, draft = lifetime.read();
-  const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [notice, setNotice] = useState<string | null>(null);
+  const [open, setOpen] = useState(() => draft.expanded === true), [busy, setBusy] = useState(false), [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<{ owner: object; value: OrthoReopenRead } | null>(null);
   const live = useRef(false), lock = useRef<object | null>(null), latest = useRef(props), controllers = useRef(new Set<AbortController>());
   useLayoutEffect(() => { latest.current = props; });
@@ -183,8 +183,15 @@ function ReopenWorkspace(props: Props & { actorId: number }) {
       if (current(token)) { lock.current = null; setBusy(false); if (confirmed) props.onChanged(); }
     }
   }
-  return <details className="mt-3 rounded-lg border bg-white p-3 text-sm" onToggle={event => {
-    setOpen(event.currentTarget.open); if (event.currentTarget.open && !read) void load();
+  // Keep expansion in the workspace draft across parent authority refreshes.
+  // Each mounted view obtains a new current read; a receipt is not that read.
+  const loadOnOpen = useRef(load);
+  useLayoutEffect(() => { loadOnOpen.current = load; });
+  useLayoutEffect(() => { if (open) void loadOnOpen.current(); }, [open, lifetime.identity]);
+  return <details open={open} className="mt-3 rounded-lg border bg-white p-3 text-sm" onToggle={event => {
+    if (!live.current || !lifetime.active()) return;
+    const expanded = event.currentTarget.open;
+    lifetime.commit({ expanded }); setOpen(expanded);
   }}>
     <summary className="min-h-11 cursor-pointer py-2 font-semibold">حالة التقويم: الإغلاق وإعادة الفتح{draft.pending ? " — طلب يحتاج التحقق" : ""}</summary>
     {open && <div className="space-y-3">
