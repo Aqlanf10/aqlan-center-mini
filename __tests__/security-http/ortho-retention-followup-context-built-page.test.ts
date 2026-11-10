@@ -57,6 +57,8 @@ async function recordedCase() {
 
 it.each([390, 1280])("reads persisted retention instructions on the built board without treating a review as fulfillment at %ipx", async width => {
   const fixture = await recordedCase();
+  const clinicalBefore = (await db.query("SELECT to_jsonb(c)::text value FROM ortho_cases c WHERE id=$1", [fixture.caseId])).rows;
+  const ledgerBefore = (await db.query("SELECT to_jsonb(e)::text value FROM ortho_retention_entries e WHERE patient_id=$1 ORDER BY id", [fixture.patientId])).rows;
   const response = await authedGet("/api/ortho/followups", h.sessions.admin); expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toContain("no-store");
   const board = await response.json() as { buckets: { bucket: string; rows: FollowupRow[] }[] };
@@ -108,6 +110,28 @@ it.each([390, 1280])("reads persisted retention instructions on the built board 
     expect(new URL(page.url()).searchParams.get("orthoCaseId")).toBe(String(fixture.caseId));
     expect(new URL(page.url()).searchParams.get("pillar")).toBe("retention");
     expect(await page.getByTestId("ortho-context-unavailable").count()).toBe(0);
+    const closure = page.getByTestId("ortho-closure-review");
+    await closure.locator("summary").click();
+    await expect.poll(() => closure.innerText()).toContain(`جهاز #${fixture.deviceId}`);
+    expect(await closure.innerText()).toContain("بيانات المثبّت القديمة: غير مسجلة");
+    expect(await closure.innerText()).toContain("2026-10-01");
+    expect(await closure.innerText()).toContain("لا يوجد حدث فك جهاز في السجل المقروء");
+    expect(await closure.innerText()).toContain("لا يثبت اكتمال العلاج");
+    const photos = closure.getByRole("region", { name: "صور مسجّلة لمرحلة فك الجهاز", exact: true });
+    expect(await photos.innerText()).toContain("لم تُقرأ بيانات الصور");
+    await photos.getByRole("button", { name: "قراءة صور مرحلة فك الجهاز", exact: true }).click();
+    await expect.poll(() => photos.innerText()).toContain("لا توجد صور لهذه المرحلة ضمن القراءة الحالية");
+    expect(await closure.locator("img").count()).toBe(0);
+    expect(await closure.getByRole("button").count()).toBe(1);
+    const recordsLink = new URL((await closure.getByRole("link", { name: "مراجعة السجلات والصور في هذه الحالة", exact: true }).getAttribute("href"))!, baseUrl);
+    expect(recordsLink.pathname).toBe(`/patients/${fixture.patientId}`);
+    expect(recordsLink.searchParams.get("orthoCaseId")).toBe(String(fixture.caseId));
+    expect(recordsLink.searchParams.get("pillar")).toBe("diagnostics");
+    await closure.scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await closure.screenshot({ path: `.settings-ui-artifacts/ortho-closure-review-${width}.png` });
+    expect((await db.query("SELECT to_jsonb(c)::text value FROM ortho_cases c WHERE id=$1", [fixture.caseId])).rows).toEqual(clinicalBefore);
+    expect((await db.query("SELECT to_jsonb(e)::text value FROM ortho_retention_entries e WHERE patient_id=$1 ORDER BY id", [fixture.patientId])).rows).toEqual(ledgerBefore);
     expect(writes).toEqual([]); expect(errors).toEqual([]);
     const counts = (await db.query(`SELECT (SELECT count(*)::int FROM ortho_retention_entries WHERE patient_id=$1) entries,
       (SELECT count(*)::int FROM appointments WHERE patient_id=$1) appointments,
