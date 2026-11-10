@@ -5,6 +5,7 @@ import { OrthoAssessmentFindingsV2 } from "./OrthoAssessmentFindingsV2";
 import { OrthoAssessmentMeasurementsV2 } from "./OrthoAssessmentMeasurementsV2";
 import { readAssessmentResponseV2 } from "@/lib/ortho-assessment-client-v2";
 import { newAssessmentEditorV2, readAssessmentEditorV2, assessmentEditorCommandV2, type AssessmentEditorV2 } from "@/lib/ortho-assessment-editor-v2";
+import { assessmentSaveFeedbackV2 } from "@/lib/ortho-assessment-save-feedback-v2";
 import type { AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import type { AssessmentReadResponseV2, AssessmentSaveExpectationV2 } from "@/lib/ortho-assessment-response-v2";
 import { editMeasurementPayloadV2 } from "@/lib/ortho-assessment-measurement-editor-v2";
@@ -49,6 +50,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
   const [selected, setSelected] = useState<number>();
   const [reload, setReload] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
+  const [showSaveFeedback, setShowSaveFeedback] = useState(false);
   const readVersion = lifetime?.readVersion ?? 0;
   const generation = useMemo(() => ({ owner, selected, reload, readVersion, sectionView }), [owner, selected, reload, readVersion, sectionView]);
   // Only the committed view may act. A persistent parent owner can outlive this
@@ -71,6 +73,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
   const stale = !!draft && !!data && draft.expectedRevisionId !== (data.history[0]?.id ?? null);
   const writable = !!lifetime && lifetime.active() && lifetime.editable() && data?.state === "ready" && data.clinicalWritable;
   const editable = !!writable && !stale;
+  const saveFeedback = showSaveFeedback && draft && editable ? assessmentSaveFeedbackV2(draft) : [];
   useEffect(() => {
     const life = latest.current, controller = new AbortController(); let live = true;
     const current = () => live && committedOwner.current === owner && committedGeneration.current === generation
@@ -109,15 +112,16 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     if (!currentDraft() || !writable || !data || !lifetime || draft || malformed || data.revision?.id !== data.history[0]?.id) return;
     const next = newAssessmentEditorV2(crypto.randomUUID(), data.revision);
     if (!next) { setMessage("هذه نسخة تاريخية بالإصدار الأول. يلزم إجراء ترقية صريح يحافظ على القيم ومصادرها؛ لم تُحوّل إلى نموذج فارغ."); return; }
-    lifetime.settle("document", JSON.stringify(next)); setMessage(null);
+    lifetime.settle("document", JSON.stringify(next)); setMessage(null); setShowSaveFeedback(false);
   }
   async function save(retry = false) {
     if (!currentDraft() || !lifetime || !draft || data?.state !== "ready" || !data.clinicalWritable || committedOwner.current !== owner || !lifetime.active()
       || lifetime.busy || (!retry && !editable) || retry && !lifetime.uncertain) return;
     const command = assessmentEditorCommandV2(draft);
-    if (!command) { setMessage("أكمل السبب والقياسات ومصدر وتاريخ كل قيمة قبل الحفظ؛ الفراغ ليس صفرًا."); return; }
+    if (!command) { setShowSaveFeedback(true); return; }
     const expected = { scope: { patientId, orthoCaseId, clinicalCaseId: data.clinicalCaseId }, command, previousVersion: draft.previousVersion };
     const lease = retry ? lifetime.beginRetry(expected) : lifetime.begin(expected); if (!lease) return;
+    setShowSaveFeedback(false);
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
     let confirmed = false;
     const say = (text: string) => { if (currentView()) setMessage(text); };
@@ -195,13 +199,18 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
           owner={{ renderEditable: editable, active: currentDraft, editable: () => currentDraft() && editable && !!latest.current?.editable() }}
           onChange={measurements => change({ ...draft, measurements })} />
       </details>}
-      <label className="block">سبب إنشاء هذه المراجعة<input className={`${control} w-full`} maxLength={500} disabled={!editable} value={draft.reason}
+      {!!saveFeedback.length && <div role="alert" data-testid="assessment-save-feedback" className="space-y-1 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+        <p className="font-bold">قبل الحفظ، أكمل الآتي:</p>
+        <ul className="list-inside list-disc space-y-1">{saveFeedback.map((text, index) => <li key={index}>{text}</li>)}</ul>
+        <p className="text-xs">مدخلاتك باقية في المسودة. الحقول التي لم تبدأ توثيقها يمكن أن تبقى غير مسجلة.</p>
+      </div>}
+      <label className="block">سبب إنشاء هذه المراجعة <span className="text-xs text-slate-500">(مطلوب)</span><input aria-label="سبب إنشاء هذه المراجعة" aria-required="true" className={`${control} w-full`} maxLength={500} disabled={!editable} value={draft.reason}
         onChange={event => change({ ...draft, reason: event.target.value })} /></label>
       <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={!editable} onClick={() => void save()}>حفظ مراجعة تقييم جديدة</button>
         <button type="button" className={control} disabled={!lifetime?.active() || lifetime.busy || lifetime.uncertain} onClick={() => {
           if (!currentDraft() || !lifetime?.active() || latest.current?.busy || latest.current?.uncertain) return;
           if (lifetime.dirty && !window.confirm("تجاهل المسودة غير المحفوظة؟")) return;
-          if (currentDraft() && lifetime.active() && !latest.current?.busy && !latest.current?.uncertain) { lifetime.settle("document", ""); setMessage(null); }
+          if (currentDraft() && lifetime.active() && !latest.current?.busy && !latest.current?.uncertain) { lifetime.settle("document", ""); setMessage(null); setShowSaveFeedback(false); }
         }}>تجاهل المسودة صراحة</button></div>
     </div>}
     {lifetime?.uncertain && <div role="alert"><p>الحفظ السابق غير مؤكد. التحرير والمغادرة متوقفان حتى تسوية نفس الطلب.</p>

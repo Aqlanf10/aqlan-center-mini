@@ -7,6 +7,8 @@ export function observationInputHintV2(code: string): string {
     invalid_performer: "أكمل إسناد منفذ الفحص أو اختر غير معلوم.",
     missing_report_source: "اربط التقرير الخارجي من قائمة المصادر المصرح بها.",
     invalid_observation_value: "أكمل القيمة أو سبب الحالة المختارة؛ الفراغ لا يمثل نتيجة.",
+    number_missing: "أدخل قيمة القياس؛ الفراغ ليس صفراً.",
+    number_partial: "أكمل كتابة الرقم قبل الحفظ؛ القيمة المدخلة ما زالت غير مكتملة.",
     number_empty: "أدخل قيمة القياس؛ الفراغ ليس صفراً.",
     number_invalid: "راجع صيغة الرقم والفاصل العشري المحدد.",
     number_ambiguous: "استخدم فاصلاً عشرياً واحداً مطابقاً لاختيار الإدخال.",
