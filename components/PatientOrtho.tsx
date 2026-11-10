@@ -524,6 +524,7 @@ export function OrthoSpacePanel({ patientId, row }: { patientId: number; row: Or
   </section>;
 }
 
+import { OrthoClosureReview } from "./OrthoClosureReview";
 import OrthoRetentionLedger, { RetentionEventDetails } from "./OrthoRetentionLedger";
 import { verifyRetentionRead, type RetentionLedgerRead } from "@/lib/ortho-retention-client";
 import { readRetentionPersistenceCommand, type RetentionPersistenceCommand } from "@/lib/ortho-retention-command";
@@ -656,6 +657,9 @@ export function OrthoRetentionPanel({ patientId, row }: { patientId: number; row
     {!reconcile && !conflict && (pending || recovery?.state === "cancelled" || recovery?.state === "pending" || recovery?.state === "blocked" && recovery.canCancel) && recovery?.state !== "committed" && <button type="button" className={control} disabled={draft.busy || !bound} onClick={() => void cancel()}>إلغاء طلب التثبيت والإقرار</button>}
     {read && <OrthoRetentionLedger data={read} draft={document} writable={form.editable() && row.status !== "assessment" && read.writable && !metadata?.recovery && !conflict && !pending && !reconcile} busy={draft.busy} uncertain={draft.uncertain}
       update={setDocument} discard={discard} save={() => void save(false)} />}
+    <OrthoClosureReview patientId={patientId} orthoCaseId={row.id} ledger={read} readUnavailable={!!error || !bound}
+      legacyRetainer={row.retainer} legacyDate={row.retainerOn} authority={sessionScope(form.session)} readVersion={owner.readSequence}
+      ownerIdentity={owner} active={form.viewActive} photosVisible={row.photosVisible} />
   </section>;
 }
 

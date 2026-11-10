@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { OrthoClosureReview } from "../components/OrthoClosureReview";
 import { OrthoRetentionPanel } from "../components/PatientOrtho";
 import OrthoRetentionLedger, { RetentionDocumentPicker } from "../components/OrthoRetentionLedger";
 import type {RetentionLedgerRead} from "../lib/ortho-retention-client";
@@ -369,5 +370,23 @@ describe('retention documentary picker',()=>{
   const view=()=>{hooks.cursor=0;return RetentionDocumentPicker({data,draft:plan(),blocked,update:vi.fn()});};
   const select=elements(view()).find(e=>e.type==='button'&&text(e)==='اختيار مستندات الحالة')!;(select.props.onClick as()=>void)();view();
   blocked=true;view();release(reply());await settle();expect(text(view())).not.toContain('Synthetic source');
+ });
+});
+
+
+describe('closure summary ownership inside actual retention panel',()=>{
+ const summary=()=>elements(render()).find(element=>element.type===OrthoClosureReview);
+ it('passes the verified retention ledger and exact case to the closure summary',async()=>{
+  render();await flush();const child=summary();expect(child).toBeDefined();
+  expect(child!.props.ledger).toBe(editor().data);expect(child!.props.ledger).toBe(data);
+  expect(child!.props.patientId).toBe(patientId);expect(child!.props.orthoCaseId).toBe(base.id);
+  expect(child!.props.legacyRetainer).toBe(base.retainer);expect(child!.props.readUnavailable).toBe(false);
+  expect((child!.props.active as ()=>boolean)()).toBe(true);
+ });
+ it('withdraws the summary ledger when a refreshed retention source is denied',async()=>{
+  render();await flush();expect(summary()?.props.ledger).toBe(data);
+  fetchMock.mockResolvedValue(new Response('{}',{status:403,headers:{'cache-control':'private, no-store'}}));
+  await click(refreshLabel);const child=summary();expect(child).toBeDefined();
+  expect(child!.props.ledger).toBeNull();expect(child!.props.readUnavailable).toBe(true);
  });
 });
