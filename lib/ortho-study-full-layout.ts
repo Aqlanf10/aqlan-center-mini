@@ -113,7 +113,7 @@ export function fullStudyTablePages(headers: string[], rows: string[][], rect: C
     rows.forEach((row, sourceRow) => {
       const pages = paginate(['الحقل المسجل', 'القيمة المسجلة'], headers.map((header, column) => [header, row[column]]), [rect.w * .35, rect.w * .65], true);
       pages.forEach((page, index) => {
-        page.caption = `صف المصدر ${sourceRow + 1}/${rows.length} • جزء ${index + 1}/${pages.length}`;
+        page.caption = `صف المصدر: ${sourceRow + 1} من أصل ${rows.length} • جزء ${index + 1} من ${pages.length}`;
         page.fragments = page.fragments.map(fragment => ({ ...fragment, rowIndex: sourceRow, fieldIndex: fragment.rowIndex }));
       });
       result.push(...pages); if (result.length > FULL_STUDY_LIMITS.pages) fail('page_limit');
@@ -123,7 +123,7 @@ export function fullStudyTablePages(headers: string[], rows: string[][], rect: C
   const pages = paginate(headers, rows, columnWidths, false);
   pages.forEach((page, index) => {
     const first = page.fragments[0]?.rowIndex, last = page.fragments.at(-1)?.rowIndex;
-    page.caption = `${first === undefined ? 'لا صفوف مسجلة' : first === last ? `صف المصدر ${first + 1}/${rows.length}` : `صفوف المصدر ${first + 1}–${last! + 1}/${rows.length}`} • جزء ${index + 1}/${pages.length}`;
+    page.caption = `${first === undefined ? 'لا صفوف مسجلة' : first === last ? `صف المصدر: ${first + 1} من أصل ${rows.length}` : `صفوف المصدر: من ${first + 1} إلى ${last! + 1} من أصل ${rows.length}`} • جزء ${index + 1} من ${pages.length}`;
   });
   return pages;
 }

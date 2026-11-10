@@ -230,7 +230,7 @@ describe('native full study tables and PowerPoint package', () => {
       expect(table.projection).toBe('row_fields'); expect(table.columnPolicy).toBe('readable_source_row_fields');
       expect(table.headers).toEqual(['الحقل المسجل', 'القيمة المسجلة']);
       expect(table.columnWidths.every(width => width > 3)).toBe(true);
-      expect(table.caption).toMatch(/صف المصدر [12]\/2 • جزء \d+\/\d+/);
+      expect(table.caption).toMatch(/صف المصدر: [12] من أصل 2 • جزء \d+ من \d+/);
       for (const [index, cells] of table.rows.entries()) {
         const fragment = table.fragments[index]; if (fragment.fieldIndex === null) throw Error('missing source field');
         expect(cells[0].replaceAll('\n', '')).toBe(headers[fragment.fieldIndex]);
@@ -239,6 +239,16 @@ describe('native full study tables and PowerPoint package', () => {
     }
     expect(reconstructed).toEqual(rows);
     expect(tables.filter(table => table.fragments.some(fragment => fragment.fragmentIndex > 0)).length).toBeGreaterThan(1);
+  });
+  it('uses explicit Arabic row ranges and part wording without RTL-ambiguous numeric slashes or dashes', () => {
+    const tables = fullStudyTablePages(['Field', 'Value'], [['One', 'Recorded'], ['Two', 'Unknown']], FULL_STUDY_BODY, []);
+    expect(tables[0].caption).toBe('صفوف المصدر: من 1 إلى 2 من أصل 2 • جزء 1 من 1');
+    const parts = fullStudyTablePages(['Field', 'Value'], [['One', 'ع🙂'.repeat(900)]], FULL_STUDY_BODY, []);
+    expect(parts.length).toBeGreaterThan(1);
+    parts.forEach((table, index) => {
+      expect(table.caption).toBe(`صف المصدر: 1 من أصل 1 • جزء ${index + 1} من ${parts.length}`);
+      expect(table.caption).not.toMatch(/[/–-]/);
+    });
   });
   it('labels incompatible header counts explicitly and refuses malformed/excessive table input', () => {
     expect(fullStudyTablePages(['A', 'B'], [['x', 'y']], FULL_STUDY_BODY, [], [1, 2, 3])[0].columnPolicy).toBe('uniform_no_matching_layout_weights');
