@@ -21,12 +21,12 @@ const nodes = (node: ReactNode): Element[] => Array.isArray(node) ? node.flatMap
   : node && typeof node === "object" && "props" in node ? [node as Element, ...nodes((node as Element).props.children as ReactNode)] : [];
 const text = (node: ReactNode): string => typeof node === "string" || typeof node === "number" ? String(node)
   : Array.isArray(node) ? node.map(text).join("") : node && typeof node === "object" && "props" in node ? text((node as Element).props.children as ReactNode) : "";
-let draft: MeasurementEditorDraftV2, permitted: boolean;
+let draft: MeasurementEditorDraftV2, permitted: boolean, active: boolean;
 const change = vi.fn(), confirm = vi.fn();
 const panelElement = { focus: vi.fn(), scrollIntoView: vi.fn() };
 function render() {
   hooks.cursor = 0; const tree = OrthoAssessmentMeasurementsV2({ draft, onChange: change, sources: [],
-    owner: { renderEditable: permitted, active: () => true, editable: () => permitted } });
+    owner: { renderEditable: permitted, active: () => active, editable: () => permitted } });
   const panel = nodes(tree).find(node => node.props["aria-label"] === "مصدر القياس وتاريخه");
   if (panel?.props.ref && typeof panel.props.ref === "object") (panel.props.ref as { current: unknown }).current = panelElement;
   hooks.effects.splice(0).forEach(effect => effect()); return tree;
@@ -48,7 +48,7 @@ afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   hooks.values.length = 0; hooks.dependencies.clear(); hooks.effects.length = 0;
   panelElement.focus.mockReset(); panelElement.scrollIntoView.mockReset();
-  permitted = true; change.mockReset(); confirm.mockReset().mockReturnValue(true);
+  permitted = true; active = true; change.mockReset(); confirm.mockReset().mockReturnValue(true);
   vi.stubGlobal("window", { confirm }); draft = blankMeasurementEditorV2();
   for (const [id, date] of [["width_11", "2026-10-01"], ["width_12", "2026-09-01"], ["width_13", "2026-09-02"]]) Object.assign(draft.values[id], {
     state: "measured", numberText: id === "width_11" ? "7.5" : "8.1", dateState: "known", date,
@@ -67,8 +67,15 @@ describe("bulk measurement source replacement review", () => {
     expect(panel.props.tabIndex).toBe(-1); expect(panel.props.className).toContain("scroll-mt-24");
     draft = structuredClone(draft); draft.values.width_11.methodDescription = "Synthetic edited method"; render();
     expect(panelElement.focus).toHaveBeenCalledTimes(1); expect(panelElement.scrollIntoView).toHaveBeenCalledTimes(1);
-    click("المصدر والتاريخ: السن 12"); render(); expect(panelElement.focus).toHaveBeenCalledTimes(2);
-    click("إغلاق تفاصيل المصدر"); render(); expect(panelElement.focus).toHaveBeenCalledTimes(2); expect(change).not.toHaveBeenCalled();
+    click("المصدر والتاريخ: السن 11"); render();
+    expect(panelElement.focus).toHaveBeenCalledTimes(2); expect(panelElement.scrollIntoView).toHaveBeenCalledTimes(2);
+    draft = structuredClone(draft); draft.values.width_11.methodDescription = "Synthetic second edit"; render();
+    expect(panelElement.focus).toHaveBeenCalledTimes(2); expect(panelElement.scrollIntoView).toHaveBeenCalledTimes(2);
+    active = false; click("المصدر والتاريخ: السن 11"); render();
+    expect(panelElement.focus).toHaveBeenCalledTimes(2); expect(panelElement.scrollIntoView).toHaveBeenCalledTimes(2);
+    active = true;
+    click("المصدر والتاريخ: السن 12"); render(); expect(panelElement.focus).toHaveBeenCalledTimes(3);
+    click("إغلاق تفاصيل المصدر"); render(); expect(panelElement.focus).toHaveBeenCalledTimes(3); expect(change).not.toHaveBeenCalled();
   });
   it("clears selected targets on measurement group change while preserving every recorded value and source", () => {
     draft.payload.measurementSets.push({ ...draft.payload.measurementSets[0], id: "second", toothWidthObservationIds: [...draft.payload.measurementSets[0].toothWidthObservationIds] });

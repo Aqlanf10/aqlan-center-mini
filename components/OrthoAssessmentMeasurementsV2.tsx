@@ -20,6 +20,11 @@ const keyOf = (s: AssessmentSourceV2) => `${s.kind}:${s.id}:${s.version}`;
 // Presentation-only rounding; the stored calculation retains full precision.
 const mm = (value: number) => <bdi dir="ltr" className="inline-block whitespace-nowrap tabular-nums">{Number(value.toFixed(3))} mm</bdi>;
 const states: Record<MeasurementValueDraftV2["state"], string> = { not_recorded: "غير مسجل", measured: "مقاس", recorded: "موثق", unknown: "غير معلوم", not_measured: "لم يُقَس", unavailable: "غير متاح", not_applicable: "لا ينطبق", tooth_absent: "السن مفقود", not_erupted: "لم يبزغ" };
+function revealSourceDetails(panel: HTMLElement | null) {
+  if (!panel) return;
+  panel.focus({ preventScroll: true });
+  panel.scrollIntoView({ block: "start", behavior: "instant" });
+}
 export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources }: {
   draft: MeasurementEditorDraftV2; onChange(draft: MeasurementEditorDraftV2): void;
   owner?: MeasurementEditorOwnerV2; sources: readonly MeasurementSourceChoiceV2[];
@@ -30,10 +35,7 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
   const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   const metadataPanel = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
-    const panel = metadataPanel.current;
-    if (!metadataId || !panel) return;
-    panel.focus({ preventScroll: true });
-    panel.scrollIntoView({ block: "start", behavior: "instant" });
+    if (metadataId) revealSourceDetails(metadataPanel.current);
   }, [metadataId]);
   const editable = owner?.renderEditable === true, rows = draft.payload.observations.observations;
   const set = draft.payload.measurementSets.find(s => s.id === selected), metadata = metadataId ? draft.values[metadataId] : null;
@@ -66,7 +68,11 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
       {value.state !== "not_recorded" && <>
         {!value.copiedFrom && <label className="flex min-h-11 items-center gap-2 text-xs"><input type="checkbox" disabled={!editable} checked={targets.includes(id)}
           onChange={() => { if (owner?.active() && owner.editable()) setTargets(current => current.includes(id) ? current.filter(one => one !== id) : [...current, id]); }} />اختيار {title} لجلسة القياس</label>}
-        <button type="button" className={control} onClick={() => { if (!owner || owner.active()) setMetadataId(id); }}>المصدر والتاريخ: {title}</button>
+        <button type="button" className={control} onClick={() => {
+          if (owner && !owner.active()) return;
+          if (metadataId === id) revealSourceDetails(metadataPanel.current);
+          else setMetadataId(id);
+        }}>المصدر والتاريخ: {title}</button>
       </>}
     </div>;
   }
