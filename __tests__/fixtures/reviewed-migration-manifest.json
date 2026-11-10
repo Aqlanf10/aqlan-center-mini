@@ -514,5 +514,11 @@
     "name": "ortho_retention_submissions",
     "filename": "0122_ortho_retention_submissions.sql",
     "checksum": "d565c4381a8ddcfa675ea174ec313963cf1cd66fc1bb9e91edd74f9c8c67f73e"
+  },
+  {
+    "version": "0123",
+    "name": "ortho_study_export_archive",
+    "filename": "0123_ortho_study_export_archive.sql",
+    "checksum": "01fd8820028c96207c1adbb6f0b2953bcc44e98e6c63cccf38ecaef67c982c07"
   }
 ]

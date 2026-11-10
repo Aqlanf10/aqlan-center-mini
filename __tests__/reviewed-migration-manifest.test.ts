@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { loadMigrationFiles } from "../lib/migration-files";
 import reviewed from "./fixtures/reviewed-migration-manifest.json";
 
-it("keeps the reviewed 86-file composed migration ledger byte-exact", async () => {
+it("keeps the reviewed composed migration ledger byte-exact", async () => {
   const files = await loadMigrationFiles();
   expect(files.map(({ version, name, filename, checksum }) => ({ version, name, filename, checksum }))).toEqual(reviewed);
   for (const file of files) {
