@@ -2517,8 +2517,8 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
   const [upperWire, setUpperWire] = form.field("upperWire", "");
   const [lowerWire, setLowerWire] = form.field("lowerWire", "");
   const [elastics, setElastics] = form.field("elastics", "");
-  const [monthsElapsed, setMonthsElapsed] = form.field("monthsElapsed", "6");
-  const [monthsRemaining, setMonthsRemaining] = form.field("monthsRemaining", "12");
+  const [monthsElapsed, setMonthsElapsed] = form.field("monthsElapsed", "");
+  const [monthsRemaining, setMonthsRemaining] = form.field("monthsRemaining", "");
   const [financialMode, setFinancialMode] = form.field<LegacyFinancialMode | "">("financialMode", "");
   const [objectives, setObjectives] = form.field("objectives", "");
   const [doctorId, setDoctorId] = form.field("doctorId", "");
@@ -2538,13 +2538,21 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
     return () => { alive = false; };
   }, []);
 
-  const elapsedNumber = Number(monthsElapsed);
-  const derivedStart = Number.isInteger(elapsedNumber) && elapsedNumber >= 0 && elapsedNumber <= 120
-    ? monthsBefore(today, elapsedNumber) : null;
+  // Blank is unknown input, never zero. Accept an explicitly entered decimal
+  // integer only; do not coerce exponent/hex notation into a clinical duration.
+  const parseMonths = (raw: string): number | null => {
+    if (!/^(0|[1-9]\d{0,2})$/.test(raw.trim())) return null;
+    const value = Number(raw.trim());
+    return value <= 120 ? value : null;
+  };
+  const elapsedNumber = parseMonths(monthsElapsed), remainingNumber = parseMonths(monthsRemaining);
+  const derivedStart = elapsedNumber === null ? null : monthsBefore(today, elapsedNumber);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (saving || form.draft.uncertain) return;
+    if (saving || form.draft.uncertain || !form.viewActive()) return;
+    if (elapsedNumber === null) { onError("الأشهر المنقضية: أدخل عددًا صحيحًا بين 0 و120؛ الفراغ ليس صفرًا."); return; }
+    if (remainingNumber === null) { onError("الأشهر المتبقية: أدخل عددًا صحيحًا بين 0 و120؛ الفراغ ليس صفرًا."); return; }
     if (!financialMode) { onError("اختر كيف عومل المال قبل النظام."); return; }
     const operation = form.begin((form.session?.role === "admin" || form.session?.role === "doctor") && !form.owner.cases.some((row) => row.status === "assessment" || row.status === "active" || row.status === "retention"));
     if (!operation) return;
@@ -2554,7 +2562,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId, appliance, arches, slot, phase, upperWire, lowerWire, elastics,
-          monthsElapsed: Number(monthsElapsed), monthsRemaining: Number(monthsRemaining),
+          monthsElapsed: elapsedNumber, monthsRemaining: remainingNumber,
           financialMode, remainingObjectives: objectives,
           responsibleDoctorId: doctorId ? Number(doctorId) : null,
         }),
@@ -2633,12 +2641,12 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
         <label>
           <span className={label}>منذ كم شهرًا بدأ</span>
           <input value={monthsElapsed} onChange={(event) => setMonthsElapsed(event.target.value)}
-            aria-label="الأشهر المنقضية" inputMode="numeric" dir="ltr" className={field} />
+            aria-label="الأشهر المنقضية" aria-required="true" inputMode="numeric" dir="ltr" className={field} />
         </label>
         <label>
           <span className={label}>الأشهر المتبقية</span>
           <input value={monthsRemaining} onChange={(event) => setMonthsRemaining(event.target.value)}
-            aria-label="الأشهر المتبقية" inputMode="numeric" dir="ltr" className={field} />
+            aria-label="الأشهر المتبقية" aria-required="true" inputMode="numeric" dir="ltr" className={field} />
         </label>
       </div>
       <datalist id="legacy-wires">

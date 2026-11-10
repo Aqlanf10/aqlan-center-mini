@@ -314,6 +314,35 @@ afterEach(() => {
   finally { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); }
 });
 
+describe("legacy baseline explicit month entry", () => {
+  const start = async () => { await mount(true); click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); edit("النظام المالي السابق", "per_session"); };
+  it("starts with no guessed months or derived start date", async () => {
+    await start(); expect(control("الأشهر المنقضية").props.value).toBe(""); expect(control("الأشهر المتبقية").props.value).toBe("");
+    expect(text(render())).not.toContain("بدء تقريبي:"); expect(writes()).toEqual([]);
+  });
+  it.each(["الأشهر المنقضية", "الأشهر المتبقية"])("does not turn cleared %s into zero and preserves all edited inputs", async label => {
+    await start(); edit("الأشهر المنقضية", "6"); edit("الأشهر المتبقية", "12"); edit("الأهداف المتبقية", "Synthetic remaining objectives");
+    edit(label, ""); const before=fields(); const promise=submit(); await drain();
+    // Do not await a wrongly dispatched request: expose the unexpected mutation first.
+    expect(writes()).toEqual([]); await promise; await flush();
+    expect(fields()).toEqual(before); expect(text(render())).toContain(label);
+    expect(text(render())).toContain("0 و120");
+    if(label==="الأشهر المنقضية")expect(text(render())).not.toContain("بدء تقريبي:");
+  });
+  it.each(["الأشهر المنقضية", "الأشهر المتبقية"].flatMap(label=>[" ", "-1", "121", "1.5", "1e1", "0x10", "NaN"].map(value=>[label,value])))("rejects invalid %s text %j before mutation", async (label,value) => {
+    await start(); edit("الأشهر المنقضية","6"); edit("الأشهر المتبقية","12"); edit(label,value);
+    if(label==="الأشهر المنقضية")expect(text(render())).not.toContain("بدء تقريبي:");
+    const promise=submit();await drain();expect(writes()).toEqual([]);await promise;
+    expect(control(label).props.value).toBe(value);
+  });
+  it.each([["0","0"],["120","12"]])("sends explicitly entered valid month counts %s/%s and keeps double-submit protection", async (elapsed,remaining) => {
+    await start(); edit("الأشهر المنقضية",elapsed);edit("الأشهر المتبقية",remaining);
+    expect(text(render())).toContain("بدء تقريبي:");const before=fields(),view=form();const first=submit(view),duplicate=submit(view);
+    expect(writes()).toHaveLength(1);expect(JSON.parse(String(writes()[0].init?.body))).toMatchObject({monthsElapsed:Number(elapsed),monthsRemaining:Number(remaining)});
+    respond(writes()[0],{message:"Synthetic explicit rejection"},409);await Promise.all([first,duplicate]);await flush();expect(fields()).toEqual(before);
+  });
+});
+
 describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () => {
   const dirtyWarning = "هناك عمل غير محفوظ في التقويم. هل تريد تجاهله ومغادرة القسم؟";
   const uncertainWarning = "نتيجة الحفظ غير مؤكدة؛ قد يكون الطلب نُفّذ. المغادرة لا تلغي الطلب ولا تعيد إرساله، وستُترك أي مسودة غير محفوظة. هل تريد مغادرة القسم؟";
@@ -1045,7 +1074,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
   it.each(["new", "baseline", "adjustment"] as const)("latches duplicate same-turn %s submits before the disabled render", async (kind) => {
     await mount(kind !== "adjustment");
     if (kind === "new") click(button("+ فتح حالة تقويم جديدة"));
-    else if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); edit("النظام المالي السابق", "per_session"); }
+    else if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); edit("النظام المالي السابق", "per_session"); edit("الأشهر المنقضية", "6"); edit("الأشهر المتبقية", "12"); }
     else adjustment();
     const view = form(); const first = submit(view); const duplicate = submit(view);
     expect(writes()).toHaveLength(1); respond(writes()[0], { message: "Synthetic ordinary rejection" }, 409);
