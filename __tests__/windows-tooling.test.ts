@@ -46,10 +46,24 @@ describe("portable development tools", () => {
     writeFileSync(join(directory, ".env.local"), "AQLAN_FIXTURE_VALUE=true\r\nAQLAN_FIXTURE_QUOTED=\"a b\"\r\nAQLAN_FIXTURE_OVERRIDE=file\r\n");
     const code = `import ${JSON.stringify(pathToFileURL(join(scripts, "load-env.mjs")).href)}; console.log(JSON.stringify([process.env.AQLAN_FIXTURE_VALUE, process.env.AQLAN_FIXTURE_QUOTED, process.env.AQLAN_FIXTURE_OVERRIDE]));`;
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
-      encoding: "utf8", env: { ...process.env, AQLAN_FIXTURE_OVERRIDE: "shell" },
+      encoding: "utf8", env: { ...process.env, NODE_ENV: "development", AQLAN_FIXTURE_OVERRIDE: "shell" },
     });
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual(["true", "a b", "shell"]);
+  });
+
+  it("never loads private local settings into a test process", () => {
+    const directory = fixture();
+    mkdirSync(join(directory, "scripts"));
+    const loader = join(directory, "scripts", "load-env.mjs");
+    copyFileSync(new URL("../scripts/load-env.mjs", import.meta.url), loader);
+    writeFileSync(join(directory, ".env.local"), "AQLAN_FIXTURE_PRIVATE=must-not-load\r\n");
+    const code = `import ${JSON.stringify(pathToFileURL(loader).href)}; console.log(String(process.env.AQLAN_FIXTURE_PRIVATE));`;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+      encoding: "utf8", env: { ...process.env, NODE_ENV: "test", AQLAN_FIXTURE_PRIVATE: undefined },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe("undefined");
   });
 
   it("honors a global npm upgrade behind a bundled npm shim", () => {

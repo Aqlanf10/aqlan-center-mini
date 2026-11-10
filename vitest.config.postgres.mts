@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
  *    صريحًا لا نجاحًا صامتًا على قاعدةٍ لا يفرضها CI أصلاً.
  */
 export default defineConfig({
+  envDir: false,
   resolve: {
     alias: {
       "@": fileURLToPath(new URL(".", import.meta.url)),

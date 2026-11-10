@@ -2,12 +2,18 @@ import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
 export default defineConfig({
+  // Unit tests must not inherit private .env.local credentials from development.
+  envDir: false,
   resolve: {
     alias: {
       "@": fileURLToPath(new URL(".", import.meta.url)),
     },
   },
   test: {
+    env: {
+      USE_LOCAL_DB: "true",
+      SESSION_SECRET: "unit-tests-only-synthetic-session-secret-0000",
+    },
     // اختبارات تكامل PostgreSQL الحقيقية منفصلة عمدًا (P1.3): تُشغَّل عبر
     // `npm run test:postgres` بإعدادها الخاص وتتطلب قاعدة حقيقية — لا تدخل
     // في `npm test` (وحدة) الذي يعمل بلا قاعدة.

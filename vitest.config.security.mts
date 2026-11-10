@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
  *    ومصفوفة RBAC لا تُثبت إلا على طلب HTTP حقيقي عبر التطبيق المبني.
  */
 export default defineConfig({
+  envDir: false,
   resolve: {
     alias: {
       "@": fileURLToPath(new URL(".", import.meta.url)),

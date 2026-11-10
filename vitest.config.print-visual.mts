@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 /** Isolated hosted Chromium/PDF presentation smoke. Synthetic inputs only;
  * deliberately separate from built-app HTTP/DB authorization acceptance. */
 export default defineConfig({
+  envDir: false,
   resolve: { alias: { "@": fileURLToPath(new URL(".", import.meta.url)) } },
   test: {
     include: ["__tests__/print-visual/financial-clinic-date.test.tsx", "__tests__/print-visual/hr-native-print.test.tsx", "__tests__/print-visual/compact-print-regressions.test.tsx", "__tests__/print-visual/official-installment-contract.test.tsx", "__tests__/print-visual/unified-print-document.test.tsx", "__tests__/print-visual/unified-print-watermark-safety.test.tsx"],
