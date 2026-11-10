@@ -123,6 +123,8 @@ it('rejects a signed session that expires during an observed case lock wait with
 
 it.each([390,1280])('reopens the same case through explicit browser review and recovers a lost committed response at %ipx',async width=>{
  const f=await fixture(),before=await caseRow(f),beforeCounts=await counts(f);
+ if(width===1280) await db.query("UPDATE clinical_cases SET status='completed',completed_at='2026-10-02T00:00:00Z' WHERE id=$1",[f.clinicalCaseId]);
+ const bridgeBefore=(await db.query('SELECT * FROM clinical_cases WHERE id=$1',[f.clinicalCaseId])).rows;
  const context=await browser.newContext({viewport:{width,height:1000},locale:'ar-YE'});
  const [name,...cookie]=h.sessions.admin.cookie.split('=');await context.addCookies([{name,value:cookie.join('='),url:baseUrl}]);
  const page=await context.newPage(),errors:string[]=[],posts:string[]=[];page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));
@@ -164,6 +166,7 @@ it.each([390,1280])('reopens the same case through explicit browser review and r
   await panel.screenshot({path:`.settings-ui-artifacts/ortho-reopen-${width}.png`});
   await page.reload();await page.getByText('حالة التقويم: الإغلاق وإعادة الفتح',{exact:true}).click();
   await expect.poll(async()=>current.innerText()).toContain('Synthetic browser subsequent closure');expect(posts).toHaveLength(1);
+  expect((await db.query('SELECT * FROM clinical_cases WHERE id=$1',[f.clinicalCaseId])).rows).toEqual(bridgeBefore);
   expect(await counts(f)).toEqual(beforeCounts);expect(errors).toEqual([]);
  }finally{await context.close();}
 });
