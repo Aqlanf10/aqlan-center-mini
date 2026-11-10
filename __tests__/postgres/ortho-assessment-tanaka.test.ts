@@ -57,7 +57,7 @@ describe("mixed analysis stored once and reused in a saved study", () => {
       } };
     const study = await saveOrthoCaseStudy({ ...scope, command: studyCommand }); if (!study.ok) throw Error(study.code);
     const text = studyTextPresentation(study.revision, scope).pages.flatMap(page => page.lines).join("\n");
-    expect(text).toContain("المساحة المطلوبة المقدّرة"); expect(text).toContain("74 mm"); expect(text).toContain("-2 mm");
+    expect(text).toContain("المسافة المطلوبة المقدّرة"); expect(text).toContain("74 mm"); expect(text).toContain("-2 mm");
     const correction = structuredClone(command); correction.commandId = randomUUID(); correction.expectedRevisionId = saved.revision.id;
     correction.content.observations.observations.find(r => r.id === "width_11")!.value = { state: "measured", value: 9 };
     const corrected = await appendOrthoAssessment({ ...scope, command: correction }); expect(corrected.ok).toBe(true);

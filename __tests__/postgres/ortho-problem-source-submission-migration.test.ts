@@ -16,12 +16,16 @@ describe("0118 upgrade from the populated 0117 baseline", () => {
       const snapshot = async () => ({ cases: (await f.pool.query("SELECT * FROM ortho_cases ORDER BY id")).rows, bridges: (await f.pool.query("SELECT * FROM clinical_cases ORDER BY id")).rows,
         money: (await f.pool.query("SELECT (SELECT count(*)::int FROM invoices) invoices,(SELECT count(*)::int FROM payments) payments,(SELECT count(*)::int FROM patient_opening_balances) opening")).rows });
       const before = await snapshot();
+      expect(before.cases.every(row => !Object.hasOwn(row, "lifecycle_version"))).toBe(true);
+      // The full upgrade also applies 0125: only its explicit initial CAS
+      // version is added; every preexisting case field/bridge/balance stays exact.
+      const upgraded = { ...before, cases: before.cases.map(row => ({ ...row, lifecycle_version: 0 })) };
       await migrate(f.pool, { apply: true, files });
-      expect(await snapshot()).toEqual(before);
+      expect(await snapshot()).toEqual(upgraded);
       expect((await f.pool.query("SELECT count(*)::int n FROM ortho_problem_source_submissions")).rows[0].n).toBe(0);
       expect((await f.pool.query("SELECT adopted FROM schema_migrations WHERE version='0118'")).rows).toEqual([{ adopted: false }]);
       await migrate(f.pool, { apply: true, files });
-      expect(await snapshot()).toEqual(before);
+      expect(await snapshot()).toEqual(upgraded);
     } finally { await f.close(); }
   });
   it("refuses an unregistered object collision and preserves the existing canary", async () => {

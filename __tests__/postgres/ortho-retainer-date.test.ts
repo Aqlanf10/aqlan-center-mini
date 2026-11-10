@@ -377,7 +377,10 @@ describe("observed PostgreSQL lock-current decisions", () => {
       () => patch(id, { retainer: "hawley", retainerOn: D0 }), SETTER);
     expect(close).toEqual({ ok: true }); expect(repeat.status).toBe(409);
     const after = await state(id);
-    expect(after).toEqual({ ...before, status, closed_at: expect.any(String),
+    expect(before.lifecycle_version).toBe(0);
+    // 0125 records the successful closure exactly once. The refused PATCH
+    // must change neither the lifecycle counter nor any other case field.
+    expect(after).toEqual({ ...before, lifecycle_version: 1, status, closed_at: expect.any(String),
       closed_by: ACTOR, closed_note: "Synthetic queued closure" });
   });
 
