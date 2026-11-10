@@ -47,11 +47,14 @@ export async function getStudyImageBasis(input: JourneyOwnerInput & {documentId:
       basis:{orientedWidth:basis.orientedWidth,orientedHeight:basis.orientedHeight,exifOrientation:basis.exifOrientation}};
   }));
 }
-export async function getStudyImagePreview(input: JourneyOwnerInput & {command: StudyImageCommand}) {
+/** Export renderers opt in internally; ordinary authorized review stays separate. */
+export async function getStudyImagePreview(input: JourneyOwnerInput & {command: StudyImageCommand; exportAccess?: true}) {
   return withSlot(() => journeyTransaction(false, async client => {
     const c = input.command;
     if (c.patientId !== input.patientId) journeyFail(400,'invalid_scope');
-    const authority = await authorizeJourney(client,input,false), doc = await source(client,{...input,documentId:c.documentId,sha256:c.sha256},authority);
+    const authority = await authorizeJourney(client,input,false);
+    if (input.exportAccess && authority.canExportStudies !== true) journeyFail(403, 'study_export_forbidden');
+    const doc = await source(client,{...input,documentId:c.documentId,sha256:c.sha256},authority);
     const owner = await lockJourneyOwner(client,input,false), bytes = await checkedBytes(doc);
     let rendered;
     try { rendered = await renderStudyImage(bytes,c.recipe,c.frame); } catch (error) { imageFailure(error); }

@@ -1004,6 +1004,8 @@ export default function UsersAndDoctorsPage() {
                           setEditForm((current) => current.role === role ? current : ({
                             ...current,
                             role,
+                            // Admin defaults and prior-role grants do not authorize export in a new role.
+                            permissions: { ...current.permissions, canExportOrthoStudies: false },
                             commissionConfig: current.commissionBaseline,
                           }));
                           setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
@@ -2388,6 +2390,11 @@ export default function UsersAndDoctorsPage() {
                       <input type="checkbox" checked={editForm.permissions.canPrintSavedPrescriptions === true}
                         onChange={event => { if (currentPrincipal() && editorPrincipal.current === principalOwner && editorOwner.current === editForm.owner) setEditForm(current => ({ ...current, permissions: { ...current.permissions, canPrintSavedPrescriptions: event.target.checked } })); }} />
                       <span>إعادة طباعة الوصفات المحفوظة الفاعلة فقط — دون إنشاء أو تعديل أو إبطال</span>
+                    </label>}
+                    {(editForm.role === "doctor" || editForm.role === "reception") && <label className="flex gap-3 rounded-xl border p-4">
+                      <input type="checkbox" checked={editForm.permissions.canExportOrthoStudies === true}
+                        onChange={event => { if (currentPrincipal() && editorPrincipal.current === principalOwner && editorOwner.current === editForm.owner) setEditForm(current => ({ ...current, permissions: { ...current.permissions, canExportOrthoStudies: event.target.checked } })); }} />
+                      <span>تصدير دراسات التقويم — يتطلب أيضاً صلاحية المريض وكل مصدر وصورة مختارة</span>
                     </label>}
                     {/* Section: AI Chatbot Permissions */}
                     <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 shadow-xs">

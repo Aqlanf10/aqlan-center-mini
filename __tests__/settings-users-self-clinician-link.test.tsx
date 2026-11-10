@@ -3,6 +3,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UsersAndDoctorsPage from "../app/settings/users/page";
+import { parseDoctorPermissions } from "../lib/doctor-permissions";
 type Hooks = { values: unknown[]; cursor: number; changed: boolean; mounted: boolean; lateUpdates: number;
   effects: Map<number, { deps?: readonly unknown[]; cleanup?: () => void; layout: boolean }>;
   memos: Map<number, { deps?: readonly unknown[]; value: unknown }>; pending: Array<() => void>; layout: Array<() => void> };
@@ -96,6 +97,56 @@ function role(value: string) {
   if (!control) throw new Error("Missing role selector");
   (control.props.onChange as (e: unknown) => void)({ target: { value } }); render();
 }
+
+function exportGrant() {
+  const label = nodes(render()).find(node => node.type === "label" && text(node).includes("تصدير دراسات التقويم"));
+  const checkbox = label && nodes(label).find(node => node.type === "input" && node.props.type === "checkbox");
+  if (!checkbox) throw new Error("Missing actual export permission checkbox");
+  return checkbox;
+}
+function permissionsTab() {
+  const tab = nodes(render()).find(node => node.type === "button" && text(node).includes("الصلاحيات والخصوصية"));
+  if (!tab) throw new Error("Missing actual permissions tab");
+  (tab.props.onClick as () => void)(); render();
+}
+async function savePermissions() {
+  await (button("حفظ التغييرات والصلاحيات").props.onClick as () => Promise<void>)();
+  expect(writes).toHaveLength(1);
+  return writes[0].body;
+}
+describe("explicit export grants across role changes", () => {
+  it.each(["doctor", "reception"])("does not inherit synthesized admin export authority when changing to %s", async nextRole => {
+    await ready(); open(); role(nextRole); permissionsTab();
+    expect(exportGrant().props.checked).toBe(false);
+    expect(writes).toEqual([]);
+    const body = await savePermissions();
+    expect(body.role).toBe(nextRole);
+    expect(body.permissions).toEqual({ ...parseDoctorPermissions(undefined, "admin"), canExportOrthoStudies: false });
+    expect(body).not.toHaveProperty("commissionConfig");
+  });
+  it.each(["doctor", "reception"])("requires the actual checkbox to grant export after admin becomes %s", async nextRole => {
+    await ready(); open(); role(nextRole); permissionsTab();
+    const checkbox = exportGrant(); expect(checkbox.props.checked).toBe(false);
+    (checkbox.props.onChange as (e: unknown) => void)({ target: { checked: true } }); render();
+    expect(exportGrant().props.checked).toBe(true);
+    const body = await savePermissions();
+    expect(body.role).toBe(nextRole);
+    expect(body.permissions).toEqual(parseDoctorPermissions(undefined, "admin"));
+    expect(body).not.toHaveProperty("commissionConfig");
+  });
+  it("retains an explicit grant for a same-role event and clears only that grant on a subsequent role transition", async () => {
+    accountRole = "doctor"; accountUsername = "other-doctor";
+    await ready(); open(); permissionsTab();
+    (exportGrant().props.onChange as (e: unknown) => void)({ target: { checked: true } }); render();
+    (nodes(render()).find(node => node.type === "button" && text(node).includes("البيانات الأساسية"))!.props.onClick as () => void)(); render();
+    role("doctor"); permissionsTab(); expect(exportGrant().props.checked).toBe(true);
+    (nodes(render()).find(node => node.type === "button" && text(node).includes("البيانات الأساسية"))!.props.onClick as () => void)(); render();
+    role("reception"); permissionsTab(); expect(exportGrant().props.checked).toBe(false);
+    const body = await savePermissions();
+    expect(body.role).toBe("reception");
+    expect(body.permissions).toEqual({ ...parseDoctorPermissions(undefined, "doctor"), canExportOrthoStudies: false });
+  });
+});
 describe("own admin clinical identity selector", () => {
   it("shows an empty deliberate selector for self without writing on load or open", async () => {
     await ready(); expect(writes).toEqual([]); open(); await settle();

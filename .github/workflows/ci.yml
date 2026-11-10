@@ -1205,6 +1205,8 @@ jobs:
             .settings-ui-artifacts/ortho-workup-1280.png
             .settings-ui-artifacts/ortho-retention-context-390.png
             .settings-ui-artifacts/ortho-retention-context-1280.png
+            .settings-ui-artifacts/ortho-study-export-grant-390.png
+            .settings-ui-artifacts/ortho-study-export-grant-1280.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

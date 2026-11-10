@@ -23,7 +23,8 @@ describe("authorized saved-study print", () => {
     expect(html).toContain("SAVED_ONLY &lt;script&gt;synthetic&lt;/script&gt;"); expect(html).toContain("مسودة"); expect(html).toContain("SHA256:");
     expect(html).toContain("لا تشمل الصور"); expect(html).not.toContain("SYNTHETIC_VIEWER"); expect(html).not.toContain("<script>");
     expect(state.read).toHaveBeenCalledTimes(2);
-    expect(state.read).toHaveBeenCalledWith({ session: state.session, patientId: 19, orthoCaseId: 41, revisionId: 91 });
+    expect(state.read).toHaveBeenNthCalledWith(1, { session: state.session, patientId: 19, orthoCaseId: 41, revisionId: 91, exportAccess: true });
+    expect(state.read).toHaveBeenNthCalledWith(2, { session: state.session, patientId: 19, orthoCaseId: 41, revisionId: 91, exportAccess: true });
   });
   it("does not expose a printout after current access is revoked during preparation", async () => {
     state.read.mockResolvedValueOnce(await state.read()).mockResolvedValueOnce({ ok: false, status: 403 }); state.read.mockClear();

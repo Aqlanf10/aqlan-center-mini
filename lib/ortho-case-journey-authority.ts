@@ -5,11 +5,12 @@ import { ensureSchema, findUserByUsername, getPool, type DbClient } from "./db";
 import { canAccessPatient } from "./patient-access";
 import { requireSession } from "./session";
 import { assessmentPositiveId as journeyId } from "./ortho-assessment-authority";
+import { canExportOrthoStudy } from "./ortho-study-export-access";
 interface JourneyScope { patientId: number; orthoCaseId: number; clinicalCaseId: number }
 export interface JourneyOwnerInput { session: SessionPayload; patientId: number; orthoCaseId: number }
 export interface JourneyAuthority {
   session: SessionPayload; userId: number; name: string; canWrite: boolean; canViewPlans: boolean;
-  canEditPlans: boolean; canViewImages: boolean;
+  canEditPlans: boolean; canViewImages: boolean; canExportStudies: boolean;
 }
 export interface JourneyOwner extends JourneyScope {
   status: OrthoLifecycleStatus;
@@ -45,7 +46,8 @@ export async function authorizeJourneyPatient(client:DbClient,input:Pick<Journey
   const canViewPlans = await canAccessPatient(session, input.patientId, "canViewPlans", client);
   const canEditPlans = canWrite && canViewPlans && await canAccessPatient(session, input.patientId, "canEditPlans", client);
   const canViewImages = await canAccessPatient(session, input.patientId, "canViewXrays", client);
-  return { session, userId: user.id, name: user.displayName, canWrite, canViewPlans, canEditPlans, canViewImages };
+  return { session, userId: user.id, name: user.displayName, canWrite, canViewPlans, canEditPlans, canViewImages,
+    canExportStudies: canExportOrthoStudy(user) };
 }
 /** Selected source plan/visit/document locks must precede this child lock. */
 export async function lockJourneyOwner(client: DbClient, input: JourneyOwnerInput, write: boolean): Promise<JourneyOwner> {

@@ -10,14 +10,14 @@ export async function withIllustratedStudy<T>(input:JourneyOwnerInput&{revisionI
  if(active)return {ok:false as const,status:409,code:'study_illustrated_busy'};
  active=true;
  try{
-  const saved=await getOrthoCaseStudy(input);if(!saved.ok)return saved;
+  const saved=await getOrthoCaseStudy({...input,exportAccess:true});if(!saved.ok)return saved;
   if(!saved.revision)return {ok:false as const,status:404,code:'study_revision_not_found'};
   const value=await illustrateSavedStudy(saved.revision,saved,async(use,frame)=>{
-   const image=await getStudyImagePreview({...input,command:{patientId:input.patientId,documentId:use.documentId,sha256:use.sourceSha256,useId:use.useId,purpose:'selected-use',recipe:use.recipe,frame}});
+   const image=await getStudyImagePreview({...input,exportAccess:true,command:{patientId:input.patientId,documentId:use.documentId,sha256:use.sourceSha256,useId:use.useId,purpose:'selected-use',recipe:use.recipe,frame}});
    if(!image.ok)throw Error(image.code);return image;
   });
   const output=await consume(value);
-  const fresh=await getOrthoCaseStudy(input);if(!fresh.ok)return fresh;
+  const fresh=await getOrthoCaseStudy({...input,exportAccess:true});if(!fresh.ok)return fresh;
   if(fresh.revision?.contentHash!==value.revisionHash)return {ok:false as const,status:409,code:'study_changed'};
   return {ok:true as const,value,output};
  }finally{active=false;}

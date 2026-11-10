@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { chromium } from "playwright";
@@ -12,6 +12,19 @@ import { formatMoney } from "../../lib/money";
 const reset = "*,::before,::after{box-sizing:border-box;border-width:0;border-style:solid}body,p,h1,h2,h3{margin:0}html{line-height:1.5}img{display:block;max-width:100%;height:auto}.object-contain{object-fit:contain}";
 const settings = { ...SETTING_DEFAULTS, "clinic.name": "مركز عرض صناعي", "clinic.lead_doctor": "طبيب اختبار", "clinic.lead_doctor_title": "اختبار", "clinic.lead_doctor_credentials": "", "clinic.phone": "000-000000", "clinic.address": "عنوان اختبار" };
 const output = resolve(".settings-ui-artifacts/unified-print");
+
+// A failed renderer must not stall diagnostics or have its original failure
+// replaced by an error while collecting evidence. Never retry the screenshot.
+async function boundedDiagnostic<T>(read: () => Promise<T>) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read().then(value => ({ state: "available" as const, value })),
+      new Promise<{ state: "timed-out" }>(resolve => { timer = setTimeout(() => resolve({ state: "timed-out" }), 1000); }),
+    ]);
+  } catch { return { state: "unavailable" as const }; }
+  finally { clearTimeout(timer); }
+}
 
 // Real Chromium/PDF witness for the shared renderer. Actual route data/privacy
 // tests remain separate; synthetic fixtures never read a clinic database.
@@ -26,10 +39,17 @@ describe("unified document shared renderer: hosted browser/PDF", () => {
     </div></div></>);
     const image = logo ? `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}` : "data:image/png;base64,";
     const html = `<!doctype html><html lang="ar" dir="rtl"><style>${reset}${readFileSync(resolve("components/print-document.css"), "utf8")}${readFileSync(resolve("app/print/print.css"), "utf8")}</style><body>${body.replaceAll('src="/logo.png"', `src="${image}"`)}</body></html>`;
-    mkdirSync(output, { recursive: true }); const browser = await chromium.launch();
+    mkdirSync(output, { recursive: true });
+    // Default remains the locked Playwright browser in CI. Explicit local
+    // overrides are recorded in failure evidence and are not equivalent runs.
+    const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
     try {
       const context = await browser.newContext({ viewport: { width: 794, height: 1123 }, locale: "ar-YE", serviceWorkers: "block" });
-      await context.route("**/*", route => route.abort()); const page = await context.newPage(); await page.setContent(html);
+      await context.route("**/*", route => route.abort()); const page = await context.newPage();
+      let crashed = false, closed = false, disconnected = false;
+      page.on("crash", () => { crashed = true; }); page.on("close", () => { closed = true; });
+      browser.on("disconnected", () => { disconnected = true; });
+      await page.setContent(html);
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode().catch(() => undefined))); });
       await page.emulateMedia({ media: "print" });
       const geometry = await page.evaluate(() => {
@@ -49,7 +69,35 @@ describe("unified document shared renderer: hosted browser/PDF", () => {
       expect(await page.locator(".print-document-watermark img").count()).toBe(logo ? 1 : 0);
       expect(geometry.headers).toBe("table-header-group"); expect(geometry.totals).toBe("table-row-group");
       expect(geometry.horizontalOverflow).toBe(false); expect(await page.locator("tbody tr").count()).toBe(rows);
-      await page.screenshot({ path: resolve(output, `${name}.png`), fullPage: true });
+      try {
+        await page.screenshot({ path: resolve(output, `${name}.png`), fullPage: true });
+      } catch (error) {
+        try {
+          const documentState = await boundedDiagnostic(() => page.evaluate(() => {
+            const dimensions = (node: HTMLElement) => ({ clientWidth: node.clientWidth, clientHeight: node.clientHeight,
+              scrollWidth: node.scrollWidth, scrollHeight: node.scrollHeight, offsetWidth: node.offsetWidth, offsetHeight: node.offsetHeight });
+            return { readyState: document.readyState, fontStatus: document.fonts.status, visibility: document.visibilityState,
+              printMedia: matchMedia("print").matches, deviceScale: devicePixelRatio, scrollX, scrollY,
+              root: dimensions(document.documentElement), body: dimensions(document.body),
+              images: [...document.images].map(img => ({ complete: img.complete, width: img.naturalWidth, height: img.naturalHeight })),
+              paints: performance.getEntriesByType("paint").map(entry => ({ name: entry.name, startTime: entry.startTime })) };
+          }));
+          const layoutMetrics = await boundedDiagnostic(async () => {
+            const client = await context.newCDPSession(page);
+            try { return await client.send("Page.getLayoutMetrics"); }
+            finally { await client.detach(); }
+          });
+          // Synthetic numeric/state evidence only: no HTML, image sources,
+          // cookies, headers, browser state, traces or environmental values.
+          writeFileSync(resolve(output, `${name}-screenshot-failure.json`), JSON.stringify({
+            schemaVersion: 1, fixture: name, rows, logo, browserVersion: browser.version(),
+            browserSelection: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? "explicit-local-override" : "playwright-bundled",
+            viewport: page.viewportSize(), screenshot: { fullPage: true },
+            crashed, closed, disconnected, connected: browser.isConnected(), geometry, documentState, layoutMetrics,
+          }, null, 2));
+        } catch { /* Evidence collection must never replace the original error. */ }
+        throw error;
+      }
       const pdf = resolve(output, `${name}.pdf`); await page.pdf({ path: pdf, format: "A4", printBackground: false });
       const text = execFileSync("pdftotext", ["-layout", pdf, "-"], { encoding: "utf8" });
       for (let i = 1; i <= rows; i++) expect(text.match(new RegExp(`ROW-${String(i).padStart(3, "0")}\\b`, "g"))).toHaveLength(1);

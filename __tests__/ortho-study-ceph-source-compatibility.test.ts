@@ -14,7 +14,7 @@ import { syntheticSourceBoundStudyCephCapture, syntheticWitnessedStudyCephCaptur
 // never a replacement for the already locked document/analysis/case graph.
 vi.mock("../lib/db", () => ({ getPool: () => { throw new Error("unexpected_pool_fallback"); } }));
 const owner: JourneyOwner = { patientId: 11, orthoCaseId: 31, clinicalCaseId: 41, status: "active", planId: null, recordingContext: "current" };
-const authority: JourneyAuthority = { userId: 9, name: "Synthetic", canWrite: true, canViewPlans: true, canEditPlans: true, canViewImages: true,
+const authority: JourneyAuthority = { userId: 9, name: "Synthetic", canWrite: true, canViewPlans: true, canEditPlans: true, canViewImages: true, canExportStudies: false,
   session: { userId: 9, username: "synthetic-doctor", role: "doctor", expiresAt: Number.MAX_SAFE_INTEGER } };
 function fixture(version: 1 | 2) {
   const payload = version === 1 ? syntheticWitnessedStudyCephCapture() : syntheticSourceBoundStudyCephCapture();

@@ -14,6 +14,9 @@ export default defineConfig({
     exclude: [
       "**/node_modules/**",
       "**/dist/**",
+      // Next standalone copies may contain traced *.test files without their source fixtures.
+      // Test the originals; generated build output is not a second source tree.
+      "**/.next/**",
       "**/cypress/**",
       "**/.{idea,git,cache,output,temp}/**",
       "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,eslint,prettier}.config.*",

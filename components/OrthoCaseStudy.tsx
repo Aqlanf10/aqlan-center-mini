@@ -10,6 +10,7 @@ import type { StudyEditorRead } from "@/lib/ortho-case-study-editor-contract";
 import type { StudyOwner } from "@/lib/ortho-case-study-owner";
 import type { JourneyScope } from "@/lib/ortho-case-journey-records";
 import { OrthoStudyTimepoints } from "./OrthoStudyTimepoints";
+import { OrthoStudyExportLinks } from "./OrthoStudyExportLinks";
 import OrthoSavedStudyReview from "@/components/OrthoSavedStudyReview";
 import OrthoStudyImagePicker from "@/components/OrthoStudyImagePicker";
 import { attachStudyImage, detachStudyImage } from "@/lib/ortho-study-image-selection";
@@ -223,13 +224,7 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
         disabled={transitionBusy || owner.busy || owner.uncertain || !!recovery?.receipt} onChange={event => { const value = event.currentTarget.value; event.currentTarget.value = selected === null ? "latest" : String(selected); selectRevision(value === "latest" ? null : Number(value)); }}>
         <option value="latest">{t("آخر نسخة محفوظة")}</option>{ready.history.map(row => <option key={row.id} value={row.id}>{t("النسخة")} {row.version} — {t(row.kind === "draft" ? "مسودة" : "موثقة")}</option>)}</select></label>
         <button type="button" className={control} disabled={transitionBusy || owner.busy} onClick={() => owner.refresh()}>{t("تحديث القراءة دون حذف المسودة")}</button></div>
-      {ready.revision && <div className="flex flex-wrap gap-3 rounded-lg bg-slate-50 p-3 text-sm">
-        <a className={control} target="_blank" rel="noopener noreferrer" href={`/print/ortho-study/${orthoCaseId}?patientId=${patientId}&revisionId=${ready.revision.id}`}>طباعة النسخة المحفوظة / PDF نصي</a>
-        <a className={control} href={`/api/ortho/${orthoCaseId}/case-study/text-pptx?patientId=${patientId}&revisionId=${ready.revision.id}`}>PowerPoint نصي قابل للتحرير</a>
-        <a className={control} href={`/api/ortho/${orthoCaseId}/case-study/illustrated-pptx?patientId=${patientId}&revisionId=${ready.revision.id}`}>PowerPoint مصور قابل للتحرير</a>
-        <a className={control} target="_blank" rel="noopener noreferrer" href={`/print/ortho-study/${orthoCaseId}?patientId=${patientId}&revisionId=${ready.revision.id}&mode=illustrated`}>معاينة الدراسة المصورة / PDF</a>
-        <p className="w-full">التصدير للنسخة المحفوظة المعروضة فقط؛ الصور وإخفاء الهوية للتعليم غير مشمولين في النسخة النصية.</p>
-      </div>}
+      {ready.revision && <OrthoStudyExportLinks patientId={patientId} orthoCaseId={orthoCaseId} revisionId={ready.revision.id} />}
       {owner.draftQuarantined || recovery?.receipt?.state === "blocked" ? null : !draft ? <p role="alert">{t("تعذّر فك المسودة المحلية؛ لم تُستبدل بمحتوى فارغ.")}</p> : <>
         {!ready.canAppend && <p>{t("عرض فقط حسب الصلاحية الحالية.")}</p>}
         <label className="block">{t("سبب حفظ النسخة")}<input dir="auto" aria-label={t("سبب حفظ النسخة")} className={`${control} w-full`} maxLength={500} value={draft.reason} disabled={!editable} onChange={event => change({ ...draft!, reason: event.currentTarget.value })} /></label>

@@ -14,12 +14,12 @@ export default async function OrthoStudyPrint({ params, searchParams }: { params
   const orthoCaseId = routeId((await params).id), patientId = routeId(query.patientId), revisionId = routeId(query.revisionId);
   if (!session || !orthoCaseId || !patientId || !revisionId || Object.keys(query).some(key => key !== "patientId" && key !== "revisionId" && key !== "mode") || query.mode !== undefined && query.mode !== "illustrated") notFound();
   if (query.mode === "illustrated") return <IllustratedStudyPrint session={session} orthoCaseId={orthoCaseId} patientId={patientId} revisionId={revisionId} />;
-  const result = await getOrthoCaseStudy({ session, patientId, orthoCaseId, revisionId });
+  const result = await getOrthoCaseStudy({ session, patientId, orthoCaseId, revisionId, exportAccess: true });
   if (!result.ok || !result.revision) notFound();
   const value = studyTextPresentation(result.revision, result);
   const settings = await getSettingsSafe();
   // Clinic header preparation must not bypass current authority on released facts.
-  const fresh = await getOrthoCaseStudy({ session, patientId, orthoCaseId, revisionId });
+  const fresh = await getOrthoCaseStudy({ session, patientId, orthoCaseId, revisionId, exportAccess: true });
   if (!fresh.ok || fresh.revision?.id !== revisionId || fresh.revision.contentHash !== value.revisionHash) notFound();
   return <main dir="rtl" className="mx-auto max-w-5xl space-y-5 bg-white p-5 text-slate-900">
     <div className="print:hidden space-y-2"><h1 className="text-xl font-bold">عرض الحالة — نسخة نصية</h1><p>تُطبع النسخة المحفوظة المختارة. هذه نسخة سريرية داخل الملف، ولا تشمل الصور أو إخفاء الهوية للنشر التعليمي.</p><OrthoStudyPrintButton /></div>

@@ -14,10 +14,13 @@ import { prepareSavedStudySourceUnion, prepareIncomingStudySourceUnion } from ".
 const decodeOnlyPolicy: StudyContentPolicy<StudySavedContent> = { decode: decodeStudySavedContent, authored: c => c.authored,
   requireCurrentRead: async () => journeyFail(500, "study_authority_not_prepared") };
 
-export async function getOrthoCaseStudy(input: JourneyOwnerInput & { revisionId?: number }) {
+/** exportAccess is server-owned intent, never parsed from request parameters. */
+export async function getOrthoCaseStudy(input: JourneyOwnerInput & { revisionId?: number; exportAccess?: true }) {
   return journeyTransaction(false, async client => {
     if (input.revisionId !== undefined && !journeyId(input.revisionId)) journeyFail(400, "invalid_study_revision");
-    const authority = await authorizeJourney(client, input, false), discovered = await discoverJourneyOwner(client, input);
+    const authority = await authorizeJourney(client, input, false);
+    if (input.exportAccess && authority.canExportStudies !== true) journeyFail(403, "study_export_forbidden");
+    const discovered = await discoverJourneyOwner(client, input);
     const preflight = await readLockedStudyHistory(client, discovered, decodeOnlyPolicy);
     const priorHead = preflight.revisions.at(-1) ?? null;
     const priorSelected = input.revisionId === undefined ? priorHead : preflight.revisions.find(r => r.id === input.revisionId) ?? null;
