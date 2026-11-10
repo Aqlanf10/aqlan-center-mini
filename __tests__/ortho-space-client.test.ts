@@ -18,6 +18,13 @@ describe('space read and receipt proofs',()=>{
  it('retains full signed baseline precision and unknown amounts',async()=>{const f=await fixture(),r=await verifySpaceRead(f.read,1,2,{scope,actorId});expect(r?.history[0].content.baseline).toEqual({discrepancyMm:-1.234567,estimated:true});expect(r?.history[0].content.authored).toEqual(plan);});
  it('retains assessment-stage space plans',async()=>{const f=await fixture();f.read.history[0].caseStatusAtCapture='assessment';f.receipt.revision.caseStatusAtCapture='assessment';expect(await verifySpaceRead(f.read,1,2,{scope,actorId})).not.toBeNull();await expect(verifySpaceReceipt(f.receipt,{scope,actorId},f.command,201)).resolves.toEqual(f.receipt.revision);});
  it('returns detached clinical data',async()=>{const f=await fixture(),r=await verifySpaceRead(f.read,1,2);f.read.history[0].content.baseline.discrepancyMm=0;expect(r?.history[0].content.baseline?.discrepancyMm).toBe(-1.234567);});
+ it('accepts the canonical analysis member used by the browser fixture and refuses punctuation',async()=>{
+  const f=await fixture();
+  f.read.baselines[0].ref={...f.read.baselines[0].ref,member:'space_upper'};
+  expect(await verifySpaceRead(f.read,1,2,{scope,actorId})).not.toBeNull();
+  f.read.baselines[0].ref.member='arch-space:upper';
+  expect(await verifySpaceRead(f.read,1,2,{scope,actorId})).toBeNull();
+ });
  it.each(['root_extra','actor','scope','recorded_patient','history_extra','hash','content','head','predecessor','version','duplicate','sparse','projection','projection_extra','baseline','baseline_extra','strategy','adjustment','adjustment_date','adjustment_extra','oversize'] as const)('refuses malformed %s without empty substitution',async kind=>{
   const f=await fixture(),r:any=structuredClone(f.read);
   if(kind==='root_extra')r.extra=true;if(kind==='actor')r.actorId=8;if(kind==='scope')r.scope.patientId=2;if(kind==='recorded_patient')r.history[0].recordedPatientId=2;

@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Locator, type Page, type Route } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
-import { toWhatsAppNumber } from "../../lib/reminders";
 import { PROCEDURE_TEMPLATES } from "../../lib/prescription-procedure-templates";
 import { baseUrl, harness } from "./_server";
 
@@ -24,6 +23,7 @@ const prescriptionId = 98103;
 const acknowledgementToken = "synthetic-prescription-acknowledgement";
 const draftNotes = "تعليمات تجريبية محفوظة في المسودة";
 const medicine = {
+  selection: { id: "manual", amount: "fixture amount", confirmed: true },
   name: "SyntheticRx", dose: "fixture dose", form: "Tablets",
   frequency: "fixture frequency", duration: "fixture duration",
   instructions: "تعليمات تجريبية", instructionsEn: "Synthetic instructions",
@@ -103,7 +103,11 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
       else if (holdPatient) pendingPatients.push(route);
       else await json(route, patientPayload, patientStatus);
     }
-    else if (path === `/api/patients/${contextPatientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [] });
+    else if (path === `/api/patients/${contextPatientId}/prescriptions`) await json(route, {
+      prescriptions: [], suggestions: [],
+      prescriberOptions: { issuerId: 98104, canChooseAnyDoctor: false, doctors: [{ id: 98104, name: "طبيب تجريبي" }] },
+    });
+    else if (path === "/api/settings") await json(route, {});
     else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties") await json(route, [{ id: 98104, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);
@@ -168,24 +172,33 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
 }
 
 async function fillMedicine(page: Page) {
-  await page.getByRole("button", { name: "إضافة دواء جديد", exact: true }).click();
+  // The current modal already supplies one blank manual row. Do not append
+  // an unreviewed second row that would correctly block issuance.
+  expect(await page.getByPlaceholder("Drug name", { exact: true }).count()).toBe(1);
   for (const [placeholder, value] of [
-    ["Drug name (e.g. Augmentin / Brufen)", medicine.name],
-    ["Dose (1g / 500mg)", medicine.dose],
-    ["Form (Tablets / Syrup)", medicine.form],
+    ["Drug name", medicine.name],
+    ["Strength / concentration + unit", medicine.dose],
+    ["Form / route (tablet, oral rinse…)", medicine.form],
     ["Frequency (every 8 hours)", medicine.frequency],
     ["Duration (5 days)", medicine.duration],
     ["التعليمات بالعربية (بعد الأكل…)", medicine.instructions],
     ["Instructions in English (after meals…)", medicine.instructionsEn],
   ]) await page.getByPlaceholder(placeholder, { exact: true }).fill(value);
+  await page.getByRole("textbox", { name: "مقدار الجرعة للسطر 1", exact: true }).fill(medicine.selection.amount);
+  await page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية/ }).check();
 }
 
 async function assertMedicine(page: Page) {
-  expect(await page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).count()).toBe(1);
-  expect(await page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).inputValue()).toBe(medicine.name);
-  expect(await page.getByPlaceholder("Dose (1g / 500mg)", { exact: true }).inputValue()).toBe(medicine.dose);
+  expect(await page.getByPlaceholder("Drug name", { exact: true }).count()).toBe(1);
+  expect(await page.getByPlaceholder("Drug name", { exact: true }).inputValue()).toBe(medicine.name);
+  expect(await page.getByPlaceholder("Strength / concentration + unit", { exact: true }).inputValue()).toBe(medicine.dose);
+  expect(await page.getByPlaceholder("Form / route (tablet, oral rinse…)", { exact: true }).inputValue()).toBe(medicine.form);
+  expect(await page.getByPlaceholder("التعليمات بالعربية (بعد الأكل…)", { exact: true }).inputValue()).toBe(medicine.instructions);
+  expect(await page.getByPlaceholder("Instructions in English (after meals…)", { exact: true }).inputValue()).toBe(medicine.instructionsEn);
   expect(await page.getByPlaceholder("Frequency (every 8 hours)", { exact: true }).inputValue()).toBe(medicine.frequency);
   expect(await page.getByPlaceholder("Duration (5 days)", { exact: true }).inputValue()).toBe(medicine.duration);
+  expect(await page.getByRole("textbox", { name: "مقدار الجرعة للسطر 1", exact: true }).inputValue()).toBe(medicine.selection.amount);
+  expect(await page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية/ }).isChecked()).toBe(true);
 }
 
 async function prints(page: Page) {
@@ -214,14 +227,16 @@ describe("prescription diagnosis draft in the built visit page", () => {
       expect(await prints(f.page)).toEqual([]);
 
       const expected = {
-        patientId, diagnosis: "Updated diagnosis before prescription print", notes: draftNotes,
+        commandKey: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+        patientId, visitId, prescribingDoctorPartyId: 98104, diagnosis: "Updated diagnosis before prescription print", notes: draftNotes,
         instructionsLang: "en", items: [medicine],
       };
       f.holdPrescriptionPreview();
-      await f.page.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }).click();
+      await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }).click();
       await expect.poll(() => f.requests.length).toBe(1);
       expect(f.requests).toEqual([expected]);
       expect(await prints(f.page)).toEqual([]);
+      expect(await f.page.getByRole("button", { name: "جارٍ حفظ الوصفة…", exact: true }).isDisabled()).toBe(true);
       // The same ownership applies while the initial POST is still in flight,
       // before any safety response has returned.
       await f.close();
@@ -230,10 +245,21 @@ describe("prescription diagnosis draft in the built visit page", () => {
       expect(await f.diagnosis.inputValue()).toBe(expected.diagnosis);
       expect(await f.notes.inputValue()).toBe(draftNotes);
       await assertMedicine(f.page);
-      expect(await f.page.getByRole("button", { name: "جارٍ حفظ الوصفة…", exact: true }).isDisabled()).toBe(true);
+      // Closing retires the in-flight operation; the old response must not
+      // regain authority when this patient context is reopened.
+      await expect.poll(() => f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }).isEnabled()).toBe(true);
       expect(f.requests).toEqual([expected]);
       expect(await prints(f.page)).toEqual([]);
+      const staleResponse = f.page.waitForResponse(response => response.url() === `${baseUrl}/api/prescriptions`);
       await f.releasePrescriptionPreview();
+      await (await staleResponse).finished();
+      await f.page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      expect(await prints(f.page)).toEqual([]);
+      expect(await f.page.getByRole("button", { name: "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا", exact: true }).count()).toBe(0);
+      await f.page.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }).click();
+      await expect.poll(() => f.requests.length).toBe(2);
+      expect(f.requests).toEqual([expected, expected]);
+      expect(f.requests[1].commandKey).toBe(f.requests[0].commandKey);
       const acknowledge = f.page.getByRole("button", { name: "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا", exact: true });
       await acknowledge.waitFor();
       // Printing now owns the reviewed Rx draft: a later visit edit must not
@@ -250,7 +276,8 @@ describe("prescription diagnosis draft in the built visit page", () => {
       await f.page.screenshot({ path: ".settings-ui-artifacts/prescription-diagnosis-pinned.png" });
       await acknowledge.click();
       await expect.poll(() => prints(f.page)).toEqual([`/print/prescription/${patientId}?rx=${prescriptionId}`]);
-      expect(f.requests).toEqual([expected, { ...expected, acknowledgedSafetyToken: acknowledgementToken }]);
+      expect(f.requests).toEqual([expected, expected, { ...expected, acknowledgedSafetyToken: acknowledgementToken }]);
+      expect(f.requests[2].commandKey).toBe(f.requests[0].commandKey);
       // Pinning a submitted draft must not disable a deliberate later edit.
       await f.diagnosis.fill("Deliberately revised prescription diagnosis");
       expect(await f.diagnosis.inputValue()).toBe("Deliberately revised prescription diagnosis");
@@ -319,8 +346,8 @@ async function capturePatientContext(page: Page, width: number, contextState: "w
   const targets: Array<{ label: string; locator: Locator }> = [
     { label: `${contextState} patient-context notice`, locator: warning },
     { label: "cancel", locator: panel.getByRole("button", { name: "إلغاء", exact: true }) },
-    { label: "print", locator: panel.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }) },
-    ...(contextState === "warning" ? [{ label: "synthetic phone action", locator: panel.getByRole("button", { name: /إرسال واتساب/ }) }] : []),
+    { label: "print", locator: panel.getByRole("button", { name: "حفظ وطباعة الوصفة", exact: true }) },
+    ...(contextState === "warning" ? [{ label: "synthetic phone action", locator: panel.getByRole("button", { name: /واتساب غير متاح حاليًا/ }) }] : []),
   ];
   const bounds = [];
   for (const { label, locator } of targets) {
@@ -370,23 +397,23 @@ describe("patient-file context in the built prescription consumer", () => {
     try {
       await f.open();
       await f.page.getByText("Penicillin allergy", { exact: true }).waitFor();
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).waitFor();
+      await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).waitFor();
       await f.diagnosis.fill("Independent Rx draft");
       await f.notes.fill(draftNotes);
       await fillMedicine(f.page);
-      const drugName = f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true });
+      const drugName = f.page.getByPlaceholder("Drug name", { exact: true });
       await drugName.fill("Amoxicillin");
       await f.page.getByText("خطر تحسسي حرج (Penicillin Allergy)", { exact: true }).waitFor();
       await capturePatientContext(f.page, width, "warning");
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
-      expect(await prints(f.page)).toEqual([expect.stringContaining("https://wa.me/967777100099?")]);
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).isDisabled()).toBe(true);
+      expect(await prints(f.page)).toEqual([]);
       await f.close();
       await f.visitDiagnosis.fill("Unsubmitted visit draft");
       f.holdPatientRead(); await f.open();
       await expect.poll(f.pendingPatientReads).toBe(1);
       await f.page.getByText(/جارٍ تحميل التنبيهات الطبية وبيانات التواصل/).waitFor();
       expect(await f.page.getByText("Penicillin allergy", { exact: true }).count()).toBe(0);
-      expect(await f.page.getByRole("button", { name: /إرسال واتساب/ }).count()).toBe(0);
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).count()).toBe(0);
       expect(await f.diagnosis.inputValue()).toBe("Independent Rx draft");
       expect(await f.notes.inputValue()).toBe(draftNotes);
       expect(await drugName.inputValue()).toBe("Amoxicillin");
@@ -400,6 +427,8 @@ describe("patient-file context in the built prescription consumer", () => {
       expect(await f.diagnosis.inputValue()).toBe("Independent Rx draft");
       expect(await drugName.inputValue()).toBe("Amoxicillin");
       expect(await f.visitDiagnosis.inputValue()).toBe("Unsubmitted visit draft");
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).count()).toBe(0);
+      expect(await prints(f.page)).toEqual([]);
       await capturePatientContext(f.page, width, "unavailable");
       expect(f.requests).toEqual([]); expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
     } finally { await f.context.close(); }
@@ -419,13 +448,13 @@ describe("patient-file context in the built prescription consumer", () => {
     const f = await fixture("Synthetic real-GET contract", { id, real: true });
     try {
       await f.open();
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).waitFor();
+      await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).waitFor();
       expect(await f.page.getByText(/تعذّر التحقق من التنبيهات الطبية/).count()).toBe(0);
       if (payload.patient.medicalAlert) await f.page.getByText(payload.patient.medicalAlert, { exact: true }).waitFor();
-      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
-      const opened = await prints(f.page);
-      expect(opened).toHaveLength(1);
-      expect(opened[0]).toContain(`https://wa.me/${toWhatsAppNumber(payload.patient.phone!)}?`);
+      // A nested phone enables only the visibly unavailable control. No
+      // editable clinical content or patient phone may leave for WhatsApp.
+      expect(await f.page.getByRole("button", { name: /واتساب غير متاح حاليًا/ }).isDisabled()).toBe(true);
+      expect(await prints(f.page)).toEqual([]);
       expect(f.requests).toEqual([]); expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
     } finally { await f.context.close(); }
   });
