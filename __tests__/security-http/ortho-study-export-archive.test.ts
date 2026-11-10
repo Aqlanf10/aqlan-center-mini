@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { Client } from 'pg';
@@ -19,7 +20,7 @@ beforeAll(async () => {
   await mkdir(join(process.cwd(), '.sec-http-storage', 'documents'), { recursive: true });
 });
 afterAll(async () => { await browser?.close(); await db?.end(); });
-async function savedStudy(withImage = false) {
+async function savedStudy(withImage = false, imageSlot: 'face-front' | 'face-smile' = 'face-front') {
   const patientId = h.seeded.patientAId;
   const caseId = (await db.query("INSERT INTO ortho_cases(patient_id,status,created_by) VALUES($1,'completed','secadmin') RETURNING id", [patientId])).rows[0].id as number;
   await db.query("INSERT INTO clinical_cases(patient_id,specialty,title,ortho_case_id,created_by) VALUES($1,'orthodontics','Synthetic archive',$2,'secadmin')", [patientId, caseId]);
@@ -37,10 +38,10 @@ async function savedStudy(withImage = false) {
     sourceImage = { id, sha256, path };
     command.content.sources = [{ key: 'synthetic_image', kind: 'document', id, version: null, contentHash: sha256 }];
     command.content.mediaUses = [{ useId: 'cropped_face', documentId: id, sourceSha256: sha256, groupId: null,
-      slotId: 'face-front', order: 0, view: 'face-rest', caption: 'Synthetic image only; no patient',
+      slotId: imageSlot, order: 0, view: 'face-rest', caption: 'Synthetic image only; no patient',
       recipe: { ...defaultOrthoMediaRecipe(120, 80, 1), cropPpm: { top: 0, bottom: 1000000, left: 500000, right: 1000000 } } }];
     command.content.panels = [{ instanceId: 'synthetic_records', layoutKey: 'records-overview', included: true,
-      state: 'available', sourceKeys: ['synthetic_image'], images: [{ slot: 'face-front', useId: 'cropped_face' }], comment: 'Synthetic crop' }];
+      state: 'available', sourceKeys: ['synthetic_image'], images: [{ slot: imageSlot, useId: 'cropped_face' }], comment: 'Synthetic crop' }];
   }
 
   const recovery = await authedGet(`${route}/recovery?patientId=${patientId}`, h.sessions.admin);
@@ -190,5 +191,118 @@ it.each([390, 1280])('archives the selected saved revision through explicit brow
     await page.getByRole('button', { name: 'تحديث حالة الملفات', exact: true }).click();
     await expect.poll(() => panel.locator('li').count()).toBe(25);
     expect(await link.count()).toBe(0); expect(writes).toHaveLength(2); expect(errors).toEqual([]);
+  } finally { await context.close(); }
+});
+
+
+it('prints the actual saved full study with its approved crop and intact clinical pixels beneath the global watermark', async () => {
+  // The middle slot overlaps the central watermark: a right-side image would
+  // prove cropping but would not exercise image protection from decoration.
+  const study = await savedStudy(true, 'face-smile');
+  expect(study.sourceImage).not.toBeNull();
+  const source = study.sourceImage!;
+  const reserved = await authedMutation(study.route, h.sessions.admin, 'POST', JSON.stringify(body(study, 'illustrated-pptx')));
+  expect(reserved.status).toBe(201); const { job } = await reserved.json();
+  const rendered = await run(study, job, h.sessions.admin);
+  expect(rendered.status, await rendered.clone().text()).toBe(200);
+  expect((await rendered.json()).job.state).toBe('ready');
+  const artifact = await authedGet(downloadPath(study, job.id), h.sessions.admin);
+  expect(artifact.status).toBe(200);
+  const zip = await JSZip.loadAsync(await artifact.arrayBuffer());
+  const media = Object.keys(zip.files).filter(name => /^ppt\/media\/.*\.png$/.test(name));
+  expect(media).toHaveLength(1);
+  const approvedPng = await zip.file(media[0])!.async('nodebuffer');
+  const approvedHash = createHash('sha256').update(approvedPng).digest('hex');
+  const manifest = (await db.query('SELECT manifest FROM ortho_study_export_artifacts WHERE job_id=$1', [job.id])).rows[0].manifest;
+  expect(manifest.renditions).toHaveLength(1);
+  expect(manifest.renditions[0]).toMatchObject({ documentId: source.id, useId: 'cropped_face', sourceSha256: source.sha256, renditionSha256: approvedHash });
+  expect(approvedHash).not.toBe(source.sha256);
+  const original = await readFile(source.path);
+  expect(createHash('sha256').update(original).digest('hex')).toBe(source.sha256);
+  const pixel = async (bytes: Buffer, left: number, top: number) => [...await sharp(bytes).extract({ left, top, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
+  expect(await pixel(original, 20, 40)).toEqual([238, 51, 34]);
+  expect(await pixel(original, 100, 40)).toEqual([34, 68, 238]);
+  const approved = await sharp(approvedPng).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  let blue = 0, red = 0;
+  for (let offset = 0; offset < approved.data.length; offset += approved.info.channels) {
+    if (approved.data[offset] === 34 && approved.data[offset + 1] === 68 && approved.data[offset + 2] === 238) blue++;
+    if (approved.data[offset] > 180 && approved.data[offset + 1] < 100 && approved.data[offset + 2] < 100) red++;
+  }
+  expect(blue).toBeGreaterThan(approved.info.width * approved.info.height / 2);
+  expect(red).toBe(0); // Independent pixel evidence: the discarded left half cannot survive.
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, locale: 'ar-YE' });
+  const [name, ...cookie] = h.sessions.admin.cookie.split('=');
+  await context.addCookies([{ name, value: cookie.join('='), url: baseUrl }]);
+  const page = await context.newPage(), errors: string[] = [], unexpected: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await context.route('**/*', route => {
+    const request = route.request();
+    if (new URL(request.url()).origin !== baseUrl || !['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
+      unexpected.push(`${request.method()} ${new URL(request.url()).pathname}`); return route.abort();
+    }
+    return route.continue();
+  });
+  try {
+    const response = await page.goto(`${baseUrl}/print/ortho-study/${study.caseId}?patientId=${study.patientId}&revisionId=${study.revisionId}&mode=full`);
+    expect(response?.status()).toBe(200); expect(response?.headers()['cache-control']).toContain('no-store');
+    await expect.poll(() => page.locator('[data-full-study-print]').getAttribute('data-print-ready'), { timeout: 20000 }).toBe('true');
+    expect(await page.getByRole('button', { name: 'طباعة / حفظ PDF', exact: true }).isEnabled()).toBe(true);
+    const image = page.getByRole('img', { name: 'صورة محفوظة cropped_face', exact: true });
+    expect(await image.count()).toBe(1);
+    const src = await image.getAttribute('src'); expect(src).toMatch(/^data:image\/png;base64,/);
+    const inline = Buffer.from(src!.slice('data:image/png;base64,'.length), 'base64');
+    expect(inline).toEqual(approvedPng);
+    expect(createHash('sha256').update(inline).digest('hex')).toBe(approvedHash);
+    const visible = await page.locator('[data-full-study-print]').innerText();
+    for (const identifier of ['synthetic_image', 'cropped_face', source.sha256, approvedHash, study.revisionHash]) expect(visible).toContain(identifier);
+    const capturedAt = await page.locator('[data-study-captured-at]').first().innerText();
+    expect(capturedAt).not.toBe('');
+    await page.emulateMedia({ media: 'print' });
+    await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(item => item.decode())); window.dispatchEvent(new Event('beforeprint')); });
+    await expect.poll(() => page.locator('[data-full-study-print]').getAttribute('data-print-ready')).toBe('true');
+    const watermark = page.locator('body > .print-document-watermark');
+    expect(await watermark.getAttribute('data-logo-state')).toBe('ready');
+    expect(await watermark.isVisible()).toBe(true);
+    expect(await watermark.evaluate(node => Number(getComputedStyle(node).opacity))).toBeGreaterThan(0);
+    const placement = await image.evaluate(node => {
+      const sheet = node.closest('[data-print-sheet]')!, imageBox = node.getBoundingClientRect(), sheetBox = sheet.getBoundingClientRect();
+      return { page: [...document.querySelectorAll('[data-print-sheet]')].indexOf(sheet) + 1, sheetWidth: sheetBox.width,
+        x: imageBox.left - sheetBox.left + imageBox.width / 2, y: imageBox.top - sheetBox.top + imageBox.height / 2 };
+    });
+    const sheetCount = await page.locator('[data-print-sheet]').count();
+    await mkdir('.settings-ui-artifacts', { recursive: true });
+    const pdf = '.settings-ui-artifacts/ortho-full-study-approved-crop.pdf';
+    await page.pdf({ path: pdf, preferCSSPageSize: true, printBackground: true });
+    const info = execFileSync('pdfinfo', [pdf], { encoding: 'utf8' });
+    expect(Number(info.match(/^Pages:\s+(\d+)/m)?.[1])).toBe(sheetCount);
+    expect(info).toMatch(/841\.\d+ x 594\.\d+ pts/);
+    let allText = '';
+    for (let index = 1; index <= sheetCount; index++) {
+      const text = execFileSync('pdftotext', ['-f', String(index), '-l', String(index), '-layout', pdf, '-'], { encoding: 'utf8' })
+        .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '');
+      expect(text).toContain(study.revisionHash); expect(text).toContain(capturedAt);
+      expect(text).toContain(`${index} / ${sheetCount}`); allText += text;
+    }
+    for (const identifier of ['synthetic_image', 'cropped_face', source.sha256, approvedHash]) expect(allText.replace(/\s/g, '')).toContain(identifier);
+    const raster = execFileSync('pdftoppm', ['-f', String(placement.page), '-l', String(placement.page), '-r', '96', '-png', '-singlefile', pdf], { maxBuffer: 12 * 1024 * 1024 });
+    await writeFile('.settings-ui-artifacts/ortho-full-study-approved-crop.png', raster);
+    const rasterInfo = await sharp(raster).metadata(), pxPerMm = 96 / 25.4;
+    const centerX = Math.round((rasterInfo.width! - placement.sheetWidth) / 2 + placement.x);
+    const centerY = Math.round(10 * pxPerMm + placement.y);
+    // The named landscape profile has equal10mm margins and a centered76x65mm
+    // global watermark. Prove the sample actually lies in that decoration area.
+    expect(Math.abs(centerX - rasterInfo.width! / 2)).toBeLessThan(38 * pxPerMm);
+    expect(Math.abs(centerY - rasterInfo.height! / 2)).toBeLessThan(32.5 * pxPerMm);
+    const patch = await sharp(raster).extract({ left: centerX - 6, top: centerY - 6, width: 12, height: 12 }).removeAlpha().raw().toBuffer();
+    // Interior crop pixels are constant blue. Only2 levels of PDF raster rounding
+    // are tolerated; watermark blending or original red pixels must fail.
+    for (let offset = 0; offset < patch.length; offset += 3) {
+      expect(Math.abs(patch[offset] - 34)).toBeLessThanOrEqual(2);
+      expect(Math.abs(patch[offset + 1] - 68)).toBeLessThanOrEqual(2);
+      expect(Math.abs(patch[offset + 2] - 238)).toBeLessThanOrEqual(2);
+    }
+    expect(createHash('sha256').update(await readFile(source.path)).digest('hex')).toBe(source.sha256);
+    expect(errors).toEqual([]); expect(unexpected).toEqual([]);
   } finally { await context.close(); }
 });
