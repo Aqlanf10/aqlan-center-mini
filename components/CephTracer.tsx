@@ -139,7 +139,6 @@ export function CephTracer({
     && correctionOrigin.parentAnalysisId === correctionToken.analysisId
     && correctionOrigin.recordedPatientId === correctionToken.patientId
     && correctionOrigin.orthoCaseId === correctionToken.orthoCaseId && correctionOrigin.documentId === correctionToken.documentId
-    && correctionOrigin.sourceSnapshotSha256 === correctionToken.sourceSha256
     && correctionSource?.state === "available" && sameCephCorrectionSource(correctionToken, correctionSource.token)
     && JSON.stringify(correctionOrigin) === JSON.stringify(parseCephCorrectionOrigin(correctionSource.origin));
   // Keep the source identity and reference catalog from this mounted review.
@@ -789,6 +788,11 @@ export function CephTracer({
     }
   };
 
+  const retireUncertainCorrection = (ticket: object, message: string) => {
+    if (!currentDirectRequest(ticket)) return;
+    setMessage(message); setSaving(false); setDirectRetired(true);
+    viewRuntime.current.retired = true; viewRuntime.current.active = false; viewRuntime.current.request = null;
+  };
   const duplicate = async () => {
     if (!completed || !correctionReady || !correctionToken) return;
     const ticket = beginDirectRequest(); if (!ticket) return;
@@ -802,9 +806,10 @@ export function CephTracer({
       const data = await res.json().catch(() => ({}));
       if (!currentDirectRequest(ticket)) return;
       if (res.ok && Number.isSafeInteger(data.id) && data.id > 0) window.location.href = `/ceph/${data.id}`;
-      else setMessage(res.ok ? "لم تتأكد هوية نسخة التصحيح. قد تكون حُفظت؛ أعد فتح سجل الدراسات للتحقق." : data.message ?? "تعذّر فتح النسخة.");
+      else if (res.ok || res.status >= 500) retireUncertainCorrection(ticket, "لم تتأكد نتيجة نسخة التصحيح. قد تكون حُفظت؛ أعد فتح سجل الدراسات للتحقق قبل تكرار الطلب.");
+      else setMessage(data.message ?? "تعذّر فتح النسخة.");
     } catch {
-      if (currentDirectRequest(ticket)) setMessage("تعذّر التحقق من نتيجة فتح النسخة. قد تكون حُفظت؛ أعد فتح سجل الدراسات للتحقق قبل تكرار الطلب.");
+      retireUncertainCorrection(ticket, "تعذّر التحقق من نتيجة فتح النسخة. قد تكون حُفظت؛ أعد فتح سجل الدراسات للتحقق قبل تكرار الطلب.");
     } finally { finishDirectRequest(ticket); }
   };
 

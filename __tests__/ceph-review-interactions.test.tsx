@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { journeyContentHash } from "../lib/ortho-case-journey-hash";
 import { CephTracer } from "../components/CephTracer";
 import { CEPH_ENGINE_VERSION, CEPH_ENGINE_SOURCE_SHA256 } from "../lib/ceph-engine-identity";
 import { REQUIRED_LANDMARKS, computeAll, type LandmarkMap } from "../lib/ceph";
@@ -98,6 +99,11 @@ beforeEach(() => {
       referenceSetSha256:"b".repeat(64),engineVersion:CEPH_ENGINE_VERSION,engineSourceSha256:CEPH_ENGINE_SOURCE_SHA256},
       referenceSet:{key:"builtin_default",name:"Viewed reference",population:null,ageMin:null,ageMax:null,sex:null,version:"v1",active:true,values:[]}},
   };
+  if (props.correctionSource?.state === "available") {
+    // Match the server contract: token seals the origin envelope, while its
+    // sourceSnapshotSha256 separately seals the observed source.
+    props.correctionSource.token.sourceSha256 = journeyContentHash(props.correctionSource.origin);
+  }
 });
 afterEach(() => { hooks.effects.forEach((effect) => effect.cleanup?.()); vi.unstubAllGlobals(); });
 describe("explicit per-point review in the real ceph component", () => {
@@ -775,7 +781,9 @@ describe("correction command uses the opened source", () => {
   it("sends the exact reviewed token once without rewriting the completed study", async () => {
     props = { ...props, analysis: { ...props.analysis, status: "completed" }, stamped: [] };
     fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 88 }) });
-    loaded(); click("نسخة تصحيح جديدة"); await flush();
+    if (props.correctionSource?.state !== "available") throw Error("fixture");
+    expect(props.correctionSource.token.sourceSha256).not.toBe(props.correctionSource.origin.sourceSnapshotSha256);
+    loaded(); expect(button("نسخة تصحيح جديدة").props.disabled).toBe(false); click("نسخة تصحيح جديدة"); await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("/api/ceph/71/duplicate");
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ schemaVersion: 1,
@@ -811,4 +819,16 @@ it("shows explicit correction ancestry without upgrading legacy approval", () =>
   expect(text(render())).toContain("نسخة تصحيح مرتبطة");
   expect(text(render())).toContain("لا يعيد اعتماده");
   expect(nodes(render()).some(node => node.props.href === "/ceph/71")).toBe(true);
+});
+
+it.each(["network", "server", "invalid-id"])("retires an uncertain %s correction instead of sending another child command", async kind => {
+  props = { ...props, analysis: { ...props.analysis, status: "completed" }, stamped: [] };
+  if (kind === "network") fetchMock.mockRejectedValueOnce(new Error("lost reply"));
+  else fetchMock.mockResolvedValueOnce({ ok: kind === "invalid-id", status: kind === "server" ? 500 : 200,
+    json: async () => ({ id: null }) });
+  loaded(); const handler = button("نسخة تصحيح جديدة").props.onClick as () => void;
+  handler(); await flush(); expect(button("نسخة تصحيح جديدة").props.disabled).toBe(true);
+  handler(); click("نسخة تصحيح جديدة"); await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(1); expect(window.location.href).toBe("/ceph/71");
+  expect(text(render())).toContain("أعد فتح سجل الدراسات للتحقق");
 });
