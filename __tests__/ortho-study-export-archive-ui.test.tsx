@@ -226,6 +226,25 @@ describe("saved study export archive", () => {
     expect(nodes(render()).filter(node => node.type === "button").map(textOf)).not.toContain("تجهيز الملف");
   });
 
+  it("explains an unavailable old renderer, permits a fresh reservation and retains existing ready downloads", async () => {
+    const ready = job({ id: 9, state: "ready", generation: 1,
+      artifact: { sha256: "b".repeat(64), sizeBytes: 123, pageCount: 2, createdAt: "2026-11-10T01:00:00.000Z" } });
+    fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [job(), ready], next: null })); await open();
+    const download = nodes(render()).find(node => node.type === "a")!.props.href;
+    fetchMock.mockImplementation(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, code: "study_export_renderer_unavailable", message: "/private/renderer-implementation" }) }));
+    click("تجهيز الملف"); await flush();
+    expect(textOf(render())).toContain("صيغة تجهيز هذا الطلب قديمة؛ أنشئ طلب تصدير جديدًا للنسخة المحفوظة.");
+    expect(textOf(render())).not.toContain("renderer-implementation"); expect(posts()).toHaveLength(1);
+    expect(visibleJobIds()).toEqual([10, 9]); expect(button("تجهيز الملف")).toBeDefined();
+    expect(nodes(render()).find(node => node.type === "a")!.props.href).toBe(download);
+    fetchMock.mockImplementation(async () => ok({ ok: true, job: job({ id: 11 }) }));
+    click("حفظ طلب تصدير جديد"); await flush(); expect(posts()).toHaveLength(2);
+    expect(posts()[1][0]).toBe("/api/ortho/2/case-study/exports");
+    expect(JSON.parse(posts()[1][1].body).command).toMatchObject({ schemaVersion: 1, revisionId: 3, revisionHash: props.revisionHash });
+    expect(visibleJobIds()).toEqual([11, 10, 9]); expect(nodes(render()).find(node => node.type === "a")!.props.href).toBe(download);
+    expect(posts().filter(([url]) => String(url).endsWith("/run"))).toHaveLength(1);
+  });
+
   it("shows an explicit compact UTC time while retaining the complete capture timestamp", async () => {
     const createdAt = "2026-11-10T02:40:31.084Z";
     fetchMock.mockImplementation(async () => ok({ ok: true, jobs: [job({ createdAt })], next: null })); await open();

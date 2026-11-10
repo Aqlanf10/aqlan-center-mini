@@ -21,6 +21,7 @@ const failures: Record<string, string> = {
   lease_expired: "انتهت مهلة التشغيل؛ حدّث الحالة قبل إعادة المحاولة.", renderer_unavailable: "صيغة هذا الطلب غير متاحة للتشغيل حاليًا.",
 };
 const requestFailures = {
+  study_export_renderer_unavailable: "صيغة تجهيز هذا الطلب قديمة؛ أنشئ طلب تصدير جديدًا للنسخة المحفوظة.",
   study_export_runtime_unavailable: "تجهيز ملفات التصدير غير متاح في بيئة التشغيل الحالية. يحتاج إعداد التشغيل إلى مراجعة المسؤول.",
   study_export_busy: "خدمة تجهيز الملفات مشغولة حاليًا. انتظر قليلًا ثم حدّث الحالة قبل إعادة المحاولة.",
   study_export_publication_unconfirmed: "لم يتأكد حفظ الملف النهائي. حدّث حالة الطلب قبل إعادة التجهيز؛ لا تنشئ طلبًا جديدًا.",
