@@ -569,3 +569,13 @@ The writers are unchanged: keys and request hashes, the patient, debt-account, p
 - **Correct** (`POST /[documentId]/correct`): `patients.history.correct`, `finance.opening-balances.manage` and `finance.patient-ledger.view` (point 3; the catalogue requires `patients.history.record` with the correction grant).
 - **`created_role`** (a published column, constrained to `admin` or `reception` and never read back) records the authority class the document was created under. On the canonical path it is `admin` when the actor holds `finance.opening-balances.manage` (it could edit an opening), otherwise `reception` (add only). The label is not stored there (point 8). The audit keeps the actor's username and label as everywhere else.
 - **Writers:** `createHistoricalDocumentOn` and `correctHistoricalDocumentOn` run on the admitted operation's transaction. The scope is decided right after the patient row lock, before the replay. The branded actor re-proves the act's grants at each point where the writer re-validated its session. Refusals keep the legacy codes and messages, and the operation rolls back.
+
+### 95d detail, written before its code: the previous-balance collection arrangement
+
+- **Create** (`POST /legacy-balance-arrangement`) and **cancel** (`PATCH`): `finance.legacy.record` **and** `finance.patient-ledger.view`. The create response carries the arrangement with the opening position it was set against (`startingDueMinor`, progress), and the screen that offers both acts is the ledger read (slice 88), so under G4-1 the amounts need the ledger view. This is a ninth point for the owner, in line with points 5 and 7; the map's grant for the act itself is unchanged.
+- An arrangement never changes an opening balance: it schedules the collection of what is already owed. It therefore does not need `finance.opening-balances.manage` (point 1 does not apply).
+- **Writers:** `createLegacyBalanceArrangementOn` and `cancelLegacyBalanceArrangementOn` run on the admitted operation's transaction. The scope is decided right after the patient row lock; outside reads as missing (`patient_not_found` for create, `not_found` for cancel). Refusals keep the legacy reasons, messages and statuses.
+- **Two gaps of the legacy path are closed on the canonical path only** (the legacy routes are unchanged):
+  - the audit row is written in the same transaction as the arrangement (`insertAuditRow`), where legacy writes it best-effort after the commit;
+  - cancel takes the patient row lock before the update, where legacy updates without a lock.
+- The label decides nothing. Request validation (currency, cadence, instalment amount, first due date not before today, cancel reason) is the legacy validation, unchanged.

@@ -184,7 +184,7 @@ export type CreateLegacyArrangementResult =
   | { ok: true; arrangement: LegacyBalanceArrangementView }
   | { ok: false; reason: "patient_not_found" | "no_opening_balance" | "opening_settled" | "already_active" | "installment_exceeds_remaining" };
 
-export async function createLegacyBalanceArrangement(input: {
+type CreateLegacyArrangementInput = {
   patientId: number;
   currency: Currency;
   cadence: LegacyArrangementCadence;
@@ -193,59 +193,68 @@ export async function createLegacyBalanceArrangement(input: {
   note: string | null;
   createdBy: string;
   today: string;
-}): Promise<CreateLegacyArrangementResult> {
+};
+type CreateLegacyArrangementRefusal = Extract<CreateLegacyArrangementResult, { ok: false }>;
+
+/** The arrangement on a caller's transaction (M2 slice 95d). Every refusal is decided before the
+ * insert, so a refusal leaves nothing to undo. `afterLocks` decides the canonical scope right
+ * after the patient row lock. The caller owns the transaction, the unique-violation mapping and
+ * the audit. */
+export async function createLegacyBalanceArrangementRowOn(
+  client: DbClient, input: CreateLegacyArrangementInput, afterLocks?: (patientId: number) => Promise<void>,
+): Promise<{ ok: true; row: ArrangementRow } | CreateLegacyArrangementRefusal> {
+  const patient = await client.query(`SELECT 1 FROM patients WHERE id = $1 FOR SHARE`, [input.patientId]);
+  if (!patient.rowCount) return { ok: false, reason: "patient_not_found" };
+  if (afterLocks) await afterLocks(input.patientId);
+  const locked = await client.query(
+    `SELECT 1 FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2 FOR UPDATE`,
+    [input.patientId, input.currency],
+  );
+  if (!locked.rowCount) return { ok: false, reason: "no_opening_balance" };
+  const position = await openingPosition(client, input.patientId, input.currency);
+  if (!position || position.remainingMinor <= 0) return { ok: false, reason: "opening_settled" };
+  if (input.installmentMinor > position.remainingMinor) return { ok: false, reason: "installment_exceeds_remaining" };
+  const active = await client.query(
+    `SELECT id FROM legacy_balance_arrangements
+      WHERE patient_id = $1 AND currency = $2 AND cancelled_at IS NULL FOR UPDATE`,
+    [input.patientId, input.currency],
+  );
+  const debtSchedule = await client.query(`SELECT a.id FROM debt_repayment_arrangements a
+    JOIN LATERAL (SELECT status FROM debt_repayment_revisions WHERE arrangement_id=a.id ORDER BY version DESC LIMIT 1) r ON TRUE
+    WHERE a.patient_id=$1 AND a.opening_currency=$2 AND r.status='active'`,[input.patientId,input.currency]);
+  if (active.rowCount || debtSchedule.rowCount) return { ok: false, reason: "already_active" };
+  const inserted = await client.query<ArrangementRow>(
+    `INSERT INTO legacy_balance_arrangements
+       (patient_id, currency, cadence, installment_minor, starting_due_minor,
+        first_due_date, note, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8)
+     RETURNING *`,
+    [
+      input.patientId, input.currency, input.cadence, input.installmentMinor,
+      position.remainingMinor, input.cadence === "monthly" ? input.firstDueDate : null,
+      input.note, input.createdBy,
+    ],
+  );
+  return { ok: true, row: inserted.rows[0] };
+}
+
+/** The canonical create: the row and its view on the operation's transaction. */
+export async function createLegacyBalanceArrangementOn(
+  client: DbClient, input: CreateLegacyArrangementInput, afterLocks: (patientId: number) => Promise<void>,
+): Promise<CreateLegacyArrangementResult> {
+  const made = await createLegacyBalanceArrangementRowOn(client, input, afterLocks);
+  return made.ok ? { ok: true, arrangement: await viewOf(made.row, input.today, client) } : made;
+}
+
+export async function createLegacyBalanceArrangement(input: CreateLegacyArrangementInput): Promise<CreateLegacyArrangementResult> {
   await ensureSchema();
   const client = await getPool().connect();
   let created: ArrangementRow | null = null;
   try {
     await client.query("BEGIN");
-    const patient = await client.query(`SELECT 1 FROM patients WHERE id = $1 FOR SHARE`, [input.patientId]);
-    if (!patient.rowCount) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "patient_not_found" };
-    }
-    const locked = await client.query(
-      `SELECT 1 FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2 FOR UPDATE`,
-      [input.patientId, input.currency],
-    );
-    if (!locked.rowCount) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "no_opening_balance" };
-    }
-    const position = await openingPosition(client, input.patientId, input.currency);
-    if (!position || position.remainingMinor <= 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "opening_settled" };
-    }
-    if (input.installmentMinor > position.remainingMinor) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "installment_exceeds_remaining" };
-    }
-    const active = await client.query(
-      `SELECT id FROM legacy_balance_arrangements
-        WHERE patient_id = $1 AND currency = $2 AND cancelled_at IS NULL FOR UPDATE`,
-      [input.patientId, input.currency],
-    );
-    const debtSchedule = await client.query(`SELECT a.id FROM debt_repayment_arrangements a
-      JOIN LATERAL (SELECT status FROM debt_repayment_revisions WHERE arrangement_id=a.id ORDER BY version DESC LIMIT 1) r ON TRUE
-      WHERE a.patient_id=$1 AND a.opening_currency=$2 AND r.status='active'`,[input.patientId,input.currency]);
-    if (active.rowCount || debtSchedule.rowCount) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "already_active" };
-    }
-    const inserted = await client.query<ArrangementRow>(
-      `INSERT INTO legacy_balance_arrangements
-         (patient_id, currency, cadence, installment_minor, starting_due_minor,
-          first_due_date, note, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8)
-       RETURNING *`,
-      [
-        input.patientId, input.currency, input.cadence, input.installmentMinor,
-        position.remainingMinor, input.cadence === "monthly" ? input.firstDueDate : null,
-        input.note, input.createdBy,
-      ],
-    );
-    created = inserted.rows[0];
+    const made = await createLegacyBalanceArrangementRowOn(client, input);
+    if (!made.ok) { await client.query("ROLLBACK"); return made; }
+    created = made.row;
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -285,4 +294,27 @@ export async function cancelLegacyBalanceArrangement(input: {
   return existing.rowCount
     ? { ok: false, reason: "already_cancelled" }
     : { ok: false, reason: "not_found" };
+}
+
+/** The cancel on a caller's transaction (M2 slice 95d): the patient row lock first (the legacy
+ * cancel takes none), then the canonical scope, then the same update and the same refusals. */
+export async function cancelLegacyBalanceArrangementOn(client: DbClient, input: {
+  patientId: number; arrangementId: number; actor: string; reason: string;
+}, afterLocks: (patientId: number) => Promise<void>): Promise<CancelLegacyArrangementResult> {
+  const patient = await client.query(`SELECT 1 FROM patients WHERE id = $1 FOR SHARE`, [input.patientId]);
+  if (!patient.rowCount) return { ok: false, reason: "not_found" };
+  await afterLocks(input.patientId);
+  const { rows } = await client.query<ArrangementRow>(
+    `UPDATE legacy_balance_arrangements
+        SET cancelled_by = $3, cancelled_at = NOW(), cancel_reason = $4
+      WHERE id = $1 AND patient_id = $2 AND cancelled_at IS NULL
+      RETURNING *`,
+    [input.arrangementId, input.patientId, input.actor, input.reason],
+  );
+  if (rows[0]) return { ok: true, arrangement: rowToArrangement(rows[0]) };
+  const existing = await client.query(
+    `SELECT cancelled_at FROM legacy_balance_arrangements WHERE id = $1 AND patient_id = $2`,
+    [input.arrangementId, input.patientId],
+  );
+  return existing.rowCount ? { ok: false, reason: "already_cancelled" } : { ok: false, reason: "not_found" };
 }
