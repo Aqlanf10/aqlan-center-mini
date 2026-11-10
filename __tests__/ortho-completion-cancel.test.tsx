@@ -8,10 +8,11 @@ import TreatmentFinancialContext from "../components/TreatmentFinancialContext";
 // Exercise PatientOrtho's real rendered button handlers with synthetic hook storage.
 // Child editors are not executed; fetch and the native prompt are fully mocked.
 const hooks = vi.hoisted(() => ({
-  values: [] as unknown[], cursor: 0, changed: false, context: null as unknown,
+  values: [] as unknown[], cursor: 0, changed: false, contexts: new Map<unknown, unknown>(),
   memos: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
   effects: new Map<number, readonly unknown[] | undefined>(),
   pending: [] as (() => void)[],
+  storeCleanups: new Map<number, () => void>(),
 }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
@@ -23,7 +24,23 @@ vi.mock("react", async (original) => {
     const value = compute(); hooks.memos.set(index, { value, deps }); return value;
   };
   return { ...react,
-    useContext: () => hooks.context,
+    useContext: (context: { _currentValue: unknown }) => hooks.contexts.has(context) ? hooks.contexts.get(context) : context._currentValue,
+    useSyncExternalStore: (subscribe: (listener: () => void) => () => void, getSnapshot: () => unknown) => {
+      const index = hooks.cursor++, snapshot = getSnapshot(); hooks.values[index] = snapshot;
+      const deps = [subscribe, getSnapshot];
+      if (!same(hooks.effects.get(index), deps)) {
+        hooks.effects.set(index, deps);
+        hooks.pending.push(() => {
+          hooks.storeCleanups.get(index)?.();
+          const check = () => {
+            const next = getSnapshot();
+            if (!Object.is(next, hooks.values[index])) { hooks.values[index] = next; hooks.changed = true; }
+          };
+          hooks.storeCleanups.set(index, subscribe(check)); check();
+        });
+      }
+      return snapshot;
+    },
     useState: (initial: unknown) => {
       const index = hooks.cursor++;
       if (!(index in hooks.values)) hooks.values[index] = typeof initial === "function" ? initial() : initial;
@@ -99,9 +116,12 @@ function render() {
   do {
     if (++rounds > 12) throw new Error("Synthetic render did not settle");
     hooks.cursor = 0; hooks.changed = false;
-    const provider = PatientOrtho({ patientId: PATIENT_ID });
-    hooks.context = provider.props.value;
-    const workspace = provider.props.children as ReactElement<Record<string, unknown>>;
+    let workspace = PatientOrtho({ patientId: PATIENT_ID }) as ReactElement<Record<string, unknown>>;
+    // Resolve each real provider by identity before invoking the workspace.
+    while (typeof workspace.type === "object") {
+      hooks.contexts.set(workspace.type, workspace.props.value);
+      workspace = workspace.props.children as ReactElement<Record<string, unknown>>;
+    }
     tree = (workspace.type as (props: Record<string, unknown>) => ReactNode)(workspace.props);
     hooks.pending.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
@@ -138,6 +158,7 @@ function expectOneWrite(status: "completed" | "discontinued", note: string) {
   expect(buttons(DISCONTINUE_LABEL)).toHaveLength(0);
 }
 beforeEach(() => {
+  hooks.storeCleanups.forEach(cleanup => cleanup()); hooks.storeCleanups.clear(); hooks.contexts.clear();
   hooks.values = []; hooks.cursor = 0; hooks.changed = false;
   hooks.memos.clear(); hooks.effects.clear(); hooks.pending = [];
   caseRow = { ...fixture }; prompt.mockReset(); fetchMock.mockReset();
@@ -157,13 +178,17 @@ beforeEach(() => {
   // real synthetic EventTarget rather than suppressing its effect or changing
   // production lifecycle behavior to satisfy this older prompt-only harness.
   const events = new EventTarget();
+  const location = { pathname: `/patients/${PATIENT_ID}`, search: "", hash: "" };
+  const history = { state: null as unknown, replaceState: (state: unknown, _unused: string, href: string) => {
+    history.state = state; const next = new URL(href, "http://synthetic.invalid"); location.search = next.search; location.hash = next.hash;
+  } };
   vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", {
-    prompt, addEventListener: events.addEventListener.bind(events),
+    prompt, location, history, addEventListener: events.addEventListener.bind(events),
     removeEventListener: events.removeEventListener.bind(events),
     dispatchEvent: events.dispatchEvent.bind(events),
   });
 });
-afterEach(async () => { await settle(); vi.unstubAllGlobals(); });
+afterEach(async () => { await settle(); hooks.storeCleanups.forEach(cleanup => cleanup()); hooks.storeCleanups.clear(); vi.unstubAllGlobals(); });
 
 describe("PatientOrtho preserves the legacy financial-link boundary", () => {
   it("offers explicit existing-agreement selection without creating a financial source", async () => {

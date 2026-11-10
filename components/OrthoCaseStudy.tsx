@@ -160,6 +160,9 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
     if (!draft || !editable) return;
     const panelId = effectiveSourcePanel;
     const panel = draft.content.panels.find(value => value.instanceId === panelId); if (!panel) return;
+    if (selection.kind === "problem_review" && !["diagnosis", "objectives", "problem-plan-strategy"].includes(panel.layoutKey)) {
+      setNotice("اختر قسم التشخيص أو الأهداف أو المشكلات والاستراتيجية لعرض مراجعة المصدر."); return;
+    }
     if (selection.kind === "space_ledger") {
       if (panel.layoutKey !== "model-measurements") { setNotice("اختر قسم تحليل المسافة لعرض لقطة سجل المسافات وIPR."); return; }
       const previous = draft.content.sources.find(value => value.kind === "space_ledger");
@@ -300,6 +303,7 @@ export function SourcePicker(props: OrthoCaseStudyProps & { locale: StudyDisplay
   return <fieldset className="min-w-0 rounded border p-3"><legend>{t("اختيار مصدر حقيقي")}</legend>
     <select className={control} aria-label={t("نوع مصدر الدراسة")} value={kind} onChange={event => { setKind(event.currentTarget.value as StudySourceKind); setAfter(null); }}>{AVAILABLE_STUDY_SOURCE_KINDS.map(value => <option key={value} value={value}>{studySourceName(value, props.locale)}</option>)}</select>
     {kind === "space_ledger" && <p>{t("اختر لقطة كاملة واحدة لسجل المسافات وIPR لقسم تحليل المسافة. لا تتضمن قياسات Bolton جديدة أو مسودات، ولا تُحدّث الدراسة المحفوظة تلقائياً.")}</p>}
+    {kind === "problem_review" && <p>{t("اختر مراجعة محفوظة للمصدر. تُعرض المشكلة والملاحظة كما وثقهما الطبيب وقت المراجعة، دون استبدالهما بالبيانات الحالية.")}</p>}
     {error && <p role="alert">{t(error)}</p>}{current?.state === "restricted" && <p>{t("هذا النوع من المصادر مقيّد بالصلاحية الحالية.")}</p>}
     {current?.state === "available" && <><ul>{current.choices.map(choice => <li key={choice.id} className="flex flex-wrap gap-2 items-center"><span>{studySourceName(kind, props.locale)} #{choice.id}{choice.version === null ? "" : ` — ${t("نسخة")} ${choice.version}`}</span>
       <button type="button" className={control} disabled={!props.editable || !choice.selection} onClick={() => choice.selection && props.onChoose(choice.selection)}>{t("اختيار")}</button>

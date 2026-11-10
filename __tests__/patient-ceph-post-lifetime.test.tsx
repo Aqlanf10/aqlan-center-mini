@@ -36,6 +36,9 @@ vi.mock("react", async (original) => {
     } });
   };
   return { ...react,
+    // Standalone component fixture has no workup provider; preserve its context default.
+    useContext: (context: { _currentValue: unknown }) => context._currentValue,
+    useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? initial() : initial);
       return [hooks.values[index], (update: unknown) => {

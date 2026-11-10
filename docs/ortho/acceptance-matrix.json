@@ -1,0 +1,1068 @@
+{
+  "metadata": {
+    "generated_at_utc": "2026-11-09T23:58:41.746953+00:00",
+    "specification": "/workspace/ortho-intake/original-prompt.txt",
+    "expected_sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+    "actual_sha256": "5c12afbbc222df0a511c73ce5e16b0ffa089a006d7d7f29cd74bab2307e4daeb",
+    "specification_bytes": 126204,
+    "scenario_count": 52,
+    "worktree": "/workspace/ortho-reconcile-20261109",
+    "head": "f2a968da504751af24cc84d69b703602edcdcc72",
+    "branch": "feat/ortho-reconcile-20261109",
+    "working_tree": "uncommitted aggregate work; not equivalent to HEAD alone",
+    "diff_sha256": "c1dcd53096bfa8be89b6c7787b754807fa2637ed288171a812df721a352e4b91",
+    "execution_by_this_audit": "none; read-only source/test inspection",
+    "reported_runtime_evidence": {
+      "root_report_only": [
+        "PG33 passed",
+        "study unit640 passed",
+        "facial baseline129 passed",
+        "owner206 passed"
+      ],
+      "browser_final": "pending at task handoff; consult root final logs",
+      "agent_prior_problem_review": "PG18.6 4/4; details in branch-inventory/PROBLEM-REVIEW-SLICE.md"
+    },
+    "runtime_acceptance_note": "All 52 full scenarios remain unverified by this audit. present means direct source implementation identified, not an accepted clinical/runtime result. Tests listed exist, were not run by this audit, and may cover only part of the scenario.",
+    "scope_exclusions": [
+      "No product edits, migration, builds, tests, deployment or messaging",
+      "No reference patient data or images copied",
+      "Offline Windows workspace and partial-cloud patch b2d1d771 unavailable and not claimed integrated",
+      "No unrelated finance/permission imports from PR506"
+    ],
+    "evidence_file_sha256": {
+      "__tests__/ceph-calculation-readiness.test.ts": "0d8aa34296d988e74538e67a136019144a3516d0e9a5d519c3351b3d55c1a804",
+      "__tests__/ceph-comparison-projection.test.ts": "32cecaf6b2a16a634e81366e22d95c8b0142d22b2a4c8574ab6e8bbbbe4a2547",
+      "__tests__/ceph-completion-provenance.test.ts": "74f3772cfebbda6617f98ae95f6224ffbdbaeb1e5cfbbd7bdbf756825b2eae40",
+      "__tests__/ceph-completion-validity.test.ts": "266fe3a56a8154dc20f6d01db854e2abae74c1204dac7728e4d60ad40836a79b",
+      "__tests__/ceph-formula-safety.test.ts": "7d9c0844a03495a1fcc4870280d1560fdcdbcf30da7265b309fad43a34286935",
+      "__tests__/ceph-manual-review-gate.test.ts": "38c97ac4ab343dab3e486d441d5b50bdf77193388cdf4a8081a9da7b81c194cc",
+      "__tests__/ceph-narrative-safety.test.ts": "45a522b7c43f663079eaee9b0d08983d1b053c95847bad5a4d7d92b19e942c66",
+      "__tests__/consent-record.test.ts": "7a117ef04e85b24a4bd8e1d3b19f67422379d21ae18cf4c940dc459abd6a5c27",
+      "__tests__/fx.test.ts": "f526965f2135e1f163773daec3d013ce731bbe96ea84bafc0f95fffd9eed87d1",
+      "__tests__/installment-agreement.test.ts": "ffdc6ec0a443f662d828da69c0f4ecfa797bed48f74d4f6451816ec893cb7f6f",
+      "__tests__/invoice-currency-scope.test.ts": "351f3f9a46a77e448c503fdc7d127060b7d4e9f45e7f946809431a20a28caf8c",
+      "__tests__/legacy-import.test.ts": "09b607b5f30c2f4f9c781dd2d9404c41709cbc12d4c87678bb558f963d5f2760",
+      "__tests__/ortho-adjustment-wire-defaults.test.tsx": "0cb0742bbe6e1974fe26b50f89cdd75792725a64f1a65fb845e6fe18f3a24546",
+      "__tests__/ortho-assessment-arithmetic-2_1_0.test.ts": "f3c0a95f0ea3f0f15b468f223f1943828543b4544452fd2663f0f4daa47d65a7",
+      "__tests__/ortho-assessment-contract-v2.test.ts": "2018aa40248764e6b7765659191d5bbc1157276bff124b28f95bfa2393e3782b",
+      "__tests__/ortho-assessment-findings-v2.test.ts": "8af4d14cf203c24488fef5b1737350b1c88011a044a3900f453de012129fd60b",
+      "__tests__/ortho-assessment-intake.test.ts": "81eebcca2f52923c2e37f487454e444688b36a9b2f4e29c72cc3b0ebe5ca59c3",
+      "__tests__/ortho-assessment-measurement-editor-v2.test.ts": "c93ef4627ab62f491853e6959b125c8361792e7c6156e94d51013ebf503f88aa",
+      "__tests__/ortho-assessment-saved-model.test.ts": "c508910668cd731fe9968609291c3736a5fb93a5f10ab7dbd2806df6b9146b26",
+      "__tests__/ortho-assessment-tanaka-boundary-v2.test.ts": "ffc7e8191884cdabf78f4bb1cb3f11625a160c9de3075e940cc2dc30a943ab80",
+      "__tests__/ortho-case-study-capture.test.ts": "6d5f17deac7be438aff880e8748b9f2d688885747c227bc454d27cb9524b4fdc",
+      "__tests__/ortho-case-study-recorded-facts.test.ts": "6c5716b3fcdeade09ad6aa6fdaf8c3d2da4c71d576123c82ccd4b0dda73103d7",
+      "__tests__/ortho-case-study-review-contract.test.ts": "09e059e8b23fbccf6b8de7ad3749360e04c03699466804617a471cf2cee53624",
+      "__tests__/ortho-followup-reminder-ui.test.tsx": "6402349353784cd2b25e908e6a9476eae9db8300629406e2c01c2963a11e6566",
+      "__tests__/ortho-followup.test.ts": "894ea87cda7b3368b640e302904f02d1a1c7871de185f36970b81b1583ed670e",
+      "__tests__/ortho-photo-comparison-selection.test.ts": "5c56cf3c2d4016b9adbaa1f7d8c9d7b0e49addfc85003a98d5f355ad773cee44",
+      "__tests__/ortho-retention-device-dossiers.test.ts": "284847461360c25e4dbca1620d1461f3409f148cdbf20dad9133a5ff57f6091c",
+      "__tests__/ortho-retention-device-history.test.ts": "4a12bfa4c5e3d91d824a0836b242c478090eb0742094671a6d968ab75416f19c",
+      "__tests__/ortho-retention-followup.test.ts": "d36f2498e053a06e7874d875f44296341a4e8eb723fc9b84811b66b8cf4f296a",
+      "__tests__/ortho-space-baselines.test.ts": "c8e6820625973d36c407948d9f07db06ac590fc451f5892b1e950b25858de814",
+      "__tests__/ortho-space-ledger.test.ts": "bf0a0ea077558bedbe9c42e826c229974eb74001cdd4f1886312697f3863e5d8",
+      "__tests__/ortho-space-submission-client.test.ts": "da3f3f9cd83141d38f770a48e7cfd028b082733ff053bda92bfbd16d0ac568b4",
+      "__tests__/ortho-study-illustrated-print.test.tsx": "ca12013325401c67b0ce478afad18ad669677f15e8664046582020ceb53fd4c2",
+      "__tests__/ortho-study-illustrated.test.ts": "c9016762c4dbf1f282c35a47549e871f92192f403ac5b4c081fcfe1076e49ca5",
+      "__tests__/ortho-study-image-processor.test.ts": "d9fa21d2ecddd50b42d903da883b9960125b89b32a227ad7a043d39c0d8e20b1",
+      "__tests__/ortho-study-image-selection.test.ts": "3623c1b5839a019ef3c71f6eca0fc17fdcf622f1f34607f5ff00bb39c668102b",
+      "__tests__/ortho-study-problem-review-ui.test.tsx": "a54b847acdc29bf01a6ef63fa22aa0d2f4ad9aea3ea8704c3c374d09b0029517",
+      "__tests__/ortho-study-submission-client.test.ts": "bcd99371d214258a1b472bd06ed37f59cd4ea2c9af02b19fdac582ce826c9e8d",
+      "__tests__/ortho-study-submission-contract.test.ts": "143d8f16e2a91fdd2e2933eaa7fdfebd4549092d19343f98d860e03df4e2dcdd",
+      "__tests__/ortho-study-text-export.test.ts": "02ae6da1b776919e52e638f85ef21aabfcd2f3c6359d620847c0cf9168f1416e",
+      "__tests__/ortho-workup-navigation.test.ts": "8b6c7c75024ecdbd421d09b05b88ce19908cd53158341beadeb6384575b6f09e",
+      "__tests__/ortho-workup-owners.test.ts": "7c43d5276c0a1ad41a45aa4049bd480e4ef76d0389653c83ead2cd0fbacddbe1",
+      "__tests__/payments-idempotency.test.ts": "09ce5753756110f2b9a6a8b51314216e64dc346c00934138edc817718773e96b",
+      "__tests__/postgres/ceph-comparison-norms.test.ts": "7b54e84760947fdb16e4ba4a737a0b9bcee28cf9077d0351beb722343e3f0e92",
+      "__tests__/postgres/ceph-completion-provenance.test.ts": "3a6fb218057638401ca900cc8140f43997f32137c6582e06110824a3354c24b0",
+      "__tests__/postgres/ceph-source-cas.test.ts": "a2dc818845f5fef8a22b082bd53c579f66dabd9f6184a67e7e2657ed4f0f5525",
+      "__tests__/postgres/debt-installment-collection.test.ts": "c87877e4718f04b25fc87b245acbff8c0baa93a670d8777ec5fe1f1aadcd3a60",
+      "__tests__/postgres/installment-plan-included.test.ts": "dbf6049c2dbfead50499ab3e602db43033ac79ce2b9baf73b53f2cdce17b7f3e",
+      "__tests__/postgres/legacy-import.test.ts": "f6a82a2de673a56e13fed4c447fd8fef0b22df9a37c4c130169feb3e09334bd2",
+      "__tests__/postgres/legacy-ortho-billing.test.ts": "1d1221460021815762083a1437a9c24794cecf5e0e4746ecb49888fa7e1d1f09",
+      "__tests__/postgres/ortho-adjustment-chronology.test.ts": "b1ac1ed7009a2fe240de0959ce20945a41216765a33222056af0381fdf152b9b",
+      "__tests__/postgres/ortho-adjustment-date.test.ts": "e0d3052ed90514fd951fcf588a1002e50d51915935e5d5193bbdeef5cc674ab1",
+      "__tests__/postgres/ortho-adjustment-request-replay.test.ts": "cf9092da2512df0b44fa73bb0d9d771c1b0da204970ddfd81fd859a2423d93c6",
+      "__tests__/postgres/ortho-assessment-strategy-union.test.ts": "fcc0b88e88904e58a85e1c3f6619a912b8c4e5eca05f504c583b4fdf06958988",
+      "__tests__/postgres/ortho-assessment-tanaka.test.ts": "28351ca6284299b3d72131776bfb6859fee5cadf29ef266149df54f9edd78884",
+      "__tests__/postgres/ortho-billing-authority.test.ts": "3420b8cba395ad8c58e9adddd2580b29774db9a0b1cba75350ffadaf089ece46",
+      "__tests__/postgres/ortho-case-study.test.ts": "d5710dbd1b575529d2bcfb2e50e82cb25fd7a54c0f1698e2230b373c5890b875",
+      "__tests__/postgres/ortho-plan-link-command.test.ts": "b745212685dda22db735f596e3ed0784d13a4969f36496bc0b8b95f39d24b6ad",
+      "__tests__/postgres/ortho-retention-history-ownership.test.ts": "90e1dcb2d53611fee804dd01e19902b8ed9ca4d21794301773bc01bb52ab59ab",
+      "__tests__/postgres/ortho-retention-ledger-backup.test.ts": "11623cb9740ce2d8f39b01fa21655209d5055bd633c03146ad20aa5a8e5f9c73",
+      "__tests__/postgres/ortho-retention-persistence.test.ts": "d81e00d4203bdb37ef25e0b2919fdb3b92dbc939bfa4f800dd7cf94e10af12a4",
+      "__tests__/postgres/ortho-session-billing-review.test.ts": "6b4d8f3491c880987fc25634167b27fc430b1899f2d918608b9c89719eedd11f",
+      "__tests__/postgres/ortho-session-report.test.ts": "7fbdf3fb4c14cfbf2402641ecb2f55f3bd1d0073934b11d8e872e33b6ee34044",
+      "__tests__/postgres/ortho-space-ledger-backup.test.ts": "697c9bef873ede25a6185b782a920e71fb9e31acdd3fa09ed210c5668b0d81b1",
+      "__tests__/postgres/ortho-space-persistence.test.ts": "c94a8a6f43e6dfed98ec4c3e0847edfd97a9a1fa3b71265bb692d06cf381e9a0",
+      "__tests__/postgres/ortho-study-image.test.ts": "f8577600efc57a938d51a7f39a13e73761feb1ce5e483bd569af0271556813da",
+      "__tests__/postgres/ortho-study-problem-review.test.ts": "f7b7ed1aad7178da437fb449e4dbac8856d3bbb25ecc6d275a93cf8494228dae",
+      "__tests__/postgres/ortho-study-submissions.test.ts": "2f5d2ea73389a4e1ba14efddb1e33e1204ef9020ce58ca3fc816940e8b6c6ea4",
+      "__tests__/postgres/plan-consent-audit-atomic.test.ts": "6d760dadbdc67c3b654f2adc2cc644a779a5913f441995e97bb89f9867f4a7cc",
+      "__tests__/postgres/plan-installment-idempotency.test.ts": "874a70e338f2e856d2c37b1131a47182c54ddb976fbced02bfad4ba17ff5abe5",
+      "__tests__/postgres/reversed-installment-recovery.test.ts": "b6abac1031a43fc59a359c857ee5c8fcfa54569b267249a4c507a1b382fad974",
+      "__tests__/security-http/legacy-import-http.test.ts": "9b92ba08586c27c0d36b0bab9077c3c1fc70f990d2510136ccc88452f36ff4e3",
+      "__tests__/security-http/ortho-adjustment-wire-defaults-ui.test.ts": "b0321de23b3e27f7f2f9a2271771c91c1be92b66c7ff0441e9a0fedb7be7883d",
+      "__tests__/security-http/ortho-followup-reminder-built-page.test.ts": "38de824e909901b0698e3e012c6352ecd8e5c38391c3be4d5364ee580456b271",
+      "__tests__/security-http/ortho-workup-browser.test.ts": "95ad02405a49f1e21ad48c357c8520b0dbbec6e5d758c7d24a5380204aa73bca",
+      "__tests__/security-http/ortho-workup-owners-real-react.test.ts": "1c9dde79c544614577e1a77d33afd9e230f07a65656772dfe57694e5c65e1436",
+      "app/print/ortho-study/[id]/page.tsx": "f66e4f799e3f16823d89e357c9b8ace9743e6b34168137308a94a6058b00dd5b",
+      "components/OrthoCaseStudy.tsx": "123c748c42e7795984ebc87f400794616cf4f4fd759b2c3429e5032b932f86c3",
+      "components/OrthoPackageLink.tsx": "7f84a56460ec598d9ba63a28516977f8e4b9909952b7c172b7db0f63b3277916",
+      "components/OrthoSavedStudyReview.tsx": "4cbb8308768f8d0eefc494455462c2505760f87412524592a0218230cec3fc70",
+      "components/OrthoStudyImageEditor.tsx": "6971661d0e4f443ac258d816673ed6c91d6bac6099fdae3609b3a4eac10755a5",
+      "components/OrthoWorkupNavigation.tsx": "a22e4899e31b856a72f4848be1185c470b7de8e2c05737a16f560d4c7440b7cc",
+      "components/OrthoWorkupOwners.tsx": "1bc4573c6b470fee7e2ecb08626415bfe17fa0e8770ab427f0375859405375af",
+      "components/PatientDocuments.tsx": "54dadaec2a8d252d92a6c8db0032dc53bed070cb04c8a7983e2da9b2306bc6ef",
+      "components/PatientOrtho.tsx": "faa9b00df21377ceccbfb84351e5dbc3164c889124098f429089cc16c023044a",
+      "components/WebCephRecordsGrid.tsx": "bdbbb966444459b463bb4ff3d60d19570fc265bdbc2f516e692717c9f9b9474f",
+      "lib/ceph-calculation-readiness.ts": "822d4097c23115ed23d023dca69c2fb97c38ece28a5ff1fc3696bd0fb0ceffb3",
+      "lib/ceph-comparison-projection.ts": "0ee701b5bb722a9972c397f4c6a6822ceea9ec9aed2b4aaa8b0eecbf61994a6d",
+      "lib/ceph-completion-provenance.ts": "e804ef38658af8332f140647b6ffff1395fd89426d7302ec9f8c6831113f464c",
+      "lib/consent-record.ts": "717cd80573206f455ceb8422089e2060baf6d4bf82c8984947e17664fdfe46f9",
+      "lib/db.ts": "d2292015aa8cab7ad3c84c3da4aafde1bb38bceea9576e8d7466730f880f8e85",
+      "lib/debt-installment-collection.ts": "100666c0fe0983e245a588a26f89525e0dd33eb10c375c337118389c9177e720",
+      "lib/debt-installments-db.ts": "b501cd1ceae60df58f37ac9f8fea5b85c4ebac7d4bf9ac7f0a13ac413f771bbe",
+      "lib/debt-installments.ts": "ff3d34a4845e285fa05a000a4f29e1185ed9dd6eea29727c987b7f70a49f5d24",
+      "lib/fx.ts": "dc3f2e27da91f7519f766e8b83d6cd66d5d54d4dad7dd5f7b2c7be810d4035ff",
+      "lib/invoice-currency-evidence.ts": "2f773de3ad4d81b3c2bceb6e2f7ccdb56f9e5c40720e679adcf3557c03aa74e0",
+      "lib/legacy-import.ts": "bce6778c616447d69d01cb583ee6343a97f2932e5f656427bbd08dba7731c9dc",
+      "lib/ortho-adjustment-command.ts": "589b12e722c6cf8d9b4ec74fc8775dc5861058cb785d19e5793f45d8655d06ee",
+      "lib/ortho-adjustment-date.ts": "9d653734d429c2c661dc6d685eca9d8c44fc8dbee6fd0d1082173804ad5e0fa9",
+      "lib/ortho-adjustment-requests.ts": "4a47c06dcb1985612832c43257595d75b1902ab93a6f928c8a1d9212d6b36372",
+      "lib/ortho-adjustment-visit-input.ts": "206a9e3c5465488d5a0bd264882d83d8292f7f9bc9de121a692b4199993482b5",
+      "lib/ortho-assessment-arithmetic-2_1_0.ts": "ec0ff7d102cd0e69c0454f5cc8c611acc9773f63e65252ba2150132759678dc0",
+      "lib/ortho-assessment-engine-2_2_1.ts": "31e74ddfe24fe0e8d8bc5611f9d3bd1718320b5c8757fe22957763d6aa08ea72",
+      "lib/ortho-assessment-findings-v2.ts": "10edb73de8c853ad3d104dd30ed724a6b80485285f9642180fb1b05301e7bf36",
+      "lib/ortho-assessment-intake.ts": "17046ae9e4cb44e39f0a4c5892d28f492024c3d7883b2e46eb28d4f10b087c2d",
+      "lib/ortho-assessment-measurement-editor-v2.ts": "b711dff3d17227b1b9aced3deae8133be3d54bb10c9813927643748cf09c9fda",
+      "lib/ortho-assessment-measurement-set-v2.ts": "e647e16ebb005133245370e15a4e22284ddf6f9a65fe4ef4569f52bad2b7d084",
+      "lib/ortho-assessment-store.ts": "6998397baa8933a663dadb1be9f94e572b89bf3e2af8ff94785abf3f39ba1c56",
+      "lib/ortho-assessment-tanaka-1974-v1.ts": "97fadfb04e35945cd238b9167a31f940fcca24bb2547ac5e403476dff3f8688a",
+      "lib/ortho-assessment-versioned-sources.ts": "b37ac68af8706fb445d71931289d28896c8b7c390626008cc4b8884ce25e3316",
+      "lib/ortho-billing-decision-schema.ts": "98df25c819835af5ce698992a3ca78f94b997127b1a79c4ac213ba21adfc0bcc",
+      "lib/ortho-case-presentation-i18n.ts": "b7e6771093303e2070ade42531245c5a6443fad2b579fd1760401f46c889e0ba",
+      "lib/ortho-case-study-access.ts": "1d1ab70650f4d2acd7e65e2b83f7c6ee715730c5775f89e14f8c62c807bff285",
+      "lib/ortho-case-study-capture.ts": "0cb04ed711eb6acdfbb8510f0a5103fdb92bdccca394284284be77e54fd17f97",
+      "lib/ortho-case-study-recorded-facts.ts": "4e53d897a5916f0b2da6b386ba133263f311420238fe41a79ad13515c1da0aca",
+      "lib/ortho-case-study-repository.ts": "ac748b6540168571181c213245101ff818190db3065118fd4cab7211a2b656ab",
+      "lib/ortho-case-study-source-union.ts": "3e0032be02528a55fea99147d337046b14e6b8e1fde17d494a8dadcac8409885",
+      "lib/ortho-case-study-sources.ts": "7bef66f39a34303e360f025d8417817c4fce874c05582a884a635bd2824d1f70",
+      "lib/ortho-followup-worklist.ts": "eac4bd0e13472ff6defd8e4bfa2e543e85f97a98b41ef5895fb8aad1d0f9a9de",
+      "lib/ortho-followup.ts": "493c2aa2599c3d6a5cf424a42955c9cb8a4334eae98b2b45f2ee7999e0c15459",
+      "lib/ortho-photo-comparison.ts": "933ddb70cebdb0d518cacbb7db0d070d1951ff1c5c30613625a4d30ffe32da28",
+      "lib/ortho-plan-link-command.ts": "c080089ea313a90c763126fed703cb35404c5e8651ce27074f91a63cb4e6dda8",
+      "lib/ortho-retention-command.ts": "cf9a8a446748550d4e53ac3cdd11b54f6751aa39486f96e87dda5502e4b0ed99",
+      "lib/ortho-retention-device-dossiers.ts": "d46c95264a16e9af5000d6a3471753fd7e1bc9eb191d50d2a9743d436bd1e847",
+      "lib/ortho-retention-event-history.ts": "13cd76d2fe800dc87a164ec55dda5464435cdaad8901f4c03bc0a2d21da7a17e",
+      "lib/ortho-retention-event-store.ts": "3aaf4be802acb6c836232cb7d79e57eb0cd29044f588c225149fe5a5d72dec08",
+      "lib/ortho-retention-events.ts": "7d4c74fd89c212438ad2343ebc1e5c6a2310906048080450803d574e0280e490",
+      "lib/ortho-retention-recall.ts": "7904ea8b736e28c59bb39da5971139ef3187dcf7558ba374635b0d0dda99c2f7",
+      "lib/ortho-retention-schema.ts": "ee6bdf0aec89923fab270fc82084d65bda6bd716ecf52838999d667ceff628be",
+      "lib/ortho-session-billing-review.ts": "98681d2c0b948ddda61f7b35757fcdbdf65ccdb0d3f2b5e73245cc2ffebcd130",
+      "lib/ortho-session-display.ts": "7426998eb38e9cf0b8c828c85f0761995bda1142994e57d91b45bb39f9fa23a5",
+      "lib/ortho-session-report.ts": "764cfae2b2c8d17971a108631a55fdd4bd97270d0ad0fe5edbcf0185d4c69641",
+      "lib/ortho-space-baselines.ts": "86651909cc49d79c4a14938b6563698a6a1e250a4016c7fef5fde7111ec72eee",
+      "lib/ortho-space-ledger.ts": "f1120dbf63303a41f4c1db19b238bd6cbd35ac5eba2b731037b806d6de471241",
+      "lib/ortho-space-schema.ts": "5139d56bcec02958376e42d3e3d17b01f2a3c6f236d4fdc28fa7237cce0ce752",
+      "lib/ortho-space-submission-store.ts": "85f5866bf05667ad501ff358eef0bc0f3cbf61057c4aca7688d41383a5f69a39",
+      "lib/ortho-strategy-client.ts": "705741b9f4a5bbbf09775ce2ba7a6e94f921a8a4d6dcaadc1d5ecfd95abe4d60",
+      "lib/ortho-study-illustrated-pptx.ts": "d7372ba9cff88030dee35d7e4a78fc3ff83a6255b4d89fdb3f91cff72c7fb7df",
+      "lib/ortho-study-illustrated.ts": "9b45a6bbdd187bf558912bc5c196595bf8f525550d715287accf92b82e626e45",
+      "lib/ortho-study-image-editor.ts": "a2a90583308d90c826e8cb874307e8f2a96e9b5b451b54f93beae1c2262bfbbe",
+      "lib/ortho-study-image-processor.ts": "ab0d2e5312108ecdd9b0a42e18f1f6cdc9ee7bfee9223c347988e4e8bd3214b0",
+      "lib/ortho-study-image-selection.ts": "c362f5c70b72155c149792763f1e46488736a39a95552a0d148fa94c304e9e96",
+      "lib/ortho-study-image-store.ts": "ef8ade2796f732031ff94bcfa5bae22b0d9b0bc2a4498c8eb45db685e2a6801b",
+      "lib/ortho-study-media.ts": "df3f3780d3dfd15f42e89390a9ae8163a429edd697acf935d2751f34a30c803f",
+      "lib/ortho-study-problem-review-store.ts": "c2d51c9cba51a7f3042190c0e1e50942ad946e975ad5a3ef4994a6e4eb84f85e",
+      "lib/ortho-study-problem-review.ts": "fd05a41a7668061e0cbe32f3d360ef988c97c0563c392ce9e9903df705483647",
+      "lib/ortho-study-space-capture.ts": "f016e8e517a7ce0ad5f4e6aaddbe747cd1fda396a86a36c58d8e1e1bc3a5d227",
+      "lib/ortho-study-submission-store.ts": "9da729af9037240dc3c8827bc3730fc0561888f6f2c55f3518479ebd52e98439",
+      "lib/ortho-study-text-export.ts": "a16a8e94976d0e5cec56b930018b46c4c71be44367b59cb2ca5898dce11be8e5",
+      "lib/ortho-workup-navigation.ts": "c73e2509877452c4909bdb0e47d306bab66b9b8ccd0158fcd4994c9174d639ce",
+      "lib/payment-acknowledgment.ts": "7086d96e8db28f12ca209fa9a3a68163bbc8029499b0b16c13c87f123bb2dc55",
+      "lib/receipt-provenance.ts": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b",
+      "lib/reversed-installment-recovery-db.ts": "b3d460e309bcac7a11e0ad1fb1486fdac9a0754dd6e0d59fe561aba535ec8d11"
+    }
+  },
+  "source_status_counts": {
+    "partial": 17,
+    "unverified": 13,
+    "present": 21,
+    "missing": 1
+  },
+  "scenarios": [
+    {
+      "id": "O01",
+      "scenario": "مريض جديد ← تقييم ← صور ← خطة ← زيارة",
+      "expected": "حالة وسياق واحد، دون تكرار الهوية أو التشخيص أو الزيارة",
+      "source_status": "partial",
+      "sources": [
+        "components/OrthoWorkupNavigation.tsx",
+        "components/OrthoWorkupOwners.tsx",
+        "components/PatientOrtho.tsx"
+      ],
+      "tests": [
+        "__tests__/ortho-workup-navigation.test.ts",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "finding": "التنقل والسياق والاستئناف موجودة في العمل الجديد؛ رحلة مريض جديد كاملة حتى حفظ الخطة والزيارة بلا تكرار لم تثبت في هذه المراجعة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O02",
+      "scenario": "مريض بدأ التقويم قبل النظام ولا تتوفر سجلات أولية",
+      "expected": "إدخال ملخص سابق بتواريخه المعلومة دون اختراع T1 أو زيارات",
+      "source_status": "unverified",
+      "sources": [
+        "components/PatientOrtho.tsx",
+        "lib/ortho-assessment-intake.ts",
+        "lib/ortho-space-baselines.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-assessment-intake.test.ts",
+        "__tests__/ortho-space-baselines.test.ts"
+      ],
+      "finding": "يوجد intake وbaseline تاريخي، لكن لم يثبت مسار ملخص علاج سابق شامل مع تواريخ مجهولة دون إنشاء T1/زيارات.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O03",
+      "scenario": "حالتان للمريض نفسه/صورة غير مرتبطة",
+      "expected": "لا اختلاط في السجلات أو السيفالو أو التصدير؛ ربط صريح فقط",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-case-study-source-union.ts",
+        "lib/ortho-case-study-access.ts",
+        "lib/ortho-photo-comparison.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-study-problem-review.test.ts",
+        "__tests__/postgres/ceph-source-cas.test.ts"
+      ],
+      "finding": "تربط مصادر الدراسة بالمريض والحالة وتتحقق من مصدر الصورة؛ الحالات المتقاطعة محمية في المصدر. اختبار الربط الجديد جزء محدد من السيناريو وليس قبول كل السجلات والتصدير.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O04",
+      "scenario": "تبديل مريض/حالة أو سحب إذن أثناء الطلب",
+      "expected": "لا ظهور بيانات في السياق الآخر ولا قبول كتابة غير مصرح بها",
+      "source_status": "present",
+      "sources": [
+        "components/OrthoWorkupOwners.tsx",
+        "lib/ortho-case-study-access.ts",
+        "lib/ortho-study-problem-review-store.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-workup-owners.test.ts",
+        "__tests__/security-http/ortho-workup-owners-real-react.test.ts",
+        "__tests__/postgres/ortho-study-problem-review.test.ts"
+      ],
+      "finding": "حراسة مالك الطلب وإعادة فحص صلاحية المصدر/الصور موجودتان؛ تقارير النجاح المحدودة لا تثبت جميع نوافذ السباق في كل أصحاب البيانات.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O05",
+      "scenario": "فقد رد الحفظ ثم إعادة المحاولة",
+      "expected": "لا تتكرر الزيارة أو IPR أو دفعة الاستيراد؛ تظهر النتيجة غير المؤكدة",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-adjustment-requests.ts",
+        "lib/ortho-space-submission-store.ts",
+        "lib/ortho-study-submission-store.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-adjustment-request-replay.test.ts",
+        "__tests__/ortho-space-submission-client.test.ts",
+        "__tests__/ortho-study-submission-client.test.ts"
+      ],
+      "finding": "إعادة إرسال الزيارة وIPR والدراسة لها عقود استرداد؛ دفعة استيراد تاريخ تقويم سريري واستكمالها غير مثبتة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O06",
+      "scenario": "طبيبان يعدلان الخطة أو الدراسة",
+      "expected": "كشف تعارض أو تسلسل آمن، دون ضياع صامت للتعديلات",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-case-study-repository.ts",
+        "lib/ortho-study-submission-store.ts",
+        "lib/ortho-assessment-store.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-study-submissions.test.ts",
+        "__tests__/postgres/ortho-assessment-strategy-union.test.ts"
+      ],
+      "finding": "نسخ الدراسة وhash المصدر وأقفال المعاملات تمنع الكتابة المتأخرة بصمت في الوحدات المفحوصة؛ قبول طبيبين في الواجهة لكل الخطة والدراسة لم ينفذ هنا.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O07",
+      "scenario": "إدخال زيارة قديمة بين زيارات قائمة",
+      "expected": "الترتيب صحيح، والمعرفات والصور والتواقيع لا تتغير",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-adjustment-date.ts",
+        "lib/ortho-adjustment-command.ts",
+        "lib/db.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-adjustment-chronology.test.ts",
+        "__tests__/postgres/ortho-adjustment-date.test.ts"
+      ],
+      "finding": "توجد تواريخ فعلية مستقلة ومعرفات ثابتة وترتيب الزيارات القديمة؛ اختبار chronology هو الدليل المرشح المباشر.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O08",
+      "scenario": "الاحتفاظ بالسلك ثم تغييره/إزالته",
+      "expected": "التاريخ الفعلي دقيق، والمخطط لا يظهر كأنه مركب",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-adjustment-visit-input.ts",
+        "lib/ortho-session-display.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-adjustment-wire-defaults.test.tsx",
+        "__tests__/security-http/ortho-adjustment-wire-defaults-ui.test.ts"
+      ],
+      "finding": "تمثيل retain/change/remove للسلك وتمييز الخطة عن المنفذ موجود؛ مراجعة سير التاريخ الكامل في تشغيل متصفح مستقل مطلوبة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O09",
+      "scenario": "صور متعددة للمنظر في تواريخ مختلفة",
+      "expected": "اختيار المجموعة واضح؛ لا تُعرض كمجموعة زمنية واحدة مصطنعة",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-study-image-selection.ts",
+        "lib/ortho-study-media.ts",
+        "lib/ortho-photo-comparison.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-study-image-selection.test.ts",
+        "__tests__/ortho-photo-comparison-selection.test.ts"
+      ],
+      "finding": "مجموعات واستخدامات الصور محفوظة وتواريخ المصدر مستقلة؛ الاختيار الآلي للمقارنة لا يمثل إثباتًا بصريًا لكل تواريخ المنظر المتكررة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O10",
+      "scenario": "صورة بلا معايرة أو نقطة لازمة",
+      "expected": "لا أطوال مؤكدة ولا صفر بديل ولا اعتماد نتيجة ناقصة",
+      "source_status": "present",
+      "sources": [
+        "lib/ceph-calculation-readiness.ts",
+        "lib/ceph-completion-provenance.ts"
+      ],
+      "tests": [
+        "__tests__/ceph-calculation-readiness.test.ts",
+        "__tests__/ceph-completion-validity.test.ts",
+        "__tests__/ceph-formula-safety.test.ts"
+      ],
+      "finding": "حراس المعايرة والنقاط والنتائج غير المتناهية موجودون؛ عدم المعايرة ليس صفرًا صالحًا.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O11",
+      "scenario": "تصحيح دراسة معتمدة ثم مقارنة متابعة",
+      "expected": "المعتمد الأصلي ثابت، أصل التصحيح معروف، ومتابعة الصورة الجديدة منفصلة",
+      "source_status": "partial",
+      "sources": [
+        "lib/db.ts",
+        "lib/ortho-case-study-sources.ts",
+        "lib/ceph-completion-provenance.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ceph-completion-provenance.test.ts",
+        "__tests__/ceph-completion-provenance.test.ts"
+      ],
+      "finding": "نسخ المعتمد إلى مسودة جديدة يحفظ الأصل ويكتب أصل التصحيح في note؛ قارئ الدراسة يعيد corrects_analysis_id=null لأن علاقة التصحيح المنظمة غير محفوظة في المخطط الحالي. لا يكفي النص لإثبات سلسلة نسب قابلة للتتبع عبر المقارنات.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O12",
+      "scenario": "مرجعان/وحدتان/نسختا محرك مختلفتان",
+      "expected": "تحذير/منع حسب المواصفة، دون فرق رقمي مضلل",
+      "source_status": "present",
+      "sources": [
+        "lib/ceph-comparison-projection.ts",
+        "lib/ceph-completion-provenance.ts"
+      ],
+      "tests": [
+        "__tests__/ceph-comparison-projection.test.ts",
+        "__tests__/postgres/ceph-comparison-norms.test.ts"
+      ],
+      "finding": "المقارنة تعتمد دليل المرجع وإصدار الحساب وتمنع الفروق غير القابلة للمقارنة؛ مصفوفة الوحدات/المراجع المطلوبة تحتاج تنفيذًا مستقلاً.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O13",
+      "scenario": "عمر مجهول وفشل AI وقياسات ناقصة",
+      "expected": "لا افتراض نمو أو نتائج طبيعية أو توصية معتمدة تلقائيًا",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-assessment-findings-v2.ts",
+        "lib/ortho-assessment-measurement-set-v2.ts",
+        "lib/ceph-calculation-readiness.ts"
+      ],
+      "tests": [
+        "__tests__/ceph-manual-review-gate.test.ts",
+        "__tests__/ceph-narrative-safety.test.ts",
+        "__tests__/ortho-assessment-findings-v2.test.ts"
+      ],
+      "finding": "تعطيل غير الجاهز وحراس المراجعة موجودة؛ اجتماع عمر مجهول وفشل AI والقياسات الناقصة عبر الخطة لم يثبت تشغيليًا.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O14",
+      "scenario": "Bolton ومجموع الأسنان وفرق المساحة",
+      "expected": "نتائج مقابل أمثلة مستقلة موثقة، مع اختبارات التقريب والأسنان المفقودة والقيم الحدية",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-assessment-arithmetic-2_1_0.ts",
+        "lib/ortho-assessment-engine-2_2_1.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-assessment-arithmetic-2_1_0.test.ts",
+        "__tests__/ortho-assessment-contract-v2.test.ts"
+      ],
+      "finding": "Bolton وarch_space وحسابات المدخلات الخام موجودة؛ وجود أمثلة اختبار لا يثبت أن جميع الأمثلة مستقلة سريريًا أو معتمدة من المختص.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O15",
+      "scenario": "تحليل مختلط للفكين ومقياس شعاعي",
+      "expected": "لا خلط لمجاميع الفكين؛ جداول/معادلات وإصدارات ومعايرة صحيحة",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-assessment-measurement-set-v2.ts",
+        "lib/ortho-assessment-tanaka-1974-v1.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-assessment-tanaka-boundary-v2.test.ts",
+        "__tests__/postgres/ortho-assessment-tanaka.test.ts"
+      ],
+      "finding": "Tanaka 1974 له نطاق وإصدار وفصل للفكين. Moyers وHuckaba وطرق أخرى معلنة disabled؛ نطاق التحليل المختلط الشعاعي الكامل غير متاح بهذه المجموعة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O16",
+      "scenario": "IPR لنفس التماس في زيارتين وإعادة إرسال الطلب",
+      "expected": "المجموع صحيح بلا تضاعف، ومخطط/منفذ متمايزان",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-space-ledger.ts",
+        "lib/ortho-space-submission-store.ts",
+        "lib/ortho-study-space-capture.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-space-ledger.test.ts",
+        "__tests__/postgres/ortho-space-persistence.test.ts"
+      ],
+      "finding": "ledger يجمع IPR المنفذ عبر الزيارات مع supersession وإعادة الإرسال، ويفصل المخطط عن المنفذ؛ ليس مفقودًا بسبب اختلاف الاسم عن الفرع القديم.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O17",
+      "scenario": "تعديل خطة موقعة ورفض المريض بديلًا",
+      "expected": "إصدار وتدقيق وموافقة مرتبطة بالنسخة المناسبة",
+      "source_status": "partial",
+      "sources": [
+        "lib/consent-record.ts",
+        "lib/ortho-strategy-client.ts",
+        "lib/ortho-case-study-sources.ts"
+      ],
+      "tests": [
+        "__tests__/consent-record.test.ts",
+        "__tests__/postgres/plan-consent-audit-atomic.test.ts"
+      ],
+      "finding": "سجلات الموافقة ونسخ المصادر موجودة؛ ربط رفض بديل وتعديل خطة موقعة بالنسخة الصحيحة خلال رحلة كاملة لم يثبت.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O18",
+      "scenario": "مثبتان مختلفان للفكين وتسليم بتاريخ قديم",
+      "expected": "حفظ مستقل وتاريخ فعلي، لا كتابة اليوم أو استبدال أحدهما بالآخر",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-retention-command.ts",
+        "lib/ortho-retention-events.ts",
+        "lib/ortho-retention-event-store.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-retention-persistence.test.ts",
+        "__tests__/ortho-retention-device-history.test.ts"
+      ],
+      "finding": "أحداث المثبتات تحمل الفك والتاريخ الفعلي وهوية الجهاز؛ ledger يسمح بتاريخ قديم دون استبدال جهاز الفك الآخر.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O19",
+      "scenario": "مثبت ثابت ومتحرك للفك نفسه ثم استبدال",
+      "expected": "تاريخ أجهزة كامل، والمراجعة مرتبطة بالجهاز الصحيح",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-retention-device-dossiers.ts",
+        "lib/ortho-retention-event-history.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-retention-device-dossiers.test.ts",
+        "__tests__/postgres/ortho-retention-history-ownership.test.ts"
+      ],
+      "finding": "التاريخ يحفظ أجهزة متعددة واستبدالات وروابط المراجعة للجهاز؛ التشغيل النهائي غير منفذ في هذا التدقيق.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O20",
+      "scenario": "تثبيت منتظم وآخر شدّة قديمة",
+      "expected": "قائمة المتابعة تعتمد استحقاق التثبيت، بلا إنذار انقطاع آلي من عداد الشدّات",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-followup.ts",
+        "lib/ortho-retention-recall.ts",
+        "lib/ortho-followup-worklist.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-followup.test.ts",
+        "__tests__/ortho-retention-followup.test.ts"
+      ],
+      "finding": "عداد الشدات معطل في retention، لكن followup يصرح retention_schedule_unavailable ولا يربط مصدر استحقاق المثبت التشغيلي. منع إنذار خاطئ لا يحقق قائمة استحقاق التثبيت.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O21",
+      "scenario": "حالة مرجعية اصطناعية طويلة بزيارات كثيرة",
+      "expected": "PPTX وPDF يطابقان ترتيب A ومصادر الحالة، دون 43 شريحة مفروضة",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-study-illustrated.ts",
+        "lib/ortho-study-illustrated-pptx.ts",
+        "app/print/ortho-study/[id]/page.tsx"
+      ],
+      "tests": [
+        "__tests__/ortho-study-illustrated.test.ts",
+        "__tests__/ortho-study-illustrated-print.test.tsx"
+      ],
+      "finding": "مصدر محفوظ وعدد صفحات ديناميكي وتصدير PPTX/طباعة موجودة؛ ترتيب A وتطابق حالة طويلة مع PDF لم يتحققا. مولد illustrated يخرج صفحات نص وصور منفصلة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O22",
+      "scenario": "استكمال بيانات أثناء توليد عرض",
+      "expected": "نسخة متسقة من لقطة محددة، لا محتوى هجين",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-case-study-capture.ts",
+        "lib/ortho-case-study-repository.ts",
+        "lib/ortho-study-illustrated.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-case-study-capture.test.ts",
+        "__tests__/postgres/ortho-study-problem-review.test.ts"
+      ],
+      "finding": "التصدير يقرأ revision محفوظًا ومصادر ملتقطة، ومنها facts لمراجعة المشكلة الجديدة؛ تغيير المصدر لا يعيد كتابة اللقطة السابقة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O23",
+      "scenario": "PPTX عربي وإنجليزي مع جدول طويل وصور",
+      "expected": "نص وجداول قابلة للتحرير؛ لا قص أو تداخل؛ فتح فعلي في عارضين",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-study-illustrated-pptx.ts",
+        "lib/ortho-case-presentation-i18n.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-study-illustrated.test.ts",
+        "__tests__/ortho-study-text-export.test.ts"
+      ],
+      "finding": "نص addText قابل للتحرير ودعم RTL موجودان؛ الإنجليزية والجداول الطويلة كجداول تحريرية وعدم القص والفتح الفعلي في عارضين لم تثبت، ولا ينفذ illustrated الحالي تخطيط المرجع المتعدد العناصر.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O24",
+      "scenario": "عرض مسودة/نهائي به بيانات غير معتمدة",
+      "expected": "توضيح الحالة وعدم تمرير مسودة على أنها نتيجة معتمدة",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-case-study-recorded-facts.ts",
+        "lib/ortho-study-text-export.ts",
+        "components/OrthoSavedStudyReview.tsx"
+      ],
+      "tests": [
+        "__tests__/ortho-case-study-recorded-facts.test.ts",
+        "__tests__/ortho-study-problem-review-ui.test.tsx"
+      ],
+      "finding": "حقائق المصدر وحالة المراجعة تظهر دون ترقية observation إلى تشخيص أو اعتماد جديد؛ يلزم قبول حزمة العرض النهائية بصريًا.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O25",
+      "scenario": "تصدير تعليمي مع صور وmetadata",
+      "expected": "فحص محتويات ZIP والملفات المضمنة وعدم تسرب هوية مخفية تحت القص أو في notes",
+      "source_status": "missing",
+      "sources": [
+        "lib/ortho-study-illustrated-pptx.ts",
+        "lib/ortho-study-image-processor.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-study-image-processor.test.ts"
+      ],
+      "finding": "نسخة تعليمية مجهولة الهوية غير مثبتة كمسار متاح: PPTX يعلن صراحة Clinical copy / Not anonymized ويضم معرفات ومصادر في notes. إزالة EXIF من rendition لا تعني تنقية العرض الكامل أو الهوية المرئية.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O26",
+      "scenario": "سحب إذن الصور/التصدير بعد بدء المهمة",
+      "expected": "التوليد/التنزيل يحترمان الصلاحية الحالية دون تسرب الملفات",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-case-study-access.ts",
+        "lib/ortho-study-image-store.ts",
+        "lib/ortho-study-problem-review-store.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-study-image.test.ts",
+        "__tests__/postgres/ortho-study-problem-review.test.ts"
+      ],
+      "finding": "قراءة/حفظ المصادر والصور يعيدان فحص الصلاحية الحالية؛ PG الجديد يغطي حجب الصورة وسحب الإذن. سباق التوليد والتنزيل لكل صيغ التصدير غير مثبت كرحلة كاملة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O27",
+      "scenario": "استيراد ملف قديم مرتين مع بعض الصفوف الخاطئة",
+      "expected": "لا تكرار، تقرير رفض وتطابق واضح، واستكمال آمن للدفعة",
+      "source_status": "partial",
+      "sources": [
+        "lib/legacy-import.ts",
+        "lib/ortho-adjustment-requests.ts"
+      ],
+      "tests": [
+        "__tests__/legacy-import.test.ts",
+        "__tests__/postgres/legacy-import.test.ts",
+        "__tests__/security-http/legacy-import-http.test.ts"
+      ],
+      "finding": "الاستيراد العام الموجود أرشيف معالجات/دفعات وأرصدة مالية مع تقرير مشاكل ومطابقة؛ لا يثبت دفعة تاريخ تقويم سريري (زيارات/صور/مصادر) قابلة للاستكمال وإعادة المحاولة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O28",
+      "scenario": "حفظ زيارة وتصدير واستيراد مع اتفاق SAR وسداد YER",
+      "expected": "لا تغيير في الفواتير والسندات أو إعادة حساب مالي من قسم التقويم",
+      "source_status": "unverified",
+      "sources": [
+        "lib/ortho-session-billing-review.ts",
+        "lib/legacy-import.ts",
+        "lib/fx.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/legacy-ortho-billing.test.ts",
+        "__tests__/postgres/ortho-session-billing-review.test.ts"
+      ],
+      "finding": "توجد حدود مالية واختبارات منفصلة، لكن عدم تغير جميع الفواتير والسندات عند الجمع بين الحفظ/التصدير/الاستيراد بعملتين لم يدقق أو ينفذ هنا.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O29",
+      "scenario": "Staging بها قالب رسالة وتذكير",
+      "expected": "لا رسالة إلى مريض حقيقي؛ أثر الاختبار ظاهر بمستقبل اختبار",
+      "source_status": "unverified",
+      "sources": [
+        "lib/ortho-followup.ts",
+        "components/PatientOrtho.tsx"
+      ],
+      "tests": [
+        "__tests__/ortho-followup-reminder-ui.test.tsx",
+        "__tests__/security-http/ortho-followup-reminder-built-page.test.ts"
+      ],
+      "finding": "وجود واجهة التذكير لا يثبت إعدادات staging أو مستقبلاً اصطناعيًا أو عدم إرسال حقيقي؛ لم يجر فحص/إرسال اتصالات.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O30",
+      "scenario": "ترحيل على PostgreSQL ثم نشر/رجوع/استعادة",
+      "expected": "سلامة البيانات والقيود والتواريخ والروابط، مع دليل استعادة فعلي",
+      "source_status": "unverified",
+      "sources": [
+        "lib/ortho-retention-schema.ts",
+        "lib/ortho-space-schema.ts",
+        "lib/ortho-case-study-repository.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-retention-ledger-backup.test.ts",
+        "__tests__/postgres/ortho-space-ledger-backup.test.ts"
+      ],
+      "finding": "اختبارات PG وbackup مرشحة؛ نجاح PG33 المبلغ عنه لا يعادل نشرًا ورجوعًا واستعادة فعلية موثقة للرأس الحالي. لم ننفذ أي ترحيل أو نشر في التدقيق.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O31",
+      "scenario": "تعبئة حالة اصطناعية ثم اختيار قالب دراسة الحالة الخاص بالمركز",
+      "expected": "الشرائح الأساسية وتوزيع الصور والجداول مماثلة للمرجع وفق جدول المطابقة، دون ترتيب خارجي يدوي",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-study-illustrated.ts",
+        "lib/ortho-study-illustrated-pptx.ts",
+        "components/OrthoCaseStudy.tsx"
+      ],
+      "tests": [
+        "__tests__/ortho-study-illustrated.test.ts"
+      ],
+      "finding": "اختيار قوالب/لوحات موجود؛ illustrated يبني صفحات نص ثم صورة واحدة في الصفحة ولا يثبت توزيع الشرائح والجداول المطابق لجدول المرجع. يلزم مقارنة اصطناعية مستقلة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O32",
+      "scenario": "رفع دفعة صور وتصحيح اقتراح تصنيفها",
+      "expected": "تعيين صحيح للمناظر والحالة والزيارة، وتعديل سهل دون فقد المصدر",
+      "source_status": "partial",
+      "sources": [
+        "components/PatientDocuments.tsx",
+        "components/WebCephRecordsGrid.tsx",
+        "lib/ortho-study-image-selection.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-study-image-selection.test.ts"
+      ],
+      "finding": "الرفع العام وتصنيف/اختيار السجلات موجودان؛ أمر رفع دفعة تقويم قابل للاسترداد وتصحيح اقتراحات التصنيف مع حفظ الربط بالزيارة لم يثبت. لا يعني ذلك أن رفع الوثائق العام معطل.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O33",
+      "scenario": "قص وتدوير صورة ذات اتجاه EXIF ثم إعادة فتحها",
+      "expected": "إعادة إنتاج دقيقة للتحويل، وأصل محفوظ وقابل للرجوع",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-study-image-editor.ts",
+        "lib/ortho-study-image-processor.ts",
+        "lib/ortho-study-media.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-study-image-processor.test.ts",
+        "__tests__/postgres/ortho-study-image.test.ts"
+      ],
+      "finding": "recipe محفوظ فوق أصل مستقل؛ اختبارات processor تتناول EXIF1–8 مرة واحدة والدوران والقص وإعادة التأليف. دورة إغلاق/فتح المتصفح غير منفذة هنا.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O34",
+      "scenario": "صورة واحدة بقصين مختلفين في لوحتين",
+      "expected": "استخدامان مستقلان من الأصل نفسه؛ تغيير أحدهما لا يفسد الآخر",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-study-media.ts",
+        "lib/ortho-study-image-store.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-study-image-selection.test.ts",
+        "__tests__/postgres/ortho-study-image.test.ts"
+      ],
+      "finding": "useId/recipe مستقل لكل استخدام للصورة نفسها؛ لا يلزم تعديل أصل الوثيقة لتغيير قص لوحة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O35",
+      "scenario": "معاينة ثم PPTX ثم PDF لصورة مقصوصة",
+      "expected": "تطابق القص والحجم النسبي والاتجاه دون تمدد أو دقة رديئة غير مبينة",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-study-image-processor.ts",
+        "lib/ortho-study-illustrated.ts",
+        "lib/ortho-study-illustrated-pptx.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-study-image-processor.test.ts",
+        "__tests__/ortho-study-illustrated-print.test.tsx"
+      ],
+      "finding": "المعالجة الهندسية المشتركة تدعم الاتجاه والاحتواء؛ التطابق البصري preview/PPTX/PDF وجودة الصور في العارضين لم يثبت.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O36",
+      "scenario": "قص صورة مستخدمة في سيفالو معتمد لأجل العرض",
+      "expected": "لا تتغير المعالم أو المعايرة أو القياسات المعتمدة",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-study-media.ts",
+        "lib/ortho-study-image-store.ts",
+        "lib/ceph-completion-provenance.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-study-image.test.ts",
+        "__tests__/postgres/ceph-completion-provenance.test.ts"
+      ],
+      "finding": "قص العرض محفوظ كاستخدام مستقل ولا يكتب معالم/معايرة أصل السيفالو؛ تحقق متكامل من نسخة معتمدة ثم تصدير مطلوب للقبول.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O37",
+      "scenario": "صورة لا يمكن قصها بأمان لخانة القالب",
+      "expected": "اختيار الاحتواء أو المراجعة؛ لا حذف منطقة سريرية مهمة بصمت",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-study-image-editor.ts",
+        "lib/ortho-study-media.ts",
+        "components/OrthoStudyImageEditor.tsx"
+      ],
+      "tests": [
+        "__tests__/ortho-study-image-processor.test.ts"
+      ],
+      "finding": "contain/reset ومراجعة القص متاحة؛ اختيار cover ينفذ قصًا مركزيًا، ولم يثبت تحذير سلامة المنطقة السريرية لكل خانة قالب.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O38",
+      "scenario": "وصول مريض جديد ثم إكمال رحلة التقييم خطوة بخطوة",
+      "expected": "نفس هوية المريض والحالة تتبع المقابلة والفحص خارج/داخل الفم والقياسات والبانوراما والسيفالو والخطة؛ استئناف آمن بعد الانقطاع",
+      "source_status": "present",
+      "sources": [
+        "components/OrthoWorkupNavigation.tsx",
+        "components/OrthoWorkupOwners.tsx",
+        "lib/ortho-workup-navigation.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-workup-navigation.test.ts",
+        "__tests__/ortho-workup-owners.test.ts",
+        "__tests__/security-http/ortho-workup-browser.test.ts"
+      ],
+      "finding": "العمل الجديد يربط خطوات workup بسياق واحد واستئناف وحراسة مالك واضحة؛ نهاية الاختبار المتصفحي الشامل كانت معلقة عند إحالة المهمة، فلا نعلن اكتمال القبول السريري.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O39",
+      "scenario": "إدخال قياسات الأسنان والقوس مرة واحدة واختيار عدة تحليلات",
+      "expected": "تشغيل التحليلات الجاهزة آليًا دون إدخال مجاميع/نتائج يدويًا؛ ما يحتاج مدخلات إضافية يطلبها تحديدًا ولا يخمنها",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-assessment-measurement-set-v2.ts",
+        "lib/ortho-assessment-engine-2_2_1.ts",
+        "lib/ortho-assessment-measurement-editor-v2.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-assessment-measurement-editor-v2.test.ts",
+        "__tests__/ortho-assessment-contract-v2.test.ts"
+      ],
+      "finding": "المجموعة الخام يعاد استخدامها لتحليلات Bolton/arch_space/Tanaka المدعومة؛ طرق معلنة disabled ولا يجوز وصف جميع التحليلات المطلوبة بأنها جاهزة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O40",
+      "scenario": "تعديل قياس بعد اعتماد تحليل وتصدير عرض",
+      "expected": "إعادة حساب المسودات المرتبطة مع حفظ النسخة المعتمدة والعرض السابق؛ النسخة الجديدة تستخدم نتيجة جديدة ذات مصدر معروف",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-assessment-store.ts",
+        "lib/ortho-assessment-versioned-sources.ts",
+        "lib/ortho-case-study-capture.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-assessment-strategy-union.test.ts",
+        "__tests__/ortho-assessment-saved-model.test.ts"
+      ],
+      "finding": "إصدارات القياس والمصادر واللقطات محفوظة؛ إعادة حساب كل المسودات التابعة تلقائيًا بعد تغيير قياس ثم تصدير النسخة الجديدة لم تثبت كرحلة مترابطة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O41",
+      "scenario": "اعتماد اتفاق وجدولة أقساطه",
+      "expected": "جدول يطابق صافي الاتفاق دون إنشاء دين إضافي؛ الدفعة المخططة لا تُسجل قبضًا",
+      "source_status": "unverified",
+      "sources": [
+        "lib/debt-installments.ts",
+        "lib/debt-installments-db.ts",
+        "lib/ortho-plan-link-command.ts"
+      ],
+      "tests": [
+        "__tests__/installment-agreement.test.ts",
+        "__tests__/postgres/installment-plan-included.test.ts"
+      ],
+      "finding": "توجد جدولة وربط اتفاق؛ المطابقة لصافي الاتفاق ومنع دين إضافي أو قبض مخطط تحتاج مراجعة السيناريو المالي الحالي، خارج slice التقويم الحالي.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O42",
+      "scenario": "اتفاق قديم له رصيد/سندات سابقة ثم إعادة ربطه",
+      "expected": "مصدر مديونية واحد وتقرير مطابقة؛ لا ازدواج في المبلغ ولا قبض تاريخي داخل صندوق اليوم",
+      "source_status": "unverified",
+      "sources": [
+        "lib/legacy-import.ts",
+        "lib/ortho-plan-link-command.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/legacy-import.test.ts",
+        "__tests__/postgres/ortho-plan-link-command.test.ts"
+      ],
+      "finding": "فصل الأرشيف القديم عن صندوق اليوم صريح بالمصدر؛ مصالحة اتفاق تقويم قديم وإعادة ربطه مع كل سنداته لم تثبت بهذا التدقيق.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O43",
+      "scenario": "اتفاق SAR وسداد YER أو USD وتغيير سعر الإعدادات",
+      "expected": "مبلغ صندوق فعلي وتخصيص بعملة الفاتورة وسعر تاريخي ثابت مع اتجاه ووحدة واضحين",
+      "source_status": "unverified",
+      "sources": [
+        "lib/fx.ts",
+        "lib/invoice-currency-evidence.ts",
+        "lib/receipt-provenance.ts"
+      ],
+      "tests": [
+        "__tests__/fx.test.ts",
+        "__tests__/invoice-currency-scope.test.ts"
+      ],
+      "finding": "أدوات العملة ودليل الصرف موجودة؛ عقد SAR مع YER/USD وتغيير الإعدادات وتسوية التقرير لم ينفذ هنا.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O44",
+      "scenario": "تحصيل جزئي/مقدم/متعدد العملات ثم إعادة المحاولة",
+      "expected": "تخصيصات صحيحة، سند واحد، فرق تقريب معلن، وعدم تجاوز السياسة المالية للزيادة",
+      "source_status": "unverified",
+      "sources": [
+        "lib/debt-installment-collection.ts",
+        "lib/receipt-provenance.ts"
+      ],
+      "tests": [
+        "__tests__/payments-idempotency.test.ts",
+        "__tests__/postgres/debt-installment-collection.test.ts"
+      ],
+      "finding": "اختبارات دفع وإعادة إرسال موجودة؛ التركيبات الجزئية والمقدمة والمتعددة العملات وسياسة الزيادة لم تتحقق كقبول موحد.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O45",
+      "scenario": "شدّة مشمولة وعمل إضافي في الزيارة نفسها",
+      "expected": "المشمولة لا تُفوتر ثانية؛ الإضافي يحتاج قرار سعر/موافقة ومصدر مطالبة واضحًا",
+      "source_status": "unverified",
+      "sources": [
+        "lib/ortho-session-billing-review.ts",
+        "lib/ortho-billing-decision-schema.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-session-billing-review.test.ts",
+        "__tests__/postgres/ortho-billing-authority.test.ts"
+      ],
+      "finding": "حدود مراجعة الفوترة وقرار المطالبة موجودة؛ جمع شدّة مشمولة وعمل إضافي في الزيارة الحالية لم ينفذ في هذه المهمة.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O46",
+      "scenario": "وصول وتأجيل الدفع ثم تحصيل وخروج وإعادة توقيع",
+      "expected": "المطلوب الآن صحيح بعد المقبوض؛ لا مضاعفة سند أو قسط ولا اعتبار التأجيل سدادًا",
+      "source_status": "unverified",
+      "sources": [
+        "lib/payment-acknowledgment.ts",
+        "lib/debt-installment-collection.ts"
+      ],
+      "tests": [
+        "__tests__/payments-idempotency.test.ts",
+        "__tests__/postgres/plan-installment-idempotency.test.ts"
+      ],
+      "finding": "مصادر قبض وإعادة إرسال موجودة؛ الوصول/التأجيل/الخروج/إعادة التوقيع مسار أوسع من نطاق فحص workup السريري.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O47",
+      "scenario": "خصم/تعديل/إلغاء اتفاق أو عكس قبض دون صلاحية",
+      "expected": "رفض خادمي وتدقيق مناسب؛ عند الصلاحية إصدار/تسوية موثقة لا محو للتاريخ",
+      "source_status": "unverified",
+      "sources": [
+        "lib/reversed-installment-recovery-db.ts",
+        "lib/ortho-billing-decision-schema.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/reversed-installment-recovery.test.ts",
+        "__tests__/postgres/ortho-billing-authority.test.ts"
+      ],
+      "finding": "اختبارات الصلاحية والعكس موجودة؛ جميع أنواع الخصم/الإلغاء/التعديل وصلة التدقيق بالنسخ لم تدقق هنا. لم نستورد صلاحيات506.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O48",
+      "scenario": "مثبت ضمن الاتفاق مع طلب مختبر وتخصص آخر",
+      "expected": "تكلفة المختبر لا تضاعف فاتورة المريض، والطبيب المنفذ وتغطية كل بند والعمولة من مصدرها الصحيح",
+      "source_status": "unverified",
+      "sources": [
+        "lib/ortho-session-billing-review.ts",
+        "components/OrthoPackageLink.tsx",
+        "lib/ortho-plan-link-command.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/installment-plan-included.test.ts",
+        "__tests__/postgres/ortho-session-billing-review.test.ts"
+      ],
+      "finding": "يوجد ربط حزمة وخطة؛ تدفق المختبر والتخصص الثاني وتغطية المثبت وعمولة المنفذ يحتاج تدقيقًا ماليًا مستقلاً.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O49",
+      "scenario": "تقرير مالي وعرض علمي للحالة نفسها",
+      "expected": "المطابقة الحسابية حسب العملة في التقرير؛ تفاصيل الاتفاق لا تتسرب افتراضيًا للعرض العلمي",
+      "source_status": "unverified",
+      "sources": [
+        "lib/ortho-study-text-export.ts",
+        "lib/ortho-case-study-recorded-facts.ts",
+        "lib/ortho-session-report.ts"
+      ],
+      "tests": [
+        "__tests__/ortho-study-text-export.test.ts",
+        "__tests__/postgres/ortho-session-report.test.ts"
+      ],
+      "finding": "مصادر العرض محددة وتقارير الزيارة موجودة؛ المطابقة حسب العملة وعدم تسرب كل تفاصيل الاتفاق في العرض العلمي لم يثبتا مجتمعين.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O50",
+      "scenario": "فتح دراستين لمريضين مختلفين وتصديرهما",
+      "expected": "اسم المركز وهوية كل مريض صحيحان؛ لا اسم للحالة المرجعية في القالب أو الأزرار ولا تسرب بيانات بين المريضين",
+      "source_status": "partial",
+      "sources": [
+        "lib/ortho-study-illustrated-pptx.ts",
+        "lib/ortho-case-study-access.ts",
+        "components/OrthoCaseStudy.tsx"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-study-problem-review.test.ts",
+        "__tests__/ortho-case-study-review-contract.test.ts"
+      ],
+      "finding": "عزل الحالة/المريض موجود؛ author في PPTX ثابت Aqlan Center وليس تحققًا من اسم المركز الجاري. تجربة دراستين وتفتيش جميع النصوص/metadata لعدم تسرب المرجع لم تنفذ.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O51",
+      "scenario": "تعبئة الدراسة وقص الصور ثم إغلاق المتصفح دون تصدير",
+      "expected": "الدراسة والقياسات والصور وتعديلات القص واختيارات العرض محفوظة؛ تُفتح من جهاز آخر وتُصدّر لاحقًا دون إعادة الإدخال",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-case-study-repository.ts",
+        "lib/ortho-study-media.ts",
+        "components/OrthoSavedStudyReview.tsx"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-case-study.test.ts",
+        "__tests__/postgres/ortho-study-image.test.ts",
+        "__tests__/ortho-study-problem-review-ui.test.tsx"
+      ],
+      "finding": "تخزين الدراسة والاختيارات والقص ومراجعة المصدر خادمي ودائم؛ يجب حفظ النسخة، ولا تعني هذه النتيجة ضمان autosave لأي تحرير غير محفوظ. تجربة جهاز ثان بعد إغلاق المتصفح لم تنفذ هنا.",
+      "runtime_acceptance": "unverified"
+    },
+    {
+      "id": "O52",
+      "scenario": "توثيق نسخة دراسة ثم تعديل المصدر أو فشل التصدير",
+      "expected": "النسخة الموثقة ثابتة، والتحديث بإصدار جديد؛ فشل التصدير لا يضيع التوثيق أو يُجبر على إعادة التعبئة",
+      "source_status": "present",
+      "sources": [
+        "lib/ortho-study-submission-store.ts",
+        "lib/ortho-case-study-repository.ts",
+        "lib/ortho-study-problem-review.ts"
+      ],
+      "tests": [
+        "__tests__/postgres/ortho-study-submissions.test.ts",
+        "__tests__/postgres/ortho-study-problem-review.test.ts",
+        "__tests__/ortho-study-submission-contract.test.ts"
+      ],
+      "finding": "توثيق النسخة منفصل عن التصدير واللقطات لا تتغير بتغيير المصدر؛ PG الربط الجديد يفحص ثبات facts وإعادة القراءة. فشل مولد فعلي مع إعادة فتح النسخة يحتاج تنفيذ قبول مستقل.",
+      "runtime_acceptance": "unverified"
+    }
+  ]
+}

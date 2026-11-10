@@ -15,6 +15,11 @@ import type { StudySavedContent } from "./ortho-case-study-capture";
 export const STUDY_SOURCE_PAGE_SIZE = 25;
 type Candidate = { id: unknown; version: unknown };
 async function candidates(client: DbClient, owner: JourneyOwner, kind: StudySourceKind, afterId: number): Promise<Candidate[]> {
+  if (kind === "problem_review") return (await client.query<Candidate>(`SELECT r.id,NULL::integer AS version
+    FROM ortho_problem_source_reviews r JOIN patient_problems p ON p.id=r.problem_id
+    WHERE r.patient_id=$1 AND r.ortho_case_id=$2 AND r.clinical_case_id=$3 AND r.id>$4
+      AND p.patient_id=$1 AND p.case_id=$3 AND p.specialty='orthodontics' ORDER BY r.id LIMIT 26`,
+  [owner.patientId, owner.orthoCaseId, owner.clinicalCaseId, afterId])).rows;
   if(kind==="space_ledger")return (await client.query<Candidate>(`SELECT id,version FROM ortho_space_entries WHERE ortho_case_id=$1 AND id>$2 ORDER BY version DESC LIMIT 1`,[owner.orthoCaseId,afterId])).rows;
   // Closed identifiers, never client-controlled SQL fragments.
   const versioned = { assessment: "ortho_assessment_revisions", diagnosis: "patient_diagnoses", strategy: "ortho_strategy_revisions",

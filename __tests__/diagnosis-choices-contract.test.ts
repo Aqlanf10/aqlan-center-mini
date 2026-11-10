@@ -8,11 +8,25 @@ import { DIAGNOSIS_CHOICE_GROUPS } from "../lib/diagnosis-choice-options";
 
 const source = readFileSync("components/PatientDiagnosis.tsx", "utf8");
 describe("case diagnosis choice boundaries", () => {
-  it("preserves main1878 authority except exact reviewed saved-comparison and userId scoping deltas", () => {
-    const start = source.indexOf("const READ_TIMEOUT_MS =");
-    const end = source.indexOf("function DiagnosisForm(", start);
+  it("preserves main1878 authority except exact reviewed comparison, ownership and workup-observer deltas", () => {
+    // Reviewed observer only: reads existing live owner/saving/writer references.
+    // It does not change read/write admission, payloads, callbacks or settlement.
+    // Each exact addition must occur once; every other authority byte stays pinned.
+    expect(source.split("useOrthoWorkupOwner(")).toHaveLength(2);
+    const withoutWorkupObserver = reverseReviewedDeltas(source, [
+      { before: "", after: 'import { useOrthoWorkupOwner } from "./OrthoWorkupOwners";\n' },
+      { before: "", after: `  useOrthoWorkupOwner(readOnly ? undefined : orthoCaseId, owner, () => ({
+    active: lifetime.current?.owner === owner && lifetime.current.active,
+    busy: lifetime.current?.owner === owner && lifetime.current.saving,
+    dirty: writerRef.current?.owner === owner,
+  }));
+
+` },
+    ]);
+    const start = withoutWorkupObserver.indexOf("const READ_TIMEOUT_MS =");
+    const end = withoutWorkupObserver.indexOf("function DiagnosisForm(", start);
     expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start);
-    expect(createHash("sha256").update(reverseReviewedDeltas(reverseReviewedDeltas(source.slice(start, end), lifecycleDeltas), diagnosisDeltas)).digest("hex"))
+    expect(createHash("sha256").update(reverseReviewedDeltas(reverseReviewedDeltas(withoutWorkupObserver.slice(start, end), lifecycleDeltas), diagnosisDeltas)).digest("hex"))
       .toBe("85e504adeb5112baa10aa2c629fc03c96b88eb101ec7407d0ac61aeb8b7f30ca");
   });
   it("retains the existing blank partial revision and exact six-key versioned submission", () => {

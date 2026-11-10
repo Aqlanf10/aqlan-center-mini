@@ -1,4 +1,5 @@
 import {readStudySpaceCapture} from './ortho-study-space-capture';
+import { readStudyProblemReview } from "./ortho-study-problem-review";
 import { permitsOrthoDocumentation, orthoDocumentationContext } from "./ortho-documentation-context";
 import type { CaseStatus as OrthoLifecycleStatus } from "./ortho";
 /** Strict immutable study capture envelope. Current authority is rechecked by
@@ -60,6 +61,10 @@ function payload(raw: unknown, scope: JourneyScope, s: StudySourceSelection): { 
     value = result.value; plans = result.value.rows.some(row => row.planItems.length > 0);
   } else if (s.kind === "space_ledger") {
     value=readStudySpaceCapture(raw,s,scope);plans=true;
+  } else if (s.kind === "problem_review") {
+    const review = readStudyProblemReview(raw, scope);
+    if (review.id !== s.id || s.version !== null || journeyContentHash(review) !== s.contentHash) fail();
+    value = review; images = review.source.requiresImages;
   } else if (s.kind === "diagnosis") {
     const r = obj(raw, ["id", "version", "createdAt", "createdBy", "content"]);
     if (r.id !== s.id || r.version !== s.version || !r.content || typeof r.content !== "object" || Array.isArray(r.content)) fail();

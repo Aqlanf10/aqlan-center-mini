@@ -1,4 +1,5 @@
 import {requireStudySpaceSource} from './ortho-study-space-source';
+import { readStudyProblemReviews, requireStudyProblemReviewRead } from "./ortho-study-problem-review-store";
 /** Canonical transaction-local study capture. No renderer, file reads, schedule,
  * consent or financial writes. Unsupported facts are explicitly unavailable. */
 import type { DbClient } from "./db";
@@ -147,12 +148,19 @@ async function captureSources(client: DbClient, owner: JourneyOwner, authority: 
   const retention = content.sources.some(s => s.kind === "retention_event")
     ? (await journeyHistory(client, "ortho_retention_entries", owner, decodeRetentionSavedContent)).revisions : [];
   const captures: StudySourceCapture[] = [];
+  const problemReviews = await readStudyProblemReviews(client, owner, selectedIds(content, "problem_review"));
   for (const selection of content.sources) {
     let payload: unknown = null, actualHash: string | null = null;
     const access = { images: false, plans: false };
     let reason: StudySourceCapture["unavailableReason"] = "source_missing_or_outside_case";
     if(selection.kind==="space_ledger"){
       const p=await requireStudySpaceSource(client,owner,authority,assessmentAccess,selection);payload=p.capture;actualHash=journeyContentHash(payload);access.plans=true;access.images=p.images;
+    } else if (selection.kind === "problem_review") {
+      const row = problemReviews.get(selection.id);
+      if (row) {
+        access.images = await requireStudyProblemReviewRead(client, owner, authority, row, assessmentAccess);
+        payload = row; actualHash = journeyContentHash(row);
+      }
     } else if (selection.kind === "assessment") {
       if (clinical!.unavailableAssessments.get(selection.id) === selection.version) reason = "source_schema_unavailable";
       const row = clinical!.assessments.find(r => r.id === selection.id && r.version === selection.version);

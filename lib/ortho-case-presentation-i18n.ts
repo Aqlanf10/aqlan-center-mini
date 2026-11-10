@@ -5,6 +5,9 @@ import type { StudySourceKind } from "./ortho-case-study";
 export type StudyDisplayLocale = "ar" | "en";
 export const STUDY_DISPLAY_LOCALE_KEY = "aqlan.orthoStudy.displayLocale";
 export const STUDY_ENGLISH = {
+  "اختر قسم التشخيص أو الأهداف أو المشكلات والاستراتيجية لعرض مراجعة المصدر.": "Choose diagnosis, objectives, or problems and strategy to display a source review.",
+  "اختر مراجعة محفوظة للمصدر. تُعرض المشكلة والملاحظة كما وثقهما الطبيب وقت المراجعة، دون استبدالهما بالبيانات الحالية.": "Choose a saved source review. The problem and observation are shown as the clinician recorded them at review, without replacement by current data.",
+  "مراجعات مصادر المشكلات أدناه تاريخية؛ وجودها في الدراسة لا يعني اعتمادًا سريريًا جديدًا.": "Problem-source reviews below are historical; including them in this study is not a new clinical approval.",
   "اختر قسم تحليل المسافة لعرض لقطة سجل المسافات وIPR.": "Choose the space-analysis section for the space/IPR ledger snapshot.",
   "توجد لقطة مسافات مختارة؛ أزلها صراحةً قبل اختيار رأس آخر. لا تُجمع لقطتان للسجل نفسه.": "A space snapshot is already selected. Explicitly remove it before choosing another head; two snapshots of the same ledger are not added together.",
   "اختر لقطة كاملة واحدة لسجل المسافات وIPR لقسم تحليل المسافة. لا تتضمن قياسات Bolton جديدة أو مسودات، ولا تُحدّث الدراسة المحفوظة تلقائياً.": "Choose one complete space/IPR ledger snapshot for the space-analysis section. It adds no new Bolton measurements or drafts and never updates a saved study automatically.",
@@ -96,6 +99,7 @@ export const studyLayoutTitle = (key: string, locale: StudyDisplayLocale): strin
   return layout ? (locale === "en" ? layout.titleEn : layout.titleAr) : studyText(locale, "غير متاح");
 };
 const sourceNames: Record<StudySourceKind, readonly [string, string]> = {
+  "problem_review": ["مصادر المشكلات التي راجعها الطبيب", "Clinician-reviewed problem sources"],
   "space_ledger": ["لقطة وثائقية لسجل المسافات وIPR", "Documentary space/IPR ledger snapshot"],
   "assessment": [
     "التقييم",

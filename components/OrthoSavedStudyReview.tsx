@@ -16,6 +16,7 @@ export default function OrthoSavedStudyReview(props: Props) {
   return <section className="min-w-0 rounded border p-3 space-y-2" aria-label={t("مراجعة الدراسة المحفوظة")}>
     <h3>{t("مراجعة النسخة المحفوظة")} {revision.version} — {t(revision.kind === "draft" ? "مسودة" : "موثقة")}</h3>
     <p>{t("هذا العرض من النسخة المحفوظة المحددة. التعديلات المحلية لا تظهر فيه قبل الحفظ؛ توثيق الدراسة لا يعني اعتمادًا سريريًا جديدًا.")}</p>
+    {revision.authored.sources.some(source => source.kind === "problem_review") && <p>{t("مراجعات مصادر المشكلات أدناه تاريخية؛ وجودها في الدراسة لا يعني اعتمادًا سريريًا جديدًا.")}</p>}
     <OrthoStudyTimepoints content={revision.authored} editable={false} locale={locale} onChange={() => false} />
     <OrthoStudyLongitudinalReview key={JSON.stringify([revision.patientId, revision.orthoCaseId, revision.clinicalCaseId, revision.id, revision.contentHash, revision.kind, readVersion])} {...props} />
     <label>{t("القسم المحفوظ المعروض")}<select className="min-h-11 max-w-full rounded border p-2" value={panel?.instanceId ?? ""}

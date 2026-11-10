@@ -1,4 +1,5 @@
 "use client";
+import { useOrthoWorkupOwner } from "./OrthoWorkupOwners";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -99,6 +100,7 @@ function createWriteOwner() {
   let active = false;
   let form: StudyForm | null = null;
   let pending: Creation | null = null;
+  let permittedDeparture = false;
   const retireForm = () => {
     form = null;
     pending?.controller.abort();
@@ -109,7 +111,11 @@ function createWriteOwner() {
   return {
     activate: () => { active = true; },
     retire: () => { active = false; retireForm(); },
-    snapshot: () => ({ form, creating: pending !== null }),
+    snapshot: () => ({ active, permittedDeparture, form, creating: pending !== null }),
+    depart(action: () => void) {
+      permittedDeparture = true;
+      try { action(); } finally { permittedDeparture = false; }
+    },
     open: () => {
       if (!active || form) return false;
       form = { identity: Symbol("ceph-study-form") };
@@ -175,6 +181,10 @@ export function PatientCeph({
     owner.activate();
     return owner.retire;
   }, [owner]);
+  useOrthoWorkupOwner(propOrthoCaseId, owner, () => {
+    const state = owner.snapshot();
+    return { active: state.active && !state.permittedDeparture, busy: state.creating, dirty: state.form !== null };
+  });
   // Retire reads at commit, before a newer view can accept old response bodies.
   useLayoutEffect(() => readOwner.retire, [readOwner]);
   const [analysisRead, setAnalysisRead] = useState<{ owner: ReturnType<typeof createReadOwner>; data: CephAnalysis[] } | null>(null);
@@ -342,7 +352,7 @@ export function PatientCeph({
         onAnalysisCreated?.(data.id);
         // A callback may synchronously change patient/view/session or unmount.
         if (!current()) return;
-        window.location.href = `/ceph/${data.id}`;
+        owner.depart(() => { window.location.href = `/ceph/${data.id}`; });
       } else {
         setError(typeof data?.message === "string" ? data.message : "تعذّر فتح التحليل.");
       }

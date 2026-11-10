@@ -1,12 +1,15 @@
 "use client";
 import { OrthoComparison } from "./OrthoPhotoComparison";
 export { OrthoComparison } from "./OrthoPhotoComparison";
+import { OrthoWorkupNavigation } from "./OrthoWorkupNavigation";
+import { ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore } from "@/lib/ortho-workup-navigation";
+import { makeOrthoWorkupOwners, OrthoWorkupOwnersContext } from "./OrthoWorkupOwners";
 import { OrthoDiagnosticNavigation } from "./OrthoDiagnosticNavigation";
 import OrthoSessionDetails from "./OrthoSessionDetails";
 import OrthoSessionBillingReview from "./OrthoSessionBillingReview";
 import { sessionExpectedFollowup, SESSION_FOLLOWUP_DISCLAIMER } from "@/lib/ortho-session-display";
 
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { readOpenAssessmentCommand, readStartTreatmentCommand, verifyIntakeReceipt, type OpenAssessmentCommand, type StartTreatmentCommand, type IntakeReceipt } from "@/lib/ortho-assessment-intake";
 import { adjustmentNewCommandError, createAdjustmentCommand, readAdjustmentCommand, completeAdjustmentCommand, retireAdjustmentCommand, isAdjustmentReceipt, type AdjustmentCommand } from "@/lib/ortho-adjustment-command";
 import { parseAdjustmentInterval } from "@/lib/ortho-adjustment-interval";
@@ -155,6 +158,7 @@ interface SavedAdjustment {
 }
 
 export const ORTHO_PARENT_READ_TIMEOUT_MS = 15_000;
+const WORKUP_PENDING_MESSAGE = "أكمل التحقق من طلب الحفظ المعلّق قبل الانتقال بين خطوات الحالة.";
 type OrthoReadState = "loading" | "ready" | "error" | "denied";
 type Draft = { values: Map<string, unknown>; edits: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean; dirty: boolean;
   strategyView: { readonly readVersion: number; subscribe(listener: () => void): () => void; notify(refresh?: boolean): void; clear(): void };
@@ -168,6 +172,7 @@ type OrthoOwner = {
   controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null;
   cases: OrthoCase[]; drafts: Map<string, Draft>; mutations: Set<Mutation>;
   assessments: Map<number, AssessmentOwnerV2>;
+  workupOwners: ReturnType<typeof makeOrthoWorkupOwners>;
   studies: Map<number, StudyMountOwner>; studyRecovery: ReturnType<typeof makeStudyRecoveryLedger>;
   deny: () => void;
   activate: () => void; activateStandaloneDraft: (key: string, draft: Draft) => void; retire: () => void;
@@ -182,7 +187,7 @@ const OrthoOwnerContext = createContext<OrthoOwner | null>(null);
 function makeOwner(standalone = false, studyRecovery = makeStudyRecoveryLedger()): OrthoOwner {
   const owner: OrthoOwner = { active: false, denied: false, clinical: standalone, contact: standalone, standalone,
     readSequence: 0, mutationSequence: 0, denialSequence: 0, controller: null, timer: null,
-    cases: [], drafts: new Map(), assessments: new Map(), studies: new Map(), studyRecovery, mutations: new Set(), deny: () => {},
+    cases: [], workupOwners: makeOrthoWorkupOwners(), drafts: new Map(), assessments: new Map(), studies: new Map(), studyRecovery, mutations: new Set(), deny: () => {},
     activate: () => { owner.active = true; },
     activateStandaloneDraft: (key, draft) => {
       owner.active = true; owner.clinical = true; owner.contact = true;
@@ -852,7 +857,7 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
   const owner = useMemo(() => makeOwner(false, studyRecovery), [patientId, authority, studyRecovery]);
   useLayoutEffect(() => { owner.activate(); return () => owner.retire(); }, [owner]);
   const canLeave = useCallback(() => {
-    if (!owner.active) return false;
+    if (!owner.active || owner.workupOwners.pending()) return false;
     const drafts = [...owner.drafts.values()].filter((draft) => draft.active);
     const assessments = [...owner.assessments.values()];
     const studies = [...owner.studies.values()];
@@ -865,7 +870,7 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
     // A confirmed booking is retained for its receipt, not an unsaved form.
     // Initial field defaults never mark a draft dirty. Confirming departure
     // only permits navigation; the existing owner cleanup disposes the draft.
-    return !owner.studyRecovery.needsUnloadWarning()
+    return !owner.workupOwners.dirty() && !owner.studyRecovery.needsUnloadWarning()
       && !studies.some(study => study.needsUnloadWarning())
       && !assessments.some(assessment => assessment.needsUnloadWarning())
       && !drafts.some((draft) => draft.dirty && !draft.values.get("booked") && draft.values.get("signed") !== true)
@@ -874,14 +879,28 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (owner.studyRecovery.needsUnloadWarning() || [...owner.studies.values()].some(study => study.needsUnloadWarning())) { event.preventDefault(); event.returnValue = ""; }
+      if (owner.workupOwners.pending() || owner.workupOwners.dirty() || owner.studyRecovery.needsUnloadWarning() || [...owner.studies.values()].some(study => study.needsUnloadWarning())) { event.preventDefault(); event.returnValue = ""; }
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [owner]);
-  return <OrthoOwnerContext.Provider value={owner}>
+  return <OrthoOwnerContext.Provider value={owner}><OrthoWorkupOwnersContext.Provider value={owner.workupOwners}>
     <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onOpenAccount={onOpenAccount} onClinicalChange={onClinicalChange} />
-  </OrthoOwnerContext.Provider>;
+  </OrthoWorkupOwnersContext.Provider></OrthoOwnerContext.Provider>;
+}
+
+/** Local diagnosis, image metadata and ceph drafts share the parent authority
+ * lifetime. A presentation change must not retire these still-owned editors. */
+function OrthoDiagnosticLifetime({ visible, children }: { visible: boolean; children: React.ReactNode }) {
+  const [opened, setOpened] = useState(visible);
+  if (visible && !opened) setOpened(true);
+  return <div hidden={!visible}>{(visible || opened) && children}</div>;
+}
+function pendingOrthoWork(owner: OrthoOwner): boolean {
+  return owner.workupOwners.pending() || owner.mutations.size > 0
+    || [...owner.assessments.values()].some(value => value.busy || value.uncertain)
+    || [...owner.drafts.values()].some(value => value.active && (value.busy || value.uncertain))
+    || [...owner.studies.values()].some(value => value.busy || value.uncertain);
 }
 
 function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTreatmentEntry, onOpenAccount, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; onOpenTreatmentEntry?: () => unknown; onOpenAccount?: () => unknown; onClinicalChange?: () => void }) {
@@ -904,11 +923,20 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
   // تبويب الركن النشط لكل حالة (افتراضيًا: الأسلاك والشدّات)
   const [activePillars, setActivePillars] = useState<Record<number, OrthoPillar>>({});
 
+  const bookmarkStore = useMemo(() => makeWorkupBookmarkStore(() => window, () => {
+    const allowed = !pendingOrthoWork(owner);
+    if (allowed) setError(previous => previous === WORKUP_PENDING_MESSAGE ? null : previous);
+    return allowed;
+  }, () => setError(WORKUP_PENDING_MESSAGE)), [owner]);
+  const bookmarkHash = useSyncExternalStore(bookmarkStore.subscribe, bookmarkStore.getSnapshot, () => "");
+  const workupBookmark = readWorkupBookmark(bookmarkHash, patientId);
+
   const renderRead = owner.readSequence;
   const currentView = () => owner.active && !owner.denied && owner.clinical && owner.readSequence === renderRead;
   const mayDiscard = (key: string) => { const draft = owner.drafts.get(key); return !draft?.busy && !draft?.uncertain; };
   const setPillarForCase = (caseId: number, pillar: OrthoPillar) => {
-    if (!currentView()) return;
+    if (!currentView() || pendingOrthoWork(owner)) return;
+    clearWorkupBookmark(window, patientId, caseId);
     setActivePillars((prev) => ({ ...prev, [caseId]: pillar }));
   };
 
@@ -1168,9 +1196,20 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
           {visibleCases.map((row) => {
             const live = row.status === "active" || row.status === "retention";
             const wires = wiresFor(row.slot);
-            const currentPillar: OrthoPillar = activePillars[row.id] ?? (context?.orthoCaseId === row.id ? context.pillar : undefined) ?? (row.phase === "assessment" ? "diagnostics" : "wires");
+            const workupStep = workupBookmark?.caseId === row.id ? workupBookmark.step : null;
+            const workup = workupStep === null ? undefined : ORTHO_WORKUP_STEPS[workupStep];
+            const navigateWorkup = (step: number) => {
+              if (!currentCase(row.id) || !Number.isInteger(step) || !ORTHO_WORKUP_STEPS[step]) return;
+              // Keep the saved/dirty owner. An unresolved command stays visible for reconciliation.
+              if (pendingOrthoWork(owner)) {
+                setError(WORKUP_PENDING_MESSAGE); return;
+              }
+              replaceWorkupBookmark(window, patientId, row.id, step);
+            };
+            const currentPillar: OrthoPillar = workup?.pillar ?? activePillars[row.id] ?? (context?.orthoCaseId === row.id ? context.pillar : undefined) ?? (row.phase === "assessment" ? "diagnostics" : "wires");
 
-            const FinancialContextContainer = currentPillar === "prescription" ? "details" : "div";
+            const compactFinancialContext = currentPillar === "prescription" && workup?.focus !== "financial" || !!workup && workup.focus !== "financial";
+            const FinancialContextContainer = compactFinancialContext ? "details" : "div";
 
             return (
               <li
@@ -1179,6 +1218,9 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   (live || row.status === "assessment") ? "border-navy-200 bg-white" : "border-slate-200 bg-slate-50/70 opacity-80"
                 }`}
               >
+                {workup && workupStep !== null ? <OrthoWorkupNavigation step={workupStep} legacy={row.status !== "assessment"}
+                  onSelect={navigateWorkup} onClose={() => { if (currentCase(row.id) && !pendingOrthoWork(owner)) setPillarForCase(row.id, currentPillar); }} />
+                  : null}
                 {/* رأس الحالة التقويمية */}
                 <div className={`border-b border-slate-100 bg-slate-50/70 ${currentPillar === "prescription" ? "px-3 py-1 sm:p-4" : "p-4"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1201,7 +1243,9 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       ) : null}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!workup && <button type="button" className="min-h-11 rounded-lg border border-navy-300 bg-white px-3 text-xs font-bold"
+                        onClick={() => navigateWorkup(0)}>{row.status === "assessment" ? "إعداد ملف التقويم خطوة بخطوة" : "استكمال ملف التقويم خطوة بخطوة"}</button>}
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-[11px] font-black border ${
                           live
@@ -1217,14 +1261,16 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     </div>
                   </div>
 
-                  {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
+                  {row.baselineKind === "legacy" ? currentPillar === "prescription"
+                    ? <details className="mt-2 rounded-lg border border-amber-200 bg-amber-50/40 px-3"><summary className="min-h-11 cursor-pointer py-3 text-xs font-bold">سياق الحالة السابقة والأهداف المتبقية</summary><LegacyBaselineSummary row={row} /></details>
+                    : <LegacyBaselineSummary row={row} /> : null}
+                  <FinancialContextContainer data-testid="ortho-financial-context" className={compactFinancialContext ? "mt-2" : undefined}>
+                    {compactFinancialContext ? <summary className="min-h-11 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs font-bold text-slate-700">
+                      مرجع الحالة المالي وشمول الشدّة
+                    </summary> : null}
                   {session && ["admin", "doctor", "reception"].includes(session.role) && Number.isSafeInteger(session.userId) && Number(session.userId) > 0 ?
                     <OrthoSessionBillingReview key={`${row.id}:${renderRead}:${session.userId}`} owner={owner} readVersion={renderRead}
                       patientId={patientId} orthoCaseId={row.id} actorId={Number(session.userId)} expectedAccess={session.role === "doctor" ? "clinical" : "clinical_financial"} /> : null}
-                  <FinancialContextContainer data-testid="ortho-financial-context" className={currentPillar === "prescription" ? "mt-2" : undefined}>
-                    {currentPillar === "prescription" ? <summary className="min-h-11 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs font-bold text-slate-700">
-                      مرجع الحالة المالي وشمول الشدّة
-                    </summary> : null}
                     <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
                       planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={row.id}
                       onOpenClinicalContext={(reference) => onContextChange?.(reference)} />
@@ -1298,7 +1344,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                 </div>
 
                 {/* أشرطة الأركان الأربعة التخصصية (Pillar Navigation) */}
-                <div className="flex border-b border-slate-200 bg-white">
+                {!workup && <div className="flex border-b border-slate-200 bg-white">
                   {PILLAR_TABS.map((tab) => {
                     const isSelected = currentPillar === tab.key;
                     return (
@@ -1318,10 +1364,16 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       </button>
                     );
                   })}
-                </div>
+                </div>}
 
                 {/* محتوى الركن المختار */}
                 <div className={currentPillar === "prescription" ? "px-2 py-1 sm:p-4" : "p-4"}>
+                  {workup?.focus === "identity" && <section aria-label="هوية حالة التقويم" className="space-y-2 rounded-xl border bg-white p-3 text-sm">
+                    <h3 className="font-bold">الحالة المختارة #{row.id}</h3><p>ملف المريض: {patient?.name ?? `#${patientId}`}</p>
+                    <p>الطبيب المسؤول المسجل: {row.responsibleDoctorName ?? "غير مسجل في الحالة"}</p>
+                    <p>سياق البداية: {row.baselineKind === "legacy" ? "بدأ قبل النظام وفق السجل المحفوظ" : row.status === "assessment" ? "ملف تقييم؛ بدء العلاج غير مسجل" : "لا يوجد توثيق لبداية الحالة قبل النظام أو تحويلها"}</p>
+                    <p>بدء العلاج: {row.startDate ?? "غير مسجل"}</p>
+                  </section>}
                   {/* ────────────────── الركن الأول: مسار الأسلاك والشدّات ────────────────── */}
                   {currentPillar === "wires" && (
                     <div className="space-y-4">
@@ -1496,11 +1548,11 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   )}
 
                   {/* ────────────────── الركن الثاني: السجلات والتشخيص السيفالومتري ────────────────── */}
-                  {currentPillar === "diagnostics" && (
-                    <OrthoDiagnosticNavigation ownerIdentity={owner} orthoCaseId={row.id} readVersion={renderRead}
-                      active={() => currentView() && owner.cases.some(entry => entry.id === row.id)}>
+                  <OrthoDiagnosticLifetime visible={currentPillar === "diagnostics" && workup?.focus !== "identity"}>
+                    <OrthoDiagnosticNavigation navigationVisible={!workup} ownerIdentity={owner} orthoCaseId={row.id} readVersion={renderRead}
+                      active={() => currentPillar === "diagnostics" && workup?.focus !== "identity" && currentView() && owner.cases.some(entry => entry.id === row.id)}>
                       {/* معرض سجلات الحالة والأشعة المعياري الـ 12 كمنصة WebCeph */}
-                      <section data-ortho-diagnostic-section="records" tabIndex={-1} aria-label="السجلات والصور" className="scroll-mt-4">
+                      <section hidden={!!workup && workup.section !== "records"} data-ortho-diagnostic-section="records" tabIndex={-1} aria-label="السجلات والصور" className="scroll-mt-4">
                         <WebCephRecordsGrid
                           patientId={patientId}
                           orthoCaseId={row.id}
@@ -1510,7 +1562,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       </section>
 
                       {/* السيفالومتري ومخطط ويب سيف (WebCeph Station) */}
-                      <section data-ortho-diagnostic-section="ceph" tabIndex={-1} aria-label="السيفالومتري" className="scroll-mt-4 rounded-2xl border border-navy-100 bg-slate-50/50 p-3.5">
+                      <section hidden={!!workup && workup.section !== "ceph"} data-ortho-diagnostic-section="ceph" tabIndex={-1} aria-label="السيفالومتري" className="scroll-mt-4 rounded-2xl border border-navy-100 bg-slate-50/50 p-3.5">
                         <PatientCeph
                           patientId={patientId}
                           orthoCaseId={row.id}
@@ -1520,26 +1572,28 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       </section>
 
                       {/* التوثيق الفوتوغرافي ومقارنة المراحل (Before / Progress / After) */}
-                      <section data-ortho-diagnostic-section="comparison" tabIndex={-1} aria-label="مقارنة الصور" className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3.5">
+                      <section hidden={!!workup && workup.section !== "records"} data-ortho-diagnostic-section="comparison" tabIndex={-1} aria-label="مقارنة الصور" className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3.5">
                         <OrthoComparison patientId={patientId} orthoCaseId={row.id} photosVisible={row.photosVisible}
                           ownerIdentity={owner} readVersion={renderRead} active={() => currentView() && owner.cases.some(item => item.id === row.id)} />
                       </section>
 
                       {/* التحليل السريري للفكين وتصنيف الحالة (Malocclusion Diagnosis) */}
-                      <section data-ortho-diagnostic-section="assessment" tabIndex={-1} aria-label="التشخيص والتقييم والقياسات" className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3.5">
-                        <PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={safeError} />
-                        {owner.clinical && <OrthoProblemSourcesPanel patientId={patientId} row={row} visible={currentPillar === "diagnostics"} />}
-                        <OrthoAssessmentPanelV2 patientId={patientId} caseRow={row} />
-                        <a className="inline-flex min-h-11 items-center rounded-lg border px-3 py-2 text-sm font-bold" href={`/ortho/${row.id}/facial?patientId=${patientId}`}>تحليل صورة الوجه اليدوي المرتبط بالمصدر</a>
+                      <section hidden={!!workup && workup.section === "ceph"} data-ortho-diagnostic-section="assessment" tabIndex={-1} aria-label="التشخيص والتقييم والقياسات" className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3.5">
+                        <div hidden={!!workup && workup.section !== "diagnosis"}><PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={safeError} /></div>
+                        {owner.clinical && (!workup || workup.section === "diagnosis") && <OrthoProblemSourcesPanel patientId={patientId} row={row} visible={currentPillar === "diagnostics"} />}
+                        <div hidden={!!workup && (workup.section === "diagnosis" || workup.section === "ceph")}>
+                          <OrthoAssessmentPanelV2 patientId={patientId} caseRow={row}
+                            sectionView={workup?.section === "records" ? "radiographs" : workup?.section === "diagnosis" || workup?.section === "ceph" ? undefined : workup?.section} />
+                        </div>
+                        {(!workup || workup.section === "extraoral") && <a className="inline-flex min-h-11 items-center rounded-lg border px-3 py-2 text-sm font-bold" href={`/ortho/${row.id}/facial?patientId=${patientId}`}>تحليل صورة الوجه اليدوي المرتبط بالمصدر</a>}
                       </section>
                     </OrthoDiagnosticNavigation>
-                  )}
+                  </OrthoDiagnosticLifetime>
 
                   {/* ────────────────── الركن الثالث: الخطة والميكانيكا الحيوية ────────────────── */}
-                  {currentPillar === "prescription" && (
+                  {currentPillar === "prescription" && workup?.focus !== "financial" && (
                     <div className="space-y-2 sm:space-y-4">
                       <OrthoStrategyPanel patientId={patientId} caseRow={row} />
-                      <OrthoSpacePanel patientId={patientId} row={row} />
                       <div className="rounded-2xl border border-slate-200 bg-white px-2 py-1 sm:p-4">
                         <h4 className="mb-1 text-xs sm:mb-3 font-black text-navy-900">
                           وصفة الجهاز والمواصفات الميكانيكية
@@ -1580,6 +1634,10 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                           </div>
                         )}
                       </div>
+                      <details className="rounded-xl border border-slate-200 bg-white" open={workup?.id === "strategy" ? true : undefined}>
+                        <summary className="min-h-11 cursor-pointer px-3 py-3 text-sm font-bold">ميزانية المسافات وIPR وطلبات الاستعادة</summary>
+                        <div className="px-3"><OrthoSpacePanel patientId={patientId} row={row} /></div>
+                      </details>
                     </div>
                   )}
 
@@ -2669,7 +2727,7 @@ function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow
 
 /** Dedicated assessment lifetime survives parent reads and pillar remounts.
  * It never uses the strategy document or acknowledges a write from GET. */
-function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" }) {
+function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" | "radiographs" }) {
   const parent = useContext(OrthoOwnerContext)!;
   const session = useSession();
   const canWrite = session?.role === "admin" || session?.role === "doctor";
@@ -2679,7 +2737,7 @@ function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView }: { patientId
   if (!canWrite) return <OrthoCaseAssessmentV2 patientId={patientId} orthoCaseId={caseRow.id} sectionView={sectionView} />;
   return <OwnedAssessmentV2 patientId={patientId} caseRow={caseRow} sectionView={sectionView} />;
 }
-function OwnedAssessmentV2({ patientId, caseRow, sectionView }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" }) {
+function OwnedAssessmentV2({ patientId, caseRow, sectionView }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" | "radiographs" }) {
   const parent = useContext(OrthoOwnerContext)!;
   const [owner] = useState(() => parent.assessments.get(caseRow.id) ?? makeAssessmentOwnerV2({
     patientId, orthoCaseId: caseRow.id,

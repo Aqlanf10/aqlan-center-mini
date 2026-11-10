@@ -7,6 +7,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "./SessionProvider";
 import { DiagnosisChoiceField } from "./DiagnosisChoiceField";
 import { DIAGNOSIS_CHOICE_GROUPS } from "@/lib/diagnosis-choice-options";
+import { useOrthoWorkupOwner } from "./OrthoWorkupOwners";
 
 interface DiagnosisVersionView {
   id: number;
@@ -73,6 +74,12 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = f
       if (committed.timer !== null) clearTimeout(committed.timer);
     };
   }, [owner]);
+
+  useOrthoWorkupOwner(readOnly ? undefined : orthoCaseId, owner, () => ({
+    active: lifetime.current?.owner === owner && lifetime.current.active,
+    busy: lifetime.current?.owner === owner && lifetime.current.saving,
+    dirty: writerRef.current?.owner === owner,
+  }));
 
   const load = useCallback(async () => {
     const committed = lifetime.current;

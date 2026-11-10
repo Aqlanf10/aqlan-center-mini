@@ -46,6 +46,20 @@ vi.mock("react", async (original) => {
   return { ...react,
     createContext: (initial: unknown) => { const context = { initial }; return Object.assign(context, { Provider: context }); },
     useContext: (context: { initial: unknown }) => hooks.contexts.has(context) ? hooks.contexts.get(context) : context.initial,
+    useSyncExternalStore: (subscribe: (listener: () => void) => () => void, getSnapshot: () => unknown) => {
+      const scope = owner(), index = scope.cursor++;
+      const snapshot = getSnapshot(); scope.values[index] = snapshot;
+      effect(() => {
+        const check = () => {
+          if (!scope.live) return;
+          const next = getSnapshot();
+          if (!Object.is(next, scope.values[index])) { scope.values[index] = next; hooks.changed = true; }
+        };
+        const unsubscribe = subscribe(check); check();
+        return unsubscribe;
+      }, [subscribe, getSnapshot], false);
+      return snapshot;
+    },
 
     useState: (initial: unknown) => {
       const scope = owner(); const index = scope.cursor++;
@@ -246,7 +260,11 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   // The real parent now owns a beforeunload recovery listener. Provide the
   // browser event surface instead of skipping its effect or weakening cleanup.
-  vi.stubGlobal("window", new EventTarget());
+  const location = { get pathname() { return `/patients/${patientId}`; }, search: "", hash: "" };
+  const history = { state: null as unknown, replaceState: (state: unknown, _unused: string, href: string) => {
+    history.state = state; const next = new URL(href, "http://synthetic.invalid"); location.search = next.search; location.hash = next.hash;
+  } };
+  vi.stubGlobal("window", Object.assign(new EventTarget(), { location, history }));
 });
 afterEach(() => { unmount(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 

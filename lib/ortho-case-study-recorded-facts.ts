@@ -2,6 +2,7 @@
  * Captured facts only. Current authorization belongs to the caller's locked reader.
  * No source fetch, clinical inference, approval, formatting of money or render job. */
 import { projectStudySpaceFacts } from "./ortho-study-space-facts";
+import { readStudyProblemReview } from "./ortho-study-problem-review";
 import { decodeAnyAssessmentRevision } from "./ortho-assessment-persisted-v2";
 import { projectStudyAssessment, STUDY_CLINICAL_PANEL_FIELDS, type StudyClinicalPanel } from "./ortho-case-study-assessment-projection";
 import { canonicalJourneyJSON } from "./ortho-case-journey-json";
@@ -13,7 +14,7 @@ import { studyLongitudinalReasonText } from "./ortho-study-longitudinal-labels";
 import { decodeStudySavedContent } from "./ortho-case-study-capture";
 import type { JourneyScope } from "./ortho-case-journey-records";
 import type { CaseParagraph, CaseTable } from "./ortho-case-render-contract";
-export const STUDY_RECORDED_FACTS_VERSION = "ortho-study-recorded-facts-v3-space-prefix";
+export const STUDY_RECORDED_FACTS_VERSION = "ortho-study-recorded-facts-v4-problem-review";
 type Block = CaseParagraph | CaseTable;
 const missing = "غير مسجل";
 function scalar(value: unknown): string {
@@ -48,7 +49,15 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
     if (!captured) throw new Error("study_source_binding_missing");
     if (captured.state !== "available") { unavailable.push({ sourceKey: key, reason: captured.unavailableReason ?? "source_unavailable" }); continue; }
     const source = captured.selection, value = record(captured.payload);
-    if (source.kind === "assessment") {
+    if (source.kind === "problem_review" && ["diagnosis", "objectives", "problem-plan-strategy"].includes(panel.layoutKey)) {
+      const problem = readStudyProblemReview(value, { ...scope, patientId: study.recordedPatientId });
+      table(key, [["معرف المراجعة المحفوظة", problem.id], ["معرف المشكلة", problem.problemId], ["المشكلة كما راجعها الطبيب", problem.problemLabelAtReview],
+        ["مراجع المصدر", problem.reviewedBy], ["وقت المراجعة", problem.reviewedAt], ["سبب المراجعة", problem.reason], ["المراجعة السابقة", problem.supersedesReviewId],
+        ["المصدر المسجل", problem.source.title], ["نوع المصدر", problem.source.category], ["الملاحظة المحفوظة", problem.source.summary],
+        ["الموضع", problem.source.site], ["مسجل المصدر", problem.source.recordedBy], ["وقت تسجيل المصدر", problem.source.recordedAt],
+        ["هوية المصدر", problem.source.identity], ["نسخة المصدر الأصلية", problem.source.ref.version], ["بصمة لقطة المصدر", problem.source.snapshotHash]]);
+      paragraph(key, "هذه مراجعة الطبيب المحفوظة للمصدر وربطها بالمشكلة وقت التسجيل. لا تُستبدل بالمشكلة الحالية ولا تتحول القياسات إلى تشخيص أو خطة علاج آلية.");
+    } else if (source.kind === "assessment") {
       const assessment = decodeAnyAssessmentRevision(value, { ...scope, patientId: study.recordedPatientId });
       if (!assessment.ok || assessment.value.schemaVersion !== 2) throw new Error("assessment_projection_schema_unavailable");
       const revision = assessment.value;

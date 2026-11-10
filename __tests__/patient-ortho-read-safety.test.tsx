@@ -65,6 +65,20 @@ vi.mock("react", async (original) => {
   return { ...react,
     createContext: (initial: unknown) => { const context = { initial }; return Object.assign(context, { Provider: context }); },
     useContext: (context: { initial: unknown }) => hooks.contexts.has(context) ? hooks.contexts.get(context) : context.initial,
+    useSyncExternalStore: (subscribe: (listener: () => void) => () => void, getSnapshot: () => unknown) => {
+      const owner = scope(), index = owner.cursor++;
+      const snapshot = getSnapshot(); owner.values[index] = snapshot;
+      effect(() => {
+        const check = () => {
+          if (!owner.live) return;
+          const next = getSnapshot();
+          if (!Object.is(next, owner.values[index])) { owner.values[index] = next; hooks.changed = true; }
+        };
+        const unsubscribe = subscribe(check); check();
+        return unsubscribe;
+      }, [subscribe, getSnapshot], false);
+      return snapshot;
+    },
     useState: (initial: unknown) => {
       const owner = scope(); const index = owner.cursor++;
       if (!(index in owner.values)) owner.values[index] = typeof initial === "function" ? initial() : initial;
@@ -262,8 +276,12 @@ beforeEach(() => {
   const storage = new Map<string, string>();
   vi.stubGlobal("sessionStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) });
   const windowEvents = new EventTarget();
+  const location = { get pathname() { return `/patients/${patientId}`; }, search: "", hash: "" };
+  const history = { state: null as unknown, replaceState: (state: unknown, _unused: string, href: string) => {
+    history.state = state; const next = new URL(href, "http://synthetic.invalid"); location.search = next.search; location.hash = next.hash;
+  } };
   vi.stubGlobal("window", { confirm: confirmLeave, prompt: vi.fn(), addEventListener: windowEvents.addEventListener.bind(windowEvents),
-    removeEventListener: windowEvents.removeEventListener.bind(windowEvents), dispatchEvent: windowEvents.dispatchEvent.bind(windowEvents) });
+    removeEventListener: windowEvents.removeEventListener.bind(windowEvents), dispatchEvent: windowEvents.dispatchEvent.bind(windowEvents), location, history });
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-04T06:00:00Z"));
   createURL.mockImplementation(() => `blob:synthetic-ortho-${createURL.mock.calls.length}`);
   vi.spyOn(URL, "createObjectURL").mockImplementation(createURL);
@@ -1160,7 +1178,8 @@ describe("diagnostic section jump navigation", () => {
     expect(elements(nav[0]).filter(node => node.type === "button")).toHaveLength(4);
     const sections = elements(render()).filter(node => node.props["data-ortho-diagnostic-section"]);
     expect(sections.map(node => node.props["data-ortho-diagnostic-section"])).toEqual(["records", "ceph", "comparison", "assessment"]);
-    expect(sections.every(node => node.props.hidden === undefined && node.props.tabIndex === -1)).toBe(true);
+    // Native hidden={false} and an omitted hidden prop both leave default sections visible.
+    for (const node of sections) { expect(node.props.hidden).toBeFalsy(); expect(node.props.tabIndex).toBe(-1); }
   });
   const attach = () => {
     const target = { isConnected: true, focus: vi.fn(), scrollIntoView: vi.fn() };

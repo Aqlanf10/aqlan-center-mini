@@ -10,6 +10,7 @@ import {
 } from "@/lib/ortho-photos";
 import { suggestCephPhase, type OrthoPhase } from "@/lib/ortho";
 import { useSession } from "./SessionProvider";
+import { useOrthoWorkupOwner } from "./OrthoWorkupOwners";
 import {
   caseRecordSlots, caseRecordStudy, decodeOrthoRecordDocuments, decodeOrthoRecordStudies,
   ORTHO_RECORDS_READ_FAILURE, recordStudyId, type OrthoRecordDocument, type OrthoRecordStudy,
@@ -18,7 +19,7 @@ import {
 type PendingFile = { token: object; file: File; slot: PhotoView; metadataVersion: number };
 type UploadMetadata = { fileName: string; owner: Owner; token: object; version: number; slot: PhotoView; stage: PhotoStage | "unknown" | ""; dateState: "known" | "unknown" | ""; date: string; note: string };
 type Owner = { scope: readonly unknown[] };
-type OwnerRuntime = { owner: Owner | null; active: boolean; ready: boolean; busy: boolean; sequence: number;
+type OwnerRuntime = { owner: Owner | null; active: boolean; ready: boolean; busy: boolean; permittedDeparture: boolean; sequence: number;
   controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null; picker: PhotoView | null; pending: PendingFile | null };
 type Snapshot = { owner: Owner; status: "loading" | "ready" | "error";
   documents: OrthoRecordDocument[]; studies: OrthoRecordStudy[] };
@@ -46,7 +47,7 @@ export function WebCephRecordsGrid({
     [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope]);
   // Mutable transport/picker state is never read by render. The immutable owner
   // scopes state snapshots; callbacks additionally require its committed runtime.
-  const runtime = useRef<OwnerRuntime>({ owner: null, active: false, ready: false, busy: false, sequence: 0, controller: null, timer: null, picker: null, pending: null });
+  const runtime = useRef<OwnerRuntime>({ owner: null, active: false, ready: false, busy: false, permittedDeparture: false, sequence: 0, controller: null, timer: null, picker: null, pending: null });
   const [metadata, setMetadata] = useState<UploadMetadata | null>(null);
   const pendingMetadata = metadata?.owner === owner ? metadata : null;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -69,12 +70,18 @@ export function WebCephRecordsGrid({
     if ((runtime.current.owner === owner && runtime.current.active)) setFailure(message ? { owner, message } : null);
   };
   useLayoutEffect(() => {
-    runtime.current = { owner, active: true, ready: false, busy: false, sequence: 0, controller: null, timer: null, picker: null, pending: null };
+    runtime.current = { owner, active: true, ready: false, busy: false, permittedDeparture: false, sequence: 0, controller: null, timer: null, picker: null, pending: null };
     return () => {
       runtime.current.active = false; runtime.current.ready = false; runtime.current.picker = null; runtime.current.pending = null; runtime.current.controller?.abort();
       if (runtime.current.timer !== null) clearTimeout(runtime.current.timer);
     };
   }, [owner]);
+
+  useOrthoWorkupOwner(orthoCaseId, owner, () => ({
+    active: runtime.current.owner === owner && runtime.current.active && !runtime.current.permittedDeparture,
+    busy: runtime.current.owner === owner && runtime.current.busy,
+    dirty: runtime.current.owner === owner && runtime.current.pending !== null,
+  }));
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -136,12 +143,17 @@ export function WebCephRecordsGrid({
     if (!existing && !canUpload) return;
     const operationRuntime = runtime.current;
     operationRuntime.busy = true;
+    const depart = (analysisId: number) => {
+      operationRuntime.permittedDeparture = true;
+      try { window.location.assign(`/ceph/${analysisId}`); }
+      finally { operationRuntime.permittedDeparture = false; }
+    };
     setOperation({ owner, documentId: docId });
     setError(null);
     try {
       // 1. فحص هل توجد دراسة سابقة لهذه الشععة
       if (existing) {
-        window.location.assign(`/ceph/${existing.id}`);
+        depart(existing.id);
         return;
       }
 
@@ -161,7 +173,7 @@ export function WebCephRecordsGrid({
       if (runtime.current !== operationRuntime || !operationRuntime.active) return;
       const analysisId = recordStudyId(data?.id);
       if (res.ok && analysisId !== null) {
-        window.location.assign(`/ceph/${analysisId}`);
+        depart(analysisId);
       } else {
         setError(data.message ?? "تعذّر فتح جلسة الرسم والتحليل السيفالومتري.");
       }
