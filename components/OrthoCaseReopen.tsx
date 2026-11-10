@@ -82,7 +82,7 @@ export function OrthoCaseReopen(props: Props) {
   return <ReopenWorkspace key={`${props.patientId}:${props.orthoCaseId}:${session.userId}:${session.role}:${JSON.stringify(session.permissions ?? null)}`} {...props} actorId={session.userId} />;
 }
 function ReopenWorkspace(props: Props & { actorId: number }) {
-  const { lifetime } = props, draft = lifetime.read();
+  const { lifetime } = props, draft = lifetime.read(), admitted = lifetime.active();
   const [open, setOpen] = useState(() => draft.expanded === true), [busy, setBusy] = useState(false), [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<{ owner: object; value: OrthoReopenRead } | null>(null);
   const live = useRef(false), lock = useRef<object | null>(null), latest = useRef(props), controllers = useRef(new Set<AbortController>());
@@ -187,7 +187,9 @@ function ReopenWorkspace(props: Props & { actorId: number }) {
   // Each mounted view obtains a new current read; a receipt is not that read.
   const loadOnOpen = useRef(load);
   useLayoutEffect(() => { loadOnOpen.current = load; });
-  useLayoutEffect(() => { if (open) void loadOnOpen.current(); }, [open, lifetime.identity]);
+  // The parent's view lease activates after child layout effects on remount.
+  // Its following render must admit this read even when identity/open are stable.
+  useLayoutEffect(() => { if (open && admitted) void loadOnOpen.current(); }, [open, admitted, lifetime.identity]);
   return <details open={open} className="mt-3 rounded-lg border bg-white p-3 text-sm" onToggle={event => {
     if (!live.current || !lifetime.active()) return;
     const expanded = event.currentTarget.open;

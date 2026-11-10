@@ -182,8 +182,14 @@ describe("explicit same-case orthodontic reopening", () => {
     const callCount = fetchMock.mock.calls.length;
     let resolve!: (response: unknown) => void;
     fetchMock.mockImplementation(() => new Promise(done => { resolve = done; }));
-    active = true; ownerViewAvailable = true;
-    const restored = render(); expect(lifetime.identity).toBe(sharedIdentity);
+    // Child layout effects run before the parent's useOrthoDraft layout effect
+    // activates its new view lease. The shared draft identity does not change.
+    active = false; ownerViewAvailable = true;
+    const inactiveView = render(); expect(lifetime.identity).toBe(sharedIdentity);
+    expect(nodes(inactiveView).find(node => node.type === "details")?.props.open).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(callCount);
+    active = true;
+    const restored = render();
     expect(nodes(restored).find(node => node.type === "details")?.props.open).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(callCount + 1);
     expect(fetchMock.mock.calls.at(-1)![0]).not.toContain("requestId=");
