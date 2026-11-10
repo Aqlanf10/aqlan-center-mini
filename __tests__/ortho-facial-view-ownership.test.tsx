@@ -161,3 +161,29 @@ describe('separate older facial history entry',()=>{
  });
 
 });
+
+describe('facial guidance progressive disclosure',()=>{
+ const guidance=()=>render().find(n=>n.type==='details')!;
+ const warning='المسودة غير المحفوظة لا تُستعاد بعد إغلاق الصفحة.';
+ it('starts with native closed guidance and retains clinical and recovery limitations',async()=>{
+  await restored();const detail=guidance();expect(detail).toBeDefined();expect(detail.props.open).toBeUndefined();expect(detail.props.onToggle).toBeUndefined();
+  const children=nodes(detail.props.children as ReactNode);expect(children.find(n=>n.type==='summary')?.props.children).toBe('دليل القياس والحفظ');
+  const paragraphs=children.filter(n=>n.type==='p').map(n=>n.props.children).join(' ');
+  for(const phrase of ['صورة أمامية في الراحة','ولا تتحول إلى تشخيص أو خطة تلقائياً','لا يصحح دوران الرأس الجانبي','بكسلاً واحداً على الأقل','النتائج الجزئية لا تعني مراجعة المعالم غير المتاحة','حدود الأذن Postaurale','جهتا الصورة','الطلب الذي لم يصل إلى الخادم لا يمكن استعادته','لا تُخزّن القياسات في تخزين المتصفح'])expect(paragraphs).toContain(phrase);
+  expect(children.some(n=>n.type==='button')).toBe(false);
+  expect(render().some(n=>n.type==='p'&&n.props.children===warning)).toBe(false);
+ });
+ it('keeps the unsaved warning outside guidance while the local draft exists',async()=>{
+  await start();const detail=guidance();expect(detail).toBeDefined();
+  expect(nodes(detail).some(n=>n.props.children===warning)).toBe(false);
+  expect(render().some(n=>n.type==='p'&&n.props.children===warning)).toBe(true);
+  invoke(button('تجاهل مسودة الصورة'),'onClick');render();
+  expect(render().some(n=>n.type==='p'&&n.props.children===warning)).toBe(false);
+ });
+ it('keeps blocked recovery and cancellation outside the disclosure',async()=>{
+  serverRecovery={state:'blocked',identity:{id:7,commandId:command().clientRequestId,requestFingerprint:await facialSubmissionHash(command())},canCancel:true};await restored();
+  const detail=guidance();expect(detail).toBeDefined();expect(nodes(detail).some(n=>n.type==='button')).toBe(false);
+  expect(button('التحقق من استعادة طلب القياسات')).toBeDefined();expect(button('إلغاء طلب القياسات المعلّق')).toBeDefined();
+  expect(render().some(n=>n.props.role==='alert')).toBe(true);expect(render().some(n=>n.type==='img')).toBe(false);
+ });
+});

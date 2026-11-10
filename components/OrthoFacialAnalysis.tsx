@@ -181,19 +181,26 @@ function Workspace({patientId,orthoCaseId}:{patientId:number;orthoCaseId:number}
     const next={documentId:restored.command.documentId,expectedHeadId:restored.command.expectedHeadId,reason:restored.command.reason,content:restored.command.content};
     draftRef.current=next;setDraft(next);setPending(restored.command);setRecoveryConflict(false);setUncertain(true);setLoaded(null);setDocumentId(restored.command.documentId);setRefresh(v=>v+1);
   }
-  const recoveryControls=<section aria-label="استعادة طلب قياسات الوجه" className="space-y-2 rounded-lg border p-3">
+  const guidance=<details className="rounded-lg border text-sm">
+    <summary className="min-h-11 cursor-pointer px-3 py-3 font-semibold">دليل القياس والحفظ</summary>
+    <div className="space-y-2 px-3 pb-3"><p className="text-sm">حدد المعالم يدوياً على صورة أمامية في الراحة. النتائج نسب وإسقاطات ثنائية الأبعاد؛ تفسيرها للطبيب، ولا تتحول إلى تشخيص أو خطة تلقائياً.</p>
+      <p className="text-xs text-slate-600">تصحيح المحور يعالج الميل داخل مستوى الصورة فقط؛ لا يصحح دوران الرأس الجانبي أو رفعه وخفضه أو تشوه المنظور والعدسة. كل جزء يجب أن يمتد بكسلاً واحداً على الأقل حتى يحسب، لذلك قد تتغير إتاحة النتيجة مع دقة الصورة. النتائج الجزئية لا تعني مراجعة المعالم غير المتاحة.</p>
+      <p className="text-xs text-slate-600">الأخماس هنا تستخدم حدود الأذن Postaurale. لا تُخلط بحدود الوجنة. اليمين واليسار المذكوران هما جهتا الصورة، ولا يحددان جهة المريض في صورة معكوسة.</p>
     <p>طلبات الحفظ التي وصلت إلى سجل الخادم تُستعاد بعد إغلاق الصفحة. الطلب الذي لم يصل إلى الخادم لا يمكن استعادته بعد الإغلاق. المسودات التي لم يُضغط حفظها تبقى في هذه الصفحة فقط؛ لا تُخزّن القياسات في تخزين المتصفح.</p>
+    </div>
+  </details>;
+  const recoveryControls=<section aria-label="استعادة طلب قياسات الوجه" className="space-y-2 empty:hidden">
+    {!!draft&&!pending&&<p className="rounded-lg border p-3 text-sm">المسودة غير المحفوظة لا تُستعاد بعد إغلاق الصفحة.</p>}
     {recoveryConflict&&!hasExpected&&!!draft&&(recovery?.state==="pending"||recovery?.state==="committed")&&<button className={control} disabled={busy} onClick={discardLocalAndRestore}>تجاهل المسودة المحلية واستعادة طلب الخادم</button>}
     {(!!pending||recoveryBlocked||!!error)&&<button className={control} disabled={busy} onClick={()=>{if(currentRender()&&!busyRef.current){committedEdit.current=null;setRefresh(v=>v+1);}}}>التحقق من استعادة طلب القياسات</button>}
     {(recovery?.state==="pending"||recovery?.state==="cancelled"||recovery?.state==="blocked"&&recovery.canCancel||recovery===null&&!!pending||recoveryConflict&&hasExpected)&&<button className={control} disabled={busy} onClick={()=>void cancelRecovery()}>إلغاء طلب القياسات المعلّق</button>}
   </section>;
   if(denied)return <p role="alert" className="rounded-xl border p-4">الصورة والتحليل محجوبان بالصلاحية الحالية. أعد تسجيل الدخول للتحقق.</p>;
-  if(recoveryBlocked)return <main dir="rtl" className="space-y-3 p-4"><p role="alert">تعذّر إتاحة مصدر الطلب المستعاد أو تعارض مع طلب هذه النافذة. لا تُعرض الصورة أو معالمها حتى حسم حالة الطلب.</p>{message&&<p role="status">{message}</p>}{recoveryControls}</main>;
+  if(recoveryBlocked)return <main dir="rtl" className="space-y-3 p-4"><p role="alert">تعذّر إتاحة مصدر الطلب المستعاد أو تعارض مع طلب هذه النافذة. لا تُعرض الصورة أو معالمها حتى حسم حالة الطلب.</p>{message&&<p role="status">{message}</p>}{guidance}{recoveryControls}</main>;
   return <main dir="rtl" className="mx-auto max-w-7xl space-y-4 p-3" data-testid="ortho-facial-workspace">
     <header className="space-y-2"><a className="inline-flex min-h-11 items-center underline" href={clinicalContextHref(patientId,{orthoCaseId,pillar:"diagnostics"},"ortho")}>العودة إلى ملف حالة التقويم #{orthoCaseId}</a>
-      <h1 className="text-xl font-bold">قياسات صورة الوجه</h1><p className="text-sm">حدد المعالم يدوياً على صورة أمامية في الراحة. النتائج نسب وإسقاطات ثنائية الأبعاد؛ تفسيرها للطبيب، ولا تتحول إلى تشخيص أو خطة تلقائياً.</p>
-      <p className="text-xs text-slate-600">تصحيح المحور يعالج الميل داخل مستوى الصورة فقط؛ لا يصحح دوران الرأس الجانبي أو رفعه وخفضه أو تشوه المنظور والعدسة. كل جزء يجب أن يمتد بكسلاً واحداً على الأقل حتى يحسب، لذلك قد تتغير إتاحة النتيجة مع دقة الصورة. النتائج الجزئية لا تعني مراجعة المعالم غير المتاحة.</p>
-      <p className="text-xs text-slate-600">الأخماس هنا تستخدم حدود الأذن Postaurale. لا تُخلط بحدود الوجنة. اليمين واليسار المذكوران هما جهتا الصورة، ولا يحددان جهة المريض في صورة معكوسة.</p></header>
+      <h1 className="text-xl font-bold">قياسات صورة الوجه</h1><p className="text-sm">اختر الصورة وحدد المعالم. النتائج نسب ثنائية الأبعاد؛ تفسيرها للطبيب ولا تُنشئ تشخيصاً تلقائياً.</p>
+      {guidance}</header>
     {recoveryControls}
     {error&&<p role="alert">{error}</p>}{message&&<p role="status" className="rounded-lg border bg-amber-50 p-3">{message}</p>}
     <div className="flex flex-wrap gap-2"><label className="min-w-0 flex-1">الصورة المرتبطة بالحالة<select aria-label="الصورة المرتبطة بالحالة" className={`${control} block w-full`} value={documentId??""} disabled={!data||busy||!!pending||recovery===undefined} onChange={e=>{
