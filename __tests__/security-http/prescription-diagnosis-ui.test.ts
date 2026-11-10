@@ -299,7 +299,14 @@ describe("prescription diagnosis draft in the built visit page", () => {
         let expectedNotes = draftNotes;
         if (kind === "template") {
           const template = PROCEDURE_TEMPLATES[0];
-          await f.page.getByRole("button", { name: template.title, exact: true }).click();
+          // Procedure guidance is intentionally collapsed until explicitly
+          // requested. Exercise its real disclosure instead of clicking a
+          // hidden template or bypassing native browser visibility checks.
+          const procedures = f.page.locator('details[data-prescription-optional="procedures"]');
+          expect(await procedures.getAttribute("open")).toBeNull();
+          await procedures.locator("summary").click();
+          await expect.poll(() => procedures.getAttribute("open")).toBe("");
+          await procedures.getByRole("button", { name: template.title, exact: true }).click();
           expectedDiagnosis = template.diagnosis;
           expectedNotes = template.notes;
         } else {
