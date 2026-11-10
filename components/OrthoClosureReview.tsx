@@ -11,7 +11,7 @@ type Props = { patientId: number; orthoCaseId: number; ledger: RetentionLedgerRe
 const arch = { upper: 'الفك العلوي', lower: 'الفك السفلي', legacy_unknown: 'الفك غير معلوم' };
 const deviceType = { fixed: 'ثابت', removable: 'متحرك', other: 'آخر' };
 const deviceState = { in_use: 'الاستخدام مسجل', not_in_use: 'عدم الاستخدام مسجل', lost: 'الفقد مسجل', removed: 'الإزالة مسجلة', replaced: 'الاستبدال مسجل', unknown: 'الاستخدام غير معلوم', ambiguous: 'تحتاج الحالة إلى مراجعة التعارض' };
-const date = (value: string | null) => value ?? 'تاريخ الواقعة غير معلوم';
+const date = (value: string | null) => value === null ? 'تاريخ الواقعة غير معلوم' : <bdi dir="ltr">{value}</bdi>;
 export function OrthoClosureReview(props: Props) {
   if (!props.active()) return null;
   const review = props.readUnavailable ? null : projectClosureReview(props.ledger, props);

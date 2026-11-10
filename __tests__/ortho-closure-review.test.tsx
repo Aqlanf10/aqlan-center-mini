@@ -124,3 +124,15 @@ it('renders an explicit documentary review without closure controls, image URLs 
   expect(stale).toContain('لا يُعد فارغاً'); expect(stale).not.toContain('جهاز #1'); expect(stale).not.toContain('قراءة صور مرحلة فك الجهاز');
   expect(unavailable).toContain('لا يُعد فارغاً'); expect(unavailable).not.toContain('لا توجد واقعة تسليم'); expect(unavailable).not.toContain('قراءة صور مرحلة فك الجهاز');
 });
+
+it('isolates exact known dates from RTL text without inventing dates for unknown evidence', async () => {
+  const debond: RetentionEventRecord = { ...delivery(3), content: { kind: 'debond', occurrence: occurrence('2026-09-30'), note: '', documentIds: [], extent: 'Synthetic extent' } };
+  const data = await ledger([delivery(1, 'upper', '2026-10-01'), delivery(2, 'lower'), debond]);
+  const html = renderToStaticMarkup(<OrthoClosureReview {...scope} ledger={data} readUnavailable={false}
+    legacyRetainer={null} legacyDate="2026-09-01" authority="synthetic" readVersion={1} ownerIdentity={{}} active={() => true} />);
+  const isolatedDates = [...html.matchAll(/<bdi dir="ltr">([^<]+)<\/bdi>/g)].map(match => match[1]);
+  expect(isolatedDates).toEqual(['2026-09-01', '2026-09-30', '2026-10-01']);
+  expect(html).toContain('تاريخ الواقعة غير معلوم');
+  expect(html).not.toContain('<bdi dir="ltr">تاريخ الواقعة غير معلوم</bdi>');
+  expect(html).not.toContain('2026-11-10'); // Recording time must not replace unknown occurrence dates.
+});
