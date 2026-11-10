@@ -28,6 +28,10 @@ import { ORTHO_ASSESSMENT_VERIFIER_2_2_SQL } from "./ortho-assessment-verifier-s
 import { parseCephSourceIdentity, sameCephSourceIdentity, type CephSourceIdentity, type CephCompletionSources } from "./ceph-source-review";
 import { CEPH_COMPLETION_SOURCE_CAS_SQL } from "./ceph-completion-source-cas-schema";
 import { CEPH_COMPLETION_PROVENANCE_SQL } from "./ceph-completion-provenance-schema";
+import { CEPH_CORRECTION_LINEAGE_SQL } from "./ceph-correction-lineage-schema";
+import { readCephCorrectionSource, readStoredCephCorrectionOrigin, requireCephCorrectionAncestry } from "./ceph-correction-source";
+import { parseCephCorrectionSourceToken, sameCephCorrectionSource, type CephCorrectionOrigin, type CephCorrectionSourceRead, type CephCorrectionSourceToken } from "./ceph-correction-origin";
+import { canonicalJourneyJSON as canonicalCephCorrectionJSON, journeyContentHash as cephCorrectionHash } from "./ortho-case-journey-hash";
 import { cephComparisonProvenanceKey } from "./cephCompare";
 import { cephComparisonProjectionSha256 } from "./ceph-comparison-projection";
 import { authorizeCephCompletion } from "./ceph-completion-access";
@@ -2177,6 +2181,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0121", name: "ortho_retention_ledger", filename: "0121_ortho_retention_ledger.sql", sql: ORTHO_RETENTION_LEDGER_SQL, checksum: checksumOf(ORTHO_RETENTION_LEDGER_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0122", name: "ortho_retention_submissions", filename: "0122_ortho_retention_submissions.sql", sql: ORTHO_RETENTION_SUBMISSION_SQL, checksum: checksumOf(ORTHO_RETENTION_SUBMISSION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0123", name: "ortho_study_export_archive", filename: "0123_ortho_study_export_archive.sql", sql: ORTHO_STUDY_EXPORT_ARCHIVE_SQL, checksum: checksumOf(ORTHO_STUDY_EXPORT_ARCHIVE_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0124", name: "ceph_correction_lineage", filename: "0124_ceph_correction_lineage.sql", sql: CEPH_CORRECTION_LINEAGE_SQL, checksum: checksumOf(CEPH_CORRECTION_LINEAGE_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -24154,6 +24159,8 @@ export const CEPH_PHASES: { value: CephPhase; label: string }[] = [
 ];
 
 export interface CephAnalysisRow {
+  /** null/absent means ancestry was not recorded, never an inferred initial study. */
+  correctionOrigin?: CephCorrectionOrigin | null;
   id: number;
   patientId: number;
   documentId: number;
@@ -24176,6 +24183,10 @@ export interface CephAnalysisRow {
 }
 
 interface CephAnalysisDbRow {
+  corrects_analysis_id?: number | string | null;
+  correction_source?: unknown;
+  correction_source_canonical?: string | null;
+  correction_source_sha256?: string | null;
   id: number;
   patient_id: number;
   document_id: number;
@@ -24207,6 +24218,7 @@ function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
     && row.cal_y2 != null && row.cal_mm != null;
   return {
     id,
+    correctionOrigin: readStoredCephCorrectionOrigin(row),
     patientId: row.patient_id,
     documentId: row.document_id,
     status: row.status as CephAnalysisRow["status"],
@@ -24735,16 +24747,20 @@ export async function getCephStudy(id: number): Promise<{
   diagnosis: CephDiagnosisRow | null;
   provenance: CephProvenanceRead;
   completionSources: CephCompletionSources;
+  correctionSource: CephCorrectionSourceRead;
 } | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<CephAnalysisReadRow>(
+  const client = await getPool().connect();
+  try {
+  await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+  const { rows } = await client.query<CephAnalysisReadRow>(
     `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses
      WHERE id = $1 AND status <> 'discarded'`, [id],
   );
-  if (!rows[0]) return null;
+  if (!rows[0]) { await client.query("COMMIT"); return null; }
   const analysis = mapCephAnalysis(rows[0]);
 
-  const { rows: lm } = await getPool().query<{
+  const { rows: lm } = await client.query<{
     code: string; x: number; y: number; source: string; confirmed_by: string;
   }>(
     `SELECT code, x, y, source, confirmed_by FROM ceph_landmarks
@@ -24760,12 +24776,12 @@ export async function getCephStudy(id: number): Promise<{
       confirmedBy: r.confirmed_by,
     }));
 
-  const { rows: ms } = await getPool().query<{ code: string; value: number }>(
+  const { rows: ms } = await client.query<{ code: string; value: number }>(
     `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1 ORDER BY id`,
     [id],
   );
 
-  const { rows: dx } = await getPool().query<{
+  const { rows: dx } = await client.query<{
     skeletal: string | null; dental: string | null; soft_tissue: string | null;
     note: string | null; final_dx: string; created_by: string; updated_at: Date;
   }>(
@@ -24787,14 +24803,20 @@ export async function getCephStudy(id: number): Promise<{
     refSet:analysis.refSet,calibration:analysis.calibration,mmPerPixel:analysis.mmPerPixel,
     landmarks:lm,diagnosis:diagnosis ? {skeletal:diagnosis.skeletal,dental:diagnosis.dental,softTissue:diagnosis.softTissue,
       note:diagnosis.note,finalDx:diagnosis.finalDx} : null});
-  const provenance = await readCephCompletionProvenance(getPool(),id,analysis.status,
+  const provenance = await readCephCompletionProvenance(client,id,analysis.status,
     currentSnapshot ? {snapshot:currentSnapshot,measurements:ms} : undefined);
   const completionSources:CephCompletionSources = analysis.status === "draft"
-    ? await readCephCompletionSources(getPool(),{patientId:analysis.patientId,documentId:analysis.documentId,refSet:analysis.refSet})
+    ? await readCephCompletionSources(client,{patientId:analysis.patientId,documentId:analysis.documentId,refSet:analysis.refSet})
     : {state:"unavailable",reason:"completed_history_has_immutable_source_evidence"};
-  return { analysis, landmarks, completionSources, measurements: displayableCephSnapshot(ms), diagnosis,
+  let correctionSource = await readCephCorrectionSource(client, id, "snapshot");
+  try { await requireCephCorrectionAncestry(client,rows[0],"snapshot"); }
+  catch { correctionSource={state:"unavailable",reason:"correction_ancestry_unavailable"}; }
+  await client.query("COMMIT");
+  return { analysis, landmarks, completionSources, correctionSource, measurements: displayableCephSnapshot(ms), diagnosis,
     provenance: analysis.status === "completed" && !currentSnapshot && provenance.state === "versioned"
       ? {state:"integrity_unavailable",reason:"stored_clinical_state_invalid"} : provenance };
+  } catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
+  finally { client.release(); }
 }
 
 export interface CephCalibrationInput {
@@ -25422,13 +25444,14 @@ export async function discardCephAnalysis(
  * ما غيّره لا يبدأ من الصفر، والمعتمد يبقى شهادةً على ما كان.
  */
 /** Required server authority for the public correction-copy path. */
-export async function duplicateAuthorizedCephAnalysis(id:number,request:CephDraftWriteRequest) {
+export async function duplicateAuthorizedCephAnalysis(id:number,request:CephDraftWriteRequest,expectedCorrectionSource:CephCorrectionSourceToken) {
   assertCephDraftRequest(request);
-  return duplicateCephAnalysis(id,request.session.username,request);
+  if (!parseCephCorrectionSourceToken(expectedCorrectionSource)) throw new ClinicalMutationAuthorityError(400,"هوية أصل التصحيح مطلوبة؛ أعد فتح الدراسة.");
+  return duplicateCephAnalysis(id,request.session.username,request,expectedCorrectionSource);
 }
 
 export async function duplicateCephAnalysis(
-  id: number, by: string, request?: CephDraftWriteRequest,
+  id: number, by: string, request?: CephDraftWriteRequest, expectedCorrectionSource?: CephCorrectionSourceToken,
 ): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -25476,6 +25499,16 @@ export async function duplicateCephAnalysis(
       await client.query("ROLLBACK");
       return {ok:false,message:"تعذّر التحقق من سلامة سجل الاعتماد؛ لا يمكن نسخ معالم لا تطابق الدليل المحفوظ."};
     }
+    try { await requireCephCorrectionAncestry(client,source,"locked"); }
+    catch(error) {
+      if((error as {code?:string}).code==="55P03")throw error;
+      await client.query("ROLLBACK");return {ok:false,message:"تعذّر التحقق من سلسلة أصل التصحيح؛ لم تُنشأ نسخة جديدة."};
+    }
+    const correctionSource = await readCephCorrectionSource(client,id,"locked");
+    if (correctionSource.state !== "available" || (request && !sameCephCorrectionSource(expectedCorrectionSource,correctionSource.token))) {
+      await client.query("ROLLBACK");
+      return {ok:false,message:"تغيّر أصل التصحيح أو تعذّر التحقق منه؛ أعد فتح الدراسة وراجع المصدر قبل النسخ."};
+    }
     // مسودة أخرى قائمة؟ النسخة ستكون مسودة — فيحكمها القيد ذاته.
     const { rows: open } = await client.query<{ n: string }>(
       `SELECT 1 AS n FROM ceph_analyses WHERE patient_id = $1 AND status = 'draft'`,
@@ -25488,9 +25521,10 @@ export async function duplicateCephAnalysis(
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO ceph_analyses
          (patient_id, document_id, status, cal_x1, cal_y1, cal_x2, cal_y2, cal_mm,
-          mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind)
+          mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind,
+          corrects_analysis_id,correction_source,correction_source_canonical,correction_source_sha256)
        VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8,
-         $9::text, $10, $11::int, $12, $13::date, $14::text, $15, $16) RETURNING id`,
+         $9::text, $10, $11::int, $12, $13::date, $14::text, $15, $16,$17,$18::jsonb,$19,$20) RETURNING id`,
       [
         source.patient_id, source.document_id,
         source.cal_x1, source.cal_y1, source.cal_x2, source.cal_y2, source.cal_mm,
@@ -25499,6 +25533,7 @@ export async function duplicateCephAnalysis(
         current?.username ?? by,
         // (ORTHO-ID) التصحيح دراسةٌ بهوية المعتمد نفسها — الحالة والمرحلة والتاريخ والجهاز والمرجع — فلا يعود T2/T3 إلى T1.
         source.ortho_case_id, source.phase, source.xray_date_text, source.device, source.ref_set, source.study_kind,
+        id,JSON.stringify(correctionSource.origin),canonicalCephCorrectionJSON(correctionSource.origin),cephCorrectionHash(correctionSource.origin),
       ],
     );
     const newId = Number(created[0].id);
@@ -28391,8 +28426,8 @@ export async function resetClinicData<F>(
       const { rows: [studyHistory] } = await client.query<{ exists: boolean }>(
         `SELECT ${ORTHO_STUDY_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (studyHistory.exists) throw new ProtectedOrthoStudyHistoryError();
-      await client.query(`LOCK TABLE ${CEPH_PROVENANCE_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
-      const { rows: [cephHistory] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM ceph_completion_provenance) AS exists");
+      await client.query(`LOCK TABLE ceph_analyses, ${CEPH_PROVENANCE_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [cephHistory] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM ceph_completion_provenance) OR EXISTS (SELECT 1 FROM ceph_analyses WHERE corrects_analysis_id IS NOT NULL) AS exists");
       if (cephHistory.exists) throw new ProtectedCephProvenanceHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);

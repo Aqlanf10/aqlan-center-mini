@@ -1,3 +1,4 @@
+import {discoverCephCorrectionAncestors} from './ceph-correction-source';
 import {prepareStudySpaceSource} from './ortho-study-space-source';
 import {readStudySpaceCapture} from './ortho-study-space-capture';
 import { readStudyProblemReview } from "./ortho-study-problem-review";
@@ -58,6 +59,7 @@ export async function prepareSavedStudySourceUnion(client: DbClient, owner: Jour
       } else { const parsed = decodeRetentionSavedContent(content); if (!parsed.ok) journeyFail(500, parsed.code); retention.push(parsed.value); }
     } else if (source.selection.kind === "document" || source.selection.kind === "ceph_study") {
       addStudySourceTargets(cache, [{ kind: source.selection.kind, id: source.selection.id }]);
+      if(source.selection.kind==='ceph_study')addStudySourceTargets(cache,(await discoverCephCorrectionAncestors(client,source.selection.id,owner)).map(id=>({kind:'ceph_study' as const,id})));
     } else if (source.selection.kind === "plan_consent") {
       addStudyPlanTargets(cache, [source.selection.id]);
     } else if (source.selection.kind === "adjustment") {
@@ -69,6 +71,7 @@ export async function prepareSavedStudySourceUnion(client: DbClient, owner: Jour
 }
 export async function prepareIncomingStudySourceUnion(client: DbClient, owner: JourneyOwner, authority: JourneyAuthority,
   content: StudyDraftContent, cache: StudyAssessmentAccess) {
+  for(const source of content.sources.filter(s=>s.kind==='ceph_study'))addStudySourceTargets(cache,(await discoverCephCorrectionAncestors(client,source.id,owner)).map(id=>({kind:'ceph_study' as const,id})));
   for(const s of content.sources.filter(s=>s.kind==="space_ledger"))await prepareStudySpaceSource(client,owner,authority,cache,s);
   const reviews = await readStudyProblemReviews(client, owner, content.sources.filter(s => s.kind === "problem_review").map(s => s.id));
   await prepareStudyProblemReviewAccess(client, owner, authority, [...reviews.values()], cache);

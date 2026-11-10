@@ -109,14 +109,15 @@ describe("quarantined historical cephalometric output", () => {
 });
 
 const source = readFileSync(new URL("../lib/db.ts", import.meta.url), "utf8");
-function reader(name: string, endMarker: string, query: ReturnType<typeof vi.fn>) {
+function reader(name: string, endMarker: string, query: (...args: unknown[]) => unknown) {
   const start = source.indexOf(`export async function ${name}(`), end = source.indexOf(endMarker, start);
   if (start < 0 || end < start) throw new Error("Missing production reader");
   const compiled = transformSync(source.slice(start, end).replace(/^export /gm, ""), { loader: "ts", target: "node22" }).code;
   const dependencies = { cephComparisonProjectionSha256, parseCephCompletionSnapshot,
     readCephCompletionProvenance: async () => ({state:"unversioned",reason:"historical_completion_without_witness"}),
     getCephStudy: async () => ({...study,provenance:{state:"unversioned",reason:"historical_completion_without_witness"}}),
-    ensureSchema: async () => {}, getPool: () => ({ query }), computeAll, isCephLandmarkCode,
+    readCephCorrectionSource:async()=>({state:'unavailable',reason:'synthetic'}), requireCephCorrectionAncestry:async()=>{},
+    ensureSchema: async () => {}, getPool: () => ({ query,connect:async()=>({query:async(sql:string,...args:unknown[])=>/^BEGIN|^COMMIT|^ROLLBACK/.test(sql)?{rows:[]}:query(sql,...args),release:()=>{}}) }), computeAll, isCephLandmarkCode,
     displayableCephSnapshot, isQuarantinedCephMeasurement, isDescriptiveCephMeasurement, mapCephAnalysis: (row: unknown) => row };
   return new Function(...Object.keys(dependencies), compiled + `\nreturn ${name};`)(...Object.values(dependencies));
 }

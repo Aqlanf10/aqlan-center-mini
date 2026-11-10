@@ -124,7 +124,18 @@ async function fixture() {
   return { expectedSources: sources.identity, id: analysisId, patientId: patient.id, documentId: document.id, referenceId: reference.id, session, snapshot, sha };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
-const complete = (f: Fixture, snapshot = f.snapshot, session = f.session) => db!.completeCephAnalysis(f.id, session.username, snapshot, session, f.expectedSources);
+const correctionTokens=new Map<number,import('../../lib/ceph-correction-origin').CephCorrectionSourceToken>();
+const complete = async(f: Fixture, snapshot = f.snapshot, session = f.session) => {
+  const result=await db!.completeCephAnalysis(f.id, session.username, snapshot, session, f.expectedSources);
+  if(result.ok)await captureCorrectionToken(f);
+  return result;
+};
+async function captureCorrectionToken(f:Fixture){
+  const read=(await db!.getCephStudy(f.id))?.correctionSource;
+  if(read?.state!=='available')throw Error('Synthetic source read unavailable');
+  correctionTokens.set(f.id,read.token);return read.token;
+}
+async function correctionToken(f:Fixture){return correctionTokens.get(f.id)??captureCorrectionToken(f);}
 async function state(id:number) {
   const pool = db!.getPool();
   return {
@@ -367,7 +378,7 @@ describe("future ceph completion provenance on real PostgreSQL 18", () => {
     await pool.query("UPDATE ceph_landmarks SET x=x+1 WHERE analysis_id=$1 AND code='N'",[f.id]);
     expect((await db!.getCephStudy(f.id))?.provenance.state).toBe("integrity_unavailable");
     const before = await state(f.id);
-    const copied = await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session});
+    const copied = await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f));
     expect(copied.ok).toBe(false);
     expect((await pool.query("SELECT id FROM ceph_analyses WHERE patient_id=$1 AND status='draft'",[f.patientId])).rows).toEqual([]);
     expect(await state(f.id)).toEqual(before);
@@ -379,7 +390,7 @@ describe("future ceph completion provenance on real PostgreSQL 18", () => {
     const cookieSession=vi.spyOn(sessionModule,"requireSession").mockResolvedValue(f.session);
     try{
       const {POST}=await import("../../app/api/ceph/[id]/duplicate/route");
-      const response=await POST(new Request(`https://test.invalid/api/ceph/${f.id}/duplicate`,{method:"POST"}),
+      const response=await POST(new Request(`https://test.invalid/api/ceph/${f.id}/duplicate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({schemaVersion:1,expectedCorrectionSource:await correctionToken(f)})}),
         {params:Promise.resolve({id:String(f.id)})});
       expect(response.status).toBe(409);expect(await response.json()).not.toHaveProperty("id");
       expect((await pool.query("SELECT id FROM ceph_analyses WHERE patient_id=$1 AND status='draft'",[f.patientId])).rows).toEqual([]);
@@ -392,16 +403,17 @@ describe("future ceph completion provenance on real PostgreSQL 18", () => {
     if(kind==="diagnosis") await pool.query("UPDATE ceph_diagnoses SET final_dx='synthetic changed' WHERE analysis_id=$1",[f.id]);
     if(kind==="missing_landmark") await pool.query("DELETE FROM ceph_landmarks WHERE analysis_id=$1 AND code='N'",[f.id]);
     const before=await state(f.id);
-    expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session})).toMatchObject({ok:false});
+    expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f))).toMatchObject({ok:false});
     expect((await pool.query("SELECT id FROM ceph_analyses WHERE patient_id=$1 AND status='draft'",[f.patientId])).rows).toEqual([]);
     expect(await state(f.id)).toEqual(before);
   });
   it("does not downgrade a present malformed witness to legacy correction history", async()=>{
     const f=await fixture(),pool=db!.getPool();
     await pool.query("UPDATE ceph_analyses SET status='completed',completed_by=$2,completed_at='2020-01-01T00:00:00Z' WHERE id=$1",[f.id,f.session.username]);
+    await captureCorrectionToken(f);
     await pool.query(`INSERT INTO ceph_completion_provenance(analysis_id,schema_version,witness,witness_sha256,actor_user_id,sealed_by,sealed_at)
       VALUES($1,1,'{}',$2,$3,$4,'2020-01-01T00:00:00Z')`,[f.id,"a".repeat(64),f.session.userId,f.session.username]);
-    expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session})).toMatchObject({ok:false});
+    expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f))).toMatchObject({ok:false});
     expect((await pool.query("SELECT id FROM ceph_analyses WHERE patient_id=$1 AND status='draft'",[f.patientId])).rows).toEqual([]);
   });
   it.each(["hash","dimensions"] as const)("refuses witnessed correction-copy when image %s no longer matches",async kind=>{
@@ -409,7 +421,7 @@ describe("future ceph completion provenance on real PostgreSQL 18", () => {
     if(kind==="hash")await pool.query("UPDATE patient_documents SET sha256=$2 WHERE id=$1",[f.documentId,"b".repeat(64)]);
     else await pool.query("UPDATE patient_documents SET width=456,height=789 WHERE id=$1",[f.documentId]);
     const before=await state(f.id);
-    expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session})).toMatchObject({ok:false});
+    expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f))).toMatchObject({ok:false});
     expect((await pool.query("SELECT id FROM ceph_analyses WHERE patient_id=$1 AND status='draft'",[f.patientId])).rows).toEqual([]);
     expect(await state(f.id)).toEqual(before);
   });
@@ -421,7 +433,7 @@ describe("future ceph completion provenance on real PostgreSQL 18", () => {
     if(kind==="catalog_drift")await pool.query("UPDATE ceph_reference_sets SET active=false,version='changed' WHERE id=$1",[f.referenceId]);
     const before=await state(f.id);
     const original=(await pool.query("SELECT code,x,y,source,confirmed_by,confirmed_at FROM ceph_landmarks WHERE analysis_id=$1 ORDER BY code",[f.id])).rows;
-    const copied=await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session});
+    const copied=await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f));
     expect(copied.ok).toBe(true);if(!copied.ok)throw new Error("Expected correction copy");
     expect((await pool.query("SELECT code,x,y,source,confirmed_by,confirmed_at FROM ceph_landmarks WHERE analysis_id=$1 ORDER BY code",[copied.id])).rows).toEqual(original);
     const draft=await state(copied.id);expect(draft.witness).toEqual([]);expect(draft.measurements).toEqual([]);
@@ -451,7 +463,7 @@ describe("future ceph completion provenance on real PostgreSQL 18", () => {
     }finally{await client.query("ROLLBACK");client.release();}
     expect((await db!.getCephStudy(f.id))?.provenance.state).toBe("versioned");
     const before=await state(f.id);
-    expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session})).toMatchObject({ok:true});
+    expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f))).toMatchObject({ok:true});
     expect(await state(f.id)).toEqual(before);
   });
   it("rolls back a validated correction-copy when its atomic audit fails",async()=>{
@@ -460,7 +472,7 @@ describe("future ceph completion provenance on real PostgreSQL 18", () => {
       IF NEW.action='ceph.create' THEN RAISE EXCEPTION 'synthetic copy audit failure'; END IF; RETURN NEW; END $$;
       CREATE TRIGGER synthetic_copy_audit_failure BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION synthetic_copy_audit_failure()`);
     try{
-      await expect(db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session})).rejects.toThrow("synthetic copy audit failure");
+      await expect(db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f))).rejects.toThrow("synthetic copy audit failure");
       expect((await pool.query("SELECT id FROM ceph_analyses WHERE patient_id=$1 AND status='draft'",[f.patientId])).rows).toEqual([]);
       expect(await state(f.id)).toEqual(before);
     }finally{await pool.query("DROP TRIGGER synthetic_copy_audit_failure ON audit_log; DROP FUNCTION synthetic_copy_audit_failure()");}
@@ -470,10 +482,10 @@ describe("future ceph completion provenance on real PostgreSQL 18", () => {
     const blocker=await pool.connect();
     try{
       await blocker.query("BEGIN");await blocker.query("UPDATE ceph_landmarks SET x=x+1 WHERE analysis_id=$1 AND code='N'",[f.id]);
-      await expect(db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session})).rejects.toMatchObject({status:409});
+      await expect(db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f))).rejects.toMatchObject({status:409});
       expect((await pool.query("SELECT id FROM ceph_analyses WHERE patient_id=$1 AND status='draft'",[f.patientId])).rows).toEqual([]);
       await blocker.query("COMMIT");
-      expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session})).toMatchObject({ok:false});
+      expect(await db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f))).toMatchObject({ok:false});
     }finally{await blocker.query("ROLLBACK");blocker.release();}
   });
   it("holds validated source children through observed copy audit wait",async()=>{
@@ -482,7 +494,7 @@ describe("future ceph completion provenance on real PostgreSQL 18", () => {
     try{
       await blocker.query("BEGIN");const {rows:[{pid}]}=await blocker.query<{pid:number}>("SELECT pg_backend_pid() AS pid");
       await blocker.query("LOCK TABLE audit_log IN SHARE MODE");
-      pending=db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session});void pending.catch(()=>undefined);
+      pending=db!.duplicateAuthorizedCephAnalysis(f.id,{patientId:f.patientId,documentId:f.documentId,session:f.session},await correctionToken(f));void pending.catch(()=>undefined);
       let observed=false;
       for(let attempt=0;attempt<250;attempt++){
         await blocker.query("SELECT pg_stat_clear_snapshot()");
@@ -741,4 +753,12 @@ describe("comparison projection consistency on PostgreSQL 18", () => {
     await db!.getPool().query("UPDATE ceph_landmarks SET x=$2::double precision WHERE analysis_id=$1 AND code='N'", [f.id, value]);
     await expect(db!.getCephAnalysisForCompare(f.id)).rejects.toThrow("Invalid cephalometric comparison projection");
   });
+});
+it('database refuses an unversioned origin when the completed parent has a witness',async()=>{
+ const f=await fixture();expect((await complete(f)).ok).toBe(true);
+ const read=(await db!.getCephStudy(f.id))!.correctionSource;if(read.state!=='available')throw Error('source');
+ const origin={...read.origin,parentCompletion:{state:'unversioned',reason:'historical_completion_without_witness'}};
+ const {canonicalJourneyJSON,journeyContentHash}=await import('../../lib/ortho-case-journey-hash');
+ await expect(db!.getPool().query("INSERT INTO ceph_analyses(patient_id,document_id,status,created_by,corrects_analysis_id,correction_source,correction_source_canonical,correction_source_sha256) VALUES($1,$2,'draft','synthetic',$3,$4,$5,$6)",[f.patientId,f.documentId,f.id,JSON.stringify(origin),canonicalJourneyJSON(origin),journeyContentHash(origin)])).rejects.toMatchObject({code:'23514'});
+ expect((await db!.getPool().query("SELECT id FROM ceph_analyses WHERE patient_id=$1 AND status='draft'",[f.patientId])).rows).toEqual([]);
 });

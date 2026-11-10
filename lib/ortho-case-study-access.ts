@@ -1,3 +1,6 @@
+import {studyCephBase,isStudyCephLineageCapture} from './ortho-study-ceph-lineage';
+import {journeyContentHash} from './ortho-case-journey-hash';
+import {readStoredCephCorrectionOrigin,requireCephCorrectionAncestry,type CephCorrectionStoredColumns} from './ceph-correction-source';
 import {requireStudySpaceSource} from './ortho-study-space-source';
 import { readStudyProblemReview } from "./ortho-study-problem-review";
 import { requireStudyProblemReviewRead } from "./ortho-study-problem-review-store";
@@ -62,8 +65,13 @@ export async function requireCurrentStudyRead(client: DbClient, owner: JourneyOw
           AND (d.ortho_case_id IS NULL OR d.ortho_case_id=$3)`,
       [source.selection.id, owner.patientId, owner.orthoCaseId]);
       if (!rows[0]) journeyFail(403, "study_ceph_source_restricted");
-      if (isWitnessedStudyCephCapture(source.payload)) {
-        const pinned = decodeWitnessedStudyCephCapture(source.payload, source.selection);
+      const row=rows[0] as unknown as CephCorrectionStoredColumns;
+      try { await requireCephCorrectionAncestry(client,row,'locked',assessmentAccess.current.historicallyReadable); }
+      catch(error){if(error instanceof Error && error.message.startsWith('ceph_correction_'))journeyFail(403,'study_ceph_source_restricted');throw error;}
+      if(isStudyCephLineageCapture(source.payload) && journeyContentHash(readStoredCephCorrectionOrigin(row))!==journeyContentHash(source.payload.correctionOrigin))journeyFail(403,'study_ceph_source_restricted');
+      const base=studyCephBase(source.payload);
+      if (isWitnessedStudyCephCapture(base)) {
+        const pinned = decodeWitnessedStudyCephCapture(base, {...source.selection,contentHash:journeyContentHash(base)});
         if (!pinned.ok) journeyFail(403, "study_ceph_source_restricted");
         const { provenance } = await readCurrentStudyCephProvenance(client, source.selection.id, rows[0]);
         if (provenance.state !== "versioned" || provenance.witnessSha256 !== pinned.value.completion.witnessSha256)

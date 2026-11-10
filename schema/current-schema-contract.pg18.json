@@ -5,10 +5,10 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 149,
-    "columns": 1935,
-    "constraints": 2499,
-    "indexes": 484,
-    "triggers": 186
+    "columns": 1939,
+    "constraints": 2502,
+    "indexes": 485,
+    "triggers": 189
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -2058,6 +2058,22 @@
           "type": "text",
           "nullable": true
         },
+        "correction_source": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "correction_source_canonical": {
+          "type": "text",
+          "nullable": true
+        },
+        "correction_source_sha256": {
+          "type": "text",
+          "nullable": true
+        },
+        "corrects_analysis_id": {
+          "type": "int8",
+          "nullable": true
+        },
         "created_at": {
           "type": "timestamptz",
           "nullable": false
@@ -2122,9 +2138,19 @@
       "checks": [
         "ceph_analyses_kind_check",
         "ceph_analyses_phase_check",
-        "ceph_analyses_status_check"
+        "ceph_analyses_status_check",
+        "ceph_correction_origin_complete"
       ],
       "foreignKeys": [
+        {
+          "columns": [
+            "corrects_analysis_id"
+          ],
+          "refTable": "ceph_analyses",
+          "refColumns": [
+            "id"
+          ]
+        },
         {
           "columns": [
             "ortho_case_id"
@@ -2179,6 +2205,12 @@
             "id"
           ],
           "unique": true
+        },
+        "ceph_correction_parent_idx": {
+          "columns": [
+            "corrects_analysis_id"
+          ],
+          "unique": false
         }
       },
       "triggers": {
@@ -2186,6 +2218,26 @@
           "timing": "AFTER",
           "events": [
             "INSERT",
+            "UPDATE"
+          ]
+        },
+        "ceph_correction_final_state": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        "ceph_correction_history_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        },
+        "ceph_correction_origin_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
             "UPDATE"
           ]
         },

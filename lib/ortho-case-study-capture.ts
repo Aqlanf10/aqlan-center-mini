@@ -1,3 +1,4 @@
+import { isStudyCephLineageCapture, readStudyCephLineageEnvelope } from './ortho-study-ceph-lineage';
 import {readStudySpaceCapture} from './ortho-study-space-capture';
 import { readStudyProblemReview } from "./ortho-study-problem-review";
 import { permitsOrthoDocumentation, orthoDocumentationContext } from "./ortho-documentation-context";
@@ -51,7 +52,16 @@ function envelope(raw: unknown, scope: JourneyScope, selection: StudySourceSelec
 }
 function payload(raw: unknown, scope: JourneyScope, s: StudySourceSelection): { value: unknown; images: boolean; plans: boolean } {
   let value: unknown = raw, images = false, plans = false;
-  if (s.kind === "assessment") {
+  if (s.kind === "ceph_study" && isStudyCephLineageCapture(raw)) {
+    const wrapped = readStudyCephLineageEnvelope(raw);
+    if (journeyContentHash(raw) !== s.contentHash || wrapped.correctionOrigin.orthoCaseId !== scope.orthoCaseId) fail();
+    const base = payload(wrapped.base, scope, { ...s, contentHash: journeyContentHash(wrapped.base) });
+    const b = wrapped.base, origin = wrapped.correctionOrigin;
+    if (isWitnessedStudyCephCapture(b)) {
+      if (b.completion.witness.image.documentId !== origin.documentId) fail();
+    } else if (b.correctsStudyId !== origin.parentAnalysisId || (b.image as {documentId?: unknown})?.documentId !== origin.documentId) fail();
+    value = { ...wrapped, base: base.value }; images = true;
+  } else if (s.kind === "assessment") {
     const result = decodeAnyAssessmentRevision(raw, scope); if (!result.ok) fail(result.code);
     if (result.value.id !== s.id || result.value.version !== s.version || result.value.contentHash !== s.contentHash) fail();
     value = result.value; // Transitive current image authority is checked by the store, not inferred here.

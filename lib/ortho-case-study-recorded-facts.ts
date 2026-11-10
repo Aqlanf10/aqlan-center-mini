@@ -1,3 +1,4 @@
+import {studyCephBase,isStudyCephLineageCapture} from './ortho-study-ceph-lineage';
 /** First source-specific semantic projection, working/unreviewed.
  * Captured facts only. Current authorization belongs to the caller's locked reader.
  * No source fetch, clinical inference, approval, formatting of money or render job. */
@@ -48,7 +49,7 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
     const captured = study.sources.find(value => value.selection.key === key);
     if (!captured) throw new Error("study_source_binding_missing");
     if (captured.state !== "available") { unavailable.push({ sourceKey: key, reason: captured.unavailableReason ?? "source_unavailable" }); continue; }
-    const source = captured.selection, value = record(captured.payload);
+    const source = captured.selection, value = record(source.kind === "ceph_study" ? studyCephBase(captured.payload) : captured.payload);
     if (source.kind === "problem_review" && ["diagnosis", "objectives", "problem-plan-strategy"].includes(panel.layoutKey)) {
       const problem = readStudyProblemReview(value, { ...scope, patientId: study.recordedPatientId });
       table(key, [["معرف المراجعة المحفوظة", problem.id], ["معرف المشكلة", problem.problemId], ["المشكلة كما راجعها الطبيب", problem.problemLabelAtReview],
@@ -123,6 +124,12 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
         ["الإجراء المسجل", value.done], ["الملاحظة", value.note], ["وقت توقيع الزيارة المخزن", value.signedAt]]);
       paragraph(key, "هذه حقائق المتابعة المحفوظة في النسخة المختارة. العرض لا ينشئ توقيعًا أو تغييرًا علاجيًا.");
     } else if (source.kind === "ceph_study" && (panel.layoutKey === "ceph-image" || panel.layoutKey === "ceph-measurements")) {
+      if (isStudyCephLineageCapture(captured.payload)) {
+        const origin = captured.payload.correctionOrigin;
+        table(key, [["الدراسة الأصلية للتصحيح", origin.parentAnalysisId], ["معرف صورة أصل التصحيح", origin.documentId],
+          ["بصمة لقطة أصل التصحيح", origin.sourceSnapshotSha256], ["دليل إكمال الأصل", origin.parentCompletion.state === "versioned" ? `النسخة ${origin.parentCompletion.witnessVersion}: ${origin.parentCompletion.witnessSha256}` : "إكمال تاريخي دون شاهد محفوظ"]]);
+        paragraph(key, "هذا رابط مصدر التصحيح المحفوظ؛ لا يستبدل الدراسة الأصلية، ولا يمنح اعتمادًا سريريًا أو مرحلة زمنية جديدة تلقائيًا.");
+      } else paragraph(key, "أصل التصحيح غير موثق في هذه النسخة؛ لا تُستنتج العلاقة من الملاحظات.");
       if (isWitnessedStudyCephCapture(value)) {
         const c = value.completion, w = c.witness;
         table(key, [["معرف دراسة السيفالومتري", value.id], ["الحالة المحفوظة", value.status], ["تاريخ التقاط الصورة المحفوظ", value.acquisitionDate],

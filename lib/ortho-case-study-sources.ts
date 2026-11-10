@@ -1,3 +1,5 @@
+import { readStoredCephCorrectionOrigin, requireCephCorrectionAncestry, type CephCorrectionStoredColumns } from './ceph-correction-source';
+import { withStudyCephLineage } from './ortho-study-ceph-lineage';
 import {requireStudySpaceSource} from './ortho-study-space-source';
 import { readStudyProblemReviews, requireStudyProblemReviewRead } from "./ortho-study-problem-review-store";
 /** Canonical transaction-local study capture. No renderer, file reads, schedule,
@@ -102,13 +104,12 @@ export async function lockStudyExternalSources(client: DbClient, input: JourneyO
   });
   for (const id of external.visits.values()) if (id !== null && !assessmentAccess.currentSessionVisitIds.has(id)) journeyFail(409, "study_visit_scope_changed");
   if (!authority.canViewImages && content.sources.some(s => s.kind === "document" || s.kind === "ceph_study")) journeyFail(403, "study_images_restricted");
-  // The current ceph schema does not persist correction lineage. Preserve an
-  // explicit unknown instead of querying a candidate-only column or inferring it.
+  // New origins are explicit; historical rows remain unknown without note inference.
   for (const id of selectedIds(content, "ceph_study")) {
     const { rows } = await client.query<Record<string, unknown>>(
       `SELECT id,patient_id,ortho_case_id,document_id,status,phase,xray_date::text,device,ref_set,study_kind,note,
        created_at,created_by,completed_at,completed_by,cal_x1,cal_y1,cal_x2,cal_y2,cal_mm,mm_per_pixel,
-       NULL::bigint AS corrects_analysis_id FROM ceph_analyses
+       corrects_analysis_id,correction_source,correction_source_canonical,correction_source_sha256 FROM ceph_analyses
        WHERE id=$1 AND patient_id=$2 AND ortho_case_id=$3`, [id, input.patientId, input.orthoCaseId]);
     if (rows[0]) external.ceph.set(id, rows[0]);
   }
@@ -129,7 +130,7 @@ export async function lockStudyExternalSources(client: DbClient, input: JourneyO
     const { rows } = await client.query<Record<string, unknown>>(
       `SELECT id,patient_id,ortho_case_id,document_id,status,phase,xray_date::text,device,ref_set,study_kind,note,
        created_at,created_by,completed_at,completed_by,cal_x1,cal_y1,cal_x2,cal_y2,cal_mm,mm_per_pixel,
-       NULL::bigint AS corrects_analysis_id FROM ceph_analyses
+       corrects_analysis_id,correction_source,correction_source_canonical,correction_source_sha256 FROM ceph_analyses
        WHERE id=$1 AND patient_id=$2 AND ortho_case_id=$3`, [id, input.patientId, input.orthoCaseId]);
     if (!rows[0]) { external.ceph.delete(id); continue; }
     if (!discovered || rows[0].document_id !== discovered.document_id) journeyFail(409, "study_ceph_document_changed");
@@ -212,6 +213,9 @@ async function captureSources(client: DbClient, owner: JourneyOwner, authority: 
       const row = external.ceph.get(selection.id);
       if (row) {
         if (!journeyId(row.document_id) || typeof row.status !== "string" || !["draft", "completed", "discarded"].includes(row.status)) journeyFail(500, "invalid_ceph_source");
+        const origin = readStoredCephCorrectionOrigin(row as unknown as CephCorrectionStoredColumns);
+        try { await requireCephCorrectionAncestry(client,row as unknown as CephCorrectionStoredColumns,'locked',assessmentAccess.current?.historicallyReadable); }
+        catch(error){if(error instanceof Error && error.message.startsWith('ceph_correction_'))journeyFail(409,'study_ceph_source_changed');throw error;}
         const document = external.documents.get(row.document_id);
         if (!document) journeyFail(409, "ceph_document_scope_changed");
         const { provenance, measurements, diagnoses } = await readCurrentStudyCephProvenance(client, selection.id, row);
@@ -230,9 +234,10 @@ async function captureSources(client: DbClient, owner: JourneyOwner, authority: 
           const witnessedHash = journeyContentHash(witnessed);
           const checked = decodeWitnessedStudyCephCapture(witnessed, { ...selection, contentHash: witnessedHash });
           if (!checked.ok) journeyFail(409, "study_ceph_source_changed");
-          if (discoverHash || selection.contentHash === witnessedHash) {
-            captures.push({ selection: discoverHash ? { ...selection, contentHash: witnessedHash } : selection,
-              state: "available", unavailableReason: null, access, payload: checked.value });
+          const wrapped = withStudyCephLineage(checked.value, origin), wrappedHash = journeyContentHash(wrapped);
+          if (discoverHash || selection.contentHash === wrappedHash) {
+            captures.push({ selection: discoverHash ? { ...selection, contentHash: wrappedHash } : selection,
+              state: "available", unavailableReason: null, access, payload: wrapped });
             continue;
           }
           // An already reserved command may pin the old exact payload. Retain
@@ -253,6 +258,7 @@ async function captureSources(client: DbClient, owner: JourneyOwner, authority: 
             finalDx: text(dx.final_dx), createdBy: text(dx.created_by, 200), createdAt: iso(dx.created_at), updatedAt: iso(dx.updated_at) } : null,
           interpretation: { state: "unavailable", reason: "review_and_reference_witness_not_versioned" },
           historicalCompletionMeaning: "stored_completion_not_new_clinical_validation" };
+        payload = withStudyCephLineage(payload, origin);
         actualHash = journeyContentHash(payload);
       }
     } else if (selection.kind === "adjustment" && external.visits.has(selection.id)) {

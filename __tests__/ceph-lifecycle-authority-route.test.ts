@@ -11,6 +11,7 @@ vi.mock("../lib/db", () => ({
 import { POST as create } from "../app/api/patients/[id]/ceph/route";
 import { POST as duplicate } from "../app/api/ceph/[id]/duplicate/route";
 import { DELETE } from "../app/api/ceph/[id]/route";
+const correctionToken={schemaVersion:1,analysisId:71,patientId:11,orthoCaseId:null,documentId:22,sourceSha256:"a".repeat(64)};
 const admitted = (role = "doctor") => ({ userId: 7, username: "synthetic-operator", role,
   credentialVersion: "synthetic-credential-version", expiresAt: Date.now() + 60_000 });
 const call = (body: unknown = { note: "Synthetic discard reason" }) =>
@@ -69,7 +70,7 @@ describe("ceph creation and correction HTTP admission", () => {
   }), { params: Promise.resolve({ id: "11" }) });
   const duplicateCall = () => duplicate(new Request("https://test.invalid/api/ceph/71/duplicate", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ patientId: 999, documentId: 999, by: "forged", session: { role: "admin" } }),
+    body: JSON.stringify({ schemaVersion:1, expectedCorrectionSource:correctionToken }),
   }), { params: Promise.resolve({ id: "71" }) });
   it.each(["admin", "doctor", "reception"])("preserves scoped clinic role %s for creation and correction", async role => {
     const session = admitted(role); m.session.mockResolvedValue(session);
@@ -78,7 +79,7 @@ describe("ceph creation and correction HTTP admission", () => {
       { patientId: 11, documentId: 22, session });
     expect(m.create.mock.calls[0][0]).not.toHaveProperty("createdBy");
     expect((await duplicateCall()).status).toBe(201);
-    expect(m.duplicate).toHaveBeenCalledExactlyOnceWith(71, { patientId: 11, documentId: 22, session });
+    expect(m.duplicate).toHaveBeenCalledExactlyOnceWith(71, { patientId: 11, documentId: 22, session }, correctionToken);
   });
   it.each([401, 403, 409] as const)("maps current-authority refusal %s from both writers", async status => {
     const error = new ClinicalMutationAuthorityError(status, "Synthetic lifecycle refusal");
@@ -87,6 +88,10 @@ describe("ceph creation and correction HTTP admission", () => {
       expect(response.status).toBe(status);
       expect(await response.json()).toEqual({ message: "Synthetic lifecycle refusal" });
     }
+  });
+  it.each([null,{}, {schemaVersion:1,expectedCorrectionSource:{...correctionToken,analysisId:72}}, {schemaVersion:1,expectedCorrectionSource:correctionToken,patientId:999}])("refuses missing, foreign or forged correction commands before writer: %j", async body=>{
+    const response=await duplicate(new Request("https://test.invalid/api/ceph/71/duplicate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}),{params:Promise.resolve({id:"71"})});
+    expect(response.status).toBe(400);expect(m.duplicate).not.toHaveBeenCalled();
   });
   it("keeps domain conflicts distinct from success", async () => {
     m.create.mockResolvedValue({ ok: false, message: "Draft already exists" });

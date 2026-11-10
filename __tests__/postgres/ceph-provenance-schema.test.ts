@@ -132,6 +132,12 @@ it('round-trips sealed evidence and legacy absence through full backup and fresh
   const validStudy = await f.db.getCephStudy(validAnalysisId);
   expect(validStudy?.provenance.state).toBe('versioned');
   if (validStudy?.provenance.state === 'versioned') expect(validStudy.provenance.witness.schemaVersion).toBe(2);
+  if(validStudy?.correctionSource.state!=='available')throw Error('Synthetic correction origin unavailable');
+  const session:SessionPayload={userId:actorId,username:actorName,role:'admin',expiresAt:Date.now()+3600000,credentialVersion:sessionCredentialVersion('synthetic-not-a-secret')};
+  const correction=await f.db.duplicateAuthorizedCephAnalysis(validAnalysisId,{patientId:validStudy.analysis.patientId,documentId:validStudy.analysis.documentId,session},validStudy.correctionSource.token);
+  if(!correction.ok)throw Error('Synthetic correction creation failed');
+  const correctionStudy=await f.db.getCephStudy(correction.id);
+  expect(correctionStudy?.analysis.correctionOrigin).toMatchObject({parentAnalysisId:validAnalysisId,parentCompletion:{state:'versioned',witnessVersion:2}});
   const expected = await state();
   expect(expected.provenance.length).toBeGreaterThan(0);
   expect(expected.analyses.length).toBeGreaterThan(expected.provenance.length);
@@ -147,9 +153,11 @@ it('round-trips sealed evidence and legacy absence through full backup and fresh
     expect(restored.errors).toEqual([]);
     expect(restored.ok).toBe(true);
     expect(restored.migrationsApplied).toContain('0113');
+    expect(restored.migrationsApplied).toContain('0124');
     expect(await state()).toEqual(expected);
     const reopened = await f.db.getCephStudy(validAnalysisId);
     expect(reopened?.provenance.state).toBe("versioned");
     expect(reopened).toEqual(validStudy);
+    expect(await f.db.getCephStudy(correction.id)).toEqual(correctionStudy);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

@@ -1,3 +1,4 @@
+import {studyCephBase} from './ortho-study-ceph-lineage';
 /** Read-only eligibility over immutable saved study bytes, never today's ceph
  * definitions/references, mutable landmarks, or inferred acquisition order. */
 import {isWitnessedStudyCephCapture} from './ortho-study-ceph-capture';
@@ -17,8 +18,9 @@ export function projectStudyLongitudinalEligibility(revision:StudyRevision<Study
    const capture=saved.sources.find(source=>source.selection.key===selection.key);if(!capture)throw Error('study_longitudinal_capture_missing');
    const result:StudyLongitudinalSource={key:selection.key,id:selection.id,contentHash:selection.contentHash,captureState:capture.state,status:null,acquisitionDate:null,referenceSetKey:null,image:null,witness:'unavailable',completion:null,reasons:[]};
    if(capture.state==='available'){
-    if(isWitnessedStudyCephCapture(capture.payload)){
-     const p=capture.payload,w=p.completion.witness;
+    const base=studyCephBase(capture.payload);
+    if(isWitnessedStudyCephCapture(base)){
+     const p=base,w=p.completion.witness;
      // Completed witnesses were checked by the saved-content decoder. Narrow
      // the nullable snapshot shape explicitly before copying its calibration.
      const {calibration,mmPerPixel}=w.snapshot;
@@ -42,7 +44,7 @@ export function projectStudyLongitudinalEligibility(revision:StudyRevision<Study
       result.completion={schemaVersion:1,...common,sourceIdentityMeaning:p.completion.witness.sourceIdentityMeaning};
      }
     }else{
-     const p=capture.payload as {status:StudyLongitudinalSource['status'];acquisitionDate:string|null;referenceSetKey:string;image:StudyLongitudinalSource['image']};
+     const p=base as {status:StudyLongitudinalSource['status'];acquisitionDate:string|null;referenceSetKey:string;image:StudyLongitudinalSource['image']};
      Object.assign(result,{status:p.status,acquisitionDate:p.acquisitionDate,referenceSetKey:p.referenceSetKey,image:p.image,witness:'legacy_unversioned'});
     }
    }
