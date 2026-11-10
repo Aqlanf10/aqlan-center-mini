@@ -85,6 +85,10 @@ describe("one workup path over the existing record owners", () => {
       await expect.poll(() => page.getByTestId("ortho-case-assessment-v2").innerText()).toContain("شكوى اصطناعية محفوظة مرة واحدة");
       // Saved documentation remains concise without losing the complaint or its exact source facts.
       const savedFindings = page.getByRole("region", { name: "نتائج المقابلة والفحص المحفوظة", exact: true });
+      const savedDate = (await db.query("SELECT created_at FROM ortho_assessment_revisions WHERE ortho_case_id=$1 ORDER BY version DESC LIMIT 1", [orthoCaseId])).rows[0].created_at as Date;
+      const recordingDate = savedFindings.locator("p").filter({ hasText: "المراجعة #" }).locator("bdi");
+      expect(await recordingDate.getAttribute("dir")).toBe("ltr");
+      expect(await recordingDate.innerText()).toBe(savedDate.toISOString().slice(0, 10));
       const historySummary = savedFindings.getByRole("region", { name: "ملخص التوثيق المحفوظ — المقابلة وتاريخ الحالة", exact: true });
       expect(await historySummary.getByText("موثق: 1", { exact: true }).isVisible()).toBe(true);
       expect(await historySummary.getByText("غير مسجل: 4", { exact: true }).isVisible()).toBe(true);
