@@ -2541,9 +2541,11 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
   // Blank is unknown input, never zero. Accept an explicitly entered decimal
   // integer only; do not coerce exponent/hex notation into a clinical duration.
   const parseMonths = (raw: string): number | null => {
-    if (!/^(0|[1-9]\d{0,2})$/.test(raw.trim())) return null;
-    const value = Number(raw.trim());
-    return value <= 120 ? value : null;
+    const digits = raw.trim().replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 0x0660))
+      .replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 0x06f0));
+    if (!/^[0-9]+$/.test(digits)) return null;
+    const value = Number(digits);
+    return Number.isSafeInteger(value) && value <= 120 ? value : null;
   };
   const elapsedNumber = parseMonths(monthsElapsed), remainingNumber = parseMonths(monthsRemaining);
   const derivedStart = elapsedNumber === null ? null : monthsBefore(today, elapsedNumber);

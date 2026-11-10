@@ -335,10 +335,13 @@ describe("legacy baseline explicit month entry", () => {
     const promise=submit();await drain();expect(writes()).toEqual([]);await promise;
     expect(control(label).props.value).toBe(value);
   });
-  it.each([["0","0"],["120","12"]])("sends explicitly entered valid month counts %s/%s and keeps double-submit protection", async (elapsed,remaining) => {
+  it.each([
+    ["0","0",0,0],["120","12",120,12],["06","012",6,12],
+    ["٦","١٢",6,12],["۶","۱۲",6,12],["٠","۰",0,0],["١٢٠","۱۲۰",120,120],
+  ] as const)("sends explicitly entered valid month counts %s/%s and keeps double-submit protection", async (elapsed,remaining,elapsedValue,remainingValue) => {
     await start(); edit("الأشهر المنقضية",elapsed);edit("الأشهر المتبقية",remaining);
     expect(text(render())).toContain("بدء تقريبي:");const before=fields(),view=form();const first=submit(view),duplicate=submit(view);
-    expect(writes()).toHaveLength(1);expect(JSON.parse(String(writes()[0].init?.body))).toMatchObject({monthsElapsed:Number(elapsed),monthsRemaining:Number(remaining)});
+    expect(writes()).toHaveLength(1);expect(JSON.parse(String(writes()[0].init?.body))).toMatchObject({monthsElapsed:elapsedValue,monthsRemaining:remainingValue});
     respond(writes()[0],{message:"Synthetic explicit rejection"},409);await Promise.all([first,duplicate]);await flush();expect(fields()).toEqual(before);
   });
 });
