@@ -4,6 +4,8 @@ import { assessmentJsonHash, createPersistedAssessmentV2, decodeAnyAssessmentRev
 import * as currentEngine from "../lib/ortho-assessment-engine-v2";
 import { decodeStudySavedContent, type StudySavedContent } from "../lib/ortho-case-study-capture";
 import { projectStudyRecordedFacts } from "../lib/ortho-case-study-recorded-facts";
+import { studyPageNotes, validateStudyNotesProjection } from "../lib/ortho-study-presentation-notes";
+import { checkedStudyPageNotes } from "../lib/ortho-study-model-analysis-evidence";
 import { studyTextPresentation } from "../lib/ortho-study-text-export";
 import { journeyContentHash } from "../lib/ortho-case-journey-hash";
 import { canonicalJourneyJSON } from "../lib/ortho-case-journey-json";
@@ -85,16 +87,30 @@ describe("historical assessment study boundaries", () => {
     const facts = projectStudyRecordedFacts(study, scope, "historical_panel", "documented");
     const cells = facts.blocks.flatMap(block => block.kind === "table" ? block.rows.map(row => row.cells[1]) : []);
     expect(facts.complete).toBe(true);
-    for (const result of payload.content.results) {
-      expect(cells).toContain(result.resultHash);
-      expect(cells).toContain(result.result.state);
-      expect(cells).toContain(canonicalJourneyJSON(result.result));
+    expect(cells).toEqual(expect.arrayContaining(["70 mm", "0 mm", "100 %", "77.2 %", "المدخلات غير مكتملة", "مسودة حسابية؛ غير معتمدة سريريًا",
+      "Bolton 1962, DOI 10.1016/0002-9416(62)90129-X, pp.506–508,517"]));
+    const lowerTable = facts.modelTables.find(table => table.analysisId === "space_lower")!;
+    const lowerBlock = facts.blocks[lowerTable.blockIndex]; expect(lowerBlock.kind).toBe("table");
+    if (lowerBlock.kind === "table") {
+      expect(lowerBlock.rows.map(row => row.cells)).toContainEqual(["حالة الحساب", "المدخلات غير مكتملة"]);
+      expect(lowerBlock.rows.some(row => row.cells[0] === "المتاح ناقص المطلوب")).toBe(false);
     }
-    const text = JSON.stringify(facts.blocks);
-    expect(text).toContain("ready"); expect(text).toContain("incomplete"); expect(text).toContain("غير معتمد");
-    expect(text).toContain("ortho-model-2.1.0");
     const output = studyTextPresentation(studyRevision(study), scope);
     expect(output.revisionHash).toBe(journeyContentHash(study));
+    validateStudyNotesProjection(output);
+    const serialized = checkedStudyPageNotes(output.pages.map(page => studyPageNotes(output, page, "synthetic-historical-acceptance")));
+    const notes: ReturnType<typeof studyPageNotes>[] = serialized.map(note => JSON.parse(note));
+    const evidence = notes.flatMap(note => note.modelAnalyses);
+    expect(evidence).toEqual(facts.modelAnalyses); expect(evidence).toHaveLength(payload.content.results.length);
+    for (const result of payload.content.results) {
+      const witness = evidence.find(item => item.exactWitness.stored.analysisId === result.analysisId)!;
+      expect(witness.source).toEqual(study.authored.sources[0]); expect(witness.panelInstanceId).toBe("historical_panel");
+      expect(witness.exactWitness).toEqual({ selection: payload.content.draft.analyses.find(row => row.id === result.analysisId), stored: result });
+      expect(canonicalJourneyJSON(witness.exactWitness.stored.result)).toBe(canonicalJourneyJSON(result.result));
+      expect(witness.exactWitness.stored.resultHash).toBe(result.resultHash);
+      const { witnessHash, ...exact } = witness; expect(witnessHash).toBe(journeyContentHash(exact));
+      if (result.result.state === "ready") expect(canonicalJourneyJSON(witness.exactWitness.stored.result)).toContain("ortho-model-2.1.0");
+    }
     expect(vi.mocked(currentEngine.deriveDraftAnalysisV2)).not.toHaveBeenCalled();
     expect(JSON.stringify(study)).toBe(before);
   });

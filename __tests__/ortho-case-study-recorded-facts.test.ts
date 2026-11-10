@@ -1,14 +1,35 @@
 import { tanakaCommandV2 } from "./fixtures/ortho-assessment-tanaka";
 import { describe, expect, it } from "vitest";
 import { assessmentCommandV2 } from "./fixtures/ortho-assessment-schema2";
-import { createPersistedAssessmentV2, assessmentJsonHash } from "../lib/ortho-assessment-persisted-v2";
+import { createPersistedAssessmentV2, assessmentJsonHash, type PersistedAssessmentContentV2 } from "../lib/ortho-assessment-persisted-v2";
 import type { StudySourceSelection } from "../lib/ortho-case-study";
 import { projectStudyRecordedFacts } from "../lib/ortho-case-study-recorded-facts";
 import { journeyContentHash } from "../lib/ortho-case-journey-hash";
 import { CASE_TEMPLATE_VERSION } from "../lib/ortho-case-template";
 import { STUDY_TEMPLATE_HASH } from "../lib/ortho-case-study-template";
+import { canonicalJourneyJSON } from "../lib/ortho-case-journey-json";
 import type { StudySavedContent } from "../lib/ortho-case-study-capture";
 const scope = { patientId: 19, orthoCaseId: 41, clinicalCaseId: 51 };
+function modelRows(facts: ReturnType<typeof projectStudyRecordedFacts>, analysisId: string) {
+  const table = facts.modelTables.find(table => table.analysisId === analysisId);
+  expect(table).toBeDefined(); const block = facts.blocks[table!.blockIndex];
+  if (block.kind !== "table") throw Error("Expected source-bound model table");
+  return block.rows.map(row => row.cells);
+}
+function exactModelEvidence(facts: ReturnType<typeof projectStudyRecordedFacts>, content: PersistedAssessmentContentV2, source: StudySourceSelection) {
+  expect(facts.modelAnalyses).toHaveLength(content.results.length);
+  for (const stored of content.results) {
+    const evidence = facts.modelAnalyses.find(item => item.exactWitness.stored.analysisId === stored.analysisId)!;
+    expect(evidence).toBeDefined(); expect(evidence.source).toEqual(source); expect(evidence.panelInstanceId).toBe("diagnosis_panel");
+    expect(evidence.exactWitness).toEqual({ selection: content.draft.analyses.find(row => row.id === stored.analysisId), stored });
+    expect(canonicalJourneyJSON(evidence.exactWitness.stored.result)).toBe(canonicalJourneyJSON(stored.result));
+    const { witnessHash, ...witness } = evidence; expect(witnessHash).toBe(journeyContentHash(witness));
+    expect(evidence.measurementSet).toEqual(content.draft.measurementSets.find(set => set.id === evidence.exactWitness.selection.measurementSetId));
+    expect(evidence.inputs).toEqual(stored.result.dependencyObservationIds.map(observationId => ({ observationId,
+      observation: content.draft.observations.observations.find(row => row.id === observationId) ?? null })));
+  }
+}
+
 function diagnosis(): StudySavedContent {
   const content = { skeletal: "Synthetic recorded skeletal finding", dental: null, crowding: "Unknown", overjet: null, bite: null, note: "Synthetic historical note" };
   const selection = { key: "diagnosis1", kind: "diagnosis" as const, id: 91, version: 1, contentHash: journeyContentHash(content) };
@@ -155,9 +176,23 @@ it("projects full decoded assessment set memberships and stored ready/non-ready 
   expect(castText).toContain("current"); expect(castText).toContain("incomplete_set");
   expect(castBlocks.flatMap(block => block.kind === "table" ? block.rows.flatMap(row => row.cells) : [])).toContain(JSON.stringify(command.content.measurementSets[0].toothWidthObservationIds));
   expect(castText).toContain("available_upper"); expect(castText).toContain("available_lower"); expect(JSON.stringify(cast)).toBe(before);
-  const model = selectedCapture(selection, payload, "model-measurements"); const result = projectStudyRecordedFacts(model, scope, "diagnosis_panel", "documented");
-  const text = JSON.stringify(result.blocks); expect(text).toContain("ready"); expect(text).toContain("incomplete"); expect(text).toContain("غير معتمد");
-  for (const stored of persisted.value.results) expect(text).toContain(stored.resultHash);
+  const model = selectedCapture(selection, payload, "model-measurements"), modelBefore = JSON.stringify(model);
+  const result = projectStudyRecordedFacts(model, scope, "diagnosis_panel", "documented");
+  expect(result.complete).toBe(true);
+  expect(modelRows(result, "space_upper")).toEqual(expect.arrayContaining([
+    ["المسافة المتاحة", "70 mm"], ["المسافة المطلوبة", "70 mm"], ["المتاح ناقص المطلوب", "0 mm"],
+    ["الاعتماد السريري", "مسودة حسابية؛ غير معتمدة سريريًا"],
+  ]));
+  const incomplete = modelRows(result, "space_missing");
+  expect(incomplete).toContainEqual(["حالة الحساب", "المدخلات غير مكتملة"]);
+  expect(incomplete.some(row => row[0].startsWith("المدخل الناقص"))).toBe(true);
+  expect(incomplete.some(row => row[0] === "المتاح ناقص المطلوب")).toBe(false);
+  expect(modelRows(result, "bolton_anterior")).toEqual(expect.arrayContaining([
+    ["نسبة السفلي إلى العلوي", "100 %"], ["النسبة المرجعية المحفوظة", "77.2 %"],
+    ["المرجع المحفوظ", "Bolton 1962, DOI 10.1016/0002-9416(62)90129-X, pp.506–508,517"],
+  ]));
+  exactModelEvidence(result, persisted.value, selection);
+  expect(JSON.stringify(model)).toBe(modelBefore);
 });
 it("preserves adjustment visit identity and missing signature without making a new signature", () => {
   const payload = { id: 91, visitId: 101, doneOn: "2026-09-01", phase: null, upperWire: "Synthetic upper", lowerWire: null, done: "Synthetic recorded action", note: null, signedAt: null };
@@ -192,10 +227,23 @@ it("projects saved Tanaka measurements as unapproved estimates without recalcula
   const input = selectedCapture(selection, payload, "model-measurements"), before = JSON.stringify(input);
   const result = projectStudyRecordedFacts(input, scope, "diagnosis_panel", "documented");
   expect(result.complete).toBe(true);
-  const text = JSON.stringify(result.blocks);
-  expect(text).toContain("Tanaka–Johnston1974"); expect(text).toContain("لكل جهة — تقدير");
-  expect(text).toContain("غير معتمد؛ تقدير يحتاج مراجعة الطبيب"); expect(text).toContain("ortho-model-2.2.1");
-  for (const entry of persisted.value.results) expect(text).toContain(entry.resultHash);
+  for (const analysis of persisted.value.draft.analyses) {
+    const rows = modelRows(result, analysis.id), upper = "arch" in analysis && analysis.arch === "upper";
+    expect(rows).toEqual(expect.arrayContaining([
+      ["التحليل", "تقدير Tanaka–Johnston 1974"], ["الاعتماد السريري", "مسودة حسابية؛ غير معتمدة سريريًا"],
+      ["الناب والضاحكان لكل جهة — تقدير", upper ? "22 mm" : "21.5 mm"],
+      ["الناب والضاحكان في الجهتين — تقدير", upper ? "44 mm" : "43 mm"],
+      ["المسافة المطلوبة المقدّرة", upper ? "74 mm" : "65 mm"], ["المتاح ناقص المطلوب المقدّر", "-2 mm"],
+      ["ملاءمة المرجع للحالة", "لم تُقيّم"], ["الحد الأدنى لمجال المدخل المدعوم", "20.5 mm"], ["الحد الأعلى لمجال المدخل المدعوم", "27 mm"],
+      ["المرجع المحفوظ", "Tanaka & Johnston1974, DOI10.14219/jada.archive.1974.0158, pp798–801"],
+      ["حدود التفسير", "القيم المقدّرة ليست قياسات مباشرة؛ مجال الدعم ليس مجالًا طبيعيًا بيولوجيًا."],
+    ]));
+  }
+  exactModelEvidence(result, persisted.value, selection);
+  for (const evidence of result.modelAnalyses) {
+    expect(evidence.exactWitness.stored.result.state).toBe("ready");
+    if (evidence.exactWitness.stored.result.state === "ready") expect(evidence.exactWitness.stored.result.witness.formula.engineVersion).toBe("ortho-model-2.2.1");
+  }
   expect(JSON.stringify(input)).toBe(before);
 });
 it('renders retained v2 document fingerprints as historical evidence, never image/current proof',()=>{
