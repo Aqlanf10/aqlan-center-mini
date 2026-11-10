@@ -46,13 +46,14 @@ async function createStudy(patientId: number) {
   const query = `patientId=${patientId}&revisionId=${revisionId}`;
   return { caseId, revisionId, capturedAt: saved.revision.content.capturedAt as string, marker, read: `${route}?${query}`,
     outputs: [`${route}/text-pptx?${query}`, `${route}/illustrated-pptx?${query}`,
-      `/print/ortho-study/${caseId}?${query}`, `/print/ortho-study/${caseId}?${query}&mode=illustrated`] };
+      `/print/ortho-study/${caseId}?${query}`, `/print/ortho-study/${caseId}?${query}&mode=illustrated`,
+      `/print/ortho-study/${caseId}?${query}&mode=full`] };
 }
 
 async function rejectOutputs(study: Awaited<ReturnType<typeof createStudy>>, session: Pick<Session, "cookie">) {
   for (const url of study.outputs) {
     const response = await authedGet(url, session);
-    const illustratedPrint = url.endsWith("&mode=illustrated");
+    const illustratedPrint = url.endsWith("&mode=illustrated") || url.endsWith("&mode=full");
     expect(response.status, url).toBe(url.startsWith("/api/") ? 403 : illustratedPrint ? 200 : 404);
     expect(response.headers.get("content-type")).not.toContain("presentationml");
     const body = await response.text();
@@ -61,6 +62,7 @@ async function rejectOutputs(study: Awaited<ReturnType<typeof createStudy>>, ses
     if (illustratedPrint) {
       expect(body).toContain("تعذر تجهيز الدراسة المصورة كاملة");
       expect(body).not.toContain('class="study-sheet');
+      expect(body).not.toContain('data-full-study-print');
       expect(body).not.toContain("data:image/png;base64,");
       expect(body).not.toContain("طباعة / حفظ PDF");
     }
@@ -69,7 +71,7 @@ async function rejectOutputs(study: Awaited<ReturnType<typeof createStudy>>, ses
 
 const money = async () => (await db.query("SELECT (SELECT count(*)::int FROM invoices) invoices,(SELECT count(*)::int FROM payments) payments,(SELECT count(*)::int FROM patient_opening_balances) opening")).rows;
 
-it.each(["doctorA", "reception"] as const)("%s keeps saved-study access while four exports require a current grant", async role => {
+it.each(["doctorA", "reception"] as const)("%s keeps saved-study access while all exports require a current grant", async role => {
   const username = role === "doctorA" ? "secdoctora" : "secreception";
   const original = (await db.query("SELECT permissions FROM users WHERE username=$1", [username])).rows[0].permissions as string | null;
   const base = original ? JSON.parse(original) as Record<string, unknown> : {};
@@ -206,7 +208,7 @@ it.each([390, 1280])("shows current export controls on the saved case only after
 });
 
 
-it("renders the saved capture context once on a separate PDF page in both print modes", async () => {
+it("renders the saved capture context once on a separate PDF page in every print mode", async () => {
   const study = await createStudy(h.seeded.patientAId);
   const directory = await mkdtemp(join(tmpdir(), "synthetic-study-print-"));
   const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, locale: "ar-YE" });
@@ -221,7 +223,7 @@ it("renders the saved capture context once on a separate PDF page in both print 
     return route.continue();
   });
   try {
-    for (const [index, mode] of ["text", "illustrated"].entries()) {
+    for (const [index, mode] of ["text", "illustrated", "full"].entries()) {
       const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
       const response = await page.goto(`${baseUrl}${study.outputs[index + 2]}`);
       expect(response?.status()).toBe(200);
@@ -229,6 +231,12 @@ it("renders the saved capture context once on a separate PDF page in both print 
       expect(await page.getByText("سياق التقاط الدراسة المحفوظة", { exact: true }).count()).toBe(1);
       expect(await page.locator("main").innerText()).toContain("حالة التقويم عند التقاط الدراسة: مكتملة");
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(image => image.decode().catch(() => undefined))); });
+      if (mode === "full") {
+        expect(response?.headers()["cache-control"]).toContain("no-store");
+        await expect.poll(() => page.locator('[data-full-study-print]').getAttribute('data-print-ready')).toBe('true');
+        expect(await page.locator('[data-print-sheet]').count()).toBe(2);
+        expect(await page.getByRole('button', {name:'طباعة / حفظ PDF',exact:true}).isEnabled()).toBe(true);
+      }
       const pdf = join(directory, `${mode}.pdf`);
       await page.pdf({ path: pdf, format: "A4", preferCSSPageSize: true, printBackground: true });
       const info = execFileSync("pdfinfo", [pdf], { encoding: "utf8" });
