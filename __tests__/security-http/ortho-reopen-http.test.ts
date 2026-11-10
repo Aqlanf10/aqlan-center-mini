@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium, type Browser } from 'playwright';
 import { CASE_STATUS_LABEL } from '../../lib/ortho';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -127,7 +127,8 @@ it.each([390,1280])('reopens the same case through explicit browser review and r
  const bridgeBefore=(await db.query('SELECT * FROM clinical_cases WHERE id=$1',[f.clinicalCaseId])).rows;
  const context=await browser.newContext({viewport:{width,height:1000},locale:'ar-YE'});
  const [name,...cookie]=h.sessions.admin.cookie.split('=');await context.addCookies([{name,value:cookie.join('='),url:baseUrl}]);
- const page=await context.newPage(),errors:string[]=[],posts:string[]=[];page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));
+ const page=await context.newPage(),errors:string[]=[],posts:string[]=[],reopenReads:string[]=[];page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));
+ page.on('request',request=>{if(request.method()==='GET'&&new URL(request.url()).pathname===f.path)reopenReads.push(new URL(request.url()).search);});
  let dropped=false;
  await page.route(`**${f.path}`,async route=>{
   if(route.request().method()!=='POST'){await route.continue();return;}
@@ -168,5 +169,11 @@ it.each([390,1280])('reopens the same case through explicit browser review and r
   await expect.poll(async()=>current.innerText()).toContain('Synthetic browser subsequent closure');expect(posts).toHaveLength(1);
   expect((await db.query('SELECT * FROM clinical_cases WHERE id=$1',[f.clinicalCaseId])).rows).toEqual(bridgeBefore);
   expect(await counts(f)).toEqual(beforeCounts);expect(errors).toEqual([]);
+ }catch(error){
+  // Synthetic acceptance diagnostics only; keep the original failure decisive.
+  const state=await page.locator('details').evaluateAll(nodes=>nodes.map(node=>({open:(node as HTMLDetailsElement).open,summary:node.querySelector('summary')?.textContent}))).catch(()=>[]);
+  await writeFile(`.settings-ui-artifacts/ortho-reopen-${width}-failure.json`,JSON.stringify({state,reopenReads,errors},null,2));
+  await page.screenshot({path:`.settings-ui-artifacts/ortho-reopen-${width}-failure.png`}).catch(()=>{});
+  throw error;
  }finally{await context.close();}
 });
