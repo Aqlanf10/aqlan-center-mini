@@ -94,6 +94,13 @@ it.each([390, 1280])('records and revises image-bound thirds/fifths without infe
   const href = `${baseUrl}/ortho/${f.orthoCaseId}/facial?patientId=${f.patientId}`;
   try {
     await f.page.goto(href); await selectImage(f.page, first);
+    const guide = f.page.locator('details').filter({ has: f.page.getByText('دليل القياس والحفظ', { exact: true }) });
+    expect(await guide.getAttribute('open')).toBeNull();
+    await guide.locator('summary').click();
+    expect(await guide.getAttribute('open')).not.toBeNull();
+    expect(await guide.getByText(/الأخماس هنا تستخدم حدود الأذن Postaurale/).isVisible()).toBe(true);
+    await guide.locator('summary').focus(); await f.page.keyboard.press('Enter');
+    expect(await guide.getAttribute('open')).toBeNull();
     await f.page.getByRole('button', { name: 'بدء قياسات هذه الصورة', exact: true }).click(); await points(f.page, first.width);
     const results = f.page.getByRole('region', { name: 'نتائج قياسات الوجه', exact: true });
     expect(await results.innerText()).toContain('33.3% · 100.0 px'); expect(await results.innerText()).toContain('20.0% · 60.0 px');
@@ -126,6 +133,9 @@ it.each([390, 1280])('records and revises image-bound thirds/fifths without infe
     expect(await f.page.getByText('نسخة 2 محفوظة — راجعها الطبيب', { exact: true }).isVisible()).toBe(true);
     expect(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await f.page.getByRole('heading', { name: 'قياسات صورة الوجه', exact: true }).scrollIntoViewIfNeeded();
+    const imageTop = await f.page.getByRole('img', { name: 'أصل صورة الوجه باتجاه العرض المتحقق', exact: true }).boundingBox();
+    expect(imageTop).not.toBeNull();
+    if (width === 390) expect(imageTop!.y).toBeLessThan(650);
     await f.page.screenshot({ path: `.settings-ui-artifacts/ortho-facial-${width}.png` });
     // Fresh patient authority is checked on real API and page loads.
     const foreignPatient = Number((await db.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic foreign facial patient') RETURNING id", [randomUUID()])).rows[0].id);

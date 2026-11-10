@@ -167,7 +167,7 @@ function ArchiveWorkspace(props: Props & { actorId?: number }) {
           <p className="text-xs">أُنشئ <time dateTime={job.createdAt} title={job.createdAt} dir="ltr" className="inline-block whitespace-nowrap tabular-nums">
             {new Date(job.createdAt).toISOString().slice(0, 16).replace("T", " · ")} UTC</time></p>
           {job.failureCode && <p>{failures[job.failureCode]}</p>}
-          {job.state === "ready" && job.artifact && <a className={control} href={`${endpoint}/${job.id}/download?patientId=${props.patientId}`}>تنزيل الملف المحفوظ · {job.artifact.pageCount} صفحات</a>}
+          {job.state === "ready" && job.artifact && <a className={`${control} mt-2 inline-flex items-center`} href={`${endpoint}/${job.id}/download?patientId=${props.patientId}`}>تنزيل الملف المحفوظ · {job.artifact.pageCount} صفحات</a>}
           {job.creatorId === props.actorId && ["queued", "running", "failed"].includes(job.state) && <button type="button" className={control} disabled={busy}
             onClick={() => void request("run", job)}>{job.state === "queued" ? "تجهيز الملف" : "إعادة محاولة تجهيز الملف"}</button>}
         </li>)}</ul>

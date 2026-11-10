@@ -161,6 +161,15 @@ it.each([390, 1280])('archives the selected saved revision through explicit brow
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const panel = page.locator('details').filter({ has: page.getByText('ملفات التصدير المحفوظة', { exact: true }) });
     await panel.scrollIntoViewIfNeeded();
+    // A padded inline anchor can overlap the preceding timestamp and exceed
+    // its row. Verify real browser geometry rather than a class-name snapshot.
+    const downloadBox = await link.boundingBox();
+    const timeBox = await panel.locator('li').filter({ has: link }).locator('time').boundingBox();
+    const rowBox = await panel.locator('li').filter({ has: link }).boundingBox();
+    expect(downloadBox).not.toBeNull(); expect(timeBox).not.toBeNull(); expect(rowBox).not.toBeNull();
+    expect(downloadBox!.height).toBeGreaterThanOrEqual(44);
+    expect(downloadBox!.y).toBeGreaterThanOrEqual(timeBox!.y + timeBox!.height);
+    expect(downloadBox!.y + downloadBox!.height).toBeLessThanOrEqual(rowBox!.y + rowBox!.height);
     await mkdir('.settings-ui-artifacts', { recursive: true });
     await panel.screenshot({ path: `.settings-ui-artifacts/ortho-archive-${width}.png` });
     // Seed queued history through the real reserve API, then recover the original
