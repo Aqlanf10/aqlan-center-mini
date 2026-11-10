@@ -41,6 +41,8 @@ describe("patient appointment history index provenance", () => {
       "0121_ortho_retention_ledger.sql",
       "0122_ortho_retention_submissions.sql",
       "0123_ortho_study_export_archive.sql",
+      "0124_ceph_correction_lineage.sql",
+      "0125_ortho_case_reopen.sql",
     ]);
   });
 

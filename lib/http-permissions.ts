@@ -174,6 +174,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ortho/[id]/facial-analysis/history": { GET: CLINIC },
   "/api/ortho/[id]/facial-analysis": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/facial-image": { GET: CLINIC },
+  "/api/ortho/[id]/reopen": { GET: CLINICAL, POST: CLINICAL },
   "/api/ortho/[id]/case-study": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/case-study/recovery": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/case-study/editor": { GET: CLINIC, POST: CLINICAL },

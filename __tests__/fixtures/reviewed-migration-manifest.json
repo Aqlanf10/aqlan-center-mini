@@ -526,5 +526,11 @@
     "name": "ceph_correction_lineage",
     "filename": "0124_ceph_correction_lineage.sql",
     "checksum": "0d1d94a2003db6599dee120be75c3ff092ad4a19f4e1c911cbde1aa9fc845355"
+  },
+  {
+    "version": "0125",
+    "name": "ortho_case_reopen",
+    "filename": "0125_ortho_case_reopen.sql",
+    "checksum": "6d9eb902c4c834f6d8b6be381c57b46a3a0e2992cdc40a05d688234bb9e3b8a3"
   }
 ]

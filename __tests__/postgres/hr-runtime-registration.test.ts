@@ -47,7 +47,7 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0078", name: "agreement_reconciliation", checksum: createHash("sha256").update(AGREEMENT_RECONCILIATION_SQL).digest("hex") },
     { version: "0087", name: "agreement_reminder_metadata", checksum: createHash("sha256").update(AGREEMENT_REMINDER_GUARD_SQL).digest("hex") },
     { version: "0089", name: "lab_shade_specification", checksum: createHash("sha256").update(LAB_SHADE_SPECIFICATION_SQL).digest("hex") },
-    ...reviewedMigrations.filter(file => ["0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123"].includes(file.version)),
+    ...reviewedMigrations.filter(file => ["0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125"].includes(file.version)),
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);

@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 149,
-    "columns": 1939,
-    "constraints": 2502,
-    "indexes": 485,
-    "triggers": 189
+    "tables": 150,
+    "columns": 1960,
+    "constraints": 2545,
+    "indexes": 489,
+    "triggers": 195
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -2869,6 +2869,12 @@
           ]
         },
         "ortho_problem_source_submission_bridge_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
+        "ortho_reopen_bridge_scope": {
           "timing": "AFTER",
           "events": [
             "UPDATE"
@@ -11268,6 +11274,210 @@
         }
       }
     },
+    "ortho_case_reopen_events": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "after_version": {
+          "type": "int4",
+          "nullable": false
+        },
+        "before_version": {
+          "type": "int4",
+          "nullable": false
+        },
+        "clinical_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "command": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "command_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "ortho_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "previous_closed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "previous_closed_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "previous_closed_note": {
+          "type": "text",
+          "nullable": true
+        },
+        "previous_phase": {
+          "type": "text",
+          "nullable": false
+        },
+        "previous_status": {
+          "type": "text",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "recorded_patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "request_fingerprint": {
+          "type": "text",
+          "nullable": false
+        },
+        "target_status": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "ortho_case_id",
+          "after_version"
+        ],
+        [
+          "patient_id",
+          "actor_user_id",
+          "command_id"
+        ]
+      ],
+      "checks": [
+        "ortho_case_reopen_events_before_version_check",
+        "ortho_case_reopen_events_check",
+        "ortho_case_reopen_events_check1",
+        "ortho_case_reopen_events_check2",
+        "ortho_case_reopen_events_check3",
+        "ortho_case_reopen_events_check4",
+        "ortho_case_reopen_events_command_check",
+        "ortho_case_reopen_events_command_id_check",
+        "ortho_case_reopen_events_created_by_check",
+        "ortho_case_reopen_events_previous_phase_check",
+        "ortho_case_reopen_events_previous_status_check",
+        "ortho_case_reopen_events_reason_check",
+        "ortho_case_reopen_events_request_fingerprint_check",
+        "ortho_case_reopen_events_target_status_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "clinical_case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "ortho_case_id"
+          ],
+          "refTable": "ortho_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "ortho_case_reopen_events_ortho_case_id_after_version_key": {
+          "columns": [
+            "ortho_case_id",
+            "after_version"
+          ],
+          "unique": true
+        },
+        "ortho_case_reopen_events_patient_id_actor_user_id_command_i_key": {
+          "columns": [
+            "patient_id",
+            "actor_user_id",
+            "command_id"
+          ],
+          "unique": true
+        },
+        "ortho_case_reopen_events_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "ortho_reopen_case_history_idx": {
+          "columns": [
+            "patient_id",
+            "ortho_case_id",
+            "id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {
+        "ortho_reopen_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_reopen_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        },
+        "ortho_reopen_scope": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT"
+          ]
+        }
+      }
+    },
     "ortho_case_study_revisions": {
       "columns": {
         "actor_user_id": {
@@ -11592,6 +11802,10 @@
           "type": "text",
           "nullable": true
         },
+        "lifecycle_version": {
+          "type": "int4",
+          "nullable": false
+        },
         "lower_wire": {
           "type": "text",
           "nullable": true
@@ -11656,7 +11870,8 @@
       "checks": [
         "ortho_assessment_state_check",
         "ortho_cases_baseline_kind_check",
-        "ortho_cases_legacy_financial_mode_check"
+        "ortho_cases_legacy_financial_mode_check",
+        "ortho_cases_lifecycle_version_check"
       ],
       "foreignKeys": [
         {
@@ -11745,6 +11960,12 @@
             "UPDATE"
           ]
         },
+        "ortho_lifecycle_transition": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
+          ]
+        },
         "ortho_problem_source_case_scope": {
           "timing": "AFTER",
           "events": [
@@ -11752,6 +11973,12 @@
           ]
         },
         "ortho_problem_source_submission_case_scope": {
+          "timing": "AFTER",
+          "events": [
+            "UPDATE"
+          ]
+        },
+        "ortho_reopen_case_scope": {
           "timing": "AFTER",
           "events": [
             "UPDATE"

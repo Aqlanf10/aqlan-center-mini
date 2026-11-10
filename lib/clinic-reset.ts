@@ -161,6 +161,12 @@ export class ProtectedOrthoAdjustmentHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد تسجيل محاولات شدّة محفوظة؛ يجب الاحتفاظ بمفاتيحها لمنع تكرارها بعد إعادة استعمال أرقام الملفات. لم يُمسح شيء."); this.name = "ProtectedOrthoAdjustmentHistoryError"; }
 }
 
+/** Reopening retains historical closure evidence and durable command identity. */
+export const ORTHO_REOPEN_HISTORY_TABLES = ["ortho_case_reopen_events"] as const;
+export class ProtectedOrthoReopenHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد إعادة فتح حالات تقويم موثقة؛ يجب الاحتفاظ بتاريخ الإغلاق ومفاتيح الطلبات. لم يُمسح شيء."); this.name = "ProtectedOrthoReopenHistoryError"; }
+}
+
 /** Saved authored history and retry proofs cannot be removed before identity reuse. */
 export const ORTHO_STUDY_HISTORY_TABLES = ["ortho_case_study_revisions", "ortho_study_submissions", "ortho_study_export_jobs", "ortho_study_export_artifacts"] as const;
 export class ProtectedOrthoStudyHistoryError extends Error {
@@ -206,6 +212,7 @@ export async function assertNoPrescriptionIssuanceHistory(client: Pick<DbClient,
 }
 
 export const RESET_KEEP_TABLES = [
+  ...ORTHO_REOPEN_HISTORY_TABLES,
   "prescription_issuance_commands",
   ...ORTHO_RETENTION_HISTORY_TABLES,
   ...ORTHO_SPACE_HISTORY_TABLES,

@@ -7,6 +7,10 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.at(-1)?.version === "0125" && files.at(-1)?.filename === "0125_ortho_case_reopen.sql") {
+    if (files.at(-2)?.filename !== "0124_ceph_correction_lineage.sql") throw new Error("Reopening requires the exact reviewed correction lineage baseline.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   if (files.at(-1)?.version === "0124" && files.at(-1)?.filename === "0124_ceph_correction_lineage.sql") {
     if (files.at(-2)?.filename !== "0123_ortho_study_export_archive.sql") throw new Error("Correction lineage requires the exact archive baseline.");
     return periodontalCandidateMigrationVersion(files.slice(0,-1));

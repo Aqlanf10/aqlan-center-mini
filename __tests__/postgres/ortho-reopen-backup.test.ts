@@ -1,0 +1,45 @@
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { createSessionToken, sessionCredentialVersion, type SessionPayload } from '../../lib/auth';
+import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
+import { fullBackupBlocks } from '../../lib/fullBackup';
+import { stagedRestore } from '../../lib/restore/staging';
+import { reopenOrthoCase, readOrthoReopen } from '../../lib/ortho-reopen-store';
+import type { OrthoReopenCommand } from '../../lib/ortho-reopen-contract';
+const request=vi.hoisted(()=>({token:''}));
+vi.mock('next/headers',()=>({cookies:async()=>({get:(name:string)=>name==='aqlan_flow_session'?{value:request.token}:undefined}),headers:async()=>new Headers()}));
+let f:Awaited<ReturnType<typeof openBackupTimestampFixture>>,db:typeof import('../../lib/db'),directory='';
+beforeAll(async()=>{
+ vi.stubEnv('SESSION_SECRET','synthetic-reopen-backup-secret-at-least-32');f=await openBackupTimestampFixture(process.env);db=await import('../../lib/db');await db.resetPoolForTesting();
+ vi.stubEnv('DATABASE_URL',f.source.options.connectionString!);vi.stubEnv('SKIP_SEED','true');vi.stubEnv('NODE_ENV','test');vi.stubEnv('DATABASE_ENVIRONMENT','test');await db.ensureSchema();
+ directory=await mkdtemp(join(tmpdir(),'synthetic-ortho-reopen-'));
+});
+afterAll(async()=>{try{await db?.resetPoolForTesting();}finally{vi.unstubAllEnvs();await f?.close();if(directory)await rm(directory,{recursive:true,force:true});}});
+it('restores exact lifecycle histories and closures, replays without reopening, then advances versions/sequences',async()=>{
+ const username=randomUUID(),password='synthetic-password',userId=(await f.source.query("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic operator',$2,'admin') RETURNING id",[username,password])).rows[0].id;
+ const session:SessionPayload={userId,username,role:'admin',credentialVersion:sessionCredentialVersion(password),expiresAt:Date.now()+600000};request.token=createSessionToken(session);
+ const patientId=(await f.source.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic reopen backup') RETURNING id",[randomUUID()])).rows[0].id;
+ const orthoCaseId=(await f.source.query("INSERT INTO ortho_cases(patient_id,status,phase,retainer,closed_at,closed_by,closed_note,created_by) VALUES($1,'completed','retention','hawley','2026-10-02 12:34:56.123456+00','Original author','Original note','synthetic') RETURNING id",[patientId])).rows[0].id;
+ const clinicalCaseId=(await f.source.query("INSERT INTO clinical_cases(patient_id,specialty,title,ortho_case_id,created_by) VALUES($1,'orthodontics','Synthetic reopen',$2,'synthetic') RETURNING id",[patientId,orthoCaseId])).rows[0].id;
+ const scope={session,patientId,orthoCaseId,clinicalCaseId};
+ const command:OrthoReopenCommand={schemaVersion:1,clientRequestId:randomUUID(),expectedLifecycleVersion:0,expectedStatus:'completed',targetStatus:'retention',reason:'Synthetic clinician-directed follow-up'};
+ const first=await reopenOrthoCase({...scope,command});if(!first.ok)throw Error(first.code);
+ expect(await db.closeOrthoCase({id:orthoCaseId,status:'completed',actor:username,note:'Later closure'},scope)).toEqual({ok:true});
+ const snapshot=async(pool:typeof f.source)=>({cases:(await pool.query('SELECT to_jsonb(o)::text row FROM ortho_cases o ORDER BY id')).rows,events:(await pool.query('SELECT to_jsonb(e)::text row FROM ortho_case_reopen_events e ORDER BY id')).rows});
+ const before=await snapshot(f.source),client=await f.source.connect(),archivePath=join(directory,'backup.tar.gz');
+ try{const blocks:Uint8Array[]=[];for await(const block of fullBackupBlocks({source:client,readDocument:async()=>{throw Error('No synthetic documents expected');}}))blocks.push(block);await writeFile(archivePath,gzipSync(Buffer.concat(blocks)));}finally{client.release();}
+ await db.resetPoolForTesting();
+ const restored=await stagedRestore({archivePath,targetUrl:f.archiveTarget.options.connectionString!,stagingDir:join(directory,'documents')});
+ expect(restored.errors).toEqual([]);expect(restored.ok).toBe(true);expect(await snapshot(f.archiveTarget)).toEqual(before);
+ vi.stubEnv('DATABASE_URL',f.archiveTarget.options.connectionString!);await db.resetPoolForTesting();
+ expect(await reopenOrthoCase({...scope,command})).toMatchObject({ok:true,replayed:true,current:{status:'completed',version:2},receipt:{id:first.receipt.id,afterVersion:1}});
+ expect(await snapshot(f.archiveTarget)).toEqual(before);
+ const second=await reopenOrthoCase({...scope,command:{...command,clientRequestId:randomUUID(),expectedLifecycleVersion:2,reason:'Second synthetic reopening'}});
+ expect(second).toMatchObject({ok:true,current:{version:3}});if(!second.ok)throw Error(second.code);expect(second.receipt.id).toBeGreaterThan(first.receipt.id);
+ expect(await readOrthoReopen(scope)).toMatchObject({ok:true,history:[{before:{closedNote:'Later closure'}},{before:{closedNote:'Original note'}}]});
+ expect(await snapshot(f.source)).toEqual(before);
+});

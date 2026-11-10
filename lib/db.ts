@@ -28,6 +28,8 @@ import { ORTHO_ASSESSMENT_VERIFIER_2_2_SQL } from "./ortho-assessment-verifier-s
 import { parseCephSourceIdentity, sameCephSourceIdentity, type CephSourceIdentity, type CephCompletionSources } from "./ceph-source-review";
 import { CEPH_COMPLETION_SOURCE_CAS_SQL } from "./ceph-completion-source-cas-schema";
 import { CEPH_COMPLETION_PROVENANCE_SQL } from "./ceph-completion-provenance-schema";
+import { ORTHO_REOPEN_SQL } from "./ortho-reopen-schema";
+import { ORTHO_REOPEN_HISTORY_TABLES, ProtectedOrthoReopenHistoryError } from "./clinic-reset";
 import { CEPH_CORRECTION_LINEAGE_SQL } from "./ceph-correction-lineage-schema";
 import { readCephCorrectionSource, readStoredCephCorrectionOrigin, requireCephCorrectionAncestry } from "./ceph-correction-source";
 import { parseCephCorrectionSourceToken, sameCephCorrectionSource, type CephCorrectionOrigin, type CephCorrectionSourceRead, type CephCorrectionSourceToken } from "./ceph-correction-origin";
@@ -2182,6 +2184,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0122", name: "ortho_retention_submissions", filename: "0122_ortho_retention_submissions.sql", sql: ORTHO_RETENTION_SUBMISSION_SQL, checksum: checksumOf(ORTHO_RETENTION_SUBMISSION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0123", name: "ortho_study_export_archive", filename: "0123_ortho_study_export_archive.sql", sql: ORTHO_STUDY_EXPORT_ARCHIVE_SQL, checksum: checksumOf(ORTHO_STUDY_EXPORT_ARCHIVE_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0124", name: "ceph_correction_lineage", filename: "0124_ceph_correction_lineage.sql", sql: CEPH_CORRECTION_LINEAGE_SQL, checksum: checksumOf(CEPH_CORRECTION_LINEAGE_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0125", name: "ortho_case_reopen", filename: "0125_ortho_case_reopen.sql", sql: ORTHO_REOPEN_SQL, checksum: checksumOf(ORTHO_REOPEN_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -5377,6 +5380,7 @@ export async function mergeDuplicatePatient(
     // Reset owns this global fence exclusively before locking any protected table.
     // A merge touches every patient FK, including history fences preceding studies.
     await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))", [PURCHASE_RESET_FENCE]);
+    await client.query(`LOCK TABLE ${ORTHO_REOPEN_HISTORY_TABLES.join(", ")} IN ROW EXCLUSIVE MODE`);
     await client.query(`LOCK TABLE ${ORTHO_RETENTION_HISTORY_TABLES.join(", ")} IN ROW EXCLUSIVE MODE`);
     await client.query(`LOCK TABLE ${ORTHO_SPACE_HISTORY_TABLES.join(", ")} IN ROW EXCLUSIVE MODE`);
     await client.query(`LOCK TABLE ${ORTHO_PROBLEM_HISTORY_TABLES.join(", ")} IN ROW EXCLUSIVE MODE`);
@@ -5400,6 +5404,13 @@ export async function mergeDuplicatePatient(
     if (prescriptionHistory.count > 0) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "source_has_prescription_history", counts: { prescriptionCommands: prescriptionHistory.count } };
+    }
+
+    const { rows: [reopenHistory] } = await client.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM ortho_case_reopen_events WHERE patient_id=ANY($1::int[])", [[sourceId,targetId]]);
+    if (reopenHistory.count > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "source_has_clinical_command_history", counts: { orthoReopenHistory: reopenHistory.count } };
     }
 
     const { rows: [retentionHistory] } = await client.query<{ count: number }>(
@@ -28409,6 +28420,9 @@ export async function resetClinicData<F>(
       // Fixed order: revisions, then submissions, matching every study writer.
       // Study writers take ROW EXCLUSIVE before patient/source locks. Retained
       // authored history and its command proofs must survive identity reuse.
+      await client.query(`LOCK TABLE ${ORTHO_REOPEN_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [reopenHistory] } = await client.query<{ exists: boolean }>("SELECT EXISTS(SELECT 1 FROM ortho_case_reopen_events) AS exists");
+      if (reopenHistory.exists) throw new ProtectedOrthoReopenHistoryError();
       await client.query(`LOCK TABLE ${ORTHO_RETENTION_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
       const { rows: [retentionHistory] } = await client.query<{ exists: boolean }>(`SELECT ${ORTHO_RETENTION_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (retentionHistory.exists) throw new ProtectedOrthoRetentionHistoryError();
@@ -28446,7 +28460,7 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, prescription_issuance_commands, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")}, ${ORTHO_ADJUSTMENT_HISTORY_TABLES.join(", ")}, ${ORTHO_INTAKE_HISTORY_TABLES.join(", ")}, ${ORTHO_STUDY_HISTORY_TABLES.join(", ")}, ${CEPH_PROVENANCE_HISTORY_TABLES.join(", ")}, ${ORTHO_FACIAL_HISTORY_TABLES.join(", ")}, ${ORTHO_PROBLEM_HISTORY_TABLES.join(", ")}, ${ORTHO_SPACE_HISTORY_TABLES.join(", ")}, ${ORTHO_RETENTION_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, ${ORTHO_REOPEN_HISTORY_TABLES.join(", ")}, prescription_issuance_commands, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")}, ${ORTHO_ADJUSTMENT_HISTORY_TABLES.join(", ")}, ${ORTHO_INTAKE_HISTORY_TABLES.join(", ")}, ${ORTHO_STUDY_HISTORY_TABLES.join(", ")}, ${CEPH_PROVENANCE_HISTORY_TABLES.join(", ")}, ${ORTHO_FACIAL_HISTORY_TABLES.join(", ")}, ${ORTHO_PROBLEM_HISTORY_TABLES.join(", ")}, ${ORTHO_SPACE_HISTORY_TABLES.join(", ")}, ${ORTHO_RETENTION_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }

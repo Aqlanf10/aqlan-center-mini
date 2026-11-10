@@ -96,7 +96,7 @@ export type AuditAction =
   | "ortho.case_create" | "visit.create"
   | "ortho.retention_submission" | "ortho.space_submission" | "ortho.facial_submission" | "ortho.problem_submission" | "ortho.problem_source.review" | "ortho.facial_revision"
   | "ortho.space_print" | "ortho.journey_record" | "ortho.study_text_export" | "ortho.strategy_revision" | "ortho.assessment.append" | "ortho.assessment_open" | "ortho.treatment_start"
-  | "ortho.study_illustrated_export" | "ortho.study_submission" | "ortho.study_export"
+  | "ortho.reopen" | "ortho.study_illustrated_export" | "ortho.study_submission" | "ortho.study_export"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
@@ -377,6 +377,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.problem_source.review": "مراجعة مصدر وربطه بقائمة مشاكل التقويم",
   "ortho.facial_revision": "حفظ مراجعة تحليل صورة الوجه",
   "ortho.journey_record": "حفظ نسخة موثقة من سجل دراسة التقويم",
+  "ortho.reopen": "إعادة فتح حالة تقويم مع حفظ تاريخ الإغلاق",
   "ortho.study_export": "إدارة وأرشفة تصدير دراسة التقويم",
   "ortho.study_submission": "تسجيل ومصالحة طلب حفظ دراسة التقويم",
   "ortho.study_illustrated_export": "تصدير نسخة مصورة من دراسة التقويم المحفوظة",
