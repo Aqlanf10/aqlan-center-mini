@@ -1,6 +1,7 @@
 "use client";
 import { observationInputHintV2 } from "@/lib/ortho-assessment-input-hints-v2";
 import { useState } from "react";
+import { measurementSourcePreview } from "@/lib/ortho-measurement-source-preview";
 import { UPPER_MEASUREMENT_TEETH, LOWER_MEASUREMENT_TEETH, measurementReadinessV2, toggleMeasurementAnalysisV2,
   changeMeasurementDecimalV2, applyMeasurementSessionV2, addMeasurementSetV2, linkMeasurementInputV2, matchesMeasurementInputV2,
   type MeasurementEditorDraftV2, type MeasurementValueDraftV2, type MissingEditorInputV2 } from "@/lib/ortho-assessment-measurement-editor-v2";
@@ -77,6 +78,7 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
     else { let suffix = 1; while (assigned.has(`analysis_${suffix}`)) suffix++; option.selection = { ...option.selection, id: `analysis_${suffix}` }; assigned.add(option.selection.id); }
   }
   const readiness = measurementReadinessV2(draft);
+  const sourcePreview = metadataId && targets.length ? measurementSourcePreview(draft, metadataId, targets) : null;
   return <section dir="rtl" aria-label="القياسات المشتركة وتحليلات المسودة" className="space-y-3">
     <p className="text-sm">أدخل كل قياس مرة واحدة. تشترك التحليلات في مراجع المجموعة؛ الحساب ليس تشخيصًا أو اعتمادًا سريريًا.</p>
     <details className="space-y-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm" open>
@@ -128,8 +130,22 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
           sources: metadata.sources.some(o => keyOf(o) === keyOf(s)) ? metadata.sources.filter(o => keyOf(o) !== keyOf(s)) : [...metadata.sources, { kind: s.kind, id: s.id, version: s.version }] })} />{s.label} · {s.version}</label>)}</fieldset>
       {metadata.sources.filter(s => !sources.some(o => keyOf(o) === keyOf(s))).map(s => <p className="break-all text-xs" key={keyOf(s)}>مرجع محفوظ يحتاج تحققًا: {s.kind} #{s.id} · {s.version}</p>)}
       {metadata.copiedFrom && <p className="break-all text-xs">نسخة أصلية #{metadata.copiedFrom.revisionId} · {metadata.copiedFrom.contentHash}</p>}
+      {sourcePreview?.ok && <section aria-label="مراجعة تطبيق مصدر الجلسة" className="space-y-3 rounded-lg border border-amber-300 bg-white p-3">
+        <h5 className="font-bold">راجع التغييرات قبل التطبيق</h5>
+        <p className="text-sm">ستُستبدل الحقول المعروضة فقط في القياسات المختارة. راجع ملاءمة وصف الطريقة لكل قياس؛ أرقام القياسات لا تتغير.</p>
+        {sourcePreview.targets.map(target => <div key={target.id} className="space-y-2 rounded-lg border p-2">
+          <label className="flex min-h-11 items-center gap-2 font-semibold"><input type="checkbox" checked disabled={!editable}
+            onChange={() => { if (owner?.active() && owner.editable()) setTargets(current => current.filter(id => id !== target.id)); }} />إبقاء {target.label} ضمن التطبيق</label>
+          {target.changes.length ? <dl className="space-y-2 text-sm">{target.changes.map(change => <div key={change.field}>
+            <dt className="font-semibold">{change.label}</dt>
+            <dd className="grid gap-1 sm:grid-cols-2"><span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">السابق: <bdi>{change.before}</bdi></span>
+              <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">الجديد: <bdi>{change.after}</bdi></span></dd>
+          </div>)}</dl> : <p className="text-sm">المصدر والتاريخ والطريقة مطابقة؛ لا تغيير لهذا القياس.</p>}
+        </div>)}
+        <p className="text-xs">يمكنك استبعاد أي قياس أعلاه. إلغاء رسالة التأكيد يحافظ على المدخلات والاختيار.</p>
+      </section>}
       <button type="button" className={control} disabled={!editable || !targets.length} onClick={() => {
-        if (!owner?.active() || !owner.editable() || !window.confirm(`هل تخص المدخلات المختارة (${targets.length}) جلسة القياس نفسها؟ سيطبق المصدر والتاريخ والمنفذ عليها فقط.`)) return;
+        if (!owner?.active() || !owner.editable() || !window.confirm(`هل تخص المدخلات المختارة (${targets.length}) جلسة القياس نفسها؟ هل راجعت استبدال التاريخ والطريقة ووصفها والمنفذ والمصادر كما في المعاينة؟ أرقام القياسات لا تتغير.`)) return;
         if (!owner.active() || !owner.editable()) return;
         const applied = applyMeasurementSessionV2(draft, metadataId, targets, true);
         if (!applied.ok) { setMessage("أكمل المصدر واختر قياسات موثقة غير منقولة من سجل تاريخي."); return; }
