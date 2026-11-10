@@ -1,3 +1,4 @@
+import { checkedStudyPageNotes } from "./ortho-study-model-analysis-evidence";
 import pptxgen from 'pptxgenjs';
 import JSZip from 'jszip';
 import { CASE_PAGE } from './ortho-case-template';
@@ -19,9 +20,9 @@ const generatedMetadataExtensions = [
  * Text and tables are native editable objects; there is no original image, URL,
  * clinic identity or patient-name parameter. Case-only labels are not anonymization. */
 export async function renderFullStudyPptx(value: FullStudyPresentation): Promise<Uint8Array> {
+  value = structuredClone(value);
   validateFullStudyPresentation(value);
-  const notes = value.pages.map(page => JSON.stringify(fullStudyPageNotes(value, page)));
-  if (notes.reduce((size, note) => size + Buffer.byteLength(note), 0) > 4 * 1024 * 1024) fail('notes_limit');
+  const notes = checkedStudyPageNotes(value.pages.map(page => fullStudyPageNotes(value, page)));
   const pptx = new pptxgen();
   pptx.defineLayout({ name: 'ORTHO_SAVED_FULL', width: CASE_PAGE.width, height: CASE_PAGE.height });
   pptx.layout = 'ORTHO_SAVED_FULL'; pptx.author = 'Clinical case renderer'; pptx.subject = FULL_STUDY_RENDERER;
@@ -31,7 +32,7 @@ export async function renderFullStudyPptx(value: FullStudyPresentation): Promise
   for (const [index, page] of value.pages.entries()) {
     const slide = pptx.addSlide(); slide.background = { color: 'FFFFFF' };
     slide.addText(page.title, { ...base, x: .4, y: .15, w: 9.2, h: .42, fontSize: 20, bold: true, color: '17324D' });
-    slide.addText(`نسخة سريرية • الحالة ${value.caseId} • الإصدار ${value.version} • ${value.kind === 'draft' ? 'مسودة' : 'نسخة موثقة'}`,
+    slide.addText(`نسخة سريرية • الحالة ${value.caseId} • الإصدار ${value.version} • ${value.kind === 'draft' ? 'مسودة' : 'نسخة موثقة'}${page.modelAnalysisId ? ' • حساب غير معتمد سريريًا' : ''}`,
       { ...base, x: .4, y: .65, w: 9.2, h: .28, fontSize: 12, color: '526579' });
     for (const element of page.elements) {
       if (element.kind === 'text') slide.addText(isolateStudyDateTokens(element.text), {

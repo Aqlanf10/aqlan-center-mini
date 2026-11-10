@@ -52,24 +52,24 @@ describe('Tanaka output integration with independent specified fixture expectati
  it('maps exact arch-specific numbers into saved study table cells, not swapped predictors or summed wrong segments',()=>{
   const {facts}=surfaces();const tables=facts.blocks.filter(b=>b.kind==='table');expect(tables).toHaveLength(2);
   const cells=tables.map(table=>Object.fromEntries(table.rows.map(row=>row.cells)));
-  expect(cells[0]).toMatchObject({'الفك':'علوي','مجموع القواطع السفلية المقاس':'22 mm','مجموع قواطع الفك المطلوب المقاس':'30 mm','الناب والضاحكان لكل جهة — تقدير':'22 mm','الناب والضاحكان في الجهتين — تقدير':'44 mm','المساحة المتاحة المقاسة':'80 mm','المساحة المطلوبة المقدّرة':'74 mm','المتاح ناقص المطلوب المقدّر':'6 mm'});
-  expect(cells[1]).toMatchObject({'الفك':'سفلي','مجموع القواطع السفلية المقاس':'22 mm','مجموع قواطع الفك المطلوب المقاس':'22 mm','الناب والضاحكان لكل جهة — تقدير':'21.5 mm','الناب والضاحكان في الجهتين — تقدير':'43 mm','المساحة المتاحة المقاسة':'60 mm','المساحة المطلوبة المقدّرة':'65 mm','المتاح ناقص المطلوب المقدّر':'-5 mm'});
+  expect(cells[0]).toMatchObject({'الفك':'علوي','مجموع القواطع السفلية المقاس':'22 mm','مجموع قواطع الفك المطلوب المقاس':'30 mm','الناب والضاحكان لكل جهة — تقدير':'22 mm','الناب والضاحكان في الجهتين — تقدير':'44 mm','المسافة المتاحة المقاسة':'80 mm','المسافة المطلوبة المقدّرة':'74 mm','المتاح ناقص المطلوب المقدّر':'6 mm'});
+  expect(cells[1]).toMatchObject({'الفك':'سفلي','مجموع القواطع السفلية المقاس':'22 mm','مجموع قواطع الفك المطلوب المقاس':'22 mm','الناب والضاحكان لكل جهة — تقدير':'21.5 mm','الناب والضاحكان في الجهتين — تقدير':'43 mm','المسافة المتاحة المقاسة':'60 mm','المسافة المطلوبة المقدّرة':'65 mm','المتاح ناقص المطلوب المقدّر':'-5 mm'});
  });
  it('gates only the selected target segment and preserves the other arch output',()=>{
   const input=command();input.content.observations.observations.find(row=>row.id==='width_13')!.value={state:'measured',value:7};
   const {draftHtml,savedHtml,facts}=surfaces(input);for(const value of [text(draftHtml),text(savedHtml)]){expect(value).toContain('غير منطبق');expect(value).toContain('-5 mm');}
-  const factsText=JSON.stringify(facts.blocks);expect(factsText).toContain('segment_width_already_measured');expect(factsText).toContain('65 mm');expect(factsText).not.toContain('74 mm');
+  const factsText=JSON.stringify(facts.blocks);expect(factsText).toContain('عرض الجزء مسجل كمقاس بالفعل');expect(facts.modelAnalyses[0].exactWitness.stored.result).toMatchObject({state:'inapplicable',reason:'segment_width_already_measured'});expect(factsText).toContain('65 mm');expect(factsText).not.toContain('74 mm');
  });
  it('does not display predicted values outside the saved domain, or call it a normal range',()=>{
   const input=command();for(const row of input.content.observations.observations)if(['width_31','width_32','width_41','width_42'].includes(row.id))row.value={state:'measured',value:7};
   const {draftHtml,savedHtml,facts}=surfaces(input);for(const value of [text(draftHtml),text(savedHtml)]){expect(value).toContain('28 mm');expect(value).not.toContain('المطلوب المقدّر:');}
-  expect(savedHtml).toContain('ليس معياراً تشخيصياً أو مدى طبيعياً');expect(JSON.stringify(facts.blocks)).toContain('outside_supported_predictor_domain');expect(JSON.stringify(facts.blocks)).not.toContain('المساحة المطلوبة المقدّرة');
+  expect(savedHtml).toContain('ليس معياراً تشخيصياً أو مدى طبيعياً');expect(JSON.stringify(facts.blocks)).toContain('خارج مجال المدخل التنبؤي المدعوم');expect(facts.modelAnalyses.map(item=>item.exactWitness.stored.result.state)).toEqual(['outside_supported_predictor_domain','outside_supported_predictor_domain']);expect(JSON.stringify(facts.blocks)).not.toContain('المساحة المطلوبة المقدّرة');
  });
  it('preserves signed units and measured/estimated labels through real text and illustrated PPTX generation',async()=>{
   const {study}=capture();const revision:StudyRevision<StudySavedContent>={...scope,id:8,actorId:7,version:1,recordedPatientId:1,schemaVersion:1,predecessorId:null,kind:'draft',documentedFromId:null,baseDocumentedId:null,createdAt:study.capturedAt,reason:'Synthetic output audit',contentHash:journeyContentHash(study),content:study};
   const renderImage=vi.fn(async()=>{throw Error('Image-free fixture must not read images');});
   const outputs=[await renderStudyTextPptx(studyTextPresentation(revision,scope)),await renderIllustratedStudyPptx(await illustrateSavedStudy(revision,scope,renderImage))];
-  for(const output of outputs){const zip=await JSZip.loadAsync(output);const slides=await Promise.all(Object.keys(zip.files).filter(name=>/^ppt\/slides\/slide\d+\.xml$/.test(name)).map(name=>zip.file(name)!.async('text')));const xml=slides.join('');for(const value of ['30 mm','22 mm','21.5 mm','44 mm','43 mm','74 mm','65 mm','6 mm','-5 mm'])expect(xml).toContain(`\u2066${value}\u2069`);expect(xml).toContain('المساحة المطلوبة المقدّرة');expect(xml).toContain('مجموع القواطع السفلية المقاس');expect(Object.keys(zip.files).some(name=>/^ppt\/media\/[^/]+$/.test(name))).toBe(false);}
+  for(const output of outputs){const zip=await JSZip.loadAsync(output);const slides=await Promise.all(Object.keys(zip.files).filter(name=>/^ppt\/slides\/slide\d+\.xml$/.test(name)).map(name=>zip.file(name)!.async('text')));const xml=slides.join('');for(const value of ['30 mm','22 mm','21.5 mm','44 mm','43 mm','74 mm','65 mm','6 mm','-5 mm'])expect(xml).toContain(`\u2066${value}\u2069`);expect(xml).toContain('المسافة المطلوبة المقدّرة');expect(xml).toContain('مجموع القواطع السفلية المقاس');expect(Object.keys(zip.files).some(name=>/^ppt\/media\/[^/]+$/.test(name))).toBe(false);}
   expect(renderImage).not.toHaveBeenCalled();
  });
 

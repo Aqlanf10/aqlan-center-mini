@@ -1,8 +1,13 @@
+import { studyPageNotes, validateStudyNotesProjection } from "./ortho-study-presentation-notes";
+import { checkedStudyPageNotes } from "./ortho-study-model-analysis-evidence";
 import { isolateStudyDateTokens } from "./ortho-study-display";
 import pptxgen from 'pptxgenjs';
 import {STUDY_ILLUSTRATED_RENDERER,type StudyIllustratedPresentation} from './ortho-study-illustrated';
 /** Native editable text and PNG renditions; no original is embedded behind crops. */
 export async function renderIllustratedStudyPptx(value:StudyIllustratedPresentation){
+ value=structuredClone(value); validateStudyNotesProjection(value);
+ const notes=checkedStudyPageNotes(value.pages.map(page=>({...studyPageNotes(value,page,STUDY_ILLUSTRATED_RENDERER),
+  image:page.image?{use:page.image.use,group:page.image.group,frame:page.image.frame,sourceSha256:page.image.sourceSha256,recipeSha256:page.image.recipeSha256,geometrySha256:page.image.geometrySha256,renditionSha256:page.image.renditionSha256,processorVersion:page.image.processorVersion}:null})));
  const pptx=new pptxgen();pptx.layout='LAYOUT_WIDE';pptx.author='Aqlan Center';pptx.title=`Ortho case ${value.caseId} — revision ${value.version}`;pptx.rtlMode=true;
  const base={fontFace:'Arial',rtlMode:true,lang:'ar-SA',align:'right' as const,margin:0};
  for(const [index,page] of value.pages.entries()){
@@ -17,9 +22,7 @@ export async function renderIllustratedStudyPptx(value:StudyIllustratedPresentat
    if(img.resolutionWarning)slide.addText('دقة الأصل أقل من حجم الإطار؛ راجع وضوح الصورة.',{...base,x:.5,y:6.65,w:12.3,h:.25,fontSize:10,color:'92400E'});
   }else page.lines.forEach((text,line)=>slide.addText(isolateStudyDateTokens(text),{...base,x:.5,y:1.65+line*.38,w:12.3,h:.36,fontSize:16,color:'182B3A'}));
   slide.addText(`${index+1}/${value.pages.length} • ${value.revisionHash.slice(0,16)} • ${STUDY_ILLUSTRATED_RENDERER}`,{...base,x:.5,y:7,w:12.3,h:.25,fontSize:9,color:'526579'});
-  slide.addNotes(JSON.stringify({revisionId:value.revisionId,revisionHash:value.revisionHash,capturedAt:value.capturedAt,sources:page.sourceKeys,renderer:STUDY_ILLUSTRATED_RENDERER,
-   image:img?{use:img.use,group:img.group,frame:img.frame,sourceSha256:img.sourceSha256,recipeSha256:img.recipeSha256,geometrySha256:img.geometrySha256,renditionSha256:img.renditionSha256,processorVersion:img.processorVersion}:null,
-   disclosure:'Clinical copy. Not anonymized for educational publication.'}));
+  slide.addNotes(notes[index]);
  }
  return new Uint8Array(await pptx.write({outputType:'arraybuffer',compression:true}) as ArrayBuffer);
 }

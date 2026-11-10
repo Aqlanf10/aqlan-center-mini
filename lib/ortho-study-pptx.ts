@@ -1,3 +1,5 @@
+import { studyPageNotes, validateStudyNotesProjection } from "./ortho-study-presentation-notes";
+import { checkedStudyPageNotes } from "./ortho-study-model-analysis-evidence";
 import pptxgen from "pptxgenjs";
 import { STUDY_TEXT_RENDERER, type StudyTextPresentation } from "./ortho-study-text-export";
 
@@ -6,6 +8,9 @@ export { isolateStudyDateTokens } from "./ortho-study-display";
 
 /** Editable native PowerPoint text, generated in memory with no external assets. */
 export async function renderStudyTextPptx(value: StudyTextPresentation): Promise<Uint8Array> {
+  value = structuredClone(value);
+  validateStudyNotesProjection(value);
+  const notes = checkedStudyPageNotes(value.pages.map(page => studyPageNotes(value, page, STUDY_TEXT_RENDERER)));
   const pptx = new pptxgen();
   pptx.layout = "LAYOUT_WIDE"; pptx.author = "Aqlan Center";
   pptx.subject = "Clinical text copy of a saved orthodontic case study";
@@ -18,7 +23,7 @@ export async function renderStudyTextPptx(value: StudyTextPresentation): Promise
     slide.addText(`نسخة نصية سريرية • الحالة ${value.caseId} • الإصدار ${value.version} • ${value.kind === "draft" ? "مسودة" : "نسخة موثقة"}`, { ...base, x: 0.5, y: 1, w: 12.3, h: 0.4, fontSize: 13, color: "526579" });
     for (const [line, text] of page.lines.entries()) slide.addText(isolateStudyDateTokens(text), { ...base, x: 0.5, y: 1.65 + line * 0.38, w: 12.3, h: 0.36, fontSize: 16, color: "182B3A" });
     slide.addText(`${index + 1}/${value.pages.length} • ${value.revisionHash.slice(0, 16)} • ${STUDY_TEXT_RENDERER}`, { ...base, x: 0.5, y: 6.85, w: 12.3, h: 0.3, fontSize: 10, color: "526579" });
-    slide.addNotes(`Revision ${value.revisionId}; SHA256 ${value.revisionHash}; captured ${value.capturedAt}; sources ${page.sourceKeys.join(", ")}. Text-only clinical copy; not an anonymized educational export.`);
+    slide.addNotes(notes[index]);
   }
   return new Uint8Array(await pptx.write({ outputType: "arraybuffer", compression: true }) as ArrayBuffer);
 }

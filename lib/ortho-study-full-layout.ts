@@ -1,3 +1,5 @@
+import { MODEL_ANALYSIS_EVIDENCE_VERSION, STUDY_PRESENTATION_NOTES_LIMIT, validateModelAnalysisEvidence, type ModelAnalysisEvidence } from "./ortho-study-model-analysis-evidence";
+import { validateStudyNotesProjection } from "./ortho-study-presentation-notes";
 import { CASE_LAYOUTS, CASE_PAGE, CASE_TEMPLATE_IDENTITY, caseLayout, type CaseRect } from './ortho-case-template';
 import { journeyContentHash } from './ortho-case-journey-hash';
 import { decodeStudySavedContent, type StudySavedContent } from './ortho-case-study-capture';
@@ -15,16 +17,16 @@ import { hashBytes, validateCasePng } from './ortho-case-render-security';
 /** Presentation-only version: stored template geometry and capture hashes never change.
  * Caller must remain inside withIllustratedStudy's current authorization/final check.
  * This module has no database, file, URL, patient-name or branding input. */
-export const FULL_STUDY_RENDERER = 'ortho-full-layout-pptx-v1';
+export const FULL_STUDY_RENDERER = 'ortho-full-layout-pptx-v2-readable-model';
 export const FULL_STUDY_LIMITS = Object.freeze({ pages: 300, images: 40, imageBytes: 24 * 1024 * 1024,
-  pngBytes: 4 * 1024 * 1024, text: 240_000, outputBytes: 24 * 1024 * 1024, rows: 4000 });
+  pngBytes: 4 * 1024 * 1024, text: 240_000, notesBytes: STUDY_PRESENTATION_NOTES_LIMIT, outputBytes: 24 * 1024 * 1024, rows: 4000 });
 export const FULL_STUDY_BODY: Readonly<CaseRect> = Object.freeze({ x: .4, y: 1.1, w: 9.2, h: 5.75 });
 const BODY_FONT = 14, TABLE_FONT = 12, PADDING = .10, TABLE_CAPTION_HEIGHT = .55, MIN_COLUMN_WIDTH = 1.1;
 const lineHeight = (font: number) => font * 1.5 / 72;
 const insetScale = FULL_STUDY_BODY.h / CASE_PAGE.height;
 export const FULL_STUDY_CONTRACT_HASH = journeyContentHash({ renderer: FULL_STUDY_RENDERER,
   templateHash: journeyContentHash(CASE_TEMPLATE_IDENTITY), body: FULL_STUDY_BODY,
-  uniformInsetScale: insetScale, bodyFont: BODY_FONT, tableFont: TABLE_FONT, tableCaptionHeight: TABLE_CAPTION_HEIGHT, minColumnWidth: MIN_COLUMN_WIDTH, wideTable: 'source_row_field_value', limits: FULL_STUDY_LIMITS });
+  uniformInsetScale: insetScale, bodyFont: BODY_FONT, tableFont: TABLE_FONT, tableCaptionHeight: TABLE_CAPTION_HEIGHT, minColumnWidth: MIN_COLUMN_WIDTH, wideTable: 'source_row_field_value', modelEvidence: MODEL_ANALYSIS_EVIDENCE_VERSION, limits: FULL_STUDY_LIMITS });
 
 export interface FullStudyText { kind: 'text'; rect: CaseRect; text: string; fontSize: number }
 export interface FullStudyTable {
@@ -39,7 +41,7 @@ export interface FullStudyImage { kind: 'image'; rect: CaseRect; image: StudyIll
 export interface FullStudyPage {
   panelId: string | null; layoutKey: string | null; title: string; continuation: boolean;
   purpose: 'prefix' | 'panel' | 'image-provenance'; sourceKeys: string[];
-  upstreamPageHash: string | null; elements: (FullStudyText | FullStudyTable | FullStudyImage)[];
+  upstreamPageHash: string | null; modelAnalysisId?: string; modelAnalyses?: ModelAnalysisEvidence[]; elements: (FullStudyText | FullStudyTable | FullStudyImage)[];
 }
 export interface FullStudyPresentation {
   schemaVersion: 1; renderer: string; contractHash: string; templateHash: string;
@@ -145,6 +147,7 @@ export function fullStudyPageNotes(value: FullStudyPresentation, page: FullStudy
     panelId: page.panelId, layoutKey: page.layoutKey, continuation: page.continuation, purpose: page.purpose, upstreamPageHash: page.upstreamPageHash,
     sources: value.sources.filter(source => page.sourceKeys.includes(source.key) || page.elements.some(element =>
       element.kind === 'image' && element.image.group?.sourceKeys.includes(source.key))),
+    modelAnalysisId: page.modelAnalysisId ?? null, modelAnalyses: page.modelAnalyses ?? [], notesVersion: MODEL_ANALYSIS_EVIDENCE_VERSION,
     images: page.elements.filter((element): element is FullStudyImage => element.kind === 'image').map(element => imageWitness(element.image)),
     tables: page.elements.filter((element): element is FullStudyTable => element.kind === 'table').map(table => ({
       sourceKeys: table.sourceKeys, projection: table.projection, originalColumnCount: table.originalColumnCount, sourceTableIndex: table.sourceTableIndex, caption: table.caption, columnWidths: table.columnWidths, columnPolicy: table.columnPolicy, fragments: table.fragments,
@@ -167,9 +170,14 @@ export function validateFullStudyPresentation(value: FullStudyPresentation): voi
     || !value.pages.length || value.pages.length > FULL_STUDY_LIMITS.pages) fail('presentation_contract');
   let text = 0, imageBytes = 0, images = 0;
   const keys = new Set(value.sources.map(source => source.key));
+  const modelEvidence = value.pages.flatMap(page => page.modelAnalyses ?? []);
   for (const page of value.pages) {
     text += page.title.length;
     if (page.sourceKeys.some(key => !keys.has(key))) fail('source_binding');
+    if (page.modelAnalyses !== undefined && !Array.isArray(page.modelAnalyses)) fail('model_evidence');
+    if (page.modelAnalysisId !== undefined && !modelEvidence.some(evidence => evidence.panelInstanceId === page.panelId
+      && evidence.exactWitness.selection.id === page.modelAnalysisId && page.sourceKeys.includes(evidence.source.key))) fail('model_analysis_binding');
+    for (const evidence of page.modelAnalyses ?? []) validateModelAnalysisEvidence(evidence, page.panelId, page.sourceKeys, value.sources);
     for (const [index, element] of page.elements.entries()) {
       if (page.elements.slice(0, index).some(previous => overlaps(previous.rect, element.rect))) fail('element_overlap');
       const { x, y, w, h } = element.rect;
@@ -227,7 +235,7 @@ export async function fullStudyPresentation(revision: StudyRevision<StudySavedCo
     checkImage(image); imageByUse.set(image.use.useId, image);
   }
   const witness = (presentation: StudyIllustratedPresentation) => ({ ...presentation,
-    pages: presentation.pages.map(page => ({ title: page.title, sourceKeys: page.sourceKeys, lines: page.lines,
+    pages: presentation.pages.map(page => ({ title: page.title, sourceKeys: page.sourceKeys, lines: page.lines, panelId: page.panelId ?? null, modelAnalyses: page.modelAnalyses ?? [],
       image: page.image ? imageWitness(page.image) : null })) });
   const verifiedHash = journeyContentHash(witness(verified));
   const rebuilt = await illustrateSavedStudy(saved, scope, async (use, frame) => {
@@ -236,6 +244,7 @@ export async function fullStudyPresentation(revision: StudyRevision<StudySavedCo
     return image;
   });
   if (journeyContentHash(witness(rebuilt)) !== verifiedHash) fail('verified_presentation_changed');
+  validateStudyNotesProjection(rebuilt);
 
   const panels = saved.content.authored.panels.filter(panel => panel.included), pages: FullStudyPage[] = [];
   if (!panels.length) fail('empty');
@@ -283,6 +292,7 @@ export async function fullStudyPresentation(revision: StudyRevision<StudySavedCo
     for (const [blockIndex, block] of facts.blocks.entries()) {
       if (block.kind === 'paragraph') { paragraph(block.text); continue; }
       const keys = [...new Set(block.rows.flatMap(row => row.sourceKeys))];
+      const modelTable = facts.modelTables.find(table => table.blockIndex === blockIndex);
       let compact: FullStudyTable[] | null = null;
       if (layout.table && !tablePlaced && pages.at(-1) === first
         && !first.elements.some(element => overlaps(element.rect, fullStudyInset(layout.table!)))) {
@@ -290,9 +300,9 @@ export async function fullStudyPresentation(revision: StudyRevision<StudySavedCo
         catch (error) { if (!(error instanceof Error) || !['full_study_table_frame', 'full_study_text_frame'].includes(error.message)) throw error; }
       }
       const markSourceTable = (table: FullStudyTable) => { table.sourceTableIndex = blockIndex; table.caption = `جدول ${blockIndex + 1} • ${table.caption}`; return table; };
-      if (compact?.length === 1) first.elements.push(markSourceTable(compact[0]));
-      else for (const table of fullStudyTablePages(block.headers, block.rows.map(row => row.cells), { ...FULL_STUDY_BODY }, keys, layout.columnWeights)) {
-        add({ ...base(true), elements: [markSourceTable(table)] });
+      if (compact?.length === 1) { first.elements.push(markSourceTable(compact[0])); if (modelTable) { first.title = modelTable.title; first.modelAnalysisId = modelTable.analysisId; } }
+      else for (const [partIndex, table] of fullStudyTablePages(block.headers, block.rows.map(row => row.cells), { ...FULL_STUDY_BODY }, keys, layout.columnWeights).entries()) {
+        add({ ...base(true), ...(modelTable ? { title: `${modelTable.title}${partIndex ? ' — تابع' : ''}`, modelAnalysisId: modelTable.analysisId, continuation: partIndex > 0 } : {}), elements: [markSourceTable(table)] });
       }
       tablePlaced = true; textPage = null;
     }
@@ -308,6 +318,11 @@ export async function fullStudyPresentation(revision: StudyRevision<StudySavedCo
     if (!facts.blocks.length && !facts.unavailable.length && !facts.unmapped.length && panel.state === 'available'
       && !panel.comment && !saved.content.authored.comment && !panel.images.length) paragraph('لا توجد حقائق نصية مسجلة في هذا القسم.');
     if (!first.elements.length) pages.splice(pages.indexOf(first), 1);
+    const evidencePage = pages.find(page => page.panelId === panel.instanceId && page.purpose === 'panel');
+    if (facts.modelAnalyses.length) {
+      if (!evidencePage) fail('model_evidence_page');
+      evidencePage.modelAnalyses = structuredClone(facts.modelAnalyses);
+    }
 
     // Preserve the exact existing image provenance/caption pages, including unknown
     // dates and filtered group source keys, rather than inventing a second caption policy.

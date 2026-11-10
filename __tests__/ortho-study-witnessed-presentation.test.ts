@@ -11,8 +11,8 @@ describe('witnessed presentation boundary',()=>{
   const saved=syntheticLongitudinalStudy(),review=projectStudyLongitudinalEligibility(saved,saved);
   expect(review.policyVersion).toBe('ortho-ceph-eligibility-v2');
   expect(review.stages.every(s=>s.sources.every(v=>v.witness==='legacy_unversioned'&&v.completion===null))).toBe(true);
-  expect(STUDY_TEXT_RENDERER).toBe('ortho-text-v7-capture-context');
-  expect(STUDY_ILLUSTRATED_RENDERER).toBe('ortho-illustrated-v7-capture-context');
+  expect(STUDY_TEXT_RENDERER).toBe('ortho-text-v8-readable-model');
+  expect(STUDY_ILLUSTRATED_RENDERER).toBe('ortho-illustrated-v8-readable-model');
  });
  it('requires explicit nullable completion metadata and rejects legacy promotion',()=>{
   const saved=syntheticLongitudinalStudy(),review=projectStudyLongitudinalEligibility(saved,saved);

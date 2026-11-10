@@ -2,6 +2,8 @@ import {studyCephBase,isStudyCephLineageCapture} from './ortho-study-ceph-lineag
 /** First source-specific semantic projection, working/unreviewed.
  * Captured facts only. Current authorization belongs to the caller's locked reader.
  * No source fetch, clinical inference, approval, formatting of money or render job. */
+import { presentSavedModelAnalysis } from "./ortho-study-model-analysis-presentation";
+import { captureModelAnalysisEvidence, type ModelAnalysisEvidence } from "./ortho-study-model-analysis-evidence";
 import { projectStudySpaceFacts } from "./ortho-study-space-facts";
 import { readStudyProblemReview } from "./ortho-study-problem-review";
 import { decodeAnyAssessmentRevision } from "./ortho-assessment-persisted-v2";
@@ -15,7 +17,7 @@ import { studyLongitudinalReasonText } from "./ortho-study-longitudinal-labels";
 import { decodeStudySavedContent } from "./ortho-case-study-capture";
 import type { JourneyScope } from "./ortho-case-journey-records";
 import type { CaseParagraph, CaseTable } from "./ortho-case-render-contract";
-export const STUDY_RECORDED_FACTS_VERSION = "ortho-study-recorded-facts-v4-problem-review";
+export const STUDY_RECORDED_FACTS_VERSION = "ortho-study-recorded-facts-v5-readable-model";
 type Block = CaseParagraph | CaseTable;
 const missing = "غير مسجل";
 function scalar(value: unknown): string {
@@ -35,13 +37,15 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
   const study = decoded.value, panel = study.authored.panels.find(value => value.instanceId === panelInstanceId);
   if (!panel) throw new Error("study_panel_not_found");
   const blocks: Block[] = [];
+  const modelAnalyses: ModelAnalysisEvidence[] = [];
+  const modelTables: { blockIndex: number; title: string; analysisId: string }[] = [];
   const unmapped: { sourceKey: string; kind: string; reason: string }[] = [];
   const unavailable: { sourceKey: string; reason: string }[] = [];
   // The author's persisted presentation state is independent of current source
   // permission. Retain the capture, but never promote a non-available panel into
   // ordinary clinical facts merely because its references are still readable.
   if (panel.state !== "available") return { version: STUDY_RECORDED_FACTS_VERSION, panelInstanceId, layoutKey: panel.layoutKey,
-    panelState: panel.state, blocks, unavailable, unmapped, complete: false };
+    panelState: panel.state, blocks, modelAnalyses, modelTables, unavailable, unmapped, complete: false };
   const paragraph = (key: string, text: string) => blocks.push({ kind: "paragraph", text, sourceKeys: [key], review });
   const table = (key: string, fields: readonly [string, unknown][]) => blocks.push({ kind: "table", headers: ["الحقل المسجل", "القيمة المسجلة"],
     rows: fields.map(([label, value]) => ({ cells: [label, scalar(value)], sourceKeys: [key], review })) });
@@ -86,26 +90,30 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
         if (!observationRows.length) paragraph(key, "لا توجد ملاحظات محفوظة مطابقة لتعريفات هذا القسم؛ لا تُفترض نتائج طبيعية.");
       } else if (panel.layoutKey === "model-measurements") {
         for (const analysis of projected.analyses) {
+          const presented = presentSavedModelAnalysis(analysis);
+          // Keep all clinical quantities/statuses visible. Technical identifiers,
+          // membership lists and full hashes remain in exact, source-bound notes.
+          const rows = presented.clinicalRows.filter(([label, value]) => !(label === "حالة الحساب" && value.startsWith("نتيجة حسابية محفوظة")))
+            .map(([label, value]): [string, string] => [label.split(" / ")[0],
+              ["الاعتماد السريري / Clinical approval", "الفك / Arch", "حالة الحساب", "ملاءمة المرجع للحالة", "ضمن مجال مدخل الجداول المنشورة — كما حُفظ"].includes(label) ? value.split(" / ")[0] : value]);
           const stored = analysis.stored.result;
-          if (stored.state === "ready" && stored.witness.result.state === "calculated"
-            && stored.witness.result.method === "tanaka_johnston_1974_approximation_v1") {
-            const prediction = stored.witness.result, mm = (value: number) => `${Number(value.toFixed(3))} mm`;
-            table(key, [["التحليل", "Tanaka–Johnston1974: تقدير المسافة المختلطة"],
-              ["الفك", prediction.arch === "upper" ? "علوي" : "سفلي"],
-              ["مجموع القواطع السفلية المقاس", mm(prediction.measuredLowerIncisorSumMm)],
-              ["مجموع قواطع الفك المطلوب المقاس", mm(prediction.measuredTargetIncisorSumMm)],
-              ["الناب والضاحكان لكل جهة — تقدير", mm(prediction.predictedCaninePremolarPerQuadrantMm)],
-              ["الناب والضاحكان في الجهتين — تقدير", mm(prediction.predictedBothQuadrantsMm)],
-              ["المساحة المتاحة المقاسة", mm(prediction.measuredAvailableMm)], ["المساحة المطلوبة المقدّرة", mm(prediction.estimatedRequiredMm)],
-              ["المتاح ناقص المطلوب المقدّر", mm(prediction.availableMinusEstimatedRequiredMm)],
-              ["إصدار الحساب", stored.witness.formula.engineVersion], ["المعادلة", stored.witness.formula.formulaVersion],
-              ["مرجع النتيجة المحفوظة", stored.witness.reference?.source ?? null],
-              ["معرف التحليل المختار", analysis.selection.id], ["بصمة النتيجة المحفوظة", analysis.stored.resultHash],
-              ["الاعتماد السريري وملاءمة المرجع للحالة", "غير معتمد؛ تقدير يحتاج مراجعة الطبيب"]]);
-          } else table(key, [["معرف التحليل المختار", analysis.selection.id],
-          ["الاختيار المحفوظ", canonicalJourneyJSON(analysis.selection)], ["حالة النتيجة المحفوظة", analysis.stored.result.state],
-          ["النتيجة والشواهد والوحدات المحفوظة", canonicalJourneyJSON(analysis.stored.result)], ["بصمة النتيجة المحفوظة", analysis.stored.resultHash],
-          ["الاعتماد السريري", "غير معتمد"]]);
+          if (stored.state === "ready" && stored.witness.result.state === "calculated") {
+            const result = stored.witness.result;
+            const formula = result.method === "arch_space" ? "المسافة المتاحة ناقص المسافة المطلوبة (mm)"
+              : result.method === "tanaka_johnston_1974_approximation_v1"
+                ? `تقدير الناب والضاحكين لكل جهة: نصف مجموع القواطع السفلية مضافًا إليه ${result.arch === "upper" ? "11" : "10.5"} mm`
+                : "نسبة مجموع عروض الأسنان السفلية إلى العلوية، مضروبة في 100 (%)";
+            rows.push(["دلالة المعادلة المحفوظة", formula]);
+          }
+          for (const [label, value] of presented.provenanceRows) {
+            if (label === "المصدر كما حُفظ") rows.push(["المرجع المحفوظ", value]);
+            else if (label === "الحد الأدنى لمجال المدخل التنبؤي المدعوم") rows.push(["الحد الأدنى لمجال المدخل المدعوم", value]);
+            else if (label === "الحد الأعلى لمجال المدخل التنبؤي المدعوم") rows.push(["الحد الأعلى لمجال المدخل المدعوم", value]);
+          }
+          const archLabel = "arch" in analysis.selection ? analysis.selection.arch === "upper" ? " — الفك العلوي" : " — الفك السفلي" : "";
+          modelTables.push({ blockIndex: blocks.length, title: presented.title + archLabel, analysisId: analysis.selection.id });
+          table(key, rows);
+          modelAnalyses.push(captureModelAnalysisEvidence(revision, source, panel.instanceId, analysis));
         }
         if (!projected.analyses.length) paragraph(key, "لم تُحفظ تحليلات مختارة في هذه النسخة؛ لم يُحسب تحليل جديد للعرض.");
       } else { unmapped.push({ sourceKey: key, kind: source.kind, reason: "assessment_layout_not_mapped" }); continue; }
@@ -259,6 +267,6 @@ export function projectStudyRecordedFacts(raw: unknown, scope: JourneyScope, pan
       paragraph(key, "أبعاد الملف المسجلة ليست إثباتًا لاتجاه EXIF أو أبعاد العرض الموجهة. عرض الصورة يتطلب استخدامًا ووصفة ومشتقًا متحققًا مستقلًا.");
     } else unmapped.push({ sourceKey: key, kind: source.kind, reason: "layout_source_projection_not_implemented" });
   }
-  return { version: STUDY_RECORDED_FACTS_VERSION, panelInstanceId, layoutKey: panel.layoutKey, panelState: panel.state, blocks, unavailable, unmapped,
+  return { version: STUDY_RECORDED_FACTS_VERSION, panelInstanceId, layoutKey: panel.layoutKey, panelState: panel.state, blocks, modelAnalyses, modelTables, unavailable, unmapped,
     complete: unavailable.length === 0 && unmapped.length === 0 };
 }

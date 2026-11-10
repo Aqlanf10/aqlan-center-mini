@@ -1,3 +1,4 @@
+import { studyNotesProjectionHash } from "./ortho-study-presentation-notes";
 import {wrapStudyTextLine} from './ortho-study-display';
 import {CASE_PAGE,caseLayout} from './ortho-case-template';
 import type {JourneyScope} from './ortho-case-journey-records';
@@ -6,7 +7,7 @@ import type {StudySavedContent} from './ortho-case-study-capture';
 import {studyTextPresentation,type StudyTextPresentation,type StudyTextPage} from './ortho-study-text-export';
 import {planOrthoMediaGeometry,type OrthoStudyMediaUseDraft} from './ortho-study-media';
 import type {StudyGroupDraft} from './ortho-case-study';
-export const STUDY_ILLUSTRATED_RENDERER='ortho-illustrated-v7-capture-context';
+export const STUDY_ILLUSTRATED_RENDERER='ortho-illustrated-v8-readable-model';
 export const STUDY_ILLUSTRATED_LIMITS=Object.freeze({images:40,pages:300,bytes:24*1024*1024});
 const viewLabels:Record<OrthoStudyMediaUseDraft['view'],string>={unassigned:'منظر غير محدد','face-rest':'الوجه في الراحة','face-smile':'الابتسامة',profile:'الوجه الجانبي','intraoral-front':'داخل الفم — أمامي','intraoral-right':'داخل الفم — يمين','intraoral-left':'داخل الفم — يسار','occlusal-upper':'إطباقي علوي','occlusal-lower':'إطباقي سفلي',panoramic:'بانوراما',cephalometric:'سيفالومتري',other:'منظر آخر'};
 export interface StudyIllustratedImage {
@@ -19,6 +20,7 @@ export interface StudyIllustratedPresentation extends Omit<StudyTextPresentation
 /** Selection order and frame are derived solely from the saved version. */
 export async function illustrateSavedStudy(revision:StudyRevision<StudySavedContent>,scope:JourneyScope,
  render:(use:OrthoStudyMediaUseDraft,frame:{width:number;height:number})=>Promise<Omit<StudyIllustratedImage,'use'|'frame'|'resolutionWarning'|'group'>>):Promise<StudyIllustratedPresentation>{
+ revision=structuredClone(revision); scope={...scope};
  const panels=revision.content.authored.panels.filter(p=>p.included),count=panels.reduce((n,p)=>n+p.images.length,0);
  if(count>STUDY_ILLUSTRATED_LIMITS.images)throw Error('study_illustrated_image_limit');
  const exportedKeys=new Set(panels.filter(panel=>panel.state==='available').flatMap(panel=>panel.sourceKeys));
@@ -48,5 +50,5 @@ export async function illustrateSavedStudy(revision:StudyRevision<StudySavedCont
     for(let i=0;i<lines.length;i+=12)add({title:`${layout!.titleAr} — تعليق الصورة`,sourceKeys:[...panel.sourceKeys],lines:lines.slice(i,i+12)});}
   }
  }
- return {...full,pages};
+ const value={...full,pages}; value.projectionHash=studyNotesProjectionHash(value); return value;
 }
