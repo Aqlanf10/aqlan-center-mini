@@ -35,7 +35,18 @@ describe("one workup path over the existing record owners", () => {
       await page.getByRole("button", { name: "بدء تقييم غير معبأ", exact: true }).click();
       await page.getByRole("combobox", { name: "حالة الشكوى الرئيسية", exact: true }).selectOption("recorded");
       await page.getByLabel("الشكوى الرئيسية — اختيار قابل للبحث أو نص حر", { exact: true }).fill("شكوى اصطناعية محفوظة مرة واحدة");
+      // A quick entry with incomplete provenance stays local and names what to fix,
+      // even while the source/date editor is collapsed. Untouched fields stay optional.
+      await page.getByRole("button", { name: "حفظ مراجعة تقييم جديدة", exact: true }).click();
+      const feedback = page.getByTestId("assessment-save-feedback");
+      await feedback.waitFor();
+      expect(await feedback.innerText()).toContain("سبب إنشاء المراجعة");
+      expect(await feedback.innerText()).toContain("الشكوى الرئيسية");
+      expect(await page.getByLabel("الشكوى الرئيسية — اختيار قابل للبحث أو نص حر", { exact: true }).inputValue()).toBe("شكوى اصطناعية محفوظة مرة واحدة");
+      expect(writes).toEqual([]);
+      expect((await db.query("SELECT count(*)::int n FROM ortho_assessment_revisions WHERE ortho_case_id=$1", [orthoCaseId])).rows[0].n).toBe(0);
       await source(page); await page.getByLabel("سبب إنشاء هذه المراجعة", { exact: true }).fill("توثيق مقابلة اصطناعية");
+      await expect.poll(() => feedback.count()).toBe(0);
       // Same draft survives section and pillar changes; navigation never sends a write.
       await selector.selectOption("2"); await selector.selectOption("8"); await selector.selectOption("1");
       await expect.poll(() => page.getByLabel("الشكوى الرئيسية — اختيار قابل للبحث أو نص حر", { exact: true }).inputValue()).toBe("شكوى اصطناعية محفوظة مرة واحدة");
