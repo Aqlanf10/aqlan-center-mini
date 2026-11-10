@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
+import { emptyStrategy } from "../fixtures/ortho-strategy";
 
 // CI-only built-page acceptance. The isolated HTTP harness owns authentication.
 // All browser API reads and all writes are intercepted with synthetic fixtures;
@@ -56,6 +57,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
   const unexpected: string[] = [];
   const errors: string[] = [];
   const diagnosisReads: string[] = [];
+  const strategyReads: string[] = [];
   let diagnosisResponse: { body: unknown; status: number } = { body: { diagnoses: diagnosisVersions() }, status: 200 };
   let stored: Record<string, unknown> = clinicalVisit(ortho);
   if (regimen === "baseline") stored.ortho = { ...(stored.ortho as object), lastAdjustment: null,
@@ -91,6 +93,10 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
       diagnosisReads.push(url.pathname + url.search);
       await json(route, diagnosisResponse.body, diagnosisResponse.status);
     }
+    else if (method === "GET" && path === "/api/ortho/98314/strategy" && url.search === "") {
+      strategyReads.push(path);
+      await json(route, { ...emptyStrategy(patientId), orthoCaseId: 98314 });
+    }
     else if (path === clinicalPath) await json(route, stored);
     else if (path === `/api/visits/${visitId}/financial-context`) await json(route, { visitId, patientId, signed: true, directReference: null, directReferenceState: "missing", work: [], summary: "no_recorded_work" });
     else if (path === `/api/visits/${visitId}/billing-preview`) await json(route, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: "شدّة مشمولة" });
@@ -116,7 +122,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
     await page.goto(`${baseUrl}/visits/${visitId}`);
     await page.locator("#visit-notes").waitFor();
     await page.getByRole("button", { name: "احفظ بلا توقيع", exact: true }).waitFor();
-    return { context, page, writes, unexpected, errors, diagnosisReads,
+    return { context, page, writes, unexpected, errors, diagnosisReads, strategyReads,
       setDiagnosisResponse: (body: unknown, status = 200) => { diagnosisResponse = { body, status }; },
       holdSave: () => { holdSave = true; },
       finishSave: async () => { if (!pendingSave) throw new Error("No synthetic save pending"); holdSave = false; await json(pendingSave, { ok: true }); pendingSave = null; },
@@ -129,6 +135,20 @@ const review = (page: Page) => page.getByRole("button", { name: "مراجعة و
 const dialog = (page: Page) => page.getByRole("dialog", { name: "مراجعة وإنهاء الزيارة", exact: true });
 const done = (page: Page) => page.getByRole("textbox", { name: "ما نُفّذ في الشدّة", exact: true });
 const assertSafe = (f: Awaited<ReturnType<typeof fixture>>) => { expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]); };
+
+/** Read-only references may compare saved records and refresh, never author data. */
+async function assertReferenceControls(page: Page) {
+  const reference = page.getByTestId("ortho-visit-reference");
+  await reference.getByTestId("ortho-diagnosis-latest-entry").waitFor();
+  await reference.getByText("لا توجد نسخة موثّقة لخطة هذه الحالة بعد.", { exact: true }).waitFor();
+  expect(await reference.locator("input, textarea").count()).toBe(0);
+  expect(await reference.locator("select").evaluateAll(nodes => nodes.map(node => node.getAttribute("aria-label"))))
+    .toEqual(["قيد المقارنة الأول", "قيد المقارنة الثاني"]);
+  expect(await reference.getByRole("button").allTextContents()).toEqual(["تحديث سجل الخطة"]);
+  expect(await reference.getByTestId("ortho-strategy-editor").count()).toBe(0);
+  expect(await reference.getByTestId("ortho-strategy-draft").count()).toBe(0);
+  expect(await reference.getByRole("alert").count()).toBe(0);
+}
 
 /** Real browser geometry, using the visible title and unchanged header controls. */
 async function assertVisitHeaderLayout(page: Page, width: number) {
@@ -214,7 +234,7 @@ describe("orthodontic session-first chairside entry in the built page", () => {
       await reference.locator(":scope > summary").click();
       expect(await reference.textContent()).toContain("تشخيص سابق للمرجع فقط");
       expect(await reference.textContent()).toContain("طبيب مسؤول تجريبي");
-      expect(await reference.locator("input, textarea, select, button").count()).toBe(0);
+      await assertReferenceControls(f.page);
       expect(await reference.getByRole("link").getAttribute("href")).toBe(`/patients/${patientId}?tab=ortho`);
       expect(await note(f.page, "فحص اليوم (إن أُجري)").inputValue()).toBe("");
       await reference.locator(":scope > summary").click();
@@ -447,8 +467,8 @@ describe("read-only case diagnosis continuity in the built RTL page", () => {
   it.each([1280, 390])("separates partial entries and preserves today's drafts through reference history, retry and signing at %ipx", async width => {
     const f = await fixture(width);
     try {
-      expect(f.diagnosisReads).toEqual([]);
-      await start(f.page).click(); expect(f.diagnosisReads).toEqual([]);
+      expect(f.diagnosisReads).toEqual([]); expect(f.strategyReads).toEqual([]);
+      await start(f.page).click(); expect(f.diagnosisReads).toEqual([]); expect(f.strategyReads).toEqual([]);
       await note(f.page, "شكوى جديدة أو تغيّر اليوم (إن وجد)").fill("شكوى اليوم فقط");
       await f.page.locator("#visit-notes details > summary").click();
       await note(f.page, "فحص اليوم (إن أُجري)").fill("فحص اليوم فقط");
@@ -466,7 +486,23 @@ describe("read-only case diagnosis continuity in the built RTL page", () => {
       expect(await latest.textContent()).not.toContain("صنف هيكلي قديم للمرجع");
       expect(await reference.textContent()).toContain("قد يتضمن القيد حقولًا محدّثة فقط");
       expect(await reference.textContent()).toContain("آخر تشخيص من زيارة موقّعة للمريض");
-      expect(await reference.locator("input, textarea, select").count()).toBe(0);
+      await assertReferenceControls(f.page);
+      await reference.getByRole("combobox", { name: "قيد المقارنة الأول", exact: true }).selectOption("98321");
+      await reference.getByRole("combobox", { name: "قيد المقارنة الثاني", exact: true }).selectOption("98320");
+      const comparison = reference.getByTestId("ortho-diagnosis-comparison");
+      await comparison.waitFor();
+      expect(await comparison.getByRole("region", { name: "بيانات القيد الأول", exact: true }).textContent()).toContain("#98321 · نسخة 7");
+      expect(await comparison.getByRole("region", { name: "بيانات القيد الثاني", exact: true }).textContent()).toContain("#98320 · نسخة 3");
+      expect(await comparison.textContent()).toContain("تحديث جزئي لتشخيص الحالة التجريبية");
+      expect(await comparison.textContent()).toContain("صنف هيكلي قديم للمرجع");
+      expect(f.writes).toEqual([]);
+      expect(f.diagnosisReads).toHaveLength(1);
+      expect(f.strategyReads).toEqual(["/api/ortho/98314/strategy"]);
+      await reference.getByRole("button", { name: "تحديث سجل الخطة", exact: true }).click();
+      await expect.poll(() => f.strategyReads.length).toBe(2);
+      await assertReferenceControls(f.page);
+      expect(f.diagnosisReads).toHaveLength(1);
+      expect(f.writes).toEqual([]);
       expect(await reference.getByRole("button", { name: /سجّل تشخيص|تحديث التشخيص|احفظ النسخة/ }).count()).toBe(0);
       const history = reference.getByTestId("ortho-diagnosis-history");
       expect(await history.getAttribute("open")).toBe(null);
@@ -499,9 +535,11 @@ describe("read-only case diagnosis continuity in the built RTL page", () => {
       await dialog(f.page).getByRole("button", { name: /وقّع الزيارة/ }).click();
       await f.page.waitForURL(`${baseUrl}${signedDestination}`);
       const readsBeforeSigned = f.diagnosisReads.length;
+      const strategyReadsBeforeSigned = f.strategyReads.length;
       await f.page.goto(`${baseUrl}/visits/${visitId}`);
       await f.page.getByRole("textbox", { name: "ملحق", exact: true }).waitFor();
       expect(f.diagnosisReads).toHaveLength(readsBeforeSigned);
+      expect(f.strategyReads).toHaveLength(strategyReadsBeforeSigned);
       expect(await f.page.getByTestId("ortho-diagnosis-reference").count()).toBe(0);
       expect(f.writes.filter(body => body.action === "sign")).toHaveLength(1);
       expect(f.writes.find(body => body.action === "sign")?.orthoSession).toMatchObject({ caseId: 98314, done: "شدّة اليوم فقط" });
