@@ -363,6 +363,18 @@ describe("diagnosis comparison owner and snapshot isolation", () => {
   const compared = () => nodes(render()).filter(n => n.type === OrthoDiagnosisComparison);
   const choose = () => { change(select("الأول"), "51"); change(select("الثاني"), "50"); };
   beforeEach(() => { read = () => response({ diagnoses: entries() }); });
+  it("keeps saved-entry comparison selects when the new diagnosis editor opens", async () => {
+    await ready();
+    const calls = fetchMock.mock.calls.length;
+    invoke(button("تحديث التشخيص"));
+    expect(form()).toBeDefined();
+    expect(nodes(render()).filter(n => n.type === "select").map(n => n.props["aria-label"]))
+      .toEqual(["قيد المقارنة الأول", "قيد المقارنة الثاني"]);
+    expect(select("الأول").props.value).toBe("");
+    expect(select("الثاني").props.value).toBe("");
+    expect(fetchMock.mock.calls).toHaveLength(calls);
+    expect(writes()).toHaveLength(0);
+  });
   it("uses two explicit IDs, rejects identical choices and never starts a read or write", async () => {
     await ready(); const calls = fetchMock.mock.calls.length;
     change(select("الأول"), "51"); expect(compared()).toHaveLength(0);
