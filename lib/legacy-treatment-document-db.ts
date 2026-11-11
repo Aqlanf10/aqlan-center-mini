@@ -5,6 +5,7 @@ import type {SessionPayload} from "./auth";
 import {CLINIC_TIME_ZONE,ensureSchema,getPool,getSettingsInTransaction,setPatientOpeningBalanceInTx,clearPatientOpeningBalanceInTx,insertAuditRow,type DbClient,type Service} from "./db";
 import {assertDebtSession,DebtRepaymentError,debtRequestHash,readDebtPosition,writeDebtRepaymentInTransaction,type DebtActorSource} from "./debt-installments-db";
 import type {PriceGrants} from "./price-authority";
+import {checkCorrectionPriceAuthority,grantsUsedByCorrection} from "./correction-price-authority";
 import type {OpeningAccess} from "./opening-access";
 import {debtAccountDue,lockDebtAccountForSchedule} from "./debt-account-position";
 import {openingBalanceAccess} from "./opening-access";
@@ -200,9 +201,15 @@ export async function correctHistoricalDocument(patientId:number,documentId:numb
 }
 /** The correction on a caller's transaction (M2 slice 95c). Authority is the caller's (the label
  * on legacy, the grants on canonical); `afterLocks` decides the canonical scope right after the
- * patient row lock, before the replay. */
+ * patient row lock, before the replay.
+ *
+ * `price` (canonical callers; review request 6801961109 on #483): the correction and opening
+ * grants are not a price exception. A changed line price or discount, compared with the revision
+ * stored under these locks, is decided by the price grants (G4-1) before any write; `used`
+ * reports the grants relied on so the actor's re-proof covers them. The legacy administrator
+ * path passes nothing and is unchanged. */
 export async function correctHistoricalDocumentOn(client:DbClient,patientId:number,documentId:number,source:Record<string,unknown>,session:DebtActorSource,
-  afterLocks?:(patientId:number)=>Promise<void>){
+  afterLocks?:(patientId:number)=>Promise<void>,price?:{grants:PriceGrants;used?:(grants:Array<keyof PriceGrants>)=>void}){
   if(typeof source.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(source.idempotencyKey))bad("مفتاح التصحيح مطلوب.");
   const hash=debtRequestHash({purpose:"historical-document-correction-v1",patientId,documentId,source,actor:actor(session)});
     await assertDebtSession(client,session);
@@ -223,6 +230,22 @@ export async function correctHistoricalDocumentOn(client:DbClient,patientId:numb
     await unallocatedPaidGuard(client,patientId,input.previouslyPaidMinor);
     await client.query("LOCK TABLE settings IN SHARE MODE");const settings=await getSettingsInTransaction(client,{requireStoredExchangeRates:true});
     verifyPeriod(settings,[current.historicalAsOf,input.historicalAsOf,...(prior.opening?[prior.opening.asOfDate]:[])]);
+    let priceAuthority:Record<string,unknown>|null=null;
+    if(price){
+      const {services}=await catalog(client,{items:current.lines.map(line=>({serviceId:line.serviceId}))},false);
+      const decision=checkCorrectionPriceAuthority({
+        lines:current.lines.map((line,index)=>{
+          const service=services.get(line.serviceId);
+          if(!service)bad("خدمة البند غير موجودة في الدليل؛ لم يُحفظ التصحيح.","conflict");
+          return {description:line.description,service,quantity:1,storedUnitMinor:line.unitPriceMinor,requestedUnitMinor:input.prices[index],serviceChanged:false};
+        }),
+        storedTotalMinor:current.totalMinor,storedDiscountMinor:current.discountMinor,totalMinor:input.totalMinor,discountMinor:input.discountMinor,
+        discountReason:input.discountReason,reason:input.reason,currencyChanged:false,currency:current.currency,rates:foreignRatesFromSettings(settings),
+        maxDiscountPercent:Number(settings["billing.max_discount_percent"]),grants:price.grants});
+      if(!decision.ok)bad(decision.message,"unauthorized");
+      price.used?.(grantsUsedByCorrection(decision,price.grants));
+      priceAuthority={changedLines:decision.changes.changedLines.filter(Boolean).length,discountChanged:decision.changes.discountChanged,overrides:decision.overrides,discount:decision.discount};
+    }
     const reason=`تصحيح الاتفاق التاريخي #${documentId}: ${input.reason}`.slice(0,300);
     // The opening is owned by the current positive historical facts. An old
     // revision date cannot remain authoritative after that fact is corrected.
@@ -241,7 +264,7 @@ export async function correctHistoricalDocumentOn(client:DbClient,patientId:numb
     await insertRevision(client,{...input,documentId,version:current.version+1,lines,reason:input.reason,openingHistoryId,repayment,hash,session});
     await insertAuditRow(client,{action:"legacy_document.correct",entity:"patient",entityId:patientId,actor:session.username,actorRole:session.role,
       details:{documentId,version:current.version+1,reason:input.reason,before:current,after:{...input,lines},openingHistoryId,receiptsPreserved:true,clinicalIdentitiesPreserved:true,
-        accountCreditMinor:Math.max(0,-(await debtAccountDue(client,patientId,current.currency)).due),cashMovement:0}});
+        accountCreditMinor:Math.max(0,-(await debtAccountDue(client,patientId,current.currency)).due),cashMovement:0,...(priceAuthority?{priceAuthority}:{})}});
     await assertDebtSession(client,session);const receipt=await readHistoricalDocumentInTx(client,documentId,patientId,current.version+1);return {document:receipt!,replayed:false};
 }
 

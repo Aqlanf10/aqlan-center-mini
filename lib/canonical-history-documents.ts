@@ -95,17 +95,22 @@ export async function commandCanonicalHistoricalCorrection(session: VerifiedDura
   validPatient(patientId);
   if (!Number.isSafeInteger(documentId) || documentId <= 0) throw new DebtRepaymentError("invalid", "هوية الاتفاق غير صالحة.");
   const needed = [CORRECT, OPENING, LEDGER] as const;
+  const PRICE = { discount: DISCOUNT, discountOverride: OVERRIDE, increase: INCREASE } as const;
   return withStaffOperation(pool, session, CORRECT, async (client, handle) => {
     const identity = await staffOperationIdentity(client, handle, CORRECT);
-    const held = await staffOperationCapabilities(client, handle, CORRECT, needed);
+    const held = await staffOperationCapabilities(client, handle, CORRECT, [...needed, DISCOUNT, OVERRIDE, INCREASE] as const);
+    // The correction and opening grants are not a price exception: the price grants decide what
+    // the correction changes in prices and discount, and the re-proof covers the grants it used.
+    let used: Array<keyof typeof PRICE> = [];
     if (!held.has(LEDGER)) throw new CanonicalLegacyArchiveRefusal();
     if (!held.has(OPENING)) throw new DebtRepaymentError("unauthorized", "تصحيح الاتفاق التاريخي يحتاج صلاحية إدارة الأرصدة الافتتاحية.");
     await early(client, handle, CORRECT, patientId);
     const actor = canonicalDebtActor(identity, async current => {
       if (current !== client) return false;
-      const now = await staffOperationCapabilities(current, handle, CORRECT, needed);
-      return needed.every(capability => now.has(capability));
+      const now = await staffOperationCapabilities(current, handle, CORRECT, [...needed, DISCOUNT, OVERRIDE, INCREASE] as const);
+      return needed.every(capability => now.has(capability)) && used.every(grant => now.has(PRICE[grant]));
     });
-    return correctHistoricalDocumentOn(client, patientId, documentId, source, actor, admitAfterLock(client, handle, CORRECT));
+    return correctHistoricalDocumentOn(client, patientId, documentId, source, actor, admitAfterLock(client, handle, CORRECT),
+      { grants: authority(capability => held.has(capability as typeof needed[number])).grants, used: list => { used = list; } });
   });
 }

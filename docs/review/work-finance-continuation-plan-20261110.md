@@ -27,7 +27,8 @@ Gate finding on `817106ac`: the interim commits had not regenerated `docs/securi
 
 - Gate on `0c4cdd08` found that the generated `inventory.json` digest was stale again (source files changed, the file was not regenerated). Regenerated in the next commit; the rule is now: regenerate the audits before every commit that touches `lib/`, `app/` or tests.
 - Case-participation storage (migration `0126`) is on its own branch, `feat/claude-commission-case-participation-20261111`, stacked on this one, so that its strict migration lists can be reconciled with the orthodontic candidate (#535/#537, lists end at `0125`) without touching this branch.
-- Next on this branch: the correction price and discount authority review requested on #483 (comment 6801961109): matrix, proven defect versus open policy, allow/deny tests. No policy is decided for the owner.
+- Gate on `0c4cdd08`: unit 15,021/15,024 (two inventory-drift failures fixed in `9b2831a3`, one load timeout that passes alone); tsc pass; PostgreSQL 225 files, 2,958/2,958; build pass; HTTP journeys 807 passed with the three known local browser failures. Pushed at `9b2831a3`.
+- Correction price and discount authority (review request 6801961109 on #483): implemented on canonical sessions; matrix, proven defect versus open policy and the five owner questions are in `correction-price-authority-20261111.md`. Unit 12/12; PostgreSQL 15/15 (12 of 15 fail on the previous writers); related PostgreSQL 25 files, 355/355. No policy was decided for the owner.
 
 ## 3. Finance queue (order by risk to patient balances and the cash box)
 
