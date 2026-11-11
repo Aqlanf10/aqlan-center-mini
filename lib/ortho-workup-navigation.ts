@@ -1,8 +1,9 @@
 export type WorkupAssessmentSection = "interview" | "extraoral" | "intraoral" | "measurements" | "records" | "ceph" | "diagnosis";
+export type OrthoWorkupPillar = "diagnostics" | "prescription" | "wires" | "retention" | "presentation";
 /** Navigation of existing record owners; a visited step is never clinical approval. */
 export const ORTHO_WORKUP_STEPS: readonly {
   id: string; title: string; hint: string;
-  pillar: "diagnostics" | "prescription" | "wires" | "retention" | "presentation";
+  pillar: OrthoWorkupPillar;
   section?: WorkupAssessmentSection; focus?: "identity" | "financial";
 }[] = [
   { id: "identity", title: "الوصول وبيانات الحالة", pillar: "diagnostics", focus: "identity", hint: "راجع هوية المريض والحالة وسياق الزيارة المتاح قبل بدء المقابلة." },
@@ -19,6 +20,18 @@ export const ORTHO_WORKUP_STEPS: readonly {
   { id: "retention", title: "النتيجة والإنهاء والتثبيت", pillar: "retention", hint: "راجع قرار إنهاء العلاج ومتابعة التثبيت لكل فك، دون افتراض تواريخ أو أجهزة غير مسجلة." },
   { id: "presentation", title: "دراسة الحالة المحفوظة", pillar: "presentation", hint: "احفظ دراسة الحالة وراجع مصادرها وصلاحية مراجعتها؛ التصدير خطوة اختيارية مستقلة." },
 ];
+/** Use the existing case-pillar order in both navigation views: wires first,
+ * diagnosis second; the remaining pillars retain their prior order. Step indices
+ * stay stable for saved bookmarks and every record keeps its command owner.
+ * The diagnostic entry opens the interview, not an inferred diagnosis. */
+export const ORTHO_WORKUP_GROUPS = [
+  { id: "wires", title: "الأسلاك والشدّات", icon: "⚡", entry: 10, steps: [10] },
+  { id: "diagnostics", title: "التشخيص", icon: "📐", entry: 1, steps: [0, 1, 2, 3, 4, 5, 6, 7] },
+  { id: "prescription", title: "خطة العلاج والميكانيكا", icon: "⚙️", entry: 8, steps: [8, 9] },
+  { id: "retention", title: "التثبيت والاستبقاء", icon: "🛡️", entry: 11, steps: [11] },
+  { id: "presentation", title: "دراسة الحالة المحفوظة", icon: "📋", entry: 12, steps: [12] },
+] as const;
+export const ORTHO_WORKUP_ENTRY_STEP = ORTHO_WORKUP_GROUPS[0].entry;
 const id = (value: number) => Number.isSafeInteger(value) && value > 0 && value <= 2147483647;
 export function workupBookmark(patientId: number, caseId: number, step: number) {
   if (!id(patientId) || !id(caseId) || !Number.isInteger(step) || !ORTHO_WORKUP_STEPS[step]) throw Error("invalid_workup_bookmark");
