@@ -3,6 +3,7 @@ import type { SessionPayload } from "./auth";
 import { canAccessPatient, PatientOutOfScopeError, resolveRestrictedDoctorScope } from "./patient-access";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
+import { PATIENT_PORTAL_SECURITY_SQL } from "./patient-portal-security-schema";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
@@ -2110,6 +2111,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0078", name: "agreement_reconciliation", filename: "0078_agreement_reconciliation.sql", sql: AGREEMENT_RECONCILIATION_SQL, checksum: checksumOf(AGREEMENT_RECONCILIATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0127", name: "patient_portal_security", filename: "0127_patient_portal_security.sql", sql: PATIENT_PORTAL_SECURITY_SQL, checksum: checksumOf(PATIENT_PORTAL_SECURITY_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -3254,6 +3256,19 @@ export async function createFirstAdmin(input: {
      RETURNING *`,
     [input.username, input.displayName, input.passwordHash],
   );
+  if (rows[0]) {
+    const { rows: [portalGrantsPresent] } = await getPool().query<{ present: string | null }>(
+      `SELECT to_regclass('public.patient_portal_staff_grants')::text AS present`,
+    );
+    if (portalGrantsPresent?.present) {
+      await getPool().query(
+        `INSERT INTO patient_portal_staff_grants (user_id, is_owner, can_manage_portal, can_preview_portal, note)
+         VALUES ($1, TRUE, TRUE, TRUE, 'حساب المالك الأول للعيادة')
+         ON CONFLICT (user_id) DO NOTHING`,
+        [rows[0].id],
+      );
+    }
+  }
   return rows[0] ? toUser(rows[0]) : null;
 }
 
@@ -3333,7 +3348,7 @@ import {
 } from "./appointment-lifecycle";
 
 import { ageFromBirthDate, ageFromBirthYear, type Gender, type Patient, type PatientInput } from "./patient";
-import { nameTokens, type CandidatePatient } from "./duplicates";
+import { nameTokens, samePhone, type CandidatePatient } from "./duplicates";
 
 /** ما يكفي لقائمة بحث: الحقول الثقيلة لا تُحمَّل لعشرين نتيجة لن تُقرأ. */
 export interface PatientSummary {
@@ -5487,6 +5502,31 @@ export async function mergeDuplicatePatient(
       };
     }
 
+    const moved: Record<string, number> = {};
+
+    /* (<NNNN>_patient_portal_security) تأمين بوابة المريض عند دمج ملف مكرر:
+       إبطال رموز التفعيل/الاستعادة المفتوحة للملف المدموج وإلغاء حساب البوابة الخاص به
+       قبل نقل المفاتيح الأجنبية، فلا يصطدم المفتاح الأساسي لحساب الهدف ولا تبقى جلسات الملف المدموج صالحة. */
+    const { rows: [portalTablesPresent] } = await client.query<{ present: string | null }>(
+      `SELECT to_regclass('public.patient_portal_accounts')::text AS present`,
+    );
+    if (portalTablesPresent?.present) {
+      await client.query(
+        `UPDATE patient_portal_tokens
+            SET invalidated_at = COALESCE(invalidated_at, NOW()),
+                invalidation_reason = COALESCE(invalidation_reason, 'patient_merged')
+          WHERE patient_id = $1 AND used_at IS NULL`,
+        [sourceId],
+      );
+      const revokedPortalSource = await client.query(
+        `DELETE FROM patient_portal_accounts WHERE patient_id = $1`,
+        [sourceId],
+      );
+      if (revokedPortalSource.rowCount) {
+        moved["patient_portal_accounts.revoked_source"] = revokedPortalSource.rowCount;
+      }
+    }
+
     /* كل عمودٍ يشير إلى patients(id) بمفتاحٍ أجنبي — من فهرس القاعدة نفسها. */
     const { rows: references } = await client.query<{ tbl: string; col: string }>(
       `SELECT c.conrelid::regclass::text AS tbl, a.attname AS col
@@ -5495,7 +5535,6 @@ export async function mergeDuplicatePatient(
         WHERE c.contype = 'f' AND c.confrelid = 'patients'::regclass
         ORDER BY 1, 2`,
     );
-    const moved: Record<string, number> = {};
     for (const { tbl, col } of references) {
       if (!/^[a-z_][a-z0-9_]*$/.test(tbl) || !/^[a-z_][a-z0-9_]*$/.test(col)) continue;
       const result = await client.query(
@@ -5597,6 +5636,15 @@ export async function updatePatient(
   // التحديث الجزئي بعلَم لكل حقل: `COALESCE` وحده لا يفرّق بين «لم يُرسَل» و«أُرسل
   // فارغًا عمدًا»، فمسحُ رقم بديل خاطئ كان مستحيلًا — يبقى إلى الأبد.
   const has = (key: keyof PatientInput) => input[key] !== undefined;
+  const checkPhoneChange = has("phone") || has("altPhone");
+  const priorPhones = checkPhoneChange
+    ? (
+        await getPool().query<{ phone: string | null; alt_phone: string | null }>(
+          `SELECT phone, alt_phone FROM patients WHERE id = $1`,
+          [id],
+        )
+      ).rows[0] ?? null
+    : null;
   const { rows } = await getPool().query<PatientRow>(
     `UPDATE patients SET
        full_name     = COALESCE($2::text, full_name),
@@ -5639,7 +5687,42 @@ export async function updatePatient(
       has("flags"), has("flags") ? input.flags : null,
     ],
   );
-  return rows[0] ? toPatient(rows[0]) : null;
+  const updatedPatient = rows[0] ? toPatient(rows[0]) : null;
+  if (updatedPatient && priorPhones) {
+    const primaryChanged =
+      Boolean(priorPhones.phone) !== Boolean(updatedPatient.phone) ||
+      (Boolean(priorPhones.phone || updatedPatient.phone) &&
+        !samePhone(priorPhones.phone, updatedPatient.phone));
+    const altChanged =
+      Boolean(priorPhones.alt_phone) !== Boolean(updatedPatient.altPhone) ||
+      (Boolean(priorPhones.alt_phone || updatedPatient.altPhone) &&
+        !samePhone(priorPhones.alt_phone, updatedPatient.altPhone));
+    if (primaryChanged || altChanged) {
+      const { rows: [portalTablesPresent] } = await getPool().query<{ present: string | null }>(
+        `SELECT to_regclass('public.patient_portal_accounts')::text AS present`,
+      );
+      if (portalTablesPresent?.present) {
+        const nextFingerprint = portalPhoneFingerprint(updatedPatient.phone);
+        await getPool().query(
+          `UPDATE patient_portal_accounts
+              SET credential_version = credential_version + 1,
+                  sessions_revoked_at = NOW(),
+                  phone_fingerprint = $2,
+                  updated_at = NOW()
+            WHERE patient_id = $1`,
+          [id, nextFingerprint],
+        );
+        await getPool().query(
+          `UPDATE patient_portal_tokens
+              SET invalidated_at = COALESCE(invalidated_at, NOW()),
+                  invalidation_reason = COALESCE(invalidation_reason, 'phone_changed')
+            WHERE patient_id = $1 AND used_at IS NULL AND invalidated_at IS NULL`,
+          [id],
+        );
+      }
+    }
+  }
+  return updatedPatient;
 }
 
 /* ─────────────────────── (PAT-3) الصورة وموافقات التواصل ─────────────────────── */
@@ -25561,6 +25644,7 @@ export async function issuedCostForPatient(patientId: number): Promise<PatientIs
 import {
   confirmVerdict,
   portalCredentialsMatch,
+  portalPhoneFingerprint,
   toPortalAppointment,
   type IntakeAnswers,
   type PortalAppointmentView,

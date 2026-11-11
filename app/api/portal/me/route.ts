@@ -3,7 +3,7 @@ import { requirePortalSession } from "@/lib/portal-server";
 
 export const dynamic = "force-dynamic";
 
-/** من الذي يطلب؟ — الصفحة تسأله لتفصل بين شاشة الدخول والبوابة. */
+/** من الذي يطلب؟ — الصفحة تسأله لتفصل بين شاشة الدخول والبوابة، وتعرض الشريط الإداري عند المعاينة. */
 export async function GET() {
   const session = await requirePortalSession();
   if (!session) {
@@ -12,5 +12,6 @@ export async function GET() {
   return NextResponse.json({
     patientNumber: session.patientNumber,
     fullName: session.fullName,
+    ...(session.adminPreview ? { adminPreview: session.adminPreview } : {}),
   });
 }

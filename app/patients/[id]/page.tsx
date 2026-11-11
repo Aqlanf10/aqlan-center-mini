@@ -47,6 +47,7 @@ import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
 import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
+import { PatientPortalAccessCard } from "@/components/PatientPortalAccessCard";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
@@ -1133,6 +1134,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               patient={patient}
               canEdit
               onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+            />
+          ) : null}
+          {!isRestrictedRole(session?.role) ? (
+            <PatientPortalAccessCard
+              patientId={patient.id}
+              patientNumber={patient.patientNumber}
+              patientPhone={patient.phone}
             />
           ) : null}
           {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Client } from "pg";
 import { hashPassword, createSessionToken, sessionCredentialVersion, sessionPermissionVersion } from "../../lib/auth";
 import { financeAccessFor } from "../../lib/finance-permissions";
+import { portalPhoneFingerprint } from "../../lib/portal";
 
 /**
  * إعداد عالمي لاختبارات الأمن HTTP (P2/S14) — يشغّل مرة واحدة لكل جولة
@@ -41,8 +42,8 @@ export const TEST_USERS = {
 } as const;
 
 export const TEST_PATIENTS = {
-  patientA: { patientNumber: "SECA-001", phone: "777100001", fullName: "مريض الأمن أ" },
-  patientB: { patientNumber: "SECB-002", phone: "777100002", fullName: "مريض الأمن ب" },
+  patientA: { patientNumber: "SECA-001", phone: "777100001", fullName: "مريض الأمن أ", loginName: "seca.001", password: "SecPortalA#1" },
+  patientB: { patientNumber: "SECB-002", phone: "777100002", fullName: "مريض الأمن ب", loginName: "secb.002", password: "SecPortalB#2" },
 } as const;
 
 function testDatabaseUrl(): string {
@@ -181,6 +182,23 @@ async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: nu
       `INSERT INTO patients (patient_number, full_name, phone, primary_doctor_id)
        VALUES ($1, $2, $3, $4) RETURNING id`,
       [TEST_PATIENTS.patientB.patientNumber, TEST_PATIENTS.patientB.fullName, TEST_PATIENTS.patientB.phone, partyB.id],
+    );
+
+    const [portalAHash, portalBHash] = await Promise.all([
+      hashPassword(TEST_PATIENTS.patientA.password),
+      hashPassword(TEST_PATIENTS.patientB.password),
+    ]);
+    await client.query(
+      `INSERT INTO patient_portal_accounts (
+         patient_id, login_name, password_hash, status, phone_fingerprint, activated_by_user_id, activated_at, password_updated_at
+       ) VALUES
+         ($1, $2, $3, 'active', $4, $9, NOW(), NOW()),
+         ($5, $6, $7, 'active', $8, $9, NOW(), NOW())`,
+      [
+        patientA.id, TEST_PATIENTS.patientA.loginName, portalAHash, portalPhoneFingerprint(TEST_PATIENTS.patientA.phone),
+        patientB.id, TEST_PATIENTS.patientB.loginName, portalBHash, portalPhoneFingerprint(TEST_PATIENTS.patientB.phone),
+        adminId,
+      ],
     );
 
     // زيارة لمريض أ لدى طبيبه أ — بها تُختبر حدود CDS السريري على زيارة موجودة

@@ -48,8 +48,8 @@ export const TEST_USERS = {
 } as const;
 
 export const TEST_PATIENTS = {
-  patientA: { patientNumber: "SECA-001", phone: "777100001", fullName: "مريض الأمن أ" },
-  patientB: { patientNumber: "SECB-002", phone: "777100002", fullName: "مريض الأمن ب" },
+  patientA: { patientNumber: "SECA-001", phone: "777100001", fullName: "مريض الأمن أ", loginName: "seca.001", password: "SecPortalA#1" },
+  patientB: { patientNumber: "SECB-002", phone: "777100002", fullName: "مريض الأمن ب", loginName: "secb.002", password: "SecPortalB#2" },
 } as const;
 
 export interface Session {
@@ -99,15 +99,15 @@ export async function loginStaff(username: string, password: string): Promise<Om
   return { cookie: sessionCookie };
 }
 
-/** دخول بوابة المريض عبر HTTP الحقيقي. */
-export async function loginPortal(phone: string, patientNumber: string): Promise<Session> {
+/** دخول بوابة المريض عبر HTTP الحقيقي (باسم المستخدم وكلمة المرور المفعّلة). */
+export async function loginPortal(username: string, password: string): Promise<Session> {
   const response = await fetch(`${baseUrl}/api/portal/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: baseUrl },
-    body: JSON.stringify({ phone, patientNumber }),
+    body: JSON.stringify({ username, password }),
   });
   if (response.status !== 200) {
-    throw new Error(`فشل دخول البوابة ${patientNumber}: HTTP ${response.status} — ${await response.text()}`);
+    throw new Error(`فشل دخول البوابة ${username}: HTTP ${response.status} — ${await response.text()}`);
   }
   const setCookies = response.headers.getSetCookie?.() ?? [];
   const portalCookie = setCookies
@@ -153,8 +153,8 @@ export async function harness(): Promise<Harness> {
         cookie: (await loginStaff(TEST_USERS.cashier.username, TEST_USERS.cashier.password)).cookie,
         token: staffTokenOf(TEST_USERS.cashier.username),
       },
-      portalA: await loginPortal(TEST_PATIENTS.patientA.phone, TEST_PATIENTS.patientA.patientNumber),
-      portalB: await loginPortal(TEST_PATIENTS.patientB.phone, TEST_PATIENTS.patientB.patientNumber),
+      portalA: await loginPortal(TEST_PATIENTS.patientA.loginName, TEST_PATIENTS.patientA.password),
+      portalB: await loginPortal(TEST_PATIENTS.patientB.loginName, TEST_PATIENTS.patientB.password),
     };
   }
   return {

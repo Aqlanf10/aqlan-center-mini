@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, portalConfirmAttendance, recordAudit } from "@/lib/db";
+import { isPortalAdminPreview } from "@/lib/portal";
 import { requirePortalSession } from "@/lib/portal-server";
 import { clinicDateString } from "@/lib/schedule";
 
@@ -24,6 +25,12 @@ export async function POST(request: Request) {
   const session = await requirePortalSession();
   if (!session) {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
+  }
+  if (isPortalAdminPreview(session)) {
+    return NextResponse.json(
+      { message: "هذا عرضٌ إداري للقراءة فقط باسم الموظف — لا تُنفَّذ عمليات باسم المريض." },
+      { status: 403 },
+    );
   }
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
