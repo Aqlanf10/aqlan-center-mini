@@ -445,10 +445,14 @@ export function resolvePolicyForShare(
  * float is involved. A discount equal to or above the total leaves every line at zero.
  * Lines with a non-positive amount take no discount.
  */
-export function allocateInvoiceDiscount(amounts: readonly number[], discountMinor: number): number[] {
-  if (amounts.some(amount => !Number.isSafeInteger(amount)) || !Number.isSafeInteger(discountMinor)) {
+export function allocateInvoiceDiscount(amounts: readonly number[], discountMinor: number, tieKeys?: readonly string[]): number[] {
+  if (amounts.some(amount => !Number.isSafeInteger(amount)) || !Number.isSafeInteger(discountMinor) || (tieKeys && tieKeys.length !== amounts.length)) {
     throw new Error("Invalid invoice discount allocation inputs");
   }
+  /* Equal remainders are ordered by the group's own identity (`tieKeys`), not by the order the
+     rows were read in: the same invoice always gives every doctor the same part of the discount.
+     Without keys the position decides, as before. */
+  const tie = (a: number, b: number) => (tieKeys && tieKeys[a] !== tieKeys[b] ? (tieKeys[a] < tieKeys[b] ? -1 : 1) : a - b);
   const weights = amounts.map(amount => (amount > 0 ? BigInt(amount) : 0n));
   const total = weights.reduce((sum, weight) => sum + weight, 0n);
   if (discountMinor <= 0 || total === 0n) return amounts.map(() => 0);
@@ -456,12 +460,20 @@ export function allocateInvoiceDiscount(amounts: readonly number[], discountMino
   if (discount >= total) return amounts.map(amount => (amount > 0 ? amount : 0));
   const parts = weights.map((weight, index) => ({ index, part: (weight * discount) / total, remainder: (weight * discount) % total }));
   let left = discount - parts.reduce((sum, entry) => sum + entry.part, 0n);
-  for (const entry of [...parts].sort((a, b) => (a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1))) {
+  for (const entry of [...parts].sort((a, b) => (a.remainder === b.remainder ? tie(a.index, b.index) : a.remainder > b.remainder ? -1 : 1))) {
     if (left === 0n) break;
     if (entry.remainder === 0n) continue;
     entry.part += 1n; left -= 1n;
   }
   return parts.map(entry => Number(entry.part));
+}
+
+/** The identity of one invoice line group for discount tie-breaking: fixed-width, so plain string
+ * order is numeric order; a missing value sorts last. Unique per group within an invoice. */
+export function discountGroupKey(group: { doctorId?: number | null; serviceId?: number | null; category?: string | null; serviceName?: string | null;
+  caseId?: number | null; planId?: number | null }): string {
+  const id = (value: number | null | undefined) => (typeof value === "number" ? String(value).padStart(12, "0") : "~");
+  return [id(group.doctorId), id(group.serviceId), group.category ?? "~", group.serviceName ?? "~", id(group.caseId), id(group.planId)].join("\u0001");
 }
 
 /**

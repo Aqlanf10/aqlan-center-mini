@@ -278,7 +278,7 @@ async function commissionDueForPayroll(client: DbClient, period: { start_date: s
   const pick = (rows: Awaited<ReturnType<typeof commissionReport>>, doctorId: number) => rows.find((c) => c.doctorId === doctorId && c.currency === currency);
   return {
     /** Due for one doctor in this run; `exceptItemId` is the run's own item (its commitment is this figure). */
-    async forDoctor(doctorId: number, exceptItemId: number | null) {
+    async forDoctor(doctorId: number, exceptItemId: number | null, standing: "draft" | "committed" = "draft") {
       /* Other runs' commission payables for this doctor and currency: only their UNPAID remainder
          is committed (what they paid is already inside the cumulative paid). The balance is taken
          at one horizon for all of them: the latest period end among this run and those runs. A
@@ -296,10 +296,19 @@ async function commissionDueForPayroll(client: DbClient, period: { start_date: s
       const horizon = other.horizon && other.horizon > periodEnd ? other.horizon : periodEnd;
       const row = pick(await cumulative(horizon), doctorId);
       const committedElsewhereMinor = Number(other.committed);
-      const cumulativeDueMinor = row?.dueMinor ?? 0;
+      /* A run that is still a draft comes after every committed run: it may only take what was
+         earned on collections up to ITS OWN period end and is not already paid or committed. A
+         collection of a later month is never pulled back into an earlier draft; when that later
+         month's run is already approved, the collection waits for the next run. A run that is
+         already approved keeps its place: its check is only that the whole ledger still covers it
+         (the single horizon above), so paying an earlier month after a later one stays possible. */
+      const earnedAtHorizon = row?.earnedMinor ?? 0;
+      const earnedAtOwnEnd = horizon === periodEnd ? earnedAtHorizon : pick(await cumulative(periodEnd), doctorId)?.earnedMinor ?? 0;
+      const earnedCapMinor = standing === "draft" ? Math.min(earnedAtOwnEnd, earnedAtHorizon) : earnedAtHorizon;
+      const cumulativeDueMinor = earnedCapMinor - (row?.paidMinor ?? 0);
       const dueMinor = Math.max(0, cumulativeDueMinor - committedElsewhereMinor);
       return {
-        dueMinor, committedElsewhereMinor, asOf: horizon,
+        dueMinor, committedElsewhereMinor, asOf: horizon, earnedAtOwnEndMinor: earnedAtOwnEnd,
         cumulativeEarnedMinor: row?.earnedMinor ?? 0, cumulativePaidMinor: row?.paidMinor ?? 0,
         /** What the period's own invoices contribute; the rest is later collections and adjustments of earlier months. */
         periodInvoicesDueMinor: Math.max(0, pick(ofPeriodInvoices, doctorId)?.dueMinor ?? 0),
@@ -500,7 +509,7 @@ async function disburseInTx(client: DbClient, input: ReturnType<typeof normalize
   if (components.commissionMinor > 0) {
     const snapshot = jsonObject(item.pay_terms_snapshot), doctorId = Number(snapshot.doctorPartyId);
     if (!doctorId || !item.commission_payable_id) fail("commission_missing", "التزام العمولة غير مرتبط بمصدره؛ يلزم مراجعة المسير.");
-    const earned = await (await commissionDueForPayroll(client, run as { start_date: string; end_date: string }, item.currency as Currency)).forDoctor(doctorId, Number(item.id));
+    const earned = await (await commissionDueForPayroll(client, run as { start_date: string; end_date: string }, item.currency as Currency)).forDoctor(doctorId, Number(item.id), "committed");
     if (components.commissionMinor > earned.dueMinor) fail("doctor_already_paid", "صُرفت العمولة من كشف الطبيب أو تغيّر استحقاقها؛ لا تُصرف ثانيةً من المسير.");
   }
   const rates = ratesFromSettings(await getSettings()), rate = rates[item.currency as Currency] ?? 1;

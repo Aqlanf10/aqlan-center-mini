@@ -14433,7 +14433,7 @@ export async function settleLabOrdersBatch(input: {
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
 import {
-  allocateInvoiceDiscount, buildCaseOverrideResolver, commissionForPatientAtEventTime, resolvePolicyForShare, summarizeCommissions,
+  allocateInvoiceDiscount, buildCaseOverrideResolver, commissionForPatientAtEventTime, discountGroupKey, resolvePolicyForShare, summarizeCommissions,
   type CommissionDetailLine, type CommissionInvoice, type DoctorShareItem, type ServiceRateFinding,
 } from "./commission";
 import { FULL_RATE_BP } from "./materialRate";
@@ -14574,7 +14574,7 @@ export async function commissionReport(
   const byPatient = new Map<number, Map<number, CommissionInvoice>>();
   const clinicDateOfInvoice = new Map<number, string>();
   const allocationTimeOfInvoice = new Map<number, string>();
-  const lineGroupsOfInvoice = new Map<number, { amountMinor: number; share: DoctorShareItem | null }[]>();
+  const lineGroupsOfInvoice = new Map<number, { amountMinor: number; share: DoctorShareItem | null; key: string }[]>();
   for (const row of invoiceRows) {
     if (typeof row.allocation_origin_id !== "number" || !Number.isSafeInteger(row.allocation_origin_id) || row.allocation_origin_id <= 0) {
       throw new Error("تعذّر إثبات أصل ترتيب عمولة الفاتورة من سجل التصحيح.");
@@ -14593,7 +14593,8 @@ export async function commissionReport(
     };
     /* Every line group of the invoice is kept (with or without a doctor) so the invoice
        discount can be spread over all of them before any percentage is applied. */
-    const group: { amountMinor: number; share: DoctorShareItem | null } = { amountMinor: toMinor(row.share_minor), share: null };
+    const group: { amountMinor: number; share: DoctorShareItem | null; key: string } = { amountMinor: toMinor(row.share_minor), share: null,
+      key: discountGroupKey({ doctorId: row.doctor_id, serviceId: row.service_id, category: row.category, serviceName: row.service_name, caseId: row.case_id, planId: row.plan_id }) };
     if (row.doctor_id) {
       /* حصة الطبيب تحمل هوية الخدمة وفئتها وعملة فاتورتها (محرك الوكيل المساعد):
          بها يجد النسبة الخاصة إن وُجدت — تقويم ٣٥٪ وزراعة ٣٠٪ على الطبيب نفسه. */
@@ -14626,7 +14627,8 @@ export async function commissionReport(
       const gross = groups.reduce((sum, group) => sum + Math.max(0, group.amountMinor), 0);
       const discountMinor = gross - invoice.netMinor;
       if (discountMinor <= 0) continue;
-      const parts = allocateInvoiceDiscount(groups.map(group => group.amountMinor), discountMinor);
+      // Ties are broken by the group's identity, never by the order the rows were read in.
+      const parts = allocateInvoiceDiscount(groups.map(group => group.amountMinor), discountMinor, groups.map(group => group.key));
       groups.forEach((group, index) => { if (group.share) group.share.amountMinor = group.amountMinor - parts[index]; });
     }
   }

@@ -1,7 +1,7 @@
 /** Owner decision 2026-11-11 (finance point 1): the doctor's percentage is taken after the invoice
  * discount. Pure tests of the exact allocation and of the engine on discounted shares. */
 import { describe, expect, it } from "vitest";
-import { allocateInvoiceDiscount, commissionForPatient, type CommissionInvoice } from "../lib/commission";
+import { allocateInvoiceDiscount, commissionForPatient, discountGroupKey, type CommissionInvoice } from "../lib/commission";
 
 describe("allocateInvoiceDiscount", () => {
   it("spreads the discount in proportion, in whole units, adding up exactly", () => {
@@ -54,5 +54,32 @@ describe("the engine on discounted shares", () => {
     // Half collected: half of each doctor's accrued share.
     expect(result.get(7)?.YER).toEqual({ accruedMinor: 19_200, earnedMinor: 9_600 });
     expect(result.get(8)?.YER).toEqual({ accruedMinor: 16_000, earnedMinor: 8_000 });
+  });
+
+  it("equal remainders are settled by the group's identity, so the order the rows were read in changes no doctor's part", () => {
+    // Three equal lines and a discount of 100: 33 each and one unit left over for exactly one group.
+    const groups = [
+      { amountMinor: 10_000, key: discountGroupKey({ doctorId: 7, serviceId: 3, category: "crown", serviceName: "SYN crown", caseId: null, planId: null }) },
+      { amountMinor: 10_000, key: discountGroupKey({ doctorId: 5, serviceId: 3, category: "crown", serviceName: "SYN crown", caseId: null, planId: null }) },
+      { amountMinor: 10_000, key: discountGroupKey({ doctorId: null, serviceId: null, category: null, serviceName: "SYN manual", caseId: null, planId: null }) },
+    ];
+    const byKey = (order: number[]) => {
+      const read = order.map(index => groups[index]);
+      const parts = allocateInvoiceDiscount(read.map(group => group.amountMinor), 100, read.map(group => group.key));
+      return Object.fromEntries(read.map((group, index) => [group.key, parts[index]]));
+    };
+    const reference = byKey([0, 1, 2]);
+    expect(Object.values(reference).sort()).toEqual([33, 33, 34]);
+    // The extra unit goes to the lowest identity (doctor 5), whatever the read order.
+    expect(reference[groups[1].key]).toBe(34);
+    for (const order of [[0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) expect(byKey(order)).toEqual(reference);
+    // Without keys the position decides: the same inputs in another order move the unit.
+    expect(allocateInvoiceDiscount([10_000, 10_000, 10_000], 100)).toEqual([34, 33, 33]);
+  });
+
+  it("identity keys order numbers numerically and put a missing value last", () => {
+    const key = (doctorId: number | null) => discountGroupKey({ doctorId, serviceId: 1, category: "c", serviceName: "n", caseId: null, planId: null });
+    expect([key(10), key(null), key(9)].sort()).toEqual([key(9), key(10), key(null)]);
+    expect(() => allocateInvoiceDiscount([1, 2], 1, ["only-one"])).toThrow();
   });
 });

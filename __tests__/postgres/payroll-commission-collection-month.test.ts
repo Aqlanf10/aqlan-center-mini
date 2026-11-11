@@ -224,4 +224,53 @@ describe("payroll pays commission in the month of collection", () => {
     expect(items).toHaveLength(1);
     expect(items[0].commissionsMinor).toBe(3_000);
   });
+
+  it("recalculating an older draft after a newer run is approved never pulls the newer month's later collection back", async () => {
+    const d = await doctor(), p = await patient();
+    await receipt(p, await invoice(p, d.partyId, OCT), 10_000, OCT);
+    const octoberDraft = await run("2026-10");
+    expect((await itemOf(octoberDraft.id, d.staffId))?.commissionsMinor).toBe(3_000);
+    // November is calculated and approved while October is still a draft: it commits everything earned so far.
+    await receipt(p, await invoice(p, d.partyId, NOV), 10_000, NOV);
+    const november = await run("2026-11");
+    await payroll.approvePayrollRun(november.id, admin);
+    const committed = (await itemOf(november.id, d.staffId))!;
+    expect(committed).toMatchObject({ commissionsMinor: 6_000, remainingMinor: 6_000 });
+    // One more collection lands in November, after November's approval.
+    await receipt(p, await invoice(p, d.partyId, NOV), 10_000, "2026-11-08T07:00:00Z");
+    // The older draft is recalculated: October's earnings are already committed by November, and
+    // the new November collection is not October's. It gets nothing; the approved run is untouched.
+    const october = await run("2026-10");
+    expect((await itemOf(october.id, d.staffId))?.commissionsMinor ?? 0).toBe(0);
+    expect(await itemOf(november.id, d.staffId)).toMatchObject({ commissionsMinor: 6_000, remainingMinor: 6_000, paidMinor: 0 });
+    await expect(run("2026-11")).rejects.toThrow();
+    // Retrying the recalculation gives the same figure.
+    expect((await itemOf((await run("2026-10")).id, d.staffId))?.commissionsMinor ?? 0).toBe(0);
+    // November is paid once; the ledger then shows exactly the later collection still due, for the next run.
+    await payroll.disbursePayrollItem(committed.id, { components: { commissionMinor: 6_000 }, clientRequestId: "syn-late-horizon-1" }, admin);
+    await expect(payroll.disbursePayrollItem(committed.id, { components: { commissionMinor: 1 }, clientRequestId: "syn-late-horizon-2" }, admin)).rejects.toThrow();
+    expect((await db.commissionReport("1970-01-01", "2026-11-30")).find(row => row.doctorId === d.partyId && row.currency === "YER"))
+      .toMatchObject({ earnedMinor: 9_000, paidMinor: 6_000, dueMinor: 3_000 });
+    expect((await itemOf((await run("2026-10")).id, d.staffId))?.commissionsMinor ?? 0).toBe(0);
+  });
+
+  it("an older month approved first keeps its own commission when a newer approved month receives a later collection", async () => {
+    const d = await doctor(), p = await patient();
+    await receipt(p, await invoice(p, d.partyId, OCT), 10_000, OCT);
+    const october = await run("2026-10");
+    await payroll.approvePayrollRun(october.id, admin);
+    await receipt(p, await invoice(p, d.partyId, NOV), 10_000, NOV);
+    const november = await run("2026-11");
+    await payroll.approvePayrollRun(november.id, admin);
+    await receipt(p, await invoice(p, d.partyId, NOV), 10_000, "2026-11-08T07:00:00Z");
+    const oct = (await itemOf(october.id, d.staffId))!, nov = (await itemOf(november.id, d.staffId))!;
+    expect([oct.commissionsMinor, nov.commissionsMinor]).toEqual([3_000, 3_000]);
+    // Both approved months are paid, each once and for its own figure; the later collection stays due.
+    await payroll.disbursePayrollItem(oct.id, { components: { commissionMinor: 3_000 }, clientRequestId: "syn-late-horizon-3" }, admin);
+    await payroll.disbursePayrollItem(nov.id, { components: { commissionMinor: 3_000 }, clientRequestId: "syn-late-horizon-4" }, admin);
+    await expect(payroll.disbursePayrollItem(nov.id, { components: { commissionMinor: 1 }, clientRequestId: "syn-late-horizon-5" }, admin)).rejects.toThrow();
+    expect((await db.commissionReport("1970-01-01", "2026-11-30")).find(row => row.doctorId === d.partyId && row.currency === "YER"))
+      .toMatchObject({ earnedMinor: 9_000, paidMinor: 6_000, dueMinor: 3_000 });
+  });
 });
+

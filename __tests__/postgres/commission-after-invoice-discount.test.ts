@@ -87,4 +87,16 @@ describe("commission is taken after the invoice discount", () => {
     expect(await rowOf(d.id, "USD")).toMatchObject({ accruedMinor: 2_250, earnedMinor: 2_250 });
     expect(await rowOf(d.id, "YER")).toMatchObject({ accruedMinor: 3_000, earnedMinor: 3_000 });
   });
+
+  it("equal remainders: the order the lines were written in changes no doctor's part of the discount", async () => {
+    // 100% rates expose the base itself. Three equal lines, discount 100: one unit is left over.
+    const a = await doctor(100), b = await doctor(100), first = await patient(), second = await patient();
+    const one = await invoice(first, [[a.id, 10_000], [b.id, 10_000], [null, 10_000]], 100);
+    const two = await invoice(second, [[null, 10_000], [b.id, 10_000], [a.id, 10_000]], 100);
+    await pay(first, one, 29_900); await pay(second, two, 29_900);
+    // In both invoices the leftover unit goes to the same group (the lower doctor identity).
+    expect(await rowOf(a.id)).toMatchObject({ accruedMinor: 2 * 9_966, earnedMinor: 2 * 9_966 });
+    expect(await rowOf(b.id)).toMatchObject({ accruedMinor: 2 * 9_967, earnedMinor: 2 * 9_967 });
+  });
 });
+

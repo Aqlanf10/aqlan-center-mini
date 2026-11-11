@@ -7,7 +7,7 @@ import {invoiceIdentityCatalog,validateInvoiceIdentityAmendments} from "./invoic
 import type { SessionPayload } from "./auth";
 import { CLINIC_TIME_ZONE, correctInvoiceInTransaction, ensureSchema, getInvoice, getPool, getSettingsInTransaction,
   insertAuditRow, listServicesWith, lockPlanItemsBilledBy, recomputePlanTotal, type DbClient } from "./db";
-import { checkCorrectionPriceAuthority, grantsUsedByCorrection } from "./correction-price-authority";
+import { checkCorrectionPriceAuthority, describeCorrectionPriceChanges, grantsUsedByCorrection } from "./correction-price-authority";
 import type { PriceGrants } from "./price-authority";
 import { foreignRatesFromSettings } from "./service-pricing";
 import { debtAccountDue, lockDebtAccountForSchedule } from "./debt-account-position";
@@ -212,28 +212,43 @@ export async function reviseInvoiceOn(client: DbClient, invoiceId: number, sourc
     const discountReason = typeof source.discountReason === "string" ? source.discountReason.trim() : "";
     if (discountMinor > 0 && (discountReason.length < 3 || discountReason.length > 300)) bad("اكتب سبب الخصم.");
     const planned = planInvoiceRevision(before.invoice.items,lines,discountMinor); if (!planned.ok) bad(planned.message);
+    /* Price changes of this correction, for both paths. A manual line's fixed reference is the
+       price recorded before its first correction: the stored price on an invoice that was never
+       corrected, otherwise the reference its last correction recorded in its receipt (unknown
+       when that receipt predates the record). */
+    const services = new Map((await listServicesWith(client, true)).map(service => [service.id, service]));
+    const { rows: [priorCorrection] } = await client.query<{ refs: unknown }>(`SELECT r.receipt->'manualPriceReferences' AS refs
+      FROM invoice_corrections c LEFT JOIN invoice_correction_receipts r ON r.correction_id=c.id WHERE c.corrected_invoice_id=$1`, [invoiceId]);
+    const recordedReferences = new Map<number, number>();
+    if (Array.isArray(priorCorrection?.refs)) for (const entry of priorCorrection.refs as { itemId?: unknown; referenceUnitMinor?: unknown }[]) {
+      if (Number.isSafeInteger(entry?.itemId) && Number.isSafeInteger(entry?.referenceUnitMinor) && (entry.referenceUnitMinor as number) >= 0) recordedReferences.set(entry.itemId as number, entry.referenceUnitMinor as number);
+    }
+    const priceLines = lines.map(line => {
+      const old = before.invoice.items.find(item => item.id === line.itemId);
+      if (!old) bad("بنود التصحيح غير صالحة.");
+      const amended = amendments.get(line.itemId), serviceId = amended ? amended.serviceId : old.serviceId;
+      const service = serviceId === null ? null : services.get(serviceId);
+      if (service === undefined) bad("خدمة البند غير موجودة في الدليل؛ لم يُحفظ التصحيح.", "conflict");
+      const serviceChanged = !!amended && amended.serviceId !== old.serviceId;
+      const manualReference = service !== null || serviceChanged ? undefined
+        : !priorCorrection ? { known: true as const, unitMinor: old.unitPriceMinor }
+        : recordedReferences.has(old.id) ? { known: true as const, unitMinor: recordedReferences.get(old.id)! } : { known: false as const };
+      return { itemId: line.itemId, description: amended?.description ?? old.description, service, quantity: line.quantity, storedUnitMinor: old.unitPriceMinor,
+        requestedUnitMinor: line.unitPriceMinor, serviceChanged, ...(manualReference ? { manualReference } : {}) };
+    });
+    const priceInput = { lines: priceLines, storedTotalMinor: before.invoice.totalMinor, storedDiscountMinor: before.invoice.discountMinor,
+      totalMinor: planned.totalMinor, discountMinor: planned.discountMinor, discountReason: discountReason || null, reason,
+      currencyChanged: changingCurrency, currency: currency as Currency };
+    const priceChanges = describeCorrectionPriceChanges(priceInput);
     let priceAuthority: Record<string, unknown> | null = null;
     if (price) {
-      const services = new Map((await listServicesWith(client, true)).map(service => [service.id, service]));
-      const decision = checkCorrectionPriceAuthority({
-        lines: lines.map(line => {
-          const old = before.invoice.items.find(item => item.id === line.itemId);
-          if (!old) bad("بنود التصحيح غير صالحة.");
-          const amended = amendments.get(line.itemId), serviceId = amended ? amended.serviceId : old.serviceId;
-          const service = serviceId === null ? null : services.get(serviceId);
-          if (service === undefined) bad("خدمة البند غير موجودة في الدليل؛ لم يُحفظ التصحيح.", "conflict");
-          return { description: amended?.description ?? old.description, service, quantity: line.quantity, storedUnitMinor: old.unitPriceMinor,
-            requestedUnitMinor: line.unitPriceMinor, serviceChanged: !!amended && amended.serviceId !== old.serviceId };
-        }),
-        storedTotalMinor: before.invoice.totalMinor, storedDiscountMinor: before.invoice.discountMinor,
-        totalMinor: planned.totalMinor, discountMinor: planned.discountMinor, discountReason: discountReason || null, reason,
-        currencyChanged: changingCurrency, currency: currency as Currency, rates: foreignRatesFromSettings(settings),
-        maxDiscountPercent: Number(settings["billing.max_discount_percent"]), grants: price.grants,
-      });
+      const decision = checkCorrectionPriceAuthority({ ...priceInput, rates: foreignRatesFromSettings(settings),
+        maxDiscountPercent: Number(settings["billing.max_discount_percent"]), grants: price.grants });
       if (!decision.ok) bad(decision.message, "unauthorized");
       price.used?.(grantsUsedByCorrection(decision, price.grants));
       priceAuthority = { changedLines: decision.changes.changedLines.filter(Boolean).length, discountChanged: decision.changes.discountChanged,
-        overrides: decision.overrides, discount: decision.discount };
+        overrides: decision.overrides, discount: decision.discount, manualLinesMeasuredAgainstRecordedPrice: decision.manualLoweredLines,
+        manualLinesByFullAuthority: decision.fullAuthorityLines };
     }
     const netMinor = planned.totalMinor - planned.discountMinor;
     const remainingMinor = Math.max(0,netMinor-settledMinor);
@@ -306,14 +321,24 @@ export async function reviseInvoiceOn(client: DbClient, invoiceId: number, sourc
       target:{...before.target,currency:currency as "YER"|"SAR"|"USD",invoiceId:result.correctedId},terms:terms.value,expectedVersion:0,expectedRemainingMinor:remainingMinor,
       reason,idempotencyKey:`invoice-revision:${hash}:new-terms`,session }) : null;
     const corrected = await getInvoice(result.correctedId,client), original = {...before.invoice,status:"cancelled" as const};
-    const receipt = { ...(reclassificationId?{reclassificationId,originalCurrency:before.invoice.baseCurrency}:{}), original, corrected, patientId:owner.patient_id,currency,idempotencyKey:key,createdBy:session.username,
+    /* The fixed reference of every manual line travels with the correction. Where none could be
+       measured (a currency change, an unprovable reference) and the price was set by the full
+       price authority (the administrator on legacy), the new price starts a new reference. */
+    const manualPriceReferences = priceLines.flatMap(line => {
+      if (line.service !== null || !correctedItems.has(line.itemId)) return [];
+      const measurable = !changingCurrency && !line.serviceChanged && line.manualReference?.known;
+      const referenceUnitMinor = measurable ? line.manualReference!.unitMinor
+        : changingCurrency || line.serviceChanged || line.requestedUnitMinor !== line.storedUnitMinor ? line.requestedUnitMinor : null;
+      return referenceUnitMinor === null ? [] : [{ itemId: correctedItems.get(line.itemId)!, referenceUnitMinor }];
+    });
+    const receipt = { ...(reclassificationId?{reclassificationId,originalCurrency:before.invoice.baseCurrency}:{}), ...(manualPriceReferences.length?{manualPriceReferences}:{}), original, corrected, patientId:owner.patient_id,currency,idempotencyKey:key,createdBy:session.username,
       beforeMinor:before.invoice.totalMinor-before.invoice.discountMinor,afterMinor:netMinor,settledMinor,remainingMinor,
       creditMinor:Math.max(0,settledMinor-netMinor),accountCreditMinor:Math.max(0,-afterDueMinor),accountDueMinor:afterDueMinor,repayment };
     await client.query("INSERT INTO invoice_correction_receipts(correction_id,receipt) VALUES($1,$2::jsonb)",[revision.id,JSON.stringify(receipt)]);
     await insertAuditRow(client,{action:"invoice.correct",entity:"invoice",entityId:invoiceId,actor:session.username,actorRole:session.role,
       details:{correctionId:revision.id,correctedInvoiceId:result.correctedId,reason,discountReason,settledMinor,remainingMinor,
         creditMinor:receipt.creditMinor,identityAmendments:[...amendments].map(([itemId,after])=>({itemId,before:before.invoice.items.find(item=>item.id===itemId),after})),repayment,receiptsPreserved:true,cashMovement:0,idempotencyKey:key,
-        ...(priceAuthority?{priceAuthority}:{})}});
+        priceChanges,...(priceAuthority?{priceAuthority}:{})}});
     await authority(client,session); return { ...receipt, replayed:false };
   }
 }
