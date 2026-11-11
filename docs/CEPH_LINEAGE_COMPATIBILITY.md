@@ -16,7 +16,7 @@ visible in review and deployment records.
 
 The existing column must be nullable bigint without a default, identity,
 generated expression or array dimensions. It must have exactly the validated, enforced,
-nondeferrable `ceph_analyses_corrects_older_ck` and
+nondeferrable `ceph_analyses_corrects_older_chk` and
 `ceph_analyses_corrects_same_patient_fk` constraints with the known definitions.
 All three `correction_source*` columns must be absent, and no existing row may
 have a non-null `corrects_analysis_id`. Existing legacy correction links require
