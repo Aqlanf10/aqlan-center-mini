@@ -5,7 +5,7 @@ import type {SessionPayload} from "./auth";
 import {CLINIC_TIME_ZONE,ensureSchema,getPool,getSettingsInTransaction,setPatientOpeningBalanceInTx,clearPatientOpeningBalanceInTx,insertAuditRow,type DbClient,type Service} from "./db";
 import {assertDebtSession,DebtRepaymentError,debtRequestHash,readDebtPosition,writeDebtRepaymentInTransaction,type DebtActorSource} from "./debt-installments-db";
 import type {PriceGrants} from "./price-authority";
-import {checkCorrectionPriceAuthority,grantsUsedByCorrection} from "./correction-price-authority";
+import {checkCorrectionPriceAuthority,describeCorrectionPriceChanges,grantsUsedByCorrection} from "./correction-price-authority";
 import type {OpeningAccess} from "./opening-access";
 import {debtAccountDue,lockDebtAccountForSchedule} from "./debt-account-position";
 import {openingBalanceAccess} from "./opening-access";
@@ -230,17 +230,20 @@ export async function correctHistoricalDocumentOn(client:DbClient,patientId:numb
     await unallocatedPaidGuard(client,patientId,input.previouslyPaidMinor);
     await client.query("LOCK TABLE settings IN SHARE MODE");const settings=await getSettingsInTransaction(client,{requireStoredExchangeRates:true});
     verifyPeriod(settings,[current.historicalAsOf,input.historicalAsOf,...(prior.opening?[prior.opening.asOfDate]:[])]);
+    // Price changes of this correction, recorded on both paths (owner decision 2026-11-11, rule 5).
+    const {services}=await catalog(client,{items:current.lines.map(line=>({serviceId:line.serviceId}))},false);
+    const priceInput={
+      lines:current.lines.map((line,index)=>{
+        const service=services.get(line.serviceId);
+        if(!service)bad("خدمة البند غير موجودة في الدليل؛ لم يُحفظ التصحيح.","conflict");
+        return {description:line.description,service,quantity:1,storedUnitMinor:line.unitPriceMinor,requestedUnitMinor:input.prices[index],serviceChanged:false};
+      }),
+      storedTotalMinor:current.totalMinor,storedDiscountMinor:current.discountMinor,totalMinor:input.totalMinor,discountMinor:input.discountMinor,
+      discountReason:input.discountReason,reason:input.reason,currencyChanged:false,currency:current.currency};
+    const priceChanges=describeCorrectionPriceChanges(priceInput);
     let priceAuthority:Record<string,unknown>|null=null;
     if(price){
-      const {services}=await catalog(client,{items:current.lines.map(line=>({serviceId:line.serviceId}))},false);
-      const decision=checkCorrectionPriceAuthority({
-        lines:current.lines.map((line,index)=>{
-          const service=services.get(line.serviceId);
-          if(!service)bad("خدمة البند غير موجودة في الدليل؛ لم يُحفظ التصحيح.","conflict");
-          return {description:line.description,service,quantity:1,storedUnitMinor:line.unitPriceMinor,requestedUnitMinor:input.prices[index],serviceChanged:false};
-        }),
-        storedTotalMinor:current.totalMinor,storedDiscountMinor:current.discountMinor,totalMinor:input.totalMinor,discountMinor:input.discountMinor,
-        discountReason:input.discountReason,reason:input.reason,currencyChanged:false,currency:current.currency,rates:foreignRatesFromSettings(settings),
+      const decision=checkCorrectionPriceAuthority({...priceInput,rates:foreignRatesFromSettings(settings),
         maxDiscountPercent:Number(settings["billing.max_discount_percent"]),grants:price.grants});
       if(!decision.ok)bad(decision.message,"unauthorized");
       price.used?.(grantsUsedByCorrection(decision,price.grants));
@@ -264,7 +267,7 @@ export async function correctHistoricalDocumentOn(client:DbClient,patientId:numb
     await insertRevision(client,{...input,documentId,version:current.version+1,lines,reason:input.reason,openingHistoryId,repayment,hash,session});
     await insertAuditRow(client,{action:"legacy_document.correct",entity:"patient",entityId:patientId,actor:session.username,actorRole:session.role,
       details:{documentId,version:current.version+1,reason:input.reason,before:current,after:{...input,lines},openingHistoryId,receiptsPreserved:true,clinicalIdentitiesPreserved:true,
-        accountCreditMinor:Math.max(0,-(await debtAccountDue(client,patientId,current.currency)).due),cashMovement:0,...(priceAuthority?{priceAuthority}:{})}});
+        accountCreditMinor:Math.max(0,-(await debtAccountDue(client,patientId,current.currency)).due),cashMovement:0,priceChanges,...(priceAuthority?{priceAuthority}:{})}});
     await assertDebtSession(client,session);const receipt=await readHistoricalDocumentInTx(client,documentId,patientId,current.version+1);return {document:receipt!,replayed:false};
 }
 

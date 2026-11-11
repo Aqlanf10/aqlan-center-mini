@@ -181,9 +181,91 @@ describe("issued invoice: the correction grant alone changes no price and no dis
     expect(await correct("overrider", beyond.invoiceId, await change("overrider", beyond.invoiceId, { unit: 6_000, discount: 1_000 }))).toMatchObject({ replayed: false, afterMinor: 5_000 });
   });
 
-  it("a manual line without a catalogue service has no reference price and stays free, as on a new invoice", async () => {
+  it("manual line (rule 3): lowering is a discount against the price recorded before the first correction", async () => {
+    const o = await invoice({ manual: true }), before = await facts(o.patientId);
+    expect(await refusal(correct("plain", o.invoiceId, await change("plain", o.invoiceId, { unit: 9_500 })))).toMatchObject(unauthorized("صلاحية تطبيق الخصم"));
+    expect(await refusal(correct("raiser", o.invoiceId, await change("raiser", o.invoiceId, { unit: 9_500 })))).toMatchObject(unauthorized("صلاحية تطبيق الخصم"));
+    expect(await refusal(correct("discounter", o.invoiceId, await change("discounter", o.invoiceId, { unit: 8_000 })))).toMatchObject(unauthorized("يتجاوز الحد"));
+    expect(await facts(o.patientId)).toBe(before);
+    const beyond = await invoice({ manual: true });
+    expect(await correct("overrider", beyond.invoiceId, await change("overrider", beyond.invoiceId, { unit: 2_000 }))).toMatchObject({ replayed: false, afterMinor: 2_000 });
+  });
+
+  it("manual line: successive reductions keep the first recorded price as the reference, so the limit is not passed in steps", async () => {
     const o = await invoice({ manual: true });
-    expect(await correct("plain", o.invoiceId, await change("plain", o.invoiceId, { unit: 14_000 }))).toMatchObject({ replayed: false, afterMinor: 14_000 });
+    // 10,000 -> 9,500 (5%) -> 9,000 (10% of the reference): both within the 10% limit.
+    const first = await correct("discounter", o.invoiceId, await change("discounter", o.invoiceId, { unit: 9_500 })) as { corrected: { id: number } };
+    const second = await correct("discounter", first.corrected.id, await change("discounter", first.corrected.id, { unit: 9_000 })) as { corrected: { id: number } };
+    expect(await priceAudit(first.corrected.id)).toMatchObject({ manualLinesMeasuredAgainstRecordedPrice: 1, overrides: [{ kind: "discount", catalogMinor: 10_000, requestedMinor: 9_000, discountPercent: 10 }] });
+    // 9,000 -> 8,600 is 4.4% of the stored price but 14% of the reference: refused, nothing written.
+    const before = await facts(o.patientId);
+    expect(await refusal(correct("discounter", second.corrected.id, await change("discounter", second.corrected.id, { unit: 8_600 })))).toMatchObject(unauthorized("يتجاوز الحد"));
+    // Back toward the reference but still below it: still a discount; the correction grant alone is refused.
+    expect(await refusal(correct("plain", second.corrected.id, await change("plain", second.corrected.id, { unit: 9_500 })))).toMatchObject(unauthorized("صلاحية تطبيق الخصم"));
+    // Above the reference: a price increase; the discount grant does not give it.
+    expect(await refusal(correct("discounter", second.corrected.id, await change("discounter", second.corrected.id, { unit: 10_500 })))).toMatchObject(unauthorized("صلاحية تطبيق زيادة السعر"));
+    expect(await facts(o.patientId)).toBe(before);
+    // Returning exactly to the reference needs no price grant; the override grant may go beyond the limit.
+    const third = await correct("plain", second.corrected.id, await change("plain", second.corrected.id, { unit: 10_000 })) as { corrected: { id: number } };
+    expect(await correct("overrider", third.corrected.id, await change("overrider", third.corrected.id, { unit: 5_000 }))).toMatchObject({ replayed: false, afterMinor: 5_000 });
+  });
+
+  it("manual line: raising above the reference, or pricing a zero line, needs the increase grant; an unprovable reference needs the full price authority", async () => {
+    const raised = await invoice({ manual: true }), zero = await invoice({ manual: true, unit: 0 });
+    const before = [await facts(raised.patientId), await facts(zero.patientId)];
+    for (const key of ["plain", "discounter", "overrider"] as const) {
+      expect(await refusal(correct(key, raised.invoiceId, await change(key, raised.invoiceId, { unit: 14_000 }))), key).toMatchObject(unauthorized("صلاحية تطبيق زيادة السعر"));
+      expect(await refusal(correct(key, zero.invoiceId, await change(key, zero.invoiceId, { unit: 500 }))), key).toMatchObject(unauthorized("صلاحية تطبيق زيادة السعر"));
+    }
+    expect([await facts(raised.patientId), await facts(zero.patientId)]).toEqual(before);
+    const up = await correct("raiser", raised.invoiceId, await change("raiser", raised.invoiceId, { unit: 14_000 })) as { corrected: { id: number } };
+    expect(up).toMatchObject({ replayed: false, afterMinor: 14_000 });
+    expect(await priceAudit(raised.invoiceId)).toMatchObject({ overrides: [{ kind: "increase", catalogMinor: 10_000, requestedMinor: 14_000 }] });
+    // The reference stays the first recorded price: back to 10,000 is free, 9,000 is a 10% discount.
+    expect(await correct("plain", up.corrected.id, await change("plain", up.corrected.id, { unit: 10_000 }))).toMatchObject({ replayed: false, afterMinor: 10_000 });
+    expect(await correct("owner", zero.invoiceId, await change("owner", zero.invoiceId, { unit: 500 }))).toMatchObject({ replayed: false, afterMinor: 500 });
+    // A corrected invoice whose receipt carries no recorded reference (a correction made before this record existed).
+    const old = await invoice({ manual: true });
+    const made = await correct("plain", old.invoiceId, await change("plain", old.invoiceId, { unit: 10_000, quantity: 2 })) as { corrected: { id: number } };
+    await q("ALTER TABLE invoice_correction_receipts DISABLE TRIGGER USER");
+    await q("UPDATE invoice_correction_receipts r SET receipt = r.receipt - 'manualPriceReferences' FROM invoice_corrections c WHERE c.id=r.correction_id AND c.corrected_invoice_id=$1", [made.corrected.id]);
+    await q("ALTER TABLE invoice_correction_receipts ENABLE TRIGGER USER");
+    const unknownBefore = await facts(old.patientId);
+    for (const key of ["plain", "raiser", "overrider"] as const) {
+      expect(await refusal(correct(key, made.corrected.id, await change(key, made.corrected.id, { unit: 9_000, quantity: 2 }))), key).toMatchObject(unauthorized("سلطة السعر الكاملة"));
+    }
+    expect(await facts(old.patientId)).toBe(unknownBefore);
+    // Keeping the price is still possible there: nothing about the price is decided.
+    const kept = await correct("plain", made.corrected.id, await change("plain", made.corrected.id, { unit: 10_000, quantity: 1 })) as { corrected: { id: number } };
+    expect(kept).toMatchObject({ replayed: false, afterMinor: 10_000 });
+    // The protected owner has the full price authority: he sets the price, and it becomes the new reference.
+    const owned = await correct("owner", kept.corrected.id, await change("owner", kept.corrected.id, { unit: 8_000 })) as { corrected: { id: number } };
+    expect(owned).toMatchObject({ replayed: false, afterMinor: 8_000, createdBy: "SYN-CP-OWNER" });
+    expect(await priceAudit(kept.corrected.id)).toMatchObject({ manualLinesByFullAuthority: 1 });
+    expect(await refusal(correct("discounter", owned.corrected.id, await change("discounter", owned.corrected.id, { unit: 7_000 })))).toMatchObject(unauthorized("يتجاوز الحد"));
+    expect(await correct("discounter", owned.corrected.id, await change("discounter", owned.corrected.id, { unit: 7_200 }))).toMatchObject({ replayed: false, afterMinor: 7_200 });
+  });
+
+  it("role matrix: the label decides nothing; the protected owner holds every price authority; each staff grant acts only for itself", async () => {
+    // `plain` carries the administrator label and only the correction grant: the label gives no price authority.
+    const labelled = await invoice(), before = await facts(labelled.patientId);
+    for (const next of [{ unit: 12_000 }, { unit: 9_500 }, { unit: 10_000, discount: 500 }]) {
+      expect(await refusal(correct("plain", labelled.invoiceId, await change("plain", labelled.invoiceId, next)))).toMatchObject({ code: "unauthorized" });
+    }
+    expect(await facts(labelled.patientId)).toBe(before);
+    // The protected owner: increase, a discount beyond the limit and an invoice discount, all recorded.
+    const raised = await invoice();
+    expect(await correct("owner", raised.invoiceId, await change("owner", raised.invoiceId, { unit: 15_000 }))).toMatchObject({ replayed: false, afterMinor: 15_000, createdBy: "SYN-CP-OWNER" });
+    expect(await priceAudit(raised.invoiceId)).toMatchObject({ overrides: [{ kind: "increase" }] });
+    const cut = await invoice();
+    expect(await correct("owner", cut.invoiceId, await change("owner", cut.invoiceId, { unit: 6_000, discount: 2_000 }))).toMatchObject({ replayed: false, afterMinor: 4_000 });
+    expect(await priceAudit(cut.invoiceId)).toMatchObject({ discountChanged: true, overrides: [{ kind: "discount", discountPercent: 40 }] });
+    // Staff: exactly one grant each.
+    const staff = await invoice(), staffBefore = await facts(staff.patientId);
+    expect(await refusal(correct("raiser", staff.invoiceId, await change("raiser", staff.invoiceId, { unit: 10_000, discount: 500 })))).toMatchObject(unauthorized("صلاحية تطبيق الخصم"));
+    expect(await refusal(correct("discounter", staff.invoiceId, await change("discounter", staff.invoiceId, { unit: 12_000 })))).toMatchObject(unauthorized("صلاحية تطبيق زيادة السعر"));
+    expect(await refusal(correct("overrider", staff.invoiceId, await change("overrider", staff.invoiceId, { unit: 12_000 })))).toMatchObject(unauthorized("صلاحية تطبيق زيادة السعر"));
+    expect(await facts(staff.patientId)).toBe(staffBefore);
   });
 
   it("retry: a refused key is not consumed; the stored receipt replays without the price grant", async () => {
@@ -261,6 +343,18 @@ describe("historical document: correction and opening management alone change no
     const beyond = await document();
     expect(await correctHistory("hOverrider", beyond.patientId, beyond.documentId, await historyChange(beyond.patientId, beyond.documentId, { price: 40_000 })))
       .toMatchObject({ replayed: false, document: { version: 2, totalMinor: 40_000, remainingMinor: 30_000 } });
+  });
+
+  it("role matrix: the administrator label gives no price authority; the protected owner holds it", async () => {
+    // `hPlain` carries the administrator label with the correction, opening and ledger grants only.
+    const labelled = await document(), before = await facts(labelled.patientId);
+    for (const next of [{ price: 60_000 }, { price: 52_000 }, { discount: 2_000 }]) {
+      expect(await refusal(correctHistory("hPlain", labelled.patientId, labelled.documentId, await historyChange(labelled.patientId, labelled.documentId, next)))).toMatchObject({ code: "unauthorized" });
+    }
+    expect(await facts(labelled.patientId)).toBe(before);
+    const owned = await document();
+    expect(await correctHistory("owner", owned.patientId, owned.documentId, await historyChange(owned.patientId, owned.documentId, { price: 30_000, discount: 5_000 })))
+      .toMatchObject({ replayed: false, document: { version: 2, totalMinor: 30_000, discountMinor: 5_000, remainingMinor: 15_000 } });
   });
 
   it("retry: a refused key is not consumed; the stored revision replays without the price grant", async () => {

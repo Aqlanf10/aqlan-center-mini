@@ -30,6 +30,12 @@ Gate finding on `817106ac`: the interim commits had not regenerated `docs/securi
 - Gate on `0c4cdd08`: unit 15,021/15,024 (two inventory-drift failures fixed in `9b2831a3`, one load timeout that passes alone); tsc pass; PostgreSQL 225 files, 2,958/2,958; build pass; HTTP journeys 807 passed with the three known local browser failures. Pushed at `9b2831a3`.
 - Correction price and discount authority (review request 6801961109 on #483): implemented on canonical sessions; matrix, proven defect versus open policy and the five owner questions are in `correction-price-authority-20261111.md`. Unit 12/12; PostgreSQL 15/15 (12 of 15 fail on the previous writers); related PostgreSQL 25 files, 355/355. No policy was decided for the owner.
 
+- Second review round (2026-11-11), on this branch after `b5c76e71`:
+  - Price authority on corrections: the five rules approved by the owner are implemented; the manual-line cases were decided under the owner's delegation and by the owner principle (the owner can do everything and gives authority to whom he sees fit): raise or first price from zero needs the increase grant; a currency change or an unprovable reference needs the full price authority (increase and discount override together). Legacy corrections now record the price detail in their audit row. Details: `correction-price-authority-20261111.md`, section 4.
+  - Discount remainders ordered by group identity; payroll draft capped at its own period end; the CI journey `verify-deletions` follows the approved lab rule. Details: `commission-owner-decisions-20261111.md`, section 5.
+  - Evidence before the gate: unit `correction-price-authority` 18/18 and `commission-invoice-discount` 8/8; new and changed PostgreSQL files 5 files, 92/92; the payroll horizon test fails on the previous code; related PostgreSQL 71 files, 1,123/1,123; `npm run verify:deletions` green.
+- Case-participation storage: pushed at `297f83cd`, Draft PR #539 (gate green except the three known local browser journeys).
+
 ## 3. Finance queue (order by risk to patient balances and the cash box)
 
 Three read-only audits ran on 2026-11-10/11, one per area (they stopped once at the usage limit and were resumed). Their reports are leads; the state column says what I verified myself.

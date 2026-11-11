@@ -33,7 +33,10 @@ This applies the policy the owner already approved for new invoices. It does not
 | Invoice correction | The same, beyond the limit; or changed line discounts and invoice discount together beyond the limit | `finance.invoices.correct` | plus `finance.discounts.override` |
 | Invoice correction | Invoice discount removed | `finance.invoices.correct` | `finance.invoices.correct` |
 | Invoice correction | Currency changed, or the line's service changed | `finance.invoices.correct` | every line and the discount are decided again in the new currency or for the new service |
-| Invoice correction | A manual line without a catalogue service | `finance.invoices.correct` | `finance.invoices.correct` (no reference price exists; as on a new invoice) |
+| Invoice correction | A manual line lowered below its fixed reference (approved rule 3) | `finance.invoices.correct` | plus `finance.discounts.apply` within the limit measured against the reference; `finance.discounts.override` beyond it |
+| Invoice correction | A manual line returned exactly to its reference | `finance.invoices.correct` | `finance.invoices.correct` |
+| Invoice correction | A manual line raised above its reference, or first priced from zero | `finance.invoices.correct` | plus `finance.price-increases.apply` |
+| Invoice correction | A manual line with a currency change, or with an unprovable reference | `finance.invoices.correct` | plus `finance.price-increases.apply` and `finance.discounts.override` together (full price authority) |
 | Historical correction | Paid-before amount, date, note, schedule; prices and discount kept | correct + opening + ledger | unchanged |
 | Historical correction | A line price changed above the catalogue | correct + opening + ledger | plus `finance.price-increases.apply` |
 | Historical correction | A line price changed below the catalogue, or a changed discount, within the limit | correct + opening + ledger | plus `finance.discounts.apply` |
@@ -71,24 +74,43 @@ PostgreSQL, `__tests__/postgres/correction-price-authority-canonical.test.ts`, b
 
 Results are recorded in section 5.
 
-## 4. Open questions for the owner
+## 4. Rules approved by the owner (2026-11-11) and their implementation
 
-These are policy choices. The stricter option is implemented until decided; none is treated as approved.
+The owner approved the five rules below after the reviewer's recommendations. Earlier revisions of this file listed them as open; they are no longer open.
 
-1. **Moving a price toward the catalogue.** A stored price of 7,000 against a catalogue of 10,000 corrected to 8,500 reduces an earlier discount, but 8,500 is still a 15% discount. Implemented: it needs the discount grant, and the override grant beyond the limit, like any new price. Alternative: allow any change that moves toward the catalogue price with the correction grant alone.
-2. **An unchanged discount amount while lines change.** Implemented: decided again only when its share of the total rises. When the total grows, the kept discount is not decided again. Alternative: decide the discount again on every correction that changes any amount.
-3. **Manual lines without a catalogue service.** They have no reference price, on a new invoice and on a correction alike. Implemented: free, as on a new invoice. Alternative: treat a decrease against the stored price as a discount that needs the discount grant.
-4. **A separate exception.** Should one grant (for example a finance manager's) be allowed to correct prices without the three price grants? Implemented: no exception exists.
-5. **Legacy administrator path.** Unchanged: the administrator label corrects prices freely, with the mandatory reason. Should the same recorded `priceAuthority` detail be added to the legacy audit row? Not implemented; it changes no authority.
+| # | Approved rule | Implementation | Changed in this revision |
+|---|---|---|---|
+| 1 | A price moved toward the catalogue that stays below it is checked against the discount grant and limit. Reaching the catalogue price needs no discount grant for that alone. | As approved. | No. |
+| 2 | An unchanged discount amount whose share of the total rose is checked again; when its share did not rise nothing more is asked. | As approved. | No. |
+| 3 | Manual line without a catalogue price: a reduction is a discount measured against the price recorded before the correction, with the grants and the limit; successive reductions use a fixed reference so the limit cannot be passed in steps. | The fixed reference is the price recorded before the line's **first** correction. It travels in each correction's immutable receipt (`manualPriceReferences`, new corrections only, both paths) and is read under the locks. Lowering below it: discount grant within the limit, override grant beyond it. Returning exactly to it: no price grant. | Yes. `b5c76e71` left manual lines free. |
+| 4 | No general exception for a finance manager. The protected owner keeps its authority; reason, audit, voucher and locked-period protections continue. | No exception grant exists. The administrator label alone gives nothing on the canonical path. The protected owner acts with full price authority and is audited. The writer's locked-period, receipt and voucher protections are untouched. | No. |
+| 5 | Add previous price, new price, reference and reason to the legacy path's audit for new operations only; older rows unchanged. | Every new correction on both paths writes `priceChanges` in its audit row (same transaction): reason; per changed line the previous price, new price and the reference (`catalogue`, `recorded` or `none`) with its amount; the discount before and after with its reason. The administrator's authority is unchanged; no existing audit row is modified. | Yes. |
+
+### Manual line: remaining cases, decided under the owner's delegation (2026-11-11)
+
+The owner delegated these to engineering judgement ("decide it"). They are decisions of this branch, recorded here with their reasons, and can be changed by a later owner decision without data changes.
+
+| Case | Decision | Reason |
+|---|---|---|
+| Raising a manual line above its fixed reference | Needs `finance.price-increases.apply`, with the correction reason; recorded as an increase against the reference. | The same control as a catalogue line. Without it a corrector could raise any agreed manual amount with no second control; keeping it stopped would leave a wrongly low line fixable only by the legacy administrator. |
+| A manual line recorded at zero | A first price on it is a raise: the same increase grant. Keeping it at zero is not decided. | One rule for every raise; zero is only the lowest reference. |
+| Changing the currency of an invoice that has a manual line | Needs the full price authority: `finance.price-increases.apply` and `finance.discounts.override` together. The new price becomes the line's reference in the new currency. Without both it is refused (403) and nothing is written. | Two currencies have no fair comparison without an agreed price, so nothing can be measured; the decision is therefore reserved to whoever has the whole price authority. |
+| A reference that cannot be proven (the invoice was corrected before references were recorded) | A price change of that manual line needs the same full price authority; the new price becomes the reference. Keeping the price needs nothing. | Falling back to the stored price would reopen stepwise reductions exactly for those invoices. |
+
+**Owner principle (2026-11-11):** the owner can do everything and gives authority to whom he sees fit. Nothing on this path is closed to the owner: every control above is a grant. The protected owner has all of them; any other account acts only with the grants the owner gave it. The two cases above are not "stopped": they require the two strongest price grants together.
+
+One existing test changed because of these rules: `invoice-corrections-canonical` used a raise of a manual line (10,000 to 14,000) by an account holding only the correction grant as its example of a successful correction. That raise now needs the increase grant, so the test corrects the quantity instead and asserts that the raise is refused. Its other assertions are unchanged.
 
 ## 5. Results
 
+First revision (`b5c76e71`): unit 12/12; PostgreSQL 15/15, 12 of 15 failing on the previous writers; related PostgreSQL 25 files, 355/355; full gate green except the three known local browser journeys.
+
+Second revision (approved rules, manual-line decisions, legacy audit detail):
+
 | Check | Result |
 |---|---|
-| Unit `correction-price-authority` | 12/12 |
-| PostgreSQL `correction-price-authority-canonical` | 15/15 |
-| Failure-first: the same file against the previous writers (four files restored byte for byte afterwards) | 12 of 15 fail (every refusal and every audit assertion); the 3 that pass are the manual line and the two scope tests, which the previous code already satisfied |
-| Existing tests | `invoice-corrections-canonical` and `history-documents-canonical` unchanged |
-| tsc, lint | clean |
+| Unit `correction-price-authority` | 18/18 |
+| PostgreSQL `correction-price-authority-canonical` (both paths, role matrix, manual line, fixed reference, full price authority) | pass |
+| PostgreSQL `invoice-corrections-canonical` (one example changed, see section 4) and `invoice-revision` (legacy administrator, with the new audit assertion) | pass |
 
-The related PostgreSQL regression and the full gate are recorded in the finance plan file with the commit.
+Exact counts for the head that carries this revision are in the finance plan file.
