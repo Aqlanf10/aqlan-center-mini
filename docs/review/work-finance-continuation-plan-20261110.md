@@ -29,18 +29,23 @@ Gate finding on `817106ac`: the interim commits had not regenerated `docs/securi
 
 ## 3. Finance queue (order by risk to patient balances and the cash box)
 
-Three read-only audits were started on 2026-11-10, one per area. Their findings are listed here only after I have verified them.
+Three read-only audits ran on 2026-11-10/11, one per area (they stopped once at the usage limit and were resumed). Their reports are leads; the state column says what I verified myself.
 
-| # | Area | State |
-|---|---|---|
-| F1 | Shifts, cash box, treasury: balance arithmetic, concurrency, grants | audit running |
-| F2 | Expenses and payables: links to lab orders and treasury, void and edit | audit running |
-| F3 | Commissions and reports: doctor share, payout, report vs ledger | audit running |
-| F4 | Independent security review of the completed diff | after F1–F3 fixes |
+| Id | Finding | Where | State |
+|---|---|---|---|
+| F2-1 | Cancelling a lab order whose payable has vouchers marks the order "paid" by counting voucher rows, even when the net settled is partial or zero (paid then voided). The order then hides from unpaid work while the laboratory is still owed. | `lib/db.ts` `setLabOrderStatusOn`, cancel branch | **Fixed locally** with `lab-cancel-payable-truth` (5 tests). "Paid" only when fully settled; otherwise the status stays `payable_created`. The payable and the amount owed are not changed. PG run pending (after the gate). |
+| F2-2 | The same cancel counted vouchers without locking the payable; a payment committing between the count and the `DELETE` left a voucher linked to a deleted payable. | same | **Fixed locally** in the same change: `FOR UPDATE` on the payable before the count; race test included. |
+| F2-3 | Whether the unpaid remainder of a cancelled, part-paid order is still owed to the laboratory. | — | **Owner decision.** Not changed: it stays owed and visible. A waiver would be an explicit negative `payable_adjustments` row. |
+| F2-4 | No idempotency key on expense create: a double submit writes two vouchers. `expected` is optional for a payable payment. | `app/api/expenses/route.ts`, `lib/expense-request.ts` | Verified by reading. **Open:** needs a unique operation key (a migration; numbers 0090+ are reserved by other lines) — to schedule with the owner. |
+| F2-5 | Payable create writes its audit row after the commit (best effort). | `app/api/payables/route.ts` | Verified by reading. **Open**, low: move to `insertAuditRow` in the transaction when the route is converted (slice 97). |
+| F1-1 | A shift's opening float is free input, never compared with the previous shift's counted cash; cash that leaves or appears between shifts is in no voucher or journal entry. | `lib/db.ts` `openShiftWith` | Reported by the audit; **owner decision** (handover rule: refuse a mismatch, or record it as a deposit/withdrawal). Not changed. |
+| F1-2 | A voucher can exceed the cash in the drawer; the close then books the gap as a cash surplus. Expenses carry no payment method. | `lib/db.ts` `recordExpenseInTx`, `lib/shift-close.ts` | Reported by the audit; **owner decision** (refuse above expected cash, or add a payment source to expenses). Not changed. |
+| F1-3 | On the legacy session path, shift open and close commit before their audit row. The canonical path already writes it in the transaction. | `app/api/shifts/route.ts` | **Open**, low. |
+| F3-1 | Payroll takes commission from `commissionReport(period.start, period.end)`, which is ranged by invoice date: a collection that lands after the invoice's period enters no payroll run (it shows only in the cumulative balance). | `lib/hr-payroll.ts` (calculate, approve, disburse), `lib/db.ts` `commissionReport` | Call and range confirmed by reading; **not yet reproduced by a test**. **Owner decision** on the rule (pay by collection date, or cumulative due minus prior payouts). High priority: doctor pay. |
+| F3-2 | An invoice-level discount is not applied to the commission base: the share is taken on the pre-discount item totals. | `lib/commission.ts`, `commissionReport` | Reported by the audit; **owner decision** (who absorbs the discount). Not changed. |
+| F3-3 | Unlinked legacy refunds reduce commission but not the material-cost base. | `commissionReport` | **Open**, low; old refunds only. |
 
-Verified findings and their fixes:
-
-_(none yet — fill in as each is confirmed: id, file and lines, scenario, failing test, fix commit)_
+Checked by the audits and reported sound: expected-cash arithmetic per currency, single open shift, close against in-flight payment/expense/void, overpayment and cross-currency guards on payables, symmetric void, integer minor units, clinic-timezone dates, role gates on shifts/expenses/payables/commissions/reports, the doctor party join for lab cost.
 
 Canonical conversion still open in finance (from the route map): shifts and day close, expenses, treasury, payables, commissions, reports (29 methods). Confirmed defects are fixed first; conversion slices 96–98 follow in that order.
 

@@ -8001,21 +8001,40 @@ export async function setLabOrderStatusOn(
      * «معفى»، والمسدَّد يبقى أثرًا للتدقيق فالمال خرج فعلًا ولا يُمحو الإلغاءُ السريري
      * سجلَه المحاسبي. */
     if (status === "cancelled" && current.payable_id) {
-      const { rows: paidRows } = await client.query<{ count: string }>(
-        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
-               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
+      /* The payable row is locked before its vouchers are counted: a payment that commits
+       * between the count and the DELETE would otherwise keep a link to a deleted payable.
+       * A payment in flight holds this row; the cancel waits for it and then counts it. */
+      await client.query(`SELECT id FROM payables WHERE id = $1 FOR UPDATE`, [current.payable_id]);
+      const { rows: paidRows } = await client.query<{ count: string; settled: string; amount: string }>(
+        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = p.id)
+               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = p.id))::text AS count,
+                ${payableSettledTotalSql("p")}::text AS settled, ${payableAmountSql("p")}::text AS amount
+           FROM payables p WHERE p.id = $1`,
         [current.payable_id],
       );
       const paidCount = Number(paidRows[0]?.count ?? 0);
-      if (paidCount === 0) {
+      /* Owner decision 2026-11-11: a laboratory debt is never dropped merely because no voucher
+       * exists. Only an order that was never sent to the laboratory ("needed") commissioned no
+       * work, so the payable born with it goes with it. Once the order was sent, the laboratory
+       * was engaged: the payable and whatever is unpaid stay, and settling or waiving the
+       * remainder is a documented financial act under the laboratory's agreement. */
+      if (paidCount === 0 && prevStatus === "needed") {
         await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
         await client.query(
           `UPDATE lab_orders SET payable_id = NULL, financial_status = 'exempt' WHERE id = $1`,
           [id],
         );
-      } else {
+      } else if (paidRows[0] && BigInt(paidRows[0].settled) >= BigInt(paidRows[0].amount)) {
         await client.query(
           `UPDATE lab_orders SET financial_status = 'paid' WHERE id = $1 AND financial_status <> 'paid'`,
+          [id],
+        );
+      } else {
+        /* Not fully settled: no voucher on work that was sent, a part payment, or a payment
+         * that was voided (two rows, net zero). The payable stays, with its vouchers, as the
+         * audit trail; the order must not read "paid" while the laboratory is still owed. */
+        await client.query(
+          `UPDATE lab_orders SET financial_status = 'payable_created' WHERE id = $1 AND financial_status = 'paid'`,
           [id],
         );
       }
@@ -14414,8 +14433,8 @@ export async function settleLabOrdersBatch(input: {
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
 import {
-  buildCaseOverrideResolver, commissionForPatientAtEventTime, resolvePolicyForShare, summarizeCommissions,
-  type CommissionDetailLine, type CommissionInvoice, type ServiceRateFinding,
+  allocateInvoiceDiscount, buildCaseOverrideResolver, commissionForPatientAtEventTime, resolvePolicyForShare, summarizeCommissions,
+  type CommissionDetailLine, type CommissionInvoice, type DoctorShareItem, type ServiceRateFinding,
 } from "./commission";
 import { FULL_RATE_BP } from "./materialRate";
 import { invoiceNet } from "./money";
@@ -14555,6 +14574,7 @@ export async function commissionReport(
   const byPatient = new Map<number, Map<number, CommissionInvoice>>();
   const clinicDateOfInvoice = new Map<number, string>();
   const allocationTimeOfInvoice = new Map<number, string>();
+  const lineGroupsOfInvoice = new Map<number, { amountMinor: number; share: DoctorShareItem | null }[]>();
   for (const row of invoiceRows) {
     if (typeof row.allocation_origin_id !== "number" || !Number.isSafeInteger(row.allocation_origin_id) || row.allocation_origin_id <= 0) {
       throw new Error("تعذّر إثبات أصل ترتيب عمولة الفاتورة من سجل التصحيح.");
@@ -14571,22 +14591,44 @@ export async function commissionReport(
       createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
       doctorShares: [],
     };
+    /* Every line group of the invoice is kept (with or without a doctor) so the invoice
+       discount can be spread over all of them before any percentage is applied. */
+    const group: { amountMinor: number; share: DoctorShareItem | null } = { amountMinor: toMinor(row.share_minor), share: null };
     if (row.doctor_id) {
       /* حصة الطبيب تحمل هوية الخدمة وفئتها وعملة فاتورتها (محرك الوكيل المساعد):
          بها يجد النسبة الخاصة إن وُجدت — تقويم ٣٥٪ وزراعة ٣٠٪ على الطبيب نفسه. */
-      invoice.doctorShares.push({
+      group.share = {
         doctorId: row.doctor_id,
-        amountMinor: toMinor(row.share_minor),
+        amountMinor: group.amountMinor,
         currency: invoice.currency,
         serviceId: row.service_id ?? undefined,
         serviceName: row.service_name ?? undefined,
         category: row.category ?? undefined,
         caseId: row.case_id ?? undefined,
         planId: row.plan_id ?? undefined,
-      });
+      };
+      invoice.doctorShares.push(group.share);
     }
+    const groups = lineGroupsOfInvoice.get(row.invoice_id) ?? [];
+    groups.push(group);
+    lineGroupsOfInvoice.set(row.invoice_id, groups);
     patientInvoices.set(row.invoice_id, invoice);
     byPatient.set(row.patient_id, patientInvoices);
+  }
+  /* Owner decision 2026-11-11 (finance point 1): the doctor's share is taken after the invoice
+     discount. The discount (line total minus the invoice net, in the invoice currency) is spread
+     over the invoice's line groups exactly; each doctor share becomes its amount after its part
+     of the discount, so the shares of a fully discounted-and-paid invoice add up to what was
+     collected. Laboratory and material costs are deducted afterwards, by the doctor's policy. */
+  for (const patientInvoices of byPatient.values()) {
+    for (const invoice of patientInvoices.values()) {
+      const groups = lineGroupsOfInvoice.get(invoice.id) ?? [];
+      const gross = groups.reduce((sum, group) => sum + Math.max(0, group.amountMinor), 0);
+      const discountMinor = gross - invoice.netMinor;
+      if (discountMinor <= 0) continue;
+      const parts = allocateInvoiceDiscount(groups.map(group => group.amountMinor), discountMinor);
+      groups.forEach((group, index) => { if (group.share) group.share.amountMinor = group.amountMinor - parts[index]; });
+    }
   }
 
   const patientIds = [...byPatient.keys()];

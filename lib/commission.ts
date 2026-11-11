@@ -436,6 +436,99 @@ export function resolvePolicyForShare(
   return resolved;
 }
 
+/**
+ * Owner decision 2026-11-11 (finance point 1): the doctor's percentage is taken after the invoice
+ * discount. An invoice-level discount is spread over the invoice's lines in proportion to each
+ * line's amount, in whole minor units of the invoice currency: floor shares first, then the
+ * leftover units one by one to the largest remainders (ties to the earlier line). The parts add up
+ * to the discount exactly, no line is discounted below zero or beyond its own amount, and no
+ * float is involved. A discount equal to or above the total leaves every line at zero.
+ * Lines with a non-positive amount take no discount.
+ */
+export function allocateInvoiceDiscount(amounts: readonly number[], discountMinor: number): number[] {
+  if (amounts.some(amount => !Number.isSafeInteger(amount)) || !Number.isSafeInteger(discountMinor)) {
+    throw new Error("Invalid invoice discount allocation inputs");
+  }
+  const weights = amounts.map(amount => (amount > 0 ? BigInt(amount) : 0n));
+  const total = weights.reduce((sum, weight) => sum + weight, 0n);
+  if (discountMinor <= 0 || total === 0n) return amounts.map(() => 0);
+  const discount = BigInt(discountMinor);
+  if (discount >= total) return amounts.map(amount => (amount > 0 ? amount : 0));
+  const parts = weights.map((weight, index) => ({ index, part: (weight * discount) / total, remainder: (weight * discount) % total }));
+  let left = discount - parts.reduce((sum, entry) => sum + entry.part, 0n);
+  for (const entry of [...parts].sort((a, b) => (a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1))) {
+    if (left === 0n) break;
+    if (entry.remainder === 0n) continue;
+    entry.part += 1n; left -= 1n;
+  }
+  return parts.map(entry => Number(entry.part));
+}
+
+/**
+ * Owner decision 2026-11-11 (finance point 3, option 2, decided per case): when two or more
+ * doctors share a case, the centre approves each participant's share of the work, in basis points
+ * that add up to 10,000 (100%). Each participant is then paid at HIS OWN contract rate on HIS part
+ * of the line's base (after the invoice discount; laboratory and material costs are split in the
+ * same proportion and deducted by each participant's own policy). Nobody receives the whole
+ * percentage, the parts of the base add up to the line exactly, and the result does not depend on
+ * which doctor is recorded on the line. While a shared case has no approved split it is `pending`:
+ * its commission is held for review and paid to no one.
+ */
+export interface CaseParticipant { doctorId: number; shareBp: number }
+export interface CaseParticipation {
+  caseId: number;
+  status: "approved" | "pending";
+  /** Empty while pending. */
+  participants: readonly CaseParticipant[];
+}
+export type CaseParticipationResolver = (caseId: number, atIso: string) => CaseParticipation | undefined;
+export const FULL_PARTICIPATION_BP = 10_000;
+
+export type CaseParticipationProblem = "no_participants" | "duplicate_doctor" | "invalid_doctor" | "invalid_share" | "shares_below_full" | "shares_above_full";
+/** Why an approved split is not acceptable; `null` when it is. A single participant must hold 100%. */
+export function caseParticipationProblem(participants: readonly CaseParticipant[]): CaseParticipationProblem | null {
+  if (participants.length === 0) return "no_participants";
+  if (participants.some(part => !Number.isSafeInteger(part.doctorId) || part.doctorId <= 0)) return "invalid_doctor";
+  if (new Set(participants.map(part => part.doctorId)).size !== participants.length) return "duplicate_doctor";
+  if (participants.some(part => !Number.isSafeInteger(part.shareBp) || part.shareBp <= 0 || part.shareBp > FULL_PARTICIPATION_BP)) return "invalid_share";
+  const total = participants.reduce((sum, part) => sum + part.shareBp, 0);
+  return total < FULL_PARTICIPATION_BP ? "shares_below_full" : total > FULL_PARTICIPATION_BP ? "shares_above_full" : null;
+}
+
+/** Splits a whole number of minor units by weights, exactly: floors first, leftover units to the
+ * largest remainders (ties to the earlier weight). The parts add up to `totalMinor`. */
+export function allocateByWeights(totalMinor: number, weights: readonly number[]): number[] {
+  if (!Number.isSafeInteger(totalMinor) || totalMinor < 0 || weights.some(weight => !Number.isSafeInteger(weight) || weight < 0)) {
+    throw new Error("Invalid weighted allocation inputs");
+  }
+  const sum = weights.reduce((acc, weight) => acc + BigInt(weight), 0n);
+  if (sum === 0n) { if (totalMinor === 0) return weights.map(() => 0); throw new Error("Invalid weighted allocation inputs"); }
+  const total = BigInt(totalMinor);
+  const parts = weights.map((weight, index) => ({ index, part: (BigInt(weight) * total) / sum, remainder: (BigInt(weight) * total) % sum }));
+  let left = total - parts.reduce((acc, entry) => acc + entry.part, 0n);
+  for (const entry of [...parts].sort((a, b) => (a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1))) {
+    if (left === 0n) break;
+    entry.part += 1n; left -= 1n;
+  }
+  return parts.map(entry => Number(entry.part));
+}
+
+/** One line share of a shared case as one share per participant (option 2). The amount and each
+ * cost are split by the approved shares; every other attribute of the line is kept. */
+export function splitShareByParticipation(share: DoctorShareItem, participation: CaseParticipation): DoctorShareItem[] {
+  if (participation.status !== "approved" || caseParticipationProblem(participation.participants) !== null) {
+    throw new Error("Case participation is not an approved, complete split");
+  }
+  const weights = participation.participants.map(part => part.shareBp);
+  const amounts = allocateByWeights(Math.max(0, share.amountMinor), weights);
+  const lab = share.labCostMinor ? allocateByWeights(share.labCostMinor, weights) : null;
+  const materials = share.materialCostMinor ? allocateByWeights(share.materialCostMinor, weights) : null;
+  return participation.participants.map((part, index) => ({
+    ...share, doctorId: part.doctorId, amountMinor: amounts[index],
+    ...(lab ? { labCostMinor: lab[index] } : {}), ...(materials ? { materialCostMinor: materials[index] } : {}),
+  }));
+}
+
 function clampPercent(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
 }
@@ -498,6 +591,10 @@ export interface CommissionEngineOptions {
   overrideAt?: CaseOverrideResolver;
   /** (F-8) مصبّ التفصيل — لا يغيّر شيئًا من الحساب. */
   sink?: CommissionDetailSink;
+  /** (Owner decision 2026-11-11, point 3) the approved split of a shared case at a given time. */
+  participationAt?: CaseParticipationResolver;
+  /** Called for every line share of a shared case that has no approved split: held, paid to no one. */
+  onHeld?: (held: { invoiceId: number; caseId: number; lineDoctorId: number; currency: Currency; amountMinor: number }) => void;
 }
 
 /**
@@ -534,7 +631,7 @@ export function commissionForPatientAtEventTime(
     byCurrency[currency].earnedMinor += earned;
     result.set(doctorId, byCurrency);
   };
-  const { overrideAt, sink } = options;
+  const { overrideAt, sink, participationAt, onHeld } = options;
   const overrideFor = (doctorId: number, share: DoctorShareItem, atIso: string) =>
     overrideAt && (share.caseId || share.planId) ? overrideAt(doctorId, share, atIso) : undefined;
 
@@ -551,7 +648,20 @@ export function commissionForPatientAtEventTime(
     if (include && !include(invoice)) continue;
     const covering = chunksByInvoice.get(invoice.id) ?? [];
 
-    for (const share of invoice.doctorShares) {
+    /* Shared cases (owner decision 2026-11-11, point 3): a line of a case with an approved split
+       becomes one share per participant; without an approved split it is held for review. */
+    const shares: DoctorShareItem[] = [];
+    for (const line of invoice.doctorShares) {
+      const participation = participationAt && line.caseId ? participationAt(line.caseId, invoice.createdAt) : undefined;
+      if (!participation) { shares.push(line); continue; }
+      if (participation.status !== "approved" || caseParticipationProblem(participation.participants) !== null) {
+        onHeld?.({ invoiceId: invoice.id, caseId: line.caseId!, lineDoctorId: line.doctorId, currency: invoice.currency, amountMinor: line.amountMinor });
+        continue;
+      }
+      shares.push(...splitShareByParticipation(line, participation));
+    }
+
+    for (const share of shares) {
       // (تصحيح ٣) حصة بعملةٍ تخالف فاتورتها = فساد بيانات يُقال لا يُدار.
       if (share.currency !== invoice.currency) {
         throw new FinancialCurrencyIntegrityError(
