@@ -18,14 +18,16 @@ Branch `feat/claude-work-continuation-20261110` (independent; stacked on the #50
 | `4b3b2187` | Slice 95a: historical onboarding reads | PG 4/4 |
 | `4424b90b` | Slice 95b: pre-system treatments | PG 5/5 |
 | `817106ac` | Slice 95c: historical documents | PG 6/6, two mutations, related PG 837/837 |
-| (slice 95d commit) | Slice 95d: previous-balance arrangement; regenerated `inventory.json` | PG 4/4, two mutations, related PG 273/273 |
+| `bf0d3f1f` | Slice 95d: previous-balance arrangement; regenerated `inventory.json` | PG 4/4, two mutations, related PG 273/273. Full gate green; Draft PR #536. |
+| `0c4cdd08` | Owner decisions of 2026-11-11: commission after the invoice discount; payroll pays the cumulative due (collection month); lab cancel shows "paid" only when fully settled; pure case-participation engine | Unit 20 new; PG 22 new (20 fail on the previous code); related PG 50 files, 834/834. Details: `commission-owner-decisions-20261111.md`. |
 
 Gate finding on `817106ac`: the interim commits had not regenerated `docs/security/staff-cutover/inventory.json`; the readiness audit reported drift (2 unit failures). The regenerated file is committed with slice 95d. One more unit failure (`redirect-hardening`, a 5 s timeout under load) passes alone.
 
 ## 2. In progress
 
-- Slice 95d: committed. PG 4/4, two mutations fail as required, related PG 273/273, unit 175/175, audits 10/10.
-- Full gate on the new head (unit, tsc, lint, audits, PG list, build, HTTP journeys), then push and open a Draft PR against the #506 branch (review only).
+- Gate on `0c4cdd08` found that the generated `inventory.json` digest was stale again (source files changed, the file was not regenerated). Regenerated in the next commit; the rule is now: regenerate the audits before every commit that touches `lib/`, `app/` or tests.
+- Case-participation storage (migration `0126`) is on its own branch, `feat/claude-commission-case-participation-20261111`, stacked on this one, so that its strict migration lists can be reconciled with the orthodontic candidate (#535/#537, lists end at `0125`) without touching this branch.
+- Next on this branch: the correction price and discount authority review requested on #483 (comment 6801961109): matrix, proven defect versus open policy, allow/deny tests. No policy is decided for the owner.
 
 ## 3. Finance queue (order by risk to patient balances and the cash box)
 
