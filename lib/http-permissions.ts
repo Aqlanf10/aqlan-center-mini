@@ -133,6 +133,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/families/[id]/members": { POST: FRONT_DESK },
   "/api/families/[id]/members/[patientId]": { DELETE: FRONT_DESK },
   "/api/finance/commission-overrides": { GET: ADMIN, POST: ADMIN },
+  "/api/finance/commission-participations": { GET: ADMIN, POST: ADMIN },
   "/api/finance/commissions": { GET: ["admin", "doctor", "accountant"] },
   "/api/finance/debts": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/finance/expense-categories": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ADMIN, PATCH: ADMIN, DELETE: ADMIN },

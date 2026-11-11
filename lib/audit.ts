@@ -66,6 +66,7 @@ export type AuditAction =
   | "auth.canonical_login" | "staff.capabilities.update" | "staff.account.update"
   /* (COMM-DETAIL-1) نسبة خاصة بحالة/خطة لطبيب — تعيين أو إلغاء بصفٍّ جديد مسبَّب. */
   | "commission.case_override.set" | "commission.case_override.void"
+  | "commission.case_participation.set" | "commission.case_participation.void"
   | "backup.download" | "export.download"
   | "document.reprint"
   | "chart.record" | "perio.record" | "visit.sign" | "visit.addendum"
@@ -264,6 +265,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "staff.account.update": "تعديل حساب موظف (تفعيل/إيقاف/اسم/دور/ربط طبيب/كلمة مرور مؤقتة)",
   "commission.case_override.set": "تعيين نسبة عمولة خاصة بحالة",
   "commission.case_override.void": "إلغاء نسبة عمولة خاصة بحالة",
+  "commission.case_participation.set": "اعتماد توزيع مشاركة الأطباء في حالة",
+  "commission.case_participation.void": "إلغاء توزيع مشاركة الأطباء في حالة",
   "backup.download": "تنزيل نسخة احتياطية",
   "export.download": "تصدير بيانات",
   "document.reprint": "إعادة طباعة مستند",
@@ -439,6 +442,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "user.disable", "doctor.permissions.update", "user.finance-permissions.update", "doctor.commission.update",
   "staff.capabilities.update", "staff.account.update",
   "commission.case_override.set", "commission.case_override.void",
+  "commission.case_participation.set", "commission.case_participation.void",
   "backup.download", "export.download", "document.reprint",
   "visit.addendum", "visit.clearance_bypass", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
 ];

@@ -949,6 +949,34 @@
   "note": ""
  },
  {
+  "route": "/api/finance/commission-participations",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.commissions.manage-rates"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Doctors sharing a case (owner decision 2026-11-11, point 3): legacy administrator only until the finance conversion slice."
+ },
+ {
+  "route": "/api/finance/commission-participations",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.commissions.manage-rates"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Doctors sharing a case (owner decision 2026-11-11, point 3): legacy administrator only until the finance conversion slice."
+ },
+ {
   "route": "/api/finance/commissions",
   "method": "GET",
   "legacyRoles": [

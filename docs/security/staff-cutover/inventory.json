@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "b0fac36b6f67ec4e5fd80ca75f98a2d0ce210357353a9fb051c0930413913ac3",
+  "sourceDigest": "e00d7c5fb258f4cf5c9e007c4d715174c2a9dc46a4dc79bfe273a49d19c639c1",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -76,10 +76,10 @@
     "patients.history.correct"
   ],
   "summary": {
-    "routeMethods": 420,
+    "routeMethods": 422,
     "routeClassifications": {
       "public-separate-portal": 25,
-      "staff-legacy-held": 386,
+      "staff-legacy-held": 388,
       "canonical-ready": 0,
       "unknown": 9
     },
@@ -90,7 +90,7 @@
       "canonical-ready": 0,
       "unknown": 25
     },
-    "legacyReferenceFiles": 249,
+    "legacyReferenceFiles": 250,
     "canonicalDirectReferences": 0
   },
   "sourceEntries": [
@@ -141,6 +141,7 @@
     "app/api/families/[id]/route.ts",
     "app/api/families/route.ts",
     "app/api/finance/commission-overrides/route.ts",
+    "app/api/finance/commission-participations/route.ts",
     "app/api/finance/commissions/route.ts",
     "app/api/finance/debts/route.ts",
     "app/api/finance/expense-categories/route.ts",
@@ -1070,6 +1071,23 @@
         {
           "symbol": "requireSession",
           "line": 36
+        }
+      ]
+    },
+    {
+      "file": "app/api/finance/commission-participations/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 20
+        },
+        {
+          "symbol": "requireSession",
+          "line": 34
         }
       ]
     },
@@ -6100,6 +6118,58 @@
         {
           "symbol": "requireSession",
           "line": 36
+        }
+      ]
+    },
+    {
+      "route": "/api/finance/commission-participations",
+      "method": "GET",
+      "file": "app/api/finance/commission-participations/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "finance-reports",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 20
+        },
+        {
+          "symbol": "requireSession",
+          "line": 34
+        }
+      ]
+    },
+    {
+      "route": "/api/finance/commission-participations",
+      "method": "POST",
+      "file": "app/api/finance/commission-participations/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "finance-reports",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 20
+        },
+        {
+          "symbol": "requireSession",
+          "line": 34
         }
       ]
     },

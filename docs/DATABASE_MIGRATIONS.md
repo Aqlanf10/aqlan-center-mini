@@ -665,3 +665,23 @@ Application shade edits commit their audit record in the same transaction and
 use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
+
+### 0126_commission_case_participations.sql
+
+Adds one additive, append-only table, `commission_case_participations`, for the
+centre's decision on how doctors share a clinical case (owner decision
+2026-11-11): the participants and their shares in basis points, the status
+(`approved`, `pending`, `void`), the source, the written reason, who decided and
+when. An immutable validation function and a CHECK constraint require an approved
+split to add up to exactly 10,000 with distinct doctors; a pending or void row
+carries no participants. One head per case is enforced by two partial unique
+indexes, and a trigger refuses every UPDATE and DELETE.
+
+No existing table, column or published migration is changed, and nothing is
+backfilled: a case without a decision is paid as before. Numbered and
+checksum-checked runtime SQL use identical bytes. The number was verified free on
+every active branch; numbers 0090–0125 belong to other lines and are not filled
+here. Decisions commit with their audit row in one transaction under the case row
+lock. Rollback of application code must not delete the table or migration
+registry history. Exact-head CI and Staging verification remain required before
+Production rollout.
