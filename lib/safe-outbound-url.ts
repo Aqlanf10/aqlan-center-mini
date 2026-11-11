@@ -351,3 +351,142 @@ export async function assertSafeOutboundUrl(
  * تحويلات، فيجب إعادة التحقق الكامل لكل hop مع حد أدنى جدًّا (موثَّق).
  */
 export const SAFE_FETCH_INIT = Object.freeze({ redirect: "error" }) as RequestInit;
+
+/* ── حماية مسارات الرسائل الصادرة (واتساب، SMS، SMTP) دون حصر مزودي الرسائل ──
+ *
+ * ملاحظة معمارية مهمّة: مزودو الرسائل (بوابات SMS اليمنية والإقليمية، وشركاء Meta BSP
+ * مثل 360dialog وTwilio وInfobip، وخوادم SMTP الخاصة بالنطاقات) متنوّعون بطبيعتهم،
+ * فلا ننسخ لهم قائمة `BUILTIN_PROVIDER_HOSTS` الخاصة بمزودي الذكاء الاصطناعي حتى لا
+ * نُعطّل بوابة رسائل مشروعة. بدلًا من ذلك نفرض:
+ *  - بروتوكول `https:` حصرًا لطلبات HTTP الصادرة (ومنافذ HTTPS القياسية).
+ *  - منع بيانات الاعتماد في الرابط (`user:pass@`) والـfragment (`#`).
+ *  - اسم مضيف عام مؤهل (FQDN) أو IP عام صريح، وحظر جميع العناوين الداخلية/الخاصة/
+ *    المحلية/الرابط المحلي/بيانات تعريف السحابة (`169.254.169.254`، `100.64/10`، `::1`…).
+ *  - فحص سجلات DNS (A/AAAA) قبل الاتصال الشبكي الفعلي مع `redirect: "error"`.
+ */
+
+const ALLOWED_MESSAGING_HTTPS_PORTS = new Set(["", "443", "8443"]);
+export const ALLOWED_PUBLIC_SMTP_PORTS = new Set([465, 587, 2525]);
+
+export interface MessagingOutboundPolicy {
+  resolveDns?: (hostname: string) => Promise<string[]>;
+  /** لتجاوز `dns.lookup` الحي فقط عند حقن `fetchImpl` وهمي في اختبارات الوحدة المعزولة (ما لم يُمرَّر `resolveDns` صراحةً). */
+  skipLiveDns?: boolean;
+}
+
+export function validateMessagingOutboundUrl(rawUrl: string): SafeUrlResult {
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed.length > 2048 || /[\r\n\0]/.test(trimmed)) {
+    return { ok: false, reason: "عنوان البوابة غير صالح." };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { ok: false, reason: "عنوان البوابة غير صالح." };
+  }
+  if (parsed.protocol !== "https:") {
+    return {
+      ok: false,
+      reason: "عنوان البوابة يجب أن يبدأ بـ https:// — لا يُرسل المفتاح بلا تشفير.",
+    };
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: "لا يُسمح بتضمين اسم مستخدم أو كلمة مرور داخل عنوان البوابة." };
+  }
+  if (parsed.hash) {
+    return { ok: false, reason: "عنوان البوابة لا يقبل مقاطع تجزئة (#)." };
+  }
+  if (!ALLOWED_MESSAGING_HTTPS_PORTS.has(parsed.port)) {
+    return { ok: false, reason: "منفذ عنوان البوابة غير مسموح به (استعمل منفذ HTTPS القياسي 443 أو 8443)." };
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    hostname.length === 0 ||
+    hostname.length > 253 ||
+    /[^\x20-\x7e]/.test(hostname) ||
+    /[\s/\\@]/.test(hostname) ||
+    hostname.includes("..")
+  ) {
+    return { ok: false, reason: "اسم مضيف البوابة غير صالح." };
+  }
+  if (isBlockedHostname(hostname)) {
+    return { ok: false, reason: "أسماء المضيفات الداخلية والمحلية محجوبة أمنيًّا." };
+  }
+  const family = isIP(hostname);
+  if (family === 0 && !hostname.includes(".")) {
+    return { ok: false, reason: "اسم مضيف البوابة يجب أن يكون نطاقًا عامًّا مؤهلًا (FQDN)." };
+  }
+  if (family !== 0 && isPrivateOrSpecialIp(hostname)) {
+    return { ok: false, reason: "العناوين الداخلية والخاصة محجوبة في قنوات الرسائل." };
+  }
+  return { ok: true, url: parsed.toString(), hostname };
+}
+
+export async function assertSafeMessagingOutboundUrl(
+  rawUrl: string,
+  policy: MessagingOutboundPolicy = {},
+): Promise<SafeUrlResult> {
+  const structural = validateMessagingOutboundUrl(rawUrl);
+  if (!structural.ok || !structural.hostname) return structural;
+  if (policy.skipLiveDns && !policy.resolveDns) {
+    return structural;
+  }
+  const dnsCheck = await assertResolvablePublicHost(structural.hostname, {
+    resolveDns: policy.resolveDns,
+  });
+  if (!dnsCheck.ok) return dnsCheck;
+  return structural;
+}
+
+export function validatePublicSmtpHostAndPort(
+  host: string,
+  port: number,
+  options: { allowDevPorts?: boolean } = {},
+): SafeUrlResult {
+  const hostname = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    !hostname ||
+    hostname.length > 200 ||
+    !/^[a-z0-9.:-]+$/.test(hostname) ||
+    hostname.includes("..")
+  ) {
+    return { ok: false, reason: "اسم خادم البريد غير صالح." };
+  }
+  if (isBlockedHostname(hostname)) {
+    return { ok: false, reason: "لا يُسمح بربط خادم البريد بعناوين محلية أو داخلية." };
+  }
+  const family = isIP(hostname);
+  if (family === 0 && !hostname.includes(".")) {
+    return { ok: false, reason: "اسم خادم البريد يجب أن يكون نطاقًا عامًّا مؤهلًا (FQDN)." };
+  }
+  if (family !== 0 && isPrivateOrSpecialIp(hostname)) {
+    return { ok: false, reason: "لا يُسمح بربط خادم البريد بعناوين شبكة خاصة أو داخلية." };
+  }
+  const allowedPorts = options.allowDevPorts
+    ? new Set([...ALLOWED_PUBLIC_SMTP_PORTS, 25, 1025])
+    : ALLOWED_PUBLIC_SMTP_PORTS;
+  if (!Number.isInteger(port) || !allowedPorts.has(port)) {
+    return {
+      ok: false,
+      reason: "منفذ خادم البريد غير مسموح به — استعمل منافذ الإرسال الموثقة (465 أو 587 أو 2525).",
+    };
+  }
+  return { ok: true, hostname };
+}
+
+export async function assertSafePublicSmtpTarget(
+  host: string,
+  port: number,
+  options: { allowDevPorts?: boolean; resolveDns?: (hostname: string) => Promise<string[]>; skipLiveDns?: boolean } = {},
+): Promise<SafeUrlResult> {
+  const structural = validatePublicSmtpHostAndPort(host, port, options);
+  if (!structural.ok || !structural.hostname) return structural;
+  if (options.skipLiveDns && !options.resolveDns) return structural;
+  const dnsCheck = await assertResolvablePublicHost(structural.hostname, {
+    resolveDns: options.resolveDns,
+  });
+  if (!dnsCheck.ok) return dnsCheck;
+  return structural;
+}

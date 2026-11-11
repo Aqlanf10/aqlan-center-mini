@@ -25,8 +25,7 @@ export async function GET(
 
   // (TD-04) الهوية قبل قراءة السجل: بلا جلسة بوابة ولا جلسة طاقم ⇒ 401 دون أن
   // يُقرأ الجسم من القاعدة — فلا يكشف المجهول وجود رسالةٍ برقمها ولا يُحمِّل الخادم جسمها.
-  const portal = await requirePortalSession();
-  const session = portal ? null : await requireSessionStrict();
+  const [portal, session] = await Promise.all([requirePortalSession(), requireSessionStrict()]);
   if (!portal && !session) {
     return NextResponse.json({ message: "سجّل الدخول لسماع الرسالة." }, { status: 401 });
   }
@@ -39,10 +38,12 @@ export async function GET(
   if (portal) {
     const mine = payload.senderPatientId === portal.patientId
       || payload.recipientPatientId === portal.patientId;
-    if (!mine) {
+    if (mine) {
+      return audioResponse(payload.mime, payload.data);
+    }
+    if (!session) {
       return NextResponse.json({ message: "لا يمكنك سماع هذه الرسالة." }, { status: 403 });
     }
-    return audioResponse(payload.mime, payload.data);
   }
 
   if (!session) {
@@ -78,7 +79,7 @@ function audioResponse(mime: string, base64: string): NextResponse {
     headers: {
       "Content-Type": mime,
       "Content-Length": String(buffer.byteLength),
-      "Cache-Control": "private, max-age=86400",
+      "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Accept-Ranges": "none",
     },

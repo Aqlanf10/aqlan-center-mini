@@ -18,6 +18,7 @@ import {
   parseMessageTarget,
   validateMessageEdit,
   validateOutgoingMessage,
+  voiceMatchesMagicBytes,
 } from "@/lib/messages";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient, resolveRestrictedDoctorScope } from "@/lib/patient-access";
@@ -127,6 +128,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: verdict.message }, { status: 400 });
   }
   const message = verdict.value;
+  if (
+    message.kind === "voice" &&
+    (!message.voiceMime ||
+      !message.voiceData ||
+      !voiceMatchesMagicBytes(message.voiceMime, message.voiceData))
+  ) {
+    return NextResponse.json(
+      { message: "ترويسة المقطع الصوتي لا تطابق الصيغة الصوتية المعلنة." },
+      { status: 400 },
+    );
+  }
 
   if (target.type === "user") {
     const recipient = await getStaffUserById(target.id!);

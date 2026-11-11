@@ -26,8 +26,7 @@ export async function GET(
 
   // (TD-04) الهوية قبل قراءة السجل: بلا جلسة بوابة ولا جلسة طاقم ⇒ 401 دون أن
   // يُقرأ الجسم من القاعدة — فلا يكشف المجهول وجود رسالةٍ برقمها ولا يُحمِّل الخادم جسمها.
-  const portal = await requirePortalSession();
-  const session = portal ? null : await requireSessionStrict();
+  const [portal, session] = await Promise.all([requirePortalSession(), requireSessionStrict()]);
   if (!portal && !session) {
     return NextResponse.json({ message: "سجّل الدخول للوصول إلى الملف." }, { status: 401 });
   }
@@ -40,10 +39,12 @@ export async function GET(
   if (portal) {
     const mine = payload.senderPatientId === portal.patientId
       || payload.recipientPatientId === portal.patientId;
-    if (!mine) {
+    if (mine) {
+      return fileResponse(payload.mime, payload.data, payload.name);
+    }
+    if (!session) {
       return NextResponse.json({ message: "لا يمكنك الوصول إلى هذا الملف." }, { status: 403 });
     }
-    return fileResponse(payload.mime, payload.data, payload.name);
   }
 
   if (!session) {
@@ -62,7 +63,8 @@ export async function GET(
   }
 
   const patientId = payload.recipientPatientId ?? payload.senderPatientId;
-  if (patientId && !(await canAccessPatient(session, patientId))) {
+  const requiredPerm = payload.mime.startsWith("image/") ? "canViewXrays" : undefined;
+  if (patientId && !(await canAccessPatient(session, patientId, requiredPerm))) {
     return NextResponse.json(
       { message: "غير مصرّح لك بالوصول إلى مرفقات هذا المريض." },
       { status: 403 },
@@ -84,7 +86,7 @@ function fileResponse(mime: string, base64: string, name: string | null): NextRe
       "Content-Type": mime,
       "Content-Length": String(buffer.byteLength),
       "Content-Disposition": `${isImage ? "inline" : "attachment"}; filename*=UTF-8''${encodedName}`,
-      "Cache-Control": "private, max-age=86400",
+      "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Accept-Ranges": "none",
     },

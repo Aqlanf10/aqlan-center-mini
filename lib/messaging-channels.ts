@@ -14,6 +14,7 @@
  * السرّ لا يعود إلى الشاشة أبدًا: الشاشة ترى «مضبوط/غير مضبوط» فقط.
  */
 import { toWhatsAppNumber } from "./reminders";
+import { validateMessagingOutboundUrl, validatePublicSmtpHostAndPort } from "./safe-outbound-url";
 
 export const CHANNELS = ["whatsapp", "sms", "email"] as const;
 export type Channel = (typeof CHANNELS)[number];
@@ -175,9 +176,8 @@ export function normalizeChannelConfig<C extends Channel>(
       return { ok: false, message: "اسم ترويسة المفتاح غير صالح: حروف لاتينية وأرقام و- فقط." };
     }
     if (config.apiBaseUrl) {
-      let parsed: URL;
-      try { parsed = new URL(config.apiBaseUrl); } catch { return { ok: false, message: "عنوان واجهة المزوّد غير صالح." }; }
-      if (parsed.protocol !== "https:") return { ok: false, message: "عنوان واجهة المزوّد يجب أن يبدأ بـ https:// — لا يُرسل المفتاح بلا تشفير." };
+      const verdict = validateMessagingOutboundUrl(config.apiBaseUrl);
+      if (!verdict.ok) return { ok: false, message: verdict.reason ?? "عنوان واجهة المزوّد غير صالح." };
     }
     if (enabled && config.provider === "meta" && !config.phoneNumberId) return { ok: false, message: "أدخل معرّف رقم الهاتف لدى Meta قبل التفعيل." };
     if (enabled && config.provider === "bsp" && !config.apiBaseUrl) return { ok: false, message: "أدخل عنوان واجهة المزوّد الشريك قبل التفعيل." };
@@ -203,9 +203,8 @@ export function normalizeChannelConfig<C extends Channel>(
       if (value && !PARAM.test(value)) return { ok: false, message: `اسم حقل ${name} غير صالح: حروف لاتينية وأرقام و_ . - فقط.` };
     }
     if (config.url) {
-      let parsed: URL;
-      try { parsed = new URL(config.url); } catch { return { ok: false, message: "عنوان البوابة غير صالح." }; }
-      if (parsed.protocol !== "https:") return { ok: false, message: "عنوان البوابة يجب أن يبدأ بـ https:// — لا يُرسل المفتاح بلا تشفير." };
+      const verdict = validateMessagingOutboundUrl(config.url);
+      if (!verdict.ok) return { ok: false, message: verdict.reason ?? "عنوان البوابة غير صالح." };
     }
     if (enabled && !config.url) return { ok: false, message: "أدخل عنوان بوابة الرسائل قبل التفعيل." };
     return { ok: true, config: config as ChannelConfigMap[C] };
@@ -219,7 +218,12 @@ export function normalizeChannelConfig<C extends Channel>(
     fromAddress: text(input.fromAddress, 200),
     fromName: text(input.fromName, 120),
   };
-  if (config.host && !/^[A-Za-z0-9.-]{1,200}$/.test(config.host)) return { ok: false, message: "اسم خادم البريد غير صالح." };
+  if (config.host) {
+    const smtpVerdict = validatePublicSmtpHostAndPort(config.host, config.port);
+    if (!smtpVerdict.ok) return { ok: false, message: smtpVerdict.reason ?? "اسم خادم البريد غير صالح." };
+  } else if (input.port !== undefined && !validatePublicSmtpHostAndPort("smtp.example.com", config.port).ok) {
+    return { ok: false, message: "منفذ خادم البريد غير مسموح به — استعمل منافذ الإرسال الموثقة (465 أو 587 أو 2525)." };
+  }
   if (config.fromAddress && !isEmail(config.fromAddress)) return { ok: false, message: "عنوان المرسل ليس بريدًا صالحًا." };
   if (enabled && (!config.host || !config.fromAddress)) return { ok: false, message: "أدخل خادم البريد وعنوان المرسل قبل التفعيل." };
   return { ok: true, config: config as ChannelConfigMap[C] };

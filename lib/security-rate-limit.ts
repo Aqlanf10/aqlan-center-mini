@@ -29,6 +29,8 @@ export interface SecurityLimitSpec {
   /** هوية من يُحدّ: اسم مستخدم، رقم هاتف، معرف جلسة — بأي شكل خام. */
   identifier: string;
   maximum: number;
+  /** سقف مستقل لبصمة المصدر خلف الوسيط الموثوق (مراعاة شبكات الجوال المشتركة CGNAT). */
+  sourceMaximum?: number;
   windowMinutes: number;
   /** ترويسات الطلب — لاستخراج المصدر خلف وسيط موثوق. */
   headers: Headers;
@@ -54,7 +56,10 @@ export async function consumeSecurityLimit(spec: SecurityLimitSpec): Promise<Sec
   if (process.env.TRUST_PROXY === "true") {
     const address = clientIpFromForwardedFor(spec.headers.get("x-forwarded-for"));
     if (address) {
-      limits.push({ key: hmac(`sec:${spec.scope}:source:${address}`), maximum: spec.maximum });
+      limits.push({
+        key: hmac(`sec:${spec.scope}:source:${address}`),
+        maximum: spec.sourceMaximum ?? spec.maximum,
+      });
     }
   }
 

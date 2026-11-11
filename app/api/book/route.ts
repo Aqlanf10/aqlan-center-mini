@@ -21,14 +21,17 @@ export const dynamic = "force-dynamic";
  */
 const MAX_PER_PHONE_PER_DAY = 3;
 const MAX_PER_SOURCE_PER_DAY = 60;
+const MAX_PER_PHONE_BURST_15M = 6;
 
 /**
  * بصمة مصدر الطلب — لا عنوانه.
  *
  * العدّ يحتاج تمييز المُرسِل، ولا يحتاج معرفته. التجزئة بمفتاح الجلسات كملح تجعل
  * الجدول عديم الفائدة لمن يقرأه: لا يمكن استخراج عنوان منه ولا مطابقته بجدول آخر.
+ * ولا يُقرأ `x-forwarded-for` إلا خلف وسيط موثوق صريح (`TRUST_PROXY=true`).
  */
 function sourceHash(request: Request): string | null {
+  if (process.env.TRUST_PROXY !== "true") return null;
   /* (P0.15) العنوان الأخير في السلسلة — الذي أضافه الوسيط الموثوق — لا الأول
    * الذي يستطيع العميل كتابته فيتحدّى بصمة المصدر الخاصة به. */
   const address = clientIpFromForwardedFor(request.headers.get("x-forwarded-for"));
@@ -44,21 +47,6 @@ function sourceHash(request: Request): string | null {
  * يستطيعه من يعبث به هو ملء قائمة طلبات — لا إفساد يوم عمل ولا حجز كرسي.
  */
 export async function POST(request: Request) {
-  /* (P2/S10) حدّ نافذة قصيرة موزّع فوق الحدّين اليوميّين القائمين (اللذين
-     لم يُمسّا): سيلٌ متزامن في دقائق لا ينتظر عدّاد اليوم ليوقفه. */
-  const burst = await consumeSecurityLimit({
-    scope: "book",
-    identifier: "public",
-    maximum: BOOK_RATE_LIMIT.maximum,
-    windowMinutes: BOOK_RATE_LIMIT.windowMinutes,
-    headers: request.headers,
-  });
-  if (!burst.allowed) {
-    return NextResponse.json(
-      { message: "طلبات كثيرة. أعد المحاولة بعد قليل." },
-      { status: 429, headers: { "Retry-After": String(Math.max(1, burst.retryAfterSeconds)) } },
-    );
-  }
   let body: unknown;
   try {
     /* (P2/S8) جسم محدود — بيانات حجز صغيرة بطبيعتها، وأي تضخيم إساءة. */
@@ -71,7 +59,7 @@ export async function POST(request: Request) {
   const source = (body ?? {}) as Record<string, unknown>;
 
   // حقل مخفي لا يراه المريض ولا يملؤه: الملأ يعني برنامجًا آليًا. يُقبل الطلب ظاهريًا
-  // ولا يُكتب — الرفض الصريح يُعلّم كاتب البرنامج كيف يتجاوزه.
+  // ولا يُكتب ولا يستهلك حصّة المرضى الحقيقيين في عدّاد المعدل.
   if (typeof source.website === "string" && source.website.trim()) {
     return NextResponse.json({ received: true });
   }
@@ -85,6 +73,24 @@ export async function POST(request: Request) {
   );
   if (!validation.ok) {
     return NextResponse.json({ message: validation.message }, { status: 400 });
+  }
+
+  const normalizedPhoneKey = validation.value.phone.replace(/\D/g, "").slice(-9) || validation.value.phone.trim();
+  /* (P2/S10-FIX) حدّ نافذة قصيرة موزّع لكل رقم مُطبَّع (+ سقف مصدر مرتفع لـCGNAT عند TRUST_PROXY=true)
+     بدل معرّف عام واحد ("public") كان يسمح لمهاجم واحد بتعطيل الحجز على العيادة كلها. */
+  const burst = await consumeSecurityLimit({
+    scope: "book",
+    identifier: normalizedPhoneKey,
+    maximum: Math.min(MAX_PER_PHONE_BURST_15M, BOOK_RATE_LIMIT.maximum),
+    sourceMaximum: BOOK_RATE_LIMIT.maximum,
+    windowMinutes: BOOK_RATE_LIMIT.windowMinutes,
+    headers: request.headers,
+  });
+  if (!burst.allowed) {
+    return NextResponse.json(
+      { message: "طلبات كثيرة. أعد المحاولة بعد قليل." },
+      { status: 429, headers: { "Retry-After": String(Math.max(1, burst.retryAfterSeconds)) } },
+    );
   }
 
   try {
