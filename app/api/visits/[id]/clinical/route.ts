@@ -7,7 +7,7 @@ import { addVisitAddendum, getClinicalVisit, getSettings, recordAudit, saveClini
 import { CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { requireSession } from "@/lib/session";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, PatientOutOfScopeError, resolveRestrictedDoctorScope } from "@/lib/patient-access";
 import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
@@ -44,6 +44,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // عزل الطبيب (§٣٩): زيارة مريضٍ ليس من مرضاه لا تُفتح — الفحص في الخادم.
     // والزيارة الحرّة غير المربوطة بمريضٍ تبقى مفتوحة: من يعالجها هو من يربطها.
     if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
+      return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
+    }
+    const getScope = await resolveRestrictedDoctorScope(session);
+    if (getScope.restricted && (getScope.blockAllPatients || (visit.patientId === null && visit.doctorId !== null && visit.doctorId !== getScope.doctorPartyId))) {
       return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
     }
     if (session.role === "assistant" && assistantOutsideToday(visit)) {
@@ -85,6 +89,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const visit = await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null });
     if (!visit) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
     if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
+      return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
+    }
+    const postScope = await resolveRestrictedDoctorScope(session);
+    if (postScope.restricted && (postScope.blockAllPatients || (visit.patientId === null && visit.doctorId !== null && visit.doctorId !== postScope.doctorPartyId))) {
       return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
     }
     if (assistant && assistantOutsideToday(visit)) {
@@ -136,6 +144,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         orthoSession: orthoSession.value,
         outsideContractDecision,
         signerRole: session.role,
+        actorSession: session,
       });
       const messages: Record<string, string> = {
         not_found: "الزيارة غير موجودة.",
@@ -230,6 +239,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       nextPlan: text(source.nextPlan, 500),
       doctorId: Number(source.doctorId) || null,
     };
+    if (postScope.restricted && clinicalNotes.doctorId !== null && clinicalNotes.doctorId !== postScope.doctorPartyId) {
+      return NextResponse.json({ message: "لا يمكن للطبيب المقيّد إسناد التوثيق السريري لطبيب آخر." }, { status: 403 });
+    }
 
     if (Array.isArray(source.procedures) && !assistant) {
       const procedures = source.procedures
@@ -291,6 +303,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     return NextResponse.json(await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null }));
   } catch (error) {
+    if (error instanceof PatientOutOfScopeError) {
+      return NextResponse.json({ message: error.message }, { status: 403 });
+    }
     if (error instanceof ClinicalDoctorIdentityConflict) {
       return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
     }

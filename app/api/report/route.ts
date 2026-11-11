@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { chairCount } from "@/lib/settings";
 import {
   CLINIC_TIME_ZONE,
+  doctorOwnedPatientIds,
   getSettings,
   listAppointmentsByDate,
   labCounts,
   listVisitsByDate,
   todayPlannedVisits,
 } from "@/lib/db";
+import { resolveRestrictedDoctorScope } from "@/lib/patient-access";
 import { dayReport, tomorrowLoad } from "@/lib/report";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -27,25 +29,46 @@ export async function GET(request: Request) {
   const next = addDays(date, 1);
 
   try {
+    const scope = await resolveRestrictedDoctorScope(session);
+    const scopeFilter = scope.restricted
+      ? { doctorPartyId: scope.doctorPartyId, blockAllPatients: scope.blockAllPatients }
+      : undefined;
     const settings = await getSettings();
     const chairs = chairCount(settings);
-    const [visits, appointments, nextDay, lab, plannedToday] = await Promise.all([
-      listVisitsByDate(date),
+    const [visits, rawAppointments, rawNextDay, lab, plannedToday] = await Promise.all([
+      listVisitsByDate(date, scopeFilter),
       listAppointmentsByDate(date),
       listAppointmentsByDate(next),
-      labCounts({ mode: "workflow", today }),
+      labCounts({ mode: "workflow", today }, scopeFilter),
       /*
        * لوحة اليوم (§٢٦): ما المخطَّط لهذا اليوم — زيارات مخطَّطة مجدولة، وبنود
        * «مخطَّط لليوم» من الخطط النشطة. مدخلٌ واحد يفتح منه الطبيب عمل يومه.
        * والطبيب المربوط يرى لوحته هو (§٣٩).
        */
-      todayPlannedVisits(
-        date,
-        session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
-          ? session.partyId
-          : null,
-      ),
+      scope.blockAllPatients
+        ? Promise.resolve([])
+        : todayPlannedVisits(
+            date,
+            scope.restricted
+              ? scope.doctorPartyId
+              : (session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
+                ? session.partyId
+                : null),
+          ),
     ]);
+    let appointments = rawAppointments;
+    let nextDay = rawNextDay;
+    if (scope.restricted) {
+      if (scope.blockAllPatients || !scope.doctorPartyId) {
+        appointments = [];
+        nextDay = [];
+      } else {
+        const candidateIds = Array.from(new Set([...rawAppointments, ...rawNextDay].map((a) => a.patientId)));
+        const owned = await doctorOwnedPatientIds(scope.doctorPartyId, candidateIds);
+        appointments = rawAppointments.filter((a) => a.doctorId === scope.doctorPartyId || owned.has(a.patientId));
+        nextDay = rawNextDay.filter((a) => a.doctorId === scope.doctorPartyId || owned.has(a.patientId));
+      }
+    }
 
     return NextResponse.json({
       date,

@@ -3,6 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { ActiveVisitExists, addVisit, listTodayVisits, recordAudit, startVisitFromPlannedVisit } from "@/lib/db";
+import { PatientOutOfScopeError, resolveRestrictedDoctorScope } from "@/lib/patient-access";
 import { listReceptionHandoffs } from "@/lib/reception-handoff-db";
 import { canReadReceptionHandoff, isHandoffDate } from "@/lib/reception-handoff";
 
@@ -32,7 +33,12 @@ export async function GET(request: Request) {
     } catch { return failed("تعذّر تحديث الزيارات الموقّعة. أعد المحاولة."); }
   }
   try {
-    return NextResponse.json(await listTodayVisits());
+    const scope = await resolveRestrictedDoctorScope(session);
+    return NextResponse.json(
+      scope.restricted
+        ? await listTodayVisits({ doctorPartyId: scope.doctorPartyId, blockAllPatients: scope.blockAllPatients })
+        : await listTodayVisits(),
+    );
   } catch {
     // تفاصيل الاستثناء لا تخرج في الاستجابة — قد تحمل رابط قاعدة البيانات.
     return failed("تعذّر تحميل قائمة اليوم. تحقق من الاتصال ثم أعد المحاولة.");
@@ -67,6 +73,7 @@ export async function POST(request: Request) {
         plannedVisitId: rawPlannedVisitId,
         actor: session.username,
         actorRole: session.role,
+        actorSession: session,
       });
       if (started && "appointmentConflict" in started) {
         return failed("تغيّر الموعد المرتبط أو أُغلق. أعد الحجز قبل بدء الجلسة.", 409);
@@ -86,7 +93,10 @@ export async function POST(request: Request) {
         actor: session.username, actorRole: session.role,
       });
       return NextResponse.json(started, { status: 201 });
-    } catch {
+    } catch (error) {
+      if (error instanceof PatientOutOfScopeError) {
+        return failed(error.message, 403);
+      }
       return failed("تعذّر بدء الزيارة من الجلسة المخطَّطة. أعد المحاولة.");
     }
   }
@@ -117,15 +127,19 @@ export async function POST(request: Request) {
       note: noteRaw ? noteRaw.slice(0, 300) : null,
       patientId,
       doctorId,
+      actorSession: session,
     });
     // (TD-06) فتح زيارة اليوم (دخول مباشر) — من فتحها ولأي مريض.
     await recordAudit({
       action: "visit.create", entity: "visit", entityId: visit.id, entityLabel: visit.patientName,
-      details: { المصدر: "دخول مباشر", المريض: patientId, الطبيب: doctorId },
+      details: { المصدر: "دخول مباشر", المريض: patientId, الطبيب: visit.doctorId ?? doctorId },
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json(visit, { status: 201 });
   } catch (error) {
+    if (error instanceof PatientOutOfScopeError) {
+      return failed(error.message, 403);
+    }
     if (error instanceof ActiveVisitExists) {
       return NextResponse.json({ message: error.message, visitId: error.visitId }, { status: 409 });
     }

@@ -20,7 +20,7 @@ import {
   validateOutgoingMessage,
 } from "@/lib/messages";
 import { requireSession } from "@/lib/session";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, resolveRestrictedDoctorScope } from "@/lib/patient-access";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES, MESSAGES_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 
@@ -43,18 +43,26 @@ export async function GET(request: Request) {
 
   try {
     if (url.searchParams.get("conversations") === "1") {
+      const scope = await resolveRestrictedDoctorScope(session);
+      const filter = scope.restricted
+        ? { doctorPartyId: scope.doctorPartyId, blockAllPatients: scope.blockAllPatients }
+        : undefined;
       const [list, unread, urgent] = await Promise.all([
-        staffConversationList(session.userId),
-        unreadMessageCount(session.userId),
-        urgentUnreadMessageCount(session.userId),
+        staffConversationList(session.userId, filter),
+        unreadMessageCount(session.userId, filter),
+        urgentUnreadMessageCount(session.userId, filter),
       ]);
       return NextResponse.json({ ...list, unread, urgent, meUserId: session.userId });
     }
 
     if (url.searchParams.get("unread") === "1") {
+      const scope = await resolveRestrictedDoctorScope(session);
+      const filter = scope.restricted
+        ? { doctorPartyId: scope.doctorPartyId, blockAllPatients: scope.blockAllPatients }
+        : undefined;
       const [unread, urgent] = await Promise.all([
-        unreadMessageCount(session.userId),
-        urgentUnreadMessageCount(session.userId),
+        unreadMessageCount(session.userId, filter),
+        urgentUnreadMessageCount(session.userId, filter),
       ]);
       return NextResponse.json({ unread, urgent });
     }

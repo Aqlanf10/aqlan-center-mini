@@ -5,6 +5,7 @@ import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabName
 import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME, labToothInputProblem, parseLabTeeth } from "@/lib/lab";
 import { LabOrderPricingConflict } from "@/lib/lab-order-pricing";
 import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
+import { canAccessPatient, PatientOutOfScopeError, resolveRestrictedDoctorScope } from "@/lib/patient-access";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { rateFromSettings } from "@/lib/settings";
@@ -44,18 +45,25 @@ export async function GET(request: Request) {
   }
 
   try {
+    const scope = await resolveRestrictedDoctorScope(session);
+    const scopeFilter = scope.restricted
+      ? { doctorPartyId: scope.doctorPartyId, blockAllPatients: scope.blockAllPatients }
+      : undefined;
     if (summaryOnly) {
-      return NextResponse.json(await labCounts());
+      return NextResponse.json(await labCounts(undefined, scopeFilter));
+    }
+    if (patientFilter !== null && scope.restricted && !(await canAccessPatient(session, patientFilter))) {
+      return NextResponse.json({ message: "هذا الملف خارج نطاق صلاحيتك السريرية." }, { status: 403 });
     }
     const [rawOrders, labs, labServices] = await Promise.all([
       patientOutOfRange
         ? Promise.resolve([])
-        : listLabOrders(patientFilter !== null ? { patientId: patientFilter } : undefined),
+        : listLabOrders(patientFilter !== null ? { patientId: patientFilter } : undefined, scopeFilter),
       listLabNames(),
       withServices ? listLabServices() : Promise.resolve([]),
     ]);
     const orders = hideCosts
-      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null }))
+      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null, baseAmountMinor: null }))
       : rawOrders;
     return NextResponse.json({ orders, labs, ...(withServices ? { labServices } : {}) });
   } catch {
@@ -75,6 +83,9 @@ export async function POST(request: Request) {
   const patientId = Number(source.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
+  }
+  if (!(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "هذا المريض خارج نطاق صلاحيتك السريرية." }, { status: 403 });
   }
 
   /*
@@ -231,6 +242,7 @@ export async function POST(request: Request) {
       expenseAccountCode,
       payableAccountCode,
       isPosted,
+      actorSession: session,
     });
     if (!created) {
       // الفهرس الفريد: سنّ واحد في الزيارة طلبٌ واحد — سؤال ثانٍ للسنّ نفسه ليس خطأ
@@ -256,6 +268,12 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
+    if (error instanceof PatientOutOfScopeError) {
+      return NextResponse.json({ message: error.message }, { status: 403 });
+    }
+    if (error instanceof Error && error.message === "VISIT_PATIENT_MISMATCH") {
+      return NextResponse.json({ message: "الزيارة المحدّدة لا تخص ملف هذا المريض." }, { status: 400 });
+    }
     if (error instanceof LabOrderPricingConflict) {
       return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });
     }

@@ -1,4 +1,6 @@
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
+import type { SessionPayload } from "./auth";
+import { canAccessPatient, PatientOutOfScopeError, resolveRestrictedDoctorScope } from "./patient-access";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
@@ -2462,13 +2464,40 @@ function toVisit(row: VisitRow): Visit {
  * زيارات اليوم — تستطلعها اللوحة وشاشة الصالة كل عشرين ثانية. شرط اليوم نطاقٌ على
  * arrived_at يقرؤه الفهرس (lib/clinic-day-sql.ts) لا تحويلٌ لكل صفٍّ في الجدول.
  */
+export interface DoctorPatientScopeFilter {
+  /** عند التفعيل، لا يرى الطبيب غير المربوط أي سجلات مرتبطة بمرضى (فشل مغلق). */
+  blockAllPatients?: boolean;
+  /** جهة الطبيب المقيّد — يقتصر العرض على مرضاه (والصفوف المشتركة غير المربوطة بملف في طابور الصالة). */
+  doctorPartyId?: number | null;
+}
+
 export const TODAY_VISITS_SQL = `SELECT * FROM visits
       WHERE ${onClinicDaySql("arrived_at", "$1", clinicTodaySql("$1"))}
       ORDER BY arrived_at ASC`;
 
-export async function listTodayVisits(): Promise<Visit[]> {
+export async function listTodayVisits(scope?: DoctorPatientScopeFilter): Promise<Visit[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<VisitRow>(TODAY_VISITS_SQL, [CLINIC_TIME_ZONE]);
+  if (!scope || (!scope.blockAllPatients && !scope.doctorPartyId)) {
+    const { rows } = await getPool().query<VisitRow>(TODAY_VISITS_SQL, [CLINIC_TIME_ZONE]);
+    return rows.map(toVisit);
+  }
+  if (scope.blockAllPatients || !scope.doctorPartyId) {
+    const { rows } = await getPool().query<VisitRow>(
+      `SELECT * FROM visits
+        WHERE ${onClinicDaySql("arrived_at", "$1", clinicTodaySql("$1"))}
+          AND patient_id IS NULL
+        ORDER BY arrived_at ASC`,
+      [CLINIC_TIME_ZONE],
+    );
+    return rows.map(toVisit);
+  }
+  const { rows } = await getPool().query<VisitRow>(
+    `SELECT * FROM visits
+      WHERE ${onClinicDaySql("arrived_at", "$1", clinicTodaySql("$1"))}
+        AND (patient_id IS NULL OR doctor_id = $2 OR ${doctorOwnedPatientSql("$2", "visits.patient_id")})
+      ORDER BY arrived_at ASC`,
+    [CLINIC_TIME_ZONE, scope.doctorPartyId],
+  );
   return rows.map(toVisit);
 }
 
@@ -2483,13 +2512,33 @@ export const CLINIC_TIME_ZONE = resolveClinicZone(process.env.CLINIC_TIME_ZONE);
  * بتوقيت الخادم كان سيُسقط زيارات المساء من تقرير اليوم ويضيفها إلى تقرير الغد،
  * فتظهر أيام «هادئة» ليست هادئة.
  */
-export async function listVisitsByDate(date: string): Promise<Visit[]> {
+export async function listVisitsByDate(date: string, scope?: DoctorPatientScopeFilter): Promise<Visit[]> {
   await ensureSchema();
+  if (!scope || (!scope.blockAllPatients && !scope.doctorPartyId)) {
+    const { rows } = await getPool().query<VisitRow>(
+      `SELECT * FROM visits
+        WHERE ${onClinicDaySql("arrived_at", "$1", "$2::date")}
+        ORDER BY arrived_at ASC`,
+      [CLINIC_TIME_ZONE, date],
+    );
+    return rows.map(toVisit);
+  }
+  if (scope.blockAllPatients || !scope.doctorPartyId) {
+    const { rows } = await getPool().query<VisitRow>(
+      `SELECT * FROM visits
+        WHERE ${onClinicDaySql("arrived_at", "$1", "$2::date")}
+          AND patient_id IS NULL
+        ORDER BY arrived_at ASC`,
+      [CLINIC_TIME_ZONE, date],
+    );
+    return rows.map(toVisit);
+  }
   const { rows } = await getPool().query<VisitRow>(
     `SELECT * FROM visits
       WHERE ${onClinicDaySql("arrived_at", "$1", "$2::date")}
+        AND (patient_id IS NULL OR doctor_id = $3 OR ${doctorOwnedPatientSql("$3", "visits.patient_id")})
       ORDER BY arrived_at ASC`,
-    [CLINIC_TIME_ZONE, date],
+    [CLINIC_TIME_ZONE, date, scope.doctorPartyId],
   );
   return rows.map(toVisit);
 }
@@ -2556,11 +2605,41 @@ export async function addVisit(input: {
   patientId?: number | null;
   /** جهة الطبيب المعالج للزيارة (لحساب العمولات والمتابعة السريرية). */
   doctorId?: number | null;
+  /** جلسة الموظف المنفّذ — لفحص نطاق الطبيب المقيّد قبل إنشاء شاهد الملكية داخل المعاملة. */
+  actorSession?: import("./auth").SessionPayload | null;
 }): Promise<Visit> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    let effectiveDoctorId = input.doctorId ?? null;
+    if (input.actorSession) {
+      const { PatientOutOfScopeError, resolveRestrictedDoctorScope } = await import("./patient-access");
+      const scope = await resolveRestrictedDoctorScope(input.actorSession, client);
+      if (scope.restricted) {
+        if (!scope.doctorPartyId) {
+          throw new PatientOutOfScopeError("حساب الطبيب غير مرتبط بجهة طبيب فاعلة.");
+        }
+        if (input.doctorId != null && input.doctorId !== scope.doctorPartyId) {
+          throw new PatientOutOfScopeError("لا يمكن للطبيب المقيّد فتح زيارة باسم طبيب آخر.");
+        }
+        effectiveDoctorId = scope.doctorPartyId;
+        if (input.patientId) {
+          const owns = await doctorOwnsPatient(scope.doctorPartyId, input.patientId, client);
+          if (!owns) {
+            throw new PatientOutOfScopeError("هذا المريض خارج نطاق صلاحيتك السريرية.");
+          }
+        } else if (input.patientPhone) {
+          const { rows: matched } = await client.query<{ id: number }>(
+            `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
+            [phoneLookupForms(input.patientPhone)],
+          );
+          if (matched[0] && !(await doctorOwnsPatient(scope.doctorPartyId, matched[0].id, client))) {
+            throw new PatientOutOfScopeError("رقم الهاتف يخص ملف مريض خارج نطاق صلاحيتك؛ يُفتح وصوله عبر الاستقبال.");
+          }
+        }
+      }
+    }
     /* (LIVE-4) مريضٌ بملفٍّ لا يُفتح له صفٌّ ثانٍ وهو في الطابور؛ المشي بلا ملفٍّ لا يُعرف
        صاحبه فلا يُحجب. */
     if (input.patientId) {
@@ -2571,7 +2650,7 @@ export async function addVisit(input: {
     const { rows } = await client.query<VisitRow>(
       `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id)
        VALUES ($1, $2, $3, $4::int, $5::int) RETURNING *`,
-      [input.patientName, input.patientPhone, input.note, input.patientId ?? null, input.doctorId ?? null],
+      [input.patientName, input.patientPhone, input.note, input.patientId ?? null, effectiveDoctorId],
     );
     await client.query("COMMIT");
     return toVisit(rows[0]);
@@ -2623,7 +2702,10 @@ export async function getVisitOwner(
  * التوقيع (resolveVisitPatient): الهاتف المطابق لملفٍّ قائم يُربط به، وإلا يُنشأ ملفٌّ جديد —
  * داخل معاملة تحت قفل الزيارة، فلا ينشأ ملفّان لنقرتين متزامنتين.
  */
-export async function openVisitPatientFile(visitId: number): Promise<
+export async function openVisitPatientFile(
+  visitId: number,
+  actorSession?: import("./auth").SessionPayload | null,
+): Promise<
   { ok: true; patientId: number; created: boolean } | { ok: false; reason: "not_found" | "signed" }
 > {
   await ensureSchema();
@@ -2638,11 +2720,17 @@ export async function openVisitPatientFile(visitId: number): Promise<
     const visit = rows[0];
     if (!visit) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
     if (visit.patient_id !== null) {
+      if (actorSession) {
+        const { PatientOutOfScopeError, canAccessPatient } = await import("./patient-access");
+        if (!(await canAccessPatient(actorSession, visit.patient_id, undefined, client))) {
+          throw new PatientOutOfScopeError();
+        }
+      }
       await client.query("COMMIT");
       return { ok: true, patientId: visit.patient_id, created: false };
     }
     if (visit.signed_at) { await client.query("ROLLBACK"); return { ok: false, reason: "signed" }; }
-    const { patientId, created } = await resolveVisitPatientDetailed(client, visit);
+    const { patientId, created } = await resolveVisitPatientDetailed(client, visit, undefined, undefined, actorSession);
     await client.query("COMMIT");
     return { ok: true, patientId, created };
   } catch (error) {
@@ -2653,7 +2741,11 @@ export async function openVisitPatientFile(visitId: number): Promise<
   }
 }
 
-export async function linkVisitToPatient(visitId: number, patientId: number): Promise<
+export async function linkVisitToPatient(
+  visitId: number,
+  patientId: number,
+  actorSession?: import("./auth").SessionPayload | null,
+): Promise<
   { ok: true; patientName: string } | { ok: false; message: string }
 > {
   await ensureSchema();
@@ -2673,6 +2765,16 @@ export async function linkVisitToPatient(visitId: number, patientId: number): Pr
       `SELECT full_name, phone FROM patients WHERE id = $1`, [patientId],
     );
     if (!patients[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الملف غير موجود." }; }
+
+    if (actorSession) {
+      const { PatientOutOfScopeError, canAccessPatient } = await import("./patient-access");
+      if (visits[0].patient_id !== null && !(await canAccessPatient(actorSession, visits[0].patient_id, undefined, client))) {
+        throw new PatientOutOfScopeError();
+      }
+      if (!(await canAccessPatient(actorSession, patientId, undefined, client))) {
+        throw new PatientOutOfScopeError();
+      }
+    }
 
     // A chart event is patient-owned clinical history. Do not leave it attached
     // to another patient's visit or silently transfer diagnoses during relinking.
@@ -2895,20 +2997,22 @@ export async function deleteVisit(
  * وتُستدعى **داخل معاملة الطرف المستدعي** فتسقط معه إن سقط.
  */
 async function resolveVisitPatient(
-  client: { query: (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+  client: DbClient,
   visit: { id: number; patient_name: string; patient_phone: string | null; patient_id: number | null },
   overridePhone?: string | null,
   lockedPatientId?: number | null,
+  actorSession?: SessionPayload | null,
 ): Promise<number> {
-  return (await resolveVisitPatientDetailed(client, visit, overridePhone, lockedPatientId)).patientId;
+  return (await resolveVisitPatientDetailed(client, visit, overridePhone, lockedPatientId, actorSession)).patientId;
 }
 
 /** كـresolveVisitPatient ومعه هل أنشأ **هذا الاستدعاء نفسه** الملف (فرع الإدراج) — لتدقيقٍ صادق. */
 async function resolveVisitPatientDetailed(
-  client: { query: (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+  client: DbClient,
   visit: { id: number; patient_name: string; patient_phone: string | null; patient_id: number | null },
   overridePhone?: string | null,
   lockedPatientId?: number | null,
+  actorSession?: SessionPayload | null,
 ): Promise<{ patientId: number; created: boolean }> {
   let created = false;
   const rawPhone = overridePhone ?? visit.patient_phone;
@@ -2917,12 +3021,31 @@ async function resolveVisitPatientDetailed(
   const phone = normalizePatientPhone(rawPhone);
 
   let patientId = visit.patient_id;
+  if (patientId !== null && actorSession) {
+    const allowed = await canAccessPatient(actorSession, patientId, undefined, client);
+    if (!allowed) {
+      throw new PatientOutOfScopeError();
+    }
+  }
   if (!patientId && phone) {
-    const { rows } = await client.query(
+    const { rows } = await client.query<{ id: number }>(
       `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
       [phoneLookupForms(rawPhone)],
     );
-    patientId = (rows[0]?.id as number) ?? null;
+    const matchedId = rows[0]?.id ?? null;
+    if (matchedId !== null && actorSession) {
+      const scope = await resolveRestrictedDoctorScope(actorSession, client);
+      if (scope.restricted) {
+        if (scope.blockAllPatients || !scope.doctorPartyId) {
+          throw new PatientOutOfScopeError();
+        }
+        const owns = await doctorOwnsPatient(scope.doctorPartyId, matchedId, client);
+        if (!owns) {
+          throw new PatientOutOfScopeError("رقم الهاتف يخص ملف مريض مسجّل خارج نطاق صلاحيتك؛ يُربط عبر الاستقبال.");
+        }
+      }
+    }
+    patientId = matchedId;
   }
   if (lockedPatientId !== undefined && patientId !== null && patientId !== lockedPatientId) {
     // A phone-only visit discovered an existing patient after the pre-visit lock phase.
@@ -2930,14 +3053,27 @@ async function resolveVisitPatientDetailed(
     throw new ClinicalPlanConflict("تغير ربط ملف المريض أثناء الحفظ. حدّث الزيارة وأعد المحاولة.");
   }
   if (!patientId) {
+    let primaryDoctorId: number | null = null;
+    if (actorSession) {
+      const scope = await resolveRestrictedDoctorScope(actorSession, client);
+      if (scope.restricted && (scope.blockAllPatients || !scope.doctorPartyId)) {
+        throw new PatientOutOfScopeError("حساب الطبيب غير مربوط بجهة طبيب نشطة.");
+      }
+      if (scope.doctorPartyId) {
+        primaryDoctorId = scope.doctorPartyId;
+      } else if (actorSession.role === "doctor") {
+        const actorUser = await findUserByUsername(actorSession.username, client);
+        primaryDoctorId = actorUser?.partyId ?? null;
+      }
+    }
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
-    const { rows } = await client.query(
-      `INSERT INTO patients (patient_number, full_name, phone)
-       VALUES (${PATIENT_NUMBER_SQL}, $1, $2)
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name, phone, primary_doctor_id)
+       VALUES (${PATIENT_NUMBER_SQL}, $1, $2, $3::int)
        RETURNING id`,
-      [visit.patient_name, phone],
+      [visit.patient_name, phone, primaryDoctorId],
     );
-    patientId = rows[0].id as number;
+    patientId = rows[0].id;
     created = true;
   } else if (phone) {
     // رقم وصل ولم يكن في السجل: يُملأ ولا يُستبدل رقمٌ قائم.
@@ -2962,6 +3098,7 @@ export async function createNextSession(
     durationMinutes: number;
     phone: string | null;
     note: string | null;
+    actorSession?: SessionPayload | null;
   },
   runOn?: DbClient,
 ): Promise<{ appointmentId: number; patientId: number; patientName: string; phone: string | null } | null> {
@@ -2983,20 +3120,36 @@ export async function createNextSession(
   }
   const client = runOn;
   const { rows: visits } = await client.query<{
-    id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
+    id: number; patient_name: string; patient_phone: string | null; patient_id: number | null; doctor_id: number | null;
   }>(
-    `SELECT id, patient_name, patient_phone, patient_id FROM visits WHERE id = $1 FOR UPDATE`,
+    `SELECT id, patient_name, patient_phone, patient_id, doctor_id FROM visits WHERE id = $1 FOR UPDATE`,
     [input.visitId],
   );
   if (!visits[0]) return null;
   const visit = visits[0];
+  let appointmentDoctorId: number | null = visit.doctor_id ?? null;
+  if (input.actorSession) {
+    const scope = await resolveRestrictedDoctorScope(input.actorSession, client);
+    if (scope.restricted) {
+      if (scope.blockAllPatients || !scope.doctorPartyId) {
+        throw new PatientOutOfScopeError();
+      }
+      if (visit.patient_id !== null && !(await doctorOwnsPatient(scope.doctorPartyId, visit.patient_id, client))) {
+        throw new PatientOutOfScopeError();
+      }
+      if (visit.patient_id === null && visit.doctor_id !== null && visit.doctor_id !== scope.doctorPartyId) {
+        throw new PatientOutOfScopeError();
+      }
+      appointmentDoctorId = scope.doctorPartyId;
+    }
+  }
   const phone = normalizePatientPhone(input.phone ?? visit.patient_phone);
-  const patientId = await resolveVisitPatient(client, visit, input.phone ?? visit.patient_phone);
+  const patientId = await resolveVisitPatient(client, visit, input.phone ?? visit.patient_phone, undefined, input.actorSession);
 
   const { rows: created } = await client.query<{ id: number }>(
-    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
-     VALUES ($1, $2, $3, $4, $5::text) RETURNING id`,
-    [patientId, input.date, input.time, input.durationMinutes, input.note],
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note, doctor_id)
+     VALUES ($1, $2, $3, $4, $5::text, $6::int) RETURNING id`,
+    [patientId, input.date, input.time, input.durationMinutes, input.note, appointmentDoctorId],
   );
 
   await client.query(
@@ -3306,6 +3459,25 @@ const DOCTOR_PATIENT_CONDITION = `EXISTS (
      AND r.workflow_state NOT IN ('declined', 'cancelled')
 )`;
 
+function doctorOwnedPatientSql(doctorParam: string, patientExpr: string): string {
+  return `EXISTS (
+    SELECT 1 FROM treatment_plans t
+     WHERE t.patient_id = ${patientExpr} AND t.primary_doctor_id = ${doctorParam} AND t.status = 'active'
+    UNION ALL
+    SELECT 1 FROM visits v_own WHERE v_own.patient_id = ${patientExpr} AND v_own.doctor_id = ${doctorParam}
+    UNION ALL
+    SELECT 1 FROM planned_visits pv_own WHERE pv_own.patient_id = ${patientExpr} AND pv_own.doctor_id = ${doctorParam}
+    UNION ALL
+    SELECT 1 FROM patients pd_own WHERE pd_own.id = ${patientExpr} AND pd_own.primary_doctor_id = ${doctorParam}
+    UNION ALL
+    SELECT 1 FROM appointments a_own WHERE a_own.patient_id = ${patientExpr} AND a_own.doctor_id = ${doctorParam}
+    UNION ALL
+    SELECT 1 FROM patient_referrals r_own
+     WHERE r_own.patient_id = ${patientExpr} AND r_own.kind = 'internal' AND r_own.to_party_id = ${doctorParam}
+       AND r_own.workflow_state NOT IN ('declined', 'cancelled')
+  )`;
+}
+
 /**
  * يبحث بالاسم أو الهاتف.
  *
@@ -3602,17 +3774,25 @@ const PATIENT_IMPORT_LOCK_KEY = "patient_import";
 export const PATIENT_CREATE_SHARED_LOCK_SQL = `SELECT pg_advisory_xact_lock_shared(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
 const PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
 
-export async function createPatient(input: PatientInput): Promise<Patient> {
+export async function createPatient(
+  input: PatientInput,
+  options?: { primaryDoctorId?: number | null },
+): Promise<Patient> {
   await ensureSchema();
+  const primaryDoctorId = typeof options?.primaryDoctorId === "number" && options.primaryDoctorId > 0
+    ? options.primaryDoctorId
+    : null;
   const { rows } = await withTransaction(getPool(), async (client) => {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     return client.query<PatientRow>(
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
-                           birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
+                           birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by,
+                           primary_doctor_id)
      VALUES (
        ${PATIENT_NUMBER_SQL},
        $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
-       $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
+       $9::date, $10::text, $11::text, $12::text, $13::text, $14::text,
+       $15::int)
      RETURNING ${PATIENT_COLUMNS}`,
     [
       input.fullName,
@@ -3629,6 +3809,7 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
       input.nationalId ?? null,
       input.referralSource ?? null,
       input.referredBy ?? null,
+      primaryDoctorId,
     ],
     );
   });
@@ -6019,14 +6200,18 @@ const LAB_SELECT = `
  * الصفوف على هاتف الاستقبال تُفتح مرة ثم تُهجَر. الأرشيف الكامل يظهر في ملف المريض.
  * الفلاتر (المختبرات V2) اختيارية — بلاها سلوك الشاشة اليومية كما كان.
  */
-export async function listLabOrders(filters?: {
-  status?: string;
-  patientId?: number;
-  doctorId?: number;
-  partyId?: number;
-  limit?: number;
-}): Promise<LabOrder[]> {
+export async function listLabOrders(
+  filters?: {
+    status?: string;
+    patientId?: number;
+    doctorId?: number;
+    partyId?: number;
+    limit?: number;
+  },
+  scope?: DoctorPatientScopeFilter,
+): Promise<LabOrder[]> {
   await ensureSchema();
+  if (scope?.blockAllPatients) return [];
   const conditions: string[] = [];
   const params: unknown[] = [];
   let idx = 1;
@@ -6050,18 +6235,23 @@ export async function listLabOrders(filters?: {
     params.push(filters.status);
   }
 
-  const hasFilters = conditions.length > 0;
-  const whereClause = hasFilters ? `WHERE ${conditions.join(" AND ")}` : "";
+  const hasUserFilters = conditions.length > 0;
   // النافذة اليومية (بلا فلاتر): المفتوح + ما رُكّب خلال شهر — أداة عمل لا أرشيف.
-  const openWindow = !hasFilters
-    ? `AND (l.status IN ('needed', 'sent', 'in_progress', 'received')
-            OR l.delivered_at > NOW() - INTERVAL '30 days')`
-    : "";
+  if (!hasUserFilters) {
+    conditions.push(`(l.status IN ('needed', 'sent', 'in_progress', 'received')
+            OR l.delivered_at > NOW() - INTERVAL '30 days')`);
+  }
+  if (typeof scope?.doctorPartyId === "number" && scope.doctorPartyId > 0) {
+    conditions.push(doctorOwnedPatientSql(`$${idx++}`, "l.patient_id"));
+    params.push(scope.doctorPartyId);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limitClause = `LIMIT ${filters?.limit ? Math.min(filters.limit, 500) : 300}`;
 
   const { rows } = await getPool().query<LabOrderRow>(
     `${LAB_SELECT}
-      ${whereClause} ${openWindow}
+      ${whereClause}
       ORDER BY l.due_date ASC, l.id DESC
       ${limitClause}`,
     params,
@@ -6590,6 +6780,7 @@ export async function createLabOrder(input: {
   expenseAccountCode?: string | null;
   payableAccountCode?: string | null;
   isPosted?: boolean;
+  actorSession?: SessionPayload | null;
 }): Promise<LabOrder | null> {
   const parsedShade = parseLabShadeSpecification(input.shadeSpecification ?? null, Object.keys(parseLabTeeth(input.toothNumbers)).map(Number));
   if (!parsedShade.ok) throw new Error(parsedShade.error);
@@ -6597,6 +6788,26 @@ export async function createLabOrder(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+
+    if (input.actorSession) {
+      const allowed = await canAccessPatient(input.actorSession, input.patientId, undefined, client);
+      if (!allowed) {
+        throw new PatientOutOfScopeError("هذا المريض خارج نطاق صلاحيتك لإنشاء أمر مختبر.");
+      }
+      const scope = await resolveRestrictedDoctorScope(input.actorSession, client);
+      if (scope.restricted && input.doctorId != null && input.doctorId !== scope.doctorPartyId) {
+        throw new PatientOutOfScopeError("لا يمكن للطبيب المقيّد إسناد أمر المختبر لطبيب آخر.");
+      }
+    }
+    if (input.visitId != null) {
+      const { rows: visitRows } = await client.query<{ patient_id: number | null }>(
+        `SELECT patient_id FROM visits WHERE id = $1 FOR SHARE`,
+        [input.visitId],
+      );
+      if (!visitRows[0] || visitRows[0].patient_id !== input.patientId) {
+        throw new Error("VISIT_PATIENT_MISMATCH");
+      }
+    }
 
     // الربط المالي: المختبر جهةٌ محاسبية — إن أُرسل الطلب باسم مختبرٍ بلا جهة،
     // نبحث عنها، فإن لم توجد وُلدت جهة جديدة بلا مخاطبة ولا حسابات مخصصة.
@@ -7181,6 +7392,7 @@ export async function setLabOrderStatus(
     qualityCheck?: "passed" | "rejected" | "pending";
     qualityNotes?: string | null;
     technicianName?: string | null;
+    actorSession?: SessionPayload | null;
   },
 ): Promise<LabOrder | null> {
   await ensureSchema();
@@ -7204,17 +7416,27 @@ export async function setLabOrderStatus(
     // قفل الصف أولًا: قراءة الحالة والمال معًا بلا سباق — ضغطتان متزامنتان
     // لن تمرّا كلتاهما من بوابة الحالة، والالتزام لا يُولد مرتين.
     const { rows: currentRows } = await client.query<{
-      status: string; party_id: number | null; cost_minor: string | null;
+      patient_id: number; status: string; party_id: number | null; cost_minor: string | null;
       cost_currency: string | null; base_amount_minor: string | null;
       payable_id: number | null; work_type: string; details: string | null;
       due_date: Date;
     }>(
-      `SELECT status, party_id, cost_minor, cost_currency, base_amount_minor, payable_id,
+      `SELECT patient_id, status, party_id, cost_minor, cost_currency, base_amount_minor, payable_id,
               work_type, details, due_date
          FROM lab_orders WHERE id = $1 FOR UPDATE`,
       [id],
     );
-    if (!currentRows[0] || !allowedFrom[status].includes(currentRows[0].status)) {
+    if (!currentRows[0]) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    if (context?.actorSession) {
+      const allowed = await canAccessPatient(context.actorSession, currentRows[0].patient_id, undefined, client);
+      if (!allowed) {
+        throw new PatientOutOfScopeError("أمر المختبر خارج نطاق صلاحيتك السريرية.");
+      }
+    }
+    if (!allowedFrom[status].includes(currentRows[0].status)) {
       await client.query("ROLLBACK");
       return null;
     }
@@ -7367,6 +7589,7 @@ export async function createLabOrderRemake(
     stumpShade?: string | null;
     actor: string;
     actorRole?: string | null;
+    actorSession?: SessionPayload | null;
   },
 ): Promise<LabOrder | null> {
   await ensureSchema();
@@ -7377,6 +7600,20 @@ export async function createLabOrderRemake(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const { rows: lockedOrig } = await client.query<{ patient_id: number }>(
+      `SELECT patient_id FROM lab_orders WHERE id = $1 FOR UPDATE`,
+      [originalId],
+    );
+    if (!lockedOrig[0]) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    if (input.actorSession) {
+      const allowed = await canAccessPatient(input.actorSession, lockedOrig[0].patient_id, undefined, client);
+      if (!allowed) {
+        throw new PatientOutOfScopeError("أمر المختبر خارج نطاق صلاحيتك السريرية.");
+      }
+    }
 
     // تحديث الطلب الأصلي لبيان حالة الإعادة
     await client.query(
@@ -7466,8 +7703,48 @@ export async function setLabOrderDueDate(
   id: number,
   dueDate: string,
   actor = "system",
+  actorSession?: SessionPayload | null,
 ): Promise<LabOrder | null> {
   await ensureSchema();
+  if (actorSession) {
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: locked } = await client.query<{ patient_id: number }>(
+        `SELECT patient_id FROM lab_orders WHERE id = $1 FOR UPDATE`,
+        [id],
+      );
+      if (!locked[0]) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const allowed = await canAccessPatient(actorSession, locked[0].patient_id, undefined, client);
+      if (!allowed) {
+        throw new PatientOutOfScopeError("أمر المختبر خارج نطاق صلاحيتك السريرية.");
+      }
+      const { rows } = await client.query<{ id: number }>(
+        `UPDATE lab_orders SET due_date = $2::date
+          WHERE id = $1 AND status IN ('sent', 'needed') RETURNING id`,
+        [id, dueDate],
+      );
+      if (!rows[0]) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      await addLabOrderTracking(
+        id, "due_date_change", null, null,
+        `تأجيل موعد التسليم إلى ${dueDate}`, actor, actorSession.role, client,
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+    const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
+    return full[0] ? toLabOrder(full[0]) : null;
+  }
   const { rows } = await getPool().query<{ id: number }>(
     `UPDATE lab_orders SET due_date = $2::date
       WHERE id = $1 AND status IN ('sent', 'needed') RETURNING id`,
@@ -7580,14 +7857,22 @@ export async function deleteLabOrder(
  * وثلاثون صفًّا في الجدول، ويصير حِملًا بلا سبب بعد سنة — والعدّ هنا لا يحتاج صفًّا
  * واحدًا في الذاكرة. «اليوم» بتوقيت العيادة لا بـUTC، وإلا حُسب عمل يستحق غدًا متأخرًا.
  */
-export async function labCounts(options?: { mode: "workflow"; today: string }): Promise<{
+export async function labCounts(
+  options?: { mode: "workflow"; today: string },
+  scope?: DoctorPatientScopeFilter,
+): Promise<{
   outstanding: number; late: number; dueToday: number; waitingFitting: number;
 }> {
   await ensureSchema();
+  if (scope?.blockAllPatients) {
+    return { outstanding: 0, late: 0, dueToday: 0, waitingFitting: 0 };
+  }
   // Reports use the full workflow and one captured clinic day; badges keep their sent-only SQL clock.
   const workflow = options?.mode === "workflow";
   const outstanding = workflow ? "status IN ('sent', 'in_progress', 'remake')" : "status = 'sent'";
   const today = workflow ? "$1::date" : "(NOW() AT TIME ZONE $1)::date";
+  const scoped = typeof scope?.doctorPartyId === "number" && scope.doctorPartyId > 0;
+  const whereClause = scoped ? `WHERE ${doctorOwnedPatientSql("$2", "lab_orders.patient_id")}` : "";
   const { rows } = await getPool().query<{
     outstanding: string; late: string; due_today: string; waiting_fitting: string;
   }>(
@@ -7596,8 +7881,11 @@ export async function labCounts(options?: { mode: "workflow"; today: string }): 
        count(*) FILTER (WHERE ${outstanding} AND due_date < ${today})::int AS late,
        count(*) FILTER (WHERE ${outstanding} AND due_date = ${today})::int AS due_today,
        count(*) FILTER (WHERE status = 'received')::int AS waiting_fitting
-     FROM lab_orders`,
-    [workflow ? options.today : CLINIC_TIME_ZONE],
+     FROM lab_orders
+     ${whereClause}`,
+    scoped
+      ? [workflow ? options.today : CLINIC_TIME_ZONE, scope.doctorPartyId]
+      : [workflow ? options.today : CLINIC_TIME_ZONE],
   );
   return {
     outstanding: Number(rows[0].outstanding),
@@ -7627,8 +7915,12 @@ import { FOLLOW_UP_LOOKBACK_DAYS, daysBetween, type OpenPastAppointment, type Re
  * موعد فائت بلا مكالمة هو المريض الذي يفهم أن العيادة لم تلاحظ غيابه. والمدى محدود
  * بشهر: الاتصال بمن تغيّب قبل ثلاثة أشهر ليس متابعة غياب — إنه استدعاء، وله قائمته.
  */
-export async function listMissedAppointments(): Promise<RecallRow[]> {
+export async function listMissedAppointments(scope?: DoctorPatientScopeFilter): Promise<RecallRow[]> {
   await ensureSchema();
+  if (scope?.blockAllPatients) return [];
+  const scoped = typeof scope?.doctorPartyId === "number" && scope.doctorPartyId > 0;
+  const doctorFilter = scoped ? `AND ${doctorOwnedPatientSql("$3", "p.id")}` : "";
+  const lookbackDays = await followUpLookbackDays();
   const { rows } = await getPool().query<{
     id: number; patient_id: number; full_name: string; phone: string | null;
     scheduled_date: Date; note: string | null;
@@ -7638,9 +7930,10 @@ export async function listMissedAppointments(): Promise<RecallRow[]> {
       WHERE a.status = 'no_show'
         AND a.follow_up_at IS NULL
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
+        ${doctorFilter}
       ORDER BY a.scheduled_date ASC
       LIMIT 100`,
-    [CLINIC_TIME_ZONE, await followUpLookbackDays()],
+    scoped ? [CLINIC_TIME_ZONE, lookbackDays, scope.doctorPartyId] : [CLINIC_TIME_ZONE, lookbackDays],
   );
   return rows.map((row) => ({
     kind: "missed" as const,
@@ -7677,8 +7970,12 @@ async function followUpLookbackDays(): Promise<number> {
  * قائمته. واليوم بتوقيت العيادة لا بتوقيت الخادم — خادمٌ على UTC يعدّ موعدَ أمسِ
  * العيادة «اليوم» ثلاثَ ساعاتٍ بعد منتصف الليل.
  */
-export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]> {
+export async function listOpenPastAppointments(scope?: DoctorPatientScopeFilter): Promise<OpenPastAppointment[]> {
   await ensureSchema();
+  if (scope?.blockAllPatients) return [];
+  const scoped = typeof scope?.doctorPartyId === "number" && scope.doctorPartyId > 0;
+  const doctorFilter = scoped ? `AND ${doctorOwnedPatientSql("$3", "p.id")}` : "";
+  const lookbackDays = await followUpLookbackDays();
   const { rows } = await getPool().query<{
     id: number; patient_id: number; full_name: string; phone: string | null;
     scheduled_date: Date; scheduled_time: string; note: string | null;
@@ -7696,9 +7993,10 @@ export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]>
            هذا اليومَ الثلاثين وذاك استثناه، لصار موعدٌ عمره ثلاثون يومًا يظهر
            هنا، وحين يُقال «لم يحضر» يخرج من هنا ولا يدخل هناك — فيختفي المريض. */
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
+        ${doctorFilter}
       ORDER BY a.scheduled_date ASC, a.scheduled_time ASC
       LIMIT 200`,
-    [CLINIC_TIME_ZONE, await followUpLookbackDays()],
+    scoped ? [CLINIC_TIME_ZONE, lookbackDays, scope.doctorPartyId] : [CLINIC_TIME_ZONE, lookbackDays],
   );
   return rows.map((row) => {
     const date = row.scheduled_date;
@@ -7766,9 +8064,12 @@ export async function closeBookedAppointment(
  *
  * ومن استُدعي في آخر ثلاثين يومًا يخرج مؤقتًا: مكالمتان في أسبوع إلحاحٌ لا اهتمام.
  */
-export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
+export async function listLapsedPatients(weeks: number, scope?: DoctorPatientScopeFilter): Promise<RecallRow[]> {
   await ensureSchema();
+  if (scope?.blockAllPatients) return [];
   const days = Math.max(1, Math.round(weeks * 7));
+  const scoped = typeof scope?.doctorPartyId === "number" && scope.doctorPartyId > 0;
+  const doctorFilter = scoped ? `AND ${doctorOwnedPatientSql("$2", "p.id")}` : "";
   const { rows } = await getPool().query<{
     id: number; full_name: string; phone: string | null; last_activity: Date; note: string | null;
   }>(
@@ -7786,6 +8087,7 @@ export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
                    AND f.scheduled_date >= CURRENT_DATE
                    AND f.status IN ('booked', 'arrived')
               )
+              ${doctorFilter}
      )
      SELECT id, full_name, phone, note, last_activity
        FROM activity
@@ -7793,7 +8095,7 @@ export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
         AND (recalled_at IS NULL OR recalled_at < NOW() - INTERVAL '30 days')
       ORDER BY last_activity ASC
       LIMIT 100`,
-    [days],
+    scoped ? [days, scope.doctorPartyId] : [days],
   );
   return rows.map((row) => ({
     kind: "lapsed" as const,
@@ -18370,6 +18672,7 @@ export async function signClinicalVisit(input: {
   signerRole?: string | null;
   /** (P1-C) قرار الشدّة خارج العقد عند التوقيع: «بلا رسوم» بسببٍ مكتوب. والفوترة تكون بسطر خدمة تقويم. */
   outsideContractDecision?: { decision: "no_charge"; reason: string } | null;
+  actorSession?: SessionPayload | null;
 }): Promise<{
   visit: ClinicalVisit | null;
   invoiceId: number | null;
@@ -18472,7 +18775,18 @@ export async function signClinicalVisit(input: {
      * سقط الملف معه، فلا يبقى مريضٌ بلا زيارة.
      */
     if (locked[0].patient_id !== null && locked[0].patient_id !== lockedPatientId) throw new ClinicalPlanConflict();
-    const patientId = await resolveVisitPatient(client, locked[0], undefined, lockedPatientId);
+    if (input.actorSession) {
+      const scope = await resolveRestrictedDoctorScope(input.actorSession, client);
+      if (scope.restricted) {
+        if (scope.blockAllPatients || !scope.doctorPartyId) {
+          throw new PatientOutOfScopeError();
+        }
+        if (locked[0].patient_id === null && locked[0].doctor_id !== null && locked[0].doctor_id !== scope.doctorPartyId) {
+          throw new PatientOutOfScopeError();
+        }
+      }
+    }
+    const patientId = await resolveVisitPatient(client, locked[0], undefined, lockedPatientId, input.actorSession);
     if (lockedPatientId !== null && patientId !== lockedPatientId) throw new ClinicalPlanConflict();
     await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [patientId]);
     await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [patientId]);
@@ -21675,6 +21989,7 @@ export async function startVisitFromPlannedVisit(input: {
   plannedVisitId: number;
   actor: string;
   actorRole?: string;
+  actorSession?: SessionPayload | null;
 }): Promise<Visit | null | { alreadyActive: true; visitId: number } | { appointmentConflict: true }> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -21698,6 +22013,24 @@ export async function startVisitFromPlannedVisit(input: {
     );
     const planned = plannedRows[0];
     if (!planned) { await client.query("ROLLBACK"); return null; }
+
+    let visitDoctorId: number | null = planned.doctor_id;
+    if (input.actorSession) {
+      const allowed = await canAccessPatient(input.actorSession, planned.patient_id, undefined, client);
+      if (!allowed) {
+        throw new PatientOutOfScopeError("هذه الجلسة المخطّطة تخص مريضًا خارج نطاق صلاحيتك السريرية.");
+      }
+      const scope = await resolveRestrictedDoctorScope(input.actorSession, client);
+      if (scope.restricted) {
+        if (scope.blockAllPatients || !scope.doctorPartyId) {
+          throw new PatientOutOfScopeError();
+        }
+        if (planned.doctor_id !== null && planned.doctor_id !== scope.doctorPartyId) {
+          throw new PatientOutOfScopeError("هذه الجلسة المخطّطة مسندة لطبيب آخر.");
+        }
+        visitDoctorId = scope.doctorPartyId;
+      }
+    }
 
     // Recheck without taking new appointment locks: a concurrent scheduling/retarget
     // operation may have committed while we waited for the plan. Retry via the API.
@@ -21750,7 +22083,7 @@ export async function startVisitFromPlannedVisit(input: {
       `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id, planned_visit_id, appointment_id)
        VALUES ($1, $2, $3, $4, $5::int, $6, $7) RETURNING *`,
       [planned.full_name, planned.phone, `مخطَّط: ${planned.title}`,
-       planned.patient_id, planned.doctor_id, input.plannedVisitId, appointment?.id ?? null],
+       planned.patient_id, visitDoctorId, input.plannedVisitId, appointment?.id ?? null],
     );
 
     await client.query(
@@ -26002,13 +26335,20 @@ export interface BroadcastSummary {
  * غير المقروء يحسب من سطور القراءة لا من عمود على الرسالة: قراءةُ صندوق
  * المرضى شخصية لكل عضو، وقراءةُ المحادثة المباشرة كذلك.
  */
-export async function staffConversationList(userId: number): Promise<{
+export async function staffConversationList(
+  userId: number,
+  scope?: DoctorPatientScopeFilter,
+): Promise<{
   staff: StaffConversationItem[];
   patients: PatientConversationItem[];
   broadcast: BroadcastSummary;
 }> {
   await ensureSchema();
   const pool = getPool();
+  const blockPatients = scope?.blockAllPatients === true;
+  const scopedDoctorId = !blockPatients && typeof scope?.doctorPartyId === "number" && scope.doctorPartyId > 0
+    ? scope.doctorPartyId
+    : null;
 
   const [usersRes, dmLastRes, dmUnreadRes, patientLastRes, patientUnreadRes, patientUrgentRes, broadcastRes, broadcastUnreadRes] = await Promise.all([
     pool.query<{ id: number; username: string; display_name: string; role: string }>(
@@ -26042,41 +26382,56 @@ export async function staffConversationList(userId: number): Promise<{
        GROUP BY m.sender_user_id`,
       [userId],
     ),
-    pool.query<{
-      patient_id: number; patient_name: string; patient_number: string; phone: string | null;
-      id: number; kind: "text" | "voice" | "file"; body: string | null;
-      voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
-      deleted_at: Date | null; is_urgent: boolean;
-    }>(
-      `SELECT DISTINCT ON (patient_id) patient_id, patient_name, patient_number, phone,
-         id, kind, body, voice_ms, file_name, created_at, sender_type, deleted_at, is_urgent
-       FROM (
-         SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at, m.sender_type,
-           m.deleted_at, m.is_urgent,
-           p.id AS patient_id, p.full_name AS patient_name, p.patient_number AS patient_number, p.phone AS phone
-         FROM messages m
-         JOIN patients p ON (m.sender_type = 'patient' AND m.sender_patient_id = p.id)
-                        OR (m.recipient_type = 'patient' AND m.recipient_patient_id = p.id)
-       ) thread
-       ORDER BY patient_id, id DESC`,
-    ),
-    pool.query<{ patient_id: number; unread: number }>(
-      `SELECT m.sender_patient_id AS patient_id, count(*)::int AS unread
-       FROM messages m
-       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient' AND m.deleted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
-       GROUP BY m.sender_patient_id`,
-      [userId],
-    ),
-    pool.query<{ patient_id: number; urgent: number }>(
-      `SELECT m.sender_patient_id AS patient_id, count(*)::int AS urgent
-       FROM messages m
-       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
-         AND m.is_urgent AND m.deleted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
-       GROUP BY m.sender_patient_id`,
-      [userId],
-    ),
+    blockPatients
+      ? Promise.resolve({ rows: [] as {
+          patient_id: number; patient_name: string; patient_number: string; phone: string | null;
+          id: number; kind: "text" | "voice" | "file"; body: string | null;
+          voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
+          deleted_at: Date | null; is_urgent: boolean;
+        }[] })
+      : pool.query<{
+          patient_id: number; patient_name: string; patient_number: string; phone: string | null;
+          id: number; kind: "text" | "voice" | "file"; body: string | null;
+          voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
+          deleted_at: Date | null; is_urgent: boolean;
+        }>(
+          `SELECT DISTINCT ON (patient_id) patient_id, patient_name, patient_number, phone,
+             id, kind, body, voice_ms, file_name, created_at, sender_type, deleted_at, is_urgent
+           FROM (
+             SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at, m.sender_type,
+               m.deleted_at, m.is_urgent,
+               p.id AS patient_id, p.full_name AS patient_name, p.patient_number AS patient_number, p.phone AS phone
+             FROM messages m
+             JOIN patients p ON (m.sender_type = 'patient' AND m.sender_patient_id = p.id)
+                            OR (m.recipient_type = 'patient' AND m.recipient_patient_id = p.id)
+             ${scopedDoctorId !== null ? `WHERE ${doctorOwnedPatientSql("$1", "p.id")}` : ""}
+           ) thread
+           ORDER BY patient_id, id DESC`,
+          scopedDoctorId !== null ? [scopedDoctorId] : [],
+        ),
+    blockPatients
+      ? Promise.resolve({ rows: [] as { patient_id: number; unread: number }[] })
+      : pool.query<{ patient_id: number; unread: number }>(
+          `SELECT m.sender_patient_id AS patient_id, count(*)::int AS unread
+           FROM messages m
+           WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient' AND m.deleted_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+             ${scopedDoctorId !== null ? `AND ${doctorOwnedPatientSql("$2", "m.sender_patient_id")}` : ""}
+           GROUP BY m.sender_patient_id`,
+          scopedDoctorId !== null ? [userId, scopedDoctorId] : [userId],
+        ),
+    blockPatients
+      ? Promise.resolve({ rows: [] as { patient_id: number; urgent: number }[] })
+      : pool.query<{ patient_id: number; urgent: number }>(
+          `SELECT m.sender_patient_id AS patient_id, count(*)::int AS urgent
+           FROM messages m
+           WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
+             AND m.is_urgent AND m.deleted_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+             ${scopedDoctorId !== null ? `AND ${doctorOwnedPatientSql("$2", "m.sender_patient_id")}` : ""}
+           GROUP BY m.sender_patient_id`,
+          scopedDoctorId !== null ? [userId, scopedDoctorId] : [userId],
+        ),
     pool.query<{
       id: number; kind: "text" | "voice" | "file"; body: string | null;
       voice_ms: number | null; file_name: string | null; created_at: Date;
@@ -26167,19 +26522,31 @@ export async function staffConversationList(userId: number): Promise<{
 }
 
 /** إجمالي غير المقروء عند مستخدم طاقم — لشارة القشرة. المحذوف لا يُعدّ. */
-export async function unreadMessageCount(userId: number): Promise<number> {
+export async function unreadMessageCount(
+  userId: number,
+  scope?: DoctorPatientScopeFilter,
+): Promise<number> {
   await ensureSchema();
+  const blockPatients = scope?.blockAllPatients === true;
+  const scopedDoctorId = !blockPatients && typeof scope?.doctorPartyId === "number" && scope.doctorPartyId > 0
+    ? scope.doctorPartyId
+    : null;
+  const staffAllCondition = blockPatients
+    ? `(m.recipient_type = 'staff_all' AND m.sender_type = 'user')`
+    : scopedDoctorId !== null
+      ? `(m.recipient_type = 'staff_all' AND (m.sender_type = 'user' OR (m.sender_type = 'patient' AND ${doctorOwnedPatientSql("$2", "m.sender_patient_id")})))`
+      : `m.recipient_type = 'staff_all'`;
   const { rows } = await getPool().query<{ c: number }>(
     `SELECT count(*)::int AS c FROM messages m
      WHERE (
              (m.recipient_type = 'user' AND m.recipient_user_id = $1 AND m.sender_type = 'user')
-          OR m.recipient_type = 'staff_all'
+          OR ${staffAllCondition}
            )
        AND m.deleted_at IS NULL
        AND NOT EXISTS (
          SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1
        )`,
-    [userId],
+    scopedDoctorId !== null ? [userId, scopedDoctorId] : [userId],
   );
   return Number(rows[0]?.c ?? 0);
 }
@@ -26190,16 +26557,24 @@ export async function unreadMessageCount(userId: number): Promise<number> {
  * العدّ شخصي كعدّ غير المقروء: ما فتحه زميلي مرّت عليه عين الطاقم، وتبقى
  * عاجلةً عندي حتى أفتحها أنا. والبانر يظهر ما دام العدد فوق الصفر.
  */
-export async function urgentUnreadMessageCount(userId: number): Promise<number> {
+export async function urgentUnreadMessageCount(
+  userId: number,
+  scope?: DoctorPatientScopeFilter,
+): Promise<number> {
   await ensureSchema();
+  if (scope?.blockAllPatients) return 0;
+  const scopedDoctorId = typeof scope?.doctorPartyId === "number" && scope.doctorPartyId > 0
+    ? scope.doctorPartyId
+    : null;
   const { rows } = await getPool().query<{ c: number }>(
     `SELECT count(*)::int AS c FROM messages m
      WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
        AND m.is_urgent AND m.deleted_at IS NULL
        AND NOT EXISTS (
          SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1
-       )`,
-    [userId],
+       )
+       ${scopedDoctorId !== null ? `AND ${doctorOwnedPatientSql("$2", "m.sender_patient_id")}` : ""}`,
+    scopedDoctorId !== null ? [userId, scopedDoctorId] : [userId],
   );
   return Number(rows[0]?.c ?? 0);
 }
