@@ -184,8 +184,27 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
       {data.sources.truncated && <p>قائمة المصادر محدودة؛ غياب مصدر من القائمة لا يعني أنه غير موجود.</p>}
       {data.revision?.schemaVersion === 1 && <p role="status">نسخة تاريخية بالإصدار الأول محفوظة للقراءة. الترقية تحتاج نقلًا صريحًا للقيم ومصادرها؛ لا تحويل تلقائي.</p>}
     </>}
+    {lifetime?.uncertain && <div role="alert"><p>الحفظ السابق غير مؤكد. التحرير والمغادرة متوقفان حتى تسوية نفس الطلب.</p>
+      <button type="button" className={control} disabled={!data || lifetime.busy || !draft} onClick={() => void save(true)}>التحقق بإعادة نفس طلب الحفظ</button></div>}
     {draft && <div data-testid="assessment-v2-draft" className="space-y-3">
       {stale && <p role="alert">تغير رأس السجل. بقيت المسودة مرتبطة بسابقتها؛ لم تُنقل إلى نسخة جديدة تلقائيًا.</p>}
+      <section aria-label="حفظ مسودة التقييم" className="space-y-3 rounded-xl border border-navy-200 bg-navy-50 p-3">
+        <p role="status" className="text-sm font-bold text-navy-900">{lifetime?.busy ? "جارٍ حفظ المراجعة…" : lifetime?.uncertain ? "نتيجة الحفظ تحتاج التحقق" : lifetime?.dirty ? "تعديلات غير محفوظة" : "مسودة مفتوحة؛ لم تُحفظ مراجعة جديدة"}</p>
+        <p className="text-xs text-slate-600">المقابلة والفحص والقياسات أجزاء من مسودة تقييم واحدة. يحفظ هذا الزر محتواها كله، بما فيه الأقسام غير المعروضة حاليًا.</p>
+        {!!saveFeedback.length && <div role="alert" data-testid="assessment-save-feedback" className="space-y-1 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <p className="font-bold">قبل الحفظ، أكمل الآتي:</p>
+          <ul className="list-inside list-disc space-y-1">{saveFeedback.map((text, index) => <li key={index}>{text}</li>)}</ul>
+          <p className="text-xs">مدخلاتك باقية في المسودة. الحقول التي لم تبدأ توثيقها يمكن أن تبقى غير مسجلة.</p>
+        </div>}
+        <label className="block">سبب إنشاء هذه المراجعة <span className="text-xs text-slate-500">(مطلوب)</span><input aria-label="سبب إنشاء هذه المراجعة" aria-required="true" className={`${control} w-full`} maxLength={500} disabled={!editable} value={draft.reason}
+          onChange={event => change({ ...draft, reason: event.target.value })} /></label>
+        <div className="flex flex-wrap gap-2"><button type="button" className="min-h-11 min-w-11 rounded-lg border border-navy-800 bg-navy-800 px-3 py-2 text-sm font-bold text-white disabled:opacity-40" disabled={!editable} onClick={() => void save()}>حفظ مراجعة تقييم جديدة</button>
+          <button type="button" className={control} disabled={!lifetime?.active() || lifetime.busy || lifetime.uncertain} onClick={() => {
+            if (!currentDraft() || !lifetime?.active() || latest.current?.busy || latest.current?.uncertain) return;
+            if (lifetime.dirty && !window.confirm("تجاهل المسودة غير المحفوظة؟")) return;
+            if (currentDraft() && lifetime.active() && !latest.current?.busy && !latest.current?.uncertain) { lifetime.settle("document", ""); setMessage(null); setShowSaveFeedback(false); }
+          }}>تجاهل المسودة صراحة</button></div>
+      </section>
       <div hidden={sectionView === "measurements" || sectionView === "radiographs"}>
       <OrthoAssessmentFindingsV2 draft={draft.measurements} sources={data?.sources.items ?? []}
         focusGroup={sectionView === "interview" ? "history" : sectionView === "extraoral" ? "facial" : sectionView === "intraoral" ? "intraoral" : undefined}
@@ -202,21 +221,6 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
           owner={{ renderEditable: editable, active: currentDraft, editable: () => currentDraft() && editable && !!latest.current?.editable() }}
           onChange={measurements => change({ ...draft, measurements })} />
       </details>}
-      {!!saveFeedback.length && <div role="alert" data-testid="assessment-save-feedback" className="space-y-1 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-        <p className="font-bold">قبل الحفظ، أكمل الآتي:</p>
-        <ul className="list-inside list-disc space-y-1">{saveFeedback.map((text, index) => <li key={index}>{text}</li>)}</ul>
-        <p className="text-xs">مدخلاتك باقية في المسودة. الحقول التي لم تبدأ توثيقها يمكن أن تبقى غير مسجلة.</p>
-      </div>}
-      <label className="block">سبب إنشاء هذه المراجعة <span className="text-xs text-slate-500">(مطلوب)</span><input aria-label="سبب إنشاء هذه المراجعة" aria-required="true" className={`${control} w-full`} maxLength={500} disabled={!editable} value={draft.reason}
-        onChange={event => change({ ...draft, reason: event.target.value })} /></label>
-      <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={!editable} onClick={() => void save()}>حفظ مراجعة تقييم جديدة</button>
-        <button type="button" className={control} disabled={!lifetime?.active() || lifetime.busy || lifetime.uncertain} onClick={() => {
-          if (!currentDraft() || !lifetime?.active() || latest.current?.busy || latest.current?.uncertain) return;
-          if (lifetime.dirty && !window.confirm("تجاهل المسودة غير المحفوظة؟")) return;
-          if (currentDraft() && lifetime.active() && !latest.current?.busy && !latest.current?.uncertain) { lifetime.settle("document", ""); setMessage(null); setShowSaveFeedback(false); }
-        }}>تجاهل المسودة صراحة</button></div>
     </div>}
-    {lifetime?.uncertain && <div role="alert"><p>الحفظ السابق غير مؤكد. التحرير والمغادرة متوقفان حتى تسوية نفس الطلب.</p>
-      <button type="button" className={control} disabled={!data || lifetime.busy || !draft} onClick={() => void save(true)}>التحقق بإعادة نفس طلب الحفظ</button></div>}
   </section>;
 }
