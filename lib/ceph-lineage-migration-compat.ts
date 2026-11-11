@@ -42,7 +42,7 @@ export async function cephLineageMigrationSql(client: DbClient, file: MigrationF
       AND (SELECT attnum FROM pg_attribute WHERE attrelid=c.conrelid AND attname='corrects_analysis_id')=ANY(c.conkey)
     ORDER BY c.conname`);
   const expected = [
-    ['ceph_analyses_corrects_older_ck','CHECK (((corrects_analysis_id IS NULL) OR (corrects_analysis_id < id)))'],
+    ['ceph_analyses_corrects_older_chk','CHECK (((corrects_analysis_id IS NULL) OR (corrects_analysis_id < id)))'],
     ['ceph_analyses_corrects_same_patient_fk','FOREIGN KEY (patient_id, corrects_analysis_id) REFERENCES ceph_analyses(patient_id, id)'],
   ];
   if (constraints.length !== expected.length || constraints.some((constraint,index) =>

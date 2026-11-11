@@ -15,7 +15,7 @@ async function base(pool = fixture.source) {
 }
 const legacy = `ALTER TABLE ceph_analyses ADD COLUMN corrects_analysis_id BIGINT;
  CREATE UNIQUE INDEX ceph_analyses_patient_id_key ON ceph_analyses(patient_id,id);
- ALTER TABLE ceph_analyses ADD CONSTRAINT ceph_analyses_corrects_older_ck CHECK(corrects_analysis_id IS NULL OR corrects_analysis_id<id),
+ ALTER TABLE ceph_analyses ADD CONSTRAINT ceph_analyses_corrects_older_chk CHECK(corrects_analysis_id IS NULL OR corrects_analysis_id<id),
  ADD CONSTRAINT ceph_analyses_corrects_same_patient_fk FOREIGN KEY(patient_id,corrects_analysis_id) REFERENCES ceph_analyses(patient_id,id);`;
 async function snapshot(pool = fixture.source) {
   return (await pool.query(`SELECT to_jsonb(c)::text AS row FROM ceph_analyses c ORDER BY id`)).rows;
@@ -46,13 +46,14 @@ it('keeps immutable bytes; fresh and legacy upgrades add the same 0124 objects a
   expect((await migrate(fixture.source,{apply:true,files:files.filter(file=>file.version<='0124')})).appliedVersions).toEqual([]);
   expect(await registry()).toEqual(registered);expect(await snapshot()).toEqual(after);
 });
-it.each(['type','default','not_null','missing_check','unvalidated','source_residue','linked','collision'])('fails closed and rolls back incompatible legacy %s',async kind => {
+it.each(['type','default','not_null','missing_check','unvalidated','source_residue','linked','collision','wrong_check_name'])('fails closed and rolls back incompatible legacy %s',async kind => {
   await base();await fixture.source.query(legacy);
   if(kind==='type')await fixture.source.query('ALTER TABLE ceph_analyses ALTER COLUMN corrects_analysis_id TYPE integer');
   if(kind==='default')await fixture.source.query('ALTER TABLE ceph_analyses ALTER COLUMN corrects_analysis_id SET DEFAULT 1');
   if(kind==='not_null')await fixture.source.query('ALTER TABLE ceph_analyses ALTER COLUMN corrects_analysis_id SET NOT NULL');
-  if(kind==='missing_check')await fixture.source.query('ALTER TABLE ceph_analyses DROP CONSTRAINT ceph_analyses_corrects_older_ck');
-  if(kind==='unvalidated')await fixture.source.query('ALTER TABLE ceph_analyses DROP CONSTRAINT ceph_analyses_corrects_older_ck; ALTER TABLE ceph_analyses ADD CONSTRAINT ceph_analyses_corrects_older_ck CHECK(corrects_analysis_id IS NULL OR corrects_analysis_id<id) NOT VALID');
+  if(kind==='wrong_check_name')await fixture.source.query('ALTER TABLE ceph_analyses RENAME CONSTRAINT ceph_analyses_corrects_older_chk TO ceph_analyses_corrects_older_ck');
+  if(kind==='missing_check')await fixture.source.query('ALTER TABLE ceph_analyses DROP CONSTRAINT ceph_analyses_corrects_older_chk');
+  if(kind==='unvalidated')await fixture.source.query('ALTER TABLE ceph_analyses DROP CONSTRAINT ceph_analyses_corrects_older_chk; ALTER TABLE ceph_analyses ADD CONSTRAINT ceph_analyses_corrects_older_chk CHECK(corrects_analysis_id IS NULL OR corrects_analysis_id<id) NOT VALID');
   if(kind==='source_residue')await fixture.source.query('ALTER TABLE ceph_analyses ADD COLUMN correction_source JSONB');
   if(kind==='linked'){const {patient,doc,parent}=await analysis();await fixture.source.query("INSERT INTO ceph_analyses(patient_id,document_id,status,created_by,corrects_analysis_id) VALUES($1,$2,'draft','synthetic',$3)",[patient,doc,parent]);}
   if(kind==='collision')await fixture.source.query('CREATE FUNCTION guard_ceph_correction_lineage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$');
