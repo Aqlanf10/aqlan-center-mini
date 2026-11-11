@@ -1,3 +1,4 @@
+import { cephLineageMigrationSql, validateCephLineageMigration } from './ceph-lineage-migration-compat';
 import { validatePrescriptionIssuanceMigration } from "./prescription-issuance-migration";
 import { validatePrescriptionMigrationLineage } from "./prescription-migration-lineage";
 import { createHash } from "node:crypto";
@@ -110,6 +111,7 @@ export async function applyRuntimeMigrationFiles(pool: DbPool, files: MigrationF
       for (const file of files) {
         if (createHash('sha256').update(file.sql).digest('hex') !== file.checksum) throw new Error(`RUNTIME_MIGRATION_SOURCE_MISMATCH: ${file.version}`);
         const row = applied.find(item => item.version === file.version);
+        validateCephLineageMigration(file, row);
         if (row && (row.name !== file.name || row.checksum !== file.checksum || row.adopted)) {
           throw new Error(`RUNTIME_MIGRATION_REGISTRY_MISMATCH: ${file.version}`);
         }
@@ -348,8 +350,9 @@ async function migrateHoldingLock(
   let applied = await listAppliedMigrations(client);
   await validatePrescriptionMigrationLineage(client, files, applied);
   await validatePrescriptionIssuanceMigration(client, files, applied);
-  // Validate only the two pinned Ortho contracts before skipping applied files.
+  // Validate pinned Ortho contracts before skipping applied files.
   for (const file of files) {
+    validateCephLineageMigration(file, applied.find(row => row.version === file.version));
     if (file.version === "0051" || file.version === "0052") validateOrthoRevisionRegistry(file, applied.find(row => row.version === file.version));
   }
   const appliedVersions = new Set(applied.map((row) => row.version));
@@ -447,7 +450,7 @@ async function applyMigrationInTransaction(
       validateOrthoRevisionRegistry(file, (await listAppliedMigrations(client)).find(row => row.version === file.version));
       await guardOrthoRevisionMigration(client, file);
     }
-    await client.query(file.sql);
+    await client.query(await cephLineageMigrationSql(client, file));
     await client.query(
       `INSERT INTO schema_migrations (version, name, checksum, adopted)
        VALUES ($1, $2, $3, $4)

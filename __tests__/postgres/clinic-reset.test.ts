@@ -175,4 +175,16 @@ describe("clinic reset", () => {
       await rm(documentsDir, { recursive: true, force: true });
     }
   });
+  it("refuses before backup or any deletion when durable prescription history exists", async () => {
+    const patient = await createPatient({ fullName: "Synthetic Rx reset guard", phone: null, altPhone: null, gender: "unknown", birthYear: null, address: null, medicalAlert: null, note: null });
+    const [rx] = await q<{ id: number }>("INSERT INTO prescriptions(patient_id,items,created_by) VALUES($1,'[]','synthetic-reset') RETURNING id", [patient.id]);
+    await q("INSERT INTO prescription_issuance_commands(command_key,actor_user_id,actor_username,patient_id,payload_sha256,prescription_id) VALUES('11111111-1111-4111-8111-111111111111',1,'synthetic-reset',$1,$2,$3)", [patient.id, 'a'.repeat(64), rx.id]);
+    const before = { patients: await count('patients'), rx: await count('prescriptions'), audit: await count('audit_log') };
+    let backupCalled = false;
+    await expect(resetClinicData({ actor: 'synthetic-reset', actorRole: 'admin' }, async () => { backupCalled = true; return { ok: true, backupId: 'must-not-run' }; })).rejects.toThrow('لا يمكن إعادة الضبط بعد إصدار وصفات');
+    expect(backupCalled).toBe(false);
+    expect({ patients: await count('patients'), rx: await count('prescriptions'), audit: await count('audit_log') }).toEqual(before);
+    expect(await count('prescription_issuance_commands')).toBe(1);
+  });
+
 });

@@ -74,13 +74,14 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
   onSettleSave: (owner: string, expectedToken: string, request?: PendingContractSave) => boolean;
 }) {
   const navigation = useHrNavigation();
-  const [observedAt, setObservedAt] = useState(() => Date.now());
+  // Observe time only after commit; abandoned renders must remain pure.
+  const [observedAt, setObservedAt] = useState<number | null>(null);
   useEffect(() => {
     const refresh = () => setObservedAt(Date.now());
     refresh();
-    const timer = window.setInterval(refresh, 60_000);
+    const timer = setInterval(refresh, 60_000);
     window.addEventListener("focus", refresh);
-    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+    return () => { clearInterval(timer); window.removeEventListener("focus", refresh); };
   }, []);
   const [selectedStaff, setSelectedStaff] = useHrStaffSelection();
   const alive = useRef(false), readSequence = useRef(0), detailSequence = useRef(0);
@@ -508,7 +509,7 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
             <tbody className="divide-y divide-navy-100">
               {filteredContracts.map((c) => {
                 const isExpiringSoon =
-                  c.endDate &&
+                  c.endDate && observedAt !== null &&
                   new Date(c.endDate).getTime() - observedAt < 30 * 24 * 3600 * 1000 &&
                   new Date(c.endDate).getTime() > observedAt;
 
