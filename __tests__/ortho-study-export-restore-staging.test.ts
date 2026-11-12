@@ -11,6 +11,8 @@ vi.mock("pg", () => ({ Client: class {
   async end() { state.end(); }
   async query(sql: string) {
     state.calls.push(sql);
+    // Integration: the restore finalizes staff identity; an empty synthetic target has none.
+    if (sql.includes("to_regclass('public.staff_authority_identity')")) return { rows: [{ identity: false, epochs: false, subjects: false }] };
     if (sql.includes("information_schema.tables")) return { rows: [{ tables: 0 }] };
     if (sql.includes("FROM ortho_study_export_artifacts")) return { rows: state.rows };
     return { rows: [] };

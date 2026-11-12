@@ -2191,7 +2191,10 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         return;
       }
       const inputError = adjustmentNewCommandError({
-        doneOn, upperWire, lowerWire, elastics, elasticNote, done, nextWeeks: intervalWeeks!,
+        doneOn, upperWire: removeUpperWire ? "" : upperWire, lowerWire: removeLowerWire ? "" : lowerWire,
+        elastics, elasticNote, done, nextWeeks: intervalWeeks!,
+        ...(removeUpperWire ? { upperWireAction: "remove" as const } : {}),
+        ...(removeLowerWire ? { lowerWireAction: "remove" as const } : {}),
       });
       if (inputError) { if (form.editable()) onError(inputError); return; }
     }
@@ -2202,7 +2205,10 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     onError(null);
     try {
       const command = commandState.command ?? createAdjustmentCommand(sessionStorage, commandScope, {
-        doneOn, upperWire, lowerWire, elastics, elasticNote, done, nextWeeks: intervalWeeks!,
+        doneOn, upperWire: removeUpperWire ? "" : upperWire, lowerWire: removeLowerWire ? "" : lowerWire,
+        elastics, elasticNote, done, nextWeeks: intervalWeeks!,
+        ...(removeUpperWire ? { upperWireAction: "remove" as const } : {}),
+        ...(removeLowerWire ? { lowerWireAction: "remove" as const } : {}),
       });
       publishCommand({ ...commandState, command });
       const frozen = JSON.parse(command.body) as { doneOn: string; nextWeeks: number };

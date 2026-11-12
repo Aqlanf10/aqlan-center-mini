@@ -390,11 +390,27 @@ jobs:
         env:
           HR_EVIDENCE_DIR: /tmp/hr-evidence
         # Raw JSON stays runner-local. Preserve Vitest's original exit status.
-        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-security-raw.json --includeTaskLocation --shard=${{ matrix.shard }}/2
+        run: npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-main-raw.json" --shard=${{ matrix.shard }}/2
 
       - name: Sanitize security HTTP test locations
         if: always()
-        run: node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-security-raw.json" "${{ runner.temp }}/http-security-locations.json"
+        run: node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-main-raw.json" "${{ runner.temp }}/http-security-locations.json"
+
+      # Runs after the locations sanitizer: the index collector deletes the raw report.
+      - name: Collect sanitized main HTTP failure index
+        id: http_main_index
+        if: always()
+        run: node scripts/dependency-security/http-failure-index.mjs main
+
+      - name: Upload sanitized main HTTP failure index
+        if: always() && steps.http_main_index.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-main-failure-index-${{ matrix.shard }}
+          path: .http-failure-index/main.json
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
 
       - name: Upload security HTTP test locations only
         if: always()
@@ -409,11 +425,26 @@ jobs:
         env:
           INVENTORY_SCHEMA_TEST: "1"
         # Raw JSON stays runner-local. Preserve Vitest's original exit status.
-        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-inventory-raw.json --includeTaskLocation
+        run: npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-inventory-raw.json"
 
       - name: Sanitize inventory HTTP test locations
         if: always()
         run: node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-inventory-raw.json" "${{ runner.temp }}/http-inventory-locations.json"
+
+      - name: Collect sanitized inventory HTTP failure index
+        id: http_inventory_index
+        if: always()
+        run: node scripts/dependency-security/http-failure-index.mjs inventory
+
+      - name: Upload sanitized inventory HTTP failure index
+        if: always() && steps.http_inventory_index.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-inventory-failure-index-${{ matrix.shard }}
+          path: .http-failure-index/inventory.json
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
 
       - name: Upload inventory HTTP test locations only
         if: always()
@@ -623,15 +654,11 @@ jobs:
       # Explicit synthetic calculated saved-print evidence only. No traces,
       # request payloads, browser state or broad artifact directory uploads.
       - name: Upload calculated prescription saved print evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_prescription_calculated_saved_print == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: prescription-calculated-saved-print
-          path: |
-            .settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.png
-            .settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.pdf
-            .settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.png
-            .settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.pdf
+          name: prescription-calculated-saved-print-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_prescription_calculated_saved_print_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1001,21 +1028,11 @@ jobs:
       # Exact synthetic /ortho board captures and decoded-link/geometry evidence.
       # Never upload cookies, browser state, traces, HAR or a whole directory.
       - name: Upload synthetic guided case and retention context evidence
-        if: always()
+        if: always() && steps.http_evidence_owners.outputs.evidence_ortho_guided_case_retention_ui == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-guided-case-retention-ui
-          path: |
-            .settings-ui-artifacts/ortho-workup-390.png
-            .settings-ui-artifacts/ortho-workup-1280.png
-            .settings-ui-artifacts/ortho-retention-context-390.png
-            .settings-ui-artifacts/ortho-retention-context-1280.png
-            .settings-ui-artifacts/ortho-study-export-grant-390.png
-            .settings-ui-artifacts/ortho-study-export-grant-1280.png
-            .settings-ui-artifacts/ortho-study-capture-context-390.png
-            .settings-ui-artifacts/ortho-study-capture-context-1280.png
-            .settings-ui-artifacts/ortho-study-capture-print-text.png
-            .settings-ui-artifacts/ortho-study-capture-print-illustrated.png
+          name: ortho-guided-case-retention-ui-${{ matrix.shard }}
+          path: ${{ steps.http_evidence_owners.outputs.evidence_ortho_guided_case_retention_ui_paths }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

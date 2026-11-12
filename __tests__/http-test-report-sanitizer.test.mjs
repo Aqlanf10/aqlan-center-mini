@@ -99,8 +99,13 @@ describe('HTTP diagnostic allowlist', () => {
   });
   it('uploads only exact sanitized files after unchanged failing test commands', () => {
     const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+    // Integration: the raw report carries staging's failure-index name (http-main/inventory-raw.json);
+    // the locations sanitizer reads it before the index collector deletes it.
     for (const lane of ['security', 'inventory']) {
-      expect(workflow).toContain(`--reporter=default --reporter=json --outputFile.json=\${{ runner.temp }}/http-${lane}-raw.json --includeTaskLocation`);
+      const raw = lane === 'security' ? 'main' : 'inventory';
+      expect(workflow).toContain(`--reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-${raw}-raw.json"`);
+      expect(workflow).toContain(`node scripts/sanitize-http-test-report.mjs "\${{ runner.temp }}/http-${raw}-raw.json" "\${{ runner.temp }}/http-${lane}-locations.json"`);
+      expect(workflow).not.toContain(`path: \${{ runner.temp }}/http-${raw}-raw.json`);
       expect(workflow).toContain(`path: \${{ runner.temp }}/http-${lane}-locations.json\n          if-no-files-found: error\n          retention-days: 7`);
       expect(workflow).not.toContain(`path: \${{ runner.temp }}/http-${lane}-raw.json`);
     }

@@ -78,6 +78,10 @@ const reviewedMirrorChanges = {
     ["setReviewOpen(false); setPreviewSnapshot(null);", "setReviewOpen(false); setBillingPreview(null);"],
     ["done: orthoSession.done, nextWeeks: adjustmentInterval!,", "done: orthoSession.done, nextWeeks: Number(orthoSession.nextWeeks),"],
     ["signReadSequence, adjustmentInterval, adjustmentTextError, labCommand, canEditWork]", "signReadSequence, labCommand, canEditWork]"],
+    // Integration: the client checks only the wire action; staging's interval/text admission stands.
+    [`const wireError = orthoWireActionError(orthoSession as unknown as Record<string, unknown>);
+      if (wireError) { setError(wireError); return; }`, `const checked = checkOrthoSessionDraft({ ...orthoSession, caseId: visit.ortho.caseId });
+      if (!checked.ok) { setError(checked.message); return; }`],
   ],
 } as const;
 function restoreReviewedHistoricalSlice(slice: string, boundary: keyof typeof reviewedMirrorChanges) {
@@ -149,8 +153,8 @@ describe("actual visit workspace retains its authoritative contracts", () => {
       "if (!canEditWork && visit?.labWorkIntentRequired)",
       "const blocked = visitSignatureBlock(visit);",
       "if (blocked) { setError(blocked); return; }",
-      "const checked = checkOrthoSessionDraft(",
-      "if (!checked.ok) { setError(checked.message); return; }",
+      "const wireError = orthoWireActionError(",
+      "if (wireError) { setError(wireError); return; }",
       'await labCommand.withMutationLock("ordinary",async()=>{',
       "if(!currentOwner()||acceptedReadOwner.current!==owner||command.current!==attempt)return;",
       "signPosted=true;",

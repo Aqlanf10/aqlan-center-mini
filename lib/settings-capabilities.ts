@@ -71,7 +71,10 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   "clinical.phrases_complaint": k("operational"), "clinical.phrases_exam": k("operational"),
   "clinical.phrases_diagnosis": k("operational"), "clinical.phrases_next": k("operational"),
   "plans.specialty_templates": k("operational"), "ortho.adjustment_service_ids": k("finance"),
-  "clinical.medical_history_review_months": k("operational"), "documents.max_megabytes": k("operational"),
+  "clinical.medical_history_review_months": k("operational"),
+  // Staging's medication catalog: owner-only here, and the canonical writer passes no
+  // catalog authority, so a canonical catalog write is refused (held) until it is wired.
+  "clinical.medication_catalog": k("authority"), "documents.max_megabytes": k("operational"),
   "inventory.expiry_soon_days": k("operational"),
   // Finance.
   "finance.base_currency": k("finance"), "finance.rate.SAR": k("finance"), "finance.rate.USD": k("finance"),

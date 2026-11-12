@@ -182,6 +182,17 @@ export function resolveOrthoWire(current: string | null, wire: string | null, ac
   return action === "remove" ? null : wire?.trim() || current;
 }
 
+/** A wire is either recorded or explicitly removed, never both; the only action is "remove". */
+export function orthoWireActionError(source: Record<string, unknown>): string | null {
+  for (const arch of ["upper", "lower"] as const) {
+    const action = source[`${arch}WireAction`];
+    if (action !== undefined && action !== "remove") return "إجراء السلك غير صالح.";
+    const wire = source[`${arch}Wire`];
+    if (action === "remove" && typeof wire === "string" && wire.trim()) return "اختر إزالة السلك أو تسجيل سلك، لا كليهما.";
+  }
+  return null;
+}
+
 export interface OrthoSessionDraft {
   caseId: number;
   upperWireAction?: "remove";
@@ -232,15 +243,11 @@ export function checkOrthoSessionDraft(
   }
   const phase = (source.phase ?? null) as OrthoPhase | null;
   const elastics = (source.elastics ?? "none") as ElasticClass;
-  // A session documents what was done (or a review without change), and a wire is either
-  // recorded or explicitly removed, never both (WORK line, kept with the strict admissions above).
+  // A wire is either recorded or explicitly removed, never both. Documentation of what was
+  // done stays optional: the staging entry contract starts every field unrecorded.
   const done = text(source.done, 400);
-  if (!done) return { ok: false, message: "وثّق ما تم في جلسة التقويم، أو المراجعة دون تغيير." };
-  for (const arch of ["upper", "lower"] as const) {
-    const action = source[`${arch}WireAction`];
-    if (action !== undefined && action !== "remove") return { ok: false, message: "إجراء السلك غير صالح." };
-    if (action === "remove" && text(source[`${arch}Wire`], 40)) return { ok: false, message: "اختر إزالة السلك أو تسجيل سلك، لا كليهما." };
-  }
+  const wireError = orthoWireActionError(source);
+  if (wireError) return { ok: false, message: wireError };
   return {
     ok: true,
     value: {

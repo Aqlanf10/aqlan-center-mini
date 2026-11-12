@@ -1750,5 +1750,105 @@
     ],
     "includeHidden": "true",
     "retentionDays": "7"
+  },
+  {
+    "name": "prescription-calculated-saved-print",
+    "paths": [
+      ".settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.png",
+      ".settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.pdf",
+      ".settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.png",
+      ".settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.pdf"
+    ],
+    "missing": "error",
+    "output": "evidence_prescription_calculated_saved_print",
+    "scope": "normal",
+    "producers": [
+      {
+        "test": "prescription-reprint-journey.test.ts",
+        "witness": "prescription-dose",
+        "paths": [
+          ".settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.png",
+          ".settings-ui-artifacts/prescription-dose/saved-amoxicillin-calculated.pdf",
+          ".settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.png",
+          ".settings-ui-artifacts/prescription-dose/saved-ibuprofen-calculated.pdf"
+        ]
+      }
+    ],
+    "includeHidden": "true",
+    "retentionDays": "7"
+  },
+  {
+    "name": "ortho-guided-case-retention-ui",
+    "paths": [
+      ".settings-ui-artifacts/ortho-workup-390.png",
+      ".settings-ui-artifacts/ortho-workup-1280.png",
+      ".settings-ui-artifacts/ortho-retention-context-390.png",
+      ".settings-ui-artifacts/ortho-retention-context-1280.png",
+      ".settings-ui-artifacts/ortho-study-export-grant-390.png",
+      ".settings-ui-artifacts/ortho-study-export-grant-1280.png",
+      ".settings-ui-artifacts/ortho-study-capture-context-390.png",
+      ".settings-ui-artifacts/ortho-study-capture-context-1280.png",
+      ".settings-ui-artifacts/ortho-study-capture-print-text.png",
+      ".settings-ui-artifacts/ortho-study-capture-print-illustrated.png"
+    ],
+    "missing": "error",
+    "output": "evidence_ortho_guided_case_retention_ui",
+    "scope": "normal",
+    "producers": [
+      {
+        "test": "ortho-workup-browser.test.ts",
+        "witness": "ortho-workup-",
+        "paths": [
+          ".settings-ui-artifacts/ortho-workup-390.png",
+          ".settings-ui-artifacts/ortho-workup-1280.png"
+        ]
+      },
+      {
+        "test": "ortho-retention-followup-context-built-page.test.ts",
+        "witness": "ortho-retention-context-",
+        "paths": [
+          ".settings-ui-artifacts/ortho-retention-context-390.png",
+          ".settings-ui-artifacts/ortho-retention-context-1280.png"
+        ]
+      },
+      {
+        "test": "ortho-study-export-permission.test.ts",
+        "witness": "ortho-study-export-grant-",
+        "paths": [
+          ".settings-ui-artifacts/ortho-study-export-grant-390.png",
+          ".settings-ui-artifacts/ortho-study-export-grant-1280.png",
+          ".settings-ui-artifacts/ortho-study-capture-context-390.png",
+          ".settings-ui-artifacts/ortho-study-capture-context-1280.png",
+          ".settings-ui-artifacts/ortho-study-capture-print-text.png",
+          ".settings-ui-artifacts/ortho-study-capture-print-illustrated.png"
+        ]
+      }
+    ],
+    "includeHidden": "true",
+    "retentionDays": "7"
+  },
+  {
+    "name": "http-main-failure-index",
+    "paths": [
+      ".http-failure-index/main.json"
+    ],
+    "missing": "error",
+    "output": "evidence_http_main_failure_index",
+    "scope": "common",
+    "producers": [],
+    "includeHidden": "true",
+    "retentionDays": "7"
+  },
+  {
+    "name": "http-inventory-failure-index",
+    "paths": [
+      ".http-failure-index/inventory.json"
+    ],
+    "missing": "error",
+    "output": "evidence_http_inventory_failure_index",
+    "scope": "common",
+    "producers": [],
+    "includeHidden": "true",
+    "retentionDays": "7"
   }
 ]

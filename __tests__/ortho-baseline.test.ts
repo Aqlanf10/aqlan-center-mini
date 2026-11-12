@@ -92,7 +92,7 @@ describe("(CASE-1) orthodontic session sent with the sign", () => {
     expect(checkOrthoSessionDraft({ caseId: 3, nextWeeks: 60 }).ok).toBe(false);
     expect(checkOrthoSessionDraft("x").ok).toBe(false);
     expect(checkOrthoSessionDraft({ caseId: 3, done: "Documented review", elastics: "weird" }).ok).toBe(false);
-    expect(checkOrthoSessionDraft({ caseId: 3, elastics: "none", upperWire: " 016 NiTi " }).ok).toBe(false);
+    expect(checkOrthoSessionDraft({ caseId: 3, elastics: "none", upperWire: " 016 NiTi " }).ok).toBe(true); // documentation optional (staging entry contract)
     expect(checkOrthoSessionDraft({ caseId: 3, done: "Documented review", elastics: "none", upperWire: " 016 NiTi " })).toEqual({
       ok: true,
       value: expect.objectContaining({ caseId: 3, elastics: "none", upperWire: "016 NiTi", nextWeeks: 4, phase: null }),

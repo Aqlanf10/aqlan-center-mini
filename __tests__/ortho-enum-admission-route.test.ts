@@ -279,9 +279,12 @@ describe("writer outcomes stay unchanged", () => {
 
 
 describe("POST adjustment input integrity", () => {
-  it.each(["", "   ", undefined])("rejects undocumented work %s", async done => {
-    expect((await call("POST", { done, nextWeeks: 4 })).status).toBe(400);
+  it.each([{ upperWireAction: "keep" }, { lowerWireAction: true }, { upperWireAction: "remove", upperWire: "016 NiTi" }])("refuses an unknown or contradictory wire action %o before any write", async action => {
+    expect((await call("POST", { done: "Documented", nextWeeks: 4, ...action })).status).toBe(400);
     noWriters();
+  });
+  it.each(["", "   ", undefined])("keeps undocumented work optional (staging entry contract) %s", async done => {
+    expect((await call("POST", { done, nextWeeks: 4 })).status).toBe(201);
   });
   it("preserves explicit wire removal and legacy empty no-change", async () => {
     expect((await call("POST", { done: "Documented removal", upperWireAction: "remove", upperWire: "", lowerWire: "" })).status).toBe(201);

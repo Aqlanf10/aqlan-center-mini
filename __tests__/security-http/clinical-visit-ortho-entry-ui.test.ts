@@ -415,17 +415,13 @@ describe("Today baseline elastic confirmation in the built RTL page", () => {
       await expect.poll(() => elasticClass.isEnabled()).toBe(true);
       expect(f.writes[0]).not.toHaveProperty("orthoSession"); expect(await elasticClass.inputValue()).toBe("");
       await elasticClass.selectOption(width === 1280 ? "class_ii" : "none");
-      await review(f.page).click();
-      await f.page.getByRole("alert").filter({ hasText: "وثّق ما تم في جلسة التقويم" }).waitFor();
-      expect(await dialog(f.page).count()).toBe(0); expect(f.writes).toHaveLength(1);
-      await done(f.page).fill("مراجعة اليوم دون تغيير");
       await review(f.page).click(); await dialog(f.page).waitFor();
       expect(await dialog(f.page).getByTestId("ortho-session-review").textContent()).toContain(width === 1280 ? "صنف ثانٍ" : "بلا مطاطات");
       await dialog(f.page).getByRole("button", { name: /وقّع الزيارة/ }).click();
       await expect.poll(() => f.writes.filter((body) => body.action === "sign").length).toBe(1);
       expect(f.writes.find((body) => body.action === "sign")?.orthoSession).toMatchObject(width === 1280
-        ? { elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", done: "مراجعة اليوم دون تغيير" }
-        : { elastics: "none", elasticNote: "", done: "مراجعة اليوم دون تغيير" });
+        ? { elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", done: "" }
+        : { elastics: "none", elasticNote: "", done: "" });
       assertSafe(f);
     } finally { await f.context.close(); }
   });
@@ -437,10 +433,6 @@ describe("Today baseline elastic confirmation in the built RTL page", () => {
       expect(await f.page.getByLabel("مطاطات هذه الشدّة", { exact: true }).inputValue()).toBe("none");
       expect(await f.page.getByLabel("أسابيع حتى الشدّة القادمة", { exact: true }).inputValue()).toBe("8");
       expect(await f.page.getByTestId("visit-baseline-elastics").count()).toBe(0);
-      await review(f.page).click();
-      await f.page.getByRole("alert").filter({ hasText: "وثّق ما تم في جلسة التقويم" }).waitFor();
-      expect(await dialog(f.page).count()).toBe(0); expect(f.writes).toEqual([]);
-      await done(f.page).fill("مراجعة اليوم دون تغيير");
       await review(f.page).click(); await dialog(f.page).waitFor(); assertSafe(f);
     } finally { await f.context.close(); }
   });

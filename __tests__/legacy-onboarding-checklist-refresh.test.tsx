@@ -331,7 +331,7 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     pending.resolve(response(classification(next !== null))); await flush();
     expect(text(checklist())).toContain(next === null ? REVIEW : INCLUDED);
     expect(text(checklist())).not.toContain(next === null ? INCLUDED : REVIEW);
-    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا يوجد رابط خطة أقساط قديم" : "✓ رابط اتفاق أقساط قديم");
+    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لم تُربط خطة علاج بهذه الحالة" : "✓ رابط اتفاق أقساط قديم");
   });
 
   it.each([51, null])("withdraws parent references after a confirmed plan transition while the case reload stalls/fails, then restores the canonical classifier (%s)", async (initialPlan) => {
@@ -355,7 +355,7 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     classifierPending.resolve(response(classification(next !== null))); await flush();
     expect(text(checklist())).toContain(next === null ? REVIEW : INCLUDED);
     expect(text(checklist())).not.toContain(next === null ? INCLUDED : REVIEW);
-    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا يوجد رابط خطة أقساط قديم" : "✓ رابط اتفاق أقساط قديم");
+    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لم تُربط خطة علاج بهذه الحالة" : "✓ رابط اتفاق أقساط قديم");
     expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ planId: next, expectedVersion: "a".repeat(64) }) }]]);
   });

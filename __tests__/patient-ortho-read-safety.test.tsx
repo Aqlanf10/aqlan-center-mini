@@ -1076,7 +1076,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     await submit(oldForm); expect(writes()).toHaveLength(1);
     click(button("تسجيل شدّة جديدة مستقلة"));
     const next = submit(); expect(writes()).toHaveLength(2);
-    expect(JSON.parse(String(writes()[1].init!.body))).toMatchObject({ elastics: "vertical", elasticNote: "Updated regimen instructions", nextWeeks: 2, done: "New explicit review" });
+    expect(JSON.parse(String(writes()[1].init!.body))).toMatchObject({ elastics: "vertical", elasticNote: "Updated regimen instructions", nextWeeks: 2, done: "" });
     respond(writes()[1], {}, 409); await next; await flush(); expect(hooks.retiredWrites).toBe(0);
   });
 

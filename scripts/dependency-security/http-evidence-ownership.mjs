@@ -16,7 +16,7 @@ export function validateOwners(records, files, source = file => readFileSync(pat
     if (names.has(entry.name) || outputs.has(entry.output) || !/^evidence_[a-z_]+$/.test(entry.output)) throw new Error("Duplicate or invalid artifact ownership identity");
     names.add(entry.name); outputs.add(entry.output);
     if (entry.scope === "common") {
-      if (!["http-security-test-locations", "http-inventory-test-locations"].includes(entry.name) || entry.producers.length || entry.missing !== "error") throw new Error("Invalid common report exception");
+      if (!["http-security-test-locations", "http-inventory-test-locations", "http-main-failure-index", "http-inventory-failure-index"].includes(entry.name) || entry.producers.length || entry.missing !== "error") throw new Error("Invalid common report exception");
       continue;
     }
     if (entry.scope === "preexisting-optional-shared") {

@@ -5,6 +5,7 @@ import { isAdjustmentVisitInput, ADJUSTMENT_VISIT_INPUT_ERROR } from "@/lib/orth
 import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "@/lib/ortho-adjustment-date";
 import { parseAdjustmentInterval, ADJUSTMENT_INTERVAL_ERROR } from "@/lib/ortho-adjustment-interval";
 import { adjustmentTextAdmissionError } from "@/lib/ortho-adjustment-text-input";
+import { orthoWireActionError } from "@/lib/ortho-baseline";
 import { OrthoRetainerAuthorityError } from '@/lib/ortho-retainer-authority';
 import { OrthoPhaseAuthorityError } from '@/lib/ortho-phase-authority';
 import { CanonicalOrthoPlanLinkRefusal, commandCanonicalOrthoPlanLink } from "@/lib/canonical-ortho-plan-link-command";
@@ -27,7 +28,6 @@ import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
 import { canonicalOrthoCaseId, readCanonicalOrthoCase } from "@/lib/canonical-ortho-reads";
 
-import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 
 export const dynamic = "force-dynamic";
 
@@ -67,13 +67,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const doneOn = typeof source.doneOn === "string" && DATE_PATTERN.test(source.doneOn)
     ? source.doneOn : today;
-  const checked = checkOrthoSessionDraft({ ...source, caseId });
-  if (!checked.ok || !checked.value) {
-    return NextResponse.json({ message: checked.ok ? "بيانات جلسة التقويم غير صالحة." : checked.message }, { status: 400 });
+  const phase = typeof source.phase === "string" && Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase)
+    ? (source.phase as keyof typeof PHASE_LABEL) : null;
+  const elastics = isElasticClass(source.elastics) ? source.elastics : "none";
+  const nextWeeks = Math.round(Number(source.nextWeeks ?? 4));
+  if (!Number.isFinite(nextWeeks) || nextWeeks < 1 || nextWeeks > 52) {
+    return NextResponse.json({ message: "المدة حتى الشدّة القادمة بين أسبوع و52 أسبوعًا." }, { status: 400 });
   }
 
   const text = (value: unknown, limit: number) =>
     typeof value === "string" && value.trim() ? value.trim().slice(0, limit) : null;
+
+  // Explicit wire removal is a newer field with no legacy journal to replay, so it is
+  // admitted before any write: an unknown action, or removal plus a wire, is refused.
+  const wireActionError = orthoWireActionError(source);
+  if (wireActionError) return NextResponse.json({ code: "invalid_adjustment_wire_action", message: wireActionError }, { status: 400 });
 
   const requestKey = request.headers.get("Idempotency-Key");
   if (!requestKey || !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) {
@@ -83,10 +91,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   try {
     const result = await recordAdjustment({
+      caseId,
       visitId: Number.isInteger(Number(source.visitId)) && Number(source.visitId) > 0
         ? Number(source.visitId) : null,
-      ...checked.value,
-      doneOn,
+      doneOn, phase,
+      upperWire: text(source.upperWire, 40),
+      lowerWire: text(source.lowerWire, 40),
+      ...(source.upperWireAction === "remove" ? { upperWireAction: "remove" as const } : {}),
+      ...(source.lowerWireAction === "remove" ? { lowerWireAction: "remove" as const } : {}),
+      elastics,
+      elasticNote: text(source.elasticNote, 120),
+      done: text(source.done, 400),
+      nextWeeks,
+      note: text(source.note, 300),
       recordedBy: session.username,
       actorRole: session.role,
       request: { key: requestKey, patientId: found.patientId, session, newTextAdmissionError: adjustmentTextAdmissionError(source),

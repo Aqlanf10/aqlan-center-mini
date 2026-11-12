@@ -11,7 +11,7 @@ describe("shared canonical owner adapter", () => {
   });
   it("requires opaque shared access matching actor and exact clinician linkage", async () => {
     const context = ownerContextFromTrustedBinding({ ownerUserId: 321, bindingVersion: "test-v1" });
-    const access = resolveStaffCapabilities({ subject: { userId: 321, role: "admin", isActive: true, clinicianPartyId: 44 }, permissionDocument: { schemaVersion: 1, revision: 1, patientScope: "all", appointmentScope: "all", grants: {} } }, context);
+    const access = resolveStaffCapabilities({ subject: { userId: 321, role: "admin", isActive: true, clinicianPartyId: 44 }, permissionDocument: { schemaVersion: 2, revision: 1, confirmation: "owner", patientScope: "all", appointmentScope: "all", grants: {} } }, context);
     mocked.load.mockResolvedValue({ access, bindingVersion: "test-v1" });
     expect(await getPrescriptionOwnerAuthority(owner)).toMatchObject({ bindingVersion: "test-v1" });
     for (const patch of [{ id: 322 }, { isActive: false }, { partyId: null }, { partyId: 45 }, { role: "doctor" }]) {

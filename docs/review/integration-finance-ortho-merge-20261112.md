@@ -80,3 +80,44 @@ removed, 13 fingerprints of this branch's superseded definitions no longer produ
 - `ceph-completion-stale-witness`: same assertions, now through staging's completion API.
 - Tests calling changed signatures (`deleteVisit`, follow-up board `GET`, legacy billing decision)
   updated to the merged signatures.
+
+## 7. Post-merge verification fixes (unit suite on b39efe1d: 180 failures in 27 files)
+
+Each failure was traced to its owning contract; none was silenced.
+
+| Area | Cause | Resolution |
+|---|---|---|
+| Ortho session documentation | This branch required «ما نُفّذ» on every new session; staging's entry contract (and the directive: entries start unrecorded) keeps it optional. | Requirement removed from `checkOrthoSessionDraft`; the refusal text no longer asks for it. This branch's tests that pinned the requirement now pin the optional rule. |
+| Standalone adjustment route | The merged POST used this branch's strict draft parser, which broke staging's enum/text/interval admission ordering and legacy replay. | Staging's POST restored whole. Explicit wire removal (this branch) re-added on top: admitted before any write (unknown action or removal plus a wire → 400), passed to the writer, and hashed only when present so every earlier request keeps its exact fingerprint. The command store and the form carry it the same way. |
+| Visit signing (client) | The client re-ran the strict server parser and refused staging's lossless interval spellings. | The client checks only the wire action; staging's interval admission stands. |
+| Visit with adjustments on two cases | Staging's strict recorded source refuses before this branch's ambiguity rule. | Test expects the refusal for two cases and the ambiguity code for one case; no write in either. |
+| Restore staging | Staging's new study-export restore test mocked a client without the identity probe this branch's restore runs. | Same probe stub as this branch's sibling restore test. |
+| Prescription owner | Staging fixtures built version-1 permission documents; this branch's documents are version 2 with owner confirmation. | Fixtures use version 2, `confirmation: "owner"`. |
+| Settings classes | Staging added `clinical.medication_catalog`. | Classified owner-only; the canonical writer passes no catalog authority, so a canonical catalog write is refused until wired. |
+| Lint tooling runtime verifier | Both sides added the file independently. | Staging's version kept; it passes both sides' tests. |
+| Route capability map | 45 staging route methods held for canonical admission had no map entry. | Entries added (`clinical.ortho.view`/`edit`, `clinical.prescriptions.write`, patient scope) marked as legacy-only; two `result.mode` reads declared as non-branches. |
+| CI | Sharded HTTP job (this branch) lacked staging's failure index; two staging uploads were neither owner-gated nor shard-named. | Normal suite writes `http-main-raw.json` per shard; the locations sanitizer reads it before the failure index deletes it; both indexes upload per shard; the two staging evidence sets have producers in the ownership table. |
+| Other pins | Migration lists, a component's hook order, a staging package-link text. | Updated to the merged tree. |
+
+Environment-only (not a merge defect): `ortho-study-export-artifact-storage` refuses storage under `/tmp`
+by design (ephemeral zone), and this local worktree lives under `/tmp`. Hosted CI runs from the runner workspace.
+
+## 8. Migration allocation for the finance additions (#483 6833690789)
+
+Coordinating allocation for this integration line only; not an exclusive or global lock. Re-checked
+before the first push of this branch: `git fetch` of all 335 remote branches, then a search of every
+fetched tree for `migrations/0127_*` … `migrations/0132_*`. Only `0127_patient_portal_security.sql`
+(`security/patient-isolation-and-hardening-20261111` @ `a77f8cdc`) exists; 0128–0131 are unused. Local
+work of other sessions is not visible to this check. It is repeated before the final integration.
+
+| Version | File | Purpose | Depends on |
+|---|---|---|---|
+| 0126 | `0126_case_participations.sql` | Case participation (published; unchanged) | 0125 |
+| 0127 | — | Reserved by the patient-portal security branch; never used here | — |
+| 0128 | `0128_expense_commands.sql` | Expense idempotency; drawer amount vs owner's private-source amount; real payment source | 0126 |
+| 0129 | `0129_shift_opening_reviews.sql` | Opening difference review per currency with reason, reconciliation, references and the previous close reference; the close is not changed | 0128 |
+| 0130 | `0130_lab_payable_waivers.sql` | Separate documented waiver of a remaining lab obligation (permission, reason, agreement evidence); no automatic waiver on cancel | 0129 |
+| 0131 | `0131_invoice_doctor_corrections.sql` | Post-approval invoice doctor correction (grantable permission, reason, before/after, request key, settlement links) | 0130 |
+
+None of these files exists on this branch yet. If a collision appears, only that number is held and
+reported (file, branch, blob, whether published or applied); published migrations are never renamed.

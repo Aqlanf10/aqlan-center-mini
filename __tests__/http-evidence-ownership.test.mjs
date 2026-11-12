@@ -44,7 +44,7 @@ describe("HTTP evidence follows the actual installed shard assignment", () => {
     const config = readFileSync(path.join(root, "vitest.config.security.mts"), "utf8");
     for (const file of inventoryFiles) { assert.ok(config.includes(file)); assert.ok(!all.includes(file)); }
     assert.ok(job.includes('INVENTORY_SCHEMA_TEST: "1"'));
-    assert.ok(job.includes("run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-inventory-raw.json --includeTaskLocation\n"));
+    assert.ok(job.includes('run: npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-inventory-raw.json"\n'));
   });
   it("assigns each required evidence pattern once to its producing test, including mixed bundles", () => {
     for (const entry of evidenceOwners.filter(entry => entry.scope === "normal")) {

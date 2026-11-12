@@ -28,6 +28,7 @@ interface CommandInput {
   upperWire: string | null; lowerWire: string | null; elastics: ElasticClass;
   elasticNote: string | null; done: string | null; nextWeeks: number; note: string | null;
   recordedBy: string; actorRole?: string | null;
+  upperWireAction?: "remove"; lowerWireAction?: "remove";
 }
 export interface AdjustmentResult { id: number; visitId: number | null; attachedToToday: boolean }
 export class OrthoAdjustmentRequestError extends Error {
@@ -65,7 +66,11 @@ export async function prepareAdjustmentRequest(client: DbClient, input: CommandI
   const hashForDate = (doneOn: string) => createHash("sha256").update(JSON.stringify({ version: 1, actorId: request.session.userId,
     patientId: request.patientId, caseId: input.caseId, visitId: input.visitId, doneOn, phase: input.phase,
     upperWire: input.upperWire, lowerWire: input.lowerWire, elastics: input.elastics, elasticNote: input.elasticNote,
-    done: input.done, nextWeeks: input.nextWeeks, note: input.note })).digest("hex");
+    done: input.done, nextWeeks: input.nextWeeks, note: input.note,
+    // Explicit removal is newer than the v1 fingerprint; it is hashed only when present,
+    // so every earlier request keeps its exact hash and a toggled removal is a different body.
+    ...(input.upperWireAction === "remove" ? { upperWireAction: "remove" } : {}),
+    ...(input.lowerWireAction === "remove" ? { lowerWireAction: "remove" } : {}) })).digest("hex");
   let hash = hashForDate(input.doneOn);
   // Fence reset before taking patient/visit/plan locks. Reset protects nonempty
   // command history and must never erase a key while an adjustment is in flight.

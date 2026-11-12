@@ -33,7 +33,7 @@ import VisitFinancialSources from "@/components/VisitFinancialSources";
 import { canViewMoney, isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "@/lib/ortho";
-import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
+import { orthoWireActionError } from "@/lib/ortho-baseline";
 import { VisitPhraseField as Field } from "./VisitPhraseField";
 import { VisitPlanRequirements } from "./VisitPlanRequirements";
 import { VisitMaterials } from "./VisitMaterials";
@@ -732,8 +732,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       return;
     }
     if (orthoSession && visit?.ortho?.visitAdjustmentId === null) {
-      const checked = checkOrthoSessionDraft({ ...orthoSession, caseId: visit.ortho.caseId });
-      if (!checked.ok) { setError(checked.message); return; }
+      const wireError = orthoWireActionError(orthoSession as unknown as Record<string, unknown>);
+      if (wireError) { setError(wireError); return; }
     }
     const attempt = { owner }; command.current = attempt;
     setBusy(true);
@@ -1830,8 +1830,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                 return;
               }
               if (orthoSession && visit.ortho?.visitAdjustmentId === null) {
-                const checked = checkOrthoSessionDraft({ ...orthoSession, caseId: visit.ortho.caseId });
-                if (!checked.ok) { setError(checked.message); return; }
+                const wireError = orthoWireActionError(orthoSession as unknown as Record<string, unknown>);
+                if (wireError) { setError(wireError); return; }
               }
               // الحفظ ثم المراجعة: توقيعٌ يترك ما كُتب في الشاشة غير محفوظ يفقد العمل.
               if (!(await send(payload())) || !currentOwner()) return;

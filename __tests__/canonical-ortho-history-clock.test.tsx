@@ -14,9 +14,9 @@ const createdAt = "2026-10-31T22:30:00.000Z";
 const zones = [ ["Asia/Aden", "الأحد 01/11/2026"], ["America/New_York", "السبت 31/10/2026"], [undefined, "2026-10-31"] ] as const;
 const props = { patientId: 1, orthoCaseId: 2, readOnly: true };
 it.each(zones)("assessment history respects clinic zone %s, preserving legacy callers without a zone", (clinicTimeZone, label) => {
-  const revision = { id: 3, version: 1, schemaVersion: 2, createdAt, createdBy: "SYN", reason: "SYN", contentHash: "a".repeat(64), content: {} };
+  const revision = { id: 3, version: 1, schemaVersion: 2, createdAt, createdBy: "SYN", reason: "SYN", contentHash: "a".repeat(64), content: { draft: { observations: { observations: [] } } } };
   const data = { state: "ready", clinicalCaseId: 4, clinicalWritable: false, revision, history: [revision], sourceStates: [], sources: { items: [], imaging: "restricted", truncated: false } };
-  hooks.cursor = 0; hooks.values = [undefined, 0, null, () => ({ generation: hooks.generation, data, error: null })];
+  hooks.cursor = 0; hooks.values = [undefined, 0, null, false, () => ({ generation: hooks.generation, data, error: null })];
   expect(renderToStaticMarkup(<OrthoCaseAssessmentV2 {...props} clinicTimeZone={clinicTimeZone} />)).toContain(`نسخة 1 · ${label} · SYN`);
 });
 it.each(zones)("strategy history and selected revision respect clinic zone %s", (clinicTimeZone, label) => {

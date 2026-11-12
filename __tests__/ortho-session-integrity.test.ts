@@ -3,17 +3,21 @@ import { checkOrthoSessionDraft, resolveOrthoWire } from '../lib/ortho-baseline'
 
 const draft = { caseId: 3, done: 'Reviewed; no change documented', nextWeeks: 4 };
 describe('orthodontic session input fidelity', () => {
-  it.each([undefined, null, '', '   '])('rejects undocumented new work: %s', done => {
-    expect(checkOrthoSessionDraft({ ...draft, done }).ok).toBe(false);
+  it.each([null, '', '   '])('keeps documentation optional (staging entry contract): %s', done => {
+    expect(checkOrthoSessionDraft({ ...draft, done })).toMatchObject({ ok: true, value: { done: null } });
+  });
+  it('refuses a present non-text documentation value (staging text admission)', () => {
+    expect(checkOrthoSessionDraft({ ...draft, done: undefined }).ok).toBe(false);
   });
   it('allows explicit documented no-change review without inventing wires', () => {
     expect(checkOrthoSessionDraft(draft)).toMatchObject({ ok: true, value: { done: draft.done, upperWire: null, lowerWire: null } });
   });
-  it.each([0, -1, 53, 1.5, 'abc', '', null, true, false, [], [4], {}].map(value => [value]))('rejects invalid explicit interval %s', nextWeeks => {
+  it.each([0, -1, 53, 1.5, 'abc', '', true, false, [], [4], {}].map(value => [value]))('rejects invalid explicit interval %s', nextWeeks => {
     expect(checkOrthoSessionDraft({ ...draft, nextWeeks }).ok).toBe(false);
   });
-  it('retains default for omitted legacy interval only', () => {
+  it('retains default for omitted or null legacy interval only (staging rule)', () => {
     expect(checkOrthoSessionDraft({ caseId: 3, done: draft.done })).toMatchObject({ ok: true, value: { nextWeeks: 4 } });
+    expect(checkOrthoSessionDraft({ caseId: 3, done: draft.done, nextWeeks: null })).toMatchObject({ ok: true, value: { nextWeeks: 4 } });
   });
   it('carries an explicit removal independently from blank legacy wire fields', () => {
     expect(checkOrthoSessionDraft({ ...draft, upperWireAction: 'remove' })).toMatchObject({ ok: true, value: { upperWire: null, upperWireAction: 'remove' } });

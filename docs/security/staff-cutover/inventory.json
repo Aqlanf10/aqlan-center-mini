@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "cd5e4c538ec88e13064e2526c3107bee1a3d1fc48125063bfb26dab5fc80cd65",
+  "sourceDigest": "1c166c8730fee1bfcfcf01e11f8d104d49d640326f00621fd01e26ba8396fa17",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -2163,7 +2163,7 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 22
         },
         {
           "symbol": "requireSession",
@@ -2171,11 +2171,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 129
+          "line": 146
         },
         {
           "symbol": "requireSession",
-          "line": 218
+          "line": 235
         }
       ]
     },
@@ -9437,7 +9437,7 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 22
         },
         {
           "symbol": "requireSession",
@@ -9445,11 +9445,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 129
+          "line": 146
         },
         {
           "symbol": "requireSession",
-          "line": 218
+          "line": 235
         }
       ]
     },
@@ -9469,7 +9469,7 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 22
         },
         {
           "symbol": "requireSession",
@@ -9477,11 +9477,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 129
+          "line": 146
         },
         {
           "symbol": "requireSession",
-          "line": 218
+          "line": 235
         }
       ]
     },
@@ -9501,7 +9501,7 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 22
         },
         {
           "symbol": "requireSession",
@@ -9509,11 +9509,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 129
+          "line": 146
         },
         {
           "symbol": "requireSession",
-          "line": 218
+          "line": 235
         }
       ]
     },

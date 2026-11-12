@@ -19,17 +19,20 @@ describe("complete isolated HTTP CI partition", () => {
  it("partitions only the complete normal suite and retains the explicit full inventory run", () => {
   const runs = job.split("\n").filter(line => line.includes("run: npm run test:security-http"));
   expect(runs).toHaveLength(2);
-  expect(runs[0]).toBe("        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-security-raw.json --includeTaskLocation --shard=${{ matrix.shard }}/2");
-  expect(runs[1]).toBe("        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-inventory-raw.json --includeTaskLocation");
+  // Integration: staging's failure-index file names, with this branch's shard on the normal suite.
+  expect(runs[0]).toBe('        run: npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-main-raw.json" --shard=${{ matrix.shard }}/2');
+  expect(runs[1]).toBe('        run: npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-inventory-raw.json"');
   expect(job).toContain('INVENTORY_SCHEMA_TEST: "1"');
  });
  it("names every artifact by shard while preserving runner-local raw reports and sanitizers", () => {
   const names = [...job.matchAll(/^ {10}name: (.+)$/gm)].map(m => m[1]);
   expect(names.length).toBeGreaterThan(60); expect(new Set(names).size).toBe(names.length);
   expect(names.every(name => name.endsWith("-${{ matrix.shard }}"))).toBe(true);
-  expect(job).toContain('node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-security-raw.json" "${{ runner.temp }}/http-security-locations.json"');
+  expect(job).toContain('node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-main-raw.json" "${{ runner.temp }}/http-security-locations.json"');
   expect(job).toContain('node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-inventory-raw.json" "${{ runner.temp }}/http-inventory-locations.json"');
   expect(job).not.toMatch(/path:.*raw\.json/);
+  // The locations sanitizer reads the raw report before the failure index deletes it.
+  for (const mode of ["main", "inventory"]) expect(job.indexOf(`http-failure-index.mjs ${mode}`)).toBeGreaterThan(job.indexOf(`http-${mode === "main" ? "security" : "inventory"}-locations.json"`));
  });
  it("keeps the fail-closed aggregate dependent on the whole HTTP matrix", () => {
   const aggregate = workflow.slice(workflow.indexOf("  required_completion:"));

@@ -32389,7 +32389,7 @@ export async function listMyReferrals(partyId: number): Promise<{
 type OrthoSessionRefusal = "invalid_session" | "not_found" | "closed" | "treatment_not_started" | "wrong_patient" | "visit_not_found" | "invalid_phase";
 
 const ORTHO_SESSION_REFUSAL: Record<OrthoSessionRefusal, string> = {
-  invalid_session: "وثّق ما تم، وحدد مدة صحيحة من أسبوع إلى 52 أسبوعًا وإجراء السلك بوضوح.",
+  invalid_session: "بيانات جلسة التقويم غير صالحة؛ حدد مدة صحيحة من أسبوع إلى 52 أسبوعًا وإجراء السلك بوضوح.",
   not_found: "الحالة غير موجودة.",
   closed: "الحالة مغلقة — لا تُسجَّل عليها شدّات.",
   treatment_not_started: "لم يبدأ العلاج بعد — وثّق بدء العلاج قبل تسجيل شدّة.",

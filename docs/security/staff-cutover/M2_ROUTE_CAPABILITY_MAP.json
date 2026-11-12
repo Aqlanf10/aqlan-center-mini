@@ -6878,5 +6878,713 @@
     }
    ]
   }
+ },
+ {
+  "route": "/api/ortho/[id]/case-study",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/editor",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/editor",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/exports",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/exports",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/exports/[jobId]/download",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/exports/[jobId]/run",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/illustrated-pptx",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/longitudinal",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/media",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/media",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/recovery",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/recovery",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/review",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/review-image",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/sources",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/case-study/text-pptx",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/facial-analysis",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/facial-analysis",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/facial-analysis/history",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/facial-analysis/recovery",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/facial-analysis/recovery",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/facial-image",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/plan-link",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/problem-sources",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/problem-sources",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/problem-sources/recovery",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/problem-sources/recovery",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/reopen",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/reopen",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/retention-ledger",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/retention-ledger",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/retention-ledger/documents",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/retention-ledger/recovery",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/retention-ledger/recovery",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/space-ledger",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/space-ledger",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/space-ledger/recovery",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/space-ledger/recovery",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/ortho/[id]/treatment-start",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held).",
+  "branchExempt": "`result.mode === \"started\"` reads the writer's result (new or replayed), not a request branch."
+ },
+{
+  "route": "/api/ortho/intake",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held).",
+  "branchExempt": "`result.mode === \"created\"` reads the writer's result (new or replayed), not a request branch."
+ },
+{
+  "route": "/api/patients/[id]/ortho-billing-decisions",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/patients/[id]/prescriptions/saved",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.prescriptions.write"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
+ },
+{
+  "route": "/api/prescriptions/commands/[key]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.prescriptions.write"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Integration 2026-11-12: staging orthodontic/prescription route; legacy session admission only. Canonical admission not implemented on this branch (held)."
  }
 ]

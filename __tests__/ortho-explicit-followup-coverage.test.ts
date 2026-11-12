@@ -138,8 +138,10 @@ describe("actual SQL explicit routine followup source decisions",()=>{
     const visit=(await q("INSERT INTO visits(patient_name,patient_id,doctor_id,diagnosis) VALUES('Synthetic coverage patient',$1,$2,'Synthetic review') RETURNING id",[f.patient,provider]))[0].id;
     for(const caseId of [f.ortho,secondCase]) await q("INSERT INTO ortho_adjustments(case_id,visit_id,done_on,recorded_by,done) VALUES($1,$2,CURRENT_DATE,'synthetic-admin','Synthetic documented review')",[caseId,visit]);
     const before=(await q("SELECT count(*)::int AS n FROM invoices WHERE patient_id=$1",[f.patient]))[0].n;
-    const result=await db.signClinicalVisit({visitId:visit,baseCurrency:'YER',signedBy:admin.username,signerRole:'admin',signerDoctorPartyId:provider});
-    expect(result.reason).toBe('ortho_adjustments_ambiguous');
+    const signing=db.signClinicalVisit({visitId:visit,baseCurrency:'YER',signedBy:admin.username,signerRole:'admin',signerDoctorPartyId:provider});
+    // Same case: this branch's ambiguity rule. Two cases: staging's strict recorded source refuses first.
+    if(sameCase) expect((await signing).reason).toBe('ortho_adjustments_ambiguous');
+    else await expect(signing).rejects.toThrow(/أكثر من حالة/);
     expect((await q("SELECT signed_at,ortho_followup_coverage_proof FROM visits WHERE id=$1",[visit]))[0]).toEqual({signed_at:null,ortho_followup_coverage_proof:null});
     expect(await q("SELECT id FROM ortho_adjustments WHERE visit_id=$1 AND followup_coverage_revision_id IS NOT NULL",[visit])).toEqual([]);
     expect((await q("SELECT count(*)::int AS n FROM invoices WHERE patient_id=$1",[f.patient]))[0].n).toBe(before);
