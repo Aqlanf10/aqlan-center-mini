@@ -1,0 +1,44 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ __tests__/canonical-plan-dependency-command.test.ts (23 tests | 2 failed) 12ms
+   × rejects a JSON array requirement with an explicit 400 refusal 3ms
+   × rejects a JSON object requirement without invoking its conversion hooks 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/canonical-plan-dependency-command.test.ts > rejects a JSON array requirement with an explicit 400 refusal
+AssertionError: expected undefined to be an instance of CanonicalPlanDependencyRefusal
+ ❯ __tests__/canonical-plan-dependency-command.test.ts:23:19
+     21| it("rejects a JSON array requirement with an explicit 400 refusal",()=…
+     22|   let failure:unknown;try{parseCanonicalPlanDependency("add","1",{...b…
+     23|   expect(failure).toBeInstanceOf(CanonicalPlanDependencyRefusal);expec…
+       |                   ^
+     24| });
+     25| it("rejects a JSON object requirement without invoking its conversion …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/canonical-plan-dependency-command.test.ts > rejects a JSON object requirement without invoking its conversion hooks
+AssertionError: expected TypeError: Cannot convert object to primi… to be an instance of CanonicalPlanDependencyRefusal
+ ❯ __tests__/canonical-plan-dependency-command.test.ts:27:19
+     25| it("rejects a JSON object requirement without invoking its conversion …
+     26|   let failure:unknown;try{parseCanonicalPlanDependency("add","1",{...b…
+     27|   expect(failure).toBeInstanceOf(CanonicalPlanDependencyRefusal);expec…
+       |                   ^
+     28| });
+     29|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 21 passed (23)
+   Start at  07:44:02
+   Duration  2.33s (transform 1.61s, setup 0ms, import 1.99s, tests 12ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,23 @@
+# Clinical batch 53–55 and clinic-date corrections
+
+This review batch extends WORK from `1990b966` to source `70faacd4`, preserving the separate coverage fix `0937e9aa`. Normal branch publication is for review only. No main merge, Stage/Production deployment, live data, settings, secrets or migration change.
+
+| Scope | Contract and evidence |
+|---|---|
+| 53 — cephalometric draft edit | Observed-version PATCH, existing analysis/image grants and patient scope; same-connection calibration/landmark/diagnosis writers, fresh authority after locks, atomic audit,256-row / 2 MiB safe-read budgets. UI diagnosis only; image tracing and calibration UI remain separate.81 PG, 58 unit/guards, 35 HTTP focused evidence. |
+| 54 — complete cephalometric study | Explicit observed draft; existing engine and atomic state/results/audit. Proven stale ANB acceptance now refuses missing current geometry.86 focused PG, 30 unit/guards, 49 HTTP. Its earlier complete source 16999 separately passed 14,596 unit / 5,331 PG. |
+| 55 — native orthodontic lifecycle | Phase,retainer and completed/discontinued only. Existing explicit retainer `none` is valid. State observation and post-wait scope/authentication; atomic audit. `planId` finance remains held and PATCH stays `existing`, not fully converted.31 unit/guards, 65 distinct PG across 64 then 18 runs, 32 distinct HTTP across 23 then 9 runs. |
+| Coverage date fix | Separate 0937 commit: original midnight witness failed, then 40 unit/guards, 25 PG and 11 HTTP passed. UTC 2026-10-31T22:30 displays November 1 in Asia/Aden, including a browser in another zone. |
+| Other instant-date labels | f4ba corrects seven canonical clinical date labels; 70fa passes the validated server zone to assessment/strategy history. Storage and calendar dates unchanged. Seven plus two original witnesses failed; expanded two-zone/legacy tests pass. f4ba:120 unit/guards, 226 PG, 98 distinct HTTP (first 95/98, then affected 21/21). 70fa: 47 unit/guards, 80 PG, 21 HTTP including legacy editor/recovery. |
+
+The final source passed **14661 unit tests in 866 files**, typecheck, build `Chpd2GcxS6DtKukI0zRmm`, full lint (0 errors, 345 existing warnings), body scan, environment contract, money scan and preflight. Both runtime provenance guards passed for that exact build (741 traces, 86 manifests; available maps only). The combined full PostgreSQL suite passed **5349 tests in 409 files** on frozen source `c65faea5`; the later 70fa change is display-only, with unchanged application server/SQL code and an additional 80-case final PG regression. This is not mislabeled as an exact 70fa local full-PG execution. Exact final-head CI remains a separate mandatory gate after push.
+
+Original failed witnesses and failed test-fixture attempts remain in their slice manifests, with their corrected runs and exact source/build distinctions. No test/timeout/security threshold was relaxed. No skipped check is a pass.
+
+Route accounting is **75 canonical-done / 269 existing out of 344 ordinary methods**, in a 386-entry map. The broader inventory has420 methods / 97 pages and remains **NOT_READY**, digest `ee7e4a741c4e4fb97d6b45d700c0da0e68d47c84392b759ae4c07d364f1f6a8d`. These numbers do not measure whole-system completion. Product diff from 1990: 36 app/component/lib files, 756 insertions / 222 deletions; 34 test files, 1,016 insertions / 42 deletions before this evidence-only commit.
+
+Limits: no durable request receipt for 55's native state command, no automatic retry, and unavailable browser storage cannot ensure reload recovery. A clinician whose only positive relationship ends with case closure may legitimately lose read scope; no extra access is granted to recover an uncertain result. The recorded main-integration review is bounded and does not cover every resolved conflict. Actual Docker remains blocked by the enforced Alpine CONNECT 403 destination refusal; no alternate source/proxy/TLS bypass was attempted, and branch-skipped CI jobs are not Docker evidence. Inventory operational acceptance, schema convergence/adoption/restore and staging/owner workflow verification remain open.
+
+Next local work is 56 assessment append using the existing immutable receipt and editor owner, including all-history source checks. That separate uncommitted slice reproduced a legacy writer accepting a revision beyond the 8 MiB reader budget; its shared aggregate guard now passes focused tests, but its UI/build/full gates and review remain pending. It is excluded from this batch and is an explicit open system blocker, not hidden by these green gates.
+
+See `evidence/work-clinical-batch53-55-20261101/manifest.json` for pinned commits, SHA256s and complete logs. No claim of whole-program readiness or permission to deploy.

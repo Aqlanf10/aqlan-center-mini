@@ -141,7 +141,7 @@ describe("selected appointment doctor must match the active-doctor picker", () =
   });
 });
 
-describe("existing appointment scheduling policy remains unchanged", () => {
+describe("appointment scheduling and explicit clinician-transfer policy", () => {
   it("allows an unspecified doctor for provider-consuming services on create and reschedule", async () => {
     const request = await input();
     const booked = await bookAppointment({ ...request, serviceId: providerService }, actor);
@@ -153,7 +153,7 @@ describe("existing appointment scheduling policy remains unchanged", () => {
     }, actor)).toMatchObject({ ok: true });
   });
 
-  it("allows explicitly clearing an inactive former doctor on reschedule", async () => {
+  it("refuses clearing an inactive stored doctor without explicit responsibility transfer context", async () => {
     const doctor = await party("doctor");
     const request = await input();
     const booked = await bookAppointment({ ...request, doctorId: doctor.id, serviceId: providerService }, actor);
@@ -162,7 +162,9 @@ describe("existing appointment scheduling policy remains unchanged", () => {
     expect(await rescheduleAppointment({
       appointmentId: booked.appointment.id, date: request.date, time: "11:00",
       doctorId: null, reason: "Synthetic reschedule",
-    }, actor)).toMatchObject({ ok: true, appointment: { doctorId: null } });
+    }, actor)).toMatchObject({ ok: false, status: 400, code: "return_booking_context_required" });
+    const retained = await getPool().query("SELECT doctor_id FROM appointments WHERE id=$1", [booked.appointment.id]);
+    expect(retained.rows[0].doctor_id).toBe(doctor.id);
   });
 
   it("preserves outside-clinic-hours as a warning rather than a rejection", async () => {

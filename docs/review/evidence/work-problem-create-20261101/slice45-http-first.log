@@ -1,0 +1,16 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  6 passed (6)
+      Tests  70 passed (70)
+   Start at  07:24:20
+   Duration  153.15s (transform 448ms, setup 0ms, import 994ms, tests 147.37s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

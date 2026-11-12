@@ -72,6 +72,31 @@ export const PHASE_ORDER: OrthoPhase[] = ["aligning", "working", "finishing", "r
 
 export type CaseStatus = "assessment" | "active" | "retention" | "completed" | "discontinued";
 
+/** M2 slice 29: a case summary only, not the clinical history, imaging or funding record. */
+export interface OrthoCaseSummary {
+  id: number;
+  patientId: number;
+  patientName: string;
+  /** Null for an assessment-only case (staging 0108): nothing is invented before treatment starts. */
+  appliance: Appliance | null;
+  arches: Arches | null;
+  status: CaseStatus;
+  phase: OrthoPhase;
+  startDate: string | null;
+  plannedMonths: number | null;
+  upperWire: string | null;
+  lowerWire: string | null;
+  responsibleDoctorId: number | null;
+  responsibleDoctorName: string | null;
+  baselineKind: "legacy" | null;
+}
+export interface OrthoCaseSummaryFeed {
+  cases: OrthoCaseSummary[];
+  today: string;
+  hasMore: boolean;
+  projection: "case-summary";
+}
+
 export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
   assessment: "قيد التقييم",
   active: "جارية",
@@ -336,3 +361,43 @@ export function suggestCephPhase(
   return "during";
 }
 
+
+/** M2 slice 30: native ortho clinical data only. Financial agreements, visit
+ * records/notes and documents have independent capabilities and readers. */
+export interface OrthoClinicalCase extends OrthoCaseSummary {
+  slot: SlotSize | null;
+  bracketSystem: string | null;
+  retainer: RetainerType | null;
+  retainerOn: string | null;
+  note: string | null;
+  closedAt: string | null;
+  closedNote: string | null;
+  baselineRecordedAt: string | null;
+  elastics: string | null;
+  remainingObjectives: string | null;
+}
+export interface OrthoClinicalAdjustment {
+  id: number;
+  doneOn: string;
+  phase: OrthoPhase | null;
+  upperWire: string | null;
+  lowerWire: string | null;
+  elastics: ElasticClass;
+  elasticNote: string | null;
+  done: string | null;
+  nextWeeks: number;
+  note: string | null;
+  recordedBy: string;
+}
+export interface OrthoClinicalDetail {
+  /** Server-resolved zone supplied by the canonical detail read. */
+  clinicTimeZone?: string;
+  /** Present on the canonical saved-detail projection; not mutation authority. */
+  editVersion?: string | null;
+  projection: "case-clinical";
+  case: OrthoClinicalCase;
+  adjustments: OrthoClinicalAdjustment[];
+  hasMore: boolean;
+  progress: CaseProgress | null;
+  today: string;
+}

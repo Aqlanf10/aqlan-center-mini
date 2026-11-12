@@ -118,6 +118,9 @@ async function open(width: number, targetPatientId = patientId) {
   };
   try {
     await page.goto(`${baseUrl}/patients/${targetPatientId}?tab=ortho`, { waitUntil: "domcontentloaded" });
+    // DOMContentLoaded precedes the asynchronously hydrated patient workspace.
+    // Await the real section before asserting its single held request.
+    await page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact: true }).waitFor();
     await expect.poll(() => pending.length).toBe(1);
     const panel = page.getByRole("region", { name: "اتفاق التقويم", exact: true });
     await page.getByText("ربط خطة علاج أو اتفاق قائم", { exact: true }).click();

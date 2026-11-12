@@ -16,6 +16,9 @@ import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { OrthoRetentionFollowupContext } from "@/components/OrthoRetentionFollowupContext";
 import { clinicalContextHref } from "@/lib/patient-navigation";
+import { useSession } from "@/components/SessionProvider";
+import { CanonicalOrthoPendingDecisions } from "@/components/CanonicalOrthoPendingDecisions";
+import { CanonicalOrthoFollowups } from "@/components/CanonicalOrthoFollowups";
 
 /**
  * مركز متابعة التقويم — قائمة يومية للاستقبال.
@@ -46,6 +49,13 @@ const TONE_CLASS: Record<string, string> = {
 };
 
 export default function OrthoFollowupPage() {
+  const session = useSession();
+  if (!session) return null;
+  const canReadDecisions = session.isOwner === true || session.capabilities?.includes("clinical.ortho.view") && (session.patientScope === "own" || session.patientScope === "all");
+  return session.canonical ? <>{canReadDecisions ? <CanonicalOrthoPendingDecisions key={`${session.username}:${session.patientScope}:${session.capabilities?.join(",")}`} /> : null}<CanonicalOrthoFollowups /></> : <LegacyOrthoFollowupPage />;
+}
+
+function LegacyOrthoFollowupPage() {
   const fallbackToday = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const [feed, setFeed] = useState<BoardFeed | null>(null);
   const today = feed?.today ?? fallbackToday;

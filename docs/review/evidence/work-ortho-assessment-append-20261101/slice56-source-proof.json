@@ -1,0 +1,21 @@
+{
+  "baseRevision": "70faacd49dbde22a4606aff72190f21eb0deba41",
+  "checks": {
+    "native immutable insert": true,
+    "command fingerprint": true,
+    "persisted calculation": true,
+    "copy source validation": true,
+    "same actor receipt": true,
+    "head comparison": true,
+    "lib/ortho-assessment-command-v2.ts unchanged": true,
+    "lib/ortho-assessment-persisted-v2.ts unchanged": true,
+    "lib/ortho-assessment-versioned-sources.ts unchanged": true,
+    "lib/ortho-assessment-owner-v2.ts unchanged": true,
+    "lib/ortho-assessment-editor-v2.ts unchanged": true,
+    "lib/ortho-assessment-authority.ts unchanged": true,
+    "lib/staff-operation-runtime.ts unchanged": true,
+    "lib/canonical-patient-reads.ts unchanged": true,
+    "lib/ortho-documentation-context.ts unchanged": true
+  },
+  "limits": "Not a proof of whole program correctness. New canonical authority/source policy and budget guard require tests/review; legacy helper extraction adds fresh checks and final budget refusal."
+}

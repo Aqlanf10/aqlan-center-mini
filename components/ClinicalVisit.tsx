@@ -1,10 +1,15 @@
 "use client";
 
+import { LabWorkDraftFields, LabWorkOrderLink, appendLabRetirement, newLabWorkDraft, useLabWorkCapability } from "./LabWorkDraftFields";
+import { parseLabWorkDraft, type LabWorkDraft, type LabWorkRetirement } from "@/lib/lab-work-intent-contract";
+import { validateClinicalLabOriginBody } from "@/lib/lab-origin-preflight";
+import { useClinicalLabCommand } from "./useClinicalLabCommand";
 import { UNVERIFIED_VISIT_INVOICE_LABEL } from "@/lib/visit-financial-presentation";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { adjustmentTextAdmissionError } from "@/lib/ortho-adjustment-text-input";
 import { parseAdjustmentInterval, ADJUSTMENT_INTERVAL_ERROR } from "@/lib/ortho-adjustment-interval";
+import { clinicalSaveFailureMessage } from "@/lib/clinical-save-failure-message";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { isValidTooth, normalizeSurfaces, toothName } from "@/lib/dental";
@@ -28,6 +33,7 @@ import VisitFinancialSources from "@/components/VisitFinancialSources";
 import { canViewMoney, isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "@/lib/ortho";
+import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 import { VisitPhraseField as Field } from "./VisitPhraseField";
 import { VisitPlanRequirements } from "./VisitPlanRequirements";
 import { VisitMaterials } from "./VisitMaterials";
@@ -89,13 +95,14 @@ const CURRENCY_CHOICES: { value: Currency; label: string }[] = [
 ];
 interface Doctor { id: number; name: string }
 interface Visit {
+  labWorkIntentSupported?: boolean; labWorkIntentRequired?: boolean; labSignVersion?: string;
   id: number; patientId: number | null; patientName: string;
   chiefComplaint: string | null; examination: string | null; diagnosis: string | null;
   treatmentDone: string | null; nextPlan: string | null; addendum: string | null;
   doctorId: number | null; status: "open" | "signed";
   signedAt: string | null; signedBy: string | null; invoiceId: number | null;
   invoiceReferenceState?: import("@/lib/visit-financial-presentation").VisitInvoiceReferenceState;
-  procedures: ProcedureLine[]; totalMinor: number;
+  procedures: (ProcedureLine & { labWork?: LabWorkDraft; labWorkOrderId?: number | null })[]; totalMinor: number;
   planItemsMatched: number; planTitle: string | null; planWarning: string | null;
   amendedServiceConflict: boolean;
   ortho: {
@@ -106,16 +113,17 @@ interface Visit {
     suggestedUpper: string | null; suggestedLower: string | null;
     /** (CASE-1) شدّة هذه الزيارة إن سُجّلت — فلا تُرسل مرةً ثانية. */
     visitAdjustmentId: number | null; legacyBaseline: boolean; nextWeeks: number;
-    adjustmentBillingClass: "INCLUDED" | "LEGACY_INCLUDED" | "NEW_BILLABLE" | "OUTSIDE_CONTRACT" | "NO_CHARGE";
+    adjustmentBillingClass: "INCLUDED" | "LEGACY_INCLUDED" | "NEW_BILLABLE" | "OUTSIDE_CONTRACT" | "REVIEW_REQUIRED" | "NO_CHARGE";
   } | null;
   plannedVisit: {
     id: number; title: string; sequence: number;
     planTitle: string | null; doctorId: number | null; durationMinutes: number;
+    remainingWork?: string | null; durationWarning?: string | null;
   } | null;
   previousVisit: {
     id: number; date: string; treatmentDone: string | null;
     nextPlan: string | null; proceduresSummary: string | null;
-    diagnosis?: string | null;
+    diagnosis?: string | null; examination?: string | null;
   } | null;
   /** (P0-E) آخر تشخيص موثَّق والحالات الجارية بخطوتها التالية — سياقٌ لا يبدأ فارغًا. */
   latestDiagnosis?: { text: string; date: string } | null;
@@ -125,6 +133,7 @@ interface Visit {
     historicalProgressUnknown?: boolean;
   }[];
   outstanding: {
+    labWork?: LabWorkDraft; labWorkOrderId?: number | null;
     planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
     toothCode: number | null; surfaces?: string | null; billingRule: BillingRule;
     caseId?: number | null; caseSite?: string | null; origin?: string;
@@ -171,7 +180,9 @@ type NoteKey = "chiefComplaint" | "examination" | "diagnosis" | "treatmentDone" 
 function matchesSubmittedVisit(loaded: Visit, body: Record<string, unknown>): boolean {
   const noteKeys: NoteKey[] = ["chiefComplaint", "examination", "diagnosis", "treatmentDone", "nextPlan"];
   if (noteKeys.some((key) => (loaded[key] ?? "") !== (typeof body[key] === "string" ? (body[key] as string).trim().slice(0, key === "chiefComplaint" || key === "nextPlan" ? 500 : 2000) : ""))
-    || loaded.doctorId !== body.doctorId
+    ) return false;
+  if (!Object.hasOwn(body,"procedures")) return Object.keys(body).every(key=>noteKeys.includes(key as NoteKey));
+  if (loaded.doctorId !== body.doctorId
     || (loaded.billingCurrency ?? CLINIC_BASE_CURRENCY) !== body.billingCurrency
     || !Array.isArray(body.procedures) || loaded.procedures.length !== body.procedures.length) return false;
   const identity = (row: Record<string, unknown>) => JSON.stringify([
@@ -184,6 +195,13 @@ function matchesSubmittedVisit(loaded: Visit, body: Record<string, unknown>): bo
     if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) return false;
     const requested = submitted as Record<string, unknown>;
     if (identity(row as unknown as Record<string, unknown>) !== identity(requested)) return false;
+    if (requested.labWork) {
+      let want:LabWorkDraft|null;
+      try { want=parseLabWorkDraft(requested.labWork); } catch { return false; }
+      const got=row.labWork;
+      if(!want || !got || got.intentId!==want.intentId || got.memberId!==want.memberId || got.groupKind!==want.groupKind
+        || got.expectedRevision<want.expectedRevision || JSON.stringify(got.prescription)!==JSON.stringify(want.prescription))return false;
+    } else if(row.labWork)return false;
     if (row.planItemId != null) {
       // Linked quantities/prices belong to the server's current session rules.
       // Adopt the authorized canonical estimate; do not recreate pricing here.
@@ -203,7 +221,7 @@ export interface VisitSignResult {
   invoiceCurrency: Currency | null;
   duesMinor: number;
   sessionsCompleted: number;
-  nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number; suggestedDate?: string | null; afterDays?: number | null } | null;
+  nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number; remainingWork?: string | null; durationWarning?: string | null; suggestedDate?: string | null; afterDays?: number | null } | null;
   /** طلبات مختبر تولّدت تلقائيًا من إجراءات المعمل (§١٩). */
   labOrdersCreated?: number;
   /** حركات مستهلكات خُصمت تلقائيًا (§٢٠). */
@@ -213,6 +231,8 @@ export interface VisitSignResult {
 }
 
 interface Draft {
+  labWork?: LabWorkDraft;
+  labWorkOrderId?: number | null;
   /** Display-only eligibility: saved category or an explicitly picked catalog service. Never submitted. */
   labCategory: string | null;
   serviceId: number; toothCode: string; surfaces: string; quantity: number;
@@ -231,6 +251,7 @@ interface BillingPreview {
   duesByCurrency: Partial<Record<Currency, number>>;
   mixedCurrencies: boolean;
   zeroReason: string | null;
+  orthoAdjustment?: string | null;
 }
 
 export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedPatientId, onNavigationGuardChange, onPreviousVisitReferenceChange }: {
@@ -251,6 +272,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
      للطبيب والمدير وحدهما — والخادم يرفض غير ذلك صراحةً. */
   const canWrite = isAdmin(session?.role) || session?.role === "doctor" || session?.role === "assistant";
   const canEditWork = isAdmin(session?.role) || session?.role === "doctor";
+  const labWorkSupported = useLabWorkCapability(JSON.stringify([session?.username, session?.role, session?.permissions, visitId]), canEditWork);
 
   // A retained component may receive another visit or principal. A fresh token
   // also distinguishes A→B→A, so identity equality cannot revive old requests.
@@ -297,6 +319,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const [services, setServices] = useState<Service[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [labRetirements, setLabRetirements] = useState<LabWorkRetirement[]>([]);
+  const labProtocol = canEditWork && ownsVisit && !!(visit?.labWorkIntentRequired || drafts.some(row=>row.labWork) || labRetirements.length);
+  const labCommand = useClinicalLabCommand(owner, ownsVisit && visit?.patientId && session?.username ? {actor:session.username,patientId:visit.patientId,visitId} : null, ownsVisit && canWrite && !!visit?.patientId && !!session?.username, session?.username?{actor:session.username,visitId}:undefined, visit?.labWorkIntentSupported===false&&!visit?.labWorkIntentRequired&&!labProtocol);
   /** (DAY1) عملة الزيارة — الإجراءات الحرّة تُسعَّر وتُفوتر بها. */
   const [visitCurrency, setVisitCurrency] = useState<Currency>(CLINIC_BASE_CURRENCY);
   const [notes, setNotes] = useState({
@@ -309,7 +334,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   }, [owner, notes, drafts, doctorId, visitCurrency]);
   /* (CASE-1) شدّة التقويم في هذه الزيارة — تُرسل مع التوقيع وتُكتب في معاملته، مرةً واحدة. */
   const [orthoSession, setOrthoSession] = useState<{
-    upperWire: string; lowerWire: string; elastics: ElasticClass | ""; elasticNote: string; done: string; nextWeeks: string;
+    upperWire: string; lowerWire: string; upperWireAction?: "remove"; lowerWireAction?: "remove"; elastics: ElasticClass | ""; elasticNote: string; done: string; nextWeeks: string;
   } | null>(null);
   const adjustmentTextError = orthoSession ? adjustmentTextAdmissionError(orthoSession) : null;
   const adjustmentInterval = orthoSession ? parseAdjustmentInterval(orthoSession.nextWeeks) : null;
@@ -533,13 +558,16 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       const nextNotes = {
         // A scheduled adjustment is reference context, not a new complaint.
         chiefComplaint: pick("chiefComplaint", loaded.chiefComplaint,
-          orthodonticDraft || loaded.ortho?.visitAdjustmentId != null ? null : suggested?.chiefComplaint),
+          orthodonticDraft || loaded.previousVisit || loaded.ortho?.visitAdjustmentId != null ? null : suggested?.chiefComplaint),
         examination: loaded.examination ?? "",
         diagnosis: loaded.diagnosis ?? "", treatmentDone: loaded.treatmentDone ?? "",
         nextPlan: pick("nextPlan", loaded.nextPlan, suggested?.nextPlan),
       };
-      if (!loaded.doctorId && suggested?.doctorId) filled.add("doctor");
-      const nextDoctorId = loaded.doctorId ?? suggested?.doctorId ?? null;
+      const nextDoctors: Doctor[] = Array.isArray(parties) ? parties : parties?.balances ?? [];
+      const suggestedDoctorId = partyResponse.ok && nextDoctors.some(doctor => doctor.id === suggested?.doctorId)
+        ? suggested?.doctorId ?? null : null;
+      if (!loaded.doctorId && suggestedDoctorId) filled.add("doctor");
+      const nextDoctorId = loaded.doctorId ?? suggestedDoctorId;
       const loadedCurrency: Currency = isCurrency(loaded.billingCurrency) ? loaded.billingCurrency : CLINIC_BASE_CURRENCY;
       /* (المراجعة النهائية للمالك — TD-05) العملة ملك البند لا الزيارة:
        * كل سطرٍ يُشتق عملته من **بند خطته هو** في الحمولة المحمّلة نفسها
@@ -553,6 +581,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           ? (line.planCurrency as Currency)
           : loadedCurrency;
         return {
+          ...(line.labWork ? { labWork: parseLabWorkDraft(line.labWork)!, labWorkOrderId: line.labWorkOrderId } : {}),
           labCategory: line.category,
           serviceId: line.serviceId, toothCode: line.toothCode ? String(line.toothCode) : "",
           surfaces: line.surfaces ?? "", quantity: line.quantity,
@@ -562,7 +591,6 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           currency: lineCurrency,
         };
       });
-      const nextDoctors = Array.isArray(parties) ? parties : parties?.balances ?? [];
       const newOwner = lastAppliedOwner.current !== owner;
       if (newOwner) {
         setOrthoSession(null); setAddendum(""); setReviewOpen(false);
@@ -580,7 +608,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         && draftForLeave.current.owner === owner && draftForLeave.current.dirty
         && (!savedDraftMatches || draftSnapshot.current !== submitted?.snapshot);
       if (!keepLocalDraft) {
-        setNotes(nextNotes); setDrafts(nextDrafts);
+        setNotes(nextNotes); setDrafts(nextDrafts); setLabRetirements([]);
         setDoctorId(nextDoctorId); setAutoFilled(filled); setVisitCurrency(loadedCurrency); setDirty(false);
       }
       if (serviceResponse.ok || newOwner) setServices(catalog ?? []);
@@ -628,43 +656,68 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const setNote = (key: NoteKey, value: string) => {
     // A save reloads its submitted snapshot. Do not accept newer edits until
     // both the write and that reload have finished.
-    if (busy || !ownsVisit || !currentOwner() || command.current?.owner === owner) return;
+    if (busy || labCommand.blocked || !ownsVisit || !currentOwner() || command.current?.owner === owner) return;
     draftForLeave.current = { owner, dirty: true }; setDirty(true);
     if (key === "treatmentDone") explicitTreatmentOwner.current = owner;
     setNotes((current) => ({ ...current, [key]: value }));
     setAutoFilled((current) => { if (!current.has(key)) return current; const next = new Set(current); next.delete(key); return next; });
   };
   const send = useCallback(async (body: Record<string, unknown>) => {
-    if (busy || !ownsVisit || acceptedReadOwner.current !== owner || !currentOwner() || command.current?.owner === owner
+    if (busy || (labCommand.blocked && !labCommand.pending) || !ownsVisit || acceptedReadOwner.current !== owner || !currentOwner() || command.current?.owner === owner
       || (confirmedSignOwner.current === owner && body.action !== "addendum")) return false;
     const attempt = { owner }; command.current = attempt;
-    const submitted = body.action ? undefined : { body, snapshot: draftSnapshot.current };
+    let submitted = body.action ? undefined : { body, snapshot: draftSnapshot.current };
     setBusy(true);
     try {
+      return await labCommand.withMutationLock(!body.action&&(labProtocol||labCommand.pending)?"lab":"ordinary",async()=>{
+      if(!currentOwner()||acceptedReadOwner.current!==owner||command.current!==attempt)return false;
+      if (body.action && labCommand.blocked) throw Error("تحقق من حفظ المختبر السابق أولًا.");
+      if (!body.action && labProtocol && !labCommand.pending) {
+        // Category is read evidence only, never used to infer prescription identity.
+        const categories=new Map(draftSnapshot.current.drafts.map(row=>[row.serviceId,row.labCategory]));
+        for(const service of services)categories.set(service.id,service.category);
+        validateClinicalLabOriginBody(body,categories);
+      }
+      const labSubmission = !body.action && (labProtocol || labCommand.pending) ? await labCommand.prepare(body) : null;
+      if (!currentOwner()) return false;
+      const encoded = labSubmission?.body ?? JSON.stringify(body);
+      if (labSubmission) submitted = {body: JSON.parse(encoded), snapshot:draftSnapshot.current};
       const response = await fetch(`/api/visits/${visitId}/clinical`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: encoded,
       });
       const payload = await response.json();
       if (!currentOwner() || command.current !== attempt) return false;
+      if (labSubmission && payload.labWorkOutcome === "rejected") {
+        labCommand.verifyReceipt(payload.labWorkCommand,labSubmission.reference);
+        draftForLeave.current={owner,dirty:false};setDirty(false);
+        if(await load(undefined,orthoSession!==null)) {
+          await labCommand.acknowledge(payload.labWorkCommand,labSubmission.reference);
+          setError(payload.message ?? "رُفض طلب المختبر ولم يُحفظ. حُدّث السجل؛ راجع البيانات ثم صحّحها.");
+        }
+        return false;
+      }
       if (!response.ok) { setError(payload?.message ?? "تعذّر الحفظ."); return false; }
       setError(null);
       const reloaded = await load(undefined, orthoSession !== null, submitted);
+      if (labSubmission && reloaded && currentOwner()) await labCommand.acknowledge(payload.labWorkCommand, labSubmission.reference);
       return reloaded && currentOwner() && command.current === attempt;
-    } catch {
-      if (currentOwner()) setError("تعذّر الاتصال بالخادم.");
+      });
+    } catch (reason) {
+      if (currentOwner()) setError(clinicalSaveFailureMessage(reason));
       return false;
     } finally {
       if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }
     }
-  }, [busy, ownsVisit, currentOwner, owner, visitId, load, orthoSession]);
+  }, [busy, ownsVisit, currentOwner, owner, visitId, load, orthoSession, labCommand, labProtocol, services]);
 
   /** التوقيع — يستجاب بنتيجة الرحلة كاملة فيمرّرها للشبّاك. */
   const signReadSequence = loadSequence.current;
   const sign = useCallback(async () => {
-    if (busy || !ownsVisit || acceptedReadOwner.current !== owner || confirmedSignOwner.current === owner
+    if (busy || labCommand.blocked || !ownsVisit || acceptedReadOwner.current !== owner || confirmedSignOwner.current === owner
       || signReadSequence !== loadSequence.current || visit?.status === "signed"
       || !currentOwner() || command.current?.owner === owner) return;
+    if (!canEditWork && visit?.labWorkIntentRequired) { setError("إنهاء زيارة تتضمن طلب مختبر محفوظ يتطلب الطبيب أو المدير؛ يمكن حفظ الملاحظات فقط."); return; }
     if (adjustmentSnapshot.current.owner !== owner || adjustmentSnapshot.current.session !== orthoSession) return;
     if (orthoSession && visit?.ortho?.visitAdjustmentId === null && adjustmentTextError) {
       setError(adjustmentTextError); return;
@@ -678,6 +731,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       setError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
       return;
     }
+    if (orthoSession && visit?.ortho?.visitAdjustmentId === null) {
+      const checked = checkOrthoSessionDraft({ ...orthoSession, caseId: visit.ortho.caseId });
+      if (!checked.ok) { setError(checked.message); return; }
+    }
     const attempt = { owner }; command.current = attempt;
     setBusy(true);
     setError(null);
@@ -688,17 +745,23 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       setLoadedOwner(null); setReviewOpen(false); setPreviewSnapshot(null);
       setErrorOwner(owner); setError("تعذّر تأكيد نتيجة التوقيع. قد تكون الزيارة وُقّعت؛ أعد تحميل السجل قبل أي محاولة أخرى.");
     };
+    let signPosted=false;
     try {
+      await labCommand.withMutationLock("ordinary",async()=>{
+      if(!currentOwner()||acceptedReadOwner.current!==owner||command.current!==attempt)return;
+      signPosted=true;
       const response = await fetch(`/api/visits/${visitId}/clinical`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "sign", dependencyOverrideReason: overrideReason.trim() || null,
-          outsideContractDecision: noChargeAdjustment && visit?.ortho?.adjustmentBillingClass === "OUTSIDE_CONTRACT"
+          action: "sign", ...(visit?.labSignVersion ? { labSignVersion: visit.labSignVersion } : {}), dependencyOverrideReason: overrideReason.trim() || null,
+          outsideContractDecision: noChargeAdjustment && ["OUTSIDE_CONTRACT", "REVIEW_REQUIRED"].includes(visit?.ortho?.adjustmentBillingClass ?? "")
             ? { decision: "no_charge", reason: noChargeReason.trim() } : null,
           orthoSession: orthoSession && visit?.ortho && visit.ortho.visitAdjustmentId === null
             ? {
               caseId: visit.ortho.caseId,
               upperWire: orthoSession.upperWire, lowerWire: orthoSession.lowerWire,
+              ...(orthoSession.upperWireAction ? { upperWireAction: orthoSession.upperWireAction } : {}),
+              ...(orthoSession.lowerWireAction ? { lowerWireAction: orthoSession.lowerWireAction } : {}),
               elastics: orthoSession.elastics, elasticNote: orthoSession.elasticNote,
               done: orthoSession.done, nextWeeks: adjustmentInterval!,
             }
@@ -745,12 +808,14 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         materialsDeducted: payload.materialsDeducted ?? 0,
         patientId: typeof payload.patientId === "number" ? payload.patientId : null,
       });
-    } catch {
-      unknownOutcome();
+      });
+    } catch (reason) {
+      if(signPosted)unknownOutcome();
+      else if(currentOwner())setError(reason instanceof Error?reason.message:"تعذّر التحقق من قفل الزيارة.");
     } finally {
       if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }
     }
-  }, [busy, ownsVisit, currentOwner, owner, visitId, expectedPatientId, load, onSigned, overrideReason, orthoSession, visit, noChargeAdjustment, noChargeReason, signReadSequence, adjustmentInterval, adjustmentTextError]);
+  }, [busy, ownsVisit, currentOwner, owner, visitId, expectedPatientId, load, onSigned, overrideReason, orthoSession, visit, noChargeAdjustment, noChargeReason, signReadSequence, adjustmentInterval, adjustmentTextError, labCommand, canEditWork]);
 
   /** (VISIT-2) فتح ملف المريض الجديد من زيارته — يعيد رقم الملف أو null مع رسالة الخطأ. */
   const openPatientFile = useCallback(async (id: number): Promise<number | null> => {
@@ -758,6 +823,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     const attempt = { owner }; command.current = attempt;
     setBusy(true);
     try {
+      return await labCommand.withMutationLock("ordinary",async()=>{
+      if(!currentOwner()||acceptedReadOwner.current!==owner||command.current!==attempt)return null;
       const response = await fetch(`/api/visits/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "open_file" }),
@@ -769,13 +836,14 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         return null;
       }
       return Number(payload.patientId);
+      });
     } catch {
       if (currentOwner()) setError("تعذّر الاتصال بالخادم.");
       return null;
     } finally {
       if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }
     }
-  }, [visitId, ownsVisit, currentOwner, owner]);
+  }, [visitId, ownsVisit, currentOwner, owner, labCommand]);
 
   /* (VISIT-2) الوصول من «مراجعة وإنهاء» لمريضٍ فُتح ملفّه للتوّ: تُفتح المراجعة مرةً واحدة. */
   useEffect(() => {
@@ -841,6 +909,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const baselineElasticNote = visit.ortho?.lastAdjustment === null ? visit.ortho.elasticNote?.trim() ?? "" : "";
   // An active case is context, not proof that today's visit is orthodontic.
   const orthoFollowUp = !signed && Boolean(visit.ortho && (orthoSession || visit.ortho.visitAdjustmentId != null));
+  const returnFollowUp = !signed && Boolean(visit.previousVisit);
+  const contextualNotes = orthoFollowUp || returnFollowUp;
   // Hide the added lab display while another visit is still loaded.
   const labVisitIsCurrent = visit.id === visitId;
   // Category metadata describes eligible work, never order/procedure provenance.
@@ -848,11 +918,20 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     .filter((work): work is string => typeof work === "string")));
   const updateDrafts = (update: (rows: Draft[]) => Draft[]) => {
     // Procedure changes also regenerate treatmentDone.
-    if (busy || !currentOwner() || command.current?.owner === owner) return;
+    if (busy || labCommand.blocked || !currentOwner() || command.current?.owner === owner) return;
     draftForLeave.current = { owner, dirty: true }; setDirty(true);
     if (!draftSnapshot.current.notes.treatmentDone.trim()) explicitTreatmentOwner.current = null;
     setDrafts(update);
   };
+  const retireLabMember = (index: number) => {
+    const work = drafts[index]?.labWork;
+    if (!work || busy || labCommand.blocked || !canEditWork || !currentOwner()) return;
+    if (!window.confirm("إلغاء عضوية العمل في مسوّدة المختبر؟ لا يحذف إرسالية أُرسلت أو أي أثر مالي.")) return;
+    setLabRetirements(current => appendLabRetirement(current,work));
+    updateDrafts(rows => rows.map((row,i) => i === index ? {...row,labWork:undefined} : row));
+  };
+  const changeLabWork = (index:number,next:LabWorkDraft) => updateDrafts(rows => rows.map((row,i) => i===index
+    ? {...row,labWork:next} : row.labWork?.intentId===next.intentId ? {...row,labWork:{...row.labWork,prescription:next.prescription}} : row));
   const lines = drafts.map((draft) => ({
     quantity: draft.quantity,
     unitPriceMinor: parseAmount(draft.price, draft.currency) ?? 0,
@@ -895,6 +974,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const serverDueEntries = billingPreview && !billingPreview.mixedCurrencies && !mixedCurrencies
     ? (Object.entries(billingPreview.duesByCurrency) as [Currency, number][]).filter(([, minor]) => minor > 0)
     : null;
+  // Only an actual session needs adjustment coverage; an active case alone is not today's work.
+  // A local no-charge selection is a proposed decision until the sign transaction accepts it.
+  const adjustmentFinancialPending = orthoFollowUp && !["INCLUDED", "LEGACY_INCLUDED", "NO_CHARGE"].includes(billingPreview?.orthoAdjustment ?? "");
   const serverZeroDue = serverDueEntries !== null && serverDueEntries.length === 0;
   const serverDue = serverDueEntries && serverDueEntries.length === 1
     ? { currency: serverDueEntries[0][0], minor: serverDueEntries[0][1] } : null;
@@ -905,10 +987,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const ownerlessPricedWork = doctorId === null && drafts.some((draft) =>
     draft.doctorId === null && (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity > 0);
 
-  const payload = () => ({
+  const payload = () => !canEditWork ? ({...notes}) : ({
     ...notes, doctorId,
     billingCurrency: visitCurrency,
+    ...(labRetirements.length ? { labRetirements } : {}),
     procedures: drafts.map((draft) => ({
+      ...(draft.labWork ? { labWork: draft.labWork } : {}),
       serviceId: draft.serviceId,
       toothCode: draft.toothCode ? Number(draft.toothCode) : null,
       surfaces: draft.surfaces || null,
@@ -932,7 +1016,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const signatureBlock = visitSignatureBlock(visit);
 
   const addPlannedItem = (item: Visit["outstanding"][number]) => {
-    if (busy || !currentOwner() || command.current?.owner === owner) return;
+    if (busy || labCommand.blocked || !canEditWork || !currentOwner() || acceptedReadOwner.current !== owner || command.current?.owner === owner) return;
     // سعر الجلسة القادمة وفق قاعدة البند — نفس دالة الخادم، فيتطابق الرقمان.
     const lineTotal = item.unitPriceMinor * item.quantity;
     const sessionIndex = item.doneSessions + 1;
@@ -950,6 +1034,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         // Plan staging has no canonical category; a later saved read supplies it.
         labCategory: null,
         serviceId: item.serviceId ?? 0,
+        ...(item.labWork ? { labWork: parseLabWorkDraft(item.labWork)!, labWorkOrderId: item.labWorkOrderId } : {}),
         toothCode: item.toothCode ? String(item.toothCode) : "",
         surfaces: item.surfaces ?? "",
         quantity: 1,
@@ -971,7 +1056,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       .slice(0, index)
       .filter((row) => row.planItemId === draft.planItemId).length;
     const sessionIndex = item.doneSessions + occurrencesBefore + 1;
-    return sessionPriceNote(item.billingRule, sessionIndex, item.sessionCount);
+    return sessionPriceNote(item.billingRule, sessionIndex, item.sessionCount, item);
   };
 
   const canChangeAdjustment = () => !busy && currentOwner() && command.current?.owner !== owner;
@@ -1007,13 +1092,21 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                     <label className="text-[10px] font-bold text-slate-600">
                       السلك العلوي
                       <input value={orthoSession.upperWire} dir="ltr" aria-label="السلك العلوي لهذه الشدّة"
-                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, upperWire: event.target.value })}
+                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, upperWire: event.target.value, upperWireAction: undefined })}
                         className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
+                    </label>
+                    <label className="mt-1 flex items-center gap-1 text-[10px] font-bold text-slate-600">
+                      <input type="checkbox" aria-label="إزالة السلك العلوي لهذه الشدّة" checked={orthoSession.upperWireAction === "remove"}
+                        onChange={event => canChangeAdjustment() && changeAdjustment({ ...orthoSession,
+                          upperWireAction: event.target.checked ? "remove" : undefined,
+                          upperWire: event.target.checked ? "" : visit.ortho?.upperWire ?? "",
+                        })} />
+                      إزالة السلك العلوي صراحةً
                     </label>
                     {visit.ortho.suggestedUpper && visit.ortho.suggestedUpper !== visit.ortho.upperWire ? (
                       <button type="button" aria-label="استخدام السلك العلوي المقترح"
                         disabled={busy || orthoSession.upperWire === visit.ortho.suggestedUpper}
-                        onClick={() => { if (canChangeAdjustment() && visit.ortho?.suggestedUpper) changeAdjustment({ ...orthoSession, upperWire: visit.ortho.suggestedUpper }); }}
+                        onClick={() => { if (canChangeAdjustment() && visit.ortho?.suggestedUpper) changeAdjustment({ ...orthoSession, upperWire: visit.ortho.suggestedUpper, upperWireAction: undefined }); }}
                         className="mt-1 text-[10px] font-bold text-navy-800 underline disabled:text-slate-400">
                         اقتراح اختياري: <span dir="ltr">{visit.ortho.suggestedUpper}</span>
                       </button>
@@ -1023,13 +1116,21 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                     <label className="text-[10px] font-bold text-slate-600">
                       السلك السفلي
                       <input value={orthoSession.lowerWire} dir="ltr" aria-label="السلك السفلي لهذه الشدّة"
-                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, lowerWire: event.target.value })}
+                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, lowerWire: event.target.value, lowerWireAction: undefined })}
                         className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
+                    </label>
+                    <label className="mt-1 flex items-center gap-1 text-[10px] font-bold text-slate-600">
+                      <input type="checkbox" aria-label="إزالة السلك السفلي لهذه الشدّة" checked={orthoSession.lowerWireAction === "remove"}
+                        onChange={event => canChangeAdjustment() && changeAdjustment({ ...orthoSession,
+                          lowerWireAction: event.target.checked ? "remove" : undefined,
+                          lowerWire: event.target.checked ? "" : visit.ortho?.lowerWire ?? "",
+                        })} />
+                      إزالة السلك السفلي صراحةً
                     </label>
                     {visit.ortho.suggestedLower && visit.ortho.suggestedLower !== visit.ortho.lowerWire ? (
                       <button type="button" aria-label="استخدام السلك السفلي المقترح"
                         disabled={busy || orthoSession.lowerWire === visit.ortho.suggestedLower}
-                        onClick={() => { if (canChangeAdjustment() && visit.ortho?.suggestedLower) changeAdjustment({ ...orthoSession, lowerWire: visit.ortho.suggestedLower }); }}
+                        onClick={() => { if (canChangeAdjustment() && visit.ortho?.suggestedLower) changeAdjustment({ ...orthoSession, lowerWire: visit.ortho.suggestedLower, lowerWireAction: undefined }); }}
                         className="mt-1 text-[10px] font-bold text-navy-800 underline disabled:text-slate-400">
                         اقتراح اختياري: <span dir="ltr">{visit.ortho.suggestedLower}</span>
                       </button>
@@ -1074,7 +1175,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                       className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
                   </label>
                   <p className="col-span-2 text-[10px] text-navy-700 sm:col-span-3">
-                    يبدأ السلك والمطاطات بالقيم الحالية؛ عدّل فقط ما تغيّر اليوم. اختيار السلك المقترح اختياري ولا يُطبّق تلقائيًا. تُحفظ الشدّة مع التوقيع فقط، وليس مع «احفظ بلا توقيع».
+                    يبدأ السلك والمطاطات بالقيم الحالية؛ عدّل فقط ما تغيّر اليوم. تفريغ حقل السلك يبقي السابق؛ للإزالة اختر إزالة السلك صراحةً. اختيار السلك المقترح اختياري ولا يُطبّق تلقائيًا. تُحفظ الشدّة مع التوقيع فقط، وليس مع «احفظ بلا توقيع».
                     <button type="button" onClick={() => { if (canChangeAdjustment()) changeAdjustment(null); }}
                       className="ms-2 font-bold text-slate-600 underline">إلغاء</button>
                   </p>
@@ -1101,11 +1202,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                   {visit.ortho.adjustmentBillingClass === "LEGACY_INCLUDED"
                     ? "شدّة مشمولة بالعلاج السابق؛ لا فاتورة جديدة للشدّة نفسها."
                     : visit.ortho.adjustmentBillingClass === "INCLUDED"
-                      ? "شدّة مشمولة باتفاق الأقساط؛ لا فاتورة مستقلة للشدّة."
-                      : "الشدّة خارج العقد — لا فاتورة تلقائية. فوترها بإضافة خدمة «شدّة تقويم»، أو اخترها «بلا رسوم» بسبب، أو تبقى معلّقة لقرار لاحق."}
+                      ? "شدّة مشمولة بالتغطية المالية المسجّلة؛ لا فاتورة مستقلة للشدّة."
+                      : visit.ortho.adjustmentBillingClass === "REVIEW_REQUIRED"
+                        ? "شمول المتابعة ضمن الاتفاق غير محدد؛ راجع نطاق المتابعات في حالة التقويم. لا رسوم أو فاتورة تلقائية، ولا يلزم إنشاء اتفاق أقساط بديل."
+                        : "الشدّة خارج العقد — لا فاتورة تلقائية. فوترها بإضافة خدمة «شدّة تقويم»، أو اخترها «بلا رسوم» بسبب، أو تبقى معلّقة لقرار لاحق."}
                 </p>
               )}
-              {visit.status === "open" && canEditWork && visit.ortho.adjustmentBillingClass === "OUTSIDE_CONTRACT"
+              {visit.status === "open" && canEditWork && ["OUTSIDE_CONTRACT", "REVIEW_REQUIRED"].includes(visit.ortho.adjustmentBillingClass)
                 && (visit.ortho.visitAdjustmentId !== null || orthoSession !== null) ? (
                 <div className="mt-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px]">
                   <label className="flex items-center gap-1.5 font-bold text-rose-900">
@@ -1133,20 +1236,24 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       {visit.plannedVisit ? (
         <div className="mb-3 rounded-xl border border-navy-200 bg-navy-50 px-3 py-2">
           <p className="text-xs font-extrabold text-navy-900">
-            مخطَّط لهذه الزيارة: {visit.plannedVisit.title}
+            مخطَّط لهذه الزيارة: {visit.plannedVisit.remainingWork ?? visit.plannedVisit.title}
             {visit.plannedVisit.planTitle ? ` · ${visit.plannedVisit.planTitle}` : ""}
           </p>
+          {visit.plannedVisit.remainingWork ? <p className="text-[11px] text-navy-800">العنوان الأصلي: {visit.plannedVisit.title}</p> : null}
           <p className="text-[11px] text-navy-800">
-            زيارة {visit.plannedVisit.sequence} · مدة مقترحة {visit.plannedVisit.durationMinutes} دقيقة
+            زيارة {visit.plannedVisit.sequence} · {visit.plannedVisit.durationWarning ? "المدة الأصلية" : "مدة مقترحة"} {visit.plannedVisit.durationMinutes} دقيقة
           </p>
+          {visit.plannedVisit.durationWarning ? <p role="status" className="mt-1 text-[11px] font-bold text-amber-800">{visit.plannedVisit.durationWarning}</p> : null}
         </div>
       ) : null}
 
       {!signed && visit.previousVisit ? (
         <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
           <p className="text-[11px] font-extrabold text-slate-700">
-            آخر زيارة ({visit.previousVisit.date}):
+            مرجع للقراءة فقط — زيارة سابقة ({visit.previousVisit.date}):
           </p>
+          {visit.previousVisit.examination ? <p className="text-[11px] text-slate-600">الفحص السابق: {visit.previousVisit.examination}</p> : null}
+          {visit.previousVisit.diagnosis ? <p className="text-[11px] text-slate-600">التشخيص السابق: {visit.previousVisit.diagnosis}</p> : null}
           <p className="text-[11px] text-slate-600">
             {visit.previousVisit.proceduresSummary ?? visit.previousVisit.treatmentDone ?? "كشف"}
             {visit.previousVisit.nextPlan ? ` · الخطة حينها: ${visit.previousVisit.nextPlan}` : ""}
@@ -1179,7 +1286,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   );
   const visitNotes = (
       <div id="visit-notes" className="mb-4 grid scroll-mt-4 gap-2 sm:grid-cols-2">
-        {orthoFollowUp ? (
+        {contextualNotes ? (
           <>
             <Field label="شكوى جديدة أو تغيّر اليوم (إن وجد)" maxLength={500} value={notes.chiefComplaint} disabled={busy || !canWrite}
               phrases={phrases.chiefComplaint} onPhrase={(phrase) => setNote("chiefComplaint", appendPhrase(notes.chiefComplaint, phrase))}
@@ -1188,8 +1295,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               auto={autoFilled.has("nextPlan")} phrases={phrases.nextPlan}
               onPhrase={(phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
               onChange={(value) => setNote("nextPlan", value)} />
+            <Field label={orthoFollowUp ? "توثيق عمل إضافي اليوم" : "ما نُفّذ اليوم"} value={notes.treatmentDone} disabled={busy || !canWrite}
+              hint={notes.treatmentDone && notes.treatmentDone === autoTreatmentText ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
+              onChange={(value) => setNote("treatmentDone", value)} />
             <details className="rounded-xl border border-slate-200 p-3 sm:col-span-2"
-              open={Boolean(notes.examination || notes.diagnosis || notes.treatmentDone)}>
+              open={Boolean(notes.examination || notes.diagnosis)}>
               <summary className="cursor-pointer text-xs font-bold text-slate-600">فحص أو تشخيص جديد / توثيق إضافي اليوم</summary>
               <p className="mt-1 text-[11px] text-slate-500">عند وجود تغيّر أو عمل إضافي، سجّله هنا. يبقى التوثيق السابق في مرجع الحالة.</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -1199,9 +1309,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                 <Field label="تشخيص جديد أو محدّث (إن وجد)" value={notes.diagnosis} disabled={busy || !canWrite}
                   phrases={phrases.diagnosis} onPhrase={(phrase) => setNote("diagnosis", appendPhrase(notes.diagnosis, phrase))}
                   onChange={(value) => setNote("diagnosis", value)} />
-                <Field label="توثيق عمل إضافي اليوم" value={notes.treatmentDone} disabled={busy || !canWrite}
-                  hint={notes.treatmentDone && notes.treatmentDone === autoTreatmentText ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
-                  onChange={(value) => setNote("treatmentDone", value)} />
+
               </div>
             </details>
           </>
@@ -1211,15 +1319,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           ["examination", "② الفحص", phrases.examination],
           ["diagnosis", "② التشخيص", phrases.diagnosis],
         ] as [NoteKey, string, string[]][]).map(([key, label, list]) => (
-          <Field key={key} label={label} maxLength={key === "chiefComplaint" ? 500 : 2000} value={notes[key]} disabled={signed || busy || !canWrite}
+          <Field key={key} label={label} maxLength={key === "chiefComplaint" ? 500 : 2000} value={notes[key]} disabled={signed || busy || labCommand.blocked || !canWrite}
             auto={autoFilled.has(key)} phrases={signed ? [] : list}
             onPhrase={signed ? undefined : (phrase) => setNote(key, appendPhrase(notes[key], phrase))}
             onChange={(value) => setNote(key, value)} />
         ))}
-        <Field label="③ ما نُفّذ" value={notes.treatmentDone} disabled={signed || busy || !canWrite}
+        <Field label="③ ما نُفّذ" value={notes.treatmentDone} disabled={signed || busy || labCommand.blocked || !canWrite}
           hint={!signed && notes.treatmentDone && notes.treatmentDone === autoTreatmentText ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
           onChange={(value) => setNote("treatmentDone", value)} />
-        <Field label="الخطة القادمة" maxLength={500} value={notes.nextPlan} disabled={signed || busy || !canWrite}
+        <Field label="الخطة القادمة" maxLength={500} value={notes.nextPlan} disabled={signed || busy || labCommand.blocked || !canWrite}
           auto={autoFilled.has("nextPlan")} phrases={signed ? [] : phrases.nextPlan}
           onPhrase={signed ? undefined : (phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
           onChange={(value) => setNote("nextPlan", value)} />
@@ -1229,9 +1337,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             الطبيب المعالج
             {autoFilled.has("doctor") ? <span className="mr-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">✨ تلقائي</span> : null}
           </span>
-          <select value={doctorId ?? ""} disabled={signed || busy || !canEditWork}
+          <select value={doctorId ?? ""} disabled={signed || busy || labCommand.blocked || !canEditWork}
             onChange={(event) => {
-              if (busy || !currentOwner()) return;
+              if (busy || labCommand.blocked || !currentOwner()) return;
               draftForLeave.current = { owner, dirty: true }; setDirty(true); setDoctorId(Number(event.target.value) || null);
               setAutoFilled((current) => { const next = new Set(current); next.delete("doctor"); return next; });
             }}
@@ -1246,6 +1354,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
   return (
     <div key={owner.generation}>
+      {labCommand.error && <div role="alert"><p>{labCommand.error}</p><button type="button" className="min-h-11 rounded border px-3" onClick={()=>labCommand.retryReference()}>إعادة قراءة مرجع الحفظ</button></div>}
+      {labCommand.pending && <section role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm"><p>نتيجة حفظ المختبر السابق تحتاج تأكيدًا. التعديل والتوقيع متوقفان حتى إثبات النتيجة؛ لا تُنشأ إرسالية أخرى.</p>
+       {!canEditWork&&<p>هذه العملية السريرية المعلّقة تحتاج جلسة طبيب أو مدير مخوّل للتحقق؛ لا يتيح تغيير الدور تجاوزها.</p>}
+       <button type="button" disabled={busy||!canEditWork} className="min-h-11 border rounded px-3" onClick={()=>void labCommand.withMutationLock("reconcile",async()=>{const found=await labCommand.reconcile();if(found&&currentOwner()){draftForLeave.current={owner,dirty:false};setDirty(false);if(await load()){await labCommand.acknowledge(found.receipt,found.reference);if(found.outcome==="rejected")setError("ثبت رفض الطلب السابق ولم يُحفظ. حُدّث السجل؛ راجع البيانات ثم صحّحها قبل الحفظ.");}}}).catch(reason=>{if(currentOwner())setError(reason instanceof Error?reason.message:"تعذّر التحقق.");})}>التحقق من نتيجة الحفظ</button>
+       {canEditWork && labCommand.canRetry && <button type="button" disabled={busy} className="min-h-11 border rounded px-3" onClick={()=>void send({})}>إعادة الطلب الأصلي دون تغيير</button>}
+      </section>}
+      <fieldset disabled={labCommand.blocked} aria-label="بيانات الزيارة" className="m-0 min-w-0 border-0 p-0">
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
       ) : null}
@@ -1325,6 +1440,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         { id: "visit-notes", label: "تغيّرات اليوم", done: Boolean(notes.chiefComplaint.trim() || notes.nextPlan.trim()) },
         { id: "visit-procedures", label: "إجراءات إضافية", done: drafts.length > 0 },
         { id: "visit-sign", label: "المراجعة والتوقيع", done: false },
+      ] : returnFollowUp ? [
+        { id: "visit-notes", label: "تغيّرات اليوم والخطوة القادمة", done: Boolean(notes.chiefComplaint.trim() || notes.nextPlan.trim()) },
+        { id: "visit-notes", label: "ما نُفّذ اليوم", done: Boolean(notes.treatmentDone.trim()) || drafts.length > 0 },
+        { id: "visit-sign", label: "المراجعة والتوقيع", done: false },
       ] : [
         { id: "visit-notes", label: "الشكوى", done: Boolean(notes.chiefComplaint.trim()) || signed },
         { id: "visit-notes", label: "الفحص والتشخيص", done: Boolean(notes.examination.trim() || notes.diagnosis.trim()) || signed },
@@ -1393,7 +1512,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       ) : <>{visitReference}{visitNotes}</>}
 
       <section id="visit-procedures" className="mb-4 min-w-0 scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3" aria-label="قائمة عمل الزيارة">
-        <fieldset disabled={busy || !canEditWork} className="m-0 min-w-0 border-0 p-0">
+        <fieldset disabled={busy || labCommand.blocked || !canEditWork} className="m-0 min-w-0 border-0 p-0">
         {!signed && canWrite ? (
           <div className="mb-2 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="عملة الزيارة">
             <span className="text-xs font-extrabold text-navy-900">عملة الزيارة:</span>
@@ -1457,7 +1576,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               base={visitCurrency}
               catalogCurrency={visitCurrency}
               searchable
-              disabled={busy || !canEditWork}
+              disabled={busy || labCommand.blocked || !canEditWork}
               placeholder="+ انقر لاختيار إجراء من الدليل المصنف…"
               ariaLabel="أضف إجراءً"
             />
@@ -1493,7 +1612,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                       <span className="text-[10px] text-slate-500">{note}</span>
                     ) : null}
                     {!signed ? (
-                      <button onClick={() => updateDrafts((rows) => rows.filter((_, i) => i !== index))}
+                      <button disabled={!!draft.labWork} title={draft.labWork ? "ألغِ عضوية المختبر صراحةً قبل حذف العمل" : undefined} onClick={() => updateDrafts((rows) => rows.filter((_, i) => i !== index))}
                         className="mr-auto rounded-lg px-2 py-1 text-[11px] font-bold text-danger-700 hover:bg-danger-50">
                         احذف
                       </button>
@@ -1513,15 +1632,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                   {!signed ? (
                     <div className="flex flex-wrap gap-2">
                       <ToothField value={draft.toothCode} className="w-24"
-                        onChange={(toothCode) => updateDrafts((rows) => rows.map((row, i) =>
-                          i === index ? { ...row, toothCode } : row))}
+                        onChange={(toothCode) => { if(draft.labWork)return; updateDrafts((rows) => rows.map((row, i) =>
+                          i === index ? { ...row, toothCode } : row)); }}
                         invalid={Boolean(draft.toothCode) && !isValidTooth(Number(draft.toothCode))} />
                       <input value={draft.surfaces} dir="ltr"
                         onChange={(event) => updateDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, surfaces: event.target.value } : row))}
                         placeholder="الأسطح" aria-label="الأسطح"
                         className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                      <input value={draft.quantity} type="number" min={1} dir="ltr"
+                      <input value={draft.quantity} type="number" min={1} dir="ltr" disabled={!!draft.labWork}
                         onChange={(event) => updateDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, quantity: Math.max(1, Number(event.target.value) || 1) } : row))}
                         aria-label="الكمية"
@@ -1553,6 +1672,16 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                         );
                       })()}
                     </div>
+                  ) : null}
+                  {canEditWork && (draft.labWorkOrderId || !signed && (draft.labWork || labWorkSupported && labWorkForCategory(draft.labCategory))) ? (
+                    draft.labWorkOrderId && visit.patientId ? <LabWorkOrderLink key={`${owner.key}:${owner.generation}:${draft.labWorkOrderId}`} orderId={draft.labWorkOrderId} patientId={visit.patientId} disabled={busy} onChanged={()=>void load()} />
+                    : draft.labWork ? <LabWorkDraftFields value={draft.labWork} workLabel={service?.name ?? "عمل المختبر"} sourceTooth={draft.toothCode ? Number(draft.toothCode) : null}
+                      disabled={busy || labCommand.blocked || !labWorkSupported} onChange={next => changeLabWork(index,next)} onRetire={() => retireLabMember(index)}
+                      bridgeChoices={drafts.filter((other,i) => i !== index && !other.labWorkOrderId && other.labWork?.groupKind === "bridge" && other.labWork.expectedRevision === 0 && other.labWork.intentId !== draft.labWork?.intentId)
+                        .filter((other,i,all) => all.findIndex(one => one.labWork?.intentId === other.labWork?.intentId) === i)
+                        .map(other => ({label:`جسر محدد — سن ${other.toothCode}`,value:other.labWork!}))} />
+                    : <button type="button" disabled={busy || labCommand.blocked || !draft.toothCode} className="mt-2 min-h-11 rounded-lg border border-sky-300 px-3 text-xs font-bold text-sky-900"
+                        onClick={() => changeLabWork(index,newLabWorkDraft(draft.labCategory === "bridge" ? "bridge" : "single"))}>إضافة مواصفات المختبر لهذا العمل</button>
                   ) : null}
                   {draft.planItemId !== null && !signed ? <VisitPlanRequirements item={planItem} /> : null}
                 </li>
@@ -1659,7 +1788,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       ) : canWrite ? (
         <>
           {visit.patientId === null ? (
-            <LinkPatient visitId={visit.id} suggestion={visit.patientName} canAct={currentOwner} onLinked={() => void load()}
+            <LinkPatient runMutation={run=>labCommand.withMutationLock("ordinary",run)} visitId={visit.id} suggestion={visit.patientName} canAct={currentOwner} onLinked={() => void load()}
               onOpenFile={async () => {
                 if (!(await send(payload())) || !currentOwner()) return;
                 const patientId = await openPatientFile(visit.id);
@@ -1699,6 +1828,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               if (orthoSession?.elastics === "" && visit.ortho?.visitAdjustmentId === null) {
                 setError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
                 return;
+              }
+              if (orthoSession && visit.ortho?.visitAdjustmentId === null) {
+                const checked = checkOrthoSessionDraft({ ...orthoSession, caseId: visit.ortho.caseId });
+                if (!checked.ok) { setError(checked.message); return; }
               }
               // الحفظ ثم المراجعة: توقيعٌ يترك ما كُتب في الشاشة غير محفوظ يفقد العمل.
               if (!(await send(payload())) || !currentOwner()) return;
@@ -1768,7 +1901,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                   <dd className="mt-1 space-y-1 text-navy-800">
                     {adjustmentTextError ? <p role="alert">{adjustmentTextError}</p> : null}
                     <p>{orthoSession.done.trim() || "لم يُكتب وصف لما نُفّذ في الشدّة"}</p>
-                    <p>علوي <span dir="ltr">{orthoSession.upperWire || "—"}</span> · سفلي <span dir="ltr">{orthoSession.lowerWire || "—"}</span></p>
+                    <p>علوي <span dir="ltr">{orthoSession.upperWireAction === "remove" ? "إزالة السلك" : orthoSession.upperWire || "دون تغيير"}</span> · سفلي <span dir="ltr">{orthoSession.lowerWireAction === "remove" ? "إزالة السلك" : orthoSession.lowerWire || "دون تغيير"}</span></p>
                     <p>المطاطات: {orthoSession.elastics ? ELASTIC_LABEL[orthoSession.elastics] : "لم يُحدّد الصنف بعد"}{orthoSession.elasticNote ? ` · ${orthoSession.elasticNote}` : ""}</p>
                     <p>{adjustmentInterval === null ? "فترة المتابعة غير صالحة؛ أدخل عددًا صحيحًا من 1 إلى 52 أسبوعًا قبل التوقيع." : <>الشدّة القادمة بعد {adjustmentInterval} أسابيع</>}</p>
                   </dd>
@@ -1846,18 +1979,30 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                 </div>
               ) : null}
 
+              {billingPreview && adjustmentFinancialPending ? (
+                <div role="status" data-testid="ortho-adjustment-financial-pending" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-900">
+                  <dt className="font-extrabold">قرار الشدّة المالي غير محسوم</dt>
+                  <dd>المعاينة تخص الإجراءات المسعّرة؛ لا تثبت تغطية الشدّة أو إعفاءها. يبقى قرارها للمراجعة، وأي اختيار «بلا رسوم» لا يُعتمد إلا عند نجاح التوقيع.</dd>
+                </div>
+              ) : null}
               {signatureBlock || !billingPreview ? (
                 <div role="status" data-testid="visit-financial-review-required" className="rounded-xl border border-amber-300 bg-amber-50 p-3">
                   <dt className="font-extrabold text-amber-900">الاستحقاق المالي غير متحقق</dt>
                   <dd className="mt-1 font-bold text-amber-800">{signatureBlock ?? "لم تكتمل معاينة الاستحقاق من الخادم؛ مبالغ المسودة ليست مبلغًا للتحصيل."}</dd>
                 </div>
+              ) : serverZeroDue && adjustmentFinancialPending ? (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3" data-testid="priced-procedures-zero-due">
+                  <dt className="font-extrabold text-amber-900">الاستحقاق الإضافي للإجراءات المسعّرة: 0</dt>
+                  <dd>هذا ليس إقرارًا بعدم وجود استحقاق للزيارة كاملةً؛ قرار الشدّة غير محسوم.</dd>
+                </div>
               ) : serverZeroDue ? (
                 <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3" data-testid="no-additional-due">
                   <dt className="flex items-center justify-between font-extrabold text-emerald-900">
-                    <span>الاستحقاق المالي اليوم</span>
+                    <span>الاستحقاق الإضافي لهذه الزيارة</span>
                     <span className="text-lg font-black">0</span>
                   </dt>
                   <dd className="mt-1 font-bold text-emerald-800">لا يوجد استحقاق إضافي على المريض لهذه الزيارة</dd>
+                  <dd className="mt-1 text-[11px] text-emerald-800">هذا لا يعني سداد رصيد الاتفاق أو خلو حساب المريض من المديونية.</dd>
                   {billingPreview?.zeroReason ? (
                     <dd className="mt-0.5 text-[11px] font-semibold text-emerald-700">السبب: {billingPreview.zeroReason}</dd>
                   ) : null}
@@ -1913,6 +2058,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                   : !billingPreview ? "تأكيد التوقيع — يعاد التحقق من الاستحقاق في الخادم"
                   : mixedCurrencies || billingPreview?.mixedCurrencies
                     ? "تأكيد إنهاء الزيارة — عملتان: فاصل الإجراءات أولًا"
+                    : adjustmentFinancialPending
+                      ? "وقّع الزيارة — مع مراجعة قرار الشدّة المالي"
                     : serverZeroDue
                       ? "✓ وقّع الزيارة — دون استحقاق إضافي"
                       : serverDue
@@ -1949,6 +2096,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         patientName={visit?.patientName ?? ""}
         initialTreatmentText={notes.treatmentDone || notes.diagnosis || ""}
       />
+      </fieldset>
     </div>
   );
 }
@@ -1981,13 +2129,15 @@ export function VisitSteps({ steps }: { steps: { id: string; label: string; done
  * لا مطابقة صامتة بالاسم: «محمد أحمد» اسمُ رجلين، ودمجُ ملفَّي شخصين يخلط تاريخين
  * طبيّين — وهو أسوأ من تكرار ملفٍّ واحد يُدمج لاحقًا. فالبرنامج يعرض، والطبيب يقرّر.
  */
-function LinkPatient({ visitId, suggestion, canAct, onLinked, onOpenFile }: {
+function LinkPatient({ visitId, suggestion, canAct, onLinked, onOpenFile, runMutation }: {
+  runMutation:(run:()=>Promise<void>)=>Promise<void>;
   visitId: number; suggestion: string; canAct: () => boolean; onLinked: () => void; onOpenFile: () => Promise<void>;
 }) {
   const [term, setTerm] = useState(suggestion);
   const [matches, setMatches] = useState<{ id: number; patientNumber: string; fullName: string; phone: string | null }[]>([]);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error,setError]=useState("");
 
   useEffect(() => {
     if (!open || !canAct()) return;
@@ -2013,11 +2163,15 @@ function LinkPatient({ visitId, suggestion, canAct, onLinked, onOpenFile }: {
     if (busy || !canAct()) return;
     setBusy(true);
     try {
+      await runMutation(async()=>{
+      if(!canAct())return;
       const response = await fetch(`/api/visits/${visitId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "link", patientId }),
       });
       if (response.ok && canAct()) { setOpen(false); onLinked(); }
+      });
+    } catch(reason){if(canAct())setError(reason instanceof Error?reason.message:"تعذّر التحقق من الزيارة.");
     } finally {
       if (canAct()) setBusy(false);
     }
@@ -2025,6 +2179,7 @@ function LinkPatient({ visitId, suggestion, canAct, onLinked, onOpenFile }: {
 
   return (
     <div className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2">
+      {error&&<p role="alert">{error}</p>}
       <p className="text-xs font-bold text-amber-900">
         مريض جديد بلا ملف — افتح له ملفًّا الآن ليُكمل الطبيب كل شيء من ملفّه: الإجراءات وطلب المعمل
         والوصفة، ثم الإنهاء والتحصيل وحجز الجلسة القادمة.

@@ -1,0 +1,15 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  4 passed (4)
+      Tests  41 passed (41)
+   Start at  10:16:59
+   Duration  21.45s (transform 2.55s, setup 0ms, import 4.09s, tests 16.63s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

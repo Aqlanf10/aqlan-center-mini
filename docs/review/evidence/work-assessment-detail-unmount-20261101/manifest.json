@@ -1,0 +1,20 @@
+{
+  "format": "assessment-detail-unmount-v1",
+  "baseRevision": "dc77d4a453c92a1f73a2e6da2d938788fb13d667",
+  "buildId": "8rud9Vg2t4DBvpQ76A7Qo",
+  "scope": "Two-line native owner invalidation on canonical assessment view cleanup; no server/SQL/legacy owner change. Late detail-only replies cannot acknowledge a closed view. Exact in-memory request remains for explicit same-receipt retry.",
+  "before": "Actual first58 build Ms_2w9bEzgofkJpGdMQpx: properly seeded witness1pass1fail7deselected. Earlier standalone filter lacked initial setup and is not the causal reproduction.",
+  "after": "Final8rud build: corrected affected two-file run20/20, including9 assessment cases and11 strategy cases. Combined earlier84/86 failed only because two new witnesses waited on unconsumed stale response bodies; owner-idle and exact-byte/DB-invariance assertions retained. No test timeout raised.",
+  "acceptance": "Focused browser and full combined14731unit/869files passed; fullPG/runtime/exact-headCI and review still pending. This fix is isolated for review; built source also includes local58 strategy work, not mislabeled as an isolated-fix build.",
+  "sourceSha256": {
+    "components/patient/CanonicalOrthoAssessment.tsx": "cee616e21c3e20ade41384761053f61f4979465c437c4b2188f493a327437989",
+    "__tests__/security-http/canonical-ortho-assessment-command-journey.test.ts": "58f3fffd3a6308acfd78f5542b4ccafee63cb6f07d115299cfe00ce49e3473f9"
+  },
+  "artifacts": {
+    "slice58-product-freeze.json": "d42495e423f0280e07d866941bd9a6680aade3d201801d3bbe4b2e6035e645b6",
+    "slice58-http-idle-boundary.log": "bbd815074a70b72234dc6f95b0e0aa2799ced6bd91458054fae5abf0dae0fcc0",
+    "slice58-assessment-diagnostic.log": "916c50aaf3bb068b4fcffd0140bd4de3e3d760f4073eeae13dbc22d45e5dd7af",
+    "slice58-assessment-detail-before.log": "a1258e63b32d298d733e53e0321744d6d833206a7ee22f1c31bc440d82e60710",
+    "slice58-assessment-detail-before-seeded.log": "0ee8a94de468151a91b41d4ded307749abb25d86070b443e1ef9a2259471478c"
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "format": "work-ceph-create-ui-v1",
+  "preparedAt": "2026-11-01T17:39:10.974662+00:00",
+  "baseRevision": "a9a75d866dccfb520c246747198e282314574130",
+  "buildId": "eqWf8RRpV3s3dsfu9bI_O",
+  "acceptance": {
+    "HTTPChromium": {
+      "passed": 78,
+      "files": 6,
+      "buildId": "eqWf8RRpV3s3dsfu9bI_O"
+    },
+    "PostgreSQLFinalFocused": {
+      "passed": 39,
+      "files": 2
+    },
+    "earlierPostgreSQL": "61/3 expanded plus16/1 bound witness on earlier source; not a single final64 run",
+    "unitFocused": "147/6 before final reference and optional case-link corrections; full final source running",
+    "mapInventory": {
+      "passed": 10,
+      "files": 2,
+      "firstAttempt": "Accidentally collected copied .next/standalone test files:18pass2fail due copied-source inventory digest. Actual root guards10/2 pass with standard .next exclusion; no guard change."
+    },
+    "typeBuildLint": "final build typecheck and targeted lint passed,0errors0warnings",
+    "fullUnit": {
+      "passed": 14776,
+      "files": 871,
+      "skipped": 0
+    },
+    "fullPostgreSQL": {
+      "passed": 5455,
+      "files": 414,
+      "skipped": 0,
+      "seconds": 2538.11
+    },
+    "runtime": {
+      "buildId": "eqWf8RRpV3s3dsfu9bI_O",
+      "bracesTraces": 372,
+      "toolingTraces": 741,
+      "manifests": 86,
+      "status": "both passed"
+    },
+    "exactHeadCI": "not published",
+    "independentReview": "pending",
+    "fullQuality": "lint0errors345existingwarnings; body, environment, money and preflight passed"
+  },
+  "before": {
+    "read": "actual56build400vs200 for create context; GET unchanged at59",
+    "reference": "actual first60build offers inactive builtin; test1failed before correction",
+    "optionalCaseLink": "a9server command accepted direct hidden ortho link under upload only; causal PG1failed before fresh independent view guard"
+  },
+  "limits": [
+    "Single-draft constraint and pending marker are not durable command idempotency; no automatic resend.",
+    "Unavailable storage cannot guarantee reload recovery; section close/refresh retains memory only.",
+    "No file bytes/publication, clinical approval, migration, finance or actual patient assignment.",
+    "NOT_READY, Docker destination denial, schema convergence and remaining integration/operational review remain.",
+    "PR506 body update separately denied by automatic review; no metadata workaround or retry without new permission."
+  ],
+  "sourceSha256": {
+    "app/api/patients/[id]/ceph/route.ts": "d5ad82f49685b91a2e50f60e672007d2c2871d9df3f23e2ffe0aa29c494b1aa3",
+    "components/patient/CanonicalCephStudies.tsx": "1db1870c6a3e72d32e17ff5a0927a99e7f73d326fa99c5be28b2c33889e9ae19",
+    "components/patient/CanonicalPatientProfile.tsx": "5670835450fc77b8eec326619c5b78f1af3380f4d184ef748eedc60677c91758",
+    "components/patient/CanonicalCephCreate.tsx": "cad3e3bb48ad9154d34b2b92941fd9f6a993a24f1efb2bb0899f444163c837c3",
+    "lib/canonical-ceph-create-context.ts": "74ea4fd5b981c0590be682a23459bfee64b884eaae508bcb67186664e52bcddc",
+    "lib/canonical-ceph-create-projection.ts": "dd4f7411d06ba5590169591e19ed1e565cb5d2be00930c71e61c9a7364ed947e",
+    "lib/canonical-ceph-create-command.ts": "e79a9b717c51da5c8997090dde896b0840ab3347162a42c6c67c8808508da198",
+    "__tests__/canonical-ceph-create-context.test.ts": "9b323dda0d9fd92eb5efe92fc13c148ac47943060075f226137054da3f65b3dc",
+    "__tests__/postgres/ceph-create-canonical-context.test.ts": "96ebec36ff0c0e76fee429eae5bc390f211089250d789bc0f189eab1a5649ad3",
+    "__tests__/postgres/ceph-create-canonical-command.test.ts": "0260090efbcc35d2b104816f87176a1339e8a16a3e21faf36996d95f6036b34e",
+    "__tests__/security-http/canonical-ceph-create-ui-journey.test.ts": "c0d42e5c11f565fa5ec5094596d2a7df19bc480c15358c5f579d0c96c52b2190"
+  },
+  "evidenceSha256": {
+    "canonical-ceph-create-390.png": "619a5eaeb8523ed620203454934f53e90bf3b6c28a8279bdabddbdbad31354fa",
+    "slice60-before-build-provenance.json": "1bcb99459b8c1d5b3ad40ab30a5023fa793a7c5036491750d2783ef3030a92c2",
+    "slice60-build-final.log": "ac738e18579957fa06e1d20fc4a4d9266829f292b6ddfbe619099c734bc69aeb",
+    "slice60-build-first.log": "733f507c01de53189e50d564b6bc88c9556afb3c3a761df6892da56ef40f3931",
+    "slice60-build-link-guard.log": "907a1bf49571c55d0bfc08f0c62e6e3c59fb89904b6a3e9eff9f9d9da6b7da13",
+    "slice60-case-link-after-corrected.log": "ec6d0543aa381c1532efa14dddd56ce3851ef533dc6c565fb04cca76cf4b2646",
+    "slice60-case-link-after.log": "06ce22b1cd0ca0b23c73f79855c1cf1cecde8b61de5eb6cd66b9fde7608fcc97",
+    "slice60-case-link-before.log": "fa7fb2ff07a76dc2fae83dd391438808f7de5f01519a48a7c0d14830c507f800",
+    "slice60-first-product-freeze.json": "47d7d01503311018dafbf9bc66fb560d15efc99e9942b0a9bbf6beb09211fdaa",
+    "slice60-http-before.log": "e196549c980a0d6e2a374c7bc6507634bbe56fe21ec9c78b1542658c6ff27ffb",
+    "slice60-http-final.log": "686bc0a8c47b77c9354052cb44ca101d01e9bf3abb07deb3d9d2aaab4a644163",
+    "slice60-http-first.log": "4593a04040a85b98d85627172155c3c6aea8efb0e6e08754066c39b51efd4bdb",
+    "slice60-http-link-final.log": "01241e85f47b4831b09065df0f02f0ca5c79c7af6502a6047989e08988e311b7",
+    "slice60-inventory-build.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice60-inventory-final.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice60-lint-corrected.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice60-lint-final-link.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice60-lint-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice60-lint-first.log": "285e8cc639651f7c7f7c1b02b60e3c1cd454ae687fe380f88842519fed21f750",
+    "slice60-map-corrected.log": "f14b73c5dd06f1f34b900cb6f8f138de7d9e8231f440e4ada768b894d5a8c481",
+    "slice60-map-final.log": "54fd975ede4beb5d1ffb1063eef0618796a0298f5791a3afab8400a4a11fc815",
+    "slice60-pg-context-corrected.log": "e6bde0e61935e81d8053bd87560f4bd91d25d0a700b03cf008beab2532541c97",
+    "slice60-pg-context-first.log": "79788b3b3a072af69171184a5c2c455a11e3d011ef1aefadf171928adafdfdbc",
+    "slice60-pg-expanded-corrected.log": "976597c8b06de0721ae7123c7d93475004eb4a7a9226eff80546e522af78995b",
+    "slice60-pg-expanded.log": "6728ecf04970f12c43a035b63b0e9abc037338adccdf75c993356c23ce728400",
+    "slice60-pg-final-context.log": "ba03c0328862cd37eed85fb407c512439d19f3d6cb23f826706edf7fca641b15",
+    "slice60-product-freeze.json": "f0f4c587256d529d27ee68a32ea39d398188bc076d857d3ddbf84e17132e5ab8",
+    "slice60-reference-before.log": "7108e82fa8e737a5a2118d7837d81b298df3e7cfa2b7d49eefc707280da9b819",
+    "slice60-reference-product-freeze.json": "105525a7d87f7d687c833f52adc2576d5812c6b0c8fbcc0439881ba1c732a85f",
+    "slice60-source-proof.json": "e2f5236c61cc6556bfe42de225a8c4b936391a10a754120065e199451fd0fc0d",
+    "slice60-tsc-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice60-type-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice60-unit-context-first.log": "a9ea864eeee532b808a9caedc892f3d303223a318cfa434c5cfdeacd32f0344c",
+    "slice60-unit-expanded.log": "2b218cbfcb62af9c08213febfee8756f907e4c2e862aecb0be233dbd2a099b88",
+    "slice60-body-full.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice60-runtime-tooling-full.log": "f3609014bb648d65bb90b022cbd9ef11581e7fc15a91c24cad4910fe25164465",
+    "slice60-unit-full.log": "83993ce10e5f09d2c3d2a5128f90effedac317a0602057b19317b17d4a07e220",
+    "slice60-lint-full.log": "f97bbe15bef51e444b2feb3ab41bfcef010d605635db86d30c326f09306945d3",
+    "slice60-money-full.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice60-runtime-braces-full.log": "a802429ada187d924badbc3ba8468a1f8f2cca158ff1f31ec2b7a530f0e36f62",
+    "slice60-pg-full.log": "3dcdc9d089bd92d5a97c5ade3ea4db3e6637f381df7c5e5f7bdfe07bf8a254fc",
+    "slice60-environment-full.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice60-preflight-full.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "slice60-runtime-proof.json": "6b4d8a9d242bc348577b6f98ebec36cbfd0e12634814af335e2452f2d7312ab4",
+    "slice60-lint-tooling-runtime-proof.json": "f47d76bd407f3de18125bd5d6fcd8b1ac43aad0cc7c7e7935aac8b0cf731cb2f"
+  }
+}

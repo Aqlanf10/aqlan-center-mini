@@ -1,0 +1,28 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/canonical-ceph-list-journey.test.ts --reporter=verbose
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > HTTP: canonical imaging viewer reads its saved study summaries without a legacy session 365ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > HTTP: independent grant, scope, empty file and strict query; no image identity or hidden clinical content 802ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > HTTP: the read and rejected writer do not change saved studies, money, schema or audit 119ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser: mobile saved-value list with draft warning and no tracer, image, financial or writer calls 1534ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser: a role label without imaging grant has no entrance 1090ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser: foreign/malformed payload and failed refresh retire saved results without a false empty list 1534ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser and HTTP: revoked imaging grant clears data and cannot be recovered by fresh login 1569ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser: a delayed reply cannot restore the closed list 1588ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  00:29:55
+   Duration  18.26s (transform 145ms, setup 0ms, import 578ms, tests 12.99s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

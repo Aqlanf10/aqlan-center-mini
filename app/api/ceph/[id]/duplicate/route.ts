@@ -6,6 +6,9 @@ import { NextResponse } from "next/server";
 import { duplicateAuthorizedCephAnalysis, getCephStudy } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { CanonicalCephCopyRefusal, commandCanonicalCephCopy } from "@/lib/canonical-ceph-copy-command";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +24,20 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const body: unknown = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalCephCopyRefusal("invalid_ceph_copy", 400, "طلب التصحيح لا يقبل مرشحات إضافية.");
+      return NextResponse.json(await commandCanonicalCephCopy(selected.handle, (await context.params).id, body), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
+      if (error instanceof CanonicalCephCopyRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد نسخة التصحيح. حدّث الدراسات وتحقق من النتيجة قبل أي طلب جديد.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const { id: raw } = await context.params;

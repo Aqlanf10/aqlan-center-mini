@@ -1,0 +1,27 @@
+{
+  "baseRevision": "a3812c1127e41ab60a57754c0e3912f8dbff9316",
+  "checks": {
+    "updateCephCalibration_sql": true,
+    "updateCephCalibration_legacy_init_commit_audit": true,
+    "updateCephLandmarks_sql": true,
+    "updateCephLandmarks_legacy_init_commit_audit": true,
+    "updateCephDiagnosis_sql": true,
+    "updateCephDiagnosis_legacy_init_commit_audit": true,
+    "db_prefix": true,
+    "db_tail": true,
+    "route_GET": true,
+    "route_DELETE": true,
+    "legacy_PATCH_body": true,
+    "lib/ceph.ts": true,
+    "lib/canonical-ceph-reads.ts": true,
+    "lib/canonical-ceph-copy-command.ts": true,
+    "lib/canonical-ceph-discard-command.ts": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/staff-capability-catalogue.ts": true,
+    "components/CephTracer.tsx": true,
+    "app/api/ceph/[id]/complete/route.ts": true,
+    "migrations": true
+  },
+  "passed": 20,
+  "notes": "Legacy source SQL exact modulo whitespace. Same legacy initialization, transaction boundaries and audit order. No clinical engine, completion or source-history change."
+}

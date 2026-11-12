@@ -1,0 +1,92 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/canonical-ceph-comparison-journey.test.ts __tests__/security-http/ceph-comparison-record-order-http.test.ts __tests__/security-http/ceph-page-authorization.test.ts __tests__/security-http/canonical-ceph-study-journey.test.ts __tests__/security-http/canonical-ceph-list-journey.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ceph-comparison-journey.test.ts (10 tests | 4 failed) 133118ms
+   × browser: 390px saved comparison and derived geometry show no hidden data or image/writer requests 31489ms
+   × browser: a missing geometric anchor fails without restoring an old or legacy image view 31325ms
+   × browser and HTTP: permission withdrawal clears previous results and prevents fallback 31321ms
+   × browser: a late response cannot restore an earlier selection after a newer read fails 31460ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-comparison-journey.test.ts > browser: 390px saved comparison and derived geometry show no hidden data or image/writer requests
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-ceph-comparison').getByLabel('الدراسة الأولى', { exact: true })[22m
+
+ ❯ openPair __tests__/security-http/canonical-ceph-comparison-journey.test.ts:80:61
+     78|   await page.getByRole("button", { name: "مقارنة دراستين محفوظتين", ex…
+     79|   const panel = page.getByTestId("canonical-ceph-comparison");
+     80|   await panel.getByLabel("الدراسة الأولى", { exact: true }).selectOpti…
+       |                                                             ^
+     81|   await panel.getByLabel("الدراسة الثانية", { exact: true }).selectOpt…
+     82|   await panel.getByRole("button", { name: "مقارنة القيم المحفوظة", exa…
+ ❯ __tests__/security-http/canonical-ceph-comparison-journey.test.ts:89:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-comparison-journey.test.ts > browser: a missing geometric anchor fails without restoring an old or legacy image view
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-ceph-comparison').getByLabel('الدراسة الأولى', { exact: true })[22m
+
+ ❯ openPair __tests__/security-http/canonical-ceph-comparison-journey.test.ts:80:61
+     78|   await page.getByRole("button", { name: "مقارنة دراستين محفوظتين", ex…
+     79|   const panel = page.getByTestId("canonical-ceph-comparison");
+     80|   await panel.getByLabel("الدراسة الأولى", { exact: true }).selectOpti…
+       |                                                             ^
+     81|   await panel.getByLabel("الدراسة الثانية", { exact: true }).selectOpt…
+     82|   await panel.getByRole("button", { name: "مقارنة القيم المحفوظة", exa…
+ ❯ __tests__/security-http/canonical-ceph-comparison-journey.test.ts:103:51
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-comparison-journey.test.ts > browser and HTTP: permission withdrawal clears previous results and prevents fallback
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-ceph-comparison').getByLabel('الدراسة الأولى', { exact: true })[22m
+
+ ❯ openPair __tests__/security-http/canonical-ceph-comparison-journey.test.ts:80:61
+     78|   await page.getByRole("button", { name: "مقارنة دراستين محفوظتين", ex…
+     79|   const panel = page.getByTestId("canonical-ceph-comparison");
+     80|   await panel.getByLabel("الدراسة الأولى", { exact: true }).selectOpti…
+       |                                                             ^
+     81|   await panel.getByLabel("الدراسة الثانية", { exact: true }).selectOpt…
+     82|   await panel.getByRole("button", { name: "مقارنة القيم المحفوظة", exa…
+ ❯ __tests__/security-http/canonical-ceph-comparison-journey.test.ts:111:51
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-comparison-journey.test.ts > browser: a late response cannot restore an earlier selection after a newer read fails
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-ceph-comparison').getByLabel('الدراسة الأولى', { exact: true })[22m
+
+ ❯ openPair __tests__/security-http/canonical-ceph-comparison-journey.test.ts:80:61
+     78|   await page.getByRole("button", { name: "مقارنة دراستين محفوظتين", ex…
+     79|   const panel = page.getByTestId("canonical-ceph-comparison");
+     80|   await panel.getByLabel("الدراسة الأولى", { exact: true }).selectOpti…
+       |                                                             ^
+     81|   await panel.getByLabel("الدراسة الثانية", { exact: true }).selectOpt…
+     82|   await panel.getByRole("button", { name: "مقارنة القيم المحفوظة", exa…
+ ❯ __tests__/security-http/canonical-ceph-comparison-journey.test.ts:121:51
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  4 failed | 42 passed (46)
+   Start at  03:40:09
+   Duration  164.15s (transform 200ms, setup 0ms, import 567ms, tests 159.97s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,134 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+ ❯ __tests__/durable-signer-boundary.test.ts (9 tests | 1 failed) 1196ms
+     × signs exactly the strict durable shape, which only the durable parser accepts 4ms
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+ ❯ __tests__/reports-generated-time-route.test.ts (0 test)
+ ❯ __tests__/staff-session-selection.test.ts (10 tests | 4 failed) 15ms
+     × a valid canonical cookie is selected and never falls through to a legacy Bearer 5ms
+     × a signed but malformed canonical cookie is denied, not translated or downgraded 1ms
+     × legacy cookie stays legacy; absent/invalid cookie uses the signed Bearer 0ms
+     × nothing usable selects none 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/reports-generated-time-route.test.ts [ __tests__/reports-generated-time-route.test.ts ]
+Error: [vitest] There was an error when mocking a module. If you are using "vi.mock" factory, make sure there are no top level variables inside, since this call is hoisted to top of the file. Read more: https://vitest.dev/api/vi.html#vi-mock
+ ❯ __tests__/reports-generated-time-route.test.ts:31:1
+     29|     parseFilters: boundary.parseFilters, reportOptions: boundary.repor…
+     30| });
+     31| import { ReportInputError, validateAnnualReportRange } from "../lib/re…
+       | ^
+     32| import { GET } from "../app/api/reports/route";
+     33|
+
+Caused by: Error: [vitest] No "PLAN_ITEM_PREBILLED_SQL" export is defined on the "../lib/db" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+vi.mock(import("../lib/db"), async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    // your mocked methods
+  }
+})
+
+ ❯ lib/ortho-followup-coverage-db.ts:49:13
+ ❯ lib/visit-financial-context-db.ts:1:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/durable-signer-boundary.test.ts > private durable signer shape > signs exactly the strict durable shape, which only the durable parser accepts
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ signDurableSessionClaims lib/auth.ts:114:21
+ ❯ __tests__/durable-signer-boundary.test.ts:63:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > a valid canonical cookie is selected and never falls through to a legacy Bearer
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ signDurableSessionClaims lib/auth.ts:114:21
+ ❯ durable __tests__/staff-session-selection.test.ts:9:23
+ ❯ __tests__/staff-session-selection.test.ts:23:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > a signed but malformed canonical cookie is denied, not translated or downgraded
+TypeError: The "key" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, DataView, KeyObject, or CryptoKey. Received undefined
+ ❯ forgedMarker __tests__/staff-session-selection.test.ts:18:20
+     16| const forgedMarker = () => {
+     17|  const body = Buffer.from(JSON.stringify({ userId: 2, username: "x", e…
+     18|  return `${body}.${createHmac("sha256", process.env.SESSION_SECRET!).u…
+       |                    ^
+     19| };
+     20|
+ ❯ __tests__/staff-session-selection.test.ts:26:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > legacy cookie stays legacy; absent/invalid cookie uses the signed Bearer
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ createSessionToken lib/auth.ts:95:21
+ ❯ legacy __tests__/staff-session-selection.test.ts:15:22
+ ❯ __tests__/staff-session-selection.test.ts:29:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > nothing usable selects none
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ readSignedSessionEnvelope lib/auth.ts:126:28
+ ❯ classify lib/staff-session-admission.ts:34:19
+ ❯ selectStaffEnvelope lib/staff-session-admission.ts:42:21
+ ❯ __tests__/staff-session-selection.test.ts:35:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  3 failed | 853 passed (856)
+      Tests  5 failed | 14438 passed (14443)
+   Start at  09:44:18
+   Duration  490.52s (transform 23.88s, setup 0ms, import 105.21s, tests 271.53s, environment 87ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,4 +1,4 @@
-import { getPool } from "./db";
+import { getPool, type DbClient } from "./db";
 import { addDays, clinicDateString } from "./schedule";
 
 export interface DoctorScheduleRow {
@@ -35,8 +35,12 @@ export function resolveScheduleDate(value: string, now: Date, zone: string): str
  * The active-party EXISTS also prevents stale/inactive doctor identities returning rows.
  * No clinical narratives, contacts or financial tables enter this read model. */
 export async function readDoctorDailySchedule(doctorId: number, date: string) {
+  return readDoctorDailyScheduleWith(getPool(), doctorId, date);
+}
+
+/** The same read in the caller's snapshot (canonical, M2 slice 15). */
+export async function readDoctorDailyScheduleWith(pool: Pick<DbClient, "query">, doctorId: number, date: string) {
   if (!Number.isSafeInteger(doctorId) || doctorId <= 0) return null;
-  const pool = getPool();
   const doctor = await pool.query<{ id: number }>(
     "SELECT id FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active = TRUE", [doctorId],
   );

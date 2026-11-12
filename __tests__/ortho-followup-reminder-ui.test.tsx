@@ -44,6 +44,7 @@ vi.mock("react", async (original) => {
   };
 });
 vi.mock("../components/PageHeader", () => ({ PageHeader: () => null }));
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic-legacy-doctor", role: "doctor", canonical: false }) }));
 vi.mock("../components/OrthoPendingDecisions", () => ({ OrthoPendingDecisions: () => null }));
 vi.mock("../components/QuickAppointmentModal", () => ({ QuickAppointmentModal: () => null }));
 
@@ -94,7 +95,12 @@ function render(): ReactNode {
   do {
     if (++rounds > 12) throw new Error("Synthetic board render did not settle");
     hooks.cursor = 0; hooks.changed = false;
-    tree = OrthoFollowupPage();
+    // The real page now selects a separate canonical or legacy component. This
+    // harness exercises the selected legacy body with its existing hook store;
+    // built-browser tests exercise the actual React/session boundary for both.
+    const boundary = OrthoFollowupPage();
+    expect(boundary && typeof boundary.type).toBe("function");
+    tree = (boundary!.type as () => ReactNode)();
     hooks.pending.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
   return tree;

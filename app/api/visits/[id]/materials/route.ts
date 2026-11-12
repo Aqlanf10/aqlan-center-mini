@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { visitMaterialMovements, visitPatientOf } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalVisitMaterials } from "@/lib/canonical-patient-reads";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +14,13 @@ export const dynamic = "force-dynamic";
  * `POST /api/inventory/[id]/movements` بـ visitId) — لا جدول موادٍ ثانٍ.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 82: a clinical grant; the visit inside the scope (outside reads like missing); no costs.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalVisitMaterials(selected.handle, Number((await context.params).id)), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل مواد الزيارة."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const visitId = Number((await context.params).id);

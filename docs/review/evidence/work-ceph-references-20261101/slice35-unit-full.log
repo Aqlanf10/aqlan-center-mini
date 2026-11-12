@@ -1,0 +1,108 @@
+
+> aqlan-center@0.1.0 test
+> vitest run --exclude .next/**
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+ ❯ __tests__/durable-signer-boundary.test.ts (9 tests | 1 failed) 1055ms
+     × signs exactly the strict durable shape, which only the durable parser accepts 3ms
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+ ❯ __tests__/staff-session-selection.test.ts (9 tests | 4 failed) 15ms
+     × a valid canonical cookie is selected and never falls through to a legacy Bearer 4ms
+     × a signed but malformed canonical cookie is denied, not translated or downgraded 1ms
+     × legacy cookie stays legacy; absent/invalid cookie uses the signed Bearer 1ms
+     × nothing usable selects none 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/durable-signer-boundary.test.ts > private durable signer shape > signs exactly the strict durable shape, which only the durable parser accepts
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ signDurableSessionClaims lib/auth.ts:114:21
+ ❯ __tests__/durable-signer-boundary.test.ts:63:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > a valid canonical cookie is selected and never falls through to a legacy Bearer
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ signDurableSessionClaims lib/auth.ts:114:21
+ ❯ durable __tests__/staff-session-selection.test.ts:9:23
+ ❯ __tests__/staff-session-selection.test.ts:23:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > a signed but malformed canonical cookie is denied, not translated or downgraded
+TypeError: The "key" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, DataView, KeyObject, or CryptoKey. Received undefined
+ ❯ forgedMarker __tests__/staff-session-selection.test.ts:18:20
+     16| const forgedMarker = () => {
+     17|  const body = Buffer.from(JSON.stringify({ userId: 2, username: "x", e…
+     18|  return `${body}.${createHmac("sha256", process.env.SESSION_SECRET!).u…
+       |                    ^
+     19| };
+     20|
+ ❯ __tests__/staff-session-selection.test.ts:26:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > legacy cookie stays legacy; absent/invalid cookie uses the signed Bearer
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ createSessionToken lib/auth.ts:95:21
+ ❯ legacy __tests__/staff-session-selection.test.ts:15:22
+ ❯ __tests__/staff-session-selection.test.ts:29:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > nothing usable selects none
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ readSignedSessionEnvelope lib/auth.ts:126:28
+ ❯ classify lib/staff-session-admission.ts:34:19
+ ❯ selectStaffEnvelope lib/staff-session-admission.ts:42:21
+ ❯ __tests__/staff-session-selection.test.ts:35:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  2 failed | 804 passed (806)
+      Tests  5 failed | 13557 passed (13562)
+   Start at  01:29:43
+   Duration  432.10s (transform 18.37s, setup 0ms, import 87.09s, tests 249.39s, environment 75ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

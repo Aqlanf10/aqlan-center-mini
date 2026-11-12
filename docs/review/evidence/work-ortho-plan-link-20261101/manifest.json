@@ -1,0 +1,85 @@
+{
+  "format": "work-ortho-plan-link-v1",
+  "preparedAt": "2026-11-01T19:26:57.167444+00:00",
+  "base": "f5ff01a2c132f2ad3cacc4f10168c76441f5d6c3",
+  "buildId": "uxNFI5efXskzuDAyzKhUF",
+  "acceptance": {
+    "unit": {
+      "passed": 45,
+      "files": 2
+    },
+    "PG": {
+      "passed": 55,
+      "files": 4
+    },
+    "HTTP": {
+      "passed": 38,
+      "files": 4,
+      "canonicalAndLifecycle": "25/2",
+      "nativeReadAndLink": "13/2"
+    },
+    "mapGuards": "10/2 passed; old build-copy collection and missing branches.values failures retained",
+    "typesBuildLint": "Passed",
+    "qualityRuntime": "All gates passed on exact build; see quality-results.json",
+    "fullPG": "Running; not counted as passed",
+    "fullUnit": "Composed full run pending",
+    "CI": "Not published",
+    "independentReview": "Pending"
+  },
+  "limits": [
+    "Link/unlink only, no chooser UI yet; no funding serialized.",
+    "Native body exact except indentation; no migration, finance policy or real data change.",
+    "Not durable idempotency; old version refuses changed-link replay, fresh same-value intent is no-op.",
+    "Inventory NOT_READY; Docker, schema and broader integration/operational gates remain."
+  ],
+  "sourceSha256": {
+    "lib/db.ts": "06d10e62e87d2732185fd36f17224480e58252146cf9feb37f2629883e0d2657",
+    "lib/canonical-ortho-plan-link-command.ts": "31cd90d0e8a47927b5a1ffd0b63cb36db3633cb89418a9edddde5a2872343556",
+    "app/api/ortho/[id]/route.ts": "921d5417184eec6b3bdbd9c634389f557e768c99b7f722a4890d5d45007a1f36",
+    "__tests__/canonical-ortho-plan-link-command.test.ts": "d0d1b62b1c31e291d92afd88fb1ebc0167c90fa408671f8f6cf6c626b6f8f3ce",
+    "__tests__/postgres/ortho-plan-link-canonical-command.test.ts": "90e0ddbd1f530636db9c8a620d5b828359d7ffa5d9b36b4b685d5df68b8e7fd0",
+    "__tests__/security-http/canonical-ortho-plan-link-journey.test.ts": "96c9e088a20453dcbd8ed337db532dff0a5182e176b23f2e081b8c1461d2e830",
+    "__tests__/security-http/canonical-ortho-lifecycle-journey.test.ts": "00426b41f033b8219fc6e6cb888228b7985c2ef2f2a19c24697ae2b7c632e22d",
+    "__tests__/security-http/ortho-package-read-state-ui.test.ts": "1c6196d9ed70b228abe9b9bf827e00f313b9abd5824269350ded6a2071197190",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "1df875b8fee9c4a32e72ddfc44e617c3eebc62e60a57ee6498a521d4f4a02c74",
+    "docs/security/staff-cutover/inventory.json": "fea5c5bb841a513196927b3aed8375f22eabf02db8eaae05a82fa478a7c02a26"
+  },
+  "evidenceSha256": {
+    "slice64-types.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice64-pg-first.log": "43db403ea39de3df6b48cb82cefab2fc9a45a95e27f6e004ca0fa54d45ab0dfe",
+    "slice64-before-build-provenance.json": "db6b819579dd30727ca4005575135373c7ff37f3822a2f7fa10b57e7a3a99ad4",
+    "slice64-preservation.json": "fa1f594cb036fc4e83b2f3621a38d321bbcf3fc267b4db64531267b0b858143b",
+    "slice64-lint.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice64-map-guards.log": "b97c651dc76c3f2767ab76021e75af1dee146a69746ca5fb57baa9697a91d358",
+    "slice64-design-draft.md": "1aa66d97b38327278613f5164ddc65939421c8cdeacc8076fc45db857e311872",
+    "slice64-money-full.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice64-map-scan.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "slice64-pg.log": "fdebcb06dd89cf13393a34cf1745d51078e893890bff2f370ed7c684485bc4c8",
+    "slice64-native-readiness-diagnostic.log": "2ae902b9dd25dd0e7378b201711f66fc281ee551d9b6d202cd51664cb17ffeec",
+    "slice64-native-http-corrected.log": "93d55e0a0b7d4f13f7f04deb033d4d32c1944ec159dde26c5b001ee8a7c3595a",
+    "slice64-runtime-braces-full.log": "f042eafc5ab8361588c8c8aef3a1569f39078b2da225100724d5f0a4173c94c5",
+    "slice64-final-test-lint.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice64-body-full.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice64-runtime-tooling-full.log": "814d2417a7808712dce8e83be97024965d35a98dc548c505edf65a1101c8f9bd",
+    "slice64-map-guards-corrected.log": "9ecae7670b8b03184f30d52f0cea35c37efe5f8421517f7ed34da018417c6d56",
+    "slice64-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice64-preflight-full.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "slice64-http-before.log": "0fb303b3497cbd783f57616fed1910b0842c20268f6dde9e0b74c5d97525d57c",
+    "slice64-environment-full.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice64-final-types.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice64-quality-results.json": "73d96cf2e543301f7f2ec13963fa3daf3a5a747066def79aa546320b9c88dfe7",
+    "slice64-lint-full.log": "184503fd492d184d966a79587028ef99990522710e6fe53e4b12c2a5bdb0d401",
+    "slice64-product-freeze.json": "2e128f72782eacabc8d300aa6d4a02b46ecd297595477eb11116a9d955012ba1",
+    "slice64-http.log": "a2560a29288c75632f51f90d195a9c8c59140b14e9d156ad6c249dc428288afa",
+    "slice64-unit.log": "a4d599faaba55b52d567324b1e5af1f9e57d4c450e0bc963c8a2c6f8161db8be",
+    "slice64-native-http.log": "ec983ccb439edc0043d60730821d3030960646d3a3687625e29dbd56f3bee02c",
+    "slice64-build.log": "6e5bfb160b6323c7881aa18226421334d0a4923dac82b7e316c7bbeb05e31c0d",
+    "slice64-source-proof.json": "2cc2f6515965b3e493f87b11a5628c9956873773190f26b358cc79a5aaa9ce6f"
+  },
+  "logNormalization": {
+    "slice64-build.log": {
+      "rawSha256": "40ba6c4e821da029ce973136176223ed9ecaa448b5d1fd25d27ee4a0a5f05701",
+      "operation": "Remove progress carriage returns and trailing whitespace only"
+    }
+  }
+}

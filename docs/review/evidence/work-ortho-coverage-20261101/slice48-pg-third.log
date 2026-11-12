@@ -1,0 +1,33 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts (24 tests | 1 failed) 3346ms
+   × payment and treatment progress do not alter the original commercial applicability rule 20ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-coverage.test.ts > payment and treatment progress do not alter the original commercial applicability rule
+error: column "paid_minor" of relation "invoices" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ __tests__/postgres/ortho-canonical-coverage.test.ts:77:3
+     75| it("payment and treatment progress do not alter the original commercia…
+     76|   const f = await episode();
+     77|   await fx.pool.query("UPDATE invoices SET paid_minor=12345 WHERE id=$…
+       |   ^
+     78|   await fx.pool.query("UPDATE plan_items SET status='in_progress' WHER…
+     79|   expect((await read("owner", f)).applicable).toBe(true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 23 passed (24)
+   Start at  09:35:47
+   Duration  6.40s (transform 1.90s, setup 0ms, import 2.34s, tests 3.35s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,171 @@
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs (6 tests | 2 failed) 2488ms
+   × checked-in exhaustive source inventory has no drift or API export mismatch 169ms
+   × CLI drift success and explicit NOT_READY failure are intentional, not exceptions 2298ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > checked-in exhaustive source inventory has no drift or API export mismatch
+AssertionError: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    baseCommit: '74b82cea27d407626fb3c5e691bf68e6defb4598',
+    canonicalDirectReferences: [],
+    formatVersion: 2,
+    layouts: [
+...
+          {
++           line: 38,
+-           line: 23,
+            symbol: 'requireSession'
+          },
+          {
+            line: 3,
+            symbol: 'findUserByUsername'
+          },
+          {
++           line: 47,
+-           line: 32,
+            symbol: 'findUserByUsername'
+          }
+        ],
+        file: 'app/api/ortho/followups/route.ts'
+      },
+...
+          {
++           line: 38,
+-           line: 23,
+            symbol: 'requireSession'
+          },
+          {
+            line: 3,
+            symbol: 'findUserByUsername'
+          },
+          {
++           line: 47,
+-           line: 32,
+            symbol: 'findUserByUsername'
+          }
+        ],
+        file: 'app/api/ortho/followups/route.ts',
+        httpAccess: [
+...
+    scope: 'All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.',
++   sourceDigest: '08ecc75125bd7fdde86c24b1773b6b253c7563c0c05fa889a394a775aff626b1',
+-   sourceDigest: '1ce68c83c1259bb12743b09036cf5136414491769c025de1ce3f310fb484f69b',
+    sourceEntries: [
+      'app/account/page.tsx',
+      'app/api/accounting/route.ts',
+      'app/api/ai/chat/route.ts',
+      'app/api/ai/confirmation/route.ts',
+
+
+- Expected
++ Received
+
+@@ -1756,19 +1756,19 @@
+          {
+            "line": 7,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 23,
++           "line": 38,
+            "symbol": "requireSession",
+          },
+          {
+            "line": 3,
+            "symbol": "findUserByUsername",
+          },
+          {
+-           "line": 32,
++           "line": 47,
+            "symbol": "findUserByUsername",
+          },
+        ],
+        "file": "app/api/ortho/followups/route.ts",
+      },
+@@ -10078,19 +10078,19 @@
+          {
+            "line": 7,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 23,
++           "line": 38,
+            "symbol": "requireSession",
+          },
+          {
+            "line": 3,
+            "symbol": "findUserByUsername",
+          },
+          {
+-           "line": 32,
++           "line": 47,
+            "symbol": "findUserByUsername",
+          },
+        ],
+        "file": "app/api/ortho/followups/route.ts",
+        "httpAccess": [
+@@ -15846,11 +15846,11 @@
+      "finance.shifts.view",
+      "finance.shifts.operate",
+      "clinical.xrays.view",
+    ],
+    "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
+-   "sourceDigest": "1ce68c83c1259bb12743b09036cf5136414491769c025de1ce3f310fb484f69b",
++   "sourceDigest": "08ecc75125bd7fdde86c24b1773b6b253c7563c0c05fa889a394a775aff626b1",
+    "sourceEntries": [
+      "app/account/page.tsx",
+      "app/api/accounting/route.ts",
+      "app/api/ai/chat/route.ts",
+      "app/api/ai/confirmation/route.ts",
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:7:9
+      5| const report=buildInventory();
+      6| test('checked-in exhaustive source inventory has no drift or API expor…
+      7|  assert.deepEqual(report,JSON.parse(readFileSync(new URL('../../docs/s…
+       |         ^
+      8|  assert.deepEqual(report.matrixExportMismatches,[]);
+      9|  assert.equal(new Set(report.routes.map(r=>`${r.method} ${r.route}`)).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > CLI drift success and explicit NOT_READY failure are intentional, not exceptions
+AssertionError: Inventory drift: regenerate and review with --write.
+
+
+1 !== 0
+
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:87:10
+     85|  for(const [args,status] of [[[],0],[['--require-ready'],1]]) {
+     86|   const result=spawnSync(process.execPath,[fileURLToPath(script),...ar…
+     87|   assert.equal(result.status,status,result.stderr);
+       |          ^
+     88|   assert.equal(result.stderr,'');
+     89|   assert.equal(JSON.parse(result.stdout).readiness,'NOT_READY');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  2 failed | 18 passed (20)
+   Start at  02:38:50
+   Duration  12.66s (transform 178ms, setup 0ms, import 4.79s, tests 7.35s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

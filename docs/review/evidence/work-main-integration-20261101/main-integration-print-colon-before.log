@@ -1,0 +1,38 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ __tests__/lab-dispatch-pdf-fields.test.ts (19 tests | 1 failed) 19ms
+     × accepts the same exact ordered field labels with attached native colon glyphs 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/lab-dispatch-pdf-fields.test.ts > field-bounded lab dispatch PDF identifiers > accepts the same exact ordered field labels with attached native colon glyphs
+AssertionError: expected [Function] to not throw an error but 'Error: PDF service label must occur i…' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"Error: PDF service label must occur in exactly one field block"
+
+ ❯ __tests__/lab-dispatch-pdf-fields.test.ts:40:78
+     38|   }
+     39|   it("accepts the same exact ordered field labels with attached native…
+     40|     expect(() => assertLabDispatchPdfFields(attachedColons(), expected…
+       |                                                                              ^
+     41|   });
+     42|   it.each(["::ربتخملا", ":ضيرملا", "ربتخملا", ":ربتخملا-PRIVATE"])("re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 passed (19)
+   Start at  04:29:55
+   Duration  300ms (transform 85ms, setup 0ms, import 122ms, tests 19ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

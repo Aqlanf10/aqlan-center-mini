@@ -1,0 +1,29 @@
+{
+  "preparedAt": "2026-11-01T19:25:43.022097+00:00",
+  "base": "bf71b8b9f3873513f788472ccc71cb8280bb725d",
+  "acceptance": {
+    "before": "3 failed: close, owner replacement and unmount each accepted stale POST before passive effects and cleared marker",
+    "after": "3 passed in real React StrictMode/Chromium; early passiveEpoch remains0; pending marker retained and exactly1 POST",
+    "lint": "Initial fixture global registration during render rejected; moved registration into layout effect, final lint passed",
+    "builtAppRegression": "Pending composed final build; fixture bundles actual component directly, not proof of current production build",
+    "hostedCI": "Pending corrected head"
+  },
+  "limits": [
+    "Only synchronous ownership retirement changed; server protocol, marker keys and request bodies unchanged.",
+    "Response headers precede commit, delayed JSON resolves from parent layout effect, AbortController intentionally ignored.",
+    "No automatic retry or durable idempotency added.",
+    "No real data, settings, finance, migration or release change."
+  ],
+  "sourceSha256": {
+    "components/patient/CanonicalCephCreate.tsx": "f8ef36692c6222bb7a7ef17072b546daccab8c7a08fafa499e9d0349db06ec47",
+    "__tests__/fixtures/canonical-ceph-commit-window.tsx": "2ee195e9a257138968c4ec6a8944f9f5435ec46409182c851e58593e173b068b",
+    "__tests__/security-http/canonical-ceph-commit-window.test.ts": "51f19081617f2a0b51e7be1c99185e9a12ac10601d9d83be53cb1dd773bc337f"
+  },
+  "evidenceSha256": {
+    "bf71-ceph-commit-lint-corrected.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "bf71-ceph-commit-before.log": "e01e0bcda249699921bd2c68d24220d0127fe1ec1fe6cd89753e2decee9cbc8e",
+    "bf71-ceph-commit-lint-first.txt": "d7dd422272ac8d30d2250b576def23edf6038f4b3af6207914a13723296fe65b",
+    "bf71-ceph-commit-corrected.log": "daa138a362797030807c9ab3237592ba9d4b43f7f69c40f3da63018784b58cb8",
+    "bf71-ceph-commit-final.log": "17257869a8497b7f2a781a3b78874064620918da4bd3225e6201eefbb4f5c49a"
+  }
+}

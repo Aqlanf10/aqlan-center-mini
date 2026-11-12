@@ -392,3 +392,5 @@ describe("حماية عزل المرضى ومكافحة ثغرات IDOR في ا�
     });
   });
 });
+// Legacy-role characterization remains on the legacy envelope after canonical dispatch was added.
+vi.mock("@/lib/staff-session-admission", () => ({ selectRequestStaffEnvelope: async () => ({ kind: "legacy" }) }));

@@ -70,7 +70,7 @@ describe("permanent purchase receipts contain synthetic clinic reset", () => {
 
   it("permits only empty-receipt reset and reads the real SQL snapshot through its separate connection without deadlock", async () => {
     await command();
-    await q("INSERT INTO patients(patient_number,full_name) VALUES('SYN-RESET-1','Synthetic reset patient')");
+    await q("INSERT INTO booking_requests(full_name,phone) VALUES('Synthetic reset booking','777000111')");
     const identities = await keptIdentities();
     let sql = ""; let backupPid = 0; let freezePid = 0;
     const result = await fixture.db.resetClinicData(resetInput, async backupClient => {
@@ -86,7 +86,8 @@ describe("permanent purchase receipts contain synthetic clinic reset", () => {
     });
     expect(result.ok).toBe(true);
     expect(sql).toContain("inventory_purchase_receipts (0)");
-    expect(sql).toContain("Synthetic reset patient");
+    expect(sql).toContain("Synthetic reset booking");
+    expect((await q("SELECT count(*)::int AS n FROM booking_requests")).rows[0].n).toBe(0);
     expect((await q("SELECT count(*)::int AS n FROM patients")).rows[0].n).toBe(0);
     expect(await keptIdentities()).toEqual(identities);
     expect((await q("SELECT count(*)::int AS n FROM inventory_purchase_receipts")).rows[0].n).toBe(0);

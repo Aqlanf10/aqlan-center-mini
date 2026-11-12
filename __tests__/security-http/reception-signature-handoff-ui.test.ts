@@ -103,6 +103,11 @@ describe("reception signature discovery on the built application", () => {
       if (url.origin === baseUrl && ["GET", "HEAD"].includes(request.method()) && [
         `/patients/${patientId}`, `/api/patients/${patientId}`, `/api/patients/${patientId}/workflow`, `/api/visits/${visitId}/walkout`,
       ].includes(url.pathname)) { await route.continue(); return; }
+      // Preserve the real same-patient source resolution (including refusal),
+      // not a mock doctor or a general patient-API allowlist.
+      if (url.origin === baseUrl && request.method() === "GET"
+        && url.pathname === `/api/patients/${patientId}/return-booking-context`
+        && url.search === `?kind=visit&sourceId=${visitId}`) { await route.continue(); return; }
       await allowBuiltBoardRead(route, unexpected);
     });
     const doctorGuard = await guardBrowserRoutes(doctor, baseUrl, unexpected, async route => {

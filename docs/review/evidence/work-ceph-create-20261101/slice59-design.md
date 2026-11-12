@@ -1,0 +1,7 @@
+# Slice 59 bounded contract
+
+Base 520f00ca. POST new empty ceph study only, map capability clinical.xrays.upload (central xrays.view prerequisite). Existing document and optional orthodontic case must belong to the already authorized patient. A reference creates no care relationship or new patient access. No additional orthodontic privilege is invented: this matches the mapped action and existing same-patient reference checks and does not project orthodontic facts.
+
+Fresh authority/scope after patient wait, same-connection native empty INSERT, document/case SHARE NOWAIT and held positive own-scope witness, final authority, atomic canonical audit. All legacy native validation messages/defaults/INSERT and post-commit legacy audit retained; wrapper rollback now also covers lookup errors. Native unique draft rule fences simultaneous legacy/canonical creators. No permanent idempotency guarantee; after closure a later request can create another draft, so UI must never auto-retry unknown create outcomes.
+
+Minimal id + bounded duplicate warning; default read and saved values unchanged. Source/choice picker and create UI are a subsequent contract. Before: real frozen57 build with unchanged create route returns401vs201 for scoped uploader afterGET200. PG first80/81 due SQL test alias day; corrected81/81. Unit108/4 and typecheck pass. Final build/HTTP and full integration not yet accepted.

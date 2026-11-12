@@ -4,8 +4,14 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { AgreementReconciliationError, readAgreementReconciliation, saveAgreementReconciliation, readAgreementReconciliationAttemptStatus } from "@/lib/agreement-reconciliation-db";
 import type { AgreementReconciliationCommand } from "@/lib/agreement-reconciliation";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { staffAdmissionRefusal } from "@/lib/staff-capability-editor";
+import { CanonicalPlanRefusal } from "@/lib/canonical-plan-writes";
+import { CanonicalAgreementStale, commandCanonicalAgreementReconciliation, readCanonicalAgreementReconciliation, readCanonicalAgreementReconciliationStatus } from "@/lib/canonical-plan-agreements";
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
+const UNAVAILABLE={code:"agreement_reconciliation_unavailable",message:"تعذّر التحقق من التسوية. احتفظ بنفس الطلب وافحص حالته؛ لا تنشئ طلبًا جديدًا."};
 async function admission(context:Context) {
  const session=await requireSession();
  if(!session)return {response:NextResponse.json({code:"unauthorized",message:"انتهت الجلسة؛ سجّل الدخول للتحقق من نفس المحاولة."},{status:401})};
@@ -17,19 +23,45 @@ async function admission(context:Context) {
 function errorResponse(error:unknown) {
  const bounded=bodyErrorResponse(error);if(bounded)return bounded;
  if(error instanceof AgreementReconciliationError)return NextResponse.json({code:error.code,message:error.message},{status:error.status});
- return NextResponse.json({code:"agreement_reconciliation_unavailable",message:"تعذّر التحقق من التسوية. احتفظ بنفس الطلب وافحص حالته؛ لا تنشئ طلبًا جديدًا."},{status:503});
+ return NextResponse.json(UNAVAILABLE,{status:503});
+}
+/** M2 slice 94d-2 (G4-1, G4-8; contract section 13): finance.agreements.manage inside the
+ * patient scope; an outside plan reads like a missing one; never cached. */
+function canonicalError(error:unknown) {
+ const bounded=bodyErrorResponse(error);if(bounded)return bounded;
+ if(error instanceof AgreementReconciliationError)return NextResponse.json({code:error.code,message:error.message},{status:error.status,headers:NO_STORE});
+ if(error instanceof CanonicalAgreementStale)return NextResponse.json({code:error.code,message:error.message},{status:409,headers:NO_STORE});
+ if(error instanceof CanonicalPlanRefusal)return NextResponse.json({code:error.code,message:error.message},{status:error.status,headers:NO_STORE});
+ const refusal=staffAdmissionRefusal(error);
+ if(refusal)return NextResponse.json({code:refusal.code,message:refusal.message},{status:refusal.status,headers:NO_STORE});
+ return NextResponse.json(UNAVAILABLE,{status:503,headers:NO_STORE});
+}
+type Canonical = { kind: "canonical"; planId: number; handle: Extract<Awaited<ReturnType<typeof selectRequestStaffEnvelope>>, { kind: "canonical" }>["handle"] };
+async function canonical(context:Context):Promise<Canonical|NextResponse|null> {
+ const selected=await selectRequestStaffEnvelope();
+ if(selected.kind==="denied")return NextResponse.json({code:"unauthorized",message:"انتهت الجلسة؛ سجّل الدخول للتحقق من نفس المحاولة."},{status:401,headers:NO_STORE});
+ if(selected.kind!=="canonical")return null;
+ return {kind:"canonical",planId:Number((await context.params).id),handle:selected.handle};
 }
 export async function GET(_request:Request,context:Context) {
+ const chosen=await canonical(context);if(chosen instanceof NextResponse)return chosen;
+ if(chosen)try{return NextResponse.json(await readCanonicalAgreementReconciliation(chosen.handle,chosen.planId),{headers:NO_STORE});}catch(error){return canonicalError(error);}
  const admitted=await admission(context);if(admitted.response)return admitted.response;
  try{return NextResponse.json(await readAgreementReconciliation(admitted.planId!,admitted.session!));}catch(error){return errorResponse(error);}
 }
 export async function POST(request:Request,context:Context) {
+ const chosen=await canonical(context);if(chosen instanceof NextResponse)return chosen;
+ if(chosen)try{const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES) as AgreementReconciliationCommand;
+  return NextResponse.json(await commandCanonicalAgreementReconciliation(chosen.handle,chosen.planId,body),{headers:NO_STORE});}catch(error){return canonicalError(error);}
  const admitted=await admission(context);if(admitted.response)return admitted.response;
  try{const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES) as AgreementReconciliationCommand;
  return NextResponse.json(await saveAgreementReconciliation(admitted.planId!,body,admitted.session!));}catch(error){return errorResponse(error);}
 }
 /** Status only: never writes a rejection or financial row; missing means unresolved. */
 export async function PUT(request:Request,context:Context) {
+ const chosen=await canonical(context);if(chosen instanceof NextResponse)return chosen;
+ if(chosen)try{const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES) as AgreementReconciliationCommand;
+  return NextResponse.json(await readCanonicalAgreementReconciliationStatus(chosen.handle,chosen.planId,body),{headers:NO_STORE});}catch(error){return canonicalError(error);}
  const admitted=await admission(context);if(admitted.response)return admitted.response;
  try{const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES) as AgreementReconciliationCommand;
  return NextResponse.json(await readAgreementReconciliationAttemptStatus(admitted.planId!,body,admitted.session!));}catch(error){return errorResponse(error);}

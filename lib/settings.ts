@@ -43,7 +43,11 @@ export type SettingKey =
   | "followup.proposal_days"
   | "documents.max_megabytes"
   | "workflow.doctor_financial_view"
+  | "ortho.case_doctor_no_charge"
   | "display.privacy_mode"
+  | "display.voice_uri"
+  | "display.voice_rate"
+  | "display.voice_pause_ms"
   | "display.voice"
   | "display.delay_notice"
   | "display.show_ortho"
@@ -140,6 +144,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // والمال ليس عمله (راجع أدوار النظام). الإدارة تفعّله إن شاءت من الإعدادات —
   // والفحص في الخادم لا في الشاشة.
   "workflow.doctor_financial_view": "false",
+  // (قرار المالك 6629149113) «بلا رسوم» لشدّة تقويم خارج الاتفاق: للمالك دائمًا، ولطبيب
+  // الحالة المسؤول المخوّل بالتقويم فقط إذا فعّله المالك هنا. مغلق افتراضيًا: لا منح تلقائي.
+  "ortho.case_doctor_no_charge": "false",
   // عشرون ميغابايت تكفي أشعةً بانورامية بجودةٍ عالية، وتردّ ملفًّا رُفع بالخطأ
   // — مقطعَ فيديو مثلًا — قبل أن يملأ القرص.
   "documents.max_megabytes": "20",
@@ -150,6 +157,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // نطق الاسم صوتيًا عند النداء. المتصفح لا يسمح بالصوت قبل لمسة، فالنطق لا
   // يعمل فعلًا إلا بعد ضغطة «تشغيل صوت النداء» على التلفاز نفسه.
   "display.voice": "true",
+  "display.voice_uri": "",
+  "display.voice_rate": "0.9",
+  "display.voice_pause_ms": "300",
   // رسالة الاعتذار عن التأخير — يشغّلها الاستقبال بضغطة من لوحة اليوم،
   // فلا يبقى المرضى متضايقين بلا تفسير.
   "display.delay_notice": "false",
@@ -384,6 +394,9 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "display.voice" || key === "display.delay_notice" || key === "display.show_ortho") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
+  if (key === "display.voice_uri" && trimmed.length > 256) return "معرّف الصوت أطول من 256 حرفًا.";
+  if (key === "display.voice_rate" && (!trimmed || !Number.isFinite(Number(trimmed)) || Number(trimmed) < 0.7 || Number(trimmed) > 1.1)) return "سرعة الصوت بين 0.7 و1.1.";
+  if (key === "display.voice_pause_ms" && (!trimmed || !Number.isInteger(Number(trimmed)) || Number(trimmed) < 0 || Number(trimmed) > 1000)) return "الوقفة بين 0 و1000 مللي ثانية.";
   if (key === "display.announcements") {
     // السطر الفارغ مقبول: يعني «استعمل الافتراضي». السطر الموجود لا يُقبل إلا
     // بصيغة «العنوان | النص» — والرسالة تسمّي رقم السطر ليجده المدير فورًا.

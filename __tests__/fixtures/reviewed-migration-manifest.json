@@ -378,10 +378,40 @@
     "checksum": "c11d02aecc5d8644dbec1edea664ecb5ba63f3c21a53c77f06c5bb4007fbc714"
   },
   {
+    "version": "0074",
+    "name": "lab_work_intents",
+    "filename": "0074_lab_work_intents.sql",
+    "checksum": "d4e3839ca32d053827a67f0b60b3efaddc69850f4c1d062577c541031b93195c"
+  },
+  {
     "version": "0078",
     "name": "agreement_reconciliation",
     "filename": "0078_agreement_reconciliation.sql",
     "checksum": "e07a3b1540fe708d9d53c5bb2ba8ca1d733c991ddfe4315392a5b26c596ebf30"
+  },
+  {
+    "version": "0079",
+    "name": "ortho_followup_coverage",
+    "filename": "0079_ortho_followup_coverage.sql",
+    "checksum": "5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99"
+  },
+  {
+    "version": "0080",
+    "name": "patient_numbering",
+    "filename": "0080_patient_numbering.sql",
+    "checksum": "b2bee7694f0781775bbddeea3715cb16ab701f4ee3fd748785ef1016c0f2e10a"
+  },
+  {
+    "version": "0081",
+    "name": "invoice_archive",
+    "filename": "0081_invoice_archive.sql",
+    "checksum": "e03d14bb7500c98c806116e251a3b3bbd29db06da53717a074cce93290a430aa"
+  },
+  {
+    "version": "0082",
+    "name": "invoice_service_additions",
+    "filename": "0082_invoice_service_additions.sql",
+    "checksum": "df2e093757385a3260012d03271f7abb0d5e6e682644bddce5409ec12dcee214"
   },
   {
     "version": "0087",
@@ -532,5 +562,11 @@
     "name": "ortho_case_reopen",
     "filename": "0125_ortho_case_reopen.sql",
     "checksum": "6d9eb902c4c834f6d8b6be381c57b46a3a0e2992cdc40a05d688234bb9e3b8a3"
+  },
+  {
+    "version": "0126",
+    "name": "commission_case_participations",
+    "filename": "0126_commission_case_participations.sql",
+    "checksum": "d3e61eb1ea1d3a7c5a479b0a3cde4b3663506a0fc919b5dc923b572386045234"
   }
 ]

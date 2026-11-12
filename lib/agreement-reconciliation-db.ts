@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { SessionPayload } from "./auth";
 import { ensureSchema, getPool, insertAuditRow, PLAN_ITEM_FINANCIAL_LINEAGE_SQL, CLINIC_TIME_ZONE, type DbClient } from "./db";
 import { revalidateSessionInTransaction } from "./session";
+import { isCanonicalDebtActor, type DebtActorSource } from "./debt-installments-db";
 import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { lockDebtAccountForSchedule } from "./debt-account-position";
 import { PURCHASE_RESET_FENCE } from "./clinic-reset";
@@ -28,7 +29,9 @@ function validate(planId: number, command: AgreementReconciliationCommand) {
    ||typeof command.reason!=="string"||command.reason!==command.reason.trim()||command.reason.length<3||command.reason.length>300)
   fail("invalid","راجع بيانات تسوية الاتفاق.",400);
 }
-async function authorize(client: DbClient, session: SessionPayload) {
+async function authorize(client: DbClient, session: DebtActorSource) {
+ // The canonical branded actor re-proves its live operation and grant (M2 slice 94d-2).
+ if(isCanonicalDebtActor(session)){if(!await session.recheck(client))fail("unauthorized","انتهت الجلسة أو سُحبت صلاحية إدارة الاتفاقات؛ سجّل الدخول من جديد.",403);return;}
  const current=await revalidateSessionInTransaction(session,client);
  if(!current||current.role!=="admin")fail("unauthorized","تسوية الاتفاق تحتاج جلسة مدير سارية.",403);
 }
@@ -111,11 +114,15 @@ async function snapshot(client: DbClient, planId: number): Promise<{view:Agreeme
 export async function readAgreementReconciliation(planId:number,session:SessionPayload) {
  return transaction(async client=>{await authorize(client,session);const {view}=await snapshot(client,planId);return view;},true);
 }
+/** The preview on a caller's read-only snapshot (the canonical read decides the scope first). */
+export async function readAgreementReconciliationWith(client:Pick<DbClient,"query">,planId:number):Promise<AgreementReconciliationView> {
+ return (await snapshot(client as DbClient,planId)).view;
+}
 
-async function lockAttempt(client:DbClient,session:SessionPayload,command:AgreementReconciliationCommand) {
+async function lockAttempt(client:DbClient,session:DebtActorSource,command:AgreementReconciliationCommand) {
  await client.query("SELECT pg_advisory_xact_lock(hashtextextended('aqlan:agreement-reconcile:'||$1::text||':'||$2::text,0))",[session.userId,command.operationKey]);
 }
-async function attempt(client:DbClient,planId:number,command:AgreementReconciliationCommand,session:SessionPayload):Promise<AgreementReconciliationAttemptStatus> {
+async function attempt(client:DbClient,planId:number,command:AgreementReconciliationCommand,session:DebtActorSource):Promise<AgreementReconciliationAttemptStatus> {
  const requestHash=digest(agreementReconciliationIntentText(planId,command));
  const saved=(await client.query<EventRow>("SELECT * FROM agreement_reconciliations WHERE actor_id=$1 AND operation_key=$2",[session.userId,command.operationKey])).rows[0];
  if(saved){
@@ -132,19 +139,42 @@ async function attempt(client:DbClient,planId:number,command:AgreementReconcilia
 }
 export async function readAgreementReconciliationAttemptStatus(planId:number,command:AgreementReconciliationCommand,session:SessionPayload):Promise<AgreementReconciliationAttemptStatus> {
  validate(planId,command);
- return transaction(async client=>{await authorize(client,session);await installed(client);await lockAttempt(client,session,command);const result=await attempt(client,planId,command,session);await authorize(client,session);return result;});
+ return transaction(client=>readAgreementReconciliationAttemptStatusOn(client,planId,command,session));
 }
+/** The status check on a caller's transaction. `beforeAttempt` decides the canonical scope
+ * after the attempt fence and before any saved attempt is read. Writes nothing. */
+export async function readAgreementReconciliationAttemptStatusOn(client:DbClient,planId:number,command:AgreementReconciliationCommand,session:DebtActorSource,beforeAttempt?:()=>Promise<void>):Promise<AgreementReconciliationAttemptStatus> {
+ validate(planId,command);
+ await authorize(client,session);await installed(client);await lockAttempt(client,session,command);
+ if(beforeAttempt)await beforeAttempt();
+ const result=await attempt(client,planId,command,session);await authorize(client,session);return result;
+}
+export const AGREEMENT_SOURCE_CHANGED="تغيّر المصدر أو يحتاج مراجعة؛ افحص حالة نفس المحاولة قبل تحديث المعاينة.";
 export async function saveAgreementReconciliation(planId:number,command:AgreementReconciliationCommand,session:SessionPayload):Promise<AgreementReconciliationResult> {
  validate(planId,command);
- const result=await transaction(async client=>{
+ const result=await transaction(client=>saveAgreementReconciliationOn(client,planId,command,session));
+ if(result===null)fail("agreement_source_changed",AGREEMENT_SOURCE_CHANGED);
+ return result;
+}
+/** The reconciliation on a caller's transaction; `null` is a committed-rejection outcome the
+ * caller commits and then refuses. `afterLocks` decides the canonical scope right after the
+ * patient row lock; with it, a saved attempt is read only after that. */
+export async function saveAgreementReconciliationOn(client:DbClient,planId:number,command:AgreementReconciliationCommand,session:DebtActorSource,
+ afterLocks?:(patientId:number)=>Promise<void>):Promise<AgreementReconciliationResult|null> {
+  validate(planId,command);
   await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",[PURCHASE_RESET_FENCE]);
   await authorize(client,session);await installed(client);await lockAttempt(client,session,command);
-  const prior=await attempt(client,planId,command,session);
-  if(prior.state==="committed")return {status:"reconciled" as const,replayed:true,reconciliation:prior.receipt,view:null};
-  if(prior.state==="rejected")return null;
+  const priorOutcome=async()=>{
+   const prior=await attempt(client,planId,command,session);
+   if(prior.state==="committed")return {status:"reconciled" as const,replayed:true,reconciliation:prior.receipt,view:null};
+   if(prior.state==="rejected")return null;
+   return undefined;
+  };
+  if(!afterLocks){const earlier=await priorOutcome();if(earlier!==undefined)return earlier;}
   const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM treatment_plans WHERE id=$1",[planId])).rows[0];
   if(!owner)fail("missing","الخطة غير موجودة.",404);
   await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[owner.patient_id]);
+  if(afterLocks){await afterLocks(owner.patient_id);const earlier=await priorOutcome();if(earlier!==undefined)return earlier;}
   await lockDebtAccountForSchedule(client,owner.patient_id,true);
   await client.query("SELECT id FROM treatment_plans WHERE id=$1 FOR UPDATE",[planId]);
   await client.query("SELECT id FROM parties WHERE id=(SELECT primary_doctor_id FROM treatment_plans WHERE id=$1) FOR SHARE",[planId]);
@@ -176,9 +206,6 @@ export async function saveAgreementReconciliation(planId:number,command:Agreemen
   await insertAuditRow(client,{action:"plan.agreement_reconciliation",entity:"treatment_plans",entityId:planId,actor:session.username,actorRole:session.role,details:{...receipt,commission:view.commission,reason:command.reason,originalInvoicesPreserved:true,originalReceiptsPreserved:true}});
   await authorize(client,session);
   return {status:"reconciled" as const,replayed:false,reconciliation:receipt,view:null};
- });
- if(result===null)fail("agreement_source_changed","تغيّر المصدر أو يحتاج مراجعة؛ افحص حالة نفس المحاولة قبل تحديث المعاينة.");
- return result;
 }
 
 /** Explicit immutable membership projection; never reinterpret a delta as full principal. */

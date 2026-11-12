@@ -4,6 +4,7 @@ import { mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { backupSnapshotSqlLines, ensureSchema, getPool, type Queryable } from "./db";
+import { readIdentityProvenance, type IdentityProvenance } from "./restore/identity-provenance";
 import { readFileByKey } from "./files";
 import { tarEnd, tarHeader, tarPadding } from "./tar";
 import { parseLoginPhotoAsset } from "./login-photo";
@@ -118,6 +119,8 @@ interface BackupSnapshot {
   sqlSize: number;
   /** الصفوف الفريدة فيزيائيًّا — بالترتيب الذي قُرئت به من اللقطة. */
   documents: BackupDocument[];
+  /** Restore protocol B1: lineage of an excluded canonical identity, from the same snapshot. */
+  identityProvenance: IdentityProvenance | null;
 }
 
 /** SELECT metadata المستندات — أعمدة التحقق حصرًا، بلا عنوان ولا معرّف مريض. */
@@ -194,6 +197,7 @@ async function captureSnapshotFromSource(source: Queryable, stage: string): Prom
 
     // metadata داخل المعاملة نفسها — اللقطة واحدة لا اثنتين.
     const documents = uniqueDocumentsByStorageKey(await readDocumentMetadata(source));
+    const identityProvenance = await readIdentityProvenance(source);
 
     await source.query("COMMIT");
     completed = true;
@@ -203,6 +207,7 @@ async function captureSnapshotFromSource(source: Queryable, stage: string): Prom
       sqlSha256: hash.digest("hex"),
       sqlSize: (await stat(sqlPath)).size,
       documents,
+      identityProvenance,
     };
   } finally {
     if (!completed) await source.query("ROLLBACK").catch(() => {});
@@ -261,6 +266,7 @@ async function* renderArchiveBlocks(
       (total, document) => total + Number(document.size_bytes), 0),
     ...(options.appCommitSha ? { appCommitSha: options.appCommitSha } : {}),
     ...(options.pgVersion ? { pgVersion: options.pgVersion } : {}),
+    ...(snapshot.identityProvenance ? { identityProvenance: snapshot.identityProvenance } : {}),
     documents: snapshot.documents.map((document): ManifestPhysicalFile => ({
       storageKey: document.storage_key,
       sha256: document.sha256,

@@ -60,12 +60,24 @@ export async function readLabBacklog(pool: Pick<DbPool, "query">, input: { filte
   session: Pick<SessionPayload, "role" | "userId">): Promise<LabBacklogSnapshot> {
   // Keep the data function fail-closed too; SQL task visibility below is admin-only.
   if (!canReadLabBacklog(session.role) || !Number.isInteger(session.userId) || session.userId <= 0) throw new Error("lab_backlog_forbidden");
-  const { rows: [row] } = await pool.query<{ as_of: Date; today: string; total: number; page: number;
+  return readLabBacklogWith(pool, input, timeZone, { userId: session.userId, tasks: true });
+}
+
+/** The same whole-clinic snapshot on the caller's runner (a canonical owning reader):
+ * the caller has already proved the authority; `tasks: false` returns no linked task
+ * (titles, assignees) and a zero visible count. */
+export async function readLabBacklogWith(q: Pick<DbPool, "query">, input: { filter: LabBacklogFilter; page: number }, timeZone: string,
+  viewer: { userId: number; tasks: boolean }): Promise<LabBacklogSnapshot> {
+  if (!Number.isInteger(viewer.userId) || viewer.userId <= 0) throw new Error("lab_backlog_forbidden");
+  const { rows: [row] } = await q.query<{ as_of: Date; today: string; total: number; page: number;
     counts: LabBacklogSnapshot["counts"]; items: LabBacklogSnapshot["items"] }>(LAB_BACKLOG_SQL,
-    [timeZone, [...LAB_READINESS_STATUSES], input.filter, input.page, LAB_BACKLOG_PAGE_SIZE, session.userId]);
+    [timeZone, [...LAB_READINESS_STATUSES], input.filter, input.page, LAB_BACKLOG_PAGE_SIZE, viewer.userId]);
+  const items = row && !viewer.tasks && Array.isArray(row.items)
+    ? row.items.map(item => ({ ...item, visibleTaskCount: 0, tasks: [] }))
+    : row?.items;
   const value = row && decodeLabBacklog({ scope: "all_open_now", asOf: row.as_of.toISOString(), today: row.today, timeZone,
     filter: input.filter, counts: row.counts, total: row.total, page: row.page,
-    hasMore: (row.page + 1) * LAB_BACKLOG_PAGE_SIZE < row.total, items: row.items }, input.filter);
+    hasMore: (row.page + 1) * LAB_BACKLOG_PAGE_SIZE < row.total, items }, input.filter);
   if (!value) throw new Error("lab_backlog_invalid_result");
   return value;
 }

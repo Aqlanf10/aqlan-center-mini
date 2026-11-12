@@ -10,6 +10,7 @@ import { PatientFlagChips } from "@/components/PatientContactPanel";
 import { useSetting } from "@/components/SettingsProvider";
 import { parseFlagList } from "@/lib/patient-identity";
 import { FamilyLinkSuggestion, linkNewPatientToFamily, type FamilyLinkChoice } from "@/components/FamilyLinkSuggestion";
+import { useSession } from "@/components/SessionProvider";
 
 /**
  * المرضى: بحث، وتصفّح، وإنشاء.
@@ -25,6 +26,8 @@ interface PatientSummary {
   fullName: string;
   phone: string | null;
   medicalAlert: string | null;
+  /** الملخص التشغيلي (الهوية الموحّدة): وجود تنبيه طبي دون نصه. */
+  hasMedicalAlert?: boolean;
   /** (PAT-1) في التصفّح فقط — البحث يعيد الأساسيات. */
   age?: number | null;
   lastVisitAt?: string | null;
@@ -36,9 +39,21 @@ interface PatientSummary {
   photoDocumentId?: number | null;
 }
 
-interface PageResult { rows: PatientSummary[]; total: number; page: number; pageSize: number }
+interface PageResult { rows: PatientSummary[]; total: number; page: number; pageSize: number; projection?: Projection }
+
+/** جلسة الهوية الموحّدة: مجموعات الأعمدة التي يملكها الموظف كما قرّرها الخادم. */
+interface Projection { care: boolean; operational?: boolean; schedule: boolean; balances: boolean }
+/** المرشّحات التي تحتاج بيانات العلاج — تُخفى لمن لا يملكها. */
+const CARE_FILTERS: readonly PatientListFilter[] = ["alert", "ortho"];
 
 export default function PatientsPage() {
+  /* الهوية الموحّدة (M2): القائمة تُقرأ بنطاق المرضى وبإسقاط الصلاحيات، والملف يفتح
+     الملف الموحّد المُسقط (components/patient/CanonicalPatientProfile). */
+  const session = useSession();
+  const canonical = session?.canonical === true;
+  const canCreate = !canonical || session?.isOwner === true || session?.capabilities?.includes("patients.create") === true;
+  const [created, setCreated] = useState<string | null>(null);
+  const [projection, setProjection] = useState<Projection | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PatientSummary[]>([]);
   /* (PAT-1) المرشّح والترتيب على الخادم — يعملان على كل المرضى لا على الصفحة المعروضة. */
@@ -77,6 +92,7 @@ export default function PatientsPage() {
         setBrowsing(false);
       } else {
         const result = payload as PageResult;
+        setProjection(result.projection ?? null);
         setResults(result.rows);
         setTotal(result.total);
         setPageSize(result.pageSize);
@@ -109,19 +125,31 @@ export default function PatientsPage() {
             {browsing && total > 0 ? `${total} مريضًا مسجّلًا` : "ابحث بالاسم أو رقم الجوال أو رقم الملف"}
           </p>
         </div>
-        <button
-          onClick={() => setAdding((open) => !open)}
-          className="shrink-0 rounded-xl bg-brand-orange px-4 py-2 text-sm font-extrabold text-white"
-        >
-          {adding ? "إغلاق" : "+ مريض جديد"}
-        </button>
+        {!canCreate ? null : (
+          <button
+            onClick={() => setAdding((open) => !open)}
+            className="shrink-0 rounded-xl bg-brand-orange px-4 py-2 text-sm font-extrabold text-white"
+          >
+            {adding ? "إغلاق" : "+ مريض جديد"}
+          </button>
+        )}
       </header>
 
-      {adding ? (
+      {adding && canCreate ? (
         <NewPatientForm
-          onCreated={(patient) => { window.location.href = `/patients/${patient.id}`; }}
+          canonical={canonical}
+          onCreated={(patient) => {
+            // الهوية الموحّدة: ملف المريض لم يُنقل بعد، فيُعلن الإنشاء هنا وتُحدَّث القائمة.
+            if (!canonical) { window.location.href = `/patients/${patient.id}`; return; }
+            setAdding(false);
+            setCreated(`أُنشئ ملف ${patient.fullName ?? ""} برقم ${patient.patientNumber ?? ""}.`);
+            void load(query, page);
+          }}
           onCancel={() => setAdding(false)}
         />
+      ) : null}
+      {created ? (
+        <p role="status" className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800">{created}</p>
       ) : null}
 
       <input
@@ -135,7 +163,7 @@ export default function PatientsPage() {
       {/* (PAT-1) مرشّحات القائمة — على كل المرضى — والترتيب. تظهر في التصفّح؛ البحث يتجاوزها. */}
       {!query.trim() ? (
         <div className="mb-4 flex flex-wrap items-center gap-1.5">
-          {(Object.entries(PATIENT_LIST_FILTERS) as [PatientListFilter, string][]).map(([key, label]) => (
+          {(Object.entries(PATIENT_LIST_FILTERS) as [PatientListFilter, string][]).filter(([key]) => filterAllowed(key, projection)).map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -156,11 +184,11 @@ export default function PatientsPage() {
             aria-label="ترتيب القائمة"
             className="mr-auto rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600"
           >
-            {(Object.entries(PATIENT_LIST_SORTS) as [PatientListSort, string][]).map(([key, label]) => (
+            {(Object.entries(PATIENT_LIST_SORTS) as [PatientListSort, string][]).filter(([key]) => key !== "last_visit" || projection?.schedule !== false).map(([key, label]) => (
               <option key={key} value={key}>ترتيب: {label}</option>
             ))}
           </select>
-          {flagList.length > 0 ? (
+          {flagList.length > 0 && (projection === null || projection.care || projection.operational) ? (
             <select
               value={flag}
               onChange={(event) => { setFlag(event.target.value); setPage(0); }}
@@ -188,10 +216,7 @@ export default function PatientsPage() {
         <ul className="space-y-2">
           {filteredResults.map((patient) => (
             <li key={patient.id}>
-              <a
-                href={`/patients/${patient.id}`}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:border-slate-300 transition-colors shadow-2xs"
-              >
+              <PatientRowFrame href={`/patients/${patient.id}`}>
                 {patient.photoDocumentId ? (
                   <img src={`/api/documents/${patient.photoDocumentId}`} alt="" loading="lazy"
                     className="h-10 w-10 shrink-0 rounded-xl object-cover" />
@@ -207,6 +232,10 @@ export default function PatientsPage() {
                   {patient.medicalAlert ? (
                     <span className="mt-1.5 inline-block rounded-lg bg-red-50 border border-red-200 px-2 py-0.5 text-[11px] font-bold text-red-700">
                       ⚠ {patient.medicalAlert}
+                    </span>
+                  ) : patient.hasMedicalAlert ? (
+                    <span className="mt-1.5 inline-block rounded-lg bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                      ⚠ يوجد تنبيه طبي — نسّق مع الطبيب قبل الحجز
                     </span>
                   ) : null}
                   {/* (PAT-1) ما يُسأل عنه قبل فتح الملف: العمر، التقويم، آخر زيارة، الموعد القادم، المستحق. */}
@@ -234,7 +263,7 @@ export default function PatientsPage() {
                 <span className="max-w-[45%] shrink-0 text-xs font-mono font-bold text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 [overflow-wrap:anywhere]">
                   {patient.patientNumber}
                 </span>
-              </a>
+              </PatientRowFrame>
             </li>
           ))}
         </ul>
@@ -263,8 +292,29 @@ export default function PatientsPage() {
   );
 }
 
-function NewPatientForm({ onCreated, onCancel }: {
-  onCreated: (patient: { id: number }) => void;
+/** المرشّح يظهر فقط إن كانت بياناته ضمن إسقاط الموظف (الجلسة القديمة: كلها). */
+function filterAllowed(filter: PatientListFilter, projection: Projection | null): boolean {
+  if (!projection) return true;
+  if (filter === "debt") return projection.balances;
+  if (filter === "no_next") return projection.schedule;
+  if (CARE_FILTERS.includes(filter)) return projection.care || projection.operational === true;
+  return true;
+}
+
+function DuplicateFrame({ href, children }: { href: string | null; children: React.ReactNode }) {
+  const className = "flex flex-wrap items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs hover:bg-slate-50";
+  return href ? <a href={href} target="_blank" rel="noopener" className={className}>{children}</a> : <div className={className}>{children}</div>;
+}
+
+function PatientRowFrame({ href, children }: { href: string | null; children: React.ReactNode }) {
+  const className = "flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:border-slate-300 transition-colors shadow-2xs";
+  return href ? <a href={href} className={className}>{children}</a> : <div className={className} data-testid="patient-row">{children}</div>;
+}
+
+function NewPatientForm({ canonical, onCreated, onCancel }: {
+  /** الهوية الموحّدة: لا رصيد سابق ولا ربط عائلة (لم يُنقلا بعد)، والمرشّحون لا يُكشفون إلا لمن نطاقه كل المرضى. */
+  canonical: boolean;
+  onCreated: (patient: { id: number; patientNumber?: string; fullName?: string }) => void;
   onCancel: () => void;
 }) {
   const [fullName, setFullName] = useState("");
@@ -276,6 +326,8 @@ function NewPatientForm({ onCreated, onCancel }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
+  /* تحذير تكرارٍ بلا أسماء (الهوية الموحّدة لمن نطاقه ليس كل المرضى). */
+  const [undisclosed, setUndisclosed] = useState(false);
   /* (PAT-4) «ربط بعائلة …» — اقتراحٌ من الجوال، لا يُربط إلا باختيار. */
   const [familyChoice, setFamilyChoice] = useState<FamilyLinkChoice | null>(null);
 
@@ -286,19 +338,22 @@ function NewPatientForm({ onCreated, onCancel }: {
       const response = await fetch("/api/patients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName, phone, gender, birthYear, medicalAlert, confirmDuplicate, ...previousBalancePayload(previous) }),
+        body: JSON.stringify({ fullName, phone, gender, birthYear, medicalAlert, confirmDuplicate, ...(canonical ? {} : previousBalancePayload(previous)) }),
       });
       const payload = await response.json().catch(() => null);
       if (response.status === 409 && Array.isArray(payload?.duplicates)) {
         setDuplicates(payload.duplicates as DuplicateMatch[]);
+        setUndisclosed(payload?.disclosed === false);
         setError(payload?.message ?? null);
         return;
       }
       if (!response.ok) { setError(payload?.message ?? "تعذّر الحفظ."); return; }
       if (typeof payload?.warning === "string") window.alert(payload.warning);
-      const familyWarning = await linkNewPatientToFamily((payload as { id: number }).id, familyChoice);
-      if (familyWarning) window.alert(familyWarning);
-      onCreated(payload as { id: number });
+      if (!canonical) {
+        const familyWarning = await linkNewPatientToFamily((payload as { id: number }).id, familyChoice);
+        if (familyWarning) window.alert(familyWarning);
+      }
+      onCreated(payload as { id: number; patientNumber?: string; fullName?: string });
     } catch {
       setError("تعذّر الاتصال بالخادم.");
     } finally {
@@ -310,6 +365,7 @@ function NewPatientForm({ onCreated, onCancel }: {
     event.preventDefault();
     // الاسم أو الهاتف تغيّر بعد التحذير: يُعاد الفحص بدل أن يمرّ التأكيد القديم.
     setDuplicates([]);
+    setUndisclosed(false);
     void send(false);
   };
 
@@ -324,16 +380,15 @@ function NewPatientForm({ onCreated, onCancel }: {
         لا زرًّا. وكلٌّ منهم رابطٌ يُفتح — لأن القرار يحتاج النظر في الملف نفسه، لا
         في سطر يقول «قد يكون مكررًا».
       */}
-      {duplicates.length > 0 ? (
-        <div className="mb-3 rounded-xl border-2 border-warning-300 bg-warning-50 p-3">
+      {duplicates.length > 0 || undisclosed ? (
+        <div className="mb-3 rounded-xl border-2 border-warning-300 bg-warning-50 p-3" data-testid="duplicate-warning">
           <p className="mb-2 text-xs font-bold text-warning-900">
             {error ?? "قد يكون هذا المريض مسجّلًا سلفًا."}
           </p>
           <ul className="mb-3 space-y-1.5">
             {duplicates.map((match) => (
               <li key={match.patient.id}>
-                <a href={`/patients/${match.patient.id}`} target="_blank" rel="noopener"
-                  className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs hover:bg-slate-50">
+                <DuplicateFrame href={canonical ? null : `/patients/${match.patient.id}`}>
                   <span className="font-bold text-navy-900">{match.patient.fullName}</span>
                   <span className="font-semibold text-slate-400 ltr-nums">{match.patient.patientNumber}</span>
                   {match.patient.phone ? (
@@ -342,7 +397,7 @@ function NewPatientForm({ onCreated, onCancel }: {
                   <span className="mr-auto rounded-full bg-warning-100 px-2 py-0.5 font-bold text-warning-900">
                     {MATCH_LABEL[match.reason]}
                   </span>
-                </a>
+                </DuplicateFrame>
               </li>
             ))}
           </ul>
@@ -351,7 +406,7 @@ function NewPatientForm({ onCreated, onCancel }: {
               className="rounded-xl bg-warning-500 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">
               ليس أحدهم — أضف مريضًا جديدًا
             </button>
-            <button type="button" onClick={() => { setDuplicates([]); setError(null); }}
+            <button type="button" onClick={() => { setDuplicates([]); setUndisclosed(false); setError(null); }}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
               تراجع
             </button>
@@ -386,9 +441,11 @@ function NewPatientForm({ onCreated, onCancel }: {
           className="w-28 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
         />
       </div>
-      <div className="mb-2">
-        <FamilyLinkSuggestion phone={phone} value={familyChoice} onChange={setFamilyChoice} />
-      </div>
+      {canonical ? null : (
+        <div className="mb-2">
+          <FamilyLinkSuggestion phone={phone} value={familyChoice} onChange={setFamilyChoice} />
+        </div>
+      )}
       <div className="mb-2 flex gap-2">
         {(["male", "female", "unknown"] as Gender[]).map((option) => (
           <button
@@ -410,9 +467,11 @@ function NewPatientForm({ onCreated, onCancel }: {
         aria-label="تنبيه طبي"
         className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
       />
-      <div className="mb-3">
-        <PreviousBalanceFields value={previous} onChange={setPrevious} />
-      </div>
+      {canonical ? null : (
+        <div className="mb-3">
+          <PreviousBalanceFields value={previous} onChange={setPrevious} />
+        </div>
+      )}
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       ) : null}
@@ -422,7 +481,7 @@ function NewPatientForm({ onCreated, onCancel }: {
           disabled={busy || fullName.trim().length < 2}
           className="flex-1 rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
         >
-          {busy ? "جارٍ الحفظ…" : "احفظ وافتح الملف"}
+          {busy ? "جارٍ الحفظ…" : canonical ? "احفظ الملف" : "احفظ وافتح الملف"}
         </button>
         <button
           type="button"

@@ -1,0 +1,15 @@
+{
+  "base": "dc77d4a453c92a1f73a2e6da2d938788fb13d667",
+  "files": {
+    "app/api/ortho/[id]/strategy/route.ts": "7abffe28b0aee27e07a5a7a91680a8816dbcec8504f2ec58cd499b4f1240f2b7",
+    "components/OrthoTreatmentStrategy.tsx": "34fb75b5e1ac5f28d388dabd35eaa1874b30a9bb49315c576e1e989ebdaba670",
+    "components/PatientOrtho.tsx": "afe5358d91556b5b5ac0b8334b2c562401b88630d1ac01c02265dc4a23c0561e",
+    "components/patient/CanonicalOrthoCases.tsx": "ac5ba8be2072d9e934926027eb8c3179b518fa7a350f3620f42e5c31a05ac911",
+    "components/patient/CanonicalOrthoDetail.tsx": "690d096a54a338c9281c163881e0ba065aa1ee5db2bba1ebff2c2768082bc171",
+    "components/patient/CanonicalOrthoStrategy.tsx": "1cf0a6c8f9ef0e174aa9f0a551a7306bb6a49760a726dc3675b9b6f68cba8461",
+    "lib/canonical-ortho-strategy.ts": "be1c49174051cbc963db5149767817d5077f65181d650d3da0031700a056298a",
+    "lib/canonical-ortho-strategy-owner.ts": "e1c4721bb29fa2a6dcc637b834d17f8a4d43b13eac1e65344f850526670de4f8",
+    "lib/ortho-draft-lifetime.ts": "e4e738d8c34300375ba86477bec295a6ae98259be2cdc3bbbd659227cb71410f"
+  },
+  "buildId": "Ms_2w9bEzgofkJpGdMQpx"
+}

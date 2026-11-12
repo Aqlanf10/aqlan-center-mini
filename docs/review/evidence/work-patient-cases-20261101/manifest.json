@@ -1,0 +1,69 @@
+{
+  "format": "work-patient-cases-evidence-v1",
+  "baseRevision": "8e12f9591ebd0aafc578587b4d6c3e5e657eee6f",
+  "sourceRevision": "15bacdb7a0b4de242b928545b72eb480b0212c39",
+  "buildId": "M4w9eIjy-wThb6RFv7ToG",
+  "results": {
+    "postgres": {
+      "tests": 70,
+      "files": 3,
+      "newTests": 35
+    },
+    "httpBrowser": {
+      "tests": 11,
+      "files": 1
+    },
+    "unit": {
+      "tests": 22,
+      "files": 2
+    },
+    "mapGuards": {
+      "tests": 10,
+      "files": 2
+    },
+    "typecheck": "pass",
+    "focusedLint": "pass",
+    "build": "pass",
+    "sourcePreservationChecks": 13,
+    "historicalSourceHashes": 436,
+    "fullBatchCI": "not yet run",
+    "independentReview": "pending"
+  },
+  "sourceSha256": {
+    "app/api/patients/[id]/cases/route.ts": "6fc81f0a093e7622035e302ce5070349d7e6d4ff2886bf44c20bae5df1e7ccfd",
+    "components/patient/CanonicalPatientProfile.tsx": "6c8b6fb5acabdaf3d4b8c288af49343aed73ddd6f7a1520f00aefdfad93c527a",
+    "components/patient/CanonicalPatientCases.tsx": "02683f83b8d1f677085eb2f008a08898ed756533787e9a6eadb50ea3b9c590b1",
+    "lib/canonical-case-projection.ts": "da462354aa1dcb1b7250a97c236d5b3de317a023681586ef101af2339f9d7972",
+    "lib/canonical-case-reads.ts": "f393e069142bb94b1b90454e2e482e9e1bf09338d3182583075db2dcbb060f78",
+    "lib/canonical-patient-reads.ts": "3fcf671f04e9223ea5879315e3d81113c4d79336ae929d34ccb5bc229f73b35f",
+    "lib/canonical-read-snapshot.ts": "7321dbd8af7a2412003bc315c384195277c7f8fe0c4ebdb63837c81c3ae0bb93",
+    "lib/db.ts": "a09ebf9c0c08d500970d9ad0444eacc5a679b93756505fad215ba435fdd3df69",
+    "lib/cases.ts": "5114cd2650085a00f2ba80c874460896e9c9124d0c90a2f23be0ac746d0ec5ac",
+    "lib/staff-operation-runtime.ts": "3061a0632468afc6b5495ca7581f4c4e351e5d21b47bf7f516632436f108144d",
+    "components/PatientCases.tsx": "2ff510b099d1254a122f123c42103c37e9fb533040b2a196b107540c5ad31991",
+    "__tests__/canonical-case-projection.test.ts": "6414114c0c65b703f226c62bb0f4caff1149c233fbab6f9e9f69ff05b2cda129",
+    "__tests__/fixtures/canonical-patient-cases.ts": "5c7182cb4ad8a8348c21e1d1b92037d2e675166c1bf120e0a2cc1e8164d2e5c5",
+    "__tests__/postgres/patient-cases-canonical-read.test.ts": "b7f9675c0de2717d908efd1efb8d7fbdae2cdbc854e24a5140e2a20e05bb604e",
+    "__tests__/security-http/canonical-patient-cases-journey.test.ts": "f7539aed87611ebb0705d4a0be51cb87a3193d837e8572b312219f71b434a852",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "7907ba295b6c6ecf5b2538b8ea81019aad4c651bde3b2c57dee4e36ca19b9216",
+    "docs/security/staff-cutover/inventory.json": "85816f5c4b381ee679e99140e0f3831611d6cb987231264831efb143bba8a59c",
+    "docs/security/staff-cutover/HANDOFF.md": "dc3556681f8da2fbf9a03d2121230f4bf72b2f7aa3cca0975aa3b685ab88a128",
+    "docs/review/work-patient-cases-slice40-20261101.md": "06505077bcc9a613ab5b24d125c6ecd0cd0ba344158939c5f8b97ef52e666687"
+  },
+  "artifacts": {
+    "93b-ci-final.json": "7c8a68bb23edb56a09a802eb2dfe32ac80f660e2e0bdd24761bb3eb6311863f7",
+    "patient-cases-390.png": "b6b53dcea6f0a0a6d67032f744af13e7bf4e3dab7828e5f1422553ba2275b40c",
+    "slice40-before-http-final.log": "cf94a3e992431e6a8a8c7bf899a59c2fbb6195bd35eda8f2350da13d34e84a00",
+    "slice40-before-http.log": "627d20511d6634b72b50d152f6a06875f166e044c0db9a7f7b26ef6977938499",
+    "slice40-build.log": "34c229b4bb9bc29c5286572ddaccc7f6b58492eee73a2717d1612b3d25f4e64c",
+    "slice40-http-first.log": "2d5a1f1472dad962c9f0b6898f66771beb04ea2a2235abae84de19b3918f9bbc",
+    "slice40-lint.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice40-map-guards.log": "5b85052dfcf8c38bc0a4ca6cd68c952a979bc5b7bd4772a43e45da33416a350c",
+    "slice40-pg-final.log": "083bc2e5b0c7a16e25c439a4126310e9aec9ddd448cacb32ccdfd9fa0368148d",
+    "slice40-pg-first.log": "00d63f71afae763b3a55d81d419add2eeb15c01b446ba6b416a54479966e3c53",
+    "slice40-pg-second.log": "4130b9a4dab233c4bb0e82e1fe3f58d2ee8d968e88ca094e0dda7b8673cee9b0",
+    "slice40-source-proof.json": "67dc1dbab231dfba465d711f56a6af8c991268e80f367639ca922f3404b310e6",
+    "slice40-types-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice40-unit.log": "19074c404930f40f218ca243bb8b647703d67d59ce079a73145fa993d15d8ecd"
+  }
+}

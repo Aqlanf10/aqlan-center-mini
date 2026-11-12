@@ -178,8 +178,14 @@ export function checkBaselineDraft(
 
 /* ─────────────────── جلسة التقويم داخل توقيع الزيارة ─────────────────── */
 
+export function resolveOrthoWire(current: string | null, wire: string | null, action?: "remove"): string | null {
+  return action === "remove" ? null : wire?.trim() || current;
+}
+
 export interface OrthoSessionDraft {
   caseId: number;
+  upperWireAction?: "remove";
+  lowerWireAction?: "remove";
   phase: OrthoPhase | null;
   upperWire: string | null;
   lowerWire: string | null;
@@ -226,16 +232,27 @@ export function checkOrthoSessionDraft(
   }
   const phase = (source.phase ?? null) as OrthoPhase | null;
   const elastics = (source.elastics ?? "none") as ElasticClass;
+  // A session documents what was done (or a review without change), and a wire is either
+  // recorded or explicitly removed, never both (WORK line, kept with the strict admissions above).
+  const done = text(source.done, 400);
+  if (!done) return { ok: false, message: "وثّق ما تم في جلسة التقويم، أو المراجعة دون تغيير." };
+  for (const arch of ["upper", "lower"] as const) {
+    const action = source[`${arch}WireAction`];
+    if (action !== undefined && action !== "remove") return { ok: false, message: "إجراء السلك غير صالح." };
+    if (action === "remove" && text(source[`${arch}Wire`], 40)) return { ok: false, message: "اختر إزالة السلك أو تسجيل سلك، لا كليهما." };
+  }
   return {
     ok: true,
     value: {
       caseId,
+      ...(source.upperWireAction === "remove" ? { upperWireAction: "remove" as const } : {}),
+      ...(source.lowerWireAction === "remove" ? { lowerWireAction: "remove" as const } : {}),
       phase,
       upperWire: text(source.upperWire, 40),
       lowerWire: text(source.lowerWire, 40),
       elastics,
       elasticNote: text(source.elasticNote, 120),
-      done: text(source.done, 400),
+      done,
       nextWeeks,
       note: text(source.note, 300),
     },

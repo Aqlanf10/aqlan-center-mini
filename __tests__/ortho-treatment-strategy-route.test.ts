@@ -5,6 +5,8 @@ vi.mock("../lib/session", () => ({ requireSession: mock.session }));
 vi.mock("../lib/case-route", () => ({ guardPatient: mock.guard }));
 vi.mock("../lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", getOrthoCase: mock.getCase }));
 vi.mock("../lib/ortho-treatment-strategy-store", () => ({ getOrthoTreatmentStrategy: mock.read, appendOrthoTreatmentStrategy: mock.append }));
+// This suite retains the legacy branch contract; canonical admission is exercised over real HTTP.
+vi.mock("../lib/staff-session-admission", () => ({ selectRequestStaffEnvelope: async () => ({ kind: "legacy" }) }));
 import { GET, POST } from "../app/api/ortho/[id]/strategy/route";
 
 const session = { username: "synthetic-doctor", userId: 9, role: "doctor", expiresAt: 9999999999999 };

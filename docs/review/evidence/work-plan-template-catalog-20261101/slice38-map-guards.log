@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run scripts/audits/m2-route-capability-map.test.mjs scripts/audits/staff-cutover-readiness.test.mjs --exclude .next/**
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  03:05:43
+   Duration  10.78s (transform 254ms, setup 0ms, import 3.26s, tests 6.72s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

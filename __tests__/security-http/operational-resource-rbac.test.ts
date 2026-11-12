@@ -1,4 +1,6 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { Client } from "pg";
 import { authedGet, authedMutation, harness } from "./_server";
 
 /**
@@ -14,17 +16,41 @@ import { authedGet, authedMutation, harness } from "./_server";
 
 let h: Awaited<ReturnType<typeof harness>>;
 
-beforeAll(async () => { h = await harness(); }, 240_000);
+let db: Client;
+beforeAll(async () => {
+  h = await harness();
+  const target = new URL(h.seeded.dbUrl);
+  expect(["127.0.0.1", "localhost", "[::1]"]).toContain(target.hostname);
+  expect(target.pathname).toBe("/aqlan_sec_http");
+  db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
+  await db.connect();
+}, 240_000);
+afterAll(async () => { await db?.end(); });
+
+// Appointment authorization must not depend on another suite's bookings or on
+// a prior action in this suite. Preserve the real seeded doctor's ownership.
+async function appointmentPatient(owner: "A" | "B"): Promise<number> {
+  const sourceId = owner === "A" ? h.seeded.patientAId : h.seeded.patientBId;
+  const result = await db.query<{ id: number }>(
+    `INSERT INTO patients (patient_number, full_name, primary_doctor_id)
+     SELECT $1, $2, primary_doctor_id FROM patients WHERE id=$3 RETURNING id`,
+    [`RBAC-APPT-${randomUUID()}`, "مريض صلاحية موعد اصطناعي", sourceId],
+  );
+  expect(result.rowCount).toBe(1);
+  return result.rows[0].id;
+}
 
 /** موعدٌ حقيقيّ للمريض ب — يُنشأ بجلسةٍ تملكه، فالرقم صالحٌ وموجود. */
 async function appointmentForB(time: string): Promise<number> {
+  const patientId = await appointmentPatient("B");
   const response = await authedMutation(
     "/api/appointments", h.sessions.reception, "POST",
     JSON.stringify({
-      patientId: h.seeded.patientBId,
-      date: "2026-08-11", time, durationMinutes: 30, appointmentType: "consultation",
+      patientId,
+      date: "2026-11-17", time, durationMinutes: 30, appointmentType: "consultation",
     }),
   );
+  expect(response.status).toBe(201);
   const body = await response.json().catch(() => null);
   expect(typeof body?.id, "تعذّر تهيئة موعد المريض ب").toBe("number");
   return body.id as number;
@@ -57,12 +83,12 @@ describe("مواعيد مريضٍ لا يملكه الطبيب", () => {
       const response = await authedMutation(
         `/api/appointments/${id}`, h.sessions.doctorA, "PATCH",
         JSON.stringify({ action, reason: "محاولة عبر الحدود",
-          ...(action === "reminded" ? { snapshot: await reminderSnapshotFor(id, "2026-08-11") } : {}) }),
+          ...(action === "reminded" ? { snapshot: await reminderSnapshotFor(id, "2026-11-17") } : {}) }),
       );
       expect(response.status).toBe(404);
 
       /* والإثباتُ في الحالة لا في رمز الردّ: الموعد لم يتغيّر. */
-      const after = await authedGet(`/api/appointments?date=2026-08-11`, h.sessions.reception);
+      const after = await authedGet(`/api/appointments?date=2026-11-17`, h.sessions.reception);
       const list = await after.json().catch(() => []);
       const row = Array.isArray(list) ? list.find((one: { id: number }) => one.id === id) : null;
       expect(row?.status).toBe("booked");
@@ -77,13 +103,13 @@ describe("مواعيد مريضٍ لا يملكه الطبيب", () => {
     const response = await authedMutation(
       `/api/appointments/${id}`, h.sessions.doctorA, "PATCH",
       JSON.stringify({
-        action: "reschedule", date: "2026-08-13", time: "10:00",
+        action: "reschedule", date: "2026-11-19", time: "10:00",
         reason: "محاولة نقلٍ عبر الحدود",
       }),
     );
     expect(response.status).toBe(404);
 
-    const after = await authedGet("/api/appointments?date=2026-08-11", h.sessions.reception);
+    const after = await authedGet("/api/appointments?date=2026-11-17", h.sessions.reception);
     const list = await after.json().catch(() => []);
     const row = Array.isArray(list)
       ? list.find((one: { id: number }) => one.id === id) as
@@ -95,19 +121,21 @@ describe("مواعيد مريضٍ لا يملكه الطبيب", () => {
   });
 
   it("والطبيب أ ينفّذ على موعد مريضه — السلوك المشروع لا يُكسر", async () => {
+    const patientId = await appointmentPatient("A");
     const created = await authedMutation(
       "/api/appointments", h.sessions.reception, "POST",
       JSON.stringify({
-        patientId: h.seeded.patientAId,
-        date: "2026-08-12", time: "09:00", durationMinutes: 30, appointmentType: "consultation",
+        patientId,
+        date: "2026-11-18", time: "09:00", durationMinutes: 30, appointmentType: "consultation",
       }),
     );
+    expect(created.status).toBe(201);
     const body = await created.json().catch(() => null);
     expect(typeof body?.id).toBe("number");
 
     const response = await authedMutation(
       `/api/appointments/${body.id}`, h.sessions.doctorA, "PATCH",
-      JSON.stringify({ action: "reminded", snapshot: await reminderSnapshotFor(body.id, "2026-08-12") }),
+      JSON.stringify({ action: "reminded", snapshot: await reminderSnapshotFor(body.id, "2026-11-18") }),
     );
     expect(response.status).toBe(200);
   });

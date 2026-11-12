@@ -28,8 +28,6 @@ import { POST as retiredPlanPOST } from "../app/api/plans/route";
 
 const ROOT = process.cwd();
 const FUNCTION_START = /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*[<(]|^(?:export\s+)?const\s+([A-Za-z0-9_]+)\s*=\s*(?:async\s*)?\(/gm;
-/** استدعاء: `name(` أو `name<T>(` (الأنواع العامة، على سطرٍ واحد — فلا يبتلع نوعٌ عامٌّ ما بعده). */
-const CALL = /\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^()\n;]*?>)?\s*\(/g;
 const WRITES_AUDIT = /recordAudit\(|insertAuditRow\(|INSERT INTO audit_log|auditVisitStep\(|saveSettingsAudited\(/;
 const MUTATING = ["POST", "PUT", "PATCH", "DELETE"] as const;
 
@@ -56,11 +54,10 @@ function splitFunctions(source: string): Map<string, string> {
 }
 
 function callsIn(body: string): Set<string> {
-  // recordExpense has a read-only quote branch that returns before its audit/write
-  // path. Do not count that edge as proof of auditing. Only a literal, unambiguous
-  // quoteOnly:true qualifies; dynamic options remain conservatively audited.
+  // This guard tracks unqualified calls to named library functions. A similarly
+  // named object method, declaration or string is not evidence of auditing.
   const source = ts.createSourceFile("audit-scan.ts", body, ts.ScriptTarget.Latest, true);
-  const quoteCalls = new Set<number>();
+  const calls = new Set<string>();
   function visit(node: ts.Node) {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
       && node.expression.text === "recordExpense" && node.arguments.length === 1) {
@@ -73,15 +70,17 @@ function callsIn(body: string): Set<string> {
           && property.name.text === "quoteOnly");
         if (flags.length === 1 && ts.isPropertyAssignment(flags[0])
           && flags[0].initializer.kind === ts.SyntaxKind.TrueKeyword) {
-          quoteCalls.add(node.expression.getStart(source));
+          // Read-only quote does not audit, but argument expressions may do so.
+          ts.forEachChild(node, visit);
+          return;
         }
       }
     }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) calls.add(node.expression.text);
     ts.forEachChild(node, visit);
   }
   visit(source);
-  return new Set([...body.matchAll(CALL)]
-    .filter(match => !quoteCalls.has(match.index!)).map(match => match[1]));
+  return calls;
 }
 
 /** دوال lib التي تكتب سطر تدقيق — مباشرةً أو عبر دالةٍ تكتبه (نقطة ثابتة). */
@@ -128,10 +127,13 @@ function handlerAudits(local: Map<string, string>, handler: string, audited: Set
 // classification. Behavioral checks below and plans-creation-entry.test.ts cover
 // refusal, preserved policy, body limits and no writer/success-audit invocation;
 // plan-creation-entry-http.test.ts covers proxy policy and unchanged DB rows.
+// M2 slice 94b re-pinned it: the canonical branch admits clinical.plans.edit inside the patient
+// scope and then refuses with the same 409 inside an operation that always rolls back
+// (postgres/plan-writes-canonical.test.ts proves no plan row is written).
 const REFUSAL_ONLY = {
   "POST /api/plans": {
-    reason: "إنشاء الخطط القديم موقوف: رفض 409 بعد الصلاحيات، بلا كتابة أو تدقيق نجاح.",
-    sha256: "cd5aa5ddddd9ccb7aba89bbdb3d060c96113a7a6226e1167f67634612a23ac2e",
+    reason: "إنشاء الخطط القديم موقوف: رفض 409 بعد الصلاحيات (والنطاق على الهوية الموحّدة)، بلا كتابة أو تدقيق نجاح.",
+    sha256: "29db38c8f9146b0ebfd4e5ee400822952da843080ff90eb7ff70ab6a5ef83a02",
   },
 };
 const audited = auditingLibFunctions();
@@ -146,6 +148,40 @@ const handlers = walk(join(ROOT, "app", "api"), (name) => name === "route.ts").f
 });
 
 describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
+  it("does not confuse member methods or declarations with named audit calls", () => {
+    expect([...callsIn('socket.write(data); stream.write(data); target?.write(data); target["write"](data);')]).toEqual([]);
+    expect([...callsIn('function write() {} // write()\nconst text = "write()";')]).toEqual([]);
+    expect([...callsIn('write(data); write<Row>(data);')]).toEqual(["write"]);
+    expect(handlerAudits(new Map([["POST", "socket.write(data);"]]), "POST", new Set(["write"]))).toBe(false);
+    expect(audited.has("sendOutbound")).toBe(false);
+    expect(audited.has("runBackupCycle")).toBe(false);
+  });
+  it("retains argument audit calls while excluding only literal read-only quotes", () => {
+    expect(callsIn('recordExpense({ quoteOnly: true, amount: auditWork() });')).not.toContain("recordExpense");
+    expect(callsIn('recordExpense({ quoteOnly: true, amount: auditWork() });')).toContain("auditWork");
+    expect(callsIn('recordExpense({ quoteOnly: flag });')).toContain("recordExpense");
+  });
+
+  it("exempts exact coverage status reads but never decision or terminal-refusal writes", () => {
+    const path = "/api/ortho/[id]/followup-coverage";
+    expect(handlers.find(handler => handler.key === `PUT ${path}`)?.audits).toBe(false);
+    expect(AUDIT_EXEMPT).toHaveProperty(`PUT ${path}`);
+    expect(handlers.find(handler => handler.key === `POST ${path}`)?.audits).toBe(true);
+    expect(AUDIT_EXEMPT).not.toHaveProperty(`POST ${path}`);
+    const route = splitFunctions(readFileSync(join(ROOT, "app/api/ortho/[id]/followup-coverage/route.ts"), "utf8"));
+    expect(callsIn(route.get("PUT")!)).toContain("readFollowupCoverageCommandStatus");
+    expect(callsIn(route.get("PUT")!)).not.toContain("appendFollowupCoverage");
+  });
+  it("exempts only the read-only service-addition preview, never its audited POST writer",()=>{
+    expect(handlers.find(handler=>handler.key==="PUT /api/invoices/[id]/add-service")?.audits).toBe(false);
+    expect(AUDIT_EXEMPT).toHaveProperty("PUT /api/invoices/[id]/add-service");
+    expect(handlers.find(handler=>handler.key==="POST /api/invoices/[id]/add-service")?.audits).toBe(true);
+    expect(AUDIT_EXEMPT).not.toHaveProperty("POST /api/invoices/[id]/add-service");
+    const route=splitFunctions(readFileSync(join(ROOT,"app/api/invoices/[id]/add-service/route.ts"),"utf8"));
+    expect(callsIn(route.get("PUT")!)).toContain("previewInvoiceAddService");
+    expect(callsIn(route.get("PUT")!)).not.toContain("addInvoiceService");
+  });
+
   it("distinguishes the read-only expense quote from mandatory create auditing", () => {
     expect(audited.has("recordExpense")).toBe(true);
     expect(handlers.find(handler => handler.key === "POST /api/expenses")?.audits).toBe(true);

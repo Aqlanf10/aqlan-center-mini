@@ -4,6 +4,7 @@ const transaction = vi.hoisted(() => ({ query: vi.fn(), release: vi.fn() }));
 vi.mock("../lib/session", async importOriginal => ({
   ...await importOriginal<typeof import("../lib/session")>(), requireSession: vi.fn(),
 }));
+vi.mock("../lib/staff-session-admission", () => ({ selectRequestStaffEnvelope: vi.fn(async () => ({ kind: "legacy" })) }));
 vi.mock("../lib/db", () => ({
   getPool: () => ({ connect: async () => transaction }),
   CLINIC_TIME_ZONE: "Asia/Aden", orthoFollowupBoard: vi.fn(), findUserByUsername: vi.fn(), doctorOwnedPatientIds: vi.fn(),
@@ -47,11 +48,11 @@ afterEach(() => { vi.useRealTimers(); });
 describe("existing board API visibility with additive appointment context", () => {
   it("requires a session before loading any board context", async () => {
     session.mockResolvedValue(null);
-    expect((await GET()).status).toBe(401);
+    expect((await GET(new Request("http://localhost/api/ortho/followups"))).status).toBe(401);
     expect(board).not.toHaveBeenCalled();
   });
   it("preserves doctor ownership filtering, including nested booking labels", async () => {
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     const payload = await response.json();
     expect(response.status).toBe(200);
     expect(payload.today).toBe("2026-10-06");
@@ -69,7 +70,7 @@ describe("existing board API visibility with additive appointment context", () =
       vi.setSystemTime(new Date("2026-10-05T21:00:01.456Z"));
       return account;
     });
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     expect(response.status).toBe(200);
     expect((await response.json()).today).toBe("2026-10-05");
     expect(board).toHaveBeenCalledWith("2026-10-05", new Date("2026-10-05T20:59:59.123Z"), transaction);
@@ -79,7 +80,7 @@ describe("existing board API visibility with additive appointment context", () =
       attendanceContext: { basis: "current_status_scheduled_slot", outcome: "conflict", latestScheduledLocal: `2026-10-06T00:00:00.0000${item.patientId}`,
         cutoff: { kind: "explicit_instant", instant: "2026-10-05T21:30:00.000Z", localDateTime: "2026-10-06T00:30:00.000000", timeZone: "Asia/Aden" } },
     })));
-    const payload = JSON.stringify(await (await GET()).json());
+    const payload = JSON.stringify(await (await GET(new Request("http://localhost/api/ortho/followups"))).json());
     expect(payload).toContain("current_status_scheduled_slot");
     expect(payload).toContain("2026-10-06T00:00:00.000010");
     expect(payload).not.toContain("2026-10-06T00:00:00.000020");
@@ -87,19 +88,19 @@ describe("existing board API visibility with additive appointment context", () =
   it.each(["admin", "reception"] as const)("preserves authorized %s board access", async (role) => {
     session.mockResolvedValue({ username: "synthetic", userId: 7, role, partyId: null, credentialVersion, expiresAt: Date.now() + 60_000 });
     user.mockResolvedValue({ id: 7, username: "synthetic", role, isActive: true, passwordHash: credential, partyId: null } as NonNullable<Awaited<ReturnType<typeof findUserByUsername>>>);
-    const payload = await (await GET()).json();
+    const payload = await (await GET(new Request("http://localhost/api/ortho/followups"))).json();
     expect(JSON.stringify(payload)).toContain("Service 10");
     expect(JSON.stringify(payload)).toContain("Service 20");
     expect(owned).not.toHaveBeenCalled();
   });
   it("preserves explicit canViewAllPatients while not redefining case ownership", async () => {
     user.mockResolvedValue({ id: 7, username: "synthetic", role: "doctor", isActive: true, passwordHash: credential, partyId: 7, permissions: { canViewAllPatients: true } } as NonNullable<Awaited<ReturnType<typeof findUserByUsername>>>);
-    expect(JSON.stringify(await (await GET()).json())).toContain("Service 20");
+    expect(JSON.stringify(await (await GET(new Request("http://localhost/api/ortho/followups"))).json())).toContain("Service 20");
     expect(owned).not.toHaveBeenCalled();
   });
   it("does not turn a failed projection query into an empty successful board", async () => {
     board.mockRejectedValue(new Error("Synthetic projection unavailable"));
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     expect(response.status).toBe(500);
     expect(await response.json()).not.toHaveProperty("buckets");
   });
@@ -110,7 +111,7 @@ describe("follow-up board current-account boundary", () => {
   const current = (overrides: Record<string, unknown> = {}) => ({ id: 7, username: "synthetic", role: "doctor",
     isActive: true, passwordHash: credential, partyId: 7, permissions: { canViewAllPatients: false }, ...overrides }) as NonNullable<Awaited<ReturnType<typeof findUserByUsername>>>;
   async function noBoardDisclosure(expectedStatus: number) {
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     expect(response.status).toBe(expectedStatus);
     const payload = await response.json();
     expect(payload).not.toHaveProperty("buckets");
@@ -142,14 +143,14 @@ describe("follow-up board current-account boundary", () => {
   it("uses the current clinician-party link rather than an earlier session projection", async () => {
     user.mockResolvedValue(current({ partyId: 17 }));
     owned.mockImplementation(async partyId => new Set(partyId === 17 ? [20] : [10]));
-    const payload = await (await GET()).json();
+    const payload = await (await GET(new Request("http://localhost/api/ortho/followups"))).json();
     expect(owned).toHaveBeenCalledWith(17, [10, 20], transaction);
     expect(JSON.stringify(payload)).toContain("Patient 20");
     expect(JSON.stringify(payload)).not.toContain("Patient 10");
   });
   it("preserves the canonical case-insensitive account lookup", async () => {
     user.mockResolvedValue(current({ username: "Synthetic" }));
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     expect(response.status).toBe(200);
     expect(owned).toHaveBeenCalledWith(7, [10, 20], transaction);
     expect(JSON.stringify(await response.json())).not.toContain("Patient 20");
@@ -161,7 +162,7 @@ describe("follow-up board current-account boundary", () => {
   it("keeps an explicit current global grant valid even without a clinician-party link", async () => {
     session.mockResolvedValue({ username: "synthetic", userId: 7, role: "doctor", partyId: null, credentialVersion, expiresAt: Date.now() + 60_000 });
     user.mockResolvedValue(current({ partyId: null, permissions: { canViewAllPatients: true } }));
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     expect(response.status).toBe(200);
     expect(user).toHaveBeenCalledWith("synthetic", transaction);
     expect(JSON.stringify(await response.json())).toContain("Patient 20");
@@ -173,14 +174,14 @@ describe("follow-up board current-account boundary", () => {
   });
   it("reports an ownership lookup failure without a partial or empty success", async () => {
     owned.mockRejectedValue(new Error("Synthetic ownership unavailable"));
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     expect(response.status).toBe(500);
     expect(await response.json()).not.toHaveProperty("buckets");
   });
   it("does not cache successful or denied clinical board responses", async () => {
-    expect((await GET()).headers.get("Cache-Control")).toBe("private, no-store");
+    expect((await GET(new Request("http://localhost/api/ortho/followups"))).headers.get("Cache-Control")).toBe("private, no-store");
     session.mockResolvedValue(null);
-    expect((await GET()).headers.get("Cache-Control")).toBe("private, no-store");
+    expect((await GET(new Request("http://localhost/api/ortho/followups"))).headers.get("Cache-Control")).toBe("private, no-store");
   });
 });
 
@@ -193,7 +194,7 @@ describe("actual follow-up GET retention recall projection", () => {
     const hiddenRetention: OrthoFollowupRow = { ...row(20), status: "retention", phase: "retention", lastAdjustmentDate: null };
     const inputs = [ownedRetention, hiddenRetention]; const before = structuredClone(inputs);
     board.mockResolvedValue(inputs);
-    const response = await GET(); const payload = await response.json();
+    const response = await GET(new Request("http://localhost/api/ortho/followups")); const payload = await response.json();
     const nonempty = payload.buckets.filter((b: { count: number }) => b.count > 0);
     expect(nonempty.map((b: { bucket: string }) => b.bucket)).toEqual(["tomorrow", "no_show", "retention"]);
     for (const bucket of nonempty) {
@@ -213,7 +214,7 @@ describe("actual follow-up GET retention recall projection", () => {
       bookingContext: { verified: true, reviewAppointments: [], otherAppointments: [],
         pastUnresolvedAppointment: { id: 511, date: "2026-10-01", time: "09:00", status: "booked" } },
     }]);
-    const payload = await (await GET()).json();
+    const payload = await (await GET(new Request("http://localhost/api/ortho/followups"))).json();
     expect(payload.buckets.filter((b: { count: number }) => b.count > 0).map((b: { bucket: string }) => b.bucket)).toEqual(["overdue", "retention"]);
     const result = payload.buckets.find((b: { bucket: string }) => b.bucket === "retention").rows[0];
     expect(result).toMatchObject({ status: "active", phase: "retention", dueDate: null, daysSinceLast: null,
@@ -225,7 +226,7 @@ describe("actual follow-up GET retention recall projection", () => {
     session.mockResolvedValue({ username: "synthetic", userId: 7, role: "reception", partyId: null, credentialVersion, expiresAt: Date.now() + 60_000 });
     user.mockResolvedValue({ id: 7, username: "synthetic", role: "reception", isActive: true, passwordHash: credential, partyId: null } as NonNullable<Awaited<ReturnType<typeof findUserByUsername>>>);
     board.mockResolvedValue([row(10), { ...row(20), status: "retention", lastAdjustmentDate: null }]);
-    const payload = await (await GET()).json();
+    const payload = await (await GET(new Request("http://localhost/api/ortho/followups"))).json();
     const unbooked = payload.buckets.find((b: { bucket: string }) => b.bucket === "no_appointment").rows;
     expect(unbooked.find((r: { patientId: number }) => r.patientId === 10)).toMatchObject({ dueDate: "2026-09-29", daysSinceLast: 35, dueBasis: "adjustment_interval" });
     expect(unbooked.find((r: { patientId: number }) => r.patientId === 20)).toMatchObject({ dueDate: null, daysSinceLast: null, dueBasis: "retention_schedule_unavailable" });
@@ -236,7 +237,7 @@ describe("actual follow-up GET retention recall projection", () => {
 
 describe("follow-up transactional response boundary", () => {
   it("uses one shared read transaction and releases it after a successful response", async () => {
-    expect((await GET()).status).toBe(200);
+    expect((await GET(new Request("http://localhost/api/ortho/followups"))).status).toBe(200);
     expect(transaction.query.mock.calls.map(call => call[0])).toEqual([
       "BEGIN ISOLATION LEVEL REPEATABLE READ", "COMMIT",
     ]);
@@ -244,7 +245,7 @@ describe("follow-up transactional response boundary", () => {
   });
   it("returns a private conflict without payload when the account snapshot cannot serialize", async () => {
     user.mockRejectedValue(Object.assign(new Error("Synthetic serialization conflict"), { code: "40001" }));
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     expect(response.status).toBe(409);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(await response.json()).not.toHaveProperty("buckets");
@@ -257,7 +258,7 @@ describe("follow-up transactional response boundary", () => {
       vi.setSystemTime(new Date("2026-10-05T21:32:00Z"));
       return [row(10), row(20)];
     });
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     expect(response.status).toBe(401);
     expect(await response.json()).not.toHaveProperty("buckets");
     expect(transaction.query).toHaveBeenCalledWith("ROLLBACK");

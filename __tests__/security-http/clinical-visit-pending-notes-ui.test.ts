@@ -115,6 +115,9 @@ async function fixture(automaticTreatment = false) {
     } else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId });
     else if (path === `/api/patients/${patientId}`) await json(route, { id: patientId, medicalAlert: null, phone: null });
     else if (path === `/api/patients/${patientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [] });
+    // This unrelated clinical fixture models capability availability, not lab commands.
+    // Keep the exact read local; every unlisted request still fails the fixture.
+    else if (method === "GET" && path === "/api/lab/work-intents/capability" && !url.search) await json(route, { supported: true });
     else if (path === "/api/services") await json(route, services);
     else if (path === "/api/parties") await json(route, [{ id: doctorId, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);

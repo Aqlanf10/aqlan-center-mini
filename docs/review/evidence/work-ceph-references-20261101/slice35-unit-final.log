@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/canonical-ceph-reference-projection.test.ts __tests__/ceph-reference-route-compat.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+
+ Test Files  2 passed (2)
+      Tests  28 passed (28)
+   Start at  01:21:36
+   Duration  409ms (transform 63ms, setup 0ms, import 141ms, tests 21ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

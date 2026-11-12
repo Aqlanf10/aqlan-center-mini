@@ -1,0 +1,37 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-canonical-decisions.test.ts (14 tests | 2 failed) 2903ms
+   × a saved foreign visit reference refuses without exposing its clinician or repairing it 6ms
+   × oversized name context refuses the whole response without a misleading empty list 20ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-decisions.test.ts > a saved foreign visit reference refuses without exposing its clinician or repairing it
+error: null value in column "patient_name" of relation "visits" violates not-null constraint
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ __tests__/postgres/ortho-canonical-decisions.test.ts:56:18
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-decisions.test.ts > oversized name context refuses the whole response without a misleading empty list
+error: index row requires 13760 bytes, maximum size is 8191
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ __tests__/postgres/ortho-canonical-decisions.test.ts:78:117
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 34 passed (36)
+   Start at  10:29:18
+   Duration  15.23s (transform 3.78s, setup 0ms, import 5.13s, tests 9.07s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

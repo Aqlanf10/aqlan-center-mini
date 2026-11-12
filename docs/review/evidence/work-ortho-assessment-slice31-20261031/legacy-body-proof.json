@@ -1,0 +1,9 @@
+{
+  "base": "34b0d619a671f5b414fa0ccfea8d0489bf1721e5",
+  "unchangedSha256": {
+    "legacyPOST": "04a691fc38c3ddf8816fe1caf2d5d654f7d86bddcd60ee2d6f4a58e3fc2cdbb3",
+    "legacyGET": "bc6a0c96e73efcaf3bf8e5591f159e985cb937fb3a51b64ef1d522571ecf7d5c",
+    "appendWriter": "67ac9a188a6a68bd6ac314495d6c4a8071d3a024650b9b803ef89fa0a9a4c309",
+    "lockingSourceCapture": "be8f71147e1098343fdd034ba6014c4618c9f7c205a6ee22bdd372ac6c3fc050"
+  }
+}

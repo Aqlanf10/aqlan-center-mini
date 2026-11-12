@@ -1,0 +1,36 @@
+{
+  "conclusion": "cancelled",
+  "headSha": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+  "jobs": [
+    {
+      "completedAt": "2026-11-01T04:35:57Z",
+      "conclusion": "success",
+      "name": "Typecheck, Lint, Unit, Audit, Build",
+      "startedAt": "2026-11-01T04:03:23Z",
+      "status": "completed"
+    },
+    {
+      "completedAt": "2026-11-01T04:56:47Z",
+      "conclusion": "failure",
+      "name": "PostgreSQL 18 integration, schema and operational journeys",
+      "startedAt": "2026-11-01T04:03:23Z",
+      "status": "completed"
+    },
+    {
+      "completedAt": "2026-11-01T05:26:07Z",
+      "conclusion": "cancelled",
+      "name": "Built-app HTTP security and hosted browser",
+      "startedAt": "2026-11-01T04:35:59Z",
+      "status": "completed"
+    },
+    {
+      "completedAt": "2026-11-01T05:26:11Z",
+      "conclusion": "failure",
+      "name": "Required CI gates (fail closed)",
+      "startedAt": "2026-11-01T05:26:09Z",
+      "status": "completed"
+    }
+  ],
+  "status": "completed",
+  "url": "https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/41271556276"
+}

@@ -1,0 +1,14 @@
+{
+  "atPause": "2026-11-01",
+  "beforeSource": "The proposed65 test ran against unchanged frozen61 build kjAZTJfRtOflAgY_0Na6p; default GET200, expansion400 expected200. No65 product implementation.",
+  "pendingFixture": "Saved as .test.ts.txt outside executable tests because this is an unimplemented future contract, not a disabled accepted regression.",
+  "files": {
+    "batch62-64-composed-build.log": "e79608e3858ab25d7edaff885fb5a19775e34fd592aba9f8e546f1cf229a54f4",
+    "slice65-design.md": "c35c1c414c9650aa014a9e61f1d7cd7f393d4fc5fe524d720190ea6751dd91a7",
+    "batch62-64-composed-gates.json": "b7d1efd748b2a8dad713defd889229a4f038c2a618a98d0383f0f2dda206ca6c",
+    "batch62-64-composed-unit.log": "d30376fbce16c7e39796afd5a0cd421af9e3239cbaa52fa67e8783445984b697",
+    "remaining-independent-integration-review.json": "fcb0cdd5d021534f2653c7e0220b6a1e8cce8be70820b8fa28afecfd53ea31f4",
+    "slice65-http-before.log": "df4ff7538fd51e407a39c48c40300cb7916362f6aec060cc69a14dbd1dcd1074",
+    "slice65-context-journey.test.ts.txt": "a2e5a5abf2109a99e99f6ee2f6e62b5a66842b716c3a002a78a820dd67af9d0a"
+  }
+}

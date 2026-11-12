@@ -13,7 +13,7 @@ import { judgeBookingInDay } from "../lib/book-appointment";
 import { evaluateCapacity, prepareCapacityEvaluator } from "../lib/capacity-context";
 
 const date = "2026-10-27";
-const client = {} as DbClient;
+const client = { query: vi.fn().mockResolvedValue({ rows: [] }) } as unknown as DbClient;
 const service: AppointmentService = {
   id: 1, code: "RCT", nameAr: "علاج جذور", nameEn: null, specialty: "endodontics",
   defaultDurationMinutes: 30, bufferBeforeMinutes: 0, bufferAfterMinutes: 0,
@@ -124,5 +124,19 @@ describe("authoritative appointment conflict suggestions", () => {
     const evaluateAt = await prepareCapacityEvaluator(input);
     expect(evaluateAt(input.time)).toEqual(await evaluateCapacity(input));
     expect(evaluateAt("16:30").state).not.toBe("OVER_CAPACITY");
+  });
+});
+
+
+describe("source-bound return provider fallback", () => {
+  it("checks the assigned clinician when a return has no catalogue service", async () => {
+    const result = await conflict({ ...base(), service: null, requireAssignedProvider: true });
+    expect(result.suggestion).toBe("16:30");
+    expect(blocks).toHaveBeenCalledExactlyOnceWith(1, date, client);
+  });
+  it("does not offer a provider-blocked alternative for a service-less return", async () => {
+    blocks.mockResolvedValue([{ startsAt: `${date}T16:30:00+03:00`, endsAt: `${date}T17:05:00+03:00`, reason: "Synthetic block" }] as Awaited<ReturnType<typeof listProviderBlocks>>);
+    const result = await conflict({ ...base(), service: null, requireAssignedProvider: true });
+    expect(result.suggestion).toBe("17:05");
   });
 });

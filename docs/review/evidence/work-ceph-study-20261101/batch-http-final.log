@@ -1,0 +1,58 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/canonical-ceph-study-journey.test.ts __tests__/security-http/canonical-ceph-list-journey.test.ts __tests__/security-http/canonical-ortho-strategy-journey.test.ts __tests__/security-http/canonical-ortho-assessment-journey.test.ts __tests__/security-http/patient-ceph-post-built-page.test.ts --reporter=verbose
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ✓ __tests__/security-http/canonical-ortho-assessment-journey.test.ts > HTTP: a canonical orthodontic viewer reads the assessment state of its case 364ms
+ ✓ __tests__/security-http/canonical-ortho-assessment-journey.test.ts > HTTP: no grant, no scope and anonymous deny; owner/all read immutable history with no write authority 579ms
+ ✓ __tests__/security-http/canonical-ortho-assessment-journey.test.ts > HTTP: outside equals missing, revision scope and negotiation are strict, legitimate missing bridge remains explicit 269ms
+ ✓ __tests__/security-http/canonical-ortho-assessment-journey.test.ts > HTTP: independent imaging sources cannot be exposed by ortho view, URL revision selection or a role label 421ms
+ ✓ __tests__/security-http/canonical-ortho-assessment-journey.test.ts > HTTP: assessment reads and denied POST preserve revisions, money and audit 155ms
+ ✓ __tests__/security-http/canonical-ortho-assessment-journey.test.ts > browser: reuses the verified clinical record at 390px, opens older revisions and makes no editing/source-picker requests 2206ms
+ ✓ __tests__/security-http/canonical-ortho-assessment-journey.test.ts > browser: failure and invalid historical hashes clear old results instead of claiming an empty assessment 1779ms
+ ✓ __tests__/security-http/canonical-ortho-assessment-journey.test.ts > browser and HTTP: revocation clears the assessment and fresh sessions cannot recover a removed grant 1807ms
+ ✓ __tests__/security-http/canonical-ortho-assessment-journey.test.ts > browser: a delayed response cannot restore a closed assessment; older revisions remain readable 2066ms
+ ✓ __tests__/security-http/canonical-ceph-study-journey.test.ts > HTTP: canonical imaging viewer reads its saved study without a legacy session 337ms
+ ✓ __tests__/security-http/canonical-ceph-study-journey.test.ts > HTTP: owner/all/own read the exact clinical snapshot; independent grant and scope deny everyone else 920ms
+ ✓ __tests__/security-http/canonical-ceph-study-journey.test.ts > HTTP: reads and canonical rejected PATCH/DELETE preserve exact clinical rows, finance and audit 147ms
+ ✓ __tests__/security-http/canonical-ceph-study-journey.test.ts > browser: 390px clinical read keeps saved unknown codes, has no editor/tracer/image and requests only the selected study 1641ms
+ ✓ __tests__/security-http/canonical-ceph-study-journey.test.ts > browser: wrong study ownership and network failures remove old diagnosis and measurements 1909ms
+ ✓ __tests__/security-http/canonical-ceph-study-journey.test.ts > browser and HTTP: removing imaging authority clears the detail and rejects fresh sessions 1973ms
+ ✓ __tests__/security-http/canonical-ceph-study-journey.test.ts > browser: delayed response cannot restore a closed study 1664ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > HTTP: canonical imaging viewer reads its saved study summaries without a legacy session 284ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > HTTP: independent grant, scope, empty file and strict query; no image identity or hidden clinical content 784ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > HTTP: the read and rejected writer do not change saved studies, money, schema or audit 122ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser: mobile saved-value list with draft warning and no tracer, image, financial or writer calls 1590ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser: a role label without imaging grant has no entrance 1104ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser: foreign/malformed payload and failed refresh retire saved results without a false empty list 1376ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser and HTTP: revoked imaging grant clears data and cannot be recovered by fresh login 1584ms
+ ✓ __tests__/security-http/canonical-ceph-list-journey.test.ts > browser: a delayed reply cannot restore the closed list 1534ms
+ ✓ __tests__/security-http/canonical-ortho-strategy-journey.test.ts > HTTP: canonical ortho view reads the saved strategy without a legacy session 353ms
+ ✓ __tests__/security-http/canonical-ortho-strategy-journey.test.ts > HTTP: anonymous, no grant and none deny; owner/all read without editors or finance 588ms
+ ✓ __tests__/security-http/canonical-ortho-strategy-journey.test.ts > HTTP: missing/outside are identical and selected history cannot bypass scope or independent plan grants 276ms
+ ✓ __tests__/security-http/canonical-ortho-strategy-journey.test.ts > HTTP: reads and canonical rejected writes preserve strategy history, financing and audit 133ms
+ ✓ __tests__/security-http/canonical-ortho-strategy-journey.test.ts > browser: 390px saved clinical document and exact historical selection, no editor/financial/source requests 2081ms
+ ✓ __tests__/security-http/canonical-ortho-strategy-journey.test.ts > browser: malformed scope and network errors clear the old document without claiming an empty record 1873ms
+ ✓ __tests__/security-http/canonical-ortho-strategy-journey.test.ts > browser and HTTP: revocation removes saved text and denies old and new sessions without legacy fallback 2015ms
+ ✓ __tests__/security-http/canonical-ortho-strategy-journey.test.ts > browser: delayed response cannot restore a closed document; reopening admits a new read 1629ms
+ ✓ __tests__/security-http/patient-ceph-post-built-page.test.ts > PatientCeph delayed writes on the real built patient page > retires a delayed POST after cancel at 1280px 1744ms
+ ✓ __tests__/security-http/patient-ceph-post-built-page.test.ts > PatientCeph delayed writes on the real built patient page > retires a delayed POST after cancel at 390px 1233ms
+ ✓ __tests__/security-http/patient-ceph-post-built-page.test.ts > PatientCeph delayed writes on the real built patient page > retires a delayed POST after pillar at 1280px 1251ms
+ ✓ __tests__/security-http/patient-ceph-post-built-page.test.ts > PatientCeph delayed writes on the real built patient page > retires a delayed POST after pillar at 390px 1379ms
+ ✓ __tests__/security-http/patient-ceph-post-built-page.test.ts > PatientCeph delayed writes on the real built patient page > captures the styled uncertain-result warning without resubmission at 1280px 1331ms
+ ✓ __tests__/security-http/patient-ceph-post-built-page.test.ts > PatientCeph delayed writes on the real built patient page > captures the styled uncertain-result warning without resubmission at 390px 1248ms
+
+ Test Files  5 passed (5)
+      Tests  38 passed (38)
+   Start at  00:38:31
+   Duration  67.06s (transform 340ms, setup 0ms, import 765ms, tests 62.19s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

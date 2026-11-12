@@ -1,3 +1,4 @@
+import { parseLabWorkDraft, type LabWorkDraft, type LabWorkRetirement } from "./lab-work-intent-contract";
 /** Server-only template expansion for the canonical invoice save/preview boundary. */
 import { createHash } from "node:crypto";
 import type { Service } from "./db";
@@ -15,7 +16,7 @@ export type InvoiceTemplateSelection = {
   steps: { key: string; include: boolean; serviceId: number | null }[];
   doctorId: number | null;
   sites?: { stepKey: string; toothCode: number | null; scope?: string | null;
-    episodeTeeth?: number[] | null; surfaces?: string | null; caseId?: number | null }[];
+    episodeTeeth?: number[] | null; surfaces?: string | null; caseId?: number | null; labWork?: LabWorkDraft }[];
 };
 
 export type InvoiceTemplatePreviewLine = {
@@ -23,6 +24,7 @@ export type InvoiceTemplatePreviewLine = {
   toothCode: number | null; scope: string | null; episodeTeeth: number[] | null; surfaces: string | null;
   caseId: number | null; doctorId: number | null; sessions: number; sessionPlan: TemplatePlanDraft["sessions"];
   priceQuote?: InvoicePriceQuote;
+  labWork?: LabWorkDraft;
 };
 export type InvoiceTemplatePreview = { templateId: string; version: string; lines: InvoiceTemplatePreviewLine[] };
 type Failure = { ok: false; status: 400 | 409; code: "INVOICE_TEMPLATE_INVALID" | "INVOICE_TEMPLATE_REVIEW_REQUIRED" | "INVOICE_TEMPLATE_STALE"; message: string };
@@ -104,7 +106,7 @@ export function parseInvoiceCommand(
   if (!Array.isArray(rawSites) || rawSites.length > 40) return invalid();
   const siteChoices = new Map<string, Record<string, unknown>>();
   for (const raw of rawSites) {
-    if (!object(raw) || !exactKeys(raw, ["stepKey", "toothCode", "scope", "episodeTeeth", "surfaces", "caseId"])
+    if (!object(raw) || !exactKeys(raw, ["stepKey", "toothCode", "scope", "episodeTeeth", "surfaces", "caseId", "labWork"])
       || typeof raw.stepKey !== "string" || !safeKey(raw.stepKey) || (raw.toothCode !== null && (typeof raw.toothCode !== "number" || !isValidTooth(raw.toothCode)))
       || (raw.caseId !== undefined && raw.caseId !== null && !id(raw.caseId))) return invalid();
     const key = JSON.stringify([raw.stepKey, raw.toothCode]);
@@ -125,6 +127,8 @@ export function parseInvoiceCommand(
       const key = JSON.stringify([step.key, toothCode]);
       const rawSite = siteChoices.get(key) ?? {};
       siteChoices.delete(key);
+      let labWork;
+      try { labWork = parseLabWorkDraft(rawSite.labWork); } catch { return invalid("هوية عمل المختبر في خطوة القالب غير صالحة."); }
       const fields = parseLineSiteFields(rawSite);
       if (!fields) return invalid("موضع خطوة القالب غير صالح.");
       // Prosthetic grouping is a clinical selection, never guessed from the template name.
@@ -140,11 +144,11 @@ export function parseInvoiceCommand(
         priceQuote: invoicePriceQuote(services.get(draft.serviceId)!, currency, foreignRatesFromSettings(settings)),
         quantity: 1, unitPriceMinor: draft.unitPriceMinor, toothCode: site.toothCode, scope: site.scope,
         episodeTeeth: site.episodeTeeth, surfaces: site.surfaces, caseId, doctorId: doctorId as number | null,
-        sessions: draft.sessions.length, sessionPlan: draft.sessions.map((session) => ({ ...session })),
+        sessions: draft.sessions.length, sessionPlan: draft.sessions.map((session) => ({ ...session })), ...(labWork ? { labWork } : {}),
       });
       generated.push({ priceQuote: invoicePriceQuote(services.get(draft.serviceId)!, currency, foreignRatesFromSettings(settings)), serviceId: draft.serviceId, quantity: 1, price: toInputAmount(draft.unitPriceMinor, currency),
         doctorId, toothCode: site.toothCode, scope: site.scope, episodeTeeth: site.episodeTeeth, surfaces: site.surfaces,
-        caseId, sessions: draft.sessions.length,
+        caseId, sessions: draft.sessions.length, ...(labWork ? { labWork } : {}),
       });
       schedules.push(draft);
     }
@@ -170,10 +174,11 @@ export function parseInvoiceCommand(
 }
 
 /** Ordinary historical fingerprints remain exact; template commands bind their reviewed version and schedule. */
-export function invoiceCommandFingerprint(parsed: ParsedInvoiceInput & { template: InvoiceTemplatePreview | null; repaymentTerms?: DebtRepaymentTerms }): string {
+export function invoiceCommandFingerprint(parsed: ParsedInvoiceInput & { template: InvoiceTemplatePreview | null; repaymentTerms?: DebtRepaymentTerms; labRetirements?: LabWorkRetirement[] }): string {
   const unquoted = invoiceRequestFingerprint({ ...parsed, currency: parsed.baseCurrency });
   const original = parsed.quotedFingerprint ? JSON.stringify([unquoted, parsed.quotedFingerprint]) : unquoted;
-  const scoped=parsed.visitId!==undefined?JSON.stringify([original,{visitId:parsed.visitId}]):original;
+  const withLabRetirements = parsed.labRetirements ? JSON.stringify([original, { labRetirements: parsed.labRetirements }]) : original;
+  const scoped=parsed.visitId!==undefined?JSON.stringify([withLabRetirements,{visitId:parsed.visitId}]):withLabRetirements;
   const financial = parsed.repaymentTerms ? JSON.stringify([scoped,parsed.repaymentTerms]) : scoped;
   return parsed.template === null ? financial : JSON.stringify([financial, { templateId: parsed.template.templateId,
     version: parsed.template.version, lines: parsed.template.lines.map((line) => [line.line, line.stepKey, line.sessionPlan]),
@@ -188,8 +193,20 @@ export function invoiceTemplateRequestFingerprint(source: Record<string, unknown
 /** Quoted manual entries can recover an acknowledged command after catalogue drift.
  * Older unquoted API clients retain their existing canonical fingerprint contract. */
 export function hasInvoiceCatalogQuote(source: Record<string, unknown>): boolean {
-  return source.visitId!=null || Object.hasOwn(source,"repaymentTerms") || Array.isArray(source.items) && source.items.some(item => item !== null && typeof item === "object"
+  return hasInvoiceLabWork(source) || source.visitId!=null || Object.hasOwn(source,"repaymentTerms") || Array.isArray(source.items) && source.items.some(item => item !== null && typeof item === "object"
     && !Array.isArray(item) && (Object.hasOwn(item, "catalogPriceMinor") || Object.hasOwn(item, "priceQuote")));
+}
+
+/** Explicit clinical work opts into immutable actor-bound raw-command recovery. */
+export function hasInvoiceLabWork(source: Record<string, unknown>): boolean {
+  const carriesWork = (value: unknown) => value !== null && typeof value === "object" && !Array.isArray(value)
+    && (value as Record<string, unknown>).labWork != null;
+  const selection = source.templateSelection;
+  return Object.hasOwn(source, "labRetirements")
+    || Array.isArray(source.items) && source.items.some(carriesWork)
+    || selection !== null && typeof selection === "object" && !Array.isArray(selection)
+      && Array.isArray((selection as Record<string, unknown>).sites)
+      && ((selection as Record<string, unknown>).sites as unknown[]).some(carriesWork);
 }
 
 export function invoiceCatalogRequestFingerprint(source: Record<string, unknown>, actor: { username: string; role: string; userId?: number | null }): string {

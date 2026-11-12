@@ -47,10 +47,12 @@ describe("immutable agreement patient/service selection", () => {
 
   it("decides registration and its read-only preview with the same locked/unlocked reader", () => {
     expect(body(registration, "writeLegacyTreatment")).toContain("await decideLegacyTreatment(client, document ? { ...input, request: { ...request, remainingMinor: 0, previouslyPaidMinor: 0 } } : input, true)");
-    const preview = body(registration, "previewLegacyTreatment");
+    // Slice 95b: the legacy entry owns the READ ONLY snapshot and delegates the decision to the shared form.
+    const entry = body(registration, "previewLegacyTreatment"), preview = body(registration, "previewLegacyTreatmentWith");
+    expect(entry).toContain("READ ONLY");
+    expect(entry).toContain("previewLegacyTreatmentWith(client, input)");
     expect(preview).toContain("await decideLegacyTreatment(client, input, false)");
-    expect(preview).toContain("READ ONLY");
-    expect(preview).not.toMatch(/INSERT|UPDATE |DELETE|setPatientOpeningBalanceInTx|insertPlanV2InTx/);
+    for (const source of [entry, preview]) expect(source).not.toMatch(/INSERT|UPDATE |DELETE|setPatientOpeningBalanceInTx|insertPlanV2InTx/);
   });
 
   it("patient-scopes the mutable historical case display join", () => {

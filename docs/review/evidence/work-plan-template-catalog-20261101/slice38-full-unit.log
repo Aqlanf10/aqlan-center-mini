@@ -1,0 +1,21 @@
+
+> aqlan-center@0.1.0 test
+> vitest run --exclude .next/**
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+
+ Test Files  809 passed (809)
+      Tests  13610 passed (13610)
+   Start at  03:05:26
+   Duration  445.29s (transform 21.13s, setup 0ms, import 94.01s, tests 250.42s, environment 77ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

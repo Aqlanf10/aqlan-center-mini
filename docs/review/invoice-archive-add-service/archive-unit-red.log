@@ -1,0 +1,33 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/invoice-archive.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+ ❯ __tests__/invoice-archive.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/invoice-archive.test.ts [ __tests__/invoice-archive.test.ts ]
+Error: Cannot find module '../lib/invoice-archive' imported from /workspace/aqlan-center-mini/__tests__/invoice-archive.test.ts
+ ❯ __tests__/invoice-archive.test.ts:2:1
+      1| import { describe, expect, it } from "vitest";
+      2| import { parseInvoiceArchiveCommand, invoiceArchiveEligibility } from …
+       | ^
+      3|
+      4| const input = { action: "archive", reason: "Synthetic archive reason",…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  00:21:58
+   Duration  217ms (transform 37ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

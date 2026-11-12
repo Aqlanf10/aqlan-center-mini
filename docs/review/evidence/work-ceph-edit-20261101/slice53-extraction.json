@@ -1,0 +1,23 @@
+{
+  "baseRevision": "a3812c1127e41ab60a57754c0e3912f8dbff9316",
+  "functions": [
+    {
+      "function": "updateCephCalibration",
+      "legacyBeforeSha256": "5c0baf74183828a12e17c5dfdd35e1b299b123811eacf602257957ba4f5b7e13",
+      "extractedCoreSha256": "fe27c86e3580062aff9cb9d5436cc0a0c8dae73c22c17bc3bcf31e58829634ea",
+      "transformation": "existing locked draft/read/write SQL moved to same-connection helper; transaction, initialization, cleanup and post-commit legacy audit remain in wrapper"
+    },
+    {
+      "function": "updateCephLandmarks",
+      "legacyBeforeSha256": "794a76a08690078fb7d71b77b6cedd89031fdff1b26fc0b855f60dd674721705",
+      "extractedCoreSha256": "37bba68f9730e8a4c9c0c5bce82972c4c277799736a4599c24100b82a8ee8e8c",
+      "transformation": "existing locked draft/read/write SQL moved to same-connection helper; transaction, initialization, cleanup and post-commit legacy audit remain in wrapper"
+    },
+    {
+      "function": "updateCephDiagnosis",
+      "legacyBeforeSha256": "b36663e19261d365288becc9f310c4f108a3c1abeba9becd288104bcfefee4c8",
+      "extractedCoreSha256": "1a8dfe1fe48c00defdb2db6995468b54066e187abd616d2d3b4614b3251bcd33",
+      "transformation": "existing locked draft/read/write SQL moved to same-connection helper; transaction, initialization, cleanup and post-commit legacy audit remain in wrapper"
+    }
+  ]
+}

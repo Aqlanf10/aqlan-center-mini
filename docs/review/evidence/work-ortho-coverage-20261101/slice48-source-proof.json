@@ -1,0 +1,28 @@
+{
+  "baseRevision": "327b12fba84049e2b0f5e4e65fbd48445da42386",
+  "checks": {
+    "original_commercial_source_sql": true,
+    "original_site_validation": true,
+    "writer_and_receipt_and_signed_proof_tail_unchanged": true,
+    "legacy_read_body_unchanged": true,
+    "original_fingerprint_and_lineage_helpers": true,
+    "legacy_get_tail_and_post_put_unchanged": true,
+    "legacy_admission_unchanged": true,
+    "lib/db.ts": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/staff-capability-catalogue.ts": true,
+    "lib/canonical-read-snapshot.ts": true,
+    "lib/canonical-patient-reads.ts": true,
+    "lib/canonical-ortho-strategy.ts": true,
+    "lib/canonical-ortho-assessment.ts": true,
+    "lib/canonical-ceph-discard-command.ts": true,
+    "lib/ortho-followup-coverage.ts": true,
+    "lib/ortho-followup-coverage-schema.ts": true,
+    "lib/commission.ts": true,
+    "lib/fullBackup.ts": true,
+    "lib/restore/staging.ts": true,
+    "immutable_migrations": true
+  },
+  "passed": 21,
+  "historicalSourceHashes": 591
+}

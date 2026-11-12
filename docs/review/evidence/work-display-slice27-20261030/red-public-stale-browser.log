@@ -1,0 +1,78 @@
+RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-display-journey.test.ts (2 tests | 1 failed | 1 skipped) 9449ms
+   × browser drops the current caller after a failed refresh 4999ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-display-journey.test.ts > browser drops the current caller after a failed refresh
+AssertionError: expected 'مرحبًا بكم في مركز الدكتور عقلان الكا…' not to contain 'SYN-CALL'
+
+- Expected
++ Received
+
+- SYN-CALL
++ مرحبًا بكم في مركز الدكتور عقلان الكامل لتقويم وزراعة وتجميل الأسنان
++
++ الجمعة، 30 أكتوبر 2026
++
++ تسجيل الوصول الذاتي
++
++ امسح بهاتفك لتأكيد دورك
++
++ يُعاد الاتصال…
++ ملء الشاشة
++ تشغيل صوت النداء
++ 06:29 م
++
++ الآن
++
++ SYN-CALL S.
++
++ يرجى التوجّه إلى غرفة العلاج 1
++
++ القادمون
++ 0 في الانتظار
++
++ لا أحد ينتظر الآن
++
++ 0
++
++ في الانتظار
++
++ ~0 د
++
++ متوسط الانتظار اليوم
++
++ 0
++
++ في العلاج الآن
++
++ 0
++
++ أُنجز اليوم
++
++ العناية بعد التقويم
++
++ الالتزام بالمطاط حسب تعليمات الطبيب يسرّع تقدم العلاج.
++
++ ابتسامتك تستحق أفضل عناية
+
+ ❯ __tests__/security-http/canonical-display-journey.test.ts:32:56
+     30|     await page.route("**/api/display", route => route.fulfill({ status…
+     31|     await page.getByText("يُعاد الاتصال…").waitFor();
+     32|     expect(await page.locator("body").innerText()).not.toContain("SYN-…
+       |                                                        ^
+     33|   } finally { await context.close(); }
+     34| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  18:29:09
+   Duration  15.82s (transform 159ms, setup 0ms, import 720ms, tests 9.45s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

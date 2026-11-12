@@ -37,7 +37,7 @@ beforeEach(async () => {
   vi.stubEnv("SKIP_SEED", "true");
   boundary.end.mockResolvedValue(undefined);
   await resetPoolForTesting();
-  boundary.poolQuery.mockResolvedValue({ rows: [] });
+  boundary.poolQuery.mockImplementation(async (sql: string) => ({ rows: sql.includes("AS markers") ? [{ markers: "0", users_kind: null, parties_kind: null }] : [] }));
   boundary.query.mockImplementation(async(sql:string)=>({rows:sql.includes("AS present")?[{present:false}]:[]}));
   boundary.connect.mockResolvedValue({ query: boundary.query, release: boundary.release });
   await ensureSchema();
@@ -53,6 +53,7 @@ beforeEach(async () => {
       if (busy) throw Object.assign(new Error("busy"), { code: "55P03" });
       return { rows: [{ id: 23, party_id: 7, lab_order_id: 11, source_type: "operational", created_date: "2026-10-05" }] };
     }
+    if (/EXISTS\(SELECT 1 FROM expenses WHERE payable_id/.test(sql)) return { rows: [{ exists: paid }] };
     if (/AS has_settlement/.test(sql)) return { rows: [{ has_settlement: paid || (trackingHistory && sql.includes("financial_settlement_reversed")) }] };
     if (/AS invoice_date/.test(sql)) return { rows: invoiceDate ? [{ invoice_date: invoiceDate }] : [] };
     if (/SELECT value FROM settings/.test(sql)) return { rows: [{ value: cutoff }] };
@@ -82,7 +83,9 @@ describe("lab accounting financial safety", () => {
     await expect(updateLabOrderAccounting(11, { costMinor: 3000 })).rejects.toThrow("lab_order_accounting_period_locked");
   });
   it.each([null, 0, -1])("rejects clearing/invalid debt amount %s rather than corrupting paired snapshots", async costMinor => {
-    await expect(updateLabOrderAccounting(11, { costMinor })).rejects.toThrow("lab_order_accounting_price_invalid");
+    await expect(updateLabOrderAccounting(11, { costMinor })).rejects.toMatchObject({ code: "lab_accounting_money_review" });
+    expect(boundary.query.mock.calls.some(([sql]) => /^(INSERT|UPDATE|DELETE) /.test(sql))).toBe(false);
+    expect(boundary.query.mock.calls.at(-1)).toEqual(["ROLLBACK"]);
   });
   it.each([
     { costMinor: 3000 }, { costCurrency: "SAR" as const }, { exchangeRate: 540 },
@@ -90,7 +93,11 @@ describe("lab accounting financial safety", () => {
     { payableAccountCode: "2102" },
   ])("rejects every financially material change after settlement: %j", async input => {
     paid = true;
-    await expect(updateLabOrderAccounting(11, input)).rejects.toThrow("lab_order_accounting_settled");
+    // WORK's earlier payable fence retains its exact code for money changes;
+    // main's later history fence additionally rejects posting/account changes.
+    if ("costMinor" in input || "costCurrency" in input || "exchangeRate" in input) {
+      await expect(updateLabOrderAccounting(11, input)).rejects.toMatchObject({ code: "lab_settled_money_review" });
+    } else await expect(updateLabOrderAccounting(11, input)).rejects.toThrow("lab_order_accounting_settled");
     expect(boundary.query.mock.calls.some(([sql]) => /UPDATE lab_orders|UPDATE payables|INSERT INTO lab_order_tracking|INSERT INTO audit_log/.test(sql))).toBe(false);
     expect(boundary.query.mock.calls.at(-1)).toEqual(["ROLLBACK"]);
   });
@@ -102,7 +109,7 @@ describe("lab accounting financial safety", () => {
   });
   it("rejects a concurrent payment lock without waiting or writing", async () => {
     busy = true;
-    await expect(updateLabOrderAccounting(11, { costMinor: 3000 })).rejects.toThrow("lab_order_accounting_busy");
+    await expect(updateLabOrderAccounting(11, { costMinor: 3000 })).rejects.toMatchObject({ code: "55P03" });
     expect(boundary.query.mock.calls.at(-1)).toEqual(["ROLLBACK"]);
   });
   it("reads settlement history in a fresh statement after the payable lock", async () => {

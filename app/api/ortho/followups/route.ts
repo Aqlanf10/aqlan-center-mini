@@ -6,6 +6,10 @@ import {
 import { classifyFollowups, groupByBucket, BUCKET_ORDER } from "@/lib/ortho-followup";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { CanonicalPatientReadRefusal } from "@/lib/canonical-patient-reads";
+import { CanonicalOrthoFollowupRefusal, readCanonicalOrthoFollowups } from "@/lib/canonical-ortho-followups";
 
 export const dynamic = "force-dynamic";
 const json = (body: unknown, status = 200) => NextResponse.json(body, {
@@ -23,7 +27,18 @@ const json = (body: unknown, status = 200) => NextResponse.json(body, {
  * عزل الطبيب (§٣٩): الطبيب يرى حالات مرضاه وحدهم ما لم يمنحه المدير «عرض جميع
  * المرضى» — والفلترة في الخادم لا في الشاشة، والاستقبال والإدارة يريان الكل.
  */
-export async function GET() {
+export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalPatientReadRefusal("invalid_patient_query", "لا يدعم هذا العرض توسيع النطاق من الرابط.");
+      return NextResponse.json(await readCanonicalOrthoFollowups(selected.handle), { headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalOrthoFollowupRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: 409, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تحميل لوحة متابعة التقويم.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);

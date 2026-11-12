@@ -1,5 +1,11 @@
 import reviewedMigrations from "../fixtures/reviewed-migration-manifest.json";
+import { LAB_WORK_INTENT_SQL } from "../../lib/lab-work-intent-schema";
+import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "../../lib/ortho-followup-coverage-schema";
+import { PATIENT_NUMBERING_SQL } from "../../lib/patient-numbering-schema";
+import { INVOICE_ARCHIVE_SQL } from "../../lib/invoice-archive-schema";
+import { INVOICE_SERVICE_ADDITIONS_SQL } from "../../lib/invoice-service-additions-schema";
 import { LAB_SHADE_SPECIFICATION_SQL } from "../../lib/lab-shade-schema";
+import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "../../lib/commission-participation-schema";
 import { AGREEMENT_REMINDER_GUARD_SQL } from "../../lib/agreement-reminder-guard-schema";
 import { AGREEMENT_RECONCILIATION_SQL } from "../../lib/agreement-reconciliation-schema";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "../../lib/patient-appointment-history-schema";
@@ -44,10 +50,16 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0067", name: "patient_appointment_history_index", checksum: createHash("sha256").update(PATIENT_APPOINTMENT_HISTORY_SQL).digest("hex") },
     { version: "0068", name: "collection_attempt_retirements", checksum: createHash("sha256").update(COLLECTION_ATTEMPT_RETIREMENT_SQL).digest("hex") },
     { version: "0069", name: "unpaid_currency_transitions", checksum: createHash("sha256").update(UNPAID_CURRENCY_TRANSITION_SQL).digest("hex") },
+    { version: "0074", name: "lab_work_intents", checksum: createHash("sha256").update(LAB_WORK_INTENT_SQL).digest("hex") },
     { version: "0078", name: "agreement_reconciliation", checksum: createHash("sha256").update(AGREEMENT_RECONCILIATION_SQL).digest("hex") },
+    { version: "0079", name: "ortho_followup_coverage", checksum: createHash("sha256").update(ORTHO_FOLLOWUP_COVERAGE_SQL).digest("hex") },
+    { version: "0080", name: "patient_numbering", checksum: createHash("sha256").update(PATIENT_NUMBERING_SQL).digest("hex") },
+    { version: "0081", name: "invoice_archive", checksum: createHash("sha256").update(INVOICE_ARCHIVE_SQL).digest("hex") },
+    { version: "0082", name: "invoice_service_additions", checksum: createHash("sha256").update(INVOICE_SERVICE_ADDITIONS_SQL).digest("hex") },
     { version: "0087", name: "agreement_reminder_metadata", checksum: createHash("sha256").update(AGREEMENT_REMINDER_GUARD_SQL).digest("hex") },
     { version: "0089", name: "lab_shade_specification", checksum: createHash("sha256").update(LAB_SHADE_SPECIFICATION_SQL).digest("hex") },
     ...reviewedMigrations.filter(file => ["0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125"].includes(file.version)),
+    { version: "0126", name: "commission_case_participations", checksum: createHash("sha256").update(COMMISSION_CASE_PARTICIPATIONS_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);

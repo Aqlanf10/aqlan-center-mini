@@ -47,7 +47,12 @@ function visibleLines(page: LabDispatchPdfPage, block: LabDispatchPdfBlock): Pri
 function labelEquals(block: LabDispatchPdfBlock, expected: string[]): boolean {
   if (block.lines.length !== 1) return false;
   const words = [...block.lines[0]].sort((a, b) => b.xMin - a.xMin);
-  return words.length === expected.length && expected.every((word, index) => matchesPrintPdfWord(words[index].text, word));
+  if (words.length === expected.length) return expected.every((word, index) => matchesPrintPdfWord(words[index].text, word));
+  // Native Chromium/Poppler can keep the terminal colon in its preceding Arabic
+  // word. Accept only that exact segmentation, in the same bounded RTL field.
+  return expected.at(-1) === ":" && words.length === expected.length - 1
+    && expected.slice(0, -2).every((word, index) => matchesPrintPdfWord(words[index].text, word))
+    && matchesPrintPdfWord(words.at(-1)!.text, `${expected.at(-2)}:`);
 }
 
 /**
@@ -78,13 +83,14 @@ export function assertLabDispatchPdfFields(pages: LabDispatchPdfPage[], expected
   }), "complete service identifier in its labeled table cell");
   visibleLines(serviceField.page, serviceField.block);
 
-  const labField = only(blocks.filter(({ block }) => block.lines.flat()
-    .some(word => matchesPrintPdfWord(word.text, "المختبر"))), "lab label");
+  const isLabLabel = (word: PrintPdfWord) => matchesPrintPdfWord(word.text, "المختبر") || matchesPrintPdfWord(word.text, "المختبر:");
+  const labField = only(blocks.filter(({ block }) => block.lines.flat().some(isLabLabel)), "lab label");
   const labLines = visibleLines(labField.page, labField.block);
-  const label = labLines.flat().filter(word => matchesPrintPdfWord(word.text, "المختبر"));
+  const label = labLines.flat().filter(isLabLabel);
   const colon = labLines.flat().filter(word => compact(word.text) === ":");
   const phone = labLines.flat().filter(word => compact(word.text) === `(${expected.labPhone})`);
-  if (label.length !== 1 || colon.length !== 1 || phone.length !== 1) throw new Error("PDF lab field label/phone boundary changed");
+  const attachedColon = label.length === 1 && matchesPrintPdfWord(label[0].text, "المختبر:");
+  if (label.length !== 1 || colon.length !== (attachedColon ? 0 : 1) || phone.length !== 1) throw new Error("PDF lab field label/phone boundary changed");
   const ancillary = new Set([...label, ...colon, ...phone]);
   const identifier = labLines.flat().filter(word => !ancillary.has(word)).map(word => compact(word.text)).join("");
   if (identifier !== lab) throw new Error("PDF complete lab identifier mismatch inside labeled field");

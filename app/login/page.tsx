@@ -160,6 +160,13 @@ export default function LoginPage() {
         return;
       }
 
+      /* الهوية الموحّدة: لا تُبنى الجلسة من رد الدخول. تحميلٌ كامل يجعل التخطيط على الخادم
+         يقبل الكوكي الجديدة بإثبات القاعدة الحالي ويمرّر إسقاط قدراتها الحالي. */
+      if (payload?.canonical === true) {
+        window.location.assign("/");
+        return;
+      }
+
       // A 200 response alone is not a usable login result.
       if (typeof payload?.username !== "string" || !payload.username.trim()
         || typeof payload?.role !== "string" || !payload.role.trim()) {

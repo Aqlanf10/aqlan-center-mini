@@ -23,6 +23,26 @@ function fixture(): LabDispatchPdfPage[] {
 }
 
 describe("field-bounded lab dispatch PDF identifiers", () => {
+  function attachedColons() {
+    const pages = fixture();
+    // Native Chromium 151 / Poppler also retains the colon in its Arabic word.
+    for (const index of [1, 2]) {
+      const line = pages[0].blocks[index].lines[0];
+      const merged = { ...line[1], text: `:${line[1].text}`, xMin: line[0].xMin };
+      pages[0].blocks[index] = block([[merged, ...line.slice(2)]]);
+    }
+    const lab = pages[0].blocks[3].lines;
+    const merged = { ...lab[0][2], text: `:${lab[0][2].text}`, xMin: lab[0][1].xMin };
+    pages[0].blocks[3] = block([[lab[0][0], merged], lab[1]]);
+    return pages;
+  }
+  it("accepts the same exact ordered field labels with attached native colon glyphs", () => {
+    expect(() => assertLabDispatchPdfFields(attachedColons(), expected)).not.toThrow();
+  });
+  it.each(["::ربتخملا", ":ضيرملا", "ربتخملا", ":ربتخملا-PRIVATE"])("refuses malformed or foreign attached label %s", label => {
+    const pages = attachedColons(); pages[0].blocks[3].lines[0][1].text = label;
+    expect(() => assertLabDispatchPdfFields(pages, expected)).toThrow();
+  });
   it("accepts complete RTL-wrapped fields despite neighboring column/phone interleaving", () => {
     expect(() => assertLabDispatchPdfFields(fixture(), expected)).not.toThrow();
   });

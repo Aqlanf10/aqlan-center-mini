@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+let responsibilityFixtureSequence = 0;
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 import { addDays, clinicDateString } from "../../lib/schedule";
@@ -45,7 +47,7 @@ beforeAll(async () => {
   orthodontist = await doctor("د. عقلان");
   endodontist = await doctor("د. محمد");
   patientId = (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ('P-REF-1', 'محمد أحمد', $1) RETURNING id`, [orthodontist]))[0].id;
-  const orthoCase = await createClinicalCase({
+  const orthoCase = await createClinicalCase({ admittedSession: await responsibilityAdminFixture("internal-referrals-responsibility-" + (++responsibilityFixtureSequence)),
     patientId, specialty: "orthodontics", title: "تقويم ثابت", site: null, problem: null,
     responsiblePartyId: orthodontist, orthoCaseId: null, actor: "dr-aqlan",
   });

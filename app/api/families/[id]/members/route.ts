@@ -2,14 +2,18 @@ import { linkPatientToFamily } from "@/lib/db";
 import { idOf, json, readBody } from "@/lib/case-route";
 import { familyFailure, familyResponse, familyWriter } from "@/lib/family-route";
 import { parseFamilyRole } from "@/lib/patient-families";
+import { canonicalFamilyRoute, commandCanonicalFamilyLink } from "@/lib/canonical-families";
 
 export const dynamic = "force-dynamic";
 
 /** (PAT-4) ربط مريضٍ بالعائلة بصلته — أو تغيير صلته إن كان من أفرادها. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const canonical = await canonicalFamilyRoute(request, (handle, body) => commandCanonicalFamilyLink(handle, id, body), "تعذّر ربط المريض بالعائلة. أعد المحاولة.");
+  if (canonical) return canonical;
   const guard = await familyWriter();
   if (!guard.ok) return guard.response;
-  const familyId = idOf((await params).id);
+  const familyId = idOf(id);
   if (!familyId) return json("رقم العائلة غير صالح.", 400);
   const read = await readBody(request);
   if (!read.ok) return read.response;

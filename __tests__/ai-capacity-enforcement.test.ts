@@ -203,6 +203,20 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
  * لو حكم بابٌ بقاعدته الخاصة لدخل منه ما مُنع من غيره. وهذا حارسٌ على الملفات
  * نفسها: من يضيف بابًا خامسًا يقرأ هذا البند فيعرف ما يلزمه.
  */
+/* Since M2 slices 21–22 two doors share their engine call with the canonical branch
+   through one module (scheduling-single-door): the route must import that module, and
+   the guard reads both, so the call cannot leave the door unseen. */
+const SHARED_DOOR_MODULES: Record<string, string> = {
+  [join("app", "api", "booking-requests", "[id]", "route.ts")]: "booking-request-confirm",
+  [join("app", "api", "planned-visits", "[id]", "schedule", "route.ts")]: "planned-visit-schedule",
+};
+function doorSource(door: string): string {
+  const route = readFileSync(join(root, door), "utf8");
+  const shared = SHARED_DOOR_MODULES[door];
+  if (!shared) return route;
+  expect(route).toContain(`from "@/lib/${shared}"`);
+  return `${route}\n${readFileSync(join(root, "lib", `${shared}.ts`), "utf8")}`;
+}
 describe("كل باب حجزٍ يستشير المحرّك", () => {
   const doors = [
     join("app", "api", "appointments", "route.ts"),
@@ -213,7 +227,7 @@ describe("كل باب حجزٍ يستشير المحرّك", () => {
 
   for (const door of doors) {
     it(`${door} يمرّ من محرّك السعة لا من فحصٍ خاصّ به`, () => {
-      const source = readFileSync(join(root, door), "utf8");
+      const source = doorSource(door);
       expect(source).toMatch(/judgeBookingInDay|bookAppointment/);
       /* `checkSlot` هو الفحص الثنائيّ القديم: يقول «ممتلئ أو لا» ولا يعرف
          الفواصل ولا الورديات ولا احتياطي الطوارئ. لا يعود إلى مسار حجز. */

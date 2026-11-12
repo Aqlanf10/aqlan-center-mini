@@ -7,6 +7,13 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  // Exact case-participation suffix (finance, owner decision 2026-11-11): directly after the
+  // reviewed orthodontic tail (0125) on the composed chain, or after the shade migration (0089)
+  // on the finance-only chain. Any other predecessor fails closed.
+  if (files.at(-1)?.version === "0126") {
+    if (!["0089", "0125"].includes(files.at(-2)?.version ?? "") || files.at(-1)?.filename !== "0126_commission_case_participations.sql") throw new Error("Unreviewed case participation migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   if (files.at(-1)?.version === "0125" && files.at(-1)?.filename === "0125_ortho_case_reopen.sql") {
     if (files.at(-2)?.filename !== "0124_ceph_correction_lineage.sql") throw new Error("Reopening requires the exact reviewed correction lineage baseline.");
     return periodontalCandidateMigrationVersion(files.slice(0, -1));
@@ -94,16 +101,40 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
       throw new Error("Prescription lineage requires the exact reviewed 0090–0093 chain.");
     return periodontalCandidateMigrationVersion(files.slice(0, -4));
   }
+  // Exact main reminder/shade suffix, followed by the existing strict WORK chain.
+  if (files.at(-1)?.version === "0089") {
+    if (files.at(-2)?.version !== "0087" || files.at(-1)?.filename !== "0089_lab_shade_specification.sql") throw new Error("Unreviewed lab shade migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0087") {
+    if (!["0078", "0082"].includes(files.at(-2)?.version ?? "") || files.at(-1)?.filename !== "0087_agreement_reminder_metadata.sql") throw new Error("Unreviewed agreement reminder migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  // Exact root-approved invoice actions are reviewed independently of older tails.
+  if (files.at(-1)?.version === "0082") {
+    if (!["0078","0079","0080"].includes(files.at(-3)?.version ?? "") || files.at(-2)?.version !== "0081" || files.at(-2)?.filename !== "0081_invoice_archive.sql"
+      || files.at(-1)?.filename !== "0082_invoice_service_additions.sql") throw new Error("Unreviewed invoice action migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -2));
+  }
+  if (files.at(-1)?.version === "0080") {
+    if (!["0078","0079"].includes(files.at(-2)?.version ?? "") || files.at(-1)?.filename !== "0080_patient_numbering.sql") throw new Error("Unreviewed patient numbering migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0079") {
+    if (files.at(-2)?.version !== "0078" || files.at(-1)?.filename !== "0079_ortho_followup_coverage.sql") throw new Error("Unreviewed orthodontic coverage migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   const reviewedAdditions: Record<string, string> = {
     "0066": "0066_agreement_delta_amendments.sql",
     "0067": "0067_patient_appointment_history_index.sql",
     "0068": "0068_collection_attempt_retirements.sql",
     "0069": "0069_unpaid_currency_transitions.sql",
+    "0074": "0074_lab_work_intents.sql",
     "0078": "0078_agreement_reconciliation.sql",
     "0087": "0087_agreement_reminder_metadata.sql",
     "0089": "0089_lab_shade_specification.sql",
   };
-  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069", "0066,0068,0069,0078", "0066,0067,0068,0069,0078", "0066,0068,0069,0078,0087", "0066,0067,0068,0069,0078,0087", "0066,0068,0069,0078,0087,0089", "0066,0067,0068,0069,0078,0087,0089"];
+  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069", "0066,0068,0069,0078", "0066,0067,0068,0069,0078", "0066,0068,0069,0074", "0066,0067,0068,0069,0074", "0066,0068,0069,0074,0078", "0066,0067,0068,0069,0074,0078", "0066,0068,0069,0078,0087", "0066,0067,0068,0069,0078,0087", "0066,0068,0069,0078,0087,0089", "0066,0067,0068,0069,0078,0087,0089"];
   if (files.length > 59 && reviewedTails.includes(files.slice(59).map(file => file.version).join(",")) &&
       files.slice(59).every(file => reviewedAdditions[file.version] === file.filename)) {
     return periodontalCandidateMigrationVersion(files.slice(0, 59));

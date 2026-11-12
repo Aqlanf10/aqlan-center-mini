@@ -1,4 +1,7 @@
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalIntakeHistory } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
+import { canonicalClinicalRecordRoute, commandCanonicalIntake } from "@/lib/canonical-clinical-records";
 import { createIntakeForm, getPatient, listIntakeForms } from "@/lib/db";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -33,6 +36,9 @@ async function guard(context: { params: Promise<{ id: string }> }) {
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 4): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await context.params).id, readCanonicalIntakeHistory, "تعذّر تحميل تاريخ الاستمارات الصحية.");
+  if (canonical) return canonical;
   const checked = await guard(context);
   if ("error" in checked) return checked.error;
   try {
@@ -43,6 +49,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 74: one admitted clinical.visits.document transaction inside the patient scope,
+     idempotent by requestKey, the audit row with the record. */
+  const canonical = await canonicalClinicalRecordRoute(request, async (handle, body) => commandCanonicalIntake(handle, (await context.params).id, body), "تعذّر حفظ الاستمارة.");
+  if (canonical) return canonical;
   const checked = await guard(context);
   if ("error" in checked) return checked.error;
   let body: unknown;

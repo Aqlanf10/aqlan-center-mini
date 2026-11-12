@@ -1,4 +1,4 @@
-import { ensureSchema, getPool } from "./db";
+import { ensureSchema, getPool, type DbClient } from "./db";
 
 /** The displayed message/contact context, not a claim about delivery. */
 export type ManualAppointmentReminderSnapshot = Readonly<{
@@ -47,10 +47,12 @@ export async function recordManualAppointmentReminder(
   appointmentId: number,
   authorizedPatientId: number | null,
   snapshot: ManualAppointmentReminderSnapshot,
+  /** The canonical path's admitted transaction (M2 slice 17); the pool otherwise. */
+  client?: Pick<DbClient, "query">,
 ): Promise<boolean> {
   if (authorizedPatientId === null || snapshot.patientId !== authorizedPatientId) return false;
-  await ensureSchema();
-  const { rowCount } = await getPool().query(
+  if (!client) await ensureSchema();
+  const { rowCount } = await (client ?? getPool()).query(
     `WITH displayed_patient AS MATERIALIZED (
        SELECT id FROM patients
        WHERE id = $2 AND full_name = $6 AND phone IS NOT DISTINCT FROM $7::text

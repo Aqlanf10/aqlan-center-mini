@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { arriveAppointment, ClinicalPlanConflict, createPatient, createPlanV2, createService, ensureSchema,
-  getClinicalVisit, getInventoryItemDetail, getPool, inventoryAlerts, listPatientPlannedVisits,
+  getClinicalVisit, getPlan, listPatientPlans, getInventoryItemDetail, getPool, inventoryAlerts, listPatientPlannedVisits,
   recordPlanConsent, resetPoolForTesting, schedulePlannedVisit, setVisitProcedures, signClinicalVisit,
   startVisitFromPlannedVisit } from '../lib/db';
 import { checkSlot, type Appointment } from '../lib/schedule';
@@ -46,6 +46,126 @@ const signer = async () => (await getPool().query<{id: number}>(
 const sign = async (visitId: number) => signClinicalVisit({ visitId, baseCurrency: 'YER', signedBy: 'test', signerDoctorPartyId: await signer() });
 
 describe('clinical release regressions', () => {
+  it('schedules only the first fallback session, then retires its unbooked proposal after walk-in work', async () => {
+    const a = await plan('per_session', 12);
+    const [initial] = await listPatientPlannedVisits(a.p.id);
+    expect(initial.durationMinutes).toBe(30);
+    const before = (await getPool().query(`SELECT sequence, planned_visit_id FROM treatment_sessions WHERE plan_item_id=$1 ORDER BY sequence`, [a.item.id])).rows;
+    expect(before.map(row => row.planned_visit_id)).toEqual([initial.id, ...Array(11).fill(null)]);
+    const walkin = await visit(a.p.id);
+    await setVisitProcedures({visitId: walkin, procedures: [a.procedure]});
+    const result = await sign(walkin);
+    expect(result.reason).toBeNull();
+    expect(result.nextPlannedVisit?.durationMinutes).toBe(30);
+    expect(result.nextPlannedVisit?.id).not.toBe(initial.id);
+    const after = (await getPool().query(`SELECT sequence, status, planned_visit_id FROM treatment_sessions WHERE plan_item_id=$1 ORDER BY sequence`, [a.item.id])).rows;
+    expect(after.filter(row => row.status === 'done').map(row => row.sequence)).toEqual([1]);
+    expect(after[0].planned_visit_id).toBe(initial.id);
+    expect(after[1].planned_visit_id).toBe(result.nextPlannedVisit?.id);
+    expect((await getPool().query(`SELECT status, visit_id FROM planned_visits WHERE id=$1`, [initial.id])).rows[0]).toEqual({status: 'completed', visit_id: null});
+    expect((await getPool().query(`SELECT count(*)::int AS n FROM audit_log WHERE action='planned_visit.reconcile' AND entity_id=$1`, [String(initial.id)])).rows[0].n).toBe(1);
+    const nextWalkin = await visit(a.p.id);
+    await setVisitProcedures({visitId: nextWalkin, procedures: [a.procedure]});
+    const nextResult = await sign(nextWalkin);
+    expect(nextResult.nextPlannedVisit?.durationMinutes).toBe(30);
+    expect(nextResult.nextPlannedVisit?.id).not.toBe(result.nextPlannedVisit?.id);
+    expect((await getPool().query(`SELECT status FROM planned_visits WHERE id=$1`, [result.nextPlannedVisit?.id])).rows[0].status).toBe('completed');
+    expect((await getPool().query(`SELECT sequence FROM treatment_sessions WHERE planned_visit_id=$1`, [nextResult.nextPlannedVisit?.id])).rows.map(row => row.sequence)).toEqual([3]);
+  });
+
+  it.each(['scheduled', 'planned_forward', 'planned_reverse'])('preserves booked proposals and appointments with %s linkage during walk-in work', async (linkage) => {
+    const a = await plan('per_session', 2);
+    const [initial] = await listPatientPlannedVisits(a.p.id);
+    const booked = await schedulePlannedVisit({plannedVisitId: initial.id, date: '2026-09-09', time: '09:00', chairs: 10});
+    if (!booked.ok) throw new Error(booked.reason);
+    if (linkage !== 'scheduled') await getPool().query(`UPDATE planned_visits SET status='planned' WHERE id=$1`, [initial.id]);
+    if (linkage === 'planned_reverse') await getPool().query(`UPDATE planned_visits SET appointment_id=NULL WHERE id=$1`, [initial.id]);
+    const walkin = await visit(a.p.id);
+    await setVisitProcedures({visitId: walkin, procedures: [a.procedure]});
+    await sign(walkin);
+    expect((await getPool().query(`SELECT status, appointment_id FROM planned_visits WHERE id=$1`, [initial.id])).rows[0]).toEqual({status: linkage === 'scheduled' ? 'scheduled' : 'planned', appointment_id: linkage === 'planned_reverse' ? null : booked.appointmentId});
+    expect((await getPool().query(`SELECT status FROM appointments WHERE id=$1`, [booked.appointmentId])).rows[0].status).toBe('booked');
+  });
+
+  it('preserves explicit grouping and does not treat remaining grouped work as done', async () => {
+    const p = await patient();
+    const service = await createService({name: `Grouped ${++counter}`, category: 'rct', priceMinor: 10000});
+    const created = await createPlanV2({patientId:p.id, title:'Explicit grouping', specialty:null, primaryDoctorId:null,
+      billingMode:'per_procedure', baseCurrency:'YER', startDate:'2026-09-07', note:null, createdBy:'test', installments:[],
+      items:[{serviceId:service.id, serviceName:service.name, category:'rct', toothCode:11, surfaces:null,
+        quantity:1, unitPriceMinor:10000, billingRule:'per_session', sessionCount:2, note:null,
+        sessionPlan:[{title:'First', minutes:20, visitKey:'group', visitTitle:'Explicit grouped work'},
+          {title:'Second', minutes:40, visitKey:'group', visitTitle:'Explicit grouped work'}]}]});
+    if (!created.ok) throw new Error(created.message);
+    await recordPlanConsent({planId:created.planId, actor:'test', note:'synthetic'});
+    const [initial] = await listPatientPlannedVisits(p.id);
+    expect(initial.durationMinutes).toBe(60);
+    const item = (await getPool().query(`SELECT id FROM plan_items WHERE plan_id=$1`, [created.planId])).rows[0];
+    const walkin = await visit(p.id);
+    await setVisitProcedures({visitId:walkin, procedures:[{serviceId:service.id, toothCode:11, surfaces:null,
+      quantity:1, unitPriceMinor:0, doctorId:null, note:null, planItemId:item.id}]});
+    const signed = await sign(walkin);
+    expect(signed.nextPlannedVisit?.id).toBe(initial.id);
+    expect(signed.nextPlannedVisit?.durationMinutes).toBe(60);
+    expect((await getPool().query(`SELECT status FROM planned_visits WHERE id=$1`, [initial.id])).rows[0].status).toBe('planned');
+    expect((await getPool().query(`SELECT status FROM treatment_sessions WHERE plan_item_id=$1 ORDER BY sequence`, [item.id])).rows.map(row => row.status)).toEqual(['done', 'planned']);
+  });
+
+  it('discloses exact remaining work and original grouped duration without rewriting legacy proposals', async () => {
+    const a = await plan('per_session', 12);
+    const [original] = await listPatientPlannedVisits(a.p.id);
+    // Synthetic legacy shape; not a migration or inference about a live proposal's origin.
+    await getPool().query(`UPDATE treatment_sessions SET planned_visit_id=$2 WHERE plan_item_id=$1`, [a.item.id, original.id]);
+    await getPool().query(`UPDATE planned_visits SET duration_minutes=360 WHERE id=$1`, [original.id]);
+    const walkin = await visit(a.p.id);
+    await setVisitProcedures({visitId:walkin,procedures:[a.procedure]});
+    const result = await sign(walkin);
+    expect(result.nextPlannedVisit).toMatchObject({id:original.id,title:original.title,durationMinutes:360});
+    expect(result.nextPlannedVisit?.remainingWork).toContain('جلسة 2؛');
+    expect(result.nextPlannedVisit?.remainingWork).not.toContain('جلسة 1؛');
+    expect(result.nextPlannedVisit?.durationWarning).toContain('المجموعة الأصلية');
+    const [listed] = await listPatientPlannedVisits(a.p.id);
+    expect(listed.remainingWork).toBe(result.nextPlannedVisit?.remainingWork);
+    expect(listed.durationWarning).toBe(result.nextPlannedVisit?.durationWarning);
+    const started = await startVisitFromPlannedVisit({plannedVisitId:original.id,actor:'test'});
+    if (!started || !('id' in started)) throw new Error('Expected open proposed visit');
+    expect((await getClinicalVisit(started.id))?.plannedVisit).toMatchObject({remainingWork:listed.remainingWork,durationWarning:listed.durationWarning,durationMinutes:360});
+    expect((await getPool().query(`SELECT title,duration_minutes FROM planned_visits WHERE id=$1`,[original.id])).rows[0]).toEqual({title:original.title,duration_minutes:360});
+    expect((await getPool().query(`SELECT count(*)::int AS n FROM treatment_sessions WHERE planned_visit_id=$1 AND status='done'`,[original.id])).rows[0].n).toBe(1);
+  });
+
+  it('reads completed sessions from signed clinical work without changing financial or legacy counters', async () => {
+    const a = await plan('on_start', 12);
+    const first = await visit(a.p.id);
+    await setVisitProcedures({ visitId: first, procedures: [a.procedure] });
+    expect((await sign(first)).reason).toBeNull();
+    const second = await visit(a.p.id);
+    await setVisitProcedures({ visitId: second, procedures: [a.procedure] });
+    expect((await sign(second)).reason).toBeNull();
+    const before = (await getPool().query(`SELECT id,total_minor,status FROM invoices WHERE patient_id=$1 ORDER BY id`, [a.p.id])).rows;
+    const detail = await getPlan(a.planId, '2026-09-07');
+    const listed = (await listPatientPlans(a.p.id, '2026-09-07')).find(p => p.id === a.planId);
+    for (const projection of [detail, listed]) {
+      expect(projection?.items[0]).toMatchObject({ sessionsCompleted: 2, sessionCount: 12, status: 'in_progress' });
+      expect(projection?.itemsProgress.doneCount).toBe(0);
+    }
+    // The old counter remains untouched: this fix only changes the projection.
+    expect((await getPool().query(`SELECT sessions_completed FROM plan_items WHERE id=$1`, [a.item.id])).rows[0].sessions_completed).toBe(0);
+    expect((await getPool().query(`SELECT id,total_minor,status FROM invoices WHERE patient_id=$1 ORDER BY id`, [a.p.id])).rows).toEqual(before);
+  });
+
+  it('counts only done sessions for the exact item, ignoring stale counters and open or skipped work', async () => {
+    const a = await plan('on_start', 4);
+    const b = await plan('on_start', 2);
+    await getPool().query(`UPDATE plan_items SET sessions_completed=4 WHERE id=$1`, [a.item.id]);
+    await getPool().query(`UPDATE treatment_sessions SET status=CASE sequence WHEN 1 THEN 'done' WHEN 2 THEN 'skipped' WHEN 3 THEN 'in_progress' ELSE 'planned' END WHERE plan_item_id=$1`, [a.item.id]);
+    await getPool().query(`UPDATE treatment_sessions SET status='done' WHERE plan_item_id=$1`, [b.item.id]);
+    expect((await getPlan(a.planId, '2026-09-07'))?.items[0].sessionsCompleted).toBe(1);
+    expect((await getPlan(b.planId, '2026-09-07'))?.items[0].sessionsCompleted).toBe(2);
+    await getPool().query(`DELETE FROM treatment_sessions WHERE plan_item_id=$1`, [a.item.id]);
+    expect((await getPlan(a.planId, '2026-09-07'))?.items[0].sessionsCompleted).toBe(0);
+  });
+
   it('rejects another patient plan and mismatched service/tooth without saving procedures', async () => {
     const a = await plan('on_start');
     const b = await patient();
