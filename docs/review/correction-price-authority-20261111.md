@@ -101,6 +101,29 @@ The owner delegated these to engineering judgement ("decide it"). They are decis
 
 One existing test changed because of these rules: `invoice-corrections-canonical` used a raise of a manual line (10,000 to 14,000) by an account holding only the correction grant as its example of a successful correction. That raise now needs the increase grant, so the test corrects the quantity instead and asserts that the raise is refused. Its other assertions are unchanged.
 
+### Worked examples (discount limit 10%; amounts in YER)
+
+Status: the owner approved rules 1–5 and confirmed on 2026-11-12 that what he had approved stands, including the manual-line decisions taken under his delegation. Every row is a grant the owner holds and can give; nothing is closed to the protected owner. Any row can be changed later without touching stored data, because a refusal writes nothing.
+
+| # | Case | Example | Staff with the correction grant only | Staff with the named grant | Protected owner |
+|---|---|---|---|---|---|
+| 1 | Toward the catalogue, still below it | Catalogue 10,000; stored 7,000; corrected to 8,500 (15% below) | Refused | Needs discount override (15% is beyond 10%); with only the discount grant: refused | Allowed, recorded |
+| 1 | Reaching the catalogue | Stored 7,000 corrected to 10,000 | Allowed | — | Allowed |
+| 2 | Same discount, smaller invoice | Invoice 20,000 with discount 1,500 (7.5%); a line is removed, total 10,000, discount still 1,500 (15%) | Refused | Needs discount override | Allowed, recorded |
+| 2 | Same discount, larger invoice | Total grows to 30,000, discount still 1,500 (5%) | Allowed | — | Allowed |
+| 3 | Manual line lowered | Recorded 10,000; corrected to 9,000 (10%) | Refused | Discount grant: allowed | Allowed |
+| 3 | Lowered in steps | 10,000 to 9,500, then 9,000, then 8,600. The third is 4.4% of 9,000 but 14% of the first price | Refused | Discount grant: first two allowed, third refused; override: allowed | Allowed |
+| 3a | Manual line raised | Recorded 10,000; corrected to 14,000 | Refused | Increase grant: allowed, recorded as an increase | Allowed |
+| 3b | Manual line recorded at zero | 0 corrected to 500 | Refused | Increase grant: allowed | Allowed |
+| 3c | Currency change with a manual line | Invoice in YER with a manual line moved to SAR | Refused | Needs increase and discount override together | Allowed; the new price becomes the reference |
+| 3d | Reference cannot be proven | An invoice corrected before references were recorded; manual line 10,000 to 9,000 | Refused (keeping 10,000 is allowed) | Needs increase and discount override together | Allowed; the new price becomes the reference |
+| 4 | General exception | A finance manager with no price grants raises 10,000 to 12,000 | Refused | Increase grant: allowed | Allowed |
+| 5 | Legacy administrator | Administrator corrects 10,000 to 12,000 on the legacy path | — | — | Allowed as before; the audit row now records 10,000, 12,000, the reference and the reason |
+
+Effect on the owner: no loss of authority on either path; every price change by anyone else is tied to a grant he gave and is recorded with its reason. Effect on staff: a corrector can still fix quantities, identities and wrongly discounted prices back to the reference, but cannot change what a patient owes beyond the grants given to that account.
+
+Kept protections: the mandatory correction reason; the audit row in the same transaction; receipts, vouchers and collections untouched (no cash movement); the locked-period refusal; the patient scope decided under the row lock.
+
 ## 5. Results
 
 First revision (`b5c76e71`): unit 12/12; PostgreSQL 15/15, 12 of 15 failing on the previous writers; related PostgreSQL 25 files, 355/355; full gate green except the three known local browser journeys.

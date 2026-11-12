@@ -36,6 +36,13 @@ Gate finding on `817106ac`: the interim commits had not regenerated `docs/securi
   - Evidence before the gate: unit `correction-price-authority` 18/18 and `commission-invoice-discount` 8/8; new and changed PostgreSQL files 5 files, 92/92; the payroll horizon test fails on the previous code; related PostgreSQL 71 files, 1,123/1,123; `npm run verify:deletions` green.
 - Case-participation storage: pushed at `297f83cd`, Draft PR #539 (gate green except the three known local browser journeys).
 
+- Gate evidence, 2026-11-12:
+  - Hosted CI on `b5c76e71` (run 43108809004): quality job success; both built-app HTTP and hosted-browser shards success; contract print success; the PostgreSQL job failed only at "Operational verification journeys" (the `verify-deletions` lab journey, fixed in `1114e608`). Hosted CI on `297f83cd` (run 43118545704, PR #539): the same pattern.
+  - The three browser journeys that fail locally (`agreement-reconciliation-browser` at 390 and 1280 px, `dental-chart-built-page` at 390 px) pass on hosted CI. Cause: the project pins Playwright 1.63.0, which expects Chromium revision 1243 (153.0); this environment only has revision 1194 (141.0) and may not install another. They are a local-environment limit, not a product defect; hosted CI is the authority for them.
+  - The unit timeout in `ai-provider-api-security` (5 s) appears only inside the full local unit run under load; alone it passes, and the hosted unit step passes.
+  - Local gate on `1114e608`: unit 15,044/15,044; lint 0 errors; audits 10/10; build pass. Two findings: `tsc` failed on a stale `.next/types` left by the previous head's build (clean after the fresh build), and `lab-status-financial-boundary` failed before any test ran because an earlier file left a stub `users(id)` table and the suite did not reset the schema (reproduced; fixed in `5357aba4`, test only).
+  - The local gate now also runs `npm run verify:ci`, the operational journeys step that hosted CI runs and the local gate had been missing.
+
 ## 3. Finance queue (order by risk to patient balances and the cash box)
 
 Three read-only audits ran on 2026-11-10/11, one per area (they stopped once at the usage limit and were resumed). Their reports are leads; the state column says what I verified myself.
