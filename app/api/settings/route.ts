@@ -1,8 +1,9 @@
 import { MEDICATION_CATALOG_KEY } from "@/lib/medication-catalog";
+import { canManageMedicationCatalog } from "@/lib/medication-catalog-access";
 import { NextResponse } from "next/server";
 import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getSettings, readStoredSettings, saveSettingsAudited } from "@/lib/db";
+import { findUserByUsername, getSettings, readStoredSettings, saveSettingsAudited } from "@/lib/db";
 import { ALL_SETTING_KEYS, SETTING_DEFAULTS, withDefaults, type SettingKey } from "@/lib/settings";
 import { settingDefinition } from "@/lib/settings-definitions";
 import { canManageCategory, denialMessage, roleCan } from "@/lib/settings-permissions";
@@ -141,8 +142,12 @@ export async function PATCH(request: Request) {
     }
     const definition = settingDefinition(key);
     if (!definition) return NextResponse.json({ message: "مفتاح غير معروف.", key }, { status: 400 });
-    if (!canManageCategory(session.role, definition.category)) {
-      return NextResponse.json({ message: denialMessage(definition.category), key }, { status: 403 });
+    // The medication catalog has its own grant (owner decision 6839071994): an administrator or a
+    // granted doctor. This is a precheck; the writer re-proves it after the settings locks.
+    if (key === MEDICATION_CATALOG_KEY
+      ? !canManageMedicationCatalog(await findUserByUsername(session.username).catch(() => null))
+      : !canManageCategory(session.role, definition.category)) {
+      return NextResponse.json({ message: key === MEDICATION_CATALOG_KEY ? "تعديل دليل الأدوية يحتاج صلاحية «تعديل دليل الأدوية» من المدير." : denialMessage(definition.category), key }, { status: 403 });
     }
     const problem = validateTypedSetting(key, raw);
     if (problem) return NextResponse.json({ message: problem, key }, { status: 400 });

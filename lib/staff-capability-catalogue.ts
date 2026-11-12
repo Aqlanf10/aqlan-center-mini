@@ -42,6 +42,9 @@ export const STAFF_CAPABILITIES = Object.freeze([
   "hr.directory.view", "hr.attendance.record", "hr.attendance.correct", "hr.staff.manage", "hr.leaves.request",
   "hr.leaves.approve", "hr.schedules.manage", "hr.payroll.manage", "hr.reports.view", "hr.settings.edit",
   "tasks.use", "messages.use", "patients.operational-summary.view",
+  // Owner decision (Dot 6839071994): default doses in the medication catalog are edited by
+  // whoever the owner grants (an administrator or a doctor). Patients' prescriptions are separate.
+  "clinical.medication-catalog.manage",
 ] as const);
 export type StaffCapability = typeof STAFF_CAPABILITIES[number];
 
@@ -121,6 +124,7 @@ export const STAFF_CAPABILITY_PREREQUISITES: Readonly<Partial<Record<StaffCapabi
   "staff.permissions.edit": Object.freeze(["staff.view"] as const),
   "settings.operational.edit": Object.freeze(["settings.view"] as const),
   "settings.finance.edit": Object.freeze(["settings.view"] as const),
+  "clinical.medication-catalog.manage": Object.freeze(["settings.view"] as const),
   "audit.export": Object.freeze(["audit.view"] as const),
   "visits.delete": Object.freeze(["visits.manage"] as const),
   "clinical.ortho.edit": Object.freeze(["clinical.ortho.view"] as const),

@@ -58,7 +58,7 @@ export function CanonicalCephStudy({ patientId,studyId,ownerKey,canAnalyze,onCop
       <p className="text-xs text-slate-600">عرض البيانات المسجلة كما حُفظت؛ يبقى الأصل المعتمد دون تغيير.</p>
       {error?<p role="alert" className="text-sm text-red-700">{error}</p>:!feed?<p role="status">جارٍ تحميل الدراسة…</p>:<div data-testid="canonical-ceph-saved" className="space-y-3">
         {feed.analysis.status==="draft"?<p className="text-amber-800">مسودة غير معتمدة؛ القياسات والملاحظات المحفوظة هنا ليست نتائج معتمدة.</p>:<p className="text-navy-800">حالة السجل: دراسة معتمدة</p>}
-        {canAnalyze && feed.analysis.status === "completed" ? <CanonicalCephCopy key={`${ownerKey}:${patientId}:${studyId}`} patientId={patientId} studyId={studyId} ownerKey={ownerKey} onCopied={onCopied} refreshStudy={() => { setFeed(null); setRefresh(value => value + 1); }} /> : null}
+        {canAnalyze && feed.analysis.status === "completed" ? <CanonicalCephCopy key={`${ownerKey}:${patientId}:${studyId}`} patientId={patientId} studyId={studyId} ownerKey={ownerKey} correctionToken={feed.correctionSource?.state === "available" ? feed.correctionSource.token : null} onCopied={onCopied} refreshStudy={() => { setFeed(null); setRefresh(value => value + 1); }} /> : null}
         <dl className="grid gap-2 sm:grid-cols-2">
           <div><dt className="text-xs text-slate-500">الجهاز المسجل</dt><dd>{feed.analysis.device??"غير مسجل"}</dd></div>
           <div><dt className="text-xs text-slate-500">المجموعة المرجعية المسجلة</dt><dd dir="ltr">{feed.analysis.refSet}</dd></div>

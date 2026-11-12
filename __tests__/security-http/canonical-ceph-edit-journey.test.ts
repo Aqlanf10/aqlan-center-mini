@@ -18,40 +18,44 @@ beforeEach(async () => {
 });
 const diagnosis = { skeletal: null, dental: null, softTissue: null, note: null, finalDx: "SYN structured draft conclusion" };
 const patch = (cookie: string, id: number, body: unknown) => journey.api(`/api/ceph/${id}`, cookie, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-async function version(cookie: string, id = studyId) { const response = await journey.api(`/api/ceph/${id}`, cookie); expect(response.status).toBe(200); return (await response.json()).discardVersion as string; }
-it("HTTP: scoped analyst edits an observed draft atomically without completing it", async () => {
-  const cookie = (await journey.login("own")).cookie, expectedVersion = await version(cookie);
-  const response = await patch(cookie, studyId, { expectedVersion, calibration: { x1: 0, y1: 0, x2: 100, y2: 0, mm: 10 }, landmarks: [{ code: "S", x: 20, y: 30, source: "manual" }], diagnosis });
-  expect(response.status).toBe(200); expect(await response.json()).toEqual({ ok: true, studyId, status: "draft" });
-  expect((await journey.db.query("SELECT status,mm_per_pixel FROM ceph_analyses WHERE id=$1", [studyId])).rows).toEqual([{ status: "draft", mm_per_pixel: 0.1 }]);
-  expect((await journey.db.query("SELECT final_dx FROM ceph_diagnoses WHERE analysis_id=$1", [studyId])).rows[0].final_dx).toBe(diagnosis.finalDx);
-  expect((await journey.db.query("SELECT count(*)::int n FROM audit_log WHERE action='ceph.update' AND entity_id=$1", [String(studyId)])).rows[0].n).toBe(3);
-});
+const observedDiagnosis = null; // the seeded draft has no saved diagnosis
 const audits = async () => Number((await journey.db.query("SELECT count(*)::int n FROM audit_log WHERE action='ceph.update' AND entity_id=$1", [String(studyId)])).rows[0].n);
-it.each(["owner", "all"] as const)("HTTP: %s edits one explicit group with minimal no-store acknowledgment", async key => {
-  const cookie = (await journey.login(key)).cookie, response = await patch(cookie, studyId, { expectedVersion: await version(cookie), diagnosis });
-  expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toContain("no-store"); expect(Object.keys(await response.json()).sort()).toEqual(["ok", "status", "studyId"]); expect(await audits()).toBe(1); expect(await journey.ddlLog()).toEqual([]);
+it("HTTP: scoped analyst edits each category of an observed draft, without completing it (staging contract)", async () => {
+  const cookie = (await journey.login("own")).cookie;
+  const calibrated = await patch(cookie, studyId, { calibration: { x1: 0, y1: 0, x2: 100, y2: 0, mm: 10 }, expectedCalibration: { calibration: null, mmPerPixel: null } });
+  expect(calibrated.status).toBe(200); expect(Object.keys(await calibrated.json()).sort()).toEqual(["calibration", "mmPerPixel", "ok"]);
+  expect((await patch(cookie, studyId, { landmarks: [{ code: "S", x: 20, y: 30, source: "manual" }], expectedLandmarks: [] })).status).toBe(200);
+  const diagnosed = await patch(cookie, studyId, { diagnosis, expectedDiagnosis: observedDiagnosis });
+  expect(diagnosed.status).toBe(200); expect(await diagnosed.json()).toMatchObject({ ok: true, diagnosis: { finalDx: diagnosis.finalDx } });
+  expect((await journey.db.query("SELECT status,mm_per_pixel FROM ceph_analyses WHERE id=$1", [studyId])).rows).toEqual([{ status: "draft", mm_per_pixel: 0.1 }]);
+  expect(await audits()).toBe(3);
+});
+it.each(["owner", "all"] as const)("HTTP: %s edits one explicit group with a no-store acknowledgment", async key => {
+  const cookie = (await journey.login(key)).cookie, response = await patch(cookie, studyId, { diagnosis, expectedDiagnosis: observedDiagnosis });
+  expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toContain("no-store"); expect(Object.keys(await response.json()).sort()).toEqual(["diagnosis", "ok"]); expect(await audits()).toBe(1); expect(await journey.ddlLog()).toEqual([]);
 });
 it("HTTP: anonymous, reader, none and foreign patients refuse without effects", async () => {
-  const owner = (await journey.login("owner")).cookie, input = { expectedVersion: await version(owner), diagnosis };
+  const input = { diagnosis, expectedDiagnosis: observedDiagnosis };
   expect((await patch("", studyId, input)).status).toBe(401);
   for (const key of ["read", "none"] as const) expect((await patch((await journey.login(key)).cookie, studyId, input)).status).toBe(403);
   await journey.db.query("UPDATE patients SET primary_doctor_id=NULL WHERE id=$1", [patientId]); const own = (await journey.login("own")).cookie;
   const foreign = await patch(own, studyId, input), absent = await patch(own, 2147483647, input); expect(foreign.status).toBe(404); expect(absent.status).toBe(404); expect(await foreign.json()).toEqual(await absent.json()); expect(await audits()).toBe(0);
 });
 it("HTTP: complete validation precedes all writes and errors contain no private fields", async () => {
-  const cookie = (await journey.login("own")).cookie, expectedVersion = await version(cookie);
-  for (const input of [null, [], {}, { expectedVersion }, { expectedVersion, diagnosis, force: true }, { expectedVersion, calibration: { x1: "0", y1: 0, x2: 100, y2: 0, mm: 10 }, diagnosis }, { expectedVersion, diagnosis: { ...diagnosis, finalDx: [] } }]) {
+  const cookie = (await journey.login("own")).cookie, expectedCalibration = { calibration: null, mmPerPixel: null };
+  for (const input of [null, [], { diagnosis }, { diagnosis, expectedDiagnosis: null, calibration: { x1: 0, y1: 0, x2: 100, y2: 0, mm: 10 }, expectedCalibration },
+    { calibration: { x1: "0", y1: 0, x2: 100, y2: 0, mm: 10 }, expectedCalibration }, { diagnosis: { ...diagnosis, finalDx: [] }, expectedDiagnosis: null }, { landmarks: [{ code: "S", x: 1, y: 2 }] }]) {
     const response = await patch(cookie, studyId, input); expect(response.status).toBe(400); expect(response.headers.get("cache-control")).toContain("no-store"); expect(JSON.stringify(await response.json())).not.toContain(diagnosis.finalDx);
   }
-  expect((await journey.api(`/api/ceph/${studyId}?force=1`, cookie, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion, diagnosis }) })).status).toBe(400);
+  expect((await journey.api(`/api/ceph/${studyId}?force=1`, cookie, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ diagnosis, expectedDiagnosis: null }) })).status).toBe(400);
   expect(await audits()).toBe(0); expect((await journey.db.query("SELECT cal_mm FROM ceph_analyses WHERE id=$1", [studyId])).rows[0].cal_mm).toBeNull();
 });
-it("HTTP: one saved intent cannot be replayed and cannot edit an approved study", async () => {
-  const cookie = (await journey.login("own")).cookie, input = { expectedVersion: await version(cookie), diagnosis };
-  expect((await patch(cookie, studyId, input)).status).toBe(200); expect((await patch(cookie, studyId, input)).status).toBe(409);
-  const latest = await version(cookie); await journey.db.query("UPDATE ceph_analyses SET status='completed',completed_at=NOW(),completed_by='SYN other' WHERE id=$1", [studyId]);
-  expect((await patch(cookie, studyId, { expectedVersion: latest, diagnosis: { ...diagnosis, finalDx: "SYN forbidden overwrite" } })).status).toBe(409); expect(await audits()).toBe(1);
+it("HTTP: a lost-response replay adds nothing; a changed prior value or an approved study refuses", async () => {
+  const cookie = (await journey.login("own")).cookie, input = { diagnosis, expectedDiagnosis: observedDiagnosis };
+  expect((await patch(cookie, studyId, input)).status).toBe(200); expect((await patch(cookie, studyId, input)).status).toBe(200); expect(await audits()).toBe(1);
+  expect((await patch(cookie, studyId, { diagnosis: { ...diagnosis, finalDx: "SYN overwrite of an unseen value" }, expectedDiagnosis: observedDiagnosis })).status).toBe(409);
+  await journey.db.query("UPDATE ceph_analyses SET status='completed',completed_at=NOW(),completed_by='SYN other' WHERE id=$1", [studyId]);
+  expect((await patch(cookie, studyId, { diagnosis: { ...diagnosis, finalDx: "SYN forbidden overwrite" }, expectedDiagnosis: diagnosis })).status).toBe(409); expect(await audits()).toBe(1);
 });
 async function openEditor(page: import("playwright").Page, key: keyof typeof ACCOUNTS = "own", signed = false, arm = true) {
   page.setDefaultTimeout(10000); if (!signed) await journey.browserLogin(page, key); await page.goto(`${journey.baseUrl}/patients/${patientId}`);
@@ -100,7 +104,7 @@ it("browser: unavailable session storage warns and never retries a failed reques
   } finally { await context.close(); }
 });
 it("HTTP/browser: withdrawing analysis rejects a prepared edit and fresh login without a write", async () => {
-  const cookie = (await journey.login("own")).cookie, input = { expectedVersion: await version(cookie), diagnosis }, original = (await journey.db.query("SELECT permissions FROM users WHERE id=$1", [journey.ids.own])).rows[0].permissions, context = await journey.browser.newContext();
+  const cookie = (await journey.login("own")).cookie, input = { diagnosis, expectedDiagnosis: observedDiagnosis }, original = (await journey.db.query("SELECT permissions FROM users WHERE id=$1", [journey.ids.own])).rows[0].permissions, context = await journey.browser.newContext();
   try { const page = await context.newPage(), editor = await openEditor(page);
     await journey.db.query("UPDATE users SET permissions=jsonb_set(jsonb_set(permissions::jsonb,'{revision}','2'),'{grants,clinical.ceph.analyze}','false')::text WHERE id=$1", [journey.ids.own]);
     expect((await patch(cookie, studyId, input)).status).toBe(401); await editor.getByRole("button", { name: "حفظ تشخيص المسودة", exact: true }).click(); await editor.getByText("انتهت الجلسة أو تغيّرت صلاحياتك. سجّل الدخول من جديد.", { exact: true }).waitFor(); expect(await editor.locator("textarea").count()).toBe(0);

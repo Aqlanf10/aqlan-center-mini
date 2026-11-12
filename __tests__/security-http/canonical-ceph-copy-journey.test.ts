@@ -23,8 +23,13 @@ beforeEach(async () => {
   studyId = (await seedCanonicalCeph(journey.db, { patientId })).id;
   await journey.db.query("INSERT INTO ceph_landmarks(analysis_id,code,x,y,source,confirmed_by) VALUES($1,'SYN_OLD_CODE',1.25,2.75,'manual','SYN original')", [studyId]);
 });
-const copy = (cookie: string, id = studyId, body: unknown = {}) => journey.api(`/api/ceph/${id}/duplicate`, cookie, {
-  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+/** Staging's correction contract: the correction-source token observed in the canonical study read. */
+async function observedToken(cookie: string, id = studyId) {
+  const response = await journey.api(`/api/ceph/${id}`, cookie); if (response.status !== 200) return { schemaVersion: 1, expectedCorrectionSource: { analysisId: id } };
+  const study = await response.json(); return { schemaVersion: 1, expectedCorrectionSource: study.correctionSource?.state === "available" ? study.correctionSource.token : { analysisId: id } };
+}
+const copy = async (cookie: string, id = studyId, body?: unknown) => journey.api(`/api/ceph/${id}/duplicate`, cookie, {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body === undefined ? await observedToken((await journey.login("owner")).cookie, id) : body),
 });
 it("HTTP: a scoped canonical analyst can open a correction draft without legacy identity", async () => {
   const session = await journey.login("own");
@@ -32,7 +37,7 @@ it("HTTP: a scoped canonical analyst can open a correction draft without legacy 
   expect((await journey.api(`/api/ceph/${studyId}`, session.cookie)).status).toBe(200);
   const response = await copy(session.cookie);
   expect(response.status).toBe(201);
-  expect(await response.json()).toEqual({ ok: true, studyId: expect.any(Number) });
+  expect(await response.json()).toEqual({ id: expect.any(Number) });
   expect(await journey.ddlLog()).toEqual([]);
 });
 const audits = async () => Number((await journey.db.query("SELECT count(*)::int n FROM audit_log WHERE action='ceph.create' AND entity_id IN (SELECT id::text FROM ceph_analyses WHERE patient_id=$1)", [patientId])).rows[0].n);
@@ -40,7 +45,7 @@ const drafts = async () => (await journey.db.query("SELECT id FROM ceph_analyses
 it.each(["owner", "all"] as const)("HTTP: %s with current scope creates a minimal no-store acknowledgment", async key => {
   const response = await copy((await journey.login(key)).cookie);
   expect(response.status).toBe(201); expect(response.headers.get("cache-control")).toContain("no-store");
-  const result = await response.json(); expect(Object.keys(result).sort()).toEqual(["ok", "studyId"]); expect(result.studyId).not.toBe(studyId); expect(await audits()).toBe(1);
+  const result = await response.json(); expect(Object.keys(result)).toEqual(["id"]); expect(result.id).not.toBe(studyId); expect(await audits()).toBe(1);
 });
 it("HTTP: reader/none/anonymous and foreign patients do not gain analysis authority", async () => {
   expect((await copy("")).status).toBe(401);
@@ -49,12 +54,13 @@ it("HTTP: reader/none/anonymous and foreign patients do not gain analysis author
   const cookie = (await journey.login("own")).cookie, a = await copy(cookie, foreign.id), b = await copy(cookie, 2147483647);
   expect(a.status).toBe(404); expect(b.status).toBe(404); expect(await a.json()).toEqual(await b.json()); expect(await drafts()).toEqual([]); expect(await audits()).toBe(0);
 });
-it("HTTP: explicit empty request rejects changed source data and query aliases without effects", async () => {
-  const cookie = (await journey.login("own")).cookie;
-  for (const body of [[], null, "", false, 0, { actor: "owner" }, { patientId }, { status: "completed" }, { documentId: 1 }, { landmarks: [] }, { force: true }]) {
+it("HTTP: a missing, foreign or altered correction token and query aliases are refused without effects", async () => {
+  const cookie = (await journey.login("own")).cookie, token = await observedToken(cookie);
+  for (const body of [{}, [], null, "", false, 0, { actor: "owner" }, { schemaVersion: 2, expectedCorrectionSource: token.expectedCorrectionSource },
+    { schemaVersion: 1, expectedCorrectionSource: { ...token.expectedCorrectionSource, analysisId: studyId + 1 } }]) {
     const response = await copy(cookie, studyId, body); expect(response.status, JSON.stringify(body)).toBe(400);
   }
-  const query = await journey.api(`/api/ceph/${studyId}/duplicate?force=1`, cookie, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  const query = await journey.api(`/api/ceph/${studyId}/duplicate?force=1`, cookie, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(token) });
   expect(query.status).toBe(400); expect(await drafts()).toEqual([]); expect(await audits()).toBe(0); expect(await journey.ddlLog()).toEqual([]);
 });
 it("HTTP: malformed copied source refuses safely without exposing values or creating a draft", async () => {
@@ -62,7 +68,7 @@ it("HTTP: malformed copied source refuses safely without exposing values or crea
   const response = await copy((await journey.login("own")).cookie);
   expect(response.status).toBe(409); expect(response.headers.get("cache-control")).toContain("no-store");
   const result = await response.json(); expect(Object.keys(result).sort()).toEqual(["code", "message"]);
-  expect(result.code).toBe("ceph_copy_stored_data_invalid"); expect(JSON.stringify(result)).not.toContain("NaN");
+  expect(result.code).toBe("ceph_copy_conflict"); expect(JSON.stringify(result)).not.toContain("NaN");
   expect(await drafts()).toEqual([]); expect(await audits()).toBe(0);
   expect((await journey.db.query("SELECT mm_per_pixel::text AS scale FROM ceph_analyses WHERE id=$1", [studyId])).rows[0].scale).toBe("NaN");
 });
@@ -111,7 +117,7 @@ it("browser: committed lost response is not replayed, even after the old draft i
 });
 it("browser: malformed success after commit stays uncertain rather than recreating", async () => {
   const context = await journey.browser.newContext();
-  try { const page = await context.newPage(), editor = await openCopy(page); let sends = 0; await page.route(`**/api/ceph/${studyId}/duplicate`, async route => { sends++; const response = await route.fetch(); expect(response.status()).toBe(201); await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ ok: true }) }); }); await editor.getByRole("button", { name: "إنشاء مسودة التصحيح", exact: true }).click(); await editor.getByText("طلب نسخة تصحيح سابق يحتاج مراجعة. لا يوجد إرسال تلقائي عند التحديث أو إعادة الاتصال.", { exact: true }).waitFor(); expect(sends).toBe(1); expect(await audits()).toBe(1); }
+  try { const page = await context.newPage(), editor = await openCopy(page); let sends = 0; await page.route(`**/api/ceph/${studyId}/duplicate`, async route => { sends++; const response = await route.fetch(); expect(response.status()).toBe(201); await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ ok: true, id: "SYN" }) }); }); await editor.getByRole("button", { name: "إنشاء مسودة التصحيح", exact: true }).click(); await editor.getByText("طلب نسخة تصحيح سابق يحتاج مراجعة. لا يوجد إرسال تلقائي عند التحديث أو إعادة الاتصال.", { exact: true }).waitFor(); expect(sends).toBe(1); expect(await audits()).toBe(1); }
   finally { await context.close(); }
 });
 it("browser: unavailable tab storage warns and holds an uncertain request in memory", async () => {

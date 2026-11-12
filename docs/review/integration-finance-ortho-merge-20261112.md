@@ -47,16 +47,30 @@ Branch `feat/claude-integration-finance-ortho-20261112`, created from the stagin
 | Cephalometrics | **Staging's writers kept whole.** My old-contract transaction helpers were removed. |
 | Clinic reset | Both sides' history protections and truncation lists combined. |
 
-## 4. Held on this branch
+## 4. Canonical ceph writes: re-aligned with staging's contract
 
-The canonical (staff-cutover) ceph write commands (create, copy, discard, complete, edit) were
-built on the earlier completion contract. On this branch they refuse with 409
-`ceph_contract_alignment_pending` before any read or write; malformed input still gets 400.
-The legacy ceph routes use staging's protected writers unchanged. Canonical ceph reads stay;
-the canonical pair comparison now uses staging's acquisition-date ordering and refuses an
-unresolved order instead of falling back to creation time.
+The merge commit held the canonical (staff-cutover) ceph write commands with 409
+`ceph_contract_alignment_pending`, because they were built on the earlier completion contract.
+The follow-up commit removes the hold by running **staging's own protected writers** inside the
+admitted staff operation, instead of keeping a second writer:
 
-Re-alignment of those commands with the snapshot/sources/provenance contract is open work.
+- `runCephWritersInTransaction` (lib/db.ts): within a canonical operation the writer's client is the
+  operation's client, and its BEGIN/COMMIT/ROLLBACK become one savepoint. A refused write rolls
+  back to the savepoint and the command then aborts the whole operation, so nothing partial survives.
+- Admission seam (`CephDraftWriteRequest.admit`, `authorizeCephCompletion(..., admit)`): after the
+  writer locks the patient row, canonical admission proves current patient scope and identity
+  (`canonical-ceph-admission.ts`) in place of the legacy session re-proof. Capability is the one the
+  operation was opened for and is re-asserted before commit.
+- Request bodies and responses are the legacy route's: completion takes the reviewed snapshot and
+  source identity, edits take the observed prior calibration/landmarks/diagnosis, a correction copy
+  takes the correction-source token. `ceph-draft-edit.ts` is now shared by both routes.
+- The canonical study read adds staging's source identity (drafts) and correction token (completed
+  studies), computed by the same helpers as the legacy read; the canonical screen sends them back.
+- Scope: no record scope → the runtime's 403 refusal; a patient outside "own" → 404, identical to a
+  missing study.
+
+Canonical ceph reads stay; the canonical pair comparison uses staging's acquisition-date ordering
+and refuses an unresolved order instead of falling back to creation time.
 
 ## 5. Generated files
 
@@ -75,8 +89,12 @@ removed, 13 fingerprints of this branch's superseded definitions no longer produ
 - `visit-workspace-contract`: my historical pins unchanged; staging's reviewed sign/load
   deltas (a241e995, 680b0fd8, the preview setter rename) are listed as exact literal reversals.
 - `ceph-comparison-record-order`: rewritten to staging's ordering rule (no creation-time fallback).
-- Five PostgreSQL tests of the held canonical ceph writers replaced by
-  `canonical-ceph-write-hold.test.ts` (400 for malformed input, 409 hold, no database access).
+- Five PostgreSQL tests of the old-contract canonical ceph writers replaced by
+  `postgres/ceph-canonical-staging-contract.test.ts` (success with witness for own/all/owner; stale
+  snapshot, changed image or reference source, out-of-scope and read-only refused with no effect;
+  audit failure rolls back; diagnosis against its observed prior; discard; correction token; create),
+  and parser tests by `canonical-ceph-staging-contract-parsers.test.ts`. HTTP journeys use the
+  staging bodies.
 - `ceph-completion-stale-witness`: same assertions, now through staging's completion API.
 - Tests calling changed signatures (`deleteVisit`, follow-up board `GET`, legacy billing decision)
   updated to the merged signatures.

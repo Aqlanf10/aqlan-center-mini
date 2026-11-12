@@ -111,6 +111,7 @@ import { walkoutLineClass } from "./checkout-summary";
 import { commissionTimeKey, commissionTimestampIso } from "./commission-time";
 import { resolveAutomaticLabPrice } from "./lab-order-pricing";
 import { Pool, type PoolClient } from "pg";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { PGlite } from "@electric-sql/pglite";
 import { resolveClinicZone } from "./clinicZone";
 import { RUNTIME_DATABASE_URL_ENV_NAMES } from "./env-contract";
@@ -9233,11 +9234,15 @@ export async function saveSettingsAudited(input: SettingsWriteInput & {
     await client.query("BEGIN");
     const result = await writeSettingsInTransaction(client, {
       ...input,
-      // Legacy medication-catalog authority: revalidate AFTER waiting on settings locks;
-      // no stale role or audit identity (staging rule, unchanged).
+      // Legacy medication-catalog authority: revalidate AFTER waiting on settings locks; no stale role,
+      // grant or audit identity (staging rule). Owner decision 6839071994: an administrator, or a doctor
+      // holding the explicit catalog grant, read from the current database user here.
       catalogAuthority: input.session ? async (q) => {
         const current = await (await import("./session")).revalidateSessionInTransaction(input.session!, q);
-        return !!current && current.role === "admin" && current.username === input.actor && current.role === input.actorRole;
+        if (!current || current.username !== input.actor || current.role !== input.actorRole) return false;
+        const user = await findUserByUsername(current.username, q as DbClient);
+        return !!user && user.id === current.userId && user.role === current.role
+          && (await import("./medication-catalog-access")).canManageMedicationCatalog(user);
       } : undefined,
     });
     if (!result.ok) {
@@ -26275,11 +26280,44 @@ function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
   };
 }
 
+/**
+ * Ceph writers own their transaction (BEGIN/COMMIT/ROLLBACK on a pooled client). The canonical
+ * runtime runs the SAME writers inside its admitted staff operation: within
+ * runCephWritersInTransaction the writer's client is the operation's client, and its transaction
+ * statements become one savepoint. A refused write rolls back to that savepoint and the caller
+ * then aborts the whole operation, so no partial write survives either way.
+ */
+const cephOuterTransaction = new AsyncLocalStorage<DbClient>();
+let cephSavepointSequence = 0;
+export function runCephWritersInTransaction<T>(client: DbClient, work: () => Promise<T>): Promise<T> {
+  return cephOuterTransaction.run(client, work);
+}
+async function cephWriterClient(): ReturnType<ReturnType<typeof getPool>["connect"]> {
+  const outer = cephOuterTransaction.getStore();
+  if (!outer) return getPool().connect();
+  const name = `ceph_writer_${++cephSavepointSequence}`;
+  let open = false;
+  const query = async (text: unknown, values?: unknown[]) => {
+    const statement = typeof text === "string" ? text.trim().toUpperCase() : "";
+    if (statement === "BEGIN") { if (open) throw new Error("CEPH_WRITER_NESTED_BEGIN"); open = true; return outer.query(`SAVEPOINT ${name}`); }
+    if (statement === "COMMIT") { if (!open) throw new Error("CEPH_WRITER_COMMIT_WITHOUT_BEGIN"); open = false; return outer.query(`RELEASE SAVEPOINT ${name}`); }
+    if (statement === "ROLLBACK") {
+      if (!open) return { rows: [], rowCount: 0 };
+      open = false;
+      await outer.query(`ROLLBACK TO SAVEPOINT ${name}`);
+      return outer.query(`RELEASE SAVEPOINT ${name}`);
+    }
+    return (outer.query as (t: unknown, v?: unknown[]) => Promise<unknown>)(text, values);
+  };
+  // The operation owns the connection: release (also with a discard flag) is a no-op here.
+  return { query, release: () => undefined } as unknown as Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>>;
+}
+
 /** يفتح مسودة تحليل على شععة موجودة للمريض نفسه — الصورة مرجعٌ لا نسخة. */
 /** HTTP creation requires server-admitted authority; trusted internal fixtures keep their explicit writer. */
 export async function createAuthorizedCephAnalysis(input: Omit<Parameters<typeof createCephAnalysis>[0], 'createdBy'>, request: CephDraftWriteRequest) {
   assertCephDraftRequest(request);
-  return createCephAnalysis({...input,createdBy:request.session.username},request);
+  return createCephAnalysis({...input,createdBy:request.session?.username ?? ""},request);
 }
 
 export async function createCephAnalysis(input: {
@@ -26293,7 +26331,7 @@ export async function createCephAnalysis(input: {
   refSet?: string | null;
 }, request?: CephDraftWriteRequest): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
   await ensureSchema();
-  const client = await getPool().connect();
+  const client = await cephWriterClient();
   try {
     await client.query("BEGIN");
     const current = request ? await authorizeCephLifecycle(client, request) : null;
@@ -26865,7 +26903,7 @@ export interface CephCalibrationInput {
 /** Required-context HTTP entry points. Legacy writer signatures remain for trusted internal tools. */
 export function updateAuthorizedCephCalibration(id: number, cal: CephCalibrationInput, expected: CephCalibrationState, request: CephDraftWriteRequest) {
   assertCephDraftRequest(request);
-  return updateCephCalibration(id, cal, request.session.username, expected, request);
+  return updateCephCalibration(id, cal, request.session?.username ?? "", expected, request);
 }
 export function updateAuthorizedCephLandmarks(id: number, points: CephLandmarkInput[], removeCodes: LandmarkCode[], expected: CephLandmarkInput[], request: CephDraftWriteRequest) {
   assertCephDraftRequest(request);
@@ -26874,14 +26912,14 @@ export function updateAuthorizedCephLandmarks(id: number, points: CephLandmarkIn
   if (!Array.isArray(expected)) {
     throw new ClinicalMutationAuthorityError(400, "حفظ المعالم يحتاج مواضعها السابقة التي راجعتها؛ أرسل قائمة صريحة ولو كانت فارغة.");
   }
-  return updateCephLandmarks(id, points, request.session.username, removeCodes, expected, request);
+  return updateCephLandmarks(id, points, request.session?.username ?? "", removeCodes, expected, request);
 }
 export function updateAuthorizedCephDiagnosis(id: number, dx: Parameters<typeof updateCephDiagnosis>[1], expected: CephCompletionDiagnosis | null, request: CephDraftWriteRequest) {
   assertCephDraftRequest(request);
   if (!isCephDiagnosisWriteInput(dx)) {
     throw new ClinicalMutationAuthorityError(400, "حقول التشخيص يجب أن تكون نصًا أو فارغة؛ الحد 2000 حرف لكل حقل والاستنتاج مطلوب.");
   }
-  return updateCephDiagnosis(id, dx, request.session.username, expected, request);
+  return updateCephDiagnosis(id, dx, request.session?.username ?? "", expected, request);
 }
 
 export async function updateCephCalibration(
@@ -26894,7 +26932,7 @@ export async function updateCephCalibration(
     return { ok: false, message: "إحداثيات المعايرة والمسافة غير صالحة." };
   }
   await ensureSchema();
-  const client = await getPool().connect();
+  const client = await cephWriterClient();
   try {
     await client.query("BEGIN");
     const currentWriter = authority ? await authorizeCephDraft(client, authority) : null;
@@ -27006,7 +27044,7 @@ export async function updateCephLandmarks(
     return { ok: false, message: "إزالة المعلم تحتاج موضعه المحفوظ للتحقق من عدم تغيّره." };
   }
   await ensureSchema();
-  const client = await getPool().connect();
+  const client = await cephWriterClient();
   try {
     await client.query("BEGIN");
     const currentWriter = authority ? await authorizeCephDraft(client, authority) : null;
@@ -27105,7 +27143,7 @@ export async function updateCephDiagnosis(
   const diagnosis = normalizeCephDiagnosis(dx);
   const finalDx = diagnosis.finalDx;
   if (!finalDx) return { ok: false, message: "الاستنتاج السيفالومتري لا يُترك فارغًا." };
-  const client = await getPool().connect();
+  const client = await cephWriterClient();
   try {
     await client.query("BEGIN");
     const currentWriter = authority ? await authorizeCephDraft(client, authority) : null;
@@ -27232,18 +27270,20 @@ export async function getCephReferenceSet(key: string): Promise<CephReferenceSet
  */
 export async function completeCephAnalysis(
   id: number, by: string, expectedSnapshot: CephCompletionSnapshot, session: import("./auth").SessionPayload, expectedSources: CephSourceIdentity | null = null,
+  /** Canonical runtime only: admission re-proved after the patient lock (see runCephWritersInTransaction). */
+  admit?: import("./ceph-draft-authority").CephCanonicalAdmit,
 ): Promise<CephCompleteResult> {
   const expected = parseCephCompletionSnapshot(expectedSnapshot);
   const sourceIdentity = parseCephSourceIdentity(expectedSources);
   if (!expected) return { ok: false, message: "الاعتماد يحتاج نسخة البيانات التي راجعتها؛ أعد فتح الدراسة وراجعها قبل الاعتماد." };
   await ensureSchema();
-  const client = await getPool().connect();
+  const client = await cephWriterClient();
   let discardLease = false;
   try {
     await client.query("BEGIN");
     // Shared reset fence before clinical locks; historical evidence blocks reset.
     await client.query("LOCK TABLE ceph_completion_provenance IN ROW EXCLUSIVE MODE");
-    const actorUserId = await authorizeCephCompletion(client, session, expected.patientId, by);
+    const actorUserId = await authorizeCephCompletion(client, session, expected.patientId, by, admit);
     if (actorUserId === null) {
       await client.query("ROLLBACK");
       return { ok: false, message: "لم تعد الجلسة أو صلاحية اعتماد دراسة هذا المريض سارية." };
@@ -27423,14 +27463,14 @@ export async function completeCephAnalysis(
 /** Required server-context HTTP lifecycle entry; legacy internal callers retain their API. */
 export function discardAuthorizedCephAnalysis(id: number, note: string | null, request: CephDraftWriteRequest) {
   assertCephDraftRequest(request);
-  return discardCephAnalysis(id, request.session.username, note, request);
+  return discardCephAnalysis(id, request.session?.username ?? "", note, request);
 }
 
 export async function discardCephAnalysis(
   id: number, by: string, note: string | null, authority?: CephDraftWriteRequest,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   await ensureSchema();
-  const client = await getPool().connect();
+  const client = await cephWriterClient();
   let discardLease = false;
   try {
     await client.query("BEGIN");
@@ -27481,14 +27521,14 @@ export async function discardCephAnalysis(
 export async function duplicateAuthorizedCephAnalysis(id:number,request:CephDraftWriteRequest,expectedCorrectionSource:CephCorrectionSourceToken) {
   assertCephDraftRequest(request);
   if (!parseCephCorrectionSourceToken(expectedCorrectionSource)) throw new ClinicalMutationAuthorityError(400,"هوية أصل التصحيح مطلوبة؛ أعد فتح الدراسة.");
-  return duplicateCephAnalysis(id,request.session.username,request,expectedCorrectionSource);
+  return duplicateCephAnalysis(id,request.session?.username ?? "",request,expectedCorrectionSource);
 }
 
 export async function duplicateCephAnalysis(
   id: number, by: string, request?: CephDraftWriteRequest, expectedCorrectionSource?: CephCorrectionSourceToken,
 ): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
   await ensureSchema();
-  const client = await getPool().connect();
+  const client = await cephWriterClient();
   try {
     await client.query("BEGIN");
     const current = request ? await authorizeCephLifecycle(client, request) : null;

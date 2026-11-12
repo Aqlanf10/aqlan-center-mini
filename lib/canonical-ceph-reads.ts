@@ -1,3 +1,6 @@
+import { readCephCompletionSources } from "./ceph-completion-provenance";
+import { readCephCorrectionSource, requireCephCorrectionAncestry, type CephCorrectionStoredColumns } from "./ceph-correction-source";
+import type { CephCorrectionSourceRead } from "./ceph-correction-origin";
 import { cephDraftVersionWith } from "./canonical-ceph-draft-version";
 import "server-only";
 import { CLINIC_TIME_ZONE, patientInDoctorScopeWith } from "./db";
@@ -89,7 +92,23 @@ export async function readCephStudyWith(q:CanonicalSnapshotQuery,scope:Canonical
   return {projection:"ceph-saved-study",clinicTimeZone:CLINIC_TIME_ZONE,...(analysis.status==="draft"?{discardVersion:await cephDraftVersionWith(q,studyId)}:{}),analysis:{...analysis,device:row.device,refSet:row.ref_set,note:row.note,createdBy:row.created_by,completedBy:row.completed_by,
     calibration:present===5?{x1:row.cal_x1!,y1:row.cal_y1!,x2:row.cal_x2!,y2:row.cal_y2!,mm:row.cal_mm!}:null,mmPerPixel:row.mm_per_pixel},
     measurementsState:analysis.status==="completed"?"saved-approved":"saved-unapproved",landmarks,measurements,
-    diagnosis:diagnosis?{skeletal:diagnosis.skeletal,dental:diagnosis.dental,softTissue:diagnosis.soft_tissue,note:diagnosis.note,finalDx:diagnosis.final_dx,createdBy:diagnosis.created_by,updatedAt:diagnosis.updated_at.toISOString()}:null};
+    diagnosis:diagnosis?{skeletal:diagnosis.skeletal,dental:diagnosis.dental,softTissue:diagnosis.soft_tissue,note:diagnosis.note,finalDx:diagnosis.final_dx,createdBy:diagnosis.created_by,updatedAt:diagnosis.updated_at.toISOString()}:null,
+    ...await cephWriteTokensWith(q,studyId,analysis.status,{patientId:owner.patient_id,refSet:row.ref_set})};
+}
+/** Staging's write contract inputs, read from the same snapshot with the same helpers as the legacy study read. */
+async function cephWriteTokensWith(q:CanonicalSnapshotQuery,studyId:number,status:string,scope:{patientId:number;refSet:string}){
+  if(status==="draft"){
+    const documentId=(await q.query<{document_id:number}>("SELECT document_id FROM ceph_analyses WHERE id=$1",[studyId])).rows[0]?.document_id;
+    const sources=documentId?await readCephCompletionSources(q,{patientId:scope.patientId,documentId,refSet:scope.refSet}):{state:"unavailable" as const,reason:"image_or_reference_source_unavailable"};
+    return {completionSources:sources.state==="available"?{state:"available" as const,identity:sources.identity}:sources};
+  }
+  if(status==="completed"){
+    let correctionSource:CephCorrectionSourceRead=await readCephCorrectionSource(q,studyId,"snapshot");
+    try{const stored=(await q.query<CephCorrectionStoredColumns>("SELECT * FROM ceph_analyses WHERE id=$1",[studyId])).rows[0];if(!stored)throw Error("missing");await requireCephCorrectionAncestry(q,stored,"snapshot");}
+    catch{correctionSource={state:"unavailable",reason:"correction_ancestry_unavailable"};}
+    return {correctionSource};
+  }
+  return {};
 }
 export function readCanonicalCephStudy(session:VerifiedDurableSession,studyId:number) {
   return runCanonicalReadSnapshot(session,"read:ceph.study",(q,scope)=>readCephStudyWith(q,scope,studyId),{errorPrefix:"STAFF_READ",maxBytes:STUDY_MAX_BYTES});

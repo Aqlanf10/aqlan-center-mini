@@ -12,7 +12,7 @@ describe("per-key settings write policy (M2, Dot 6480538845 item 1)", () => {
   it("delegable classes use catalogue capabilities; authority, integration and backup are owner-only", () => {
     for (const [cls, requirement] of Object.entries(SETTING_WRITE_REQUIREMENT)) {
       if ("capability" in requirement) {
-        expect(["operational", "finance"]).toContain(cls);
+        expect(["operational", "finance", "medicationCatalog"]).toContain(cls); // medicationCatalog: owner decision 6839071994
         expect(STAFF_CAPABILITIES).toContain(requirement.capability);
       } else {
         expect(["authority", "integration", "backup"]).toContain(cls);

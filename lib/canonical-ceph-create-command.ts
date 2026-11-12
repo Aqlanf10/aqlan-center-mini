@@ -1,17 +1,14 @@
 import "server-only";
-import { getPool, type CephPhase } from "./db";
+import { createCephAnalysis, getPool, type CephPhase } from "./db";
+import { CanonicalCephWriteFailure, runCanonicalCephWrite } from "./canonical-ceph-write";
 import type { VerifiedDurableSession } from "./staff-durable-session";
-import { assertStaffOperation, staffOperationCapabilities, staffOperationIdentity, staffOperationPatientScope, withStaffOperation } from "./staff-operation-runtime";
 
 export class CanonicalCephCreateRefusal extends Error {
-  constructor(readonly code: "invalid_ceph_create" | "ceph_create_not_found" | "ceph_create_conflict" | "ceph_create_reference_invalid" | "ceph_contract_alignment_pending", readonly status: 400 | 404 | 409, message: string) {
+  constructor(readonly code: "invalid_ceph_create" | "ceph_create_not_found" | "ceph_create_conflict" | "ceph_create_session_expired", readonly status: 400 | 401 | 404 | 409, message: string) {
     super(message); this.name = "CanonicalCephCreateRefusal";
   }
 }
 const invalid = () => new CanonicalCephCreateRefusal("invalid_ceph_create", 400, "بيانات فتح مسودة السيفالومتري غير صالحة.");
-const missing = () => new CanonicalCephCreateRefusal("ceph_create_not_found", 404, "المريض غير متاح ضمن مرضاك.");
-const conflict = () => new CanonicalCephCreateRefusal("ceph_create_conflict", 409, "تعذّر فتح المسودة من الحالة الحالية. راجع الدراسات قبل طلب جديد.");
-const reference = () => new CanonicalCephCreateRefusal("ceph_create_reference_invalid", 409, "تعذّر التحقق من صورة المريض أو الحالة المرتبطة؛ لم تُنشأ مسودة.");
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 const phases = new Set(["pretreatment", "during", "posttreatment", "followup"]);
 export function parseCanonicalCephCreate(raw: string, body: unknown) {
@@ -31,14 +28,29 @@ export function parseCanonicalCephCreate(raw: string, body: unknown) {
   return { patientId, documentId: row.documentId, orthoCaseId: row.orthoCaseId as number | null | undefined ?? null, phase: (row.phase ?? "pretreatment") as CephPhase, xrayDate: date as string | null | undefined ?? null, device: text(row.device, 120), refSet: text(row.refSet, 60) };
 }
 
-/** One new intention. The native single-draft constraint is not a permanent request receipt. */
 /**
- * Held on the integration branch (2026-11-12). This canonical writer was built on the earlier
- * cephalometric contract; staging's protected writers (completion snapshot, sources, provenance,
- * witness, landmark/calibration checks) now own every ceph write. Until this command is re-aligned
- * with that contract it refuses before any read or write. The legacy route keeps staging's writer.
+ * One new draft through staging's protected creator (patient → image lock order, same-patient
+ * image and orthodontic case, audit), admitted by clinical.xrays.upload and current patient scope.
+ * Same response as the legacy route, including the non-blocking same-image warning.
  */
-export async function commandCanonicalCephCreate(_session: VerifiedDurableSession, rawId: string, body: unknown, _pool = getPool()): Promise<never> {
-  parseCanonicalCephCreate(rawId, body);
-  throw new CanonicalCephCreateRefusal("ceph_contract_alignment_pending", 409, "تعديل دراسات السيفالو واعتمادها عبر هذا المسار موقوف مؤقتًا حتى مواءمته مع عقد الاعتماد الحالي (اللقطة والمصادر والأثر)؛ لم يُكتب شيء. استعمل شاشة السيفالو المعتادة.");
+export async function commandCanonicalCephCreate(session: VerifiedDurableSession, rawId: string, body: unknown, pool = getPool()) {
+  const input = parseCanonicalCephCreate(rawId, body);
+  try {
+    return await runCanonicalCephWrite(session, "clinical.xrays.upload", { kind: "patient", patientId: input.patientId, documentId: input.documentId }, async ({ client, admit }) => {
+      const { rows: same } = await client.query<{ id: number }>(
+        "SELECT id FROM ceph_analyses WHERE patient_id=$1 AND document_id=$2 AND status<>'discarded' ORDER BY id", [input.patientId, input.documentId]);
+      const created = await createCephAnalysis({ patientId: input.patientId, documentId: input.documentId, createdBy: "",
+        orthoCaseId: input.orthoCaseId, phase: input.phase, xrayDate: input.xrayDate, device: input.device, refSet: input.refSet },
+      { patientId: input.patientId, documentId: input.documentId, admit });
+      if (!created.ok) return created;
+      const duplicateWarning = same.length > 0
+        ? `للهذه الشععة ${same.length} دراسة سابقة (${same.map((a) => `#${a.id}`).join("، ")}) — تابع إن كان ذلك مقصودًا.` : null;
+      return { ok: true as const, value: { id: created.id, duplicateWarning } };
+    }, pool);
+  } catch (error) {
+    if (error instanceof CanonicalCephWriteFailure) throw new CanonicalCephCreateRefusal(
+      error.kind === "not_found" ? "ceph_create_not_found" : error.kind === "expired" ? "ceph_create_session_expired" : "ceph_create_conflict",
+      error.kind === "not_found" ? 404 : error.kind === "expired" ? 401 : 409, error.message);
+    throw error;
+  }
 }

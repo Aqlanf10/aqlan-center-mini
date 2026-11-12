@@ -11,6 +11,8 @@ export function CanonicalCephDraftDiagnosis({ patientId, studyId, ownerKey, feed
   const [initial] = useState(() => { try { return { pending: sessionStorage.getItem(storageKey) !== null, warning: false }; } catch { return { pending: false, warning: true }; } });
   const [pending, setPending] = useState(initial.pending), [warning, setWarning] = useState(initial.warning), [busy, setBusy] = useState(false);
   const [intent, setIntent] = useState<string | null>(null), [fields, setFields] = useState<Fields>(empty), [message, setMessage] = useState<string | null>(null), [unverified, setUnverified] = useState<CanonicalCephStudy | null>(null);
+  // The diagnosis as observed when editing began: the server refuses the save if it changed since.
+  const observedDiagnosis = useRef<{ skeletal: string | null; dental: string | null; softTissue: string | null; note: string | null; finalDx: string } | null>(null);
   const active = useRef(false), sending = useRef(false), pendingRef = useRef(initial.pending), controller = useRef<AbortController | null>(null);
   useEffect(() => { active.current = true; return () => { active.current = false; controller.current?.abort(); }; }, [storageKey]);
   useEffect(() => { const leave = (e: BeforeUnloadEvent) => { if (sending.current || pendingRef.current) { e.preventDefault(); e.returnValue = ""; } }; window.addEventListener("beforeunload", leave); return () => window.removeEventListener("beforeunload", leave); }, []);
@@ -20,21 +22,23 @@ export function CanonicalCephDraftDiagnosis({ patientId, studyId, ownerKey, feed
   const clear = () => { setIntent(null); setFields(empty); };
   function begin() {
     if (!editable || !feed || sending.current || pendingRef.current) return;
+    const d = feed.diagnosis;
+    observedDiagnosis.current = d ? { skeletal: d.skeletal, dental: d.dental, softTissue: d.softTissue, note: d.note, finalDx: d.finalDx } : null;
     setIntent(feed.discardVersion!); setFields({ skeletal: feed.diagnosis?.skeletal ?? "", dental: feed.diagnosis?.dental ?? "", softTissue: feed.diagnosis?.softTissue ?? "", note: feed.diagnosis?.note ?? "", finalDx: feed.diagnosis?.finalDx ?? "" }); setMessage(null);
   }
   async function save() {
     if (!active.current || sending.current || pendingRef.current || !current || !feed) return;
     if (!fields.finalDx.trim() || Object.values(fields).some(v => v.trim().length > 2000)) { setMessage("اكتب الاستنتاج وراجع طول الحقول؛ لا نختصر التشخيص تلقائيًا."); return; }
-    const version = intent, diagnosis = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.trim() || null]));
+    const diagnosis = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.trim() || null]));
     const request = new AbortController(); controller.current = request; sending.current = true; setBusy(true); setMessage(null); setUnverified(feed);
     try { sessionStorage.setItem(storageKey, "pending"); } catch { setWarning(true); }
     const timeout = setTimeout(() => request.abort(), 10000);
     const unknown = () => { pendingRef.current = true; setPending(true); clear(); setMessage("لم تتأكد نتيجة حفظ المسودة. لن نعيد الطلب تلقائيًا."); refresh(); };
     try {
-      const response = await fetch(`/api/ceph/${studyId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, signal: request.signal, body: JSON.stringify({ expectedVersion: version, diagnosis }) });
+      const response = await fetch(`/api/ceph/${studyId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, signal: request.signal, body: JSON.stringify({ diagnosis, expectedDiagnosis: observedDiagnosis.current }) });
       const result = await response.json().catch(() => null); if (!active.current) return;
       if (!response.ok) { if (response.status < 500 && result && (response.status === 401 || /^(STAFF_|ceph_edit_|invalid_ceph_edit$)/.test(String(result.code)))) { erase(); clear(); setMessage(typeof result.message === "string" ? result.message : "لم يُحفظ التعديل. راجع الدراسة الحالية."); refresh(); } else unknown(); return; }
-      if (!result || Object.keys(result).sort().join(",") !== "ok,status,studyId" || result.ok !== true || result.studyId !== studyId || result.status !== "draft") { unknown(); return; }
+      if (!result || result.ok !== true || !result.diagnosis || typeof result.diagnosis !== "object") { unknown(); return; }
       erase(); clear(); setMessage("حُفظ التشخيص في المسودة وسُجّل أثره. لم تُعتمد الدراسة أو تُغيّر القياسات."); refresh();
     } catch { if (active.current) unknown(); }
     finally { clearTimeout(timeout); sending.current = false; if (active.current) setBusy(false); }

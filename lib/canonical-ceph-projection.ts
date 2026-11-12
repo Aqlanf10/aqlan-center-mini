@@ -1,3 +1,6 @@
+import { parseCephCompletionSnapshot, type CephCompletionSnapshot } from "./ceph-completion-snapshot";
+import { parseCephSourceIdentity, type CephSourceIdentity } from "./ceph-source-review";
+import { parseCephCorrectionSourceToken, type CephCorrectionSourceRead } from "./ceph-correction-origin";
 import { isKnownZone } from "./clinicZone";
 /** Saved cephalometric projection. No tracing engine, financial or image payload. */
 export const CEPH_SUMMARY_LIMIT = 300;
@@ -35,6 +38,10 @@ export interface CanonicalCephStudy {
   landmarks:{code:string;x:number;y:number;source:"manual"|"suggested";confirmedBy:string}[];
   measurements:{code:string;value:number}[];
   diagnosis:{skeletal:string|null;dental:string|null;softTissue:string|null;note:string|null;finalDx:string;createdBy:string;updatedAt:string}|null;
+  /** Drafts: staging's reviewed source identity (image hash and reference set), sent back on completion. */
+  completionSources?:{state:"available";identity:CephSourceIdentity}|{state:"unavailable";reason:string};
+  /** Completed studies: staging's correction-source token, sent back to open a correction copy. */
+  correctionSource?:CephCorrectionSourceRead;
 }
 const textOrNull=(v:unknown)=>v===null||typeof v==="string";
 export function isCanonicalCephStudy(value:unknown,patientId:number,studyId:number):value is CanonicalCephStudy {
@@ -49,5 +56,23 @@ export function isCanonicalCephStudy(value:unknown,patientId:number,studyId:numb
   if(!Array.isArray(v.landmarks)||v.landmarks.length>256||v.landmarks.some(p=>!p||typeof p.code!=="string"||!p.code.length||p.code.length>100||!Number.isFinite(p.x)||!Number.isFinite(p.y)||(p.source!=="manual"&&p.source!=="suggested")||typeof p.confirmedBy!=="string"))return false;
   if(!Array.isArray(v.measurements)||v.measurements.length>256||v.measurements.some(m=>!m||typeof m.code!=="string"||!m.code.length||m.code.length>100||!Number.isFinite(m.value)))return false;
   if(v.diagnosis!==null){const d=v.diagnosis;if(!d||![d.skeletal,d.dental,d.softTissue,d.note].every(textOrNull)||typeof d.finalDx!=="string"||typeof d.createdBy!=="string"||typeof d.updatedAt!=="string"||!Number.isFinite(Date.parse(d.updatedAt)))return false;}
+  if(v.completionSources!==undefined&&(a.status!=="draft"||!v.completionSources||(v.completionSources.state==="available"?!parseCephSourceIdentity(v.completionSources.identity):v.completionSources.state!=="unavailable"||typeof v.completionSources.reason!=="string")))return false;
+  if(v.correctionSource!==undefined&&(a.status!=="completed"||!v.correctionSource||(v.correctionSource.state==="available"?!parseCephCorrectionSourceToken(v.correctionSource.token)||v.correctionSource.token.analysisId!==studyId:v.correctionSource.state!=="unavailable"||typeof v.correctionSource.reason!=="string")))return false;
   return true;
+}
+/**
+ * Staging's completion request from the observed canonical draft: the exact saved snapshot the
+ * clinician reviewed and the reviewed source identity. Null when sources or the snapshot cannot be
+ * proved; the server compares both against the locked current state and refuses any change.
+ */
+export function cephCompletionRequestFromStudy(feed:CanonicalCephStudy):{expectedSnapshot:CephCompletionSnapshot;expectedSources:CephSourceIdentity}|null{
+  if(feed.analysis.status!=="draft"||feed.completionSources?.state!=="available")return null;
+  const identity=parseCephSourceIdentity(feed.completionSources.identity);
+  if(!identity)return null;
+  const d=feed.diagnosis;
+  const expectedSnapshot=parseCephCompletionSnapshot({patientId:feed.analysis.patientId,documentId:identity.documentId,refSet:feed.analysis.refSet,
+    calibration:feed.analysis.calibration,mmPerPixel:feed.analysis.mmPerPixel,
+    landmarks:feed.landmarks.map(p=>({code:p.code,x:p.x,y:p.y,source:p.source})),
+    diagnosis:d?{skeletal:d.skeletal,dental:d.dental,softTissue:d.softTissue,note:d.note,finalDx:d.finalDx}:null});
+  return expectedSnapshot?{expectedSnapshot,expectedSources:identity}:null;
 }

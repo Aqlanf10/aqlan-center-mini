@@ -116,6 +116,7 @@ export const STAFF_CAPABILITY_LABELS: Readonly<Record<StaffCapability, string>> 
  "clinical.ortho.edit": "توثيق حالات التقويم وخططها",
  "clinical.ceph.analyze": "تحليل السيفالومتري",
  "clinical.prescriptions.write": "كتابة الوصفات وإلغاؤها",
+ "clinical.medication-catalog.manage": "تعديل دليل الأدوية وجرعاته الافتراضية (لا يغيّر الوصفات القائمة)",
  "clinical.referrals.manage": "الإحالات",
  "clinical.lab.view": "عرض أوامر المختبر وأسعاره",
  "clinical.lab.order": "طلب وتحديث أعمال المختبر",

@@ -18,6 +18,9 @@ export interface DoctorPermissions {
   canPrintSavedPrescriptions?: boolean;
   /** Independent saved-study export grant; patient/source access is still required. */
   canExportOrthoStudies?: boolean;
+  /** Owner decision 6839071994: edit the medication catalog's default doses (a doctor needs this
+   * explicit grant; administrators keep it). Never edits or rewrites a patient's prescription. */
+  canManageMedicationCatalog?: boolean;
   /** عرض جميع المرضى (افتراضياً: خطأ ❌ — يرى مرضاه وحالاته فقط) */
   canViewAllPatients: boolean;
   /** إضافة مريض جديد */
@@ -85,6 +88,7 @@ export interface DoctorPermissions {
 export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
   canPrintSavedPrescriptions: false,
   canExportOrthoStudies: false,
+  canManageMedicationCatalog: false,
   canViewAllPatients: false,
   canAddPatient: true,
   canEditPatient: true,
@@ -117,6 +121,7 @@ export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
 export const ADMIN_PERMISSIONS: DoctorPermissions = {
   canPrintSavedPrescriptions: true,
   canExportOrthoStudies: true,
+  canManageMedicationCatalog: true,
   canViewAllPatients: true,
   canAddPatient: true,
   canEditPatient: true,
@@ -148,6 +153,7 @@ export const ADMIN_PERMISSIONS: DoctorPermissions = {
 export const RECEPTION_PERMISSIONS: DoctorPermissions = {
   canPrintSavedPrescriptions: false,
   canExportOrthoStudies: false,
+  canManageMedicationCatalog: false,
   canViewAllPatients: true,
   canAddPatient: true,
   canEditPatient: true,

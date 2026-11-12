@@ -31,7 +31,7 @@ import { staffOperationCapabilities, staffOperationIdentity, staffOperationOwner
  * The response payload is read in the same transaction, after the writes.
  */
 export const SETTINGS_READ_MAX_BYTES = 1_048_576;
-const DELEGABLE_SETTING_CAPABILITIES = ["settings.operational.edit", "settings.finance.edit"] as const satisfies readonly StaffCapability[];
+const DELEGABLE_SETTING_CAPABILITIES = ["settings.operational.edit", "settings.finance.edit", "clinical.medication-catalog.manage"] as const satisfies readonly StaffCapability[];
 const OWNER_SETTING_OPERATIONS = ["settings.security.change", "settings.integrations.change", "clinic.backup.manage"] as const satisfies readonly OwnerOnlySettingOperation[];
 
 export type CanonicalSettingsRefusalCode = "invalid_settings_request" | "unknown_setting_key" | "invalid_setting_value" | "setting_locked"
@@ -167,7 +167,19 @@ export async function commandCanonicalSettingsWrite(session: VerifiedDurableSess
     }
     const crossProblem = validateSettingSet(write.values, await getSettingsWith(client));
     if (crossProblem) throw new CanonicalSettingsRefusal("setting_rule", 400, crossProblem);
-    const core = await writeSettingsInTransaction(client, { values: write.values, expected: write.expected, reason: write.reason });
+    let core: Awaited<ReturnType<typeof writeSettingsInTransaction>>;
+    try {
+      core = await writeSettingsInTransaction(client, { values: write.values, expected: write.expected, reason: write.reason,
+        // Staging's medication-catalog rule: authority is re-proved after the settings locks are held.
+        // Here it is the grant the key is classified under, read again through the live handle.
+        catalogAuthority: async (q) => (await staffOperationCapabilities(q, handle, action, ["clinical.medication-catalog.manage"])).has("clinical.medication-catalog.manage") });
+    } catch (error) {
+      // Authority lost after the locks, or the catalog's observed version/reason missing: nothing is written.
+      if (error instanceof Error && error.message === "MEDICATION_CATALOG_AUTHORITY_REQUIRED") {
+        throw new CanonicalSettingsRefusal("setting_not_granted", 403, "تعديل دليل الأدوية يحتاج صلاحية تعديل الدليل الحالية ونسخة الدليل التي راجعتها وسببًا مكتوبًا؛ لم يُحفظ شيء.", "clinical.medication_catalog");
+      }
+      throw error;
+    }
     if (!core.ok) {
       if ("problem" in core) throw new CanonicalSettingsRefusal("setting_rule", 400, core.problem);
       throw new CanonicalSettingsRefusal("setting_conflict", 409, "غُيّر هذا الإعداد من جهازٍ آخر. حدّث الصفحة ثم أعد المحاولة.", core.conflict.key, core.conflict.currentUpdatedAt);

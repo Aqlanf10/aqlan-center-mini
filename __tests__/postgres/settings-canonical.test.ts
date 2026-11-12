@@ -24,6 +24,7 @@ const ACCOUNTS = {
   both: { username: "SYN-S-BOTH", role: "reception", grants: { "settings.view": true, "settings.operational.edit": true, "settings.finance.edit": true } },
   adminLabel: { username: "SYN-S-ADMIN-LABEL", role: "admin", grants: { "patients.create": true } },
   revoked: { username: "SYN-S-REVOKED", role: "reception", grants: OPERATIONAL },
+  catalogDoctor: { username: "SYN-S-CATALOG-DOCTOR", role: "doctor", grants: { "settings.view": true, "clinical.medication-catalog.manage": true } },
   pending: { username: "SYN-S-PENDING", role: "reception", grants: OPERATIONAL },
 } as const;
 type Key = keyof typeof ACCOUNTS;
@@ -186,5 +187,49 @@ describe("revocation (owner decision 4)", () => {
       await blocker.query("ROLLBACK").catch(() => undefined);
       await blocker.end();
     }
+  });
+});
+
+/** Staging's medication catalog on the canonical writer: owner operation re-proved after the
+ * settings locks, observed version and reason required, catalog transition rules, one audited
+ * transaction. Synthetic catalogue entries only. */
+describe("canonical medication catalog write (staging contract)", () => {
+  const KEY = "clinical.medication_catalog";
+  const entry = { id: "22222222-2222-4222-8222-222222222222", revision: 1, enabled: true, name: "SYN canonical medicine", arabicName: "", form: "tablet", strength: "1 mg", population: "adult", amount: "", frequency: "", duration: "", instructionsAr: "", instructionsEn: "", indication: "Synthetic only", cautions: "", sourceUrl: "" };
+  const catalog = (entries: unknown[]) => JSON.stringify({ schemaVersion: 1, entries });
+  it("a granted doctor saves with the observed version and a reason; one audit row; existing prescriptions keep their doses", async () => {
+    const patient = (await fx.pool.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-CATALOG-RX','SYN catalog patient') RETURNING id")).rows[0].id;
+    const rx = (await fx.pool.query("INSERT INTO prescriptions(patient_id,doctor_name,items,created_by) VALUES($1,'SYN','[{\"drug\":\"SYN canonical medicine\",\"dose\":\"1 mg\"}]','SYN') RETURNING id,items::text items", [patient])).rows[0];
+    await update("catalogDoctor", { [KEY]: catalog([entry]) }, { __reason: "SYN add synthetic medicine" });
+    expect(JSON.parse((await stored(KEY))!).entries).toHaveLength(1);
+    expect(await audits(KEY)).toEqual([expect.objectContaining({ actor: ACCOUNTS.catalogDoctor.username })]);
+    expect((await fx.pool.query("SELECT items::text items FROM prescriptions WHERE id=$1", [rx.id])).rows[0].items).toBe(rx.items);
+  });
+  it("refuses without a reason, a delegate with every settings grant, an unsafe transition and a stale version, without effects", async () => {
+    const before = await stored(KEY), beforeAudits = (await audits(KEY)).length;
+    await expect(update("owner", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) })).rejects.toMatchObject({ status: expect.any(Number) });
+    await expect(update("both", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) }, { __reason: "SYN settings grants are not the catalog grant" })).rejects.toMatchObject({ code: "setting_not_granted" });
+    await expect(update("adminLabel", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) }, { __reason: "SYN admin label alone" })).rejects.toMatchObject({ status: 403 });
+    await expect(update("owner", { [KEY]: catalog([]) }, { __reason: "SYN delete is not allowed" })).rejects.toMatchObject({ code: "setting_rule" });
+    const stale = settings.parseCanonicalSettingsUpdate({ [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]), __versions: { [KEY]: "2000-01-01T00:00:00.000Z" }, __reason: "SYN stale" });
+    await expect(settings.commandCanonicalSettingsWrite(await fx.session("owner"), stale)).rejects.toMatchObject({ code: "setting_conflict" });
+    expect(await stored(KEY)).toBe(before); expect(await audits(KEY)).toHaveLength(beforeAudits);
+  });
+  it("revocation between admission and the catalog lock writes nothing", async () => {
+    const before = await stored(KEY);
+    const blocker = new Client({ connectionString: fx.pool.options.connectionString as string }); await blocker.connect();
+    try {
+      await blocker.query("BEGIN"); await blocker.query("SELECT pg_advisory_xact_lock(hashtext('clinic-setting:' || $1))", [KEY]);
+      const pending = update("catalogDoctor", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) }, { __reason: "SYN revoked while waiting" });
+      await new Promise(resolve => setTimeout(resolve, 300));
+      await fx.pool.query("UPDATE users SET permissions=jsonb_set(jsonb_set(permissions::jsonb,'{revision}',to_jsonb((permissions::jsonb->>'revision')::int+1)),'{grants,clinical.medication-catalog.manage}','false')::text WHERE username=$1", [ACCOUNTS.catalogDoctor.username]);
+      await blocker.query("COMMIT");
+      await expect(pending).rejects.toBeTruthy();
+    } finally { await blocker.query("ROLLBACK").catch(() => undefined); await blocker.end(); }
+    expect(await stored(KEY)).toBe(before);
+  });
+  it("a revisioned disable is accepted for the owner", async () => {
+    await update("owner", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) }, { __reason: "SYN disable" });
+    expect(JSON.parse((await stored(KEY))!).entries[0]).toMatchObject({ enabled: false, revision: 2 });
   });
 });

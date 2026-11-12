@@ -71,7 +71,7 @@ beforeAll(async () => {
   };
   pool = { query, connect: async () => ({ query, release: () => {} }) };
   const output: Record<string, unknown> = {};
-  const dependencies = { ...cephProvenanceDependencies, assessCephCalculationReadiness, ensureSchema: async () => {}, getPool: () => pool, isCephLandmarkCode, REQUIRED_LANDMARKS, MEASUREMENTS, normalizeCephDiagnosis, parseCephCompletionDiagnosis, parseCephCompletionSnapshot, sameCephCompletionSnapshot,
+  const dependencies = { ...cephProvenanceDependencies, assessCephCalculationReadiness, ensureSchema: async () => {}, getPool: () => pool, cephWriterClient: () => pool.connect(), /* integration: ceph writers take their client from cephWriterClient (pooled outside a canonical operation) */ isCephLandmarkCode, REQUIRED_LANDMARKS, MEASUREMENTS, normalizeCephDiagnosis, parseCephCompletionDiagnosis, parseCephCompletionSnapshot, sameCephCompletionSnapshot,
     describeAudit, sanitizeDetails, currentAuditSource: async () => ({ ip: null, userAgent: null }), computeAll: compute, summarize };
   new Function("exports", ...Object.keys(dependencies), compiled)(output, ...Object.values(dependencies));
   completeDomain = output.completeCephAnalysis as typeof completeCephAnalysis;

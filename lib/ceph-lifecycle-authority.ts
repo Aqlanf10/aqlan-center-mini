@@ -10,7 +10,11 @@ import { canAccessPatient } from "./patient-access";
 export async function authorizeCephLifecycle(client: DbClient, request: CephDraftWriteRequest): Promise<SessionPayload> {
   assertCephDraftRequest(request);
   const { rows } = await client.query("SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE", [request.patientId]);
-  const current = await currentClinicalActor(request.session, client);
+  if (request.admit) {
+    if (!rows.length) throw new ClinicalMutationAuthorityError(403, "غير مصرّح لك بإدارة دراسة هذا المريض.");
+    return request.admit(client, request.patientId);
+  }
+  const current = await currentClinicalActor(request.session!, client);
   if (!rows.length || !["admin", "reception", "doctor"].includes(current.role)
     || !await canAccessPatient(current, request.patientId, "canUploadXrays", client, "nowait")) {
     throw new ClinicalMutationAuthorityError(403, "غير مصرّح لك بإدارة دراسة هذا المريض.");

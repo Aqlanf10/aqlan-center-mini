@@ -1,32 +1,38 @@
 import "server-only";
-import { getPool } from "./db";
-import { cephDraftVersionWith } from "./canonical-ceph-draft-version";
+import { parseCephCompletionSnapshot, type CephCompletionSnapshot } from "./ceph-completion-snapshot";
+import { parseCephSourceIdentity, type CephSourceIdentity } from "./ceph-source-review";
+import { CanonicalCephWriteFailure, cephRouteId, runCanonicalCephWrite } from "./canonical-ceph-write";
+import { completeCephAnalysis, getPool } from "./db";
 import type { VerifiedDurableSession } from "./staff-durable-session";
-import { assertStaffOperation, staffOperationIdentity, staffOperationPatientScope, withStaffOperation } from "./staff-operation-runtime";
 
 export class CanonicalCephCompleteRefusal extends Error {
-  constructor(readonly code: "invalid_ceph_complete" | "ceph_complete_not_found" | "ceph_complete_conflict" | "ceph_complete_reference_invalid" | "ceph_complete_conditions" | "ceph_contract_alignment_pending", readonly status: 400 | 404 | 409, message: string) {
-    super(message); this.name = "CanonicalCephCompleteRefusal";
+  constructor(readonly code: "invalid_ceph_complete" | "ceph_complete_not_found" | "ceph_complete_conditions" | "ceph_complete_session_expired", readonly status: 400 | 401 | 404 | 409, message: string) { super(message); this.name = "CanonicalCephCompleteRefusal"; }
+}
+/** Staging's completion contract: the reviewed snapshot, and the reviewed source identity when sent. */
+export function parseCanonicalCephComplete(rawId: string, body: unknown): { id: number; snapshot: CephCompletionSnapshot; sources: CephSourceIdentity | null } {
+  const id = cephRouteId(rawId);
+  if (id === null) throw new CanonicalCephCompleteRefusal("invalid_ceph_complete", 400, "رقم التحليل غير صالح.");
+  const value = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : null;
+  const snapshot = parseCephCompletionSnapshot(value?.expectedSnapshot);
+  if (!snapshot) throw new CanonicalCephCompleteRefusal("invalid_ceph_complete", 400, "الاعتماد يحتاج نسخة صالحة من البيانات التي راجعتها.");
+  const hasSources = !!value && Object.hasOwn(value, "expectedSources");
+  const sources = hasSources ? parseCephSourceIdentity(value!.expectedSources) : null;
+  if (hasSources && !sources) throw new CanonicalCephCompleteRefusal("invalid_ceph_complete", 400, "هوية مصادر المراجعة غير صالحة؛ أعد فتح الدراسة.");
+  return { id, snapshot, sources };
+}
+/** Explicit completion through staging's writer (snapshot, sources, provenance witness, replay rule). */
+export async function commandCanonicalCephComplete(session: VerifiedDurableSession, rawId: string, body: unknown, pool = getPool()) {
+  const input = parseCanonicalCephComplete(rawId, body);
+  try {
+    return await runCanonicalCephWrite(session, "clinical.ceph.analyze", { kind: "study", id: input.id }, async ({ admit, actor }) => {
+      const done = await completeCephAnalysis(input.id, actor.username, input.snapshot, actor, input.sources, admit);
+      return done.ok ? { ok: true as const, value: { ok: true as const, measurements: done.measurements, summary: done.summary } }
+        : { ok: false as const, message: done.message ?? "لا يمكن الاعتماد." };
+    }, pool);
+  } catch (error) {
+    if (error instanceof CanonicalCephWriteFailure) throw new CanonicalCephCompleteRefusal(
+      error.kind === "not_found" ? "ceph_complete_not_found" : error.kind === "expired" ? "ceph_complete_session_expired" : "ceph_complete_conditions",
+      error.kind === "not_found" ? 404 : error.kind === "expired" ? 401 : 409, error.message);
+    throw error;
   }
-}
-const missing = () => new CanonicalCephCompleteRefusal("ceph_complete_not_found", 404, "المسودة غير متاحة ضمن مرضاك.");
-const conflict = () => new CanonicalCephCompleteRefusal("ceph_complete_conflict", 409, "تغيّرت المسودة أو تعذّر تثبيت حالتها. حدّث الدراسة وراجعها قبل اعتماد جديد.");
-export function parseCanonicalCephComplete(rawId: string, body: unknown) {
-  const id = Number(rawId), invalid = () => new CanonicalCephCompleteRefusal("invalid_ceph_complete", 400, "اعتماد الدراسة يتطلب قراءة المسودة الحالية وتأكيدًا صريحًا.");
-  if (!/^[1-9]\d*$/.test(rawId) || !Number.isSafeInteger(id) || id > 2147483647 || !body || typeof body !== "object" || Array.isArray(body)) throw invalid();
-  const value = body as Record<string, unknown>;
-  if (Object.keys(value).join(",") !== "expectedVersion" || typeof value.expectedVersion !== "string" || !/^[a-f0-9]{64}$/.test(value.expectedVersion)) throw invalid();
-  return { id, expectedVersion: value.expectedVersion };
-}
-
-/** Explicit approval of one observed saved draft; no new image access or historical repair. */
-/**
- * Held on the integration branch (2026-11-12). This canonical writer was built on the earlier
- * cephalometric contract; staging's protected writers (completion snapshot, sources, provenance,
- * witness, landmark/calibration checks) now own every ceph write. Until this command is re-aligned
- * with that contract it refuses before any read or write. The legacy route keeps staging's writer.
- */
-export async function commandCanonicalCephComplete(_session: VerifiedDurableSession, rawId: string, body: unknown, _pool = getPool()): Promise<never> {
-  parseCanonicalCephComplete(rawId, body);
-  throw new CanonicalCephCompleteRefusal("ceph_contract_alignment_pending", 409, "تعديل دراسات السيفالو واعتمادها عبر هذا المسار موقوف مؤقتًا حتى مواءمته مع عقد الاعتماد الحالي (اللقطة والمصادر والأثر)؛ لم يُكتب شيء. استعمل شاشة السيفالو المعتادة.");
 }

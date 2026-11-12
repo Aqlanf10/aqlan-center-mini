@@ -3,6 +3,7 @@ import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journe
 import { REQUIRED_LANDMARKS } from "../../lib/ceph";
 import { validCephPoint } from "../fixtures/ceph-valid-geometry";
 import { seedCanonicalCeph } from "../fixtures/canonical-ceph";
+import { cephCompletionRequestFromStudy } from "../../lib/canonical-ceph-projection";
 const ANALYZE = { "clinical.xrays.view": true, "clinical.ceph.analyze": true };
 const ACCOUNTS = {
   owner: { username: "canon-complete-owner", password: "Canon#CompleteOwner1", role: "admin", display: "المالك التجريبي" },
@@ -21,32 +22,43 @@ beforeEach(async () => {
   for(const code of REQUIRED_LANDMARKS)await journey.db.query("INSERT INTO ceph_landmarks(analysis_id,code,x,y,source,confirmed_by) VALUES($1,$2,$3,$4,'manual','SYN')",[studyId,code,validCephPoint(code).x,validCephPoint(code).y]);
 });
 const complete = (cookie: string, id: number, body: unknown) => journey.api(`/api/ceph/${id}/complete`, cookie, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-async function version(cookie: string, id = studyId) { const response = await journey.api(`/api/ceph/${id}`, cookie); expect(response.status).toBe(200); return (await response.json()).discardVersion as string; }
+/** Staging's completion contract, built from the canonical study read exactly as the screen does. */
+async function reviewed(cookie: string, id = studyId) { const response = await journey.api(`/api/ceph/${id}`, cookie); expect(response.status).toBe(200); const request = cephCompletionRequestFromStudy(await response.json()); expect(request).not.toBeNull(); return request!; }
 it("HTTP: scoped analyst explicitly seals one observed draft and its audit",async()=>{
- const cookie=(await journey.login("own")).cookie,response=await complete(cookie,studyId,{expectedVersion:await version(cookie)});
- expect(response.status).toBe(200);expect(await response.json()).toEqual({ok:true,studyId,status:"completed"});
+ const cookie=(await journey.login("own")).cookie,response=await complete(cookie,studyId,await reviewed(cookie));
+ expect(response.status).toBe(200);expect(await response.json()).toMatchObject({ok:true,measurements:expect.any(Array)});
+ expect(Number((await journey.db.query("SELECT count(*)::int n FROM ceph_completion_provenance WHERE analysis_id=$1",[studyId])).rows[0].n)).toBe(1);
  expect((await journey.db.query("SELECT status,completed_by FROM ceph_analyses WHERE id=$1",[studyId])).rows).toEqual([{status:"completed",completed_by:ACCOUNTS.own.username}]);expect(await audits()).toBe(1);
 });
 const audits = async () => Number((await journey.db.query("SELECT count(*)::int n FROM audit_log WHERE action='ceph.complete' AND entity_id=$1", [String(studyId)])).rows[0].n);
 it.each(["owner", "all"] as const)("HTTP: %s approves one observed draft with minimal no-store acknowledgment", async key => {
-  const cookie = (await journey.login(key)).cookie, response = await complete(cookie, studyId, { expectedVersion: await version(cookie) });
-  expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toContain("no-store"); expect(Object.keys(await response.json()).sort()).toEqual(["ok", "status", "studyId"]); expect(await audits()).toBe(1); expect(await journey.ddlLog()).toEqual([]);
+  const cookie = (await journey.login(key)).cookie, response = await complete(cookie, studyId, await reviewed(cookie));
+  expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toContain("no-store"); expect(Object.keys(await response.json()).sort()).toEqual(["measurements", "ok", "summary"]); expect(await audits()).toBe(1); expect(await journey.ddlLog()).toEqual([]);
 });
 it("HTTP: anonymous, reader, none and foreign patients refuse without effects", async () => {
-  const owner = (await journey.login("owner")).cookie, input = { expectedVersion: await version(owner) };
+  const owner = (await journey.login("owner")).cookie, input = await reviewed(owner);
   expect((await complete("", studyId, input)).status).toBe(401);
   for (const key of ["read", "none"] as const) expect((await complete((await journey.login(key)).cookie, studyId, input)).status).toBe(403);
   await journey.db.query("UPDATE patients SET primary_doctor_id=NULL WHERE id=$1", [patientId]); const own = (await journey.login("own")).cookie;
   const foreign = await complete(own, studyId, input), absent = await complete(own, 2147483647, input); expect(foreign.status).toBe(404); expect(absent.status).toBe(404); expect(await foreign.json()).toEqual(await absent.json()); expect(await audits()).toBe(0);
 });
-it("HTTP: malformed requests and query parameters cannot select measurements, actor or force",async()=>{
- const cookie=(await journey.login("own")).cookie,expectedVersion=await version(cookie);
- for(const body of [null,[],{},{expectedVersion:[]},{expectedVersion,force:true},{expectedVersion,actor:"owner"},{expectedVersion,measurements:[]}]){const response=await complete(cookie,studyId,body);expect(response.status).toBe(400);expect(response.headers.get("cache-control")).toContain("no-store");}
- expect((await journey.api(`/api/ceph/${studyId}/complete?force=1`,cookie,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion})})).status).toBe(400);expect(await audits()).toBe(0);
+it("HTTP: malformed snapshots and query parameters are refused; body fields cannot select the actor or the measurements",async()=>{
+ const cookie=(await journey.login("own")).cookie,input=await reviewed(cookie);
+ for(const body of [null,[],{},{expectedSnapshot:[]},{expectedSnapshot:{...input.expectedSnapshot,landmarks:"all"}},{...input,expectedSources:{}}]){const response=await complete(cookie,studyId,body);expect(response.status).toBe(400);expect(response.headers.get("cache-control")).toContain("no-store");}
+ expect((await journey.api(`/api/ceph/${studyId}/complete?force=1`,cookie,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)})).status).toBe(400);expect(await audits()).toBe(0);
+ // Extra fields are ignored: the signer is the admitted actor and measurements are recomputed on the server.
+ expect((await complete(cookie,studyId,{...input,actor:"owner",measurements:[{code:"ANB",value:99}]})).status).toBe(200);
+ expect((await journey.db.query("SELECT completed_by FROM ceph_analyses WHERE id=$1",[studyId])).rows[0].completed_by).toBe(ACCOUNTS.own.username);
+ expect((await journey.db.query("SELECT value FROM ceph_measurements WHERE analysis_id=$1 AND code='ANB'",[studyId])).rows[0]?.value).not.toBe(99);
 });
-it("HTTP: committed approval cannot replay and incomplete geometry refuses without writes",async()=>{
- const cookie=(await journey.login("own")).cookie,input={expectedVersion:await version(cookie)};expect((await complete(cookie,studyId,input)).status).toBe(200);expect((await complete(cookie,studyId,input)).status).toBe(409);expect(await audits()).toBe(1);
- const draft=(await seedCanonicalCeph(journey.db,{patientId,status:"draft"})).id;const response=await complete(cookie,draft,{expectedVersion:await version(cookie,draft)});expect(response.status).toBe(409);expect((await response.json()).code).toBe("ceph_complete_conditions");
+it("HTTP: a lost-response replay is read-only; a changed draft or incomplete geometry refuses without writes",async()=>{
+ const cookie=(await journey.login("own")).cookie,input=await reviewed(cookie);expect((await complete(cookie,studyId,input)).status).toBe(200);
+ expect((await complete(cookie,studyId,input)).status).toBe(200);expect(await audits()).toBe(1);
+ expect((await complete((await journey.login("all")).cookie,studyId,input)).status).toBe(409);expect(await audits()).toBe(1);
+ const draft=(await seedCanonicalCeph(journey.db,{patientId,status:"draft"})).id;await journey.db.query("UPDATE ceph_analyses SET cal_x1=0,cal_y1=0,cal_x2=100,cal_y2=0,cal_mm=50,mm_per_pixel=0.5 WHERE id=$1",[draft]);
+ const stale=await reviewed(cookie,draft);await journey.db.query("INSERT INTO ceph_landmarks(analysis_id,code,x,y,source,confirmed_by) VALUES($1,'S',1,1,'manual','SYN')",[draft]);
+ const response=await complete(cookie,draft,stale);expect(response.status).toBe(409);expect((await response.json()).code).toBe("ceph_complete_conditions");
+ expect((await journey.db.query("SELECT status FROM ceph_analyses WHERE id=$1",[draft])).rows[0].status).toBe("draft");
 });
 async function openEditor(page: import("playwright").Page, key: keyof typeof ACCOUNTS = "own", signed = false, arm = true) {
   page.setDefaultTimeout(10000); if (!signed) await journey.browserLogin(page, key); await page.goto(`${journey.baseUrl}/patients/${patientId}`);
@@ -96,7 +108,7 @@ it("browser: unavailable session storage warns and never retries a failed reques
   } finally { await context.close(); }
 });
 it("HTTP/browser: withdrawing analysis rejects a prepared edit and fresh login without a write", async () => {
-  const cookie = (await journey.login("own")).cookie, input = { expectedVersion: await version(cookie) }, original = (await journey.db.query("SELECT permissions FROM users WHERE id=$1", [journey.ids.own])).rows[0].permissions, context = await journey.browser.newContext();
+  const cookie = (await journey.login("own")).cookie, input = await reviewed(cookie), original = (await journey.db.query("SELECT permissions FROM users WHERE id=$1", [journey.ids.own])).rows[0].permissions, context = await journey.browser.newContext();
   try { const page = await context.newPage(), editor = await openEditor(page);
     await journey.db.query("UPDATE users SET permissions=jsonb_set(jsonb_set(permissions::jsonb,'{revision}','2'),'{grants,clinical.ceph.analyze}','false')::text WHERE id=$1", [journey.ids.own]);
     expect((await complete(cookie, studyId, input)).status).toBe(401); await editor.getByRole("button", { name: "تأكيد اعتماد الدراسة", exact: true }).click(); await editor.getByText("انتهت الجلسة أو تغيّرت صلاحياتك. سجّل الدخول من جديد.", { exact: true }).waitFor(); expect(await editor.getByRole("button",{name:"تأكيد اعتماد الدراسة",exact:true}).count()).toBe(0);
@@ -105,12 +117,12 @@ it("HTTP/browser: withdrawing analysis rejects a prepared edit and fresh login w
 });
 it("browser: malformed success after a real commit stays uncertain and never resends", async () => {
   const context = await journey.browser.newContext(); try { const page = await context.newPage(), editor = await openEditor(page); let sends = 0;
-    await page.route(`**/api/ceph/${studyId}/complete`, async route => { if (route.request().method() !== "POST") return route.continue(); sends++; const response = await route.fetch(); expect(response.status()).toBe(200); await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }); });
+    await page.route(`**/api/ceph/${studyId}/complete`, async route => { if (route.request().method() !== "POST") return route.continue(); sends++; const response = await route.fetch(); expect(response.status()).toBe(200); await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, studyId }) }); });
     await editor.getByRole("button", { name: "تأكيد اعتماد الدراسة", exact: true }).click(); await editor.getByText("اعتماد سابق يحتاج مراجعة. لا إعادة تلقائية عند التحديث أو إعادة الاتصال.", { exact: true }).waitFor(); expect(sends).toBe(1); expect(await audits()).toBe(1);
   } finally { await context.close(); }
 });
 it("HTTP: canceled durable session refuses approval without fallback; a newly admitted session retains legitimate authority",async()=>{
- const cookie=(await journey.login("own")).cookie,input={expectedVersion:await version(cookie)};
+ const cookie=(await journey.login("own")).cookie,input=await reviewed(cookie);
  const epoch=(await journey.db.query("SELECT authorization_epoch::text epoch FROM users WHERE id=$1",[journey.ids.own])).rows[0].epoch;
  await journey.db.query("UPDATE users SET is_active=false WHERE id=$1",[journey.ids.own]);
  expect((await journey.db.query("SELECT authorization_epoch::text epoch FROM users WHERE id=$1",[journey.ids.own])).rows[0].epoch).not.toBe(epoch);

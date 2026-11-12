@@ -1,32 +1,31 @@
 import "server-only";
-import { getPool } from "./db";
-import { cephDraftVersionWith } from "./canonical-ceph-draft-version";
+import { CanonicalCephWriteFailure, cephRouteId, runCanonicalCephWrite } from "./canonical-ceph-write";
+import { discardCephAnalysis, getPool } from "./db";
 import type { VerifiedDurableSession } from "./staff-durable-session";
-import { assertStaffOperation, staffOperationIdentity, staffOperationPatientScope, withStaffOperation } from "./staff-operation-runtime";
 
 export class CanonicalCephDiscardRefusal extends Error {
-  constructor(readonly code: "invalid_ceph_discard" | "ceph_discard_not_found" | "ceph_discard_conflict" | "ceph_discard_reference_invalid" | "ceph_contract_alignment_pending", readonly status: 400 | 404 | 409, message: string) {
-    super(message); this.name = "CanonicalCephDiscardRefusal";
+  constructor(readonly code: "invalid_ceph_discard" | "ceph_discard_not_found" | "ceph_discard_conflict" | "ceph_discard_session_expired", readonly status: 400 | 401 | 404 | 409, message: string) { super(message); this.name = "CanonicalCephDiscardRefusal"; }
+}
+/** Same body as the legacy route: an optional textual note; anything else is ignored as before. */
+export function parseCanonicalCephDiscard(rawId: string, body: unknown): { id: number; note: string | null } {
+  const id = cephRouteId(rawId);
+  if (id === null) throw new CanonicalCephDiscardRefusal("invalid_ceph_discard", 400, "رقم التحليل غير صالح.");
+  const note = body && typeof body === "object" && !Array.isArray(body) && typeof (body as Record<string, unknown>).note === "string"
+    ? (body as Record<string, string>).note : null;
+  return { id, note };
+}
+/** Audited soft discard of a draft through staging's lifecycle writer. */
+export async function commandCanonicalCephDiscard(session: VerifiedDurableSession, rawId: string, body: unknown, pool = getPool()) {
+  const input = parseCanonicalCephDiscard(rawId, body);
+  try {
+    return await runCanonicalCephWrite(session, "clinical.ceph.analyze", { kind: "study", id: input.id }, async ({ patientId, documentId, admit }) => {
+      const done = await discardCephAnalysis(input.id, "", input.note, { patientId, documentId, admit });
+      return done.ok ? { ok: true as const, value: { ok: true as const } } : done;
+    }, pool);
+  } catch (error) {
+    if (error instanceof CanonicalCephWriteFailure) throw new CanonicalCephDiscardRefusal(
+      error.kind === "not_found" ? "ceph_discard_not_found" : error.kind === "expired" ? "ceph_discard_session_expired" : "ceph_discard_conflict",
+      error.kind === "not_found" ? 404 : error.kind === "expired" ? 401 : 409, error.message);
+    throw error;
   }
-}
-const missing = () => new CanonicalCephDiscardRefusal("ceph_discard_not_found", 404, "المسودة غير متاحة ضمن مرضاك.");
-const conflict = () => new CanonicalCephDiscardRefusal("ceph_discard_conflict", 409, "تغيّرت المسودة أو تعذّر تثبيت حالتها. حدّث الدراسة وراجعها قبل طلب رفض جديد.");
-export function parseCanonicalCephDiscard(rawId: string, body: unknown) {
-  const id = Number(rawId), invalid = () => new CanonicalCephDiscardRefusal("invalid_ceph_discard", 400, "راجع المسودة الحالية وملاحظة الرفض؛ لم يُختصر النص.");
-  if (!/^[1-9]\d*$/.test(rawId) || !Number.isSafeInteger(id) || !body || typeof body !== "object" || Array.isArray(body)) throw invalid();
-  const value = body as Record<string, unknown>;
-  if (Object.keys(value).sort().join(",") !== "expectedVersion,note" || typeof value.expectedVersion !== "string" || !/^[a-f0-9]{64}$/.test(value.expectedVersion) || value.note !== null && (typeof value.note !== "string" || value.note.length > 4000)) throw invalid();
-  return { id, expectedVersion: value.expectedVersion, note: typeof value.note === "string" ? value.note.trim() || null : null };
-}
-
-/** Preserves the existing draft-only soft discard; approved history and child rows are retained. */
-/**
- * Held on the integration branch (2026-11-12). This canonical writer was built on the earlier
- * cephalometric contract; staging's protected writers (completion snapshot, sources, provenance,
- * witness, landmark/calibration checks) now own every ceph write. Until this command is re-aligned
- * with that contract it refuses before any read or write. The legacy route keeps staging's writer.
- */
-export async function commandCanonicalCephDiscard(_session: VerifiedDurableSession, rawId: string, body: unknown, _pool = getPool()): Promise<never> {
-  parseCanonicalCephDiscard(rawId, body);
-  throw new CanonicalCephDiscardRefusal("ceph_contract_alignment_pending", 409, "تعديل دراسات السيفالو واعتمادها عبر هذا المسار موقوف مؤقتًا حتى مواءمته مع عقد الاعتماد الحالي (اللقطة والمصادر والأثر)؛ لم يُكتب شيء. استعمل شاشة السيفالو المعتادة.");
 }
