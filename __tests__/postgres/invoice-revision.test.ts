@@ -76,6 +76,13 @@ describe("immutable invoice replacement and original receipt settlement", () => 
       expect(await q("SELECT to_jsonb(p) AS receipt FROM payments p WHERE patient_id=$1 ORDER BY id",[invoice.patientId])).toEqual(receipts);
       expect(await q("SELECT id FROM invoices WHERE patient_id=$1 AND status<>'cancelled'",[invoice.patientId])).toHaveLength(1);
       expect(await q("SELECT id FROM audit_log WHERE action='invoice.correct' AND entity_id=$1",[String(invoice.id)])).toHaveLength(1);
+      // Owner decision 2026-11-11 (rule 5): the legacy audit row of a new correction carries the price detail;
+      // the administrator's authority is unchanged (no priceAuthority decision on this path).
+      const [audited]=await q("SELECT details->'priceChanges' AS changes, details ? 'priceAuthority' AS decided FROM audit_log WHERE action='invoice.correct' AND entity_id=$1",[String(invoice.id)]) as {changes:{reason:string;lines:{previousUnitMinor:number;newUnitMinor:number;reference:{kind:string}}[]};decided:boolean}[];
+      expect(audited.decided).toBe(false);
+      expect(audited.changes.reason).toBe(input.reason.trim());
+      expect(audited.changes.lines.every(line=>line.previousUnitMinor===10000&&line.newUnitMinor===after&&["catalogue","recorded","none"].includes(line.reference.kind))).toBe(true);
+      expect(audited.changes.lines.length).toBe(after===10000?0:view.invoice.items.length);
       const replay=await revision.reviseInvoice(invoice.id,input,session);
       expect(replay).toEqual({...result,replayed:true});
       expect(readInvoiceRevisionReceipt(replay,retained)).not.toBeNull();

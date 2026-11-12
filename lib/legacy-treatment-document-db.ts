@@ -3,7 +3,10 @@ import { foreignRatesFromSettings } from "./service-pricing";
 import { invoicePricingAudit } from "./invoice-price-settings-db";
 import type {SessionPayload} from "./auth";
 import {CLINIC_TIME_ZONE,ensureSchema,getPool,getSettingsInTransaction,setPatientOpeningBalanceInTx,clearPatientOpeningBalanceInTx,insertAuditRow,type DbClient,type Service} from "./db";
-import {assertDebtSession,DebtRepaymentError,debtRequestHash,readDebtPosition,writeDebtRepaymentInTransaction} from "./debt-installments-db";
+import {assertDebtSession,DebtRepaymentError,debtRequestHash,readDebtPosition,writeDebtRepaymentInTransaction,type DebtActorSource} from "./debt-installments-db";
+import type {PriceGrants} from "./price-authority";
+import {checkCorrectionPriceAuthority,describeCorrectionPriceChanges,grantsUsedByCorrection} from "./correction-price-authority";
+import type {OpeningAccess} from "./opening-access";
 import {debtAccountDue,lockDebtAccountForSchedule} from "./debt-account-position";
 import {openingBalanceAccess} from "./opening-access";
 import {clinicDateString} from "./schedule";
@@ -16,7 +19,7 @@ import {isCurrency,type Currency} from "./money";
 
 function bad(message:string,code:"invalid"|"stale"|"conflict"|"unauthorized"|"missing"="invalid"):never {throw new DebtRepaymentError(code,message);}
 const minor=(value:unknown)=>{const number=Number(value);if(!Number.isSafeInteger(number)||number<0)bad("المبلغ خارج النطاق الآمن.");return number;};
-const actor=(session:SessionPayload)=>({userId:session.userId??null,username:session.username,role:session.role});
+const actor=(session:DebtActorSource)=>({userId:session.userId??null,username:session.username,role:session.role});
 const target=(patientId:number,currency:Currency)=>({patientId,currency,invoiceId:null,openingCurrency:currency});
 
 async function catalog(client:DbClient,source:Record<string,unknown>,lock:boolean){
@@ -53,13 +56,15 @@ async function unallocatedPaidGuard(client:DbClient,patientId:number,previouslyP
 function verifyPeriod(settings:Record<string,string>,dates:string[]){
   const cutoff=settings["finance.locked_before"]?.trim();if(cutoff&&dates.some(date=>date<cutoff))bad(LEGACY_TREATMENT_MESSAGE.period_locked,"conflict");
 }
-async function inputInTx(client:DbClient,patientId:number,source:Record<string,unknown>,session:SessionPayload,lock:boolean){
+/** Canonical authority (M2 slice 95c): explicit grants in place of the label and the reception setting. */
+export type HistoricalCanonicalAuthority={access:OpeningAccess;grants:PriceGrants};
+async function inputInTx(client:DbClient,patientId:number,source:Record<string,unknown>,session:DebtActorSource,lock:boolean,canonical?:HistoricalCanonicalAuthority){
   if(lock)await client.query("LOCK TABLE settings IN SHARE MODE");
   const settings=await getSettingsInTransaction(client,{requireStoredExchangeRates:true});
-  const access=openingBalanceAccess(session.role,settings["finance.reception_adds_opening_balance"]==="true");
+  const access=canonical?canonical.access:openingBalanceAccess(session.role,settings["finance.reception_adds_opening_balance"]==="true");
   if(!access.add)bad("تغيّرت صلاحية تسجيل العلاج السابق ورصيده.","unauthorized");
   const {services,doctors}=await catalog(client,source,lock);
-  const parsed=parseHistoricalDocument({...source,patientId},services,doctors,{today:clinicDateString(new Date(),CLINIC_TIME_ZONE),role:session.role,maxDiscountPercent:Number(settings["billing.max_discount_percent"]),rates:foreignRatesFromSettings(settings)});
+  const parsed=parseHistoricalDocument({...source,patientId},services,doctors,{today:clinicDateString(new Date(),CLINIC_TIME_ZONE),role:session.role,grants:canonical?.grants,maxDiscountPercent:Number(settings["billing.max_discount_percent"]),rates:foreignRatesFromSettings(settings)});
   if(!parsed.ok)bad(parsed.message);
   const input=parsed.value;
   for(let index=0;index<input.lines.length;index++)if(input.lines.slice(0,index).some(prior=>prior.serviceId===input.lines[index].serviceId
@@ -84,9 +89,12 @@ export async function previewHistoricalDocument(patientId:number,source:Record<s
   return withLegacyStaffReadOnlySnapshot(session,{
     allows:current=>["admin","reception"].includes(current.role),
     unauthorized:()=>new DebtRepaymentError("unauthorized","انتهت الجلسة أو تغيّرت صلاحية إدارة الاتفاق؛ سجّل الدخول من جديد."),
-  },async client=>{
+  },async client=>previewHistoricalDocumentWith(client,patientId,source,session));
+}
+/** The preview on a caller's read-only snapshot (M2 slice 95c: the canonical read, with grants). */
+export async function previewHistoricalDocumentWith(client:DbClient,patientId:number,source:Record<string,unknown>,session:DebtActorSource,canonical?:HistoricalCanonicalAuthority){
     if(!(await client.query("SELECT id FROM patients WHERE id=$1",[patientId])).rows.length)bad("المريض غير موجود.","missing");
-    const {input,access,settings}=await inputInTx(client,patientId,source,session,false);
+    const {input,access,settings}=await inputInTx(client,patientId,source,session,false,canonical);
     const prior=await openingEvidence(client,patientId,input.currency);
     if(prior.opening&&!access.edit&&input.remainingMinor>0)bad(LEGACY_TREATMENT_MESSAGE.opening_edit_forbidden,"unauthorized");
     verifyPeriod(settings,[input.historicalAsOf,...(prior.opening?[prior.opening.asOfDate]:[])]);
@@ -99,10 +107,9 @@ export async function previewHistoricalDocument(patientId:number,source:Record<s
     const accountDueMinor=(await debtAccountDue(client,patientId,input.currency)).due+input.remainingMinor;
     return {patientId,currency:input.currency,lines,remainingMinor,accountDueMinor,sourceHash:prior.sourceHash,scheduleVersion:prior.scheduleVersion,
       requiresAllocationReview:remainingMinor>Math.max(0,accountDueMinor),openingPrincipalMinor:prior.position.principalMinor+input.remainingMinor};
-  });
 }
 
-async function writeOpening(client:DbClient,input:{patientId:number;currency:Currency;after:number;asOf:string;reason:string;session:SessionPayload;prior:Awaited<ReturnType<typeof openingEvidence>>;addOnly:boolean;allowCredit?:boolean}){
+async function writeOpening(client:DbClient,input:{patientId:number;currency:Currency;after:number;asOf:string;reason:string;session:DebtActorSource;prior:Awaited<ReturnType<typeof openingEvidence>>;addOnly:boolean;allowCredit?:boolean}){
   const {prior}=input;const before=prior.opening;
   if(!Number.isSafeInteger(input.after)||input.after<0||!input.allowCredit&&input.after<prior.position.settledMinor)bad("المتبقي المصحّح لا يغطي التحصيل المثبت؛ راجع السندات قبل تعديل أصل الدين.","conflict");
   if(input.after===(before?.amountMinor??0)&&(!before||input.asOf===before.asOfDate))return null;
@@ -114,14 +121,14 @@ async function writeOpening(client:DbClient,input:{patientId:number;currency:Cur
     details:{source:"historical_document",beforeMinor:before?.amountMinor??0,afterMinor:input.after,currency:input.currency,reason:input.reason,historyId}});
   return historyId;
 }
-async function writeTerms(client:DbClient,input:Pick<HistoricalDocumentInput,"patientId"|"currency"|"repaymentRemainingMinor"|"repaymentVersion"|"repaymentTerms">,key:string,reason:string,session:SessionPayload){
+async function writeTerms(client:DbClient,input:Pick<HistoricalDocumentInput,"patientId"|"currency"|"repaymentRemainingMinor"|"repaymentVersion"|"repaymentTerms">,key:string,reason:string,session:DebtActorSource){
   if(input.repaymentRemainingMinor===0&&input.repaymentVersion===0)return null;
   const written=await writeDebtRepaymentInTransaction(client,{target:target(input.patientId,input.currency),terms:input.repaymentTerms,expectedVersion:input.repaymentVersion,
     expectedRemainingMinor:input.repaymentRemainingMinor,cancel:input.repaymentRemainingMinor===0,reason,idempotencyKey:key,session});
   return {arrangementId:written.arrangementId,revisionId:written.revisionId,version:written.version,terms:input.repaymentTerms};
 }
 async function insertRevision(client:DbClient,input:{documentId:number;version:number;totalMinor:number;discountMinor:number;discountReason:string|null;previouslyPaidMinor:number;remainingMinor:number;
-  historicalAsOf:string;lines:HistoricalDocumentReceipt["lines"];note:string|null;reason:string;openingHistoryId:number|null;repayment:HistoricalDocumentReceipt["repayment"];idempotencyKey:string;hash:string;session:SessionPayload}){
+  historicalAsOf:string;lines:HistoricalDocumentReceipt["lines"];note:string|null;reason:string;openingHistoryId:number|null;repayment:HistoricalDocumentReceipt["repayment"];idempotencyKey:string;hash:string;session:DebtActorSource}){
   await client.query(`INSERT INTO legacy_treatment_document_revisions(document_id,version,total_minor,discount_minor,discount_reason,previously_paid_minor,remaining_minor,
     historical_as_of,lines,note,reason,opening_history_id,repayment_receipt,idempotency_key,request_hash,created_by)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13::jsonb,$14,$15,$16)`,
@@ -130,24 +137,38 @@ async function insertRevision(client:DbClient,input:{documentId:number;version:n
 }
 
 export async function createHistoricalDocument(patientId:number,source:Record<string,unknown>,session:SessionPayload){
-  if(typeof source.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(source.idempotencyKey)||source.patientId!==patientId)bad("هوية المريض ومفتاح الاتفاق مطلوبان.");
-  const hash=debtRequestHash({purpose:"historical-document-v1",patientId,source,actor:actor(session)});
   await ensureSchema();const client=await getPool().connect();
   try{
-    await client.query("BEGIN");await assertDebtSession(client,session);
+    await client.query("BEGIN");
+    const result=await createHistoricalDocumentOn(client,patientId,source,session);
+    await client.query("COMMIT");return result;
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);if(error instanceof LegacyTreatmentWriteError)bad(LEGACY_TREATMENT_MESSAGE[error.reason],"conflict");throw error;}finally{client.release();}
+}
+/** The record on a caller's transaction (M2 slice 95c). `canonical` replaces the label and the
+ * reception setting by grants; `afterLocks` decides the canonical scope right after the patient
+ * row lock, before the replay. */
+export async function createHistoricalDocumentOn(client:DbClient,patientId:number,source:Record<string,unknown>,session:DebtActorSource,
+  canonical?:HistoricalCanonicalAuthority,afterLocks?:(patientId:number)=>Promise<void>){
+  if(typeof source.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(source.idempotencyKey)||source.patientId!==patientId)bad("هوية المريض ومفتاح الاتفاق مطلوبان.");
+  const hash=debtRequestHash({purpose:"historical-document-v1",patientId,source,actor:actor(session)});
+  try{
+    await assertDebtSession(client,session);
     if(!(await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[patientId])).rows.length)bad("المريض غير موجود.","missing");
+    if(afterLocks)await afterLocks(patientId);
     const {rows:[replay]}=await client.query<{id:number;request_hash:string;patient_id:number}>("SELECT id,request_hash,patient_id FROM legacy_treatment_documents WHERE idempotency_key=$1",[source.idempotencyKey]);
     if(replay){if(replay.request_hash!==hash||replay.patient_id!==patientId)bad("مفتاح الاتفاق مستعمل بطلب مختلف.","conflict");
       const document=await readHistoricalDocumentInTx(client,replay.id,patientId,1);if(!document)bad("لم يكتمل إيصال الاتفاق السابق؛ أعد نفس الطلب.","stale");
-      await assertDebtSession(client,session);await client.query("COMMIT");return {document,replayed:true};}
+      await assertDebtSession(client,session);return {document,replayed:true};}
     await lockDebtAccountForSchedule(client,patientId);
-    const {input,settings,access}=await inputInTx(client,patientId,source,session,true);
+    const {input,settings,access}=await inputInTx(client,patientId,source,session,true,canonical);
     const prior=await openingEvidence(client,patientId,input.currency);
     if(prior.sourceHash!==input.repaymentSourceHash||prior.scheduleVersion!==input.repaymentVersion||prior.position.remainingMinor+input.remainingMinor!==input.repaymentRemainingMinor)bad("تغيّر الرصيد السابق أو جدول السداد؛ حدّث معاينة الاتفاق.","stale");
     if(prior.opening&&!access.edit&&input.remainingMinor>0)bad(LEGACY_TREATMENT_MESSAGE.opening_edit_forbidden,"unauthorized");
     verifyPeriod(settings,[input.historicalAsOf,...(prior.opening?[prior.opening.asOfDate]:[])]);
     const {rows:[document]}=await client.query<{id:number}>(`INSERT INTO legacy_treatment_documents(patient_id,currency,line_count,intent,idempotency_key,request_hash,created_by,created_role)
-      VALUES($1,$2,$3,$4::jsonb,$5,$6,$7,$8) RETURNING id`,[patientId,input.currency,input.lines.length,JSON.stringify(source),input.idempotencyKey,hash,session.username,session.role]);
+      VALUES($1,$2,$3,$4::jsonb,$5,$6,$7,$8) RETURNING id`,[patientId,input.currency,input.lines.length,JSON.stringify(source),input.idempotencyKey,hash,session.username,
+      // The authority class (contract section 15, point 8): canonical = opening management or add-only.
+      canonical?(canonical.access.edit?"admin":"reception"):session.role]);
     const links:HistoricalDocumentReceipt["lines"]=[];
     const allocations=allocateHistoricalDiscount(input.lines.map(line=>line.unitPriceMinor),input.discountMinor);
     for(const [index,line] of input.lines.entries()){
@@ -165,21 +186,38 @@ export async function createHistoricalDocument(patientId:number,source:Record<st
     await insertAuditRow(client,{action:"legacy_document.create",entity:"patient",entityId:patientId,actor:session.username,actorRole:session.role,
       details:{documentId:document.id,currency:input.currency,agreedMinor:input.agreedMinor,previouslyPaidMinor:input.previouslyPaidMinor,remainingMinor:input.remainingMinor,discountMinor:input.discountMinor,discountReason:input.discountReason,
         invoicePriceSnapshots:invoicePricingAudit(input.pricingSnapshots??[]),lines:links,openingHistoryId,receiptsCreated:0,invoicesCreated:0,historicalCashMovement:0}});
-    await assertDebtSession(client,session);const receipt=await readHistoricalDocumentInTx(client,document.id,patientId,1);await client.query("COMMIT");return {document:receipt!,replayed:false};
-  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);if(error instanceof LegacyTreatmentWriteError)bad(LEGACY_TREATMENT_MESSAGE[error.reason],"conflict");throw error;}finally{client.release();}
+    await assertDebtSession(client,session);const receipt=await readHistoricalDocumentInTx(client,document.id,patientId,1);return {document:receipt!,replayed:false};
+  }catch(error){if(error instanceof LegacyTreatmentWriteError)bad(LEGACY_TREATMENT_MESSAGE[error.reason],"conflict");throw error;}
 }
 
 export async function correctHistoricalDocument(patientId:number,documentId:number,source:Record<string,unknown>,session:SessionPayload){
   if(session.role!=="admin")bad("تصحيح الحقائق التاريخية للمدير وحده.","unauthorized");
-  if(typeof source.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(source.idempotencyKey))bad("مفتاح التصحيح مطلوب.");
-  const hash=debtRequestHash({purpose:"historical-document-correction-v1",patientId,documentId,source,actor:actor(session)});
   await ensureSchema();const client=await getPool().connect();
   try{
-    await client.query("BEGIN");await assertDebtSession(client,session);
-    await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[patientId]);
+    await client.query("BEGIN");
+    const result=await correctHistoricalDocumentOn(client,patientId,documentId,source,session);
+    await client.query("COMMIT");return result;
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+}
+/** The correction on a caller's transaction (M2 slice 95c). Authority is the caller's (the label
+ * on legacy, the grants on canonical); `afterLocks` decides the canonical scope right after the
+ * patient row lock, before the replay.
+ *
+ * `price` (canonical callers; review request 6801961109 on #483): the correction and opening
+ * grants are not a price exception. A changed line price or discount, compared with the revision
+ * stored under these locks, is decided by the price grants (G4-1) before any write; `used`
+ * reports the grants relied on so the actor's re-proof covers them. The legacy administrator
+ * path passes nothing and is unchanged. */
+export async function correctHistoricalDocumentOn(client:DbClient,patientId:number,documentId:number,source:Record<string,unknown>,session:DebtActorSource,
+  afterLocks?:(patientId:number)=>Promise<void>,price?:{grants:PriceGrants;used?:(grants:Array<keyof PriceGrants>)=>void}){
+  if(typeof source.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(source.idempotencyKey))bad("مفتاح التصحيح مطلوب.");
+  const hash=debtRequestHash({purpose:"historical-document-correction-v1",patientId,documentId,source,actor:actor(session)});
+    await assertDebtSession(client,session);
+    if(!(await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[patientId])).rows.length)bad("المريض غير موجود.","missing");
+    if(afterLocks)await afterLocks(patientId);
     const {rows:[replay]}=await client.query<{document_id:number;version:number;request_hash:string}>("SELECT document_id,version,request_hash FROM legacy_treatment_document_revisions WHERE idempotency_key=$1",[source.idempotencyKey]);
     if(replay){if(replay.document_id!==documentId||replay.request_hash!==hash)bad("مفتاح التصحيح مستعمل بطلب مختلف.","conflict");
-      const document=await readHistoricalDocumentInTx(client,documentId,patientId,replay.version);if(!document)bad("الاتفاق لا يخص هذا المريض.","missing");await assertDebtSession(client,session);await client.query("COMMIT");return {document,replayed:true};}
+      const document=await readHistoricalDocumentInTx(client,documentId,patientId,replay.version);if(!document)bad("الاتفاق لا يخص هذا المريض.","missing");await assertDebtSession(client,session);return {document,replayed:true};}
     await lockDebtAccountForSchedule(client,patientId);
     await client.query("SELECT id FROM plan_items WHERE plan_id IN (SELECT id FROM treatment_plans WHERE patient_id=$1) ORDER BY id FOR UPDATE",[patientId]);
     await client.query("SELECT id FROM legacy_treatment_documents WHERE id=$1 AND patient_id=$2 FOR UPDATE",[documentId,patientId]);
@@ -192,6 +230,25 @@ export async function correctHistoricalDocument(patientId:number,documentId:numb
     await unallocatedPaidGuard(client,patientId,input.previouslyPaidMinor);
     await client.query("LOCK TABLE settings IN SHARE MODE");const settings=await getSettingsInTransaction(client,{requireStoredExchangeRates:true});
     verifyPeriod(settings,[current.historicalAsOf,input.historicalAsOf,...(prior.opening?[prior.opening.asOfDate]:[])]);
+    // Price changes of this correction, recorded on both paths (owner decision 2026-11-11, rule 5).
+    const {services}=await catalog(client,{items:current.lines.map(line=>({serviceId:line.serviceId}))},false);
+    const priceInput={
+      lines:current.lines.map((line,index)=>{
+        const service=services.get(line.serviceId);
+        if(!service)bad("خدمة البند غير موجودة في الدليل؛ لم يُحفظ التصحيح.","conflict");
+        return {description:line.description,service,quantity:1,storedUnitMinor:line.unitPriceMinor,requestedUnitMinor:input.prices[index],serviceChanged:false};
+      }),
+      storedTotalMinor:current.totalMinor,storedDiscountMinor:current.discountMinor,totalMinor:input.totalMinor,discountMinor:input.discountMinor,
+      discountReason:input.discountReason,reason:input.reason,currencyChanged:false,currency:current.currency};
+    const priceChanges=describeCorrectionPriceChanges(priceInput);
+    let priceAuthority:Record<string,unknown>|null=null;
+    if(price){
+      const decision=checkCorrectionPriceAuthority({...priceInput,rates:foreignRatesFromSettings(settings),
+        maxDiscountPercent:Number(settings["billing.max_discount_percent"]),grants:price.grants});
+      if(!decision.ok)bad(decision.message,"unauthorized");
+      price.used?.(grantsUsedByCorrection(decision,price.grants));
+      priceAuthority={changedLines:decision.changes.changedLines.filter(Boolean).length,discountChanged:decision.changes.discountChanged,overrides:decision.overrides,discount:decision.discount};
+    }
     const reason=`تصحيح الاتفاق التاريخي #${documentId}: ${input.reason}`.slice(0,300);
     // The opening is owned by the current positive historical facts. An old
     // revision date cannot remain authoritative after that fact is corrected.
@@ -210,14 +267,19 @@ export async function correctHistoricalDocument(patientId:number,documentId:numb
     await insertRevision(client,{...input,documentId,version:current.version+1,lines,reason:input.reason,openingHistoryId,repayment,hash,session});
     await insertAuditRow(client,{action:"legacy_document.correct",entity:"patient",entityId:patientId,actor:session.username,actorRole:session.role,
       details:{documentId,version:current.version+1,reason:input.reason,before:current,after:{...input,lines},openingHistoryId,receiptsPreserved:true,clinicalIdentitiesPreserved:true,
-        accountCreditMinor:Math.max(0,-(await debtAccountDue(client,patientId,current.currency)).due),cashMovement:0}});
-    await assertDebtSession(client,session);const receipt=await readHistoricalDocumentInTx(client,documentId,patientId,current.version+1);await client.query("COMMIT");return {document:receipt!,replayed:false};
-  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+        accountCreditMinor:Math.max(0,-(await debtAccountDue(client,patientId,current.currency)).due),cashMovement:0,priceChanges,...(priceAuthority?{priceAuthority}:{})}});
+    await assertDebtSession(client,session);const receipt=await readHistoricalDocumentInTx(client,documentId,patientId,current.version+1);return {document:receipt!,replayed:false};
 }
 
 export async function listHistoricalDocuments(patientId:number){
   await ensureSchema();const client=await getPool().connect();
   try{await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const documents=await listHistoricalDocumentsWith(client,patientId);
+    await client.query("COMMIT");return documents;
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+}
+/** The same list on a caller's read-only snapshot (M2 slice 95a). */
+export async function listHistoricalDocumentsWith(client:DbClient,patientId:number){
     const ids=(await client.query<{id:number}>("SELECT id FROM legacy_treatment_documents WHERE patient_id=$1 ORDER BY id DESC",[patientId])).rows;
     const documents=[];for(const {id} of ids){const document=await readHistoricalDocumentInTx(client,id,patientId);if(!document)continue;
       // Historical facts stay readable after an independent account correction.
@@ -225,6 +287,5 @@ export async function listHistoricalDocuments(patientId:number){
       const opening=await openingEvidence(client,patientId,document.currency,false);const history=(await client.query("SELECT version,reason,created_by,created_at::text,total_minor::text,discount_minor::text,previously_paid_minor::text,remaining_minor::text FROM legacy_treatment_document_revisions WHERE document_id=$1 ORDER BY version",[id])).rows;
       documents.push({...document,sourceHash:opening.sourceHash??debtRequestHash(null),openingPrincipalMinor:opening.position.principalMinor,openingCollectedMinor:opening.position.settledMinor,openingRemainingMinor:opening.position.remainingMinor,accountDueMinor:(await debtAccountDue(client,patientId,document.currency)).due,scheduleVersion:opening.scheduleVersion,
         correctionAvailable:opening.owned,correctionMessage:opening.owned?null:LEGACY_TREATMENT_MESSAGE.opening_not_owned,history});}
-    await client.query("COMMIT");return documents;
-  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+    return documents;
 }

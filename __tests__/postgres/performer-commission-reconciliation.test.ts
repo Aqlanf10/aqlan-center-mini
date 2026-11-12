@@ -111,25 +111,26 @@ describe("performer commission and settlement reconciliation", () => {
     expect(rows.find(row => row.doctorId === creator.id)).toBeUndefined();
   });
 
-  it("characterizes the documented gross-share discount basis, linked refunds, cancellation and separate currency buckets", async () => {
+  it("takes the share after the invoice discount (owner decision 2026-11-11), with linked refunds, cancellation and separate currency buckets", async () => {
     const d = await doctor(30), p = await patient();
     const yer = await invoice(p, d.id, "YER", 2000);
     const usd = await invoice(p, d.id, "USD");
     const payment = await receipt(p, yer, 4000, "YER");
     await receipt(p, usd, 2000, "USD");
     let rows = (await report()).filter(row => row.doctorId === d.id);
-    // Existing documented formula uses gross line share / invoice net.
-    // This is characterization, not a new net-of-discount policy.
-    expect(rows.find(row => row.currency === "YER")).toMatchObject({ accruedMinor: 3000, earnedMinor: 1500 });
+    // Owner decision 2026-11-11: the percentage is taken after the invoice discount.
+    // 10,000 with a 2,000 discount = 8,000 net; 30% = 2,400 accrued; 4,000 of 8,000 collected = 1,200.
+    // (The previous characterization used the gross line: 3,000 accrued and 1,500 earned.)
+    expect(rows.find(row => row.currency === "YER")).toMatchObject({ accruedMinor: 2400, earnedMinor: 1200 });
     expect(rows.find(row => row.currency === "USD")).toMatchObject({ accruedMinor: 3000, earnedMinor: 600 });
     await receipt(p, yer, 2000, "YER", payment);
     rows = (await report()).filter(row => row.doctorId === d.id);
-    expect(rows.find(row => row.currency === "YER")?.earnedMinor).toBe(750);
+    expect(rows.find(row => row.currency === "YER")?.earnedMinor).toBe(600);
     expect(rows.find(row => row.currency === "USD")?.earnedMinor).toBe(600);
     expect(await db.setInvoiceStatus(usd, "cancelled", { actor: admin.username, actorRole: "admin" })).toMatchObject({ status: "cancelled" });
     rows = (await report()).filter(row => row.doctorId === d.id);
     expect(rows.find(row => row.currency === "USD")).toBeUndefined();
-    expect(rows.find(row => row.currency === "YER")?.earnedMinor).toBe(750);
+    expect(rows.find(row => row.currency === "YER")?.earnedMinor).toBe(600);
   });
 });
 

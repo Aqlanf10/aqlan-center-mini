@@ -1,4 +1,4 @@
-import { ensureSchema, getPool, ORTHO_CASE_FUNDED_SQL, orthoAdjustmentBillingClass } from "./db";
+import { ensureSchema, getPool, ORTHO_CASE_FUNDED_SQL, orthoAdjustmentBillingClass, type DbClient } from "./db";
 import { isLegacyFinancialMode } from "./ortho-baseline";
 import { legacyOnboarding, type LegacyOnboarding } from "./legacy-onboarding";
 import { readCaseFinancialReference } from "./ortho-financial-reference-db";
@@ -14,6 +14,19 @@ export async function patientLegacyOnboarding(patientId: number, caseId?: number
   let destroy = false;
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const result = await patientLegacyOnboardingWith(client, patientId, caseId);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    try { await client.query("ROLLBACK"); } catch { destroy = true; }
+    throw error;
+  } finally { client.release(destroy); }
+}
+
+/** The onboarding read on a caller's read-only snapshot (M2 slice 95a). */
+export async function patientLegacyOnboardingWith(client: DbClient, patientId: number, caseId?: number): Promise<(LegacyOnboarding & { caseId: number }) | null> {
+  if (!Number.isSafeInteger(patientId) || patientId <= 0
+    || caseId !== undefined && (!Number.isSafeInteger(caseId) || caseId <= 0)) throw new Error("Invalid case identity");
     const { rows: [row] } = await client.query<{
       id: number; baseline_kind: string | null; legacy_financial_mode: string | null;
       opening_currencies: string[]; arrangement_currencies: string[]; funded_plan: boolean;
@@ -30,7 +43,7 @@ export async function patientLegacyOnboarding(patientId: number, caseId?: number
         FROM ortho_cases c WHERE c.patient_id = $1
           AND (($2::int IS NOT NULL AND c.id = $2) OR ($2::int IS NULL AND c.status IN ('active', 'retention')))
         ORDER BY c.id DESC LIMIT 1`, [patientId, caseId ?? null]);
-    if (!row) { await client.query("COMMIT"); return null; }
+    if (!row) return null;
     const financialReference = await readCaseFinancialReference(client, patientId, row.id);
     const adjustmentClass = await orthoAdjustmentBillingClass(client, row.id, patientId);
     const result = { caseId: row.id, ...legacyOnboarding({
@@ -39,10 +52,5 @@ export async function patientLegacyOnboarding(patientId: number, caseId?: number
       openingCurrencies: row.opening_currencies, activeArrangementCurrencies: row.arrangement_currencies,
       fundedPlan: row.funded_plan, financialReference, adjustmentClass,
     }) };
-    await client.query("COMMIT");
     return result;
-  } catch (error) {
-    try { await client.query("ROLLBACK"); } catch { destroy = true; }
-    throw error;
-  } finally { client.release(destroy); }
 }

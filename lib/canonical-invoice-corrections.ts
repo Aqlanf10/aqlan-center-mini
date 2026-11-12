@@ -8,6 +8,7 @@ import { DebtRepaymentError } from "./debt-installments-db";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
 import { staffOperationCapabilities, staffOperationIdentity, staffOperationPatientScope, withStaffOperation, type StaffOperationHandle, type StaffRuntimeAction } from "./staff-operation-runtime";
 import type { StaffCapability } from "./staff-capability-catalogue";
+import type { PriceGrants } from "./price-authority";
 import type { VerifiedDurableSession } from "./staff-durable-session";
 
 /**
@@ -22,6 +23,8 @@ import type { VerifiedDurableSession } from "./staff-durable-session";
  * witness FOR SHARE NOWAIT), after an early unlocked look; outside reads like missing.
  */
 const MISSING = "الفاتورة غير موجودة.";
+const PRICE = Object.freeze({ discount: "finance.discounts.apply", discountOverride: "finance.discounts.override", increase: "finance.price-increases.apply" } as const);
+const PRICE_GRANTS = Object.freeze([PRICE.discount, PRICE.discountOverride, PRICE.increase] as const);
 export function invoiceIdOf(raw: unknown, invalid: (message: string) => Error): number {
   const id = typeof raw === "string" && /^[1-9][0-9]{0,9}$/.test(raw) ? Number(raw) : typeof raw === "number" ? raw : NaN;
   if (!Number.isSafeInteger(id) || id <= 0 || id > 2147483647) throw invalid("رقم الفاتورة غير صالح.");
@@ -96,7 +99,17 @@ export async function commandCanonicalInvoiceRevision(session: VerifiedDurableSe
       missing: () => new DebtRepaymentError("missing", MISSING),
       conflict: () => new DebtRepaymentError("conflict", "تعذّر تثبيت نطاق المريض. احتفظ بالطلب نفسه وأعد المحاولة."),
     });
-    const actor = await invoiceWriteActor(client, handle, "finance.invoices.correct", "finance.invoices.correct");
-    return reviseInvoiceOn(client, invoiceId, body as Record<string, unknown>, actor, admit);
+    // The correction grant is not a price exception: the price grants decide what the correction
+    // changes in prices and discount, and the actor re-proves every grant the decision used.
+    const held = await staffOperationCapabilities(client, handle, "finance.invoices.correct", PRICE_GRANTS);
+    const grants: PriceGrants = { discount: held.has(PRICE.discount), discountOverride: held.has(PRICE.discountOverride), increase: held.has(PRICE.increase) };
+    let used: Array<keyof PriceGrants> = [];
+    const identity = await staffOperationIdentity(client, handle, "finance.invoices.correct");
+    const actor = canonicalDebtActor(identity, async current => {
+      if (current !== client) return false;
+      const now = await staffOperationCapabilities(current, handle, "finance.invoices.correct", ["finance.invoices.correct", ...PRICE_GRANTS] as const);
+      return now.has("finance.invoices.correct") && used.every(grant => now.has(PRICE[grant]));
+    });
+    return reviseInvoiceOn(client, invoiceId, body as Record<string, unknown>, actor, admit, { grants, used: list => { used = list; } });
   });
 }

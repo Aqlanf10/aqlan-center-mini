@@ -4133,8 +4133,16 @@ export async function patientLegacyHistory(patientId: number): Promise<{
   orphanPayments: LegacyTreatmentView["payments"];
 }> {
   await ensureSchema();
-  const [treatments, payments] = await Promise.all([
-    getPool().query<{
+  return patientLegacyHistoryWith(getPool(), patientId);
+}
+
+/** The archive read on a caller's reader (M2 slice 95a: the canonical read snapshot, where the
+ * two queries run one after the other on the snapshot client). */
+export async function patientLegacyHistoryWith(reader: Pick<DbClient, "query">, patientId: number): Promise<{
+  treatments: LegacyTreatmentView[];
+  orphanPayments: LegacyTreatmentView["payments"];
+}> {
+  const treatments = await reader.query<{
       id: number; legacy_number: number | null; treated_on: string | null; doctor_name: string | null; service: string | null;
       currency: string; price_minor: string; rate: string | null; paid_minor: string; remaining_minor: string;
       has_provenance: boolean; source_kind: string | null; historical_as_of: string | null;
@@ -4145,14 +4153,13 @@ export async function patientLegacyHistory(patientId: number): Promise<{
               to_jsonb(t)->>'source_kind' AS source_kind,
               to_jsonb(t)->>'historical_as_of' AS historical_as_of
          FROM legacy_treatments t WHERE patient_id = $1
-        ORDER BY treated_on NULLS LAST, legacy_number NULLS LAST, id`, [patientId]),
-    getPool().query<{
+        ORDER BY treated_on NULLS LAST, legacy_number NULLS LAST, id`, [patientId]);
+  const payments = await reader.query<{
       legacy_treatment_id: number | null; legacy_number: number; paid_on: string | null; currency: string;
       amount_minor: string; rate: string | null; method: string | null; cash_box: string | null;
     }>(
       `SELECT legacy_treatment_id, legacy_number, paid_on::text, currency, amount_minor::text, rate::text, method, cash_box
-         FROM legacy_payments WHERE patient_id = $1 ORDER BY paid_on NULLS LAST, legacy_number`, [patientId]),
-  ]);
+         FROM legacy_payments WHERE patient_id = $1 ORDER BY paid_on NULLS LAST, legacy_number`, [patientId]);
   const paymentOf = (row: typeof payments.rows[number]) => ({
     legacyNumber: row.legacy_number, paidOn: row.paid_on,
     currency: requireCurrency(row.currency, "دفعة قديمة", row.legacy_number),
@@ -7994,21 +8001,40 @@ export async function setLabOrderStatusOn(
      * «معفى»، والمسدَّد يبقى أثرًا للتدقيق فالمال خرج فعلًا ولا يُمحو الإلغاءُ السريري
      * سجلَه المحاسبي. */
     if (status === "cancelled" && current.payable_id) {
-      const { rows: paidRows } = await client.query<{ count: string }>(
-        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
-               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
+      /* The payable row is locked before its vouchers are counted: a payment that commits
+       * between the count and the DELETE would otherwise keep a link to a deleted payable.
+       * A payment in flight holds this row; the cancel waits for it and then counts it. */
+      await client.query(`SELECT id FROM payables WHERE id = $1 FOR UPDATE`, [current.payable_id]);
+      const { rows: paidRows } = await client.query<{ count: string; settled: string; amount: string }>(
+        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = p.id)
+               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = p.id))::text AS count,
+                ${payableSettledTotalSql("p")}::text AS settled, ${payableAmountSql("p")}::text AS amount
+           FROM payables p WHERE p.id = $1`,
         [current.payable_id],
       );
       const paidCount = Number(paidRows[0]?.count ?? 0);
-      if (paidCount === 0) {
+      /* Owner decision 2026-11-11: a laboratory debt is never dropped merely because no voucher
+       * exists. Only an order that was never sent to the laboratory ("needed") commissioned no
+       * work, so the payable born with it goes with it. Once the order was sent, the laboratory
+       * was engaged: the payable and whatever is unpaid stay, and settling or waiving the
+       * remainder is a documented financial act under the laboratory's agreement. */
+      if (paidCount === 0 && prevStatus === "needed") {
         await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
         await client.query(
           `UPDATE lab_orders SET payable_id = NULL, financial_status = 'exempt' WHERE id = $1`,
           [id],
         );
-      } else {
+      } else if (paidRows[0] && BigInt(paidRows[0].settled) >= BigInt(paidRows[0].amount)) {
         await client.query(
           `UPDATE lab_orders SET financial_status = 'paid' WHERE id = $1 AND financial_status <> 'paid'`,
+          [id],
+        );
+      } else {
+        /* Not fully settled: no voucher on work that was sent, a part payment, or a payment
+         * that was voided (two rows, net zero). The payable stays, with its vouchers, as the
+         * audit trail; the order must not read "paid" while the laboratory is still owed. */
+        await client.query(
+          `UPDATE lab_orders SET financial_status = 'payable_created' WHERE id = $1 AND financial_status = 'paid'`,
           [id],
         );
       }
@@ -14407,8 +14433,8 @@ export async function settleLabOrdersBatch(input: {
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
 import {
-  buildCaseOverrideResolver, commissionForPatientAtEventTime, resolvePolicyForShare, summarizeCommissions,
-  type CommissionDetailLine, type CommissionInvoice, type ServiceRateFinding,
+  allocateInvoiceDiscount, buildCaseOverrideResolver, commissionForPatientAtEventTime, discountGroupKey, resolvePolicyForShare, summarizeCommissions,
+  type CommissionDetailLine, type CommissionInvoice, type DoctorShareItem, type ServiceRateFinding,
 } from "./commission";
 import { FULL_RATE_BP } from "./materialRate";
 import { invoiceNet } from "./money";
@@ -14548,6 +14574,7 @@ export async function commissionReport(
   const byPatient = new Map<number, Map<number, CommissionInvoice>>();
   const clinicDateOfInvoice = new Map<number, string>();
   const allocationTimeOfInvoice = new Map<number, string>();
+  const lineGroupsOfInvoice = new Map<number, { amountMinor: number; share: DoctorShareItem | null; key: string }[]>();
   for (const row of invoiceRows) {
     if (typeof row.allocation_origin_id !== "number" || !Number.isSafeInteger(row.allocation_origin_id) || row.allocation_origin_id <= 0) {
       throw new Error("تعذّر إثبات أصل ترتيب عمولة الفاتورة من سجل التصحيح.");
@@ -14564,22 +14591,46 @@ export async function commissionReport(
       createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
       doctorShares: [],
     };
+    /* Every line group of the invoice is kept (with or without a doctor) so the invoice
+       discount can be spread over all of them before any percentage is applied. */
+    const group: { amountMinor: number; share: DoctorShareItem | null; key: string } = { amountMinor: toMinor(row.share_minor), share: null,
+      key: discountGroupKey({ doctorId: row.doctor_id, serviceId: row.service_id, category: row.category, serviceName: row.service_name, caseId: row.case_id, planId: row.plan_id }) };
     if (row.doctor_id) {
       /* حصة الطبيب تحمل هوية الخدمة وفئتها وعملة فاتورتها (محرك الوكيل المساعد):
          بها يجد النسبة الخاصة إن وُجدت — تقويم ٣٥٪ وزراعة ٣٠٪ على الطبيب نفسه. */
-      invoice.doctorShares.push({
+      group.share = {
         doctorId: row.doctor_id,
-        amountMinor: toMinor(row.share_minor),
+        amountMinor: group.amountMinor,
         currency: invoice.currency,
         serviceId: row.service_id ?? undefined,
         serviceName: row.service_name ?? undefined,
         category: row.category ?? undefined,
         caseId: row.case_id ?? undefined,
         planId: row.plan_id ?? undefined,
-      });
+      };
+      invoice.doctorShares.push(group.share);
     }
+    const groups = lineGroupsOfInvoice.get(row.invoice_id) ?? [];
+    groups.push(group);
+    lineGroupsOfInvoice.set(row.invoice_id, groups);
     patientInvoices.set(row.invoice_id, invoice);
     byPatient.set(row.patient_id, patientInvoices);
+  }
+  /* Owner decision 2026-11-11 (finance point 1): the doctor's share is taken after the invoice
+     discount. The discount (line total minus the invoice net, in the invoice currency) is spread
+     over the invoice's line groups exactly; each doctor share becomes its amount after its part
+     of the discount, so the shares of a fully discounted-and-paid invoice add up to what was
+     collected. Laboratory and material costs are deducted afterwards, by the doctor's policy. */
+  for (const patientInvoices of byPatient.values()) {
+    for (const invoice of patientInvoices.values()) {
+      const groups = lineGroupsOfInvoice.get(invoice.id) ?? [];
+      const gross = groups.reduce((sum, group) => sum + Math.max(0, group.amountMinor), 0);
+      const discountMinor = gross - invoice.netMinor;
+      if (discountMinor <= 0) continue;
+      // Ties are broken by the group's identity, never by the order the rows were read in.
+      const parts = allocateInvoiceDiscount(groups.map(group => group.amountMinor), discountMinor, groups.map(group => group.key));
+      groups.forEach((group, index) => { if (group.share) group.share.amountMinor = group.amountMinor - parts[index]; });
+    }
   }
 
   const patientIds = [...byPatient.keys()];
@@ -22337,8 +22388,10 @@ export async function removePlanItemOn(
   const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
   if (!allowed.ok) { return allowed; }
 
-  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
-    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL}`, [itemId]);
+  // Scope the lineage check to the already-authorized plan before reading financial history.
+  // Otherwise an out-of-plan item ID can reveal whether that other patient's item was billed.
+  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1 AND i.plan_id = $2
+    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL}`, [itemId, planId]);
   if (financial) { return { ok: false, message: "البند له سجل مالي أو اتفاق تاريخي محفوظ؛ لا يُحذف." }; }
   const { rows: [removed] } = await client.query<PlanItemAuditRow>(
     `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2 RETURNING ${PLAN_ITEM_AUDIT_COLUMNS}`, [itemId, planId],
