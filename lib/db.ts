@@ -1,7 +1,18 @@
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import type { SessionPayload } from "./auth";
-import { canAccessPatient, PatientOutOfScopeError, resolveRestrictedDoctorScope } from "./patient-access";
-import { AmbiguousSharedPhonePatientError, type SharedPhonePatientCandidate } from "./patient-scope-error";
+import { AmbiguousSharedPhonePatientError, PatientOutOfScopeError, type SharedPhonePatientCandidate } from "./patient-scope-error";
+
+async function canAccessPatientLazy(
+  ...args: Parameters<typeof import("./patient-access").canAccessPatient>
+): Promise<boolean> {
+  return (await import("./patient-access")).canAccessPatient(...args);
+}
+
+async function resolveRestrictedDoctorScopeLazy(
+  ...args: Parameters<typeof import("./patient-access").resolveRestrictedDoctorScope>
+): Promise<import("./patient-access").RestrictedDoctorScope> {
+  return (await import("./patient-access")).resolveRestrictedDoctorScope(...args);
+}
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
 import { PATIENT_PORTAL_SECURITY_SQL } from "./patient-portal-security-schema";
@@ -3088,7 +3099,7 @@ async function resolveVisitPatientDetailed(
 
   let patientId = visit.patient_id;
   if (patientId !== null && actorSession) {
-    const allowed = await canAccessPatient(actorSession, patientId, undefined, client);
+    const allowed = await canAccessPatientLazy(actorSession, patientId, undefined, client);
     if (!allowed) {
       throw new PatientOutOfScopeError();
     }
@@ -3098,7 +3109,7 @@ async function resolveVisitPatientDetailed(
     if (matched.length >= 1) {
       let visibleMatches = matched;
       if (actorSession) {
-        const scope = await resolveRestrictedDoctorScope(actorSession, client);
+        const scope = await resolveRestrictedDoctorScopeLazy(actorSession, client);
         if (scope.restricted) {
           if (scope.blockAllPatients || !scope.doctorPartyId) {
             throw new PatientOutOfScopeError();
@@ -3137,7 +3148,7 @@ async function resolveVisitPatientDetailed(
   if (!patientId) {
     let primaryDoctorId: number | null = null;
     if (actorSession) {
-      const scope = await resolveRestrictedDoctorScope(actorSession, client);
+      const scope = await resolveRestrictedDoctorScopeLazy(actorSession, client);
       if (scope.restricted && (scope.blockAllPatients || !scope.doctorPartyId)) {
         throw new PatientOutOfScopeError("حساب الطبيب غير مربوط بجهة طبيب نشطة.");
       }
@@ -3211,7 +3222,7 @@ export async function createNextSession(
   const visit = visits[0];
   let appointmentDoctorId: number | null = visit.doctor_id ?? null;
   if (input.actorSession) {
-    const scope = await resolveRestrictedDoctorScope(input.actorSession, client);
+    const scope = await resolveRestrictedDoctorScopeLazy(input.actorSession, client);
     if (scope.restricted) {
       if (scope.blockAllPatients || !scope.doctorPartyId) {
         throw new PatientOutOfScopeError();
@@ -7038,11 +7049,11 @@ export async function createLabOrder(input: {
     await client.query("BEGIN");
 
     if (input.actorSession) {
-      const allowed = await canAccessPatient(input.actorSession, input.patientId, undefined, client);
+      const allowed = await canAccessPatientLazy(input.actorSession, input.patientId, undefined, client);
       if (!allowed) {
         throw new PatientOutOfScopeError("هذا المريض خارج نطاق صلاحيتك لإنشاء أمر مختبر.");
       }
-      const scope = await resolveRestrictedDoctorScope(input.actorSession, client);
+      const scope = await resolveRestrictedDoctorScopeLazy(input.actorSession, client);
       if (scope.restricted && input.doctorId != null && input.doctorId !== scope.doctorPartyId) {
         throw new PatientOutOfScopeError("لا يمكن للطبيب المقيّد إسناد أمر المختبر لطبيب آخر.");
       }
@@ -7679,7 +7690,7 @@ export async function setLabOrderStatus(
       return null;
     }
     if (context?.actorSession) {
-      const allowed = await canAccessPatient(context.actorSession, currentRows[0].patient_id, undefined, client);
+      const allowed = await canAccessPatientLazy(context.actorSession, currentRows[0].patient_id, undefined, client);
       if (!allowed) {
         throw new PatientOutOfScopeError("أمر المختبر خارج نطاق صلاحيتك السريرية.");
       }
@@ -7857,7 +7868,7 @@ export async function createLabOrderRemake(
       return null;
     }
     if (input.actorSession) {
-      const allowed = await canAccessPatient(input.actorSession, lockedOrig[0].patient_id, undefined, client);
+      const allowed = await canAccessPatientLazy(input.actorSession, lockedOrig[0].patient_id, undefined, client);
       if (!allowed) {
         throw new PatientOutOfScopeError("أمر المختبر خارج نطاق صلاحيتك السريرية.");
       }
@@ -7966,7 +7977,7 @@ export async function setLabOrderDueDate(
         await client.query("ROLLBACK");
         return null;
       }
-      const allowed = await canAccessPatient(actorSession, locked[0].patient_id, undefined, client);
+      const allowed = await canAccessPatientLazy(actorSession, locked[0].patient_id, undefined, client);
       if (!allowed) {
         throw new PatientOutOfScopeError("أمر المختبر خارج نطاق صلاحيتك السريرية.");
       }
@@ -19035,7 +19046,7 @@ export async function signClinicalVisit(input: {
      */
     if (locked[0].patient_id !== null && locked[0].patient_id !== lockedPatientId) throw new ClinicalPlanConflict();
     if (input.actorSession) {
-      const scope = await resolveRestrictedDoctorScope(input.actorSession, client);
+      const scope = await resolveRestrictedDoctorScopeLazy(input.actorSession, client);
       if (scope.restricted) {
         if (scope.blockAllPatients || !scope.doctorPartyId) {
           throw new PatientOutOfScopeError();
@@ -22275,11 +22286,11 @@ export async function startVisitFromPlannedVisit(input: {
 
     let visitDoctorId: number | null = planned.doctor_id;
     if (input.actorSession) {
-      const allowed = await canAccessPatient(input.actorSession, planned.patient_id, undefined, client);
+      const allowed = await canAccessPatientLazy(input.actorSession, planned.patient_id, undefined, client);
       if (!allowed) {
         throw new PatientOutOfScopeError("هذه الجلسة المخطّطة تخص مريضًا خارج نطاق صلاحيتك السريرية.");
       }
-      const scope = await resolveRestrictedDoctorScope(input.actorSession, client);
+      const scope = await resolveRestrictedDoctorScopeLazy(input.actorSession, client);
       if (scope.restricted) {
         if (scope.blockAllPatients || !scope.doctorPartyId) {
           throw new PatientOutOfScopeError();
