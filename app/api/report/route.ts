@@ -36,10 +36,10 @@ export async function GET(request: Request) {
     const settings = await getSettings();
     const chairs = chairCount(settings);
     const [visits, rawAppointments, rawNextDay, lab, plannedToday] = await Promise.all([
-      listVisitsByDate(date, scopeFilter),
+      scopeFilter ? listVisitsByDate(date, scopeFilter) : listVisitsByDate(date),
       listAppointmentsByDate(date),
       listAppointmentsByDate(next),
-      labCounts({ mode: "workflow", today }, scopeFilter),
+      labCounts({ mode: "workflow", today }),
       /*
        * لوحة اليوم (§٢٦): ما المخطَّط لهذا اليوم — زيارات مخطَّطة مجدولة، وبنود
        * «مخطَّط لليوم» من الخطط النشطة. مدخلٌ واحد يفتح منه الطبيب عمل يومه.

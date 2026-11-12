@@ -31,9 +31,14 @@ export async function requirePortalSession(): Promise<PortalPayload | null> {
     const preview = readPortalAdminPreviewToken(previewRaw);
     if (preview) {
       const staffSession = await requireSessionStrict();
-      if (staffSession && staffSession.userId === preview.staffUserId) {
+      if (
+        staffSession &&
+        staffSession.userId === preview.staffUserId &&
+        (!preview.staffCredentialVersion ||
+          preview.staffCredentialVersion === staffSession.credentialVersion)
+      ) {
         const access = await getPortalStaffAccess(staffSession.userId);
-        if (access?.isActive && access.canPreviewPortal) {
+        if (access?.isActive && access.role === "admin" && access.canPreviewPortal) {
           const patient = await getPatient(preview.patientId);
           if (patient) {
             return {

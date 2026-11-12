@@ -86,7 +86,7 @@ export type AuditAction =
   | "portal.staff_grant.update"
   | "portal.account.activate_issued" | "portal.account.activate_delivery_failed" | "portal.account.activated"
   | "portal.account.reset_issued" | "portal.account.in_person_reset_issued" | "portal.account.reset_delivery_failed" | "portal.account.password_reset"
-  | "portal.account.disabled" | "portal.account.enabled" | "portal.account.sessions_revoked"
+  | "portal.account.disabled" | "portal.account.enabled" | "portal.account.sessions_revoked" | "portal.account.patient_merged"
   | "portal.admin_preview.start" | "portal.admin_preview.exit"
   | "intake.staff"
   | "display.delay_notice"
@@ -316,6 +316,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "portal.account.disabled": "تعطيل حساب بوابة مريض وإبطال جلساته",
   "portal.account.enabled": "إعادة تمكين حساب بوابة مريض",
   "portal.account.sessions_revoked": "إبطال جلسات بوابة مريض",
+  "portal.account.patient_merged": "تدوير وإبطال جلسات ورموز حساب البوابة عند دمج ملف مريض مكرر",
   "portal.admin_preview.start": "بدء عرض إداري لبوابة مريض (للقراءة فقط)",
   "portal.admin_preview.exit": "إنهاء العرض الإداري لبوابة مريض",
   "display.delay_notice": "تشغيل/إيقاف رسالة الاعتذار على شاشة الصالة",

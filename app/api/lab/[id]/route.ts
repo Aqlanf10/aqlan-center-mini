@@ -82,15 +82,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ ok: true, shadeSpecification: next.value });
     }
 
-    let hideCosts = false;
-    if (session.role === "doctor") {
-      const doctorUser = await findUserByUsername(session.username).catch(() => null);
-      if (!canDoctorViewCostPrices(doctorUser?.permissions, session.role)) hideCosts = true;
-    }
-    const maskCosts = <T extends { costMinor?: number | null; costCurrency?: Currency | null; baseAmountMinor?: number | null }>(
-      order: T,
-    ): T => (hideCosts ? { ...order, costMinor: null, costCurrency: null, baseAmountMinor: null } : order);
-
     /* سجل أحداث الطلب (المختبرات V2) — قبل أي تغيير أو بدونه عند الطلب المجرد. */
     if (source.action === "events") {
       const existing = await getLabOrderById(id);
@@ -184,6 +175,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
       return NextResponse.json(updated);
     }
+
+    let hideCosts = false;
+    if (session.role === "doctor") {
+      const doctorUser = await findUserByUsername(session.username).catch(() => null);
+      if (!canDoctorViewCostPrices(doctorUser?.permissions, session.role)) hideCosts = true;
+    }
+    const maskCosts = <T extends { costMinor?: number | null; costCurrency?: Currency | null; baseAmountMinor?: number | null }>(
+      order: T,
+    ): T => (hideCosts ? { ...order, costMinor: null, costCurrency: null, baseAmountMinor: null } : order);
 
     if (typeof source.dueDate === "string") {
       if (!DATE_PATTERN.test(source.dueDate)) {

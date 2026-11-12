@@ -31,6 +31,8 @@ export interface SecurityLimitSpec {
   maximum: number;
   /** سقف مستقل لبصمة المصدر خلف الوسيط الموثوق (مراعاة شبكات الجوال المشتركة CGNAT). */
   sourceMaximum?: number;
+  /** سقف عام احتياطي يُفعَّل عند غياب الوسيط الموثوق لمنع إغراق القاعدة بتدوير الهويات. */
+  untrustedGlobalMaximum?: number;
   windowMinutes: number;
   /** ترويسات الطلب — لاستخراج المصدر خلف وسيط موثوق. */
   headers: Headers;
@@ -60,7 +62,17 @@ export async function consumeSecurityLimit(spec: SecurityLimitSpec): Promise<Sec
         key: hmac(`sec:${spec.scope}:source:${address}`),
         maximum: spec.sourceMaximum ?? spec.maximum,
       });
+    } else if (spec.untrustedGlobalMaximum !== undefined) {
+      limits.push({
+        key: hmac(`sec:${spec.scope}:global`),
+        maximum: spec.untrustedGlobalMaximum,
+      });
     }
+  } else if (spec.untrustedGlobalMaximum !== undefined) {
+    limits.push({
+      key: hmac(`sec:${spec.scope}:global`),
+      maximum: spec.untrustedGlobalMaximum,
+    });
   }
 
   try {

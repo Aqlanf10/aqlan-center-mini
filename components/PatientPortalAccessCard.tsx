@@ -13,6 +13,8 @@ interface AccountSummary {
   hasPendingToken: boolean;
   pendingTokenPurpose: "activate" | "reset" | "in_person_reset" | null;
   pendingTokenExpiresAt: string | null;
+  hasSharedFamilyPhone?: boolean;
+  sharedPhonePatientsCount?: number;
 }
 
 interface StaffPortalPermissions {
@@ -247,6 +249,11 @@ export function PatientPortalAccessCard({
 
       {permissions.canManagePortal && (
         <div className="mt-3 space-y-3 border-t border-slate-100 pt-3">
+          {account.hasSharedFamilyPhone && (
+            <p className="rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs font-bold text-amber-950">
+              تنبيه هاتف عائلي مشترك ({account.sharedPhonePatientsCount ?? 2} ملفات تشترك في هذا الرقم): لا تعتمد على الهاتف وحده؛ تحقّق من اسم المريض ورقم ملفه ({patientNumber}) وهويته قبل التفعيل أو الاستعادة، ووثّق التحقق في الملاحظة (8 أحرف على الأقل).
+            </p>
+          )}
           {(account.status === "not_activated" || account.status === "pending_activation") && (
             <div className="grid gap-2 sm:grid-cols-3">
               <label className="text-xs">

@@ -3,7 +3,8 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { ActiveVisitExists, addVisit, listTodayVisits, recordAudit, startVisitFromPlannedVisit } from "@/lib/db";
-import { PatientOutOfScopeError, resolveRestrictedDoctorScope } from "@/lib/patient-access";
+import { resolveRestrictedDoctorScope } from "@/lib/patient-access";
+import { AmbiguousSharedPhonePatientError, PatientOutOfScopeError } from "@/lib/patient-scope-error";
 import { listReceptionHandoffs } from "@/lib/reception-handoff-db";
 import { canReadReceptionHandoff, isHandoffDate } from "@/lib/reception-handoff";
 
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
         plannedVisitId: rawPlannedVisitId,
         actor: session.username,
         actorRole: session.role,
-        actorSession: session,
+        ...(session.role === "doctor" ? { actorSession: session } : {}),
       });
       if (started && "appointmentConflict" in started) {
         return failed("تغيّر الموعد المرتبط أو أُغلق. أعد الحجز قبل بدء الجلسة.", 409);
@@ -139,6 +140,12 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof PatientOutOfScopeError) {
       return failed(error.message, 403);
+    }
+    if (error instanceof AmbiguousSharedPhonePatientError) {
+      return NextResponse.json(
+        { message: error.message, code: error.code, candidates: error.candidates },
+        { status: 409 },
+      );
     }
     if (error instanceof ActiveVisitExists) {
       return NextResponse.json({ message: error.message, visitId: error.visitId }, { status: 409 });

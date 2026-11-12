@@ -14,7 +14,7 @@
  * السرّ لا يعود إلى الشاشة أبدًا: الشاشة ترى «مضبوط/غير مضبوط» فقط.
  */
 import { toWhatsAppNumber } from "./reminders";
-import { validateMessagingOutboundUrl, validatePublicSmtpHostAndPort } from "./safe-outbound-url";
+import { validateMessagingOutboundUrl, validatePublicSmtpHostAndPort } from "./safe-outbound-url-pure";
 
 export const CHANNELS = ["whatsapp", "sms", "email"] as const;
 export type Channel = (typeof CHANNELS)[number];

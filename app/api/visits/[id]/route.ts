@@ -5,7 +5,7 @@ import { requireSession } from "@/lib/session";
 import { callVisitAgain, callVisitGated, clearVisit, deferVisitPayment, deleteVisit, finishVisit, linkVisitToPatient, openVisitPatientFile, recordAudit, returnVisitToWaiting, seatVisitGated, type GatedMoveResult } from "@/lib/db";
 import { normalizeEmergencyReason } from "@/lib/chair-readiness";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
-import { PatientOutOfScopeError } from "@/lib/patient-access";
+import { AmbiguousSharedPhonePatientError, PatientOutOfScopeError } from "@/lib/patient-scope-error";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
@@ -189,6 +189,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   } catch (error) {
     if (error instanceof PatientOutOfScopeError) {
       return NextResponse.json({ message: error.message }, { status: 403 });
+    }
+    if (error instanceof AmbiguousSharedPhonePatientError) {
+      return NextResponse.json(
+        { message: error.message, code: error.code, candidates: error.candidates },
+        { status: 409 },
+      );
     }
     return NextResponse.json({ message: "تعذّر تنفيذ الإجراء. أعد المحاولة." }, { status: 500 });
   }

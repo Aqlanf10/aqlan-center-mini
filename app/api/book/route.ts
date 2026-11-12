@@ -3,9 +3,14 @@ import { clientIpFromForwardedFor } from "@/lib/net";
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, countRecentRequests, createBookingRequest, getSettings } from "@/lib/db";
 import { validateBookingRequest } from "@/lib/booking";
+import { toWhatsAppNumber } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { BOOK_RATE_LIMIT, JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import {
+  BOOK_RATE_LIMIT,
+  BOOK_UNTRUSTED_GLOBAL_MAX,
+  JSON_BODY_LIMIT_BYTES,
+} from "@/lib/security-limits";
 import { consumeSecurityLimit } from "@/lib/security-rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +69,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true });
   }
 
+  // فحص مبدئي متزامن للاسم والهاتف قبل لمس قاعدة البيانات (`getSettings` أو عدّادات المعدل).
+  const rawName = typeof source.fullName === "string" ? source.fullName.trim().replace(/\s+/g, " ") : "";
+  if (rawName.length < 3 || rawName.length > 60 || !/[\u0600-\u06FFA-Za-z]/.test(rawName)) {
+    const syncValidation = validateBookingRequest(source, clinicDateString(new Date(), CLINIC_TIME_ZONE));
+    return NextResponse.json(
+      { message: syncValidation.ok ? "اكتب الاسم الكامل." : syncValidation.message },
+      { status: 400 },
+    );
+  }
+  const normalizedPrePhone = toWhatsAppNumber(typeof source.phone === "string" ? source.phone : "");
+  if (!normalizedPrePhone) {
+    return NextResponse.json(
+      { message: "اكتب رقم جوال يمني صحيح، مثل 7XXXXXXXX." },
+      { status: 400 },
+    );
+  }
+
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   /* أقصى مدى للحجز من الإعداد `scheduling.max_days_ahead` — والافتراضيّ داخل
      الدالّة يحفظ سلوك اليوم إن غاب المفتاح أو فسد. */
@@ -76,13 +98,15 @@ export async function POST(request: Request) {
   }
 
   const normalizedPhoneKey = validation.value.phone.replace(/\D/g, "").slice(-9) || validation.value.phone.trim();
-  /* (P2/S10-FIX) حدّ نافذة قصيرة موزّع لكل رقم مُطبَّع (+ سقف مصدر مرتفع لـCGNAT عند TRUST_PROXY=true)
-     بدل معرّف عام واحد ("public") كان يسمح لمهاجم واحد بتعطيل الحجز على العيادة كلها. */
+  /* (P2/S10-FIX) حدّ نافذة قصيرة موزّع لكل رقم مُطبَّع (+ سقف مصدر مرتفع لـCGNAT عند TRUST_PROXY=true،
+     + سقف عام احتياطي عند غياب TRUST_PROXY لمنع إغراق القاعدة بتدوير أرقام وهمية)
+     بدل معرّف عام ضيّق واحد ("public") كان يسمح لمهاجم واحد بتعطيل الحجز على العيادة كلها. */
   const burst = await consumeSecurityLimit({
     scope: "book",
     identifier: normalizedPhoneKey,
     maximum: Math.min(MAX_PER_PHONE_BURST_15M, BOOK_RATE_LIMIT.maximum),
     sourceMaximum: BOOK_RATE_LIMIT.maximum,
+    untrustedGlobalMaximum: BOOK_UNTRUSTED_GLOBAL_MAX,
     windowMinutes: BOOK_RATE_LIMIT.windowMinutes,
     headers: request.headers,
   });

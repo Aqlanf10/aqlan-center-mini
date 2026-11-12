@@ -7,7 +7,6 @@ import { refusalStatus } from "@/lib/expense-request";
 import { rateOf, refusalMessage, type SupplierPaymentRefusal } from "@/lib/supplier-payments";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
-import { resolveRestrictedDoctorScope } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import {
   buildBatchSettlementNote,
@@ -60,13 +59,9 @@ export async function GET(request: Request) {
     const tomorrowStr = addDays(todayStr, 1);
     const afterTomorrowStr = addDays(todayStr, 2);
 
-    const scope = await resolveRestrictedDoctorScope(session);
-    const scopeFilter = scope.restricted
-      ? { doctorPartyId: scope.doctorPartyId, blockAllPatients: scope.blockAllPatients }
-      : undefined;
     const [labParties, allOrders, todayAppts, tomorrowAppts, afterAppts] = await Promise.all([
       listParties("lab"),
-      listLabOrders({ limit: 300 }, scopeFilter),
+      listLabOrders({ limit: 300 }),
       listAppointmentsByDate(todayStr),
       listAppointmentsByDate(tomorrowStr),
       listAppointmentsByDate(afterTomorrowStr),

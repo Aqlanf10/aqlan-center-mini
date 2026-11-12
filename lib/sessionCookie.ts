@@ -9,6 +9,8 @@ export const SESSION_DURATION_MS = 12 * 60 * 60 * 1000; // وردية يوم ك�
 
 /** اسم كوكي بوابة المريض — نفس العزل: حارس الـmutations في proxy يقرأه هنا. */
 export const PORTAL_COOKIE_NAME = "aqlan_portal_session";
+/** اسم كوكي المعاينة الإدارية لبوابة المريض (قراءة فقط باسم الموظف المخوّل). */
+export const PORTAL_ADMIN_PREVIEW_COOKIE_NAME = "aqlan_portal_preview";
 
 /**
  * (P2-FINAL-1) قرار Secure لكوكي جلسة الطاقم `aqlan_flow_session` — مستقل

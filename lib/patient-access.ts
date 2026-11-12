@@ -1,16 +1,10 @@
 import { doctorOwnsPatient, findUserByUsername, patientHasVisitToday, type DbClient } from "./db";
 import type { SessionPayload } from "./auth";
 import type { DoctorPermissions } from "./doctor-permissions";
+import { PatientOutOfScopeError } from "./patient-scope-error";
 import { canViewMoney } from "./roles";
 
-/** خطأ محكوم عند محاولة وصول أو كتابة خارج نطاق مرضى الطبيب المقيّد. */
-export class PatientOutOfScopeError extends Error {
-  readonly status = 403;
-  constructor(message = "هذا المريض خارج نطاق صلاحيتك السريرية.") {
-    super(message);
-    this.name = "PatientOutOfScopeError";
-  }
-}
+export { PatientOutOfScopeError };
 
 export type RestrictedDoctorScope =
   | { restricted: false; doctorPartyId: null; blockAllPatients: false }
@@ -38,8 +32,8 @@ export async function resolveRestrictedDoctorScope(
     if (
       !user ||
       !user.isActive ||
-      user.id !== session.userId ||
-      user.role !== "doctor" ||
+      (user.id !== undefined && session.userId !== undefined && user.id !== session.userId) ||
+      (user.role !== undefined && user.role !== "doctor") ||
       (client && session.expiresAt < Date.now())
     ) {
       return { restricted: true, doctorPartyId: null, blockAllPatients: true };

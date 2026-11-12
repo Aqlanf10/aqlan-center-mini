@@ -39,6 +39,12 @@ export async function GET(
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
   }
+  if (session.role !== "admin" && session.role !== "reception" && session.role !== "doctor") {
+    return NextResponse.json(
+      { message: "إدارة بوابة المريض مخصّصة للإدارة والاستقبال والأطباء." },
+      { status: 403 },
+    );
+  }
   const { id } = await context.params;
   const patientId = Number(id);
   if (!Number.isInteger(patientId) || patientId <= 0) {
@@ -75,6 +81,22 @@ export async function POST(
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
+  }
+  if (session.role !== "admin" && session.role !== "reception" && session.role !== "doctor") {
+    return NextResponse.json(
+      { message: "إدارة بوابة المريض مخصّصة للإدارة والاستقبال والأطباء المخوّلين." },
+      { status: 403 },
+    );
+  }
+  const staffAccess = await getPortalStaffAccess(session.userId);
+  if (!staffAccess || !staffAccess.isActive) {
+    return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
+  }
+  if (!staffAccess.canManagePortal) {
+    return NextResponse.json(
+      { message: "غير مصرّح لك بإدارة حسابات بوابة المرضى." },
+      { status: 403 },
+    );
   }
   const { id } = await context.params;
   const patientId = Number(id);

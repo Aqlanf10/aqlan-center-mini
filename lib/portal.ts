@@ -12,16 +12,16 @@ import { samePhone } from "./duplicates";
  *     يستدعي `patientLedger()` نفسها التي تخدم شاشة المريض الداخلية، فلا يُبنى
  *     استعلام موازٍ فيظهر رقم في البوابة وآخر في الصندوق.
  *
- * ولماذا لا كلمة مرور؟ مريض عيادة بكرسيين لا يملك حسابًا يُدار ولا بريدًا يُوثَّق.
- * العاملان اللذان يملكهما المريض الحقيقي حصريًا — تقريبًا — هما رقم هاتفه ورقم
- * ملفه الذي أعطته إياه العيادة. مزاوجتهما مع حد لمحاولات الدخول يوفر ما يكفي
- * لبوابة تُرى ولا تدفع ولا تُعدّل: قراءةٌ للحساب ومواعيد، وتأكيدٌ حضور،
- * واستمارةٌ تعود للطاقم لا للمريض.
+ * (0127_patient_portal_security) الدخول المعتمد لبوابة المريض يتم حصريًا عبر
+ * اسم مستخدم فريد وكلمة مرور مجزّأة بـ `scrypt` يختارها المريض عبر رابط تفعيل
+ * مؤقت أحادي الاستخدام بعد تفعيل موظف مخوّل؛ وأُوقف مسار الدخول القديم برقم
+ * الملف والهاتف نهائيًا بلا أي استثناء طوارئ.
  */
 
-export { PORTAL_COOKIE_NAME as PORTAL_COOKIE } from "./sessionCookie";
-/** كوكي مستقل لمعاينة البوابة الإدارية (قراءة فقط باسم الموظف المخوّل، بحد أقصى 30 دقيقة). */
-export const PORTAL_ADMIN_PREVIEW_COOKIE = "aqlan_portal_preview";
+export {
+  PORTAL_ADMIN_PREVIEW_COOKIE_NAME as PORTAL_ADMIN_PREVIEW_COOKIE,
+  PORTAL_COOKIE_NAME as PORTAL_COOKIE,
+} from "./sessionCookie";
 export const PORTAL_ADMIN_PREVIEW_DURATION_MS = 30 * 60 * 1000;
 /**
  * بوابة تُفتح أسبوعًا لا شهرًا: الجلسة الطويلة نافذةٌ مفتوحة على حساب المريض
@@ -61,6 +61,8 @@ export interface PortalAdminPreviewTokenPayload {
   staffUsername: string;
   staffDisplayName: string;
   staffRole: string;
+  /** بصمة اعتماد جلسة الموظف وقت إصدار المعاينة — لإبطال كوكي المعاينة فور تدوير كلمة مرور الموظف. */
+  staffCredentialVersion?: string;
   reason: string;
   startedAt: number;
   expiresAt: number;
@@ -160,6 +162,12 @@ export function readPortalAdminPreviewToken(
     if (!Number.isInteger(payload.patientId) || payload.patientId <= 0) return null;
     if (!Number.isInteger(payload.staffUserId) || payload.staffUserId <= 0) return null;
     if (typeof payload.staffUsername !== "string" || !payload.staffUsername) return null;
+    if (
+      payload.staffCredentialVersion !== undefined &&
+      (typeof payload.staffCredentialVersion !== "string" || !payload.staffCredentialVersion.trim())
+    ) {
+      return null;
+    }
     if (typeof payload.reason !== "string" || payload.reason.trim().length < 5) return null;
     return payload;
   } catch {
@@ -259,7 +267,7 @@ export function validatePortalLogin(raw: unknown): PortalLoginValidation {
   if (phone.replace(/\D/g, "").length < MIN_PHONE_DIGITS) {
     return { ok: false, message: "أدخل رقم هاتف صحيحًا." };
   }
-  if (!patientNumber || patientNumber.length > 20) {
+  if (!patientNumber || patientNumber.length > 21) {
     return { ok: false, message: "أدخل رقم الملف كما أُعطي لك." };
   }
   return { ok: true, value: { phone, patientNumber } };

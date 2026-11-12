@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createNextSession, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
+import { AmbiguousSharedPhonePatientError, createNextSession, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
 import type { CapacityVerdict } from "@/lib/capacity";
 import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
@@ -125,6 +125,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   } catch (error) {
     if (error instanceof PatientOutOfScopeError) {
       return NextResponse.json({ message: error.message }, { status: 403 });
+    }
+    if (error instanceof AmbiguousSharedPhonePatientError) {
+      return NextResponse.json(
+        { message: error.message, code: error.code, candidates: error.candidates },
+        { status: 409 },
+      );
     }
     return NextResponse.json({ message: "تعذّر حجز الجلسة. أعد المحاولة." }, { status: 500 });
   }

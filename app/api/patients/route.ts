@@ -177,8 +177,7 @@ export async function POST(request: Request) {
       }
     }
     const created = await createPatient(
-      validation.value,
-      doctorPrimaryPartyId ? { primaryDoctorId: doctorPrimaryPartyId } : undefined,
+      doctorPrimaryPartyId ? { ...validation.value, primaryDoctorId: doctorPrimaryPartyId } : validation.value,
     );
     // (P1-4) الإنشاء يُدقَّق بلقطته — ومع علامة إن أُكِّد رغم تحذير التكرار.
     await recordAudit({

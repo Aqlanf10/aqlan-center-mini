@@ -13,7 +13,7 @@ const boundary = vi.hoisted(() => ({
   requireSession: vi.fn(), getSettings: vi.fn(), listVisitsByDate: vi.fn(),
   listAppointmentsByDate: vi.fn(), todayPlannedVisits: vi.fn(),
   labCounts: vi.fn(), listLabOrders: vi.fn(), listLabNames: vi.fn(), listLabServices: vi.fn(),
-  createLabOrder: vi.fn(), findUserByUsername: vi.fn(), listParties: vi.fn(), recordAudit: vi.fn(),
+  createLabOrder: vi.fn(), findUserByUsername: vi.fn(), doctorOwnedPatientIds: vi.fn(), listParties: vi.fn(), recordAudit: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
 vi.mock("@/lib/db", () => ({ ...boundary, CLINIC_TIME_ZONE: "Asia/Riyadh" }));
@@ -126,6 +126,8 @@ describe("daily report complete lab aggregate", () => {
 
   it("preserves linked-doctor planned-visit scope independently of global lab counts", async () => {
     boundary.requireSession.mockResolvedValue({ username: "synthetic-report-doctor", role: "doctor", partyId: 17 });
+    boundary.findUserByUsername.mockResolvedValue({ id: 17, username: "synthetic-report-doctor", role: "doctor", isActive: true, partyId: 17, permissions: {} });
+    boundary.doctorOwnedPatientIds.mockResolvedValue(new Set());
     expect((await reportRequest("2026-09-01")).status).toBe(200);
     expect(boundary.todayPlannedVisits).toHaveBeenCalledExactlyOnceWith("2026-09-01", 17);
     expectAggregateOwner();

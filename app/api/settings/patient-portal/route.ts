@@ -38,6 +38,9 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
   }
+  if (session.role !== "admin") {
+    return NextResponse.json({ message: "هذه الصفحة مخصّصة للإدارة فقط." }, { status: 403 });
+  }
 
   let body: unknown;
   try {
@@ -49,6 +52,16 @@ export async function POST(request: Request) {
   }
 
   const payload = (body ?? {}) as Record<string, unknown>;
+  if ("isOwner" in payload && payload.isOwner !== undefined) {
+    return NextResponse.json(
+      {
+        message:
+          "هوية مالك العيادة مصدرها النظام القانوني المعتمد حصريًا ولا تُمنح أو تُعدَّل من جدول صلاحيات البوابة.",
+      },
+      { status: 403 },
+    );
+  }
+
   const targetUserId = Number(payload.userId);
   if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
     return NextResponse.json({ message: "معرّف الموظف غير صالح." }, { status: 400 });
@@ -57,7 +70,6 @@ export async function POST(request: Request) {
   const result = await updatePortalStaffGrant({
     actorSession: session,
     targetUserId,
-    isOwner: typeof payload.isOwner === "boolean" ? payload.isOwner : undefined,
     canManagePortal: Boolean(payload.canManagePortal),
     canPreviewPortal: Boolean(payload.canPreviewPortal),
     note: typeof payload.note === "string" ? payload.note : null,

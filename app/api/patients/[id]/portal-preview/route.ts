@@ -73,6 +73,7 @@ export async function POST(
     staffUsername: access.username,
     staffDisplayName: access.displayName,
     staffRole: access.role,
+    staffCredentialVersion: staffSession.credentialVersion,
     reason: rawReason,
     startedAt,
     expiresAt,

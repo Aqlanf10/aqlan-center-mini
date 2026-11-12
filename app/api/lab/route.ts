@@ -50,20 +50,21 @@ export async function GET(request: Request) {
       ? { doctorPartyId: scope.doctorPartyId, blockAllPatients: scope.blockAllPatients }
       : undefined;
     if (summaryOnly) {
-      return NextResponse.json(await labCounts(undefined, scopeFilter));
+      return NextResponse.json(scopeFilter ? await labCounts(undefined, scopeFilter) : await labCounts());
     }
     if (patientFilter !== null && scope.restricted && !(await canAccessPatient(session, patientFilter))) {
       return NextResponse.json({ message: "هذا الملف خارج نطاق صلاحيتك السريرية." }, { status: 403 });
     }
+    const orderFilters = patientFilter !== null ? { patientId: patientFilter } : undefined;
     const [rawOrders, labs, labServices] = await Promise.all([
       patientOutOfRange
         ? Promise.resolve([])
-        : listLabOrders(patientFilter !== null ? { patientId: patientFilter } : undefined, scopeFilter),
+        : (scopeFilter ? listLabOrders(orderFilters, scopeFilter) : listLabOrders(orderFilters)),
       listLabNames(),
       withServices ? listLabServices() : Promise.resolve([]),
     ]);
     const orders = hideCosts
-      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null, baseAmountMinor: null }))
+      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null }))
       : rawOrders;
     return NextResponse.json({ orders, labs, ...(withServices ? { labServices } : {}) });
   } catch {

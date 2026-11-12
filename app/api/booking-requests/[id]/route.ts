@@ -8,6 +8,7 @@ import {
   existingPatientForBookingRequest,
   writeAppointmentInDay,
 } from "@/lib/db";
+import { AmbiguousSharedPhonePatientError } from "@/lib/patient-scope-error";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
 import type { CapacityVerdict } from "@/lib/capacity";
 import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
@@ -71,6 +72,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       });
       const overrideReason = typeof source.overrideReason === "string"
         ? source.overrideReason.trim().slice(0, 300) : "";
+      const selectedPatientId =
+        Number.isInteger(Number(source.patientId)) && Number(source.patientId) > 0
+          ? Number(source.patientId)
+          : null;
+      const createNewPatient = source.createNewPatient === true;
       /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
       const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
       const result = await writeAppointmentInDay({
@@ -79,14 +85,28 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           const judged = await judgeBookingInDay({
             sameDay, client, date, time, durationMinutes, service,
             context: capacityContext, canOverride, overrideReason,
-            // (P2-3) مريضٌ قائم بهاتف الطلب لا يُحجز فوق موعده.
-            patientId: await existingPatientForBookingRequest(id, client),
+            // (P2-3) مريضٌ قائم بهاتف الطلب واسمه المطابق (أو المختار صراحةً) لا يُحجز فوق موعده.
+            patientId: await existingPatientForBookingRequest(id, client, {
+              patientId: selectedPatientId,
+              createNewPatient,
+            }),
           });
           if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
           if (judged.overridden) overrideState.verdict = judged.verdict;
           return { ok: true as const };
         },
-        commit: (client) => confirmBookingRequest({ id, date, time, durationMinutes }, client),
+        commit: (client) =>
+          confirmBookingRequest(
+            {
+              id,
+              date,
+              time,
+              durationMinutes,
+              patientId: selectedPatientId,
+              createNewPatient,
+            },
+            client,
+          ),
       });
       if (!result.ok) {
         return NextResponse.json(result.conflict, { status: 409 });
@@ -108,7 +128,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     return NextResponse.json({ message: "إجراء غير معروف." }, { status: 400 });
-  } catch {
+  } catch (error) {
+    if (error instanceof AmbiguousSharedPhonePatientError) {
+      return NextResponse.json(
+        {
+          code: error.code,
+          message: error.message,
+          candidates: error.candidates,
+        },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ message: "تعذّر تنفيذ الإجراء. أعد المحاولة." }, { status: 500 });
   }
 }

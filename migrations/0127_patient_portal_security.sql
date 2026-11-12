@@ -50,7 +50,6 @@ CREATE INDEX IF NOT EXISTS patient_portal_tokens_patient_purpose_idx
 
 CREATE TABLE IF NOT EXISTS patient_portal_staff_grants (
   user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  is_owner BOOLEAN NOT NULL DEFAULT FALSE,
   can_manage_portal BOOLEAN NOT NULL DEFAULT FALSE,
   can_preview_portal BOOLEAN NOT NULL DEFAULT FALSE,
   granted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,

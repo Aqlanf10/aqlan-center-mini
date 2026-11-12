@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const boundary = vi.hoisted(() => ({
-  requireSession: vi.fn(), findUserByUsername: vi.fn(), listLabOrders: vi.fn(),
+  requireSession: vi.fn(), findUserByUsername: vi.fn(), doctorOwnsPatient: vi.fn(), listLabOrders: vi.fn(),
   listLabNames: vi.fn(), listLabServices: vi.fn(), labCounts: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
@@ -89,7 +89,7 @@ describe("patient lab GET canonical query boundary", () => {
 
   it.each([false, true])("preserves doctor cost visibility = %s", async (canViewCostPrices) => {
     boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor" });
-    boundary.findUserByUsername.mockResolvedValue({ permissions: { canViewCostPrices } });
+    boundary.findUserByUsername.mockResolvedValue({ isActive: true, permissions: { canViewAllPatients: true, canViewCostPrices } });
     const response = await GET(request("?patientId=101"));
     expect(boundary.listLabOrders).toHaveBeenCalledExactlyOnceWith({ patientId: 101 });
     expect((await response.json()).orders).toEqual(canViewCostPrices
@@ -98,9 +98,15 @@ describe("patient lab GET canonical query boundary", () => {
     expect(orders.map((order) => order.costCurrency)).toEqual(["USD", "SAR", "YER"]);
   });
 
-  it("keeps doctor costs masked when the user lookup fails", async () => {
+  it("fails closed for a doctor when the user lookup fails and masks costs when unspecified", async () => {
     boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor" });
     boundary.findUserByUsername.mockRejectedValue(new Error("Synthetic lookup failure"));
+    const failedLookup = await GET(request("?patientId=101"));
+    expect(failedLookup.status).toBe(403);
+    expect(boundary.listLabOrders).not.toHaveBeenCalled();
+
+    boundary.findUserByUsername.mockResolvedValue({ isActive: true, partyId: 7, permissions: {} });
+    boundary.doctorOwnsPatient.mockResolvedValue(true);
     expect((await (await GET(request("?patientId=101"))).json()).orders)
       .toEqual(orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })));
   });

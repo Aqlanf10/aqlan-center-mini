@@ -1,10 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import { hashPassword, verifyPassword, type SessionPayload } from "./auth";
 import {
+  doctorOwnsPatient,
   ensureSchema,
   getPatient,
   getPool,
   messagingChannelWithSecret,
+  phoneLookupForms,
   recordAudit,
   recordMessageDelivery,
   updatePatient,
@@ -18,15 +20,24 @@ import {
   validatePortalLoginName,
   validatePortalPasswordChoice,
 } from "./portal";
+import {
+  canPerformOwnerOperation,
+  hasStaffCapability,
+  patientCapabilityConstraint,
+  type ResolvedStaffAccess,
+} from "./staff-capabilities";
+import { reviewLegacyStaffCapabilities } from "./staff-capabilities-legacy";
+import { inspectStaffPortalAuthority } from "./staff-owner-authority";
 
 /**
- * (<NNNN>_patient_portal_security) خدمات أمان بوابة المريض — التفعيل من الطاقم المخوّل، وروابط التفعيل/الاستعادة
+ * (0127_patient_portal_security) خدمات أمان بوابة المريض — التفعيل من الطاقم المخوّل، وروابط التفعيل/الاستعادة
  * المؤقتة أحادية الاستخدام، وإبطال الجلسات الفوري، وصلاحيات «عرض بوابة المريض» المستقلة.
  *
  * قواعد صارمة:
  * - لا تُخزَّن كلمة المرور الأصلية أو الرمز الخام أو الرابط في القاعدة أو `audit_log` أو `message_deliveries` أو السجلات.
  * - تجزئة كلمات المرور عبر `scrypt` (`hashPassword` / `verifyPassword`)، وتجزئة الرموز عبر `SHA-256`.
  * - مسار الدخول القديم برقم الملف والهاتف محذوف نهائيًا بلا أي استثناء طوارئ؛ وتُعتمد الاستعادة الحضورية الآمنة بتحديث وسيلة التواصل ورابط مؤقت أحادي الاستخدام.
+ * - هوية المالك (`isOwner`) تُقرأ حصريًا من مصدر السلطة القانونية المعتمد (`lib/staff-owner-authority.ts`) ولا تُخزَّن أو تُستنتج في جدول صلاحيات البوابة.
  */
 
 export const PORTAL_ACTIVATION_TTL_MS = 60 * 60 * 1000; // 60 دقيقة
@@ -64,6 +75,8 @@ export interface PatientPortalAccountSummary {
   pendingTokenPurpose: PortalTokenPurpose | null;
   pendingTokenExpiresAt: string | null;
   pendingTokenChannel: PortalDeliveryChannel | null;
+  hasSharedFamilyPhone: boolean;
+  sharedPhonePatientsCount: number;
 }
 
 // تجزئة وهمية ثابتة لمنع كشف وجود اسم المستخدم عبر فرق زمن فحص scrypt
@@ -95,13 +108,169 @@ export function buildPortalActionUrl(
   return `${cleanOrigin}/portal?mode=${mode}&token=${encodeURIComponent(rawToken)}`;
 }
 
-/**
- * استخراج صلاحيات الموظف الفعلية تجاه بوابة المريض:
- * - المالك (`is_owner = TRUE` أو أول مدير نشط عند الإقلاع الأول قبل تخصيص مالك صريح) يملك الإدارة والمعاينة.
- * - «عرض بوابة المريض» محصور بالمالك وبدور الإدارة (`role === 'admin'`) الحاصل على صلاحية `can_preview_portal` المستقلة.
- * - تفعيل الحسابات وإرسال روابط الاستعادة يتطلب `canManagePortal` (المالك أو موظف مخوّل صراحةً).
- */
-export async function getPortalStaffAccess(userId: number): Promise<PortalStaffAccess | null> {
+interface EvaluatedPortalStaffAuthority {
+  access: PortalStaffAccess;
+  rawCanManageGrant: boolean;
+  rawCanPreviewGrant: boolean;
+  canManageStaffGrants: boolean;
+  canonicalAccess: ResolvedStaffAccess | null;
+  note: string | null;
+  updatedAt: string | null;
+}
+
+function isPortalClinicRole(role: string): boolean {
+  return role === "admin" || role === "reception" || role === "doctor";
+}
+
+async function evaluatePortalStaffAuthorityRow(row: {
+  id: number;
+  username: string;
+  display_name: string;
+  role: string;
+  is_active: boolean;
+  permissions: unknown;
+  can_manage_portal: boolean | null;
+  can_preview_portal: boolean | null;
+  note: string | null;
+  updated_at: Date | null;
+}): Promise<EvaluatedPortalStaffAuthority> {
+  const rawCanManageGrant = row.can_manage_portal === true;
+  const rawCanPreviewGrant = row.can_preview_portal === true;
+  const note = row.note ?? null;
+  const updatedAt = row.updated_at ? row.updated_at.toISOString() : null;
+
+  if (!row.is_active) {
+    return {
+      access: {
+        userId: row.id,
+        username: row.username,
+        displayName: row.display_name,
+        role: row.role,
+        isActive: false,
+        isOwner: false,
+        canManagePortal: false,
+        canPreviewPortal: false,
+      },
+      rawCanManageGrant,
+      rawCanPreviewGrant,
+      canManageStaffGrants: false,
+      canonicalAccess: null,
+      note,
+      updatedAt,
+    };
+  }
+
+  const inspection = await inspectStaffPortalAuthority(getPool(), row.id);
+  if (inspection.mode === "canonical") {
+    const canonicalAccess = inspection.ownerAuthority?.access ?? null;
+    if (!canonicalAccess || canonicalAccess.status !== "allowed") {
+      return {
+        access: {
+          userId: row.id,
+          username: row.username,
+          displayName: row.display_name,
+          role: row.role,
+          isActive: true,
+          isOwner: false,
+          canManagePortal: false,
+          canPreviewPortal: false,
+        },
+        rawCanManageGrant,
+        rawCanPreviewGrant,
+        canManageStaffGrants: false,
+        canonicalAccess: null,
+        note,
+        updatedAt,
+      };
+    }
+
+    const isOwner =
+      row.role === "admin" &&
+      canPerformOwnerOperation(canonicalAccess, "settings.security.change");
+    const canEditPatients = patientCapabilityConstraint(canonicalAccess, "edit").kind !== "none";
+    const canViewAllPatients = patientCapabilityConstraint(canonicalAccess, "view").kind === "all";
+    const canManagePortal =
+      isPortalClinicRole(row.role) && canEditPatients && (isOwner || rawCanManageGrant);
+    const canPreviewPortal =
+      row.role === "admin" && canViewAllPatients && (isOwner || rawCanPreviewGrant);
+    const canManageStaffGrants =
+      row.role === "admin" &&
+      (isOwner || hasStaffCapability(canonicalAccess, "staff.permissions.edit"));
+
+    return {
+      access: {
+        userId: row.id,
+        username: row.username,
+        displayName: row.display_name,
+        role: row.role,
+        isActive: true,
+        isOwner,
+        canManagePortal,
+        canPreviewPortal,
+      },
+      rawCanManageGrant,
+      rawCanPreviewGrant,
+      canManageStaffGrants,
+      canonicalAccess,
+      note,
+      updatedAt,
+    };
+  }
+
+  // وضع التوافق القديم (قبل تفعيل مخطط السلطة القانونية): لا يُستنتج مالك من MIN(id) أو الدور أبدًا.
+  const legacyReview = reviewLegacyStaffCapabilities(row.role, row.permissions);
+  if (!legacyReview.ok) {
+    return {
+      access: {
+        userId: row.id,
+        username: row.username,
+        displayName: row.display_name,
+        role: row.role,
+        isActive: true,
+        isOwner: false,
+        canManagePortal: false,
+        canPreviewPortal: false,
+      },
+      rawCanManageGrant,
+      rawCanPreviewGrant,
+      canManageStaffGrants: false,
+      canonicalAccess: null,
+      note,
+      updatedAt,
+    };
+  }
+
+  const review = legacyReview.value;
+  const canManagePortal =
+    isPortalClinicRole(row.role) && review.patientEdit !== "none" && rawCanManageGrant;
+  const canPreviewPortal =
+    row.role === "admin" && review.patientRead === "all" && rawCanPreviewGrant;
+  const canManageStaffGrants =
+    row.role === "admin" && review.observedCapabilities["staff.permissions.edit"] === true;
+
+  return {
+    access: {
+      userId: row.id,
+      username: row.username,
+      displayName: row.display_name,
+      role: row.role,
+      isActive: true,
+      isOwner: false,
+      canManagePortal,
+      canPreviewPortal,
+    },
+    rawCanManageGrant,
+    rawCanPreviewGrant,
+    canManageStaffGrants,
+    canonicalAccess: null,
+    note,
+    updatedAt,
+  };
+}
+
+async function evaluatePortalStaffAuthority(
+  userId: number,
+): Promise<EvaluatedPortalStaffAuthority | null> {
   if (!Number.isInteger(userId) || userId <= 0) return null;
   await ensureSchema();
   const { rows } = await getPool().query<{
@@ -110,34 +279,22 @@ export async function getPortalStaffAccess(userId: number): Promise<PortalStaffA
     display_name: string;
     role: string;
     is_active: boolean;
-    is_owner: boolean | null;
+    permissions: unknown;
     can_manage_portal: boolean | null;
     can_preview_portal: boolean | null;
-    any_explicit_owner: boolean;
-    first_active_admin_id: number | null;
+    note: string | null;
+    updated_at: Date | null;
   }>(
     `SELECT u.id,
             u.username,
             u.display_name,
             u.role,
             u.is_active,
-            g.is_owner,
+            u.permissions,
             g.can_manage_portal,
             g.can_preview_portal,
-            EXISTS (
-              SELECT 1
-                FROM patient_portal_staff_grants g2
-                JOIN users u2 ON u2.id = g2.user_id
-               WHERE g2.is_owner = TRUE
-                 AND u2.role = 'admin'
-                 AND u2.is_active = TRUE
-            ) AS any_explicit_owner,
-            (
-              SELECT MIN(u3.id)
-                FROM users u3
-               WHERE u3.role = 'admin'
-                 AND u3.is_active = TRUE
-            ) AS first_active_admin_id
+            g.note,
+            g.updated_at
        FROM users u
        LEFT JOIN patient_portal_staff_grants g ON g.user_id = u.id
       WHERE u.id = $1
@@ -146,37 +303,47 @@ export async function getPortalStaffAccess(userId: number): Promise<PortalStaffA
   );
   const row = rows[0];
   if (!row) return null;
-  if (!row.is_active) {
-    return {
-      userId: row.id,
-      username: row.username,
-      displayName: row.display_name,
-      role: row.role,
-      isActive: false,
-      isOwner: false,
-      canManagePortal: false,
-      canPreviewPortal: false,
-    };
-  }
-  const isBootstrapOwner =
-    !row.any_explicit_owner &&
-    row.role === "admin" &&
-    row.first_active_admin_id === row.id;
-  const isOwner = row.role === "admin" && (row.is_owner === true || isBootstrapOwner);
-  const canManagePortal = isOwner || row.can_manage_portal === true;
-  const canPreviewPortal =
-    row.role === "admin" && (isOwner || row.can_preview_portal === true);
+  return evaluatePortalStaffAuthorityRow(row);
+}
 
-  return {
-    userId: row.id,
-    username: row.username,
-    displayName: row.display_name,
-    role: row.role,
-    isActive: true,
-    isOwner,
-    canManagePortal,
-    canPreviewPortal,
-  };
+async function canStaffManagePatientPortal(
+  authority: EvaluatedPortalStaffAuthority,
+  actorSession: SessionPayload,
+  patientId: number,
+): Promise<boolean> {
+  if (!authority.access.isActive || !authority.access.canManagePortal) return false;
+  if (!(await canAccessPatient(actorSession, patientId))) return false;
+  if (authority.canonicalAccess) {
+    const constraint = patientCapabilityConstraint(authority.canonicalAccess, "edit");
+    if (constraint.kind === "none") return false;
+    if (constraint.kind === "own") {
+      return doctorOwnsPatient(constraint.clinicianPartyId, patientId);
+    }
+  }
+  return true;
+}
+
+export async function countPatientsSharingPhone(
+  phone: string | null | undefined,
+): Promise<number> {
+  const forms = phoneLookupForms(phone);
+  if (forms.length === 0) return 0;
+  const { rows: [row] } = await getPool().query<{ c: number }>(
+    `SELECT COUNT(*)::int AS c FROM patients WHERE phone = ANY($1::text[])`,
+    [forms],
+  );
+  return row?.c ?? 0;
+}
+
+/**
+ * استخراج صلاحيات الموظف الفعلية تجاه بوابة المريض:
+ * - هوية المالك (`isOwner`) تُقرأ حصريًا من مصدر السلطة القانونية المعتمد (`lib/staff-owner-authority.ts`) ولا تُستنتج من `MIN(users.id)` أو الدور.
+ * - الصلاحية الفعلية تقاطعٌ إلزامي بين جدول منح البوابة (`patient_portal_staff_grants`) ونواة الصلاحيات الموحدة (`staff-capabilities` / `reviewLegacyStaffCapabilities`).
+ * - «عرض بوابة المريض» محصور بالمالك المعتمد وبدور الإدارة (`role === 'admin'`) الحاصل على منحة `can_preview_portal` مع نطاق قراءة كل المرضى.
+ */
+export async function getPortalStaffAccess(userId: number): Promise<PortalStaffAccess | null> {
+  const evaluated = await evaluatePortalStaffAuthority(userId);
+  return evaluated ? evaluated.access : null;
 }
 
 export interface PortalStaffGrantRow {
@@ -200,68 +367,39 @@ export async function listPortalStaffGrants(): Promise<PortalStaffGrantRow[]> {
     display_name: string;
     role: string;
     is_active: boolean;
-    is_owner: boolean | null;
+    permissions: unknown;
     can_manage_portal: boolean | null;
     can_preview_portal: boolean | null;
     note: string | null;
     updated_at: Date | null;
-    any_explicit_owner: boolean;
-    first_active_admin_id: number | null;
   }>(
-    `WITH owner_state AS (
-       SELECT EXISTS (
-                SELECT 1
-                  FROM patient_portal_staff_grants g2
-                  JOIN users u2 ON u2.id = g2.user_id
-                 WHERE g2.is_owner = TRUE
-                   AND u2.role = 'admin'
-                   AND u2.is_active = TRUE
-              ) AS any_explicit_owner,
-              (
-                SELECT MIN(u3.id)
-                  FROM users u3
-                 WHERE u3.role = 'admin'
-                   AND u3.is_active = TRUE
-              ) AS first_active_admin_id
-     )
-     SELECT u.id,
+    `SELECT u.id,
             u.username,
             u.display_name,
             u.role,
             u.is_active,
-            g.is_owner,
+            u.permissions,
             g.can_manage_portal,
             g.can_preview_portal,
             g.note,
-            g.updated_at,
-            o.any_explicit_owner,
-            o.first_active_admin_id
+            g.updated_at
        FROM users u
-       CROSS JOIN owner_state o
        LEFT JOIN patient_portal_staff_grants g ON g.user_id = u.id
       ORDER BY u.is_active DESC, u.id ASC`,
   );
-  return rows.map((row) => {
-    const bootstrapOwner =
-      row.is_active &&
-      !row.any_explicit_owner &&
-      row.role === "admin" &&
-      row.first_active_admin_id === row.id;
-    const isOwner = row.is_active && row.role === "admin" && (row.is_owner === true || bootstrapOwner);
-    return {
-      userId: row.id,
-      username: row.username,
-      displayName: row.display_name,
-      role: row.role,
-      isActive: row.is_active,
-      isOwner,
-      canManagePortal: row.is_active && (isOwner || row.can_manage_portal === true),
-      canPreviewPortal:
-        row.is_active && row.role === "admin" && (isOwner || row.can_preview_portal === true),
-      note: row.note,
-      updatedAt: row.updated_at ? row.updated_at.toISOString() : null,
-    };
-  });
+  const evaluated = await Promise.all(rows.map((row) => evaluatePortalStaffAuthorityRow(row)));
+  return evaluated.map((item) => ({
+    userId: item.access.userId,
+    username: item.access.username,
+    displayName: item.access.displayName,
+    role: item.access.role,
+    isActive: item.access.isActive,
+    isOwner: item.access.isOwner,
+    canManagePortal: item.access.canManagePortal,
+    canPreviewPortal: item.access.canPreviewPortal,
+    note: item.note,
+    updatedAt: item.updatedAt,
+  }));
 }
 
 export async function updatePortalStaffGrant(input: {
@@ -272,94 +410,79 @@ export async function updatePortalStaffGrant(input: {
   canPreviewPortal: boolean;
   note?: string | null;
 }): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
-  const actorAccess = await getPortalStaffAccess(input.actorSession.userId);
-  if (!actorAccess || !actorAccess.isActive) {
+  const actorAuthority = await evaluatePortalStaffAuthority(input.actorSession.userId);
+  if (!actorAuthority || !actorAuthority.access.isActive) {
     return { ok: false, status: 401, message: "انتهت الجلسة." };
   }
-  if (actorAccess.role !== "admin" || (!actorAccess.isOwner && !actorAccess.canManagePortal)) {
+  const actorAccess = actorAuthority.access;
+  if (actorAccess.role !== "admin" || !actorAuthority.canManageStaffGrants) {
     return { ok: false, status: 403, message: "غير مصرّح لك بإدارة صلاحيات بوابة المريض." };
   }
 
-  const targetAccess = await getPortalStaffAccess(input.targetUserId);
-  if (!targetAccess) {
-    return { ok: false, status: 404, message: "الموظف المطلوب غير موجود." };
-  }
-
-  const nextIsOwner = input.isOwner !== undefined ? Boolean(input.isOwner) : targetAccess.isOwner;
-  // منح/سحب صفة المالك أو صلاحية «عرض بوابة المريض» المستقلة محصور بالمالك وحده (لا ترقية ذاتية لمدير غير مالك).
-  if (!actorAccess.isOwner) {
-    if (nextIsOwner !== targetAccess.isOwner || input.canPreviewPortal !== targetAccess.canPreviewPortal) {
-      return {
-        ok: false,
-        status: 403,
-        message: "منح صلاحية المالك أو «عرض بوابة المريض» محصور بمالك العيادة فقط.",
-      };
-    }
-  }
-
-  if ((nextIsOwner || input.canPreviewPortal) && targetAccess.role !== "admin") {
+  if (input.isOwner !== undefined) {
     return {
       ok: false,
-      status: 400,
-      message: "صلاحية المالك و«عرض بوابة المريض» تُمنح لحسابات الإدارة فقط.",
+      status: 403,
+      message:
+        "هوية مالك العيادة تُدار حصريًا عبر سجل سلطة الهوية القانونية المعتمد ولا تُعدَّل من جدول صلاحيات البوابة.",
     };
   }
 
-  const pool = getPool();
-  // تثبيت صف المالك الأول في الجدول إن كان في وضع الإقلاع قبل أي تعديل
-  if (actorAccess.isOwner) {
-    await pool.query(
-      `INSERT INTO patient_portal_staff_grants (user_id, is_owner, can_manage_portal, can_preview_portal, granted_by_user_id, note)
-       VALUES ($1, TRUE, TRUE, TRUE, $1, 'تثبيت صلاحية المالك')
-       ON CONFLICT (user_id) DO NOTHING`,
-      [actorAccess.userId],
-    );
+  const targetAuthority = await evaluatePortalStaffAuthority(input.targetUserId);
+  if (!targetAuthority) {
+    return { ok: false, status: 404, message: "الموظف المطلوب غير موجود." };
   }
+  const targetAccess = targetAuthority.access;
 
-  if (targetAccess.isOwner && !nextIsOwner) {
-    const { rows: [ownersCount] } = await pool.query<{ n: number }>(
-      `SELECT COUNT(*)::int AS n
-         FROM patient_portal_staff_grants g
-         JOIN users u ON u.id = g.user_id
-        WHERE g.is_owner = TRUE
-          AND u.role = 'admin'
-          AND u.is_active = TRUE
-          AND u.id <> $1`,
-      [input.targetUserId],
-    );
-    if ((ownersCount?.n ?? 0) === 0) {
+  // منح/سحب صلاحية «عرض بوابة المريض» المستقلة أو تعديل سجل المالك محصور بالمالك المعتمد وحده.
+  if (!actorAccess.isOwner) {
+    if (
+      targetAccess.isOwner ||
+      Boolean(input.canPreviewPortal) !== targetAuthority.rawCanPreviewGrant ||
+      Boolean(input.canPreviewPortal) !== targetAccess.canPreviewPortal
+    ) {
       return {
         ok: false,
-        status: 400,
-        message: "لا يمكن إزالة آخر مالك نشط للعيادة.",
+        status: 403,
+        message: "منح أو تعديل صلاحية «عرض بوابة المريض» محصور بمالك العيادة المعتمد فقط.",
       };
     }
   }
 
-  const cleanNote = typeof input.note === "string" ? input.note.trim().slice(0, 300) || null : null;
-  const finalManage = nextIsOwner ? true : Boolean(input.canManagePortal);
-  const finalPreview = nextIsOwner ? true : Boolean(input.canPreviewPortal);
+  if (input.canPreviewPortal && targetAccess.role !== "admin") {
+    return {
+      ok: false,
+      status: 400,
+      message: "صلاحية «عرض بوابة المريض» تُمنح لحسابات الإدارة فقط.",
+    };
+  }
 
-  await pool.query(
+  if (input.canManagePortal && !isPortalClinicRole(targetAccess.role)) {
+    return {
+      ok: false,
+      status: 400,
+      message: "صلاحية إدارة حسابات البوابة تُمنح لأدوار الإدارة أو الاستقبال أو الطبيب فقط.",
+    };
+  }
+
+  const cleanNote = typeof input.note === "string" ? input.note.trim().slice(0, 300) || null : null;
+  const finalManage = targetAccess.isOwner ? true : Boolean(input.canManagePortal);
+  const finalPreview = targetAccess.isOwner ? true : Boolean(input.canPreviewPortal);
+
+  await getPool().query(
     `INSERT INTO patient_portal_staff_grants (
-       user_id, is_owner, can_manage_portal, can_preview_portal, granted_by_user_id, note, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       user_id, can_manage_portal, can_preview_portal, granted_by_user_id, note, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, NOW())
      ON CONFLICT (user_id) DO UPDATE SET
-       is_owner = EXCLUDED.is_owner,
        can_manage_portal = EXCLUDED.can_manage_portal,
        can_preview_portal = EXCLUDED.can_preview_portal,
        granted_by_user_id = EXCLUDED.granted_by_user_id,
        note = EXCLUDED.note,
        updated_at = NOW()`,
-    [
-      input.targetUserId,
-      nextIsOwner,
-      finalManage,
-      finalPreview,
-      actorAccess.userId,
-      cleanNote,
-    ],
+    [input.targetUserId, finalManage, finalPreview, actorAccess.userId, cleanNote],
   );
+
+  const refreshedTarget = await evaluatePortalStaffAuthority(input.targetUserId);
 
   await recordAudit({
     action: "portal.staff_grant.update",
@@ -374,7 +497,11 @@ export async function updatePortalStaffGrant(input: {
         canPreviewPortal: targetAccess.canPreviewPortal,
       },
       next: {
-        isOwner: nextIsOwner,
+        isOwner: refreshedTarget?.access.isOwner ?? targetAccess.isOwner,
+        canManagePortal: refreshedTarget?.access.canManagePortal ?? finalManage,
+        canPreviewPortal: refreshedTarget?.access.canPreviewPortal ?? finalPreview,
+      },
+      storedGrants: {
         canManagePortal: finalManage,
         canPreviewPortal: finalPreview,
       },
@@ -391,6 +518,10 @@ export async function getPatientPortalAccountSummary(
   patientId: number,
 ): Promise<PatientPortalAccountSummary> {
   await ensureSchema();
+  const patient = await getPatient(patientId);
+  const sharedPhonePatientsCount = await countPatientsSharingPhone(patient?.phone);
+  const hasSharedFamilyPhone = sharedPhonePatientsCount > 1;
+
   const { rows: [account] } = await getPool().query<{
     login_name: string;
     status: PortalAccountStatus;
@@ -442,6 +573,8 @@ export async function getPatientPortalAccountSummary(
       pendingTokenPurpose: pendingToken?.purpose ?? null,
       pendingTokenExpiresAt: pendingToken ? pendingToken.expires_at.toISOString() : null,
       pendingTokenChannel: pendingToken?.delivery_channel ?? null,
+      hasSharedFamilyPhone,
+      sharedPhonePatientsCount,
     };
   }
 
@@ -465,6 +598,8 @@ export async function getPatientPortalAccountSummary(
     pendingTokenPurpose: pendingToken?.purpose ?? null,
     pendingTokenExpiresAt: pendingToken ? pendingToken.expires_at.toISOString() : null,
     pendingTokenChannel: pendingToken?.delivery_channel ?? null,
+    hasSharedFamilyPhone,
+    sharedPhonePatientsCount,
   };
 }
 
@@ -507,14 +642,15 @@ export async function issuePortalActivation(
   },
   sendOptions?: PortalOutboundOptions,
 ): Promise<PortalIssueLinkResult> {
-  const access = await getPortalStaffAccess(input.actorSession.userId);
-  if (!access || !access.isActive) {
+  const authority = await evaluatePortalStaffAuthority(input.actorSession.userId);
+  if (!authority || !authority.access.isActive) {
     return { ok: false, status: 401, message: "انتهت الجلسة." };
   }
+  const access = authority.access;
   if (!access.canManagePortal) {
     return { ok: false, status: 403, message: "غير مصرّح لك بتفعيل حسابات بوابة المرضى." };
   }
-  if (!(await canAccessPatient(input.actorSession, input.patientId))) {
+  if (!(await canStaffManagePatientPortal(authority, input.actorSession, input.patientId))) {
     return { ok: false, status: 403, message: "غير مصرّح لك بالوصول إلى ملف هذا المريض." };
   }
 
@@ -533,12 +669,23 @@ export async function issuePortalActivation(
     return { ok: false, status: 400, message: "وسيلة إرسال التفعيل غير صالحة." };
   }
 
+  const sharedPhonePatientsCount = await countPatientsSharingPhone(patient.phone);
+  const hasSharedFamilyPhone = sharedPhonePatientsCount > 1;
   const note = typeof input.verificationNote === "string" ? input.verificationNote.trim().slice(0, 500) : "";
   if (input.deliveryChannel === "in_person" && note.length < 8) {
     return {
       ok: false,
       status: 400,
       message: "التفعيل الحضوري المباشر يتطلّب تدوين ملاحظة التحقق من هوية المريض حضوريًا (8 أحرف على الأقل).",
+    };
+  }
+  if (hasSharedFamilyPhone && note.length < 8) {
+    return {
+      ok: false,
+      status: 400,
+      code: "shared_phone_verification_required",
+      message:
+        "هذا الهاتف مشترك بين أكثر من ملف عائلي؛ يجب توثيق التحقق من اسم المريض ورقم ملفه وهويته (8 أحرف على الأقل) قبل إصدار الرابط.",
     };
   }
   if (input.deliveryChannel !== "in_person" && (!patient.phone || patient.phone.replace(/\D/g, "").length < 9)) {
@@ -652,6 +799,7 @@ export async function issuePortalActivation(
   if (input.deliveryChannel !== "in_person") {
     const bodyText =
       `مرحباً ${patient.fullName}، تم تفعيل حسابكم في بوابة المريض بمركز عقلان.\n` +
+      `رقم الملف: ${patient.patientNumber}\n` +
       `اسم المستخدم: ${normalizedLogin}\n` +
       `لتعيين كلمة المرور الخاصة بكم (الرابط صالح لمدة 60 دقيقة ويُستخدم مرة واحدة فقط):\n` +
       `${actionUrl}`;
@@ -709,6 +857,7 @@ export async function issuePortalActivation(
       loginName: normalizedLogin,
       deliveryChannel: input.deliveryChannel,
       expiresAt: expiresAt.toISOString(),
+      ...(hasSharedFamilyPhone ? { sharedFamilyPhone: true, sharedPhonePatientsCount } : {}),
       ...(note ? { verificationNote: note } : {}),
     },
     actor: access.username,
@@ -744,14 +893,15 @@ export async function issuePortalPasswordReset(
   },
   sendOptions?: PortalOutboundOptions,
 ): Promise<PortalIssueLinkResult> {
-  const access = await getPortalStaffAccess(input.actorSession.userId);
-  if (!access || !access.isActive) {
+  const authority = await evaluatePortalStaffAuthority(input.actorSession.userId);
+  if (!authority || !authority.access.isActive) {
     return { ok: false, status: 401, message: "انتهت الجلسة." };
   }
+  const access = authority.access;
   if (!access.canManagePortal) {
     return { ok: false, status: 403, message: "غير مصرّح لك بإصدار روابط استعادة بوابة المرضى." };
   }
-  if (!(await canAccessPatient(input.actorSession, input.patientId))) {
+  if (!(await canStaffManagePatientPortal(authority, input.actorSession, input.patientId))) {
     return { ok: false, status: 403, message: "غير مصرّح لك بالوصول إلى ملف هذا المريض." };
   }
 
@@ -793,6 +943,8 @@ export async function issuePortalPasswordReset(
     return { ok: false, status: 400, message: "وسيلة إرسال الاستعادة غير صالحة." };
   }
 
+  const sharedPhonePatientsCount = await countPatientsSharingPhone(patient.phone);
+  const hasSharedFamilyPhone = sharedPhonePatientsCount > 1;
   const note = typeof input.verificationNote === "string" ? input.verificationNote.trim().slice(0, 500) : "";
   const isInPersonFlow = Boolean(input.inPersonVerified) || input.deliveryChannel === "in_person";
   let contactPhoneUpdated = false;
@@ -855,6 +1007,15 @@ export async function issuePortalPasswordReset(
         message: "يجب تأكيد رقم الهاتف المسجّل في ملف المريض بعد التحقق من هويته قبل إرسال رابط الاستعادة.",
       };
     }
+    if (hasSharedFamilyPhone && note.length < 8) {
+      return {
+        ok: false,
+        status: 400,
+        code: "shared_phone_verification_required",
+        message:
+          "هذا الهاتف مشترك بين أكثر من ملف عائلي؛ لا يكفي تأكيد الهاتف وحده، بل يجب توثيق التحقق من هوية صاحب الملف ورقم ملفه (8 أحرف على الأقل).",
+      };
+    }
     if (note.length < 5) {
       return {
         ok: false,
@@ -912,6 +1073,7 @@ export async function issuePortalPasswordReset(
   if (input.deliveryChannel !== "in_person") {
     const bodyText =
       `مرحباً ${patient.fullName}، بناءً على طلبكم بعد التحقق من هويتكم في مركز عقلان:\n` +
+      `رقم الملف: ${patient.patientNumber}\n` +
       `اسم المستخدم: ${account.login_name}\n` +
       `رابط إعادة تعيين كلمة المرور (صالح لمدة 30 دقيقة ويُستخدم مرة واحدة فقط):\n` +
       `${actionUrl}`;
@@ -975,6 +1137,7 @@ export async function issuePortalPasswordReset(
       contactPhoneUpdated,
       expiresAt: expiresAt.toISOString(),
       verificationNote: note,
+      ...(hasSharedFamilyPhone ? { sharedFamilyPhone: true, sharedPhonePatientsCount } : {}),
     },
     actor: access.username,
     actorRole: access.role,
@@ -1000,12 +1163,13 @@ export async function setPortalAccountStatusByStaff(input: {
   action: "disable" | "enable" | "revoke_sessions";
   reason?: string | null;
 }): Promise<{ ok: true; message: string } | { ok: false; status: number; message: string }> {
-  const access = await getPortalStaffAccess(input.actorSession.userId);
-  if (!access || !access.isActive) return { ok: false, status: 401, message: "انتهت الجلسة." };
+  const authority = await evaluatePortalStaffAuthority(input.actorSession.userId);
+  if (!authority || !authority.access.isActive) return { ok: false, status: 401, message: "انتهت الجلسة." };
+  const access = authority.access;
   if (!access.canManagePortal) {
     return { ok: false, status: 403, message: "غير مصرّح لك بإدارة حساب بوابة هذا المريض." };
   }
-  if (!(await canAccessPatient(input.actorSession, input.patientId))) {
+  if (!(await canStaffManagePatientPortal(authority, input.actorSession, input.patientId))) {
     return { ok: false, status: 403, message: "غير مصرّح لك بالوصول إلى ملف هذا المريض." };
   }
 
@@ -1422,6 +1586,7 @@ export async function revokePortalSessionByPatient(patientId: number): Promise<v
  */
 export async function verifyLivePortalPatientSession(payload: {
   patientId: number;
+  patientNumber?: string;
   credentialVersion?: number;
   issuedAt?: number;
   phoneFingerprint?: string | null;
@@ -1453,6 +1618,9 @@ export async function verifyLivePortalPatientSession(payload: {
   );
   if (!row) return null;
   if (row.status !== "active") return null;
+  if (payload.patientNumber !== undefined && row.patient_number !== payload.patientNumber) {
+    return null;
+  }
   if (row.credential_version !== payload.credentialVersion) return null;
   if (row.sessions_revoked_at && row.sessions_revoked_at.getTime() > payload.issuedAt) {
     return null;
@@ -1475,9 +1643,21 @@ export interface PortalMigrationReadinessSummary {
   pendingAccounts: number;
   disabledAccounts: number;
   legacyLoginsLast7Days: number;
+  portalLegacySuccessTotal: number;
+  portalLegacyFailureTotal: number;
+  portalLegacyBlockedTotal: number;
+  auditLogEarliestAt: string | null;
+  intakeFormsTotal: number;
+  appointmentsConfirmedByPatientTotal: number;
+  portalMessagesTotal: number;
+  provenanceCaveat: string;
 }
 
-/** استعلام قراءة فقط آمن (بلا بيانات مرضى) للتحقق من الجاهزية والبيانات بعد الحذف النهائي للدخول القديم. */
+/**
+ * استعلام قراءة فقط آمن (بلا أسماء أو هواتف أو معرّفات مرضى) لفحص الجاهزية وأثر الاستخدام التاريخي للبوابة.
+ * تنبيه صريح: العدّ التجميعي وحده لا يثبت مصدر كل صف تاريخي (تجربة داخلية من الطاقم أم مريض فعلي) ولا بديل
+ * عن التحقق التشغيلي المعتمد من المالك قبل أي قرار تواصلي مع المرضى.
+ */
 export async function getPortalMigrationReadinessSummary(): Promise<PortalMigrationReadinessSummary> {
   await ensureSchema();
   const { rows: [row] } = await getPool().query<{
@@ -1487,6 +1667,13 @@ export async function getPortalMigrationReadinessSummary(): Promise<PortalMigrat
     pending_accounts: number;
     disabled_accounts: number;
     legacy_logins_7d: number;
+    legacy_success_total: number;
+    legacy_failure_total: number;
+    legacy_blocked_total: number;
+    audit_earliest_at: Date | null;
+    intake_forms_total: number;
+    appointments_confirmed_patient_total: number;
+    portal_messages_total: number;
   }>(
     `SELECT (SELECT COUNT(*)::int FROM patients) AS total_patients,
             (SELECT COUNT(*)::int FROM patient_portal_accounts) AS total_accounts,
@@ -1496,7 +1683,24 @@ export async function getPortalMigrationReadinessSummary(): Promise<PortalMigrat
             (SELECT COUNT(*)::int FROM audit_log
               WHERE action = 'portal.login'
                 AND details ->> 'ok' = 'true'
-                AND created_at >= NOW() - INTERVAL '7 days') AS legacy_logins_7d`,
+                AND COALESCE(details ->> 'method', 'legacy_phone') <> 'username_password'
+                AND created_at >= NOW() - INTERVAL '7 days') AS legacy_logins_7d,
+            (SELECT COUNT(*)::int FROM audit_log
+              WHERE action = 'portal.login'
+                AND details ->> 'ok' = 'true'
+                AND COALESCE(details ->> 'method', 'legacy_phone') <> 'username_password') AS legacy_success_total,
+            (SELECT COUNT(*)::int FROM audit_log
+              WHERE action = 'portal.login'
+                AND details ->> 'ok' = 'false'
+                AND COALESCE(details ->> 'method', 'legacy_phone') <> 'username_password') AS legacy_failure_total,
+            (SELECT COUNT(*)::int FROM audit_log
+              WHERE action = 'portal.login.legacy_blocked') AS legacy_blocked_total,
+            (SELECT MIN(created_at) FROM audit_log) AS audit_earliest_at,
+            (SELECT COUNT(*)::int FROM patient_intake_forms) AS intake_forms_total,
+            (SELECT COUNT(*)::int FROM appointments
+              WHERE patient_confirmed_at IS NOT NULL) AS appointments_confirmed_patient_total,
+            (SELECT COUNT(*)::int FROM messages
+              WHERE sender_type = 'patient') AS portal_messages_total`,
   );
   return {
     totalPatients: row?.total_patients ?? 0,
@@ -1505,5 +1709,14 @@ export async function getPortalMigrationReadinessSummary(): Promise<PortalMigrat
     pendingAccounts: row?.pending_accounts ?? 0,
     disabledAccounts: row?.disabled_accounts ?? 0,
     legacyLoginsLast7Days: row?.legacy_logins_7d ?? 0,
+    portalLegacySuccessTotal: row?.legacy_success_total ?? 0,
+    portalLegacyFailureTotal: row?.legacy_failure_total ?? 0,
+    portalLegacyBlockedTotal: row?.legacy_blocked_total ?? 0,
+    auditLogEarliestAt: row?.audit_earliest_at ? row.audit_earliest_at.toISOString() : null,
+    intakeFormsTotal: row?.intake_forms_total ?? 0,
+    appointmentsConfirmedByPatientTotal: row?.appointments_confirmed_patient_total ?? 0,
+    portalMessagesTotal: row?.portal_messages_total ?? 0,
+    provenanceCaveat:
+      "الأعداد التجميعية وحدها لا تثبت أن السجل أنشأه مريض فعلي لا فحص داخلي، كما تعتمد تغطية audit_log على أقدم سجل محفوظ.",
   };
 }

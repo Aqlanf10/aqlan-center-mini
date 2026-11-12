@@ -24,7 +24,7 @@ interface ReadinessSummary {
 }
 
 export default function PatientPortalSecuritySettingsPage() {
-  const [me, setMe] = useState<{ isOwner: boolean; canManagePortal: boolean } | null>(null);
+  const [me, setMe] = useState<{ isOwner: boolean; canManagePortal: boolean; role?: string } | null>(null);
   const [grants, setGrants] = useState<GrantRow[]>([]);
   const [readiness, setReadiness] = useState<ReadinessSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +50,7 @@ export default function PatientPortalSecuritySettingsPage() {
     void load();
   }, [load]);
 
-  const toggleGrant = async (row: GrantRow, patch: Partial<Pick<GrantRow, "canManagePortal" | "canPreviewPortal" | "isOwner">>) => {
+  const toggleGrant = async (row: GrantRow, patch: Partial<Pick<GrantRow, "canManagePortal" | "canPreviewPortal">>) => {
     setSavingId(row.userId);
     setError(null);
     try {
@@ -59,7 +59,6 @@ export default function PatientPortalSecuritySettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: row.userId,
-          isOwner: patch.isOwner ?? row.isOwner,
           canManagePortal: patch.canManagePortal ?? row.canManagePortal,
           canPreviewPortal: patch.canPreviewPortal ?? row.canPreviewPortal,
         }),
@@ -142,7 +141,11 @@ export default function PatientPortalSecuritySettingsPage() {
                   <input
                     type="checkbox"
                     checked={row.canManagePortal}
-                    disabled={savingId === row.userId || row.isOwner || !me?.canManagePortal}
+                    disabled={
+                      savingId === row.userId ||
+                      row.isOwner ||
+                      (!me?.isOwner && me?.role !== "admin")
+                    }
                     onChange={(e) => void toggleGrant(row, { canManagePortal: e.target.checked })}
                   />
                 </td>

@@ -63,7 +63,7 @@ migrations/
   0041_invoice_clinical_linkage.sql ← الربط السريري للفاتورة: مفتاح إعادة للفاتورة، رابط البند المالي الحي (billed_invoice_id)، نسب سطر الفاتورة إلى بنده عبر التصحيحات (invoice_items.plan_item_id)، ومصدر البند والحالة (origin) — أعمدة قابلة للفراغ بلا تعبئة (INV-LINK B)
   0042_legacy_treatment_agreements.sql ← العلاج السابق للنظام: جدول legacy_treatment_agreements للاتفاق التاريخي (المتفق والمدفوع قبل النظام والمتبقي عند البداية بعملته وتاريخه، وبنده وحالته، وصلته بصف تاريخ الرصيد الافتتاحي) — المتبقي وحده رصيد افتتاحي، بلا فاتورة أو إيصال؛ إلحاقي بحارس لا يسمح إلا بالإبطال، وفهارس تمنع اتفاقين حيّين لنفس (مريض، خدمة، سن) أو لنفس البند — جدول جديد بلا تعديل لقائم (INV-LINK LEGACY)
   0043_legacy_treatment_coverage.sql   ← لقطة التغطية الثابتة للعلاج التاريخي: legacy_treatment_coverage_snapshots (صف واحد لكل اتفاق: نمط الموقع، والأسنان، والنطاق، والأسطح) مع دالة التحقق aqlan_legacy_coverage_site_valid حسب فئة الخدمة، وحارس يطابق الخدمة والسن المرجعي للاتفاق ويرفض التعديل والحذف المستقل — إضافية، بلا تعبئة للصفوف القديمة ولا مال ولا موافقة (INV-LINK LEGACY)
-  0127_patient_portal_security.sql     ← تأمين بوابة المريض: حسابات المرضى المفعّلة من الطاقم المخوّل (patient_portal_accounts)، ورموز التفعيل والاستعادة المؤقتة أحادية الاستخدام ببصمة SHA-256 فقط (patient_portal_tokens)، وصلاحيات الإدارة المستقلة للمعاينة الإدارية (patient_portal_staff_grants)
+  0127_patient_portal_security.sql     ← تأمين بوابة المريض: حسابات المرضى المفعّلة من الطاقم المخوّل (patient_portal_accounts)، ورموز التفعيل والاستعادة المؤقتة أحادية الاستخدام ببصمة SHA-256 فقط (patient_portal_tokens)، وصلاحيات الإدارة المستقلة (patient_portal_staff_grants بلا عمود ملكية محلي — هوية المالك من السلطة القانونية الموحدة حصريًا)
 ```
 
 ## إضافة HR في فرع التكامل المحلي
@@ -621,3 +621,21 @@ Application shade edits commit their audit record in the same transaction and
 use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
+
+### 0127_patient_portal_security.sql
+
+Adds the three additive patient-portal security tables (`patient_portal_accounts`,
+`patient_portal_tokens`, and `patient_portal_staff_grants`) with SHA-256 checksum
+`f8771647e3a149536af80bc54439fef7cd6bb1bc750707a87c51f9d336de535f`, byte-identical
+to `PATIENT_PORTAL_SECURITY_SQL` in `lib/patient-portal-security-schema.ts`.
+Reserved after cross-branch coordination (`0124..0125` Orthodontics, `0126`
+Commissions, `0127` Patient Portal Security, leaving `0128+` for Expenses).
+
+Passwords use `scrypt` only; single-use activation and recovery tokens store only
+64-char SHA-256 digests (`token_hash`). `patient_portal_staff_grants` intentionally
+contains no `is_owner` column: clinic owner authority is resolved strictly from
+the canonical staff authority tables (`staff_authority_control` + `staff_identity_*`)
+and intersected with unified staff capabilities. Tested on disposable PostgreSQL 18.6
+both from fresh baseline/runtime paths and by upgrading a populated Staging
+(`779bf35b`, `0001..0093`) database and co-applying `0094..0127`. Neither this
+listing nor CI authorizes a Production deploy without Owner approval.

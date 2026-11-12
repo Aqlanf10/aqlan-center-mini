@@ -1,6 +1,7 @@
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import type { SessionPayload } from "./auth";
 import { canAccessPatient, PatientOutOfScopeError, resolveRestrictedDoctorScope } from "./patient-access";
+import { AmbiguousSharedPhonePatientError, type SharedPhonePatientCandidate } from "./patient-scope-error";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
 import { PATIENT_PORTAL_SECURITY_SQL } from "./patient-portal-security-schema";
@@ -2632,14 +2633,49 @@ export async function addVisit(input: {
             throw new PatientOutOfScopeError("هذا المريض خارج نطاق صلاحيتك السريرية.");
           }
         } else if (input.patientPhone) {
-          const { rows: matched } = await client.query<{ id: number }>(
-            `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
-            [phoneLookupForms(input.patientPhone)],
-          );
-          if (matched[0] && !(await doctorOwnsPatient(scope.doctorPartyId, matched[0].id, client))) {
-            throw new PatientOutOfScopeError("رقم الهاتف يخص ملف مريض خارج نطاق صلاحيتك؛ يُفتح وصوله عبر الاستقبال.");
+          const matched = await queryPatientsSharingPhone(client, input.patientPhone);
+          if (matched.length >= 1) {
+            const ownedMatches: SharedPhonePatientCandidate[] = [];
+            for (const candidate of matched) {
+              if (await doctorOwnsPatient(scope.doctorPartyId, candidate.id, client)) {
+                ownedMatches.push(candidate);
+              }
+            }
+            if (ownedMatches.length === 0) {
+              throw new PatientOutOfScopeError(
+                "رقم الهاتف يخص ملف مريض خارج نطاق صلاحيتك؛ يُفتح وصوله أو ملف فرد العائلة عبر الاستقبال.",
+              );
+            }
+            if (matched.length > 1) {
+              throw new AmbiguousSharedPhonePatientError(
+                "هذا الهاتف مشترك بين أكثر من ملف عائلي؛ لا تُحدَّد الهوية بالهاتف وحده — افتح الزيارة باختيار الملف الصحيح بعد التحقق أو عبر الاستقبال.",
+                ownedMatches,
+              );
+            }
+            if (normalizeName(ownedMatches[0].fullName) !== normalizeName(input.patientName)) {
+              throw new AmbiguousSharedPhonePatientError(
+                `رقم الهاتف مسجّل لملف آخر باسم «${ownedMatches[0].fullName}»؛ لا تُحدَّد الهوية بالهاتف وحده — يُتحقق من الهوية ويُربط الملف الصحيح عبر الاستقبال.`,
+                ownedMatches,
+              );
+            }
           }
         }
+      } else if (!input.patientId && input.patientPhone) {
+        const matched = await queryPatientsSharingPhone(client, input.patientPhone);
+        if (matched.length > 1) {
+          throw new AmbiguousSharedPhonePatientError(
+            "هذا الهاتف مشترك بين أكثر من ملف عائلي؛ لا تُحدَّد الهوية بالهاتف وحده — اختر الملف الصحيح بعد التحقق من هوية المريض أو أنشئ ملفًا مستقلًا لفرد العائلة الجديد أولًا.",
+            matched,
+          );
+        }
+      }
+    } else if (!input.patientId && input.patientPhone) {
+      const matched = await queryPatientsSharingPhone(client, input.patientPhone);
+      if (matched.length > 1) {
+        throw new AmbiguousSharedPhonePatientError(
+          "هذا الهاتف مشترك بين أكثر من ملف عائلي؛ لا تُحدَّد الهوية بالهاتف وحده — اختر الملف الصحيح بعد التحقق من هوية المريض أو أنشئ ملفًا مستقلًا لفرد العائلة الجديد أولًا.",
+          matched,
+        );
       }
     }
     /* (LIVE-4) مريضٌ بملفٍّ لا يُفتح له صفٌّ ثانٍ وهو في الطابور؛ المشي بلا ملفٍّ لا يُعرف
@@ -2998,6 +3034,34 @@ export async function deleteVisit(
  * والبحث بالرقم لا بالاسم: «عبدالله محمد» و«عبد الله محمد» شخص واحد بسجلّين.
  * وتُستدعى **داخل معاملة الطرف المستدعي** فتسقط معه إن سقط.
  */
+export { AmbiguousSharedPhonePatientError, type SharedPhonePatientCandidate };
+
+async function queryPatientsSharingPhone(
+  runner: DbClient | DbPool,
+  rawPhone: string | null | undefined,
+): Promise<SharedPhonePatientCandidate[]> {
+  const forms = phoneLookupForms(rawPhone);
+  if (forms.length === 0) return [];
+  const { rows } = await runner.query<{
+    id: number;
+    patient_number: string;
+    full_name: string;
+    phone: string | null;
+  }>(
+    `SELECT id, patient_number, full_name, phone
+       FROM patients
+      WHERE phone = ANY($1::text[])
+      ORDER BY id`,
+    [forms],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    patientNumber: row.patient_number,
+    fullName: row.full_name,
+    phone: row.phone,
+  }));
+}
+
 async function resolveVisitPatient(
   client: DbClient,
   visit: { id: number; patient_name: string; patient_phone: string | null; patient_id: number | null },
@@ -3030,24 +3094,40 @@ async function resolveVisitPatientDetailed(
     }
   }
   if (!patientId && phone) {
-    const { rows } = await client.query<{ id: number }>(
-      `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
-      [phoneLookupForms(rawPhone)],
-    );
-    const matchedId = rows[0]?.id ?? null;
-    if (matchedId !== null && actorSession) {
-      const scope = await resolveRestrictedDoctorScope(actorSession, client);
-      if (scope.restricted) {
-        if (scope.blockAllPatients || !scope.doctorPartyId) {
-          throw new PatientOutOfScopeError();
-        }
-        const owns = await doctorOwnsPatient(scope.doctorPartyId, matchedId, client);
-        if (!owns) {
-          throw new PatientOutOfScopeError("رقم الهاتف يخص ملف مريض مسجّل خارج نطاق صلاحيتك؛ يُربط عبر الاستقبال.");
+    const matched = await queryPatientsSharingPhone(client, rawPhone);
+    if (matched.length >= 1) {
+      let visibleMatches = matched;
+      if (actorSession) {
+        const scope = await resolveRestrictedDoctorScope(actorSession, client);
+        if (scope.restricted) {
+          if (scope.blockAllPatients || !scope.doctorPartyId) {
+            throw new PatientOutOfScopeError();
+          }
+          const ownedMatches: SharedPhonePatientCandidate[] = [];
+          for (const candidate of matched) {
+            if (await doctorOwnsPatient(scope.doctorPartyId, candidate.id, client)) {
+              ownedMatches.push(candidate);
+            }
+          }
+          if (ownedMatches.length === 0) {
+            throw new PatientOutOfScopeError(
+              "رقم الهاتف يخص ملف مريض مسجّل خارج نطاق صلاحيتك؛ يُربط عبر الاستقبال.",
+            );
+          }
+          visibleMatches = ownedMatches;
         }
       }
+      if (matched.length === 1 && normalizeName(matched[0].fullName) === normalizeName(visit.patient_name)) {
+        patientId = matched[0].id;
+      } else {
+        throw new AmbiguousSharedPhonePatientError(
+          matched.length > 1
+            ? "هذا الهاتف مشترك بين أكثر من ملف عائلي؛ لا تُحدَّد هوية المريض بالهاتف وحده — تحقّق من الهوية واربط الزيارة بالملف الصحيح أولًا."
+            : `رقم الهاتف مسجّل لملف آخر باسم «${visibleMatches[0].fullName}» (${visibleMatches[0].patientNumber})؛ لا تُحدَّد هوية المريض بالهاتف وحده — تحقّق من الهوية واربط الزيارة بالملف الصحيح أو أنشئ ملفًا مستقلًا لفرد العائلة الجديد ثم اربطها به.`,
+          visibleMatches,
+        );
+      }
     }
-    patientId = matchedId;
   }
   if (lockedPatientId !== undefined && patientId !== null && patientId !== lockedPatientId) {
     // A phone-only visit discovered an existing patient after the pre-visit lock phase.
@@ -3348,7 +3428,7 @@ import {
 } from "./appointment-lifecycle";
 
 import { ageFromBirthDate, ageFromBirthYear, type Gender, type Patient, type PatientInput } from "./patient";
-import { nameTokens, samePhone, type CandidatePatient } from "./duplicates";
+import { normalizeName, nameTokens, samePhone, type CandidatePatient } from "./duplicates";
 
 /** ما يكفي لقائمة بحث: الحقول الثقيلة لا تُحمَّل لعشرين نتيجة لن تُقرأ. */
 export interface PatientSummary {
@@ -3435,7 +3515,7 @@ function normalizePatientPhone(raw: string | null | undefined): string | null {
  * السجلات التي أُنشئت قبل توحيد الصيغة تحمل الرقم المحلي، والبحث بالصيغة الدولية
  * وحدها كان سيعتبرها مرضى جددًا وينشئ لهم سجلات ثانية.
  */
-function phoneLookupForms(raw: string | null | undefined): string[] {
+export function phoneLookupForms(raw: string | null | undefined): string[] {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return [];
   const normalized = toWhatsAppNumber(trimmed);
@@ -3790,12 +3870,13 @@ export const PATIENT_CREATE_SHARED_LOCK_SQL = `SELECT pg_advisory_xact_lock_shar
 const PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
 
 export async function createPatient(
-  input: PatientInput,
+  input: PatientInput & { primaryDoctorId?: number | null },
   options?: { primaryDoctorId?: number | null },
 ): Promise<Patient> {
   await ensureSchema();
-  const primaryDoctorId = typeof options?.primaryDoctorId === "number" && options.primaryDoctorId > 0
-    ? options.primaryDoctorId
+  const candidatePrimaryDoctorId = options?.primaryDoctorId ?? input.primaryDoctorId;
+  const primaryDoctorId = typeof candidatePrimaryDoctorId === "number" && candidatePrimaryDoctorId > 0
+    ? candidatePrimaryDoctorId
     : null;
   const { rows } = await withTransaction(getPool(), async (client) => {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
@@ -5302,16 +5383,28 @@ export async function rejectBookingRequest(id: number): Promise<BookingRequest |
  * (P2-3) المريض القائم الذي سيُنسب إليه طلب الحجز عند تأكيده — بالقاعدة نفسها
  * (رقم الهاتف بصيغه) — ليُفحص تداخل مواعيده قبل الحجز. `null` = مريضٌ جديد.
  */
-export async function existingPatientForBookingRequest(id: number, client?: DbClient): Promise<number | null> {
+export async function existingPatientForBookingRequest(
+  id: number,
+  client?: DbClient,
+  selection?: { patientId?: number | null; createNewPatient?: boolean },
+): Promise<number | null> {
   await ensureSchema();
+  if (selection?.createNewPatient === true) return null;
+  if (selection?.patientId != null && Number.isInteger(selection.patientId) && selection.patientId > 0) {
+    return selection.patientId;
+  }
   const runner = client ?? getPool();
-  const { rows } = await runner.query<{ phone: string }>(`SELECT phone FROM booking_requests WHERE id = $1`, [id]);
-  if (!rows[0]) return null;
-  const { rows: existing } = await runner.query<{ id: number }>(
-    `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
-    [phoneLookupForms(rows[0].phone)],
+  const { rows } = await runner.query<{ full_name: string; phone: string }>(
+    `SELECT full_name, phone FROM booking_requests WHERE id = $1`,
+    [id],
   );
-  return existing[0]?.id ?? null;
+  if (!rows[0]) return null;
+  const matched = await queryPatientsSharingPhone(runner, rows[0].phone);
+  if (matched.length === 0) return null;
+  if (matched.length === 1 && normalizeName(matched[0].fullName) === normalizeName(rows[0].full_name)) {
+    return matched[0].id;
+  }
+  return null;
 }
 
 export async function confirmBookingRequest(
@@ -5320,6 +5413,8 @@ export async function confirmBookingRequest(
     date: string;
     time: string;
     durationMinutes: number;
+    patientId?: number | null;
+    createNewPatient?: boolean;
   },
   runOn?: DbClient,
 ): Promise<{ appointmentId: number; patientId: number } | null> {
@@ -5348,11 +5443,33 @@ export async function confirmBookingRequest(
   if (!requests[0]) return null;
   const request = requests[0];
 
-  const { rows: existing } = await client.query<{ id: number }>(
-    `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
-    [phoneLookupForms(request.phone)],
-  );
-  let patientId = existing[0]?.id;
+  let patientId: number | undefined;
+  if (input.patientId != null && Number.isInteger(input.patientId) && input.patientId > 0) {
+    const { rows: selectedRows } = await client.query<{ id: number }>(
+      `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`,
+      [input.patientId],
+    );
+    if (!selectedRows[0]) {
+      throw new AmbiguousSharedPhonePatientError(
+        "الملف المختار غير موجود؛ تحقّق من هوية المريض وأعد اختيار الملف الصحيح.",
+        await queryPatientsSharingPhone(client, request.phone),
+      );
+    }
+    patientId = selectedRows[0].id;
+  } else if (input.createNewPatient !== true) {
+    const matched = await queryPatientsSharingPhone(client, request.phone);
+    if (matched.length === 1 && normalizeName(matched[0].fullName) === normalizeName(request.full_name)) {
+      patientId = matched[0].id;
+    } else if (matched.length >= 1) {
+      throw new AmbiguousSharedPhonePatientError(
+        matched.length > 1
+          ? "هذا الهاتف مشترك بين أكثر من ملف عائلي؛ تحقّق من هوية المريض واختر الملف الصحيح أو افتح ملفًا مستقلًا لفرد جديد من العائلة."
+          : `رقم الهاتف مسجّل باسم «${matched[0].fullName}» (${matched[0].patientNumber}) بينما الطلب باسم «${request.full_name}»؛ تحقّق من الهوية واختر الملف الصحيح أو افتح ملفًا مستقلًا لفرد جديد بنفس هاتف العائلة.`,
+        matched,
+      );
+    }
+  }
+
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     const { rows: created } = await client.query<{ id: number }>(
@@ -5361,7 +5478,7 @@ export async function confirmBookingRequest(
          ${PATIENT_NUMBER_SQL},
          $1, $2)
        RETURNING id`,
-      [request.full_name, request.phone],
+      [request.full_name, normalizePatientPhone(request.phone) ?? request.phone],
     );
     patientId = created[0].id;
   }
@@ -5504,25 +5621,30 @@ export async function mergeDuplicatePatient(
 
     const moved: Record<string, number> = {};
 
-    /* (<NNNN>_patient_portal_security) تأمين بوابة المريض عند دمج ملف مكرر:
+    /* (0127_patient_portal_security) تأمين بوابة المريض عند دمج ملف مكرر:
        إبطال رموز التفعيل/الاستعادة المفتوحة للملف المدموج وإلغاء حساب البوابة الخاص به
        قبل نقل المفاتيح الأجنبية، فلا يصطدم المفتاح الأساسي لحساب الهدف ولا تبقى جلسات الملف المدموج صالحة. */
     const { rows: [portalTablesPresent] } = await client.query<{ present: string | null }>(
       `SELECT to_regclass('public.patient_portal_accounts')::text AS present`,
     );
+    let sourcePortalLoginName: string | null = null;
     if (portalTablesPresent?.present) {
-      await client.query(
+      const invalidatedSourceTokens = await client.query(
         `UPDATE patient_portal_tokens
             SET invalidated_at = COALESCE(invalidated_at, NOW()),
                 invalidation_reason = COALESCE(invalidation_reason, 'patient_merged')
-          WHERE patient_id = $1 AND used_at IS NULL`,
+          WHERE patient_id = $1 AND used_at IS NULL AND invalidated_at IS NULL`,
         [sourceId],
       );
-      const revokedPortalSource = await client.query(
-        `DELETE FROM patient_portal_accounts WHERE patient_id = $1`,
+      if (invalidatedSourceTokens.rowCount) {
+        moved["patient_portal_tokens.invalidated_source"] = invalidatedSourceTokens.rowCount;
+      }
+      const revokedPortalSource = await client.query<{ login_name: string }>(
+        `DELETE FROM patient_portal_accounts WHERE patient_id = $1 RETURNING login_name`,
         [sourceId],
       );
       if (revokedPortalSource.rowCount) {
+        sourcePortalLoginName = revokedPortalSource.rows[0]?.login_name ?? null;
         moved["patient_portal_accounts.revoked_source"] = revokedPortalSource.rowCount;
       }
     }
@@ -5601,8 +5723,51 @@ export async function mergeDuplicatePatient(
         sourceFamily?.family_id ?? null, sourceFamily?.family_id != null ? sourceFamily.family_role : null,
       ],
     );
+    let targetPortalRefreshed = false;
+    if (portalTablesPresent?.present) {
+      const invalidatedTargetTokens = await client.query(
+        `UPDATE patient_portal_tokens
+            SET invalidated_at = COALESCE(invalidated_at, NOW()),
+                invalidation_reason = COALESCE(invalidation_reason, 'patient_merged')
+          WHERE patient_id = $1 AND used_at IS NULL AND invalidated_at IS NULL`,
+        [targetId],
+      );
+      if (invalidatedTargetTokens.rowCount) {
+        moved["patient_portal_tokens.invalidated_target"] = invalidatedTargetTokens.rowCount;
+      }
+      const refreshedTargetAccount = await client.query(
+        `UPDATE patient_portal_accounts
+            SET credential_version = credential_version + 1,
+                sessions_revoked_at = NOW(),
+                phone_fingerprint = $2,
+                updated_at = NOW()
+          WHERE patient_id = $1`,
+        [targetId, portalPhoneFingerprint(updated[0].phone)],
+      );
+      if (refreshedTargetAccount.rowCount) {
+        targetPortalRefreshed = true;
+        moved["patient_portal_accounts.refreshed_target"] = refreshedTargetAccount.rowCount;
+      }
+    }
     await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
     await client.query("COMMIT");
+
+    if (sourcePortalLoginName !== null || targetPortalRefreshed) {
+      await recordAudit({
+        action: "portal.account.patient_merged",
+        entity: "patient",
+        entityId: targetId,
+        entityLabel: target.full_name,
+        details: {
+          sourcePatientId: sourceId,
+          sourcePortalRevoked: sourcePortalLoginName !== null,
+          ...(sourcePortalLoginName ? { sourcePortalLoginName } : {}),
+          targetSessionsRevoked: targetPortalRefreshed,
+        },
+        actor: ctx.actor,
+        actorRole: ctx.actorRole ?? null,
+      });
+    }
 
     /* مُنتظَر لا «أطلق وانسَ»: دمجٌ يحذف ملفًّا يجب أن يكون أثره مكتوبًا قبل الرد
        (recordAudit لا يرمي أبدًا). */
@@ -17744,16 +17909,20 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
  */
 async function previewPatientId(
   pool: DbPool,
-  visit: { patient_id: number | null; patient_phone?: string | null },
+  visit: { patient_id: number | null; patient_name?: string | null; patient_phone?: string | null },
 ): Promise<number | null> {
   if (visit.patient_id) return visit.patient_id;
   const phone = visit.patient_phone ?? null;
   if (!normalizePatientPhone(phone)) return null;
-  const { rows } = await pool.query<{ id: number }>(
-    `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
-    [phoneLookupForms(phone)],
-  );
-  return rows[0]?.id ?? null;
+  const matched = await queryPatientsSharingPhone(pool, phone);
+  if (
+    matched.length === 1 &&
+    typeof visit.patient_name === "string" &&
+    normalizeName(matched[0].fullName) === normalizeName(visit.patient_name)
+  ) {
+    return matched[0].id;
+  }
+  return null;
 }
 
 /**
@@ -18175,16 +18344,23 @@ export interface ProcedurePriceOverride {
 }
 
 async function lockVisitPatientFirst(client: DbClient, visitId: number): Promise<number | null> {
-  const { rows: [visit] } = await client.query<{ patient_id: number | null; patient_phone: string | null }>(
-    `SELECT patient_id, patient_phone FROM visits WHERE id = $1`, [visitId]);
+  const { rows: [visit] } = await client.query<{
+    patient_id: number | null;
+    patient_phone: string | null;
+  }>("SELECT patient_id, patient_phone FROM visits WHERE id = $1", [visitId]);
   if (!visit) return null;
   let patientId = visit.patient_id;
   if (patientId === null && normalizePatientPhone(visit.patient_phone)) {
-    const { rows: [patient] } = await client.query<{ id: number }>(
-      `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`, [phoneLookupForms(visit.patient_phone)]);
-    patientId = patient?.id ?? null;
+    const { rows: [named] } = await client.query<{ patient_name: string }>(
+      "SELECT patient_name FROM visits WHERE id = $1",
+      [visitId],
+    );
+    const matched = await queryPatientsSharingPhone(client, visit.patient_phone);
+    if (named && matched.length === 1 && normalizeName(matched[0].fullName) === normalizeName(named.patient_name)) {
+      patientId = matched[0].id;
+    }
   }
-  if (patientId !== null) await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [patientId]);
+  if (patientId !== null) await client.query("SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE", [patientId]);
   return patientId;
 }
 
@@ -25643,7 +25819,6 @@ export async function issuedCostForPatient(patientId: number): Promise<PatientIs
 
 import {
   confirmVerdict,
-  portalCredentialsMatch,
   portalPhoneFingerprint,
   toPortalAppointment,
   type IntakeAnswers,
@@ -25651,30 +25826,17 @@ import {
 } from "./portal";
 
 /**
- * تسجيل دخول مريض إلى البوابة.
- *
- * العاملان: هاتفٌ يطابق هاتف الملف بالمنطق نفسه الذي يُدر به تكرار المرضى
- * (`samePhone`)، ورقم ملفٍ يطابق حرفيًا. المطابقة هنا لا تُنشئ جلسة — الجلسة
- * يوقّع المسار بعد هذا النداء — فالقاعدة تُجيب «من أنت؟» لا «ادخل».
+ * (0127_patient_portal_security) أُلغي مسار الدخول القديم برقم الملف والهاتف نهائيًا بلا أي استثناء طوارئ؛
+ * يُعاد `null` دائمًا حتى لا يعبر أي نداء داخلي قديم من غير مصادقة اسم المستخدم وكلمة المرور في `lib/portal-security.ts`.
  */
 export async function portalLogin(
   phone: string,
   patientNumber: string,
 ): Promise<{ patient: { id: number; patientNumber: string; fullName: string } } | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
-    id: number; patient_number: string; full_name: string; phone: string | null; alt_phone: string | null;
-  }>(
-    `SELECT id, patient_number, full_name, phone, alt_phone FROM patients
-      WHERE UPPER(TRIM(patient_number)) = UPPER(TRIM($1))
-      LIMIT 1`,
-    [patientNumber],
-  );
-  const row = rows[0];
-  if (!row) return null;
-  const patient = { patientNumber: row.patient_number, phone: row.phone, altPhone: row.alt_phone };
-  if (!portalCredentialsMatch(patient, phone, patientNumber)) return null;
-  return { patient: { id: row.id, patientNumber: row.patient_number, fullName: row.full_name } };
+  void phone;
+  void patientNumber;
+  return null;
 }
 
 /**
