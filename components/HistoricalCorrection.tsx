@@ -14,21 +14,33 @@ import {useSession} from "./SessionProvider";
 const input="mt-1 min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-sm";
 const button="min-h-11 rounded-xl border px-4 py-2 text-sm font-bold disabled:opacity-50";
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==="object"&&!Array.isArray(value);
+/** The editable draft of a stored historical document, in the document's currency. */
+function draftOf(view:HistoricalDocumentView){
+  const saved=view.repayment?.terms;
+  return {prices:view.lines.map(line=>toInputAmount(line.unitPriceMinor,view.currency)),discount:toInputAmount(view.discountMinor,view.currency),
+    discountReason:view.discountReason??"",paid:toInputAmount(view.previouslyPaidMinor,view.currency),date:view.historicalAsOf,note:view.note??"",
+    terms:{mode:saved?.mode??"full",rows:(saved?.installments??[]).map((row,index)=>({key:String(index),dueDate:row.dueDate,kind:row.kind,amount:toInputAmount(row.amountMinor,view.currency)}))} as DebtRepaymentDraft};
+}
 export function HistoricalCorrection({original,recovery,onRecoveryChange,financialRecovery,onDone,onCancel}:{
   original:HistoricalDocumentView;recovery:HistoricalCorrectionCommand|null;onRecoveryChange:(value:HistoricalCorrectionCommand|null)=>void;
   financialRecovery:FinancialRecoveryControl;onDone:(message:string)=>void;onCancel:()=>void;
 }){
   const session=useSession(),[view,setView]=useState(original);
-  const [prices,setPrices]=useState<string[]>([]),[discount,setDiscount]=useState("0"),[discountReason,setDiscountReason]=useState("");
-  const [paid,setPaid]=useState(""),[date,setDate]=useState(""),[note,setNote]=useState(""),[reason,setReason]=useState("");
-  const [terms,setTerms]=useState<DebtRepaymentDraft>({mode:"full",rows:[]});
+  /* The draft starts from the stored document in the first render. Seeding it in an effect left the
+     fields empty for one paint, and typing in that moment was merged with the stored value
+     ("3000" then "1300" became "30001300"). The effect below re-seeds only when the document changes. */
+  const [prices,setPrices]=useState<string[]>(()=>draftOf(original).prices),[discount,setDiscount]=useState(()=>draftOf(original).discount),[discountReason,setDiscountReason]=useState(()=>draftOf(original).discountReason);
+  const [paid,setPaid]=useState(()=>draftOf(original).paid),[date,setDate]=useState(()=>draftOf(original).date),[note,setNote]=useState(()=>draftOf(original).note),[reason,setReason]=useState("");
+  const [terms,setTerms]=useState<DebtRepaymentDraft>(()=>draftOf(original).terms);
+  const seeded=useRef(original);
   const [busy,setBusy]=useState(false),[error,setError]=useState<string|null>(null);
   const lifetime=useRef({active:false}),pending=useRef(false),draftRevision=useRef(financialRecovery.revision);
   useLayoutEffect(()=>{const owner=lifetime.current;owner.active=true;return()=>{owner.active=false;};},[]);
-  useEffect(()=>{setPrices(view.lines.map(line=>toInputAmount(line.unitPriceMinor,view.currency)));setDiscount(toInputAmount(view.discountMinor,view.currency));
-    setDiscountReason(view.discountReason??"");setPaid(toInputAmount(view.previouslyPaidMinor,view.currency));setDate(view.historicalAsOf);setNote(view.note??"");
-    const saved=view.repayment?.terms;
-    setTerms({mode:saved?.mode??"full",rows:(saved?.installments??[]).map((row,index)=>({key:String(index),dueDate:row.dueDate,kind:row.kind,amount:toInputAmount(row.amountMinor,view.currency)}))});
+  useEffect(()=>{
+    if(seeded.current===view)return;
+    seeded.current=view;
+    const draft=draftOf(view);
+    setPrices(draft.prices);setDiscount(draft.discount);setDiscountReason(draft.discountReason);setPaid(draft.paid);setDate(draft.date);setNote(draft.note);setTerms(draft.terms);
   },[view]);
   const preview=useMemo(()=>{
     const amounts=prices.map(price=>parseAmount(price,view.currency)),deduction=parseAmount(discount,view.currency),prepaid=parseAmount(paid,view.currency);
