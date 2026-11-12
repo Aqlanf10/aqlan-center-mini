@@ -15,6 +15,8 @@ import {labVisitSignatureVersion} from "./lab-visit-signature";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
+import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "./commission-participation-schema";
+import { loadCaseParticipationsAt } from "./commission-participation-read";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
@@ -2134,6 +2136,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0082", name: "invoice_service_additions", filename: "0082_invoice_service_additions.sql", sql: INVOICE_SERVICE_ADDITIONS_SQL, checksum: checksumOf(INVOICE_SERVICE_ADDITIONS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0126", name: "commission_case_participations", filename: "0126_commission_case_participations.sql", sql: COMMISSION_CASE_PARTICIPATIONS_SQL, checksum: checksumOf(COMMISSION_CASE_PARTICIPATIONS_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -14433,7 +14436,7 @@ export async function settleLabOrdersBatch(input: {
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
 import {
-  allocateInvoiceDiscount, buildCaseOverrideResolver, commissionForPatientAtEventTime, discountGroupKey, resolvePolicyForShare, summarizeCommissions,
+  allocateInvoiceDiscount, buildCaseOverrideResolver, commissionForPatientAtEventTime, discountGroupKey, effectiveDoctorShares, resolvePolicyForShare, summarizeCommissions,
   type CommissionDetailLine, type CommissionInvoice, type DoctorShareItem, type ServiceRateFinding,
 } from "./commission";
 import { FULL_RATE_BP } from "./materialRate";
@@ -14842,6 +14845,11 @@ export async function commissionReport(
   const policyAt = commissionPolicyResolver(policies);
   /* (F-11) النسب الخاصة بالحالات — تُحلّ داخل المحرّك وقت كل حدث. */
   const overrideAt = buildCaseOverrideResolver(await loadCaseOverrideRows(pool));
+  /* Doctors sharing a case (owner decision 2026-11-11, point 3): the centre's decision in force at
+     the end of the report range. An approved split pays each participant at his own rate on his
+     part of the line; a shared case without an approved split is held and paid to nobody. */
+  const caseParticipations = await loadCaseParticipationsAt(to, pool as Parameters<typeof loadCaseParticipationsAt>[1], CLINIC_TIME_ZONE);
+  const participationAt = caseParticipations.size > 0 ? (caseId: number) => caseParticipations.get(caseId) : undefined;
 
   /* (P0-1) تكلفة المختبر — تُخصم من حصة الطبيب **في الفاتورة التي جاء منها عمله**،
    * مرّةً واحدة، وبعملتها حصرًا. الربط صريح في المخطط لا تخمين:
@@ -15058,6 +15066,8 @@ export async function commissionReport(
       (invoice) => inRange(invoice.id),
       {
         overrideAt,
+        participationAt,
+        onHeld: detail ? (held) => (detail.heldParticipations ??= []).push({ ...held, patientId }) : undefined,
         sink: detail ? (line) => detail.lines.push({ ...line, invoiceCreatedAt: new Date(line.invoiceCreatedAt).toISOString(), patientId }) : undefined,
       },
     ));
@@ -15068,7 +15078,7 @@ export async function commissionReport(
       if (chunk.amount <= 0) continue;
       const invoice = invoices.get(chunk.invoiceId);
       if (!invoice || !inRange(invoice.id) || invoice.netMinor <= 0) continue;
-      for (const share of invoice.doctorShares) {
+      for (const share of effectiveDoctorShares(invoice, participationAt)) {
         /* (F-4) حصةٌ خُصمت تكلفة موادّها الفعلية بسياسة وقت هذه الدفعة لا تُقدَّر
            موادّها بنسبة التخصص مرّةً ثانية — لا خصمٌ مزدوج لموادّ عملٍ واحد. */
         if (share.materialCostMinor && share.materialCostMinor > 0) {
@@ -30569,7 +30579,7 @@ export async function removePlanItemDependency(input: RemovePlanDependencyInput)
 
 import {
   RULE_SOURCE_LABEL, resolveLegacyServiceRateNames,
-  type CaseOverrideRow, type CommissionRuleSource,
+  type CaseOverrideRow, type CommissionRuleSource, type HeldParticipationShare,
 } from "./commission";
 import { CATEGORY_LABEL } from "./services-catalog";
 
@@ -30590,6 +30600,8 @@ export interface CommissionDetailCollector {
   unallocatedMaterials: UnallocatedMaterial[];
   serviceRateFindings: ServiceRateFinding[];
   invoiceClinicDate: Map<number, string>;
+  /** Lines of a shared case whose split is not approved: held, paid to nobody (owner decision 2026-11-11, point 3). */
+  heldParticipations?: Array<HeldParticipationShare & { patientId: number }>;
 }
 
 export const UNALLOCATED_MATERIAL_REASON: Record<UnallocatedMaterial["reason"], string> = {

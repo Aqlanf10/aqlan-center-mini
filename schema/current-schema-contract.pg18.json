@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6 (Debian 18.6-1.pgdg13+2)",
+  "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
-    "tables": 146,
-    "columns": 1820,
-    "constraints": 2205,
-    "indexes": 450,
-    "triggers": 144
+    "tables": 147,
+    "columns": 1830,
+    "constraints": 2223,
+    "indexes": 454,
+    "triggers": 145
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -2877,6 +2877,127 @@
       },
       "triggers": {
         "commission_case_overrides_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "commission_case_participations": {
+      "columns": {
+        "case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "decided_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "decided_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "decided_by_user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "participants": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "source": {
+          "type": "text",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "supersedes_id": {
+          "type": "int8",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "commission_case_participations_decided_by_check",
+        "commission_case_participations_reason_check",
+        "commission_case_participations_shares_check",
+        "commission_case_participations_source_check",
+        "commission_case_participations_status_check",
+        "commission_case_participations_void_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "supersedes_id"
+          ],
+          "refTable": "commission_case_participations",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "decided_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "commission_case_participations_case_idx": {
+          "columns": [
+            "case_id",
+            "decided_at"
+          ],
+          "unique": false
+        },
+        "commission_case_participations_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "commission_case_participations_root_uniq": {
+          "columns": [
+            "case_id"
+          ],
+          "unique": true
+        },
+        "commission_case_participations_supersedes_uniq": {
+          "columns": [
+            "supersedes_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "commission_case_participations_append_only": {
           "timing": "BEFORE",
           "events": [
             "DELETE",

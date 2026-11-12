@@ -541,6 +541,33 @@ export function splitShareByParticipation(share: DoctorShareItem, participation:
   }));
 }
 
+export type HeldParticipationShare = { invoiceId: number; caseId: number; lineDoctorId: number; currency: Currency; amountMinor: number };
+
+/**
+ * The shares an invoice actually pays commission on (owner decision 2026-11-11, point 3): a line
+ * of a case with an approved split becomes one share per participant; a line of a shared case
+ * without an approved, complete split is held (reported through `onHeld`, paid to nobody); every
+ * other line is unchanged. One function for the engine and for every reader of the same shares.
+ */
+export function effectiveDoctorShares(
+  invoice: Pick<CommissionInvoice, "id" | "createdAt" | "currency" | "doctorShares">,
+  participationAt?: CaseParticipationResolver,
+  onHeld?: (held: HeldParticipationShare) => void,
+): DoctorShareItem[] {
+  if (!participationAt) return invoice.doctorShares;
+  const shares: DoctorShareItem[] = [];
+  for (const line of invoice.doctorShares) {
+    const participation = line.caseId ? participationAt(line.caseId, invoice.createdAt) : undefined;
+    if (!participation) { shares.push(line); continue; }
+    if (participation.status !== "approved" || caseParticipationProblem(participation.participants) !== null) {
+      onHeld?.({ invoiceId: invoice.id, caseId: line.caseId!, lineDoctorId: line.doctorId, currency: invoice.currency, amountMinor: line.amountMinor });
+      continue;
+    }
+    shares.push(...splitShareByParticipation(line, participation));
+  }
+  return shares;
+}
+
 function clampPercent(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
 }
@@ -660,18 +687,7 @@ export function commissionForPatientAtEventTime(
     if (include && !include(invoice)) continue;
     const covering = chunksByInvoice.get(invoice.id) ?? [];
 
-    /* Shared cases (owner decision 2026-11-11, point 3): a line of a case with an approved split
-       becomes one share per participant; without an approved split it is held for review. */
-    const shares: DoctorShareItem[] = [];
-    for (const line of invoice.doctorShares) {
-      const participation = participationAt && line.caseId ? participationAt(line.caseId, invoice.createdAt) : undefined;
-      if (!participation) { shares.push(line); continue; }
-      if (participation.status !== "approved" || caseParticipationProblem(participation.participants) !== null) {
-        onHeld?.({ invoiceId: invoice.id, caseId: line.caseId!, lineDoctorId: line.doctorId, currency: invoice.currency, amountMinor: line.amountMinor });
-        continue;
-      }
-      shares.push(...splitShareByParticipation(line, participation));
-    }
+    const shares = effectiveDoctorShares(invoice, participationAt, onHeld);
 
     for (const share of shares) {
       // (تصحيح ٣) حصة بعملةٍ تخالف فاتورتها = فساد بيانات يُقال لا يُدار.

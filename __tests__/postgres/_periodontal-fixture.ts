@@ -7,6 +7,11 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  // Exact case-participation suffix (finance, owner decision 2026-11-11) directly after the shade migration.
+  if (files.at(-1)?.version === "0126") {
+    if (files.at(-2)?.version !== "0089" || files.at(-1)?.filename !== "0126_commission_case_participations.sql") throw new Error("Unreviewed case participation migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   // Exact main reminder/shade suffix, followed by the existing strict WORK chain.
   if (files.at(-1)?.version === "0089") {
     if (files.at(-2)?.version !== "0087" || files.at(-1)?.filename !== "0089_lab_shade_specification.sql") throw new Error("Unreviewed lab shade migration suffix.");

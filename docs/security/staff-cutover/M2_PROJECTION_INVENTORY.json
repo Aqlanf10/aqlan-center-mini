@@ -60,6 +60,9 @@
  "/api/finance/commission-overrides": [
   "isAdmin("
  ],
+ "/api/finance/commission-participations": [
+  "isAdmin("
+ ],
  "/api/finance/debts": [
   "canViewMoney("
  ],
