@@ -21,6 +21,7 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { maskName, type PrivacyMode, averageWaitMinutes } from "@/lib/waiting-room";
 import { waitingRows } from "@/lib/flow";
+import { isPortalAdminPreview } from "@/lib/portal";
 import { requirePortalSession } from "@/lib/portal-server";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CHECKIN_RATE_LIMIT, JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -127,6 +128,12 @@ export async function POST(request: Request) {
   const session = await requirePortalSession();
   if (!session) {
     return NextResponse.json({ message: "سجّل الدخول إلى بوابة المريض أولًا. للمريض الجديد يرجى مراجعة الاستقبال أو طلب موعد." }, { status: 401 });
+  }
+  if (isPortalAdminPreview(session)) {
+    return NextResponse.json(
+      { message: "هذا عرضٌ إداري للقراءة فقط باسم الموظف — لا يُسجَّل حضور ذاتي باسم المريض." },
+      { status: 403 },
+    );
   }
   /* (P2/S10) حدّ معدل موزّع لكل مريض بوابة — تسجيل وصول متكرر آليًا هو
      إساءة/استطلاع لا مريض. */

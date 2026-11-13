@@ -4,7 +4,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { chromium, type Browser, type Page } from "playwright";
 import { authedGet, authedMutation, baseUrl, confirmingSimilarCollection, harness, loginPortal, type Session } from "./_server";
+import { hashPassword } from "../../lib/auth";
 import { formatMoney, type Currency } from "../../lib/money";
+import { portalPhoneFingerprint } from "../../lib/portal";
 import { friendlyDateLong } from "../../lib/reminders";
 
 /**
@@ -46,9 +48,15 @@ beforeAll(async () => {
   await db.query("INSERT INTO settings(key,value) VALUES('finance.rate.SAR','140'),('finance.rate.USD','530') ON CONFLICT(key) DO NOTHING");
   for (const [currency, phone] of [["YER", `7771${String(stamp).slice(-5)}`], ["SAR", `7772${String(stamp).slice(-5)}`]] as const) {
     const number = `PH${currency[0]}-${String(stamp).slice(-8)}`;
+    const loginName = `ph.${currency.toLowerCase()}.${String(stamp).slice(-8)}`;
+    const portalPass = `HistPortal#${currency}9`;
     const id = (await db.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone) VALUES($1,$2,$3) RETURNING id",
       [number, `مريض بوابة تاريخي اصطناعي ${currency}`, phone])).rows[0].id;
-    patients[currency] = { id, documentId: 0, portal: await loginPortal(phone, number), marker: `PORTAL-HIST-${currency}-${stamp}` };
+    await db.query(
+      "INSERT INTO patient_portal_accounts(patient_id,login_name,password_hash,status,phone_fingerprint,activated_at,password_updated_at) VALUES($1,$2,$3,'active',$4,NOW(),NOW())",
+      [id, loginName, await hashPassword(portalPass), portalPhoneFingerprint(phone)],
+    );
+    patients[currency] = { id, documentId: 0, portal: await loginPortal(loginName, portalPass), marker: `PORTAL-HIST-${currency}-${stamp}` };
   }
   // YER: 3 × 50,000 = 150,000; discount 15,000; agreed 135,000; paid before 35,000; carried 100,000.
   const yerService = (await db.query<{ id: number }>("INSERT INTO services(name,category,price_minor,price_sar_minor,price_configured,is_active) VALUES($1,'rct',50000,5000000,TRUE,TRUE) RETURNING id",

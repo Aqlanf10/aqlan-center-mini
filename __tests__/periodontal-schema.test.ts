@@ -12,13 +12,14 @@ describe("unregistered periodontal SQL source contract (SQL never executed)", ()
   it("does not register schema, a numbered migration, a route or an editor", () => {
     expect(readFileSync("lib/db.ts", "utf8")).not.toContain("PERIODONTAL_SQL");
     const files = readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name));
-    expect(files).toHaveLength(89);
+    expect(files).toHaveLength(90);
     expect(files).toContain("0066_agreement_delta_amendments.sql");
     expect(files).toContain("0067_patient_appointment_history_index.sql");
     expect(files).toContain("0068_collection_attempt_retirements.sql");
     expect(files).toContain("0069_unpaid_currency_transitions.sql");
     expect(files).toContain("0089_lab_shade_specification.sql");
     expect(files).toContain("0108_ortho_assessment_intake.sql");
+    expect(files).toContain("0127_patient_portal_security.sql");
     expect(files.filter(name => name >= "0106").sort()).toEqual([
       "0106_ortho_assessment_verifier_2_2.sql",
       "0108_ortho_assessment_intake.sql",
@@ -39,6 +40,7 @@ describe("unregistered periodontal SQL source contract (SQL never executed)", ()
       "0123_ortho_study_export_archive.sql",
       "0124_ceph_correction_lineage.sql",
       "0125_ortho_case_reopen.sql",
+      "0127_patient_portal_security.sql",
     ]);
     expect(files.filter(name => /^005[12]_/.test(name)).sort()).toEqual(["0051_ortho_treatment_strategy.sql", "0052_ortho_assessment.sql"]);
     expect(readdirSync("migrations")).toContain("0061_invoice_correction_lineage.sql");

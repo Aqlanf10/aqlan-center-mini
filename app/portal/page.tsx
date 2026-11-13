@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Logo } from "@/components/Icon";
+import {
+  PortalAdminPreviewBanner,
+  PortalLoginAndTokenScreen,
+  type PortalSessionInfo,
+} from "@/components/PortalAccountFlow";
 import {
   ChatComposer,
   daySeparatorLabel,
@@ -50,7 +54,7 @@ interface PortalAppointmentView {
 type StatementFeed = PortalStatement;
 
 export default function PortalPage() {
-  const [session, setSession] = useState<{ fullName: string; patientNumber: string } | null>(null);
+  const [session, setSession] = useState<PortalSessionInfo | null>(null);
   const [checking, setChecking] = useState(true);
   const [tab, setTab] = useState<Tab>("appointments");
 
@@ -68,7 +72,7 @@ export default function PortalPage() {
 
   useEffect(() => { void checkSession(); }, [checkSession]);
   useEffect(() => {
-    if (session && new URLSearchParams(window.location.search).get("next") === "/checkin") {
+    if (session && !session.adminPreview && new URLSearchParams(window.location.search).get("next") === "/checkin") {
       window.location.replace("/checkin");
     }
   }, [session]);
@@ -78,21 +82,42 @@ export default function PortalPage() {
   }
 
   if (!session) {
-    return <LoginScreen onLogin={(next) => { setSession(next); setTab("appointments"); }} />;
+    return <PortalLoginAndTokenScreen onLogin={(next) => { setSession(next); setTab("appointments"); }} />;
   }
 
   return (
     <main className="mx-auto max-w-2xl p-4 pb-16">
+      {session.adminPreview && (
+        <PortalAdminPreviewBanner
+          preview={session.adminPreview}
+          onExited={(returnTo) => {
+            setSession(null);
+            window.location.assign(returnTo);
+          }}
+        />
+      )}
       <header className="mb-5 flex items-center justify-between">
         <div>
-          <p className="text-xs text-slate-500">مرحًا بك</p>
+          <p className="text-xs text-slate-500">
+            {session.adminPreview ? "معاينة إدارية لملف المريض" : "مرحًا بك"}
+          </p>
           <h1 className="text-lg font-black text-navy-900">{session.fullName}</h1>
           <p className="text-xs text-slate-500">ملف رقم {session.patientNumber}</p>
         </div>
         <button
-          onClick={async () => { await fetch("/api/portal/logout", { method: "POST" }); setSession(null); }}
+          onClick={async () => {
+            if (session.adminPreview) {
+              const res = await fetch("/api/portal/admin-preview/exit", { method: "POST" });
+              const data = await res.json().catch(() => null);
+              setSession(null);
+              window.location.assign(typeof data?.returnTo === "string" ? data.returnTo : "/");
+              return;
+            }
+            await fetch("/api/portal/logout", { method: "POST" });
+            setSession(null);
+          }}
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:border-danger-300 hover:text-danger-700">
-          خروج
+          {session.adminPreview ? "إنهاء العرض الإداري" : "خروج"}
         </button>
       </header>
 
@@ -107,7 +132,7 @@ export default function PortalPage() {
         ))}
       </nav>
 
-      {tab === "appointments" && <AppointmentsTab />}
+      {tab === "appointments" && <AppointmentsTab readOnly={Boolean(session.adminPreview)} />}
       {tab === "statement" && <StatementTab />}
       {tab === "intake" && <IntakeTab />}
       {tab === "messages" && <MessagesTab />}
@@ -115,62 +140,7 @@ export default function PortalPage() {
   );
 }
 
-function LoginScreen({ onLogin }: { onLogin: (session: { fullName: string; patientNumber: string }) => void }) {
-  const [phone, setPhone] = useState("");
-  const [patientNumber, setPatientNumber] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/portal/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, patientNumber }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر الدخول.");
-      onLogin(payload as { fullName: string; patientNumber: string });
-    } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : "تعذّر الدخول.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-4">
-      <div className="mb-6 text-center">
-        <Logo className="mx-auto mb-3 h-12 w-12" />
-        <h1 className="text-xl font-black text-navy-900">بوابة المريض</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          أدخل رقم هاتفك ورقم ملفك كما أُعطي لك من الاستقبال.
-        </p>
-      </div>
-      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
-        <label className="block text-sm">
-          <span className="mb-1 block font-bold text-slate-700">رقم الهاتف</span>
-          <input type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr"
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-left" placeholder="777000000" />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block font-bold text-slate-700">رقم الملف</span>
-          <input type="text" value={patientNumber} onChange={(event) => setPatientNumber(event.target.value)} dir="ltr"
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-left" placeholder="P-0001" />
-        </label>
-        {error && <p className="rounded-xl border border-danger-200 bg-danger-50 p-3 text-sm font-bold text-danger-800">{error}</p>}
-        <button onClick={submit} disabled={busy}
-          className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-black text-white disabled:opacity-50">
-          {busy ? "جارٍ الدخول…" : "دخول"}
-        </button>
-      </div>
-    </main>
-  );
-}
-
-function AppointmentsTab() {
+function AppointmentsTab({ readOnly = false }: { readOnly?: boolean }) {
   const [feed, setFeed] = useState<{ today: string; appointments: PortalAppointmentView[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -226,13 +196,15 @@ function AppointmentsTab() {
             </div>
             {appointment.patientConfirmedAt ? (
               <span className="rounded-lg bg-success-100 px-2 py-1 text-xs font-black text-success-800">مؤكد الحضور ✓</span>
-            ) : appointment.confirmable ? (
+            ) : appointment.confirmable && !readOnly ? (
               <button onClick={() => confirm(appointment.id)} disabled={busyId === appointment.id}
                 className="rounded-xl bg-navy-800 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
                 {busyId === appointment.id ? "…" : "أؤكد حضورى"}
               </button>
             ) : (
-              <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-500">محدود بالتأكيد</span>
+              <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-500">
+                {readOnly ? "قراءة فقط" : "محدود بالتأكيد"}
+              </span>
             )}
           </div>
         </article>

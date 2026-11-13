@@ -12,6 +12,7 @@ import net from "node:net";
 import tls from "node:tls";
 import type { Duplex } from "node:stream";
 import { randomUUID } from "node:crypto";
+import { assertSafePublicSmtpTarget } from "./safe-outbound-url";
 
 export interface SmtpOptions {
   host: string;
@@ -19,6 +20,7 @@ export interface SmtpOptions {
   security: "tls" | "starttls";
   username: string;
   password: string;
+  resolveDns?: (hostname: string) => Promise<string[]>;
 }
 
 export interface MailMessage {
@@ -47,6 +49,9 @@ class SmtpError extends Error {
   constructor(readonly arabic: string) { super(arabic); }
 }
 
+const MAX_SMTP_REPLY_BYTES = 64 * 1024;
+const MAX_SMTP_REPLY_LINES = 128;
+
 /** يقرأ ردود الخادم سطرًا سطرًا — الرد متعدد الأسطر ينتهي بسطرٍ «رمز + مسافة». */
 class ReplyReader {
   private buffer = "";
@@ -74,11 +79,24 @@ class ReplyReader {
 
   private feed(data: string): void {
     this.buffer += data;
+    if (Buffer.byteLength(this.buffer, "utf8") > MAX_SMTP_REPLY_BYTES) {
+      this.buffer = "";
+      this.pending = [];
+      this.socket.destroy();
+      this.fail(new SmtpError("ردّ خادم البريد تجاوز الحد المسموح."));
+      return;
+    }
     let index: number;
     while ((index = this.buffer.indexOf("\n")) >= 0) {
       const line = this.buffer.slice(0, index).replace(/\r$/, "");
       this.buffer = this.buffer.slice(index + 1);
       this.pending.push(line);
+      if (this.pending.length > MAX_SMTP_REPLY_LINES) {
+        this.pending = [];
+        this.socket.destroy();
+        this.fail(new SmtpError("ردّ خادم البريد تجاوز عدد الأسطر المسموح."));
+        return;
+      }
       if (/^\d{3} /.test(line) || /^\d{3}$/.test(line)) {
         const lines = this.pending;
         this.pending = [];
@@ -135,6 +153,15 @@ export async function sendMail(
   transport: SmtpTransport = nodeSmtpTransport,
   timeoutMs = 20_000,
 ): Promise<SmtpResult> {
+  if (transport === nodeSmtpTransport || options.resolveDns) {
+    const safeTarget = await assertSafePublicSmtpTarget(options.host, options.port, {
+      allowDevPorts: process.env.NODE_ENV !== "production",
+      resolveDns: options.resolveDns,
+    });
+    if (!safeTarget.ok) {
+      return { ok: false, message: safeTarget.reason ?? "عنوان خادم البريد محجوب أمنيًّا." };
+    }
+  }
   let socket: Duplex | null = null;
   try {
     socket = transport.connect(options);
@@ -193,7 +220,9 @@ export async function sendMail(
   } catch (error) {
     return { ok: false, message: error instanceof SmtpError ? error.arabic : "تعذّر الاتصال بخادم البريد." };
   } finally {
-    socket?.end();
-    socket?.destroy();
+    if (socket && !socket.destroyed) {
+      socket.on("error", () => {});
+      socket.end();
+    }
   }
 }

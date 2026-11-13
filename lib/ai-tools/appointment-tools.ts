@@ -25,11 +25,21 @@ export async function getTodayAppointments(
   }
 
   try {
+    const role = context.role || context.userRole;
+    const isRestrictedDoctor = role === "doctor" && !context.permissions?.canViewAllAppointments;
+    if (isRestrictedDoctor && (typeof context.doctorPartyId !== "number" || context.doctorPartyId <= 0)) {
+      return {
+        success: false,
+        textSummary: "🔒 **تنبيه أمني:** حساب الطبيب غير مرتبط بجهة طبيب في المركز — لا يمكن استعراض جدول المواعيد العام.",
+        warnings: ["عزل الأطباء: حساب طبيب غير مرتبط بجهة طبيب"],
+      };
+    }
+
     const rawAppointments = await listAppointmentsByDate(date).catch(() => []);
     let appointments = rawAppointments;
 
     // عزل الطبيب: إذا كان الطبيب لا يملك رؤية جدول بقية الأطباء
-    if (context.role === "doctor" && !context.permissions?.canViewAllAppointments && context.doctorPartyId) {
+    if (isRestrictedDoctor) {
       appointments = appointments.filter((a) => a.doctorId === context.doctorPartyId);
     } else if (params.doctorId) {
       appointments = appointments.filter((a) => a.doctorId === params.doctorId);

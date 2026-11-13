@@ -13,6 +13,7 @@ import {
 } from "./messaging-channels";
 import { consentAllows, consentBlockedMessage, type ConsentMode, type ConsentState } from "./patient-identity";
 import { toWhatsAppNumber } from "./reminders";
+import { assertSafeMessagingOutboundUrl, SAFE_FETCH_INIT } from "./safe-outbound-url";
 import { sendMail, type SmtpTransport } from "./smtp-client";
 import { sendWhatsAppText, type WhatsAppCloudConfig } from "./whatsapp-cloud";
 
@@ -30,8 +31,10 @@ export interface OutboundMessage {
   to: string;
   subject?: string | null;
   body: string;
+  /** نص بديل معقَّم يُحفظ في `message_deliveries` بدل النص الخام (لحجب روابط ورموز التفعيل/إعادة التعيين). */
+  redactedLogBody?: string;
   patientId: number | null;
-  purpose: "manual" | "test" | "reply" | "reminder";
+  purpose: "manual" | "test" | "reply" | "reminder" | "portal_auth";
   replyToInboundId?: number | null;
   actor: string;
 }
@@ -52,6 +55,7 @@ export interface OutboundDeps {
   }): Promise<number | null>;
   fetchImpl?: typeof fetch;
   smtpTransport?: SmtpTransport;
+  resolveDns?: (hostname: string) => Promise<string[]>;
   /**
    * (PAT-3) موافقة المريض على القناة ووضع المركز. رسالةٌ يبدؤها المركز لمريضٍ (يدوية أو
    * تذكير) لا تُرسل بلا موافقةٍ بحسب الوضع؛ والرد على رسالة المريض والاختبار لا يُحجبان.
@@ -96,7 +100,7 @@ export async function sendOutbound(message: OutboundMessage, deps: OutboundDeps)
     if (!counterpart) return { ok: false, message: "رقم الجوال غير صالح لواتساب.", deliveryId: null, status: 400 };
     const config = view.config as WhatsAppChannelConfig;
     const result = await sendWhatsAppText(
-      whatsAppSendConfig(config, secret),
+      { ...whatsAppSendConfig(config, secret), resolveDns: deps.resolveDns },
       counterpart, body, deps.fetchImpl ?? fetch,
     );
     outcome = result.ok ? { ok: true, providerId: result.messageId } : { ok: false, error: result.message };
@@ -104,14 +108,14 @@ export async function sendOutbound(message: OutboundMessage, deps: OutboundDeps)
     const config = view.config as SmsChannelConfig;
     counterpart = smsRecipient(message.to, config.numberFormat);
     if (!counterpart) return { ok: false, message: "رقم الجوال غير صالح للرسائل النصية.", deliveryId: null, status: 400 };
-    outcome = await sendSms(config, secret, counterpart, body, deps.fetchImpl ?? fetch);
+    outcome = await sendSms(config, secret, counterpart, body, deps.fetchImpl ?? fetch, deps.resolveDns);
   } else {
     const config = view.config as EmailChannelConfig;
     counterpart = message.to.trim();
     if (!isEmail(counterpart)) return { ok: false, message: "عنوان البريد غير صالح.", deliveryId: null, status: 400 };
     const subject = (message.subject ?? "").trim() || "رسالة من المركز";
     const result = await sendMail(
-      { host: config.host, port: config.port, security: config.security, username: config.username, password: secret },
+      { host: config.host, port: config.port, security: config.security, username: config.username, password: secret, resolveDns: deps.resolveDns },
       { fromAddress: config.fromAddress, fromName: config.fromName, to: counterpart, subject, text: body },
       deps.smtpTransport,
     );
@@ -119,12 +123,17 @@ export async function sendOutbound(message: OutboundMessage, deps: OutboundDeps)
   }
 
   // الإرسال وقع (أو فشل) لدى المزوّد — تعذّر السجل بعده لا يقلب النتيجة ولا يدعو لإعادة الإرسال.
+  const loggedBody = message.redactedLogBody?.trim() || (
+    message.purpose === "portal_auth"
+      ? "[رسالة تحقق بوابة المريض — الرابط والرمز محجوبان من السجلات]"
+      : body
+  );
   const deliveryId = await deps.record({
     channel: message.channel,
     patientId: message.patientId,
     counterpart,
     subject: message.channel === "email" ? (message.subject ?? null) : null,
-    body,
+    body: loggedBody,
     purpose: message.purpose,
     status: outcome.ok ? "sent" : "failed",
     providerMessageId: outcome.ok ? outcome.providerId : null,
@@ -142,11 +151,20 @@ async function sendSms(
   to: string,
   body: string,
   fetchImpl: typeof fetch,
+  resolveDns?: (hostname: string) => Promise<string[]>,
 ): Promise<{ ok: true; providerId: string | null } | { ok: false; error: string }> {
+  const safeBase = await assertSafeMessagingOutboundUrl(config.url, {
+    resolveDns,
+    skipLiveDns: fetchImpl !== fetch,
+  });
+  if (!safeBase.ok) {
+    return { ok: false, error: safeBase.reason ?? "عنوان بوابة الرسائل النصية محجوب أمنيًّا." };
+  }
   const request = buildSmsRequest(config, apiKey, to, body);
   let response: Response;
   try {
     response = await fetchImpl(request.url, {
+      ...SAFE_FETCH_INIT,
       method: request.method,
       headers: request.headers,
       body: request.body ?? undefined,
@@ -154,6 +172,9 @@ async function sendSms(
     });
   } catch {
     return { ok: false, error: "تعذّر الاتصال ببوابة الرسائل النصية." };
+  }
+  if (response.status >= 300 && response.status < 400) {
+    return { ok: false, error: "رفضنا تحويلًا خارجيًّا غير آمن من بوابة الرسائل النصية." };
   }
   const text = await response.text().catch(() => "");
   if (smsResponseOk(response.status, text, config.successPattern)) return { ok: true, providerId: null };

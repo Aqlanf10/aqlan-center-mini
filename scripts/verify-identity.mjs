@@ -122,15 +122,42 @@ try {
   check("ولم يُدمج بملفِّ الآخر", files[1].id !== file.id,
     "دمج الاسم يخلط تاريخين طبيّين — والتكرار أهون");
 
-  console.log("\n  ── والهاتف يظلّ يربط كما كان ──");
+  console.log("\n  ── الهاتف المشترك للعائلة: لا تُحدَّد الهوية بالهاتف وحده ──");
 
-  const byPhone = await db.addVisit({
-    patientName: "اسمٌ كُتب خطأً", patientPhone: "770112233", note: null,
+  const normalizedSamePerson = await db.addVisit({
+    patientName: "سعيد عبد الله القدسي", patientPhone: "770112233", note: null,
   });
-  await notes(byPhone.id);
-  await db.signClinicalVisit({ visitId: byPhone.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor });
-  const resolved = await db.getClinicalVisit(byPhone.id);
-  check("الرقم يجد الملف ولو أُخطئ الاسم", resolved.patientId === file.id, `الملف ${resolved.patientId}`);
+  await notes(normalizedSamePerson.id);
+  await db.signClinicalVisit({
+    visitId: normalizedSamePerson.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor,
+  });
+  const resolvedSame = await db.getClinicalVisit(normalizedSamePerson.id);
+  check("تطابق الهاتف والاسم المطبَّع لملفٍ وحيد يربط بالملف نفسه", resolvedSame.patientId === file.id, `الملف ${resolvedSame.patientId}`);
+
+  const relativeVisit = await db.addVisit({
+    patientName: "أحمد سعيد القدسي", patientPhone: "770112233", note: null,
+  });
+  await notes(relativeVisit.id);
+  let blockedPhoneOnly = false;
+  try {
+    await db.signClinicalVisit({
+      visitId: relativeVisit.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor,
+    });
+  } catch (err) {
+    blockedPhoneOnly = err instanceof db.AmbiguousSharedPhonePatientError;
+  }
+  check("فرد عائلة باسم مختلف ونفس الهاتف لا يُدمج صامتًا بالهاتف وحده", blockedPhoneOnly);
+
+  const relativeFile = await db.createPatient({
+    fullName: "أحمد سعيد القدسي", phone: "770112233", altPhone: null, gender: "male",
+    birthYear: 2012, address: null, medicalAlert: null, note: null,
+  });
+  const explicitLink = await db.linkVisitToPatient(relativeVisit.id, relativeFile.id);
+  check("يُسمح بملف مستقل لنفس هاتف العائلة ويُربط بقرار صريح", explicitLink.ok && relativeFile.id !== file.id);
+  const signedRelative = await db.signClinicalVisit({
+    visitId: relativeVisit.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor,
+  });
+  check("بعد اختيار الملف الصحيح تُوقَّع الزيارة في ملف صاحبها", signedRelative.reason === null);
 
   await db.getPool().end();
 } catch (error) {
