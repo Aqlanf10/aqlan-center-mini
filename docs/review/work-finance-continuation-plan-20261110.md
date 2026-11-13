@@ -43,6 +43,10 @@ Gate finding on `817106ac`: the interim commits had not regenerated `docs/securi
   - Local gate on `1114e608`: unit 15,044/15,044; lint 0 errors; audits 10/10; build pass. Two findings: `tsc` failed on a stale `.next/types` left by the previous head's build (clean after the fresh build), and `lab-status-financial-boundary` failed before any test ran because an earlier file left a stub `users(id)` table and the suite did not reset the schema (reproduced; fixed in `5357aba4`, test only).
   - The local gate now also runs `npm run verify:ci`, the operational journeys step that hosted CI runs and the local gate had been missing.
 
+### 2026-11-13 — integration branch status
+- `feat/claude-integration-finance-ortho-20261112` carries #539 merged into the staging orthodontic line plus post-merge reconciliation (merge record sections 7/7a), canonical ceph writes on staging's writers (fingerprint contract), and the medication-catalog grant (owner decision 6839071994).
+- Next on this plan after the stage-1/2 gate and Draft PR: upgrade proof from the staging schema, then orthodontic UI (stage 3), then finance migrations 0128–0131 (stage 4; re-check numbering collisions first; 0126/0127 protected).
+
 ## 3. Finance queue (order by risk to patient balances and the cash box)
 
 Three read-only audits ran on 2026-11-10/11, one per area (they stopped once at the usage limit and were resumed). Their reports are leads; the state column says what I verified myself.
