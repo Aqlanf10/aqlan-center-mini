@@ -39,3 +39,14 @@ navigations and steps before and after the change. Do not claim speed without ev
   "unchanged" is visible rather than assumed (6838132093: "معلومة الزيارة السابقة مصدر مؤرخ").
 - The phase-dependent workup entry removes a detour only when the doctor opens the full workspace from an
   active case. It is not part of the routine three-action path above.
+
+## Owner directive (#483, 2026-11-13 23:05 UTC)
+
+> خطوات جلسات الشد ما اريد تغيريها انا مرتاح بها واعمل بها يوميا
+
+The steps and order of the adjustment session stay as they are. Reducing or reordering them is not a goal;
+work on this path is limited to fixing defects and making data clearer. Verified on the integration head:
+- The session form keeps staging's field order (wires, elastics, what was done, photos, date, interval).
+- The routine path is the same 3 actions and 2 navigations.
+- Additions are text only (the dated source of carried-over values) or come from #539 (optional "remove
+  wire" checkboxes, unchecked by default).
