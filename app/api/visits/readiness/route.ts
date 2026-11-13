@@ -80,7 +80,7 @@ export async function GET(request: Request) {
         : null;
       return {
         visitId: row.visitId,
-        patientId: row.patientId,
+        patientId: open ? row.patientId : null,
         status: row.status,
         chair: row.chair,
         arrivedAt: row.arrivedAt,

@@ -34,6 +34,13 @@ function todayLocal(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+interface SharedPhoneCandidate {
+  id: number;
+  patientNumber: string;
+  fullName: string;
+  phone: string | null;
+}
+
 export default function RequestsPage() {
   const CLINIC_NAME = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
@@ -46,6 +53,8 @@ export default function RequestsPage() {
   const [date, setDate] = useState(todayLocal());
   const [time, setTime] = useState("10:00");
   const [duration, setDuration] = useState(30);
+  const [sharedPhoneCandidates, setSharedPhoneCandidates] = useState<SharedPhoneCandidate[]>([]);
+  const [patientChoice, setPatientChoice] = useState<string>("");
   const [confirmed, setConfirmed] = useState<{ id: number; link: string | null } | null>(null);
   const inFlight = useRef(false);
 
@@ -75,6 +84,8 @@ export default function RequestsPage() {
     setOpenId(request.id);
     setConfirmed(null);
     setError(null);
+    setSharedPhoneCandidates([]);
+    setPatientChoice("");
     setDate(request.preferredDate ?? todayLocal());
     setTime(request.preferredPeriod === "evening" ? "17:00" : "10:00");
     setDuration(30);
@@ -82,16 +93,40 @@ export default function RequestsPage() {
 
   const confirm = useCallback(async (request: BookingRequest) => {
     if (inFlight.current) return;
+    if (sharedPhoneCandidates.length > 0 && !patientChoice) {
+      setError("اختر الملف الصحيح بعد التحقق من هوية المريض أو اختر فتح ملف مستقل لفرد جديد من العائلة.");
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     try {
+      const extraSelection =
+        patientChoice === "new"
+          ? { createNewPatient: true }
+          : Number(patientChoice) > 0
+            ? { patientId: Number(patientChoice) }
+            : {};
       const response = await fetch(`/api/booking-requests/${request.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "confirm", date, time, durationMinutes: duration }),
+        body: JSON.stringify({
+          action: "confirm",
+          date,
+          time,
+          durationMinutes: duration,
+          ...extraSelection,
+        }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
+        if (
+          payload?.code === "shared_phone_patient_selection_required" &&
+          Array.isArray(payload.candidates)
+        ) {
+          setSharedPhoneCandidates(payload.candidates as SharedPhoneCandidate[]);
+          setError(payload.message ?? "هذا الهاتف مشترك؛ اختر الملف الصحيح بعد التحقق من الهوية.");
+          return;
+        }
         // اقتراح وقت بديل بدل رفض مجرّد: الاستقبال تقول للمريض وقتًا في نفس المكالمة.
         setError([payload?.message, payload?.suggestionMessage].filter(Boolean).join(" ") || "تعذّر التأكيد.");
         if (typeof payload?.suggestion === "string") setTime(payload.suggestion);
@@ -109,6 +144,8 @@ export default function RequestsPage() {
         link: number ? `https://wa.me/${number}?text=${encodeURIComponent(text)}` : null,
       });
       setOpenId(null);
+      setSharedPhoneCandidates([]);
+      setPatientChoice("");
       setError(null);
       await load(false);
     } catch {
@@ -117,7 +154,7 @@ export default function RequestsPage() {
       inFlight.current = false;
       setBusy(false);
     }
-  }, [date, time, duration, load, CLINIC_NAME, clinicPhone]);
+  }, [date, time, duration, sharedPhoneCandidates.length, patientChoice, load, CLINIC_NAME, clinicPhone]);
 
   const reject = useCallback(async (id: number) => {
     if (inFlight.current) return;
@@ -256,6 +293,40 @@ export default function RequestsPage() {
                       />
                     </label>
                   </div>
+                  {sharedPhoneCandidates.length > 0 ? (
+                    <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                      <p className="font-bold">
+                        رقم الهاتف مشترك — تحقّق من هوية المريض واختر الملف الصحيح (لا يُربط الطلب بالهاتف وحده):
+                      </p>
+                      <div className="mt-2 space-y-1.5">
+                        {sharedPhoneCandidates.map((cand) => (
+                          <label key={cand.id} className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-1.5">
+                            <input
+                              type="radio"
+                              name={`patient-choice-${request.id}`}
+                              value={String(cand.id)}
+                              checked={patientChoice === String(cand.id)}
+                              onChange={(event) => setPatientChoice(event.target.value)}
+                            />
+                            <span className="font-bold">{cand.fullName}</span>
+                            <span className="text-slate-500">({cand.patientNumber})</span>
+                          </label>
+                        ))}
+                        <label className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-1.5">
+                          <input
+                            type="radio"
+                            name={`patient-choice-${request.id}`}
+                            value="new"
+                            checked={patientChoice === "new"}
+                            onChange={(event) => setPatientChoice(event.target.value)}
+                          />
+                          <span className="font-bold">
+                            فتح ملف مستقل جديد لفرد العائلة «{request.fullName}» بنفس الهاتف
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
                   <button
                     onClick={() => confirm(request)}
                     disabled={busy}

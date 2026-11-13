@@ -38,13 +38,13 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
+  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض قبل قراءة بياناته. */
+  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
+
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const [patient, settings] = await Promise.all([getPatient(id), getSettingsSafe()]);
   // ومريضٌ لا وجود له ٤٠٤، لا بطاقةً باسمٍ فارغ على ترويسة المركز.
   if (!patient) notFound();
-  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
-   * تعتمد على الوكيل العام الذي يمرر /print/*. */
-  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
 
 
   const next = upcomingAppointments(await patientAppointmentsFrom(id, today), today);
@@ -94,8 +94,7 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
 
         <div className="rule-light" />
         <p style={{ fontSize: "9pt", fontWeight: 700, margin: "1mm 0 0" }}>
-          متابعة مواعيدك وحسابك من جوّالك: ادخل بوّابة المرضى برقم ملفّك أعلاه
-          ورقم جوّالك المسجَّل لدينا.
+          متابعة مواعيدك وفواتيرك من جوّالك: ادخل بوّابة المرضى بحسابك المفعَّل لدى الاستقبال.
         </p>
 
         {/* وتاريخ الطبع يقول إلى متى تصحّ الورقة. */}

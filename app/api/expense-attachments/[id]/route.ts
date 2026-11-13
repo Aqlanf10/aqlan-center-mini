@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getExpenseAttachment } from "@/lib/db";
 import { readFileByKey } from "@/lib/files";
+import { ALLOWED_TYPES } from "@/lib/storage";
 import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -34,12 +35,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       );
     }
     const download = new URL(request.url).searchParams.get("download") === "1";
+    const normalizedMime = (found.attachment.mimeType ?? "").trim().toLowerCase();
+    const isAllowedMime = Object.hasOwn(ALLOWED_TYPES, normalizedMime);
+    const safeMime = isAllowedMime ? normalizedMime : "application/octet-stream";
+    const forceAttachment = download || !isAllowedMime;
     const name = encodeURIComponent(found.attachment.title);
     return new NextResponse(new Uint8Array(bytes), {
       headers: {
-        "Content-Type": found.attachment.mimeType,
+        "Content-Type": safeMime,
         "Content-Length": String(bytes.length),
-        "Content-Disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${name}`,
+        "Content-Disposition": `${forceAttachment ? "attachment" : "inline"}; filename*=UTF-8''${name}`,
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
       },

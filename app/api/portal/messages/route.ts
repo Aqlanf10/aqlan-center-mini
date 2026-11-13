@@ -14,7 +14,9 @@ import {
   PORTAL_MESSAGE_HOUR_LIMIT,
   validateMessageEdit,
   validateOutgoingMessage,
+  voiceMatchesMagicBytes,
 } from "@/lib/messages";
+import { isPortalAdminPreview } from "@/lib/portal";
 import { requirePortalSession } from "@/lib/portal-server";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES, MESSAGES_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -37,7 +39,10 @@ export async function GET() {
   }
   try {
     const messages = await patientThreadMessages(session.patientId);
-    await markPatientThreadReadByPatient(session.patientId);
+    // لا نضع علامة «قرأها المريض» أثناء العرض الإداري للقراءة فقط.
+    if (!isPortalAdminPreview(session)) {
+      await markPatientThreadReadByPatient(session.patientId);
+    }
     return NextResponse.json({ messages });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل المحادثة." }, { status: 500 });
@@ -55,6 +60,12 @@ export async function POST(request: Request) {
   const session = await requirePortalSession();
   if (!session) {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
+  }
+  if (isPortalAdminPreview(session)) {
+    return NextResponse.json(
+      { message: "هذا عرضٌ إداري للقراءة فقط باسم الموظف — لا تُرسل رسائل باسم المريض." },
+      { status: 403 },
+    );
   }
 
   // ملفٌ حُذف وتوكنُ جلسته ما زال صالحاً: الجلسة موقّعة فتمرّ، والإدراج يسقط
@@ -81,6 +92,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: verdict.message }, { status: 400 });
   }
   const message = verdict.value;
+  if (
+    message.kind === "voice" &&
+    (!message.voiceMime ||
+      !message.voiceData ||
+      !voiceMatchesMagicBytes(message.voiceMime, message.voiceData))
+  ) {
+    return NextResponse.json(
+      { message: "ترويسة المقطع الصوتي لا تطابق الصيغة الصوتية المعلنة." },
+      { status: 400 },
+    );
+  }
 
   try {
     const recent = await countRecentPatientMessages(session.patientId, 60);
@@ -142,6 +164,12 @@ export async function PATCH(request: Request) {
   if (!session) {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
+  if (isPortalAdminPreview(session)) {
+    return NextResponse.json(
+      { message: "هذا عرضٌ إداري للقراءة فقط باسم الموظف — لا تُعدَّل رسائل باسم المريض." },
+      { status: 403 },
+    );
+  }
 
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
@@ -175,6 +203,12 @@ export async function DELETE(request: Request) {
   const session = await requirePortalSession();
   if (!session) {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
+  }
+  if (isPortalAdminPreview(session)) {
+    return NextResponse.json(
+      { message: "هذا عرضٌ إداري للقراءة فقط باسم الموظف — لا تُحذف رسائل باسم المريض." },
+      { status: 403 },
+    );
   }
 
   const url = new URL(request.url);

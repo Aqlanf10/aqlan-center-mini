@@ -4,10 +4,10 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 133,
-    "columns": 1693,
-    "constraints": 1956,
-    "indexes": 413,
+    "tables": 136,
+    "columns": 1730,
+    "constraints": 1998,
+    "indexes": 419,
     "triggers": 100
   },
   "tables": {
@@ -12059,6 +12059,314 @@
           ]
         }
       }
+    },
+    "patient_portal_accounts": {
+      "columns": {
+        "activated_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "activated_by_user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "credential_version": {
+          "type": "int4",
+          "nullable": false
+        },
+        "disabled_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "disabled_by_user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "disabled_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "last_login_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "login_name": {
+          "type": "text",
+          "nullable": false
+        },
+        "password_hash": {
+          "type": "text",
+          "nullable": true
+        },
+        "password_updated_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "phone_fingerprint": {
+          "type": "text",
+          "nullable": true
+        },
+        "sessions_revoked_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "patient_id"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_portal_accounts_active_requires_secret",
+        "patient_portal_accounts_credential_version_check",
+        "patient_portal_accounts_disabled_reason_check",
+        "patient_portal_accounts_login_name_check",
+        "patient_portal_accounts_status_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "activated_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "disabled_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_portal_accounts_login_lower_idx": {
+          "columns": [],
+          "unique": true
+        },
+        "patient_portal_accounts_pkey": {
+          "columns": [
+            "patient_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "patient_portal_staff_grants": {
+      "columns": {
+        "can_manage_portal": {
+          "type": "bool",
+          "nullable": false
+        },
+        "can_preview_portal": {
+          "type": "bool",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "granted_by_user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "user_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "user_id"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_portal_staff_grants_note_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "granted_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_portal_staff_grants_pkey": {
+          "columns": [
+            "user_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "patient_portal_tokens": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "delivery_channel": {
+          "type": "text",
+          "nullable": false
+        },
+        "expires_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "failed_attempts": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "invalidated_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "invalidation_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "issued_by_user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "phone_fingerprint": {
+          "type": "text",
+          "nullable": true
+        },
+        "purpose": {
+          "type": "text",
+          "nullable": false
+        },
+        "token_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "used_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "verification_note": {
+          "type": "text",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "token_hash"
+        ]
+      ],
+      "checks": [
+        "patient_portal_tokens_delivery_channel_check",
+        "patient_portal_tokens_failed_attempts_check",
+        "patient_portal_tokens_invalidation_reason_check",
+        "patient_portal_tokens_purpose_check",
+        "patient_portal_tokens_token_hash_check",
+        "patient_portal_tokens_verification_note_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "issued_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_portal_tokens_patient_purpose_idx": {
+          "columns": [
+            "patient_id",
+            "purpose",
+            "created_at"
+          ],
+          "unique": false
+        },
+        "patient_portal_tokens_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "patient_portal_tokens_token_hash_key": {
+          "columns": [
+            "token_hash"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
     },
     "patient_problems": {
       "columns": {

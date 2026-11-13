@@ -13,9 +13,22 @@
  * داخل ملاحظة فيُقسم الصف صفّين، وعلامة اقتباس فتُنهي الخلية في منتصفها. الاقتباس
  * المزدوج يعالجها كلها.
  */
+const PURE_NUMERIC_TEXT = /^\s*-?(?:0|[1-9]\d*)(?:\.\d+)?\s*$/;
+const FORMULA_TRIGGER_START = /^[=+\-@\t\r]/;
+const FORMULA_TRIGGER_TRIMMED = /^[=+\-@]/;
+
+function neutralizeSpreadsheetFormula(text: string, rawValue: unknown): string {
+  if (typeof rawValue === "number" && Number.isFinite(rawValue)) return text;
+  if (PURE_NUMERIC_TEXT.test(text)) return text;
+  if (FORMULA_TRIGGER_START.test(text) || FORMULA_TRIGGER_TRIMMED.test(text.trimStart())) {
+    return `'${text}`;
+  }
+  return text;
+}
+
 export function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const text = String(value);
+  const text = neutralizeSpreadsheetFormula(String(value), value);
   if (!/[",\n\r]/.test(text)) return text;
   return `"${text.replace(/"/g, '""')}"`;
 }

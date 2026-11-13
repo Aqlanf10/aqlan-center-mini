@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { PORTAL_COOKIE_NAME, SESSION_COOKIE } from "@/lib/sessionCookie";
+import {
+  PORTAL_ADMIN_PREVIEW_COOKIE_NAME,
+  PORTAL_COOKIE_NAME,
+  SESSION_COOKIE,
+} from "@/lib/sessionCookie";
 import { buildCspHeaderValue } from "@/lib/csp";
 import {
   MESSAGES_BODY_LIMIT_BYTES,
@@ -83,10 +87,14 @@ const PUBLIC_API = new Set([
   // مسارات بوابة المريض. تُفتح للمرور فقط: كل واحد منها يفحص جلسة البوابة
   // الموقّعة بمجال منفصل عن جلسة الطاقم — فلا توكن طاقم يفتح بوابة ولا عكس،
   // ولا معرّف مريض يقبل من العميل إطلاقًا.
+  "/api/portal/activate",
+  "/api/portal/admin-preview/exit",
   "/api/portal/login",
   "/api/portal/logout",
   "/api/portal/me",
+  "/api/portal/reset-password",
   "/api/portal/statement",
+  "/api/portal/token-info",
   "/api/portal/appointments",
   "/api/portal/appointments/confirm",
   "/api/portal/intake",
@@ -178,10 +186,11 @@ function mutationGuardVerdict(request: NextRequest): string | null {
   const authorization = request.headers.get("authorization") ?? "";
   if (authorization.toLowerCase().startsWith("bearer ")) return null;
 
-  // أي جلسة مبنية على كوكي — طاقم أو بوابة — ترفع سقف التشدد: صاحب
-  // الجلسة يمكن استدراجه من موقع آخر، وذاكرته تحمل الكوكي معه.
+  // أي جلسة مبنية على كوكي — طاقم أو بوابة أو عرض بوابة إداري — ترفع سقف التشدد:
+  // صاحب الجلسة يمكن استدراجه من موقع آخر، وذاكرته تحمل الكوكي معه.
   const cookieAuthenticated = Boolean(request.cookies.get(SESSION_COOKIE)?.value)
-    || Boolean(request.cookies.get(PORTAL_COOKIE_NAME)?.value);
+    || Boolean(request.cookies.get(PORTAL_COOKIE_NAME)?.value)
+    || Boolean(request.cookies.get(PORTAL_ADMIN_PREVIEW_COOKIE_NAME)?.value);
 
   const fetchSite = request.headers.get("sec-fetch-site")?.trim().toLowerCase() ?? "";
   const origin = request.headers.get("origin");
@@ -268,7 +277,12 @@ function securedNext(request: NextRequest): NextResponse {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("Content-Security-Policy", csp);
-  if (pathname.startsWith("/api/") || pathname.startsWith("/portal/") || pathname.startsWith("/print/")) {
+  if (
+    pathname.startsWith("/api/") ||
+    pathname === "/portal" ||
+    pathname.startsWith("/portal/") ||
+    pathname.startsWith("/print/")
+  ) {
     response.headers.set("Cache-Control", "private, no-store");
   }
   return response;

@@ -48,10 +48,19 @@ export type PatientResolution =
   | { kind: "notFound"; message: string }
   | { kind: "denied" };
 
+export function isUnlinkedRestrictedDoctor(context: AiToolContext): boolean {
+  const role = context.role || context.userRole;
+  if (role !== "doctor") return false;
+  if (context.canViewAllPatients || context.permissions?.canViewAllPatients) return false;
+  return typeof context.doctorPartyId !== "number" || context.doctorPartyId <= 0;
+}
+
 function scopeIdFor(context: AiToolContext): number | null {
   if (context.role !== "doctor" && context.userRole !== "doctor") return null;
   if (context.canViewAllPatients || context.permissions?.canViewAllPatients) return null;
-  return context.doctorPartyId ?? null;
+  return typeof context.doctorPartyId === "number" && context.doctorPartyId > 0
+    ? context.doctorPartyId
+    : null;
 }
 
 /**
@@ -61,6 +70,7 @@ function scopeIdFor(context: AiToolContext): number | null {
  *   شيئًا عما إذا كان المريض موجودًا أصلًا.
  * - `patientName` معطى: البحث **بمجال الطبيب** — فالنتائج نفسها مسموحة،
  *   والتشابه المتعدد يطلب توضيحًا لا يعرض إلا مسموحًا به.
+ * - الطبيب المقيد غير المربوط بجهة طبيب يُرفض Fail-Closed دون بحث عام.
  * - بعد التثبيت يُعاد `patientId` دقيقًا ليحلّ محلّ الاسم في المعاملات.
  */
 export async function resolvePatientForTool(
@@ -80,6 +90,10 @@ export async function resolvePatientForTool(
   const name = typeof params.patientName === "string" ? params.patientName.trim() : "";
   if (!name) return { kind: "notFound", message: "يرجى تحديد المريض بالاسم أو رقم الملف." };
 
+  if (isUnlinkedRestrictedDoctor(context)) {
+    return { kind: "denied" };
+  }
+
   const scopeId = scopeIdFor(context);
   const matches = await searchPatients(name, 5, scopeId).catch(() => []);
   if (matches.length === 0) {
@@ -96,6 +110,10 @@ export async function resolvePatientForTool(
       kind: "disambiguation",
       message: `يوجد أكثر من مريض يطابق «${name}»:\n${list}\n\nيرجى تحديد رقم الملف أو الاسم الكامل.`,
     };
+  }
+  if (context.isDbConnected !== false) {
+    const allowed = await canAccessPatient(session, matches[0].id).catch(() => false);
+    if (!allowed) return { kind: "denied" };
   }
   return { kind: "pinned", patientId: matches[0].id, patientName: matches[0].fullName };
 }

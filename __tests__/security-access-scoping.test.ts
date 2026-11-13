@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   orthoCase: vi.fn(),
   clinicalVisit: vi.fn(),
   poolQuery: vi.fn(),
+  attachmentMeta: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({
@@ -48,6 +49,7 @@ vi.mock("@/lib/db", () => ({
   markConversationRead: vi.fn(async () => {}),
   getPatient: vi.fn(async (id: number) => ({ id, fullName: "Test Patient" })),
   insertMessage: vi.fn(async () => ({ id: 1 })),
+  getMessageAttachmentMeta: mocks.attachmentMeta,
   fileMessagePayload: vi.fn(async () => ({
     senderType: "patient",
     recipientPatientId: 99,
@@ -107,6 +109,15 @@ beforeEach(() => {
   mocks.clinicalVisit.mockResolvedValue({
     id: 303,
     patientId: 99,
+  });
+  mocks.attachmentMeta.mockResolvedValue({
+    mime: "application/pdf",
+    senderType: "patient",
+    senderUserId: null,
+    senderPatientId: 99,
+    recipientType: "staff_all",
+    recipientUserId: null,
+    recipientPatientId: null,
   });
 });
 

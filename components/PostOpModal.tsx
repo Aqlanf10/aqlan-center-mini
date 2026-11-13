@@ -28,6 +28,8 @@ interface PostOpModalProps {
   patientName: string;
   patientPhone?: string | null;
   initialTreatmentText?: string;
+  visitId?: number | null;
+  savedVisitNotes?: string | null;
   clinicName?: string;
   clinicPhone?: string | null;
 }
@@ -39,6 +41,8 @@ export function PostOpModal({
   patientName,
   patientPhone,
   initialTreatmentText = "",
+  visitId = null,
+  savedVisitNotes = null,
   clinicName = "مركز الدكتور عقلان الكامل لطب وجراحة الفم والأسنان",
   clinicPhone,
 }: PostOpModalProps) {
@@ -76,8 +80,8 @@ export function PostOpModal({
   const handlePrint = () => {
     const params = new URLSearchParams();
     params.set("templateId", currentTemplate.id);
-    if (customNotes.trim()) {
-      params.set("notes", customNotes.trim());
+    if (visitId && visitId > 0) {
+      params.set("visitId", String(visitId));
     }
     window.open(`/print/post-op/${patientId}?${params.toString()}`, "_blank");
   };
@@ -236,16 +240,22 @@ export function PostOpModal({
             </div>
           </div>
 
-          {/* ملاحظات الطبيب المخصصة للمريض */}
+          {/* الملاحظة السريرية المحفوظة للطباعة + ملاحظة الواتساب الاختيارية */}
+          {savedVisitNotes?.trim() ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
+              <strong className="font-bold">الملاحظة السريرية المحفوظة في سجل الزيارة (تظهر في الطباعة الموثّقة): </strong>
+              <span>{savedVisitNotes.trim()}</span>
+            </div>
+          ) : null}
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-              ✍️ ملاحظة أو توجيه خاص من الطبيب (اختياري، ستُضاف لرسالة الواتساب والطباعة):
+              ✍️ ملاحظة إضافية لرسالة الواتساب فقط (المطبوع الرسمي يعرض الملاحظات المحفوظة في سجل الزيارة حصرًا):
             </label>
             <textarea
               value={customNotes}
               onChange={(e) => setCustomNotes(e.target.value)}
               rows={2}
-              placeholder="مثال: يرجى الحضور بعد 7 أيام لإزالة الخياطة، أو الالتزام بوضع كمادة دافئة بدءاً من الغد..."
+              placeholder="مثال: تذكير بموعد المتابعة عبر واتساب (لإظهار توجيه سريري مطبوع، احفظه في حقل خطة المتابعة داخل الزيارة)..."
               className="w-full rounded-2xl border border-slate-300 p-3 text-xs focus:border-emerald-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
             />
           </div>
