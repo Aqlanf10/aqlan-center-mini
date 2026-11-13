@@ -1,8 +1,8 @@
 "use client";
 import { OrthoComparison } from "./OrthoPhotoComparison";
 export { OrthoComparison } from "./OrthoPhotoComparison";
-import { OrthoWorkupNavigation } from "./OrthoWorkupNavigation";
-import { ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore } from "@/lib/ortho-workup-navigation";
+import { OrthoCaseNavigation, OrthoWorkupNavigation } from "./OrthoWorkupNavigation";
+import { ORTHO_WORKUP_ENTRY_STEP, ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore, type OrthoWorkupPillar } from "@/lib/ortho-workup-navigation";
 import { makeOrthoWorkupOwners, OrthoWorkupOwnersContext } from "./OrthoWorkupOwners";
 import { OrthoDiagnosticNavigation } from "./OrthoDiagnosticNavigation";
 import OrthoSessionDetails from "./OrthoSessionDetails";
@@ -120,15 +120,7 @@ interface OrthoCase {
   } | null;
 }
 
-type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention" | "presentation";
-
-const PILLAR_TABS: { key: OrthoPillar; label: string; icon: string }[] = [
-  { key: "wires", label: "مسار الأسلاك والشدّات", icon: "⚡" },
-  { key: "diagnostics", label: "السجلات والسيفالومتري (WebCeph)", icon: "📐" },
-  { key: "prescription", label: "خطة العلاج والميكانيكا", icon: "⚙️" },
-  { key: "retention", label: "التثبيت والاستبقاء", icon: "🛡️" },
-  { key: "presentation", label: "دراسة الحالة المحفوظة", icon: "📋" },
-];
+type OrthoPillar = OrthoWorkupPillar;
 
 function monthsText(months: number): string {
   if (months < 1) return "أقل من شهر";
@@ -1256,7 +1248,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
 
                     <div className="flex flex-wrap items-center gap-2">
                       {!workup && <button type="button" className="min-h-11 rounded-lg border border-navy-300 bg-white px-3 text-xs font-bold"
-                        onClick={() => navigateWorkup(0)}>{row.status === "assessment" ? "إعداد ملف التقويم خطوة بخطوة" : "استكمال ملف التقويم خطوة بخطوة"}</button>}
+                        onClick={() => navigateWorkup(ORTHO_WORKUP_ENTRY_STEP)}>فتح مساحة عمل التقويم</button>}
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-[11px] font-black border ${
                           live
@@ -1357,28 +1349,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </> : <p className="mt-3 rounded-lg border bg-white p-3 text-sm">ملف تقييم فقط؛ لم يُسجل بدء علاج أو جهاز أو مدة علاج.</p>}
                 </div>
 
-                {/* أشرطة الأركان الأربعة التخصصية (Pillar Navigation) */}
-                {!workup && <div className="flex border-b border-slate-200 bg-white">
-                  {PILLAR_TABS.map((tab) => {
-                    const isSelected = currentPillar === tab.key;
-                    return (
-                      <button
-                        key={tab.key}
-                        aria-label={tab.label}
-                        onClick={() => { if (currentCase(row.id)) setPillarForCase(row.id, tab.key); }}
-                        className={`flex-1 py-2.5 text-xs font-black transition-all border-b-2 flex items-center justify-center gap-1.5 ${
-                          isSelected
-                            ? "border-navy-800 text-navy-900 bg-navy-50/40"
-                            : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-                        }`}
-                      >
-                        <span>{tab.icon}</span>
-                        <span className="hidden sm:inline">{tab.label}</span>
-                        <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
-                      </button>
-                    );
-                  })}
-                </div>}
+                {!workup && <OrthoCaseNavigation pillar={currentPillar}
+                  onSelect={pillar => { if (currentCase(row.id)) setPillarForCase(row.id, pillar); }} />}
 
                 {/* محتوى الركن المختار */}
                 <div className={currentPillar === "prescription" ? "px-2 py-1 sm:p-4" : "p-4"}>
@@ -2808,7 +2780,7 @@ function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView }: { patientId
   const canWrite = session?.role === "admin" || session?.role === "doctor";
   const [opened, setOpened] = useState(() => parent.assessments.has(caseRow.id));
   if (!canWrite) return null;
-  if (!opened) return <button type="button" className="mb-4 min-h-11 rounded-lg border px-3 py-2 text-sm"
+  if (!opened && sectionView === undefined) return <button type="button" className="mb-4 min-h-11 rounded-lg border px-3 py-2 text-sm"
     onClick={() => { if (parent.active && !parent.denied && parent.clinical) setOpened(true); }}>فتح التقييم السريري والقياسات</button>;
   return <OwnedAssessmentV2 patientId={patientId} caseRow={caseRow} sectionView={sectionView} />;
 }
@@ -2820,11 +2792,16 @@ function OwnedAssessmentV2({ patientId, caseRow, sectionView }: { patientId: num
     deny: () => parent.deny(),
   }));
   const [, redraw] = useState(0);
+  const [binding, setBinding] = useState<AssessmentOwnerV2 | null>(null);
   useLayoutEffect(() => {
     parent.assessments.set(caseRow.id, owner); owner.activate();
     const unsubscribe = owner.subscribe(() => redraw(value => value + 1));
+    setBinding(owner);
     return unsubscribe; // Parent retirement owns disposal, not a temporary view.
   }, [owner, parent, caseRow.id]);
+  // Do not present initial attachment as an authorization failure. The child
+  // still checks the live authority on every read, edit and save after binding.
+  if (binding !== owner) return <p role="status">جارٍ تهيئة سياق التقييم…</p>;
   const lifetime: AssessmentLifetimeV2 = {
     identity: owner, active: owner.active, editable: owner.editable, denied: owner.denied,
     busy: owner.busy, uncertain: owner.uncertain, dirty: owner.dirty, readVersion: owner.readVersion,

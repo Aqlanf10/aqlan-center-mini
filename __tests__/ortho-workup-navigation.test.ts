@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, workupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore } from "../lib/ortho-workup-navigation";
+import { ORTHO_WORKUP_ENTRY_STEP, ORTHO_WORKUP_GROUPS, ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, workupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore } from "../lib/ortho-workup-navigation";
 describe("case-scoped workup navigation", () => {
+  it("exposes every existing destination exactly once in five direct groups without changing bookmark indices", () => {
+    expect(ORTHO_WORKUP_GROUPS).toHaveLength(5);
+    expect(ORTHO_WORKUP_GROUPS.flatMap(group => [...group.steps]).sort((a, b) => a - b)).toEqual(ORTHO_WORKUP_STEPS.map((_, index) => index));
+    expect(ORTHO_WORKUP_GROUPS[2].steps.map(index => ORTHO_WORKUP_STEPS[index].id)).toEqual(["strategy", "agreement"]);
+    for (const group of ORTHO_WORKUP_GROUPS) {
+      expect(group.steps.some(step => step === group.entry)).toBe(true);
+      expect(group.steps.every(step => ORTHO_WORKUP_STEPS[step].pillar === group.id)).toBe(true);
+    }
+  });
+  it("starts with wires, then diagnosis, and keeps the remaining existing pillars in order", () => {
+    expect(ORTHO_WORKUP_GROUPS.map(group => group.id)).toEqual(["wires", "diagnostics", "prescription", "retention", "presentation"]);
+    expect(ORTHO_WORKUP_GROUPS.slice(0, 2).map(group => group.title)).toEqual(["الأسلاك والشدّات", "التشخيص"]);
+    expect(ORTHO_WORKUP_STEPS[ORTHO_WORKUP_ENTRY_STEP].id).toBe("visits");
+    expect(ORTHO_WORKUP_STEPS[ORTHO_WORKUP_GROUPS[1].entry].id).toBe("interview");
+  });
   it("places measurements before radiographs and preserves the separate agreement, visit, retention and study owners", () => {
     expect(ORTHO_WORKUP_STEPS.map(step => step.id)).toEqual(["identity", "interview", "extraoral", "intraoral", "measurements", "radiographs", "ceph", "diagnosis", "strategy", "agreement", "visits", "retention", "presentation"]);
     expect(ORTHO_WORKUP_STEPS.slice(8).map(step => step.pillar)).toEqual(["prescription", "prescription", "wires", "retention", "presentation"]);

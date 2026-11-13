@@ -622,7 +622,7 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
     expect(financial.props.open).toBeUndefined();
     expect(text(financial)).toContain("مرجع الحالة المالي وشمول الشدّة");
     expect(text(prescriptionValue())).toBe("غير مسجّلة");
-    const tab = one(node => node.type === "button" && node.props["aria-label"] === "مسار الأسلاك والشدّات");
+    const tab = one(node => node.type === "button" && node.props["aria-label"] === "الأسلاك والشدّات");
     click(tab);
     expect(one(node => node.props["data-testid"] === "ortho-financial-context").type).toBe("div");
     expect(row).toEqual(before); expect(writes()).toEqual([]);
@@ -692,7 +692,7 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
 
 describe.each([
   { endpoint: "space-ledger", label: "خطة العلاج والميكانيكا", panel: "OrthoSpacePanel" },
-  { endpoint: "problem-sources", label: "السجلات والسيفالومتري (WebCeph)", panel: "OrthoProblemSourcesPanel" },
+  { endpoint: "problem-sources", label: "التشخيص", panel: "OrthoProblemSourcesPanel" },
 ])("PatientOrtho $endpoint recovery read ownership", ({ endpoint, label, panel }) => {
   const metadata = () => ({ ok: true, actorId: 7,
     scope: { patientId: 19, orthoCaseId: 41, clinicalCaseId: 51 }, recovery: null });
@@ -1210,7 +1210,7 @@ describe('recorded session detail and chronology entry',()=>{
 
 describe("diagnostic section jump navigation", () => {
   it("exposes four in-page controls without hiding existing sections or issuing requests", async () => {
-    render(); await grant(); click(control("السجلات والسيفالومتري (WebCeph)"));
+    render(); await grant(); click(control("التشخيص"));
     const nav = elements(render()).filter(node => node.type === "nav" && node.props["aria-label"] === "الانتقال بين أقسام التشخيص");
     expect(nav).toHaveLength(1);
     expect(elements(nav[0]).filter(node => node.type === "button")).toHaveLength(4);
@@ -1227,7 +1227,7 @@ describe("diagnostic section jump navigation", () => {
     return { target, root };
   };
   it("retains mounted child state and pending reads through every jump", async () => {
-    hooks.cephProbe = true; await mount(); click(control("السجلات والسيفالومتري (WebCeph)"));
+    hooks.cephProbe = true; await mount(); click(control("التشخيص"));
     edit("synthetic-ceph-draft", "unsaved synthetic text");
     const beforeScopes = new Map(scopes), beforeRequests = requests.length;
     const pending = reads().find(request => request.url.includes("problem-sources/recovery"))!;
@@ -1243,7 +1243,7 @@ describe("diagnostic section jump navigation", () => {
     expect(hooks.retiredWrites).toBe(0);
   });
   it("retires old jump callbacks during parent refresh and after revalidation", async () => {
-    await mount(); click(control("السجلات والسيفالومتري (WebCeph)")); const { target } = attach();
+    await mount(); click(control("التشخيص")); const { target } = attach();
     const old = button("السيفالومتري"); refresh();
     (old.props.onClick as () => void)(); expect(target.focus).not.toHaveBeenCalled();
     await grant(); (old.props.onClick as () => void)(); expect(target.focus).not.toHaveBeenCalled();
@@ -1254,7 +1254,7 @@ describe("diagnostic section jump navigation", () => {
 
 describe('photo comparison parent read ownership',()=>{
  const source={id:91,patientId:19,orthoCaseId:41,title:'synthetic comparison source',isImage:true,photoStage:'initial',photoView:null,takenOn:null,uploadedAt:'2026-01-01T00:00:00.000Z',removedAt:null,note:null};
- async function open(){render();const current=pair();respond(current.ortho,{cases:[fixture(19,{photosVisible:true})]});respond(current.patient,contact());await flush();click(control('السجلات والسيفالومتري (WebCeph)'));await flush();}
+ async function open(){render();const current=pair();respond(current.ortho,{cases:[fixture(19,{photosVisible:true})]});respond(current.patient,contact());await flush();click(control('التشخيص'));await flush();}
  it('withdraws loaded comparison images during parent refresh and denied reread',async()=>{
   const base=fetchMock.getMockImplementation()!;fetchMock.mockImplementation((url,init)=>url==='/api/patients/19/documents'&&(!init?.method||init.method==='GET')?Promise.resolve(new Response(JSON.stringify({documents:[source]}),{headers:{'content-type':'application/json'}})):base(url,init));
   await open();expect(elements(render()).some(n=>n.type==='img'&&n.props.src==='/api/documents/91')).toBe(true);
