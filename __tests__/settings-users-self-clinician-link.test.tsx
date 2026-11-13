@@ -121,7 +121,8 @@ describe("explicit export grants across role changes", () => {
     expect(writes).toEqual([]);
     const body = await savePermissions();
     expect(body.role).toBe(nextRole);
-    expect(body.permissions).toEqual({ ...parseDoctorPermissions(undefined, "admin"), canExportOrthoStudies: false });
+    // Like export, the medication-catalog grant (owner decision 6839071994) is explicit: a role change never inherits it.
+    expect(body.permissions).toEqual({ ...parseDoctorPermissions(undefined, "admin"), canExportOrthoStudies: false, canManageMedicationCatalog: false });
     expect(body).not.toHaveProperty("commissionConfig");
   });
   it.each(["doctor", "reception"])("requires the actual checkbox to grant export after admin becomes %s", async nextRole => {
@@ -131,7 +132,7 @@ describe("explicit export grants across role changes", () => {
     expect(exportGrant().props.checked).toBe(true);
     const body = await savePermissions();
     expect(body.role).toBe(nextRole);
-    expect(body.permissions).toEqual(parseDoctorPermissions(undefined, "admin"));
+    expect(body.permissions).toEqual({ ...parseDoctorPermissions(undefined, "admin"), canManageMedicationCatalog: false });
     expect(body).not.toHaveProperty("commissionConfig");
   });
   it("retains an explicit grant for a same-role event and clears only that grant on a subsequent role transition", async () => {
