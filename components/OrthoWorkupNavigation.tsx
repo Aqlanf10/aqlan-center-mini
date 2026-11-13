@@ -3,14 +3,16 @@
 import { ORTHO_CASE_PILLARS, ORTHO_WORKUP_GROUPS, ORTHO_WORKUP_STEPS, type OrthoWorkupPillar } from "@/lib/ortho-workup-navigation";
 
 /** The normal case view and the workup share an order and readable labels,
- * including narrow screens. The parent still owns navigation admission. */
+ * including narrow screens, where the full labels wrap at their natural width
+ * (two rows at 390px instead of a three-row grid), so the case identity and
+ * today's session stay near the top. The parent still owns navigation admission. */
 export function OrthoCaseNavigation({ pillar, onSelect }: {
   pillar: OrthoWorkupPillar; onSelect(pillar: OrthoWorkupPillar): void;
 }) {
-  return <nav aria-label="أقسام حالة التقويم" className="grid grid-cols-2 border-b border-slate-200 bg-white sm:grid-cols-5">
+  return <nav aria-label="أقسام حالة التقويم" className="flex flex-wrap border-b border-slate-200 bg-white sm:grid sm:grid-cols-5">
     {ORTHO_CASE_PILLARS.map(item => <button key={item.id} type="button" aria-label={item.title} aria-pressed={pillar === item.id}
       onClick={() => onSelect(item.id)}
-      className={`flex min-h-11 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-xs font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${pillar === item.id ? "border-navy-800 bg-navy-50/40 text-navy-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
+      className={`flex min-h-11 flex-auto items-center justify-center gap-1.5 whitespace-nowrap border-b-2 px-2 py-2.5 text-xs font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${pillar === item.id ? "border-navy-800 bg-navy-50/40 text-navy-900" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
       <span aria-hidden="true">{item.icon}</span><span>{item.title}</span>
     </button>)}
   </nav>;

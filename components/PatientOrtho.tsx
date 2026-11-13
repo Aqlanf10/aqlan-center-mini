@@ -1223,7 +1223,6 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                 {workup && workupStep !== null ? <OrthoWorkupNavigation step={workupStep} legacy={row.status !== "assessment"}
                   onSelect={navigateWorkup} onClose={() => { if (currentCase(row.id) && !pendingOrthoWork(owner)) setPillarForCase(row.id, currentPillar); }} />
                   : null}
-                {live ? <PatientResponsibilitySettings patientId={patientId} kind="ortho" sourceId={row.id} onSaved={refreshAfterConfirmedChange} /> : null}
                 {/* رأس الحالة التقويمية */}
                 <div className={`border-b border-slate-100 bg-slate-50/70 ${currentPillar === "prescription" ? "px-3 py-1 sm:p-4" : "p-4"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1280,6 +1279,9 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={row.id}
                       onOpenClinicalContext={(reference) => onContextChange?.(reference)} />
                     <OrthoFollowupCoveragePanel patientId={patientId} orthoCaseId={row.id} onSaved={refreshAfterConfirmedChange} />
+                    {/* Admin-only booking responsibility sits with the case's reference context, below the clinical
+                        header, so the doctor's case identity and today's session are not pushed down by a settings box. */}
+                    {live ? <PatientResponsibilitySettings patientId={patientId} kind="ortho" sourceId={row.id} onSaved={refreshAfterConfirmedChange} /> : null}
                     {(row.status === "active" || row.status === "retention")
                       ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
                           refreshRevision={onboardingRevision} onOpenAccount={onOpenAccount} /> : null}
