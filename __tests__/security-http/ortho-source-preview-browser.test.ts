@@ -58,8 +58,8 @@ describe("built measurement session provenance preview", () => {
       await page.getByRole("button", { name: "فتح مساحة عمل التقويم", exact: true }).click();
       const workspace = page.getByRole("region", { name: "مساحة عمل ملف التقويم", exact: true });
       await workspace.getByRole("navigation", { name: "مجموعات ملف التقويم", exact: true }).getByRole("button", { name: "الفحص والسجلات", exact: true }).click();
+      // A section opens the assessment directly; no extra "open" press (6838132093).
       await workspace.getByRole("button", { name: "القياسات وتحليل الموديلات", exact: true }).click();
-      await page.getByRole("button", { name: "فتح التقييم السريري والقياسات", exact: true }).click();
       await page.getByRole("button", { name: "بدء تقييم غير معبأ", exact: true }).click();
       await measurement(page, 11, "7.5", "2026-10-01", "طريقة مصدر اصطناعية", "منفذ مصدر اصطناعي");
       await measurement(page, 12, "8.1", "2026-09-01", "طريقة سابقة اصطناعية", "منفذ سابق اصطناعي");
