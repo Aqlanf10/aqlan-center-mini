@@ -160,7 +160,9 @@ jobs:
   postgres_integration:
     name: PostgreSQL 18 integration, schema and operational journeys
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    # The integrated suite (576 files, run serially by design for concurrency proofs) takes 41 minutes on a
+    # local runner and was still running at 75 minutes on a hosted one. The job name is unchanged.
+    timeout-minutes: 120
     services:
       # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
       # ليست اختيارية: التزامن المالي لا يُثبت على PGlite أحادي الاتصال.
