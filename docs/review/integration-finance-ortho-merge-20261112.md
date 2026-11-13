@@ -102,6 +102,27 @@ Each failure was traced to its owning contract; none was silenced.
 Environment-only (not a merge defect): `ortho-study-export-artifact-storage` refuses storage under `/tmp`
 by design (ephemeral zone), and this local worktree lives under `/tmp`. Hosted CI runs from the runner workspace.
 
+## 7a. PostgreSQL verification fixes (suite on 6d81832f: 61 failures in 18 files)
+
+Run from a durable path (`/root/...`), one PostgreSQL run at a time, with CI's two disposable-fixture
+switches (`CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE`, `MANUAL_CASH_CI_DISPOSABLE_FIXTURE`). Without them the
+five empty-database proof suites refuse a nonempty schema by design; that is how CI runs them, not a defect.
+Each staging-only suite was first run on staging 4d85fb69 alone (7 files, 89/89 passed) so only merge
+regressions were changed.
+
+| Area | Cause | Resolution |
+|---|---|---|
+| Legacy baseline writer | This branch's responsibility check (user SHARE lock) ran before staging's patient lock; a permission change committed behind the patient lock deadlocked (500) instead of refusing. | Order is now patient → identity → responsibility, the same as staging's admission; stale account 401, stale access/plan 403, changed doctor 409 again. Responsibility check kept. |
+| Clinic reset (study suites) | This branch refuses reset while patient files or retired numbers exist (number reuse protection); staging's study tests reset with a patient present. | Protection kept. Tests prove an empty reset succeeds, and a reset with a patient file is refused before backup with the study history untouched; the merge-serialization test expects the same refusal after waiting. |
+| Session writer enums | This branch's writer validates every new session (enum, interval, text); staging seeded a historical invalid-enum receipt through the writer. | Writer validation kept. The historical row and its exact v1 receipt are seeded directly (immutable receipt inserted, never updated), so replay/expiry/actor tests still prove the legacy path. |
+| Billing class of a new unfunded case | This branch classifies it `REVIEW_REQUIRED` (decision pending); staging's tests expected `OUTSIDE_CONTRACT`, which this branch keeps for per-session legacy cases. | Expectations follow the merged classification; frozen signed billing and no-charge behaviour unchanged. |
+| Reopen guard (0125) | This branch's coverage/decision fixtures reopened a closed case with a direct UPDATE. | Fixtures seed the case open; the decisions test leaves the case closed (its pending review is what later tests read). Guard untouched. |
+| Retainer metadata | This branch's lifecycle test expected a retainer save to move the case to retention; staging's rule never infers a lifecycle transition from retainer metadata. | Staging rule kept; test expects the case to stay active. |
+| Ceph superimposition | Staging requires a non-collinear S–N–Me frame and refuses an overflowing transform as unavailable geometry. | Pair fixture records Me; overflow expects `ceph_pair_geometry_unavailable`. |
+| Ceph comparison overflow | Staging's comparator skips a pair whose difference overflows, so a saved value could vanish from the canonical answer. | Canonical comparison refuses the whole pair (`ceph_pair_invalid`) when a value present in both studies has a non-finite difference. |
+| Ceph completion fixtures | Index-derived landmark positions are collinear for several measurements, which staging's completion gate refuses; the PG test also passed the BIGINT id as a string. | Shared defined synthetic geometry (`__tests__/fixtures/ceph-valid-geometry.ts`, same as staging's identity fixture) and a numeric id. |
+| Schema ownership | Table count. | 132 (merge base) + 17 (staging) + 14 (this branch) = 163. |
+
 ## 8. Migration allocation for the finance additions (#483 6833690789)
 
 Coordinating allocation for this integration line only; not an exclusive or global lock. Re-checked

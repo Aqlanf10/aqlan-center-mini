@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { readFollowupCoverageSnapshotWith } from "../../lib/ortho-followup-coverage-db";
 let sequence = 0;
-export async function seedCanonicalCoverage(q: Pick<Pool, "query">, input: { patientId: number; actorId: number; doctorId: number; caseId?: number; save?: boolean; createdAt?: string }) {
+export async function seedCanonicalCoverage(q: Pick<Pool, "query">, input: { patientId: number; actorId: number; doctorId: number; caseId?: number; save?: boolean; createdAt?: string; status?: "active" | "completed" }) {
   const n = ++sequence, patient = input.patientId;
-  const ortho = input.caseId ?? (await q.query("INSERT INTO ortho_cases(patient_id,created_by,status) VALUES($1,'SYN','completed') RETURNING id", [patient])).rows[0].id;
+  const ortho = input.caseId ?? (await q.query("INSERT INTO ortho_cases(patient_id,created_by,status) VALUES($1,'SYN',$2) RETURNING id", [patient, input.status ?? "completed"])).rows[0].id;
   const clinical = (await q.query("INSERT INTO clinical_cases(patient_id,specialty,title,site,ortho_case_id,created_by) VALUES($1,'orthodontics','SYN private clinical title','both',$2,'SYN') RETURNING id", [patient, ortho])).rows[0].id;
   const plan = (await q.query("INSERT INTO treatment_plans(patient_id,title,total_minor,base_currency,consent_at,consent_by) VALUES($1,'SYN private plan',250000,'YER',NOW(),'SYN') RETURNING id", [patient])).rows[0].id;
   const service = (await q.query("INSERT INTO services(name,category,price_minor) VALUES('SYN invoice service','ortho',250000) RETURNING id")).rows[0].id;

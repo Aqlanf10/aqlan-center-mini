@@ -91,7 +91,9 @@ it.each(["missing-anchor", "zero-baseline", "missing-calibration", "overflow"])(
   if (kind === "zero-baseline") await fx.pool.query("UPDATE ceph_landmarks SET x=200,y=50 WHERE analysis_id=$1 AND code='N'", [saved.after]);
   if (kind === "missing-calibration") await fx.pool.query("UPDATE ceph_analyses SET mm_per_pixel=NULL WHERE id=$1", [saved.after]);
   if (kind === "overflow") await fx.pool.query("UPDATE ceph_analyses SET mm_per_pixel='1e308' WHERE id=$1", [saved.after]);
-  await expect(read("own", "superimpose", saved.before, saved.after)).rejects.toMatchObject({ code: kind === "overflow" ? "ceph_pair_invalid" : "ceph_pair_geometry_unavailable" });
+  // Staging's superimposition refuses a transform that overflows ("التحويل بالمقياس الحالي ينتج إحداثيات غير صالحة")
+  // before any value is serialized, so overflow is reported as unavailable geometry, like the other three.
+  await expect(read("own", "superimpose", saved.before, saved.after)).rejects.toMatchObject({ code: "ceph_pair_geometry_unavailable" });
 });
 function instrument(wrap: (q: CanonicalSnapshotQuery) => CanonicalSnapshotQuery) {
   const original = snapshots.runCanonicalReadSnapshot;

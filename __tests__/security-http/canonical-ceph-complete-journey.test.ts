@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
 import { REQUIRED_LANDMARKS } from "../../lib/ceph";
+import { validCephPoint } from "../fixtures/ceph-valid-geometry";
 import { seedCanonicalCeph } from "../fixtures/canonical-ceph";
 const ANALYZE = { "clinical.xrays.view": true, "clinical.ceph.analyze": true };
 const ACCOUNTS = {
@@ -17,7 +18,7 @@ beforeEach(async () => {
   patientId = (await journey.db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'SYN draft edit patient',$2) RETURNING id", [`SYN-CEPH-COMPLETE-${++sequence}`, journey.parties.own])).rows[0].id;
   studyId = (await seedCanonicalCeph(journey.db, { patientId, status: "draft" })).id;
   await journey.db.query("UPDATE ceph_analyses SET cal_x1=0,cal_y1=0,cal_x2=100,cal_y2=0,cal_mm=50,mm_per_pixel=0.5 WHERE id=$1",[studyId]);
-  for(const [i,code] of REQUIRED_LANDMARKS.entries())await journey.db.query("INSERT INTO ceph_landmarks(analysis_id,code,x,y,source,confirmed_by) VALUES($1,$2,$3,$4,'manual','SYN')",[studyId,code,40+(i*37)%400,30+(i*53)%380]);
+  for(const code of REQUIRED_LANDMARKS)await journey.db.query("INSERT INTO ceph_landmarks(analysis_id,code,x,y,source,confirmed_by) VALUES($1,$2,$3,$4,'manual','SYN')",[studyId,code,validCephPoint(code).x,validCephPoint(code).y]);
 });
 const complete = (cookie: string, id: number, body: unknown) => journey.api(`/api/ceph/${id}/complete`, cookie, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 async function version(cookie: string, id = studyId) { const response = await journey.api(`/api/ceph/${id}`, cookie); expect(response.status).toBe(200); return (await response.json()).discardVersion as string; }

@@ -32525,11 +32525,6 @@ export async function recordOrthoBaseline(input: BaselineDraft & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    if (input.responsibleDoctorId !== null) {
-      const verified = await (await import("./initial-responsibility-authority")).authorizeInitialResponsibility(client, request?.session ?? input.admittedSession, input.patientId, input.responsibleDoctorId);
-      if (!verified) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_doctor" }; }
-      input = { ...input, actor: verified.username, actorRole: verified.role };
-    }
     // يُقفل صفّ المريض كما في createOrthoCase: التجسير بالاتفاق التاريخي لا يتسابق مع كاتبٍ آخر لسياق التقويم.
     const { rows: patients } = await client.query<{ full_name: string }>(
       `SELECT full_name FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
@@ -32553,6 +32548,13 @@ export async function recordOrthoBaseline(input: BaselineDraft & {
         .canChangeOrthoPlanLink(current, input.patientId, client, "nowait")) {
         throw new OrthoBaselineAuthorityError(403, "plan_access_denied", "غير مصرّح لك بربط حالة التقويم بخطة العلاج.");
       }
+    }
+    // Patient → identity → responsibility: the same lock order as the admission above, so a
+    // concurrent account/permission change behind the patient lock is refused, never deadlocked.
+    if (input.responsibleDoctorId !== null) {
+      const verified = await (await import("./initial-responsibility-authority")).authorizeInitialResponsibility(client, request?.session ?? input.admittedSession, input.patientId, input.responsibleDoctorId);
+      if (!verified) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_doctor" }; }
+      input = { ...input, actor: verified.username, actorRole: verified.role };
     }
     const actor = current?.username ?? input.actor;
     const actorRole = current?.role ?? input.actorRole ?? null;

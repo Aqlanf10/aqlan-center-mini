@@ -22,13 +22,13 @@ type Key = keyof typeof ACCOUNTS;
 let fx: CanonicalInventoryDatabase<Key>, side: Pool;
 const ids = { own: 0, outside: 0 };
 let base: Awaited<ReturnType<typeof seedCanonicalCoverage>>;
-const episode = (patientId = ids.own, save = true) => seedCanonicalCoverage(fx.pool, { patientId, actorId: fx.ids.owner, doctorId: fx.parties.own!, save });
+const episode = (patientId = ids.own, save = true, status?: "active") => seedCanonicalCoverage(fx.pool, { patientId, actorId: fx.ids.owner, doctorId: fx.parties.own!, save, status });
 const read = async (key: Key, f = base) => reads.readCanonicalCoverageEditor(await fx.session(key), f.patient, f.ortho);
 beforeAll(async () => {
   fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner"); side = new Pool({ connectionString: fx.pool.options.connectionString, max: 3 });
   for (const key of ["own", "outside"] as const) ids[key] = (await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,$1,$2) RETURNING id", [`SYN-CED-${key}`, key === "own" ? fx.parties.own! : null])).rows[0].id;
-  base = await episode();
-  await fx.pool.query("UPDATE ortho_cases SET status='active' WHERE id=$1",[base.ortho]);
+  // Seeded open: staging's reopen guard (0125) forbids reopening a closed case without reopen evidence.
+  base = await episode(ids.own, true, "active");
 }, 180_000);
 afterAll(async () => { await side?.end(); await fx?.close(); });
 it.each(["owner","own","all"]as const)("%s reads the complete minimal explicit source choice",async key=>{
@@ -44,7 +44,7 @@ it("missing, foreign and mismatched owner references remain indistinguishable",a
 });
 it.each(["completed","cancelled"]as const)("%s preserves the record but refuses future editing",async status=>{const s=await episode();await fx.pool.query("UPDATE ortho_cases SET status=$1 WHERE id=$2",[status,s.ortho]);expect(await read("owner",s)).toMatchObject({enabled:true,canEdit:false,current:{id:s.revision},sources:[s.source]});});
 it("one fenced RR read-only snapshot contains case state, source fingerprint and authority",async()=>{
- const patient=(await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-CED-SNAPSHOT','SYN snapshot patient',$1) RETURNING id",[fx.parties.own])).rows[0].id;const s=await episode(patient);await fx.pool.query("UPDATE ortho_cases SET status='active' WHERE id=$1",[s.ortho]);const original=store.readFollowupCoverageSnapshotWith,spy=vi.spyOn(store,"readFollowupCoverageSnapshotWith").mockImplementationOnce(async(q,p,c)=>{expect((await q.query("SHOW transaction_isolation")).rows[0].transaction_isolation).toBe("repeatable read");expect((await q.query("SHOW transaction_read_only")).rows[0].transaction_read_only).toBe("on");await side.query("UPDATE ortho_cases SET status='completed' WHERE id=$1",[s.ortho]);await side.query("UPDATE invoices SET total_minor=260000 WHERE id=$1",[s.invoice]);return original(q,p,c);});try{expect(await read("own",s)).toMatchObject({canEdit:true,applicable:true,sources:[s.source]});}finally{spy.mockRestore();}const next=await read("own",s);expect(next).toMatchObject({canEdit:false,applicable:false});expect(next.sources[0].fingerprint).not.toBe(s.source.fingerprint);
+ const patient=(await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-CED-SNAPSHOT','SYN snapshot patient',$1) RETURNING id",[fx.parties.own])).rows[0].id;const s=await episode(patient,true,"active");const original=store.readFollowupCoverageSnapshotWith,spy=vi.spyOn(store,"readFollowupCoverageSnapshotWith").mockImplementationOnce(async(q,p,c)=>{expect((await q.query("SHOW transaction_isolation")).rows[0].transaction_isolation).toBe("repeatable read");expect((await q.query("SHOW transaction_read_only")).rows[0].transaction_read_only).toBe("on");await side.query("UPDATE ortho_cases SET status='completed' WHERE id=$1",[s.ortho]);await side.query("UPDATE invoices SET total_minor=260000 WHERE id=$1",[s.invoice]);return original(q,p,c);});try{expect(await read("own",s)).toMatchObject({canEdit:true,applicable:true,sources:[s.source]});}finally{spy.mockRestore();}const next=await read("own",s);expect(next).toMatchObject({canEdit:false,applicable:false});expect(next.sources[0].fingerprint).not.toBe(s.source.fingerprint);
 });
 it("disabled substrate and absent head remain distinct without implicit initialization",async()=>{const s=await episode(ids.own,false);expect(await read("owner",s)).toMatchObject({enabled:true,current:null,applicable:false});await fx.pool.query("ALTER TABLE visits DISABLE TRIGGER ortho_followup_visit_manifest");try{expect(await read("owner",s)).toMatchObject({enabled:false,canEdit:false,current:null,applicable:false,sources:[]});}finally{await fx.pool.query("ALTER TABLE visits ENABLE TRIGGER ortho_followup_visit_manifest");}});
 it("all persisted money, signed history and audit stay unchanged; one lease and no legacy wrapper",async()=>{

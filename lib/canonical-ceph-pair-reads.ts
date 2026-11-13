@@ -45,6 +45,11 @@ export async function compareCephPairWith(q: CanonicalSnapshotQuery, scope: Cano
   // computeAll or substitute today's norm/diagnosis for a saved measurement.
   const comparable = (study: CanonicalCephStudy) => study.measurements.map(m => ({ ...m, name: m.code, unit: "", mean: null }));
   const comparison = compareAnalyses(comparable(pair.before), comparable(pair.after));
+  // Staging's comparator skips a pair whose difference overflows; a saved value present in both
+  // studies must never vanish from the canonical answer, so refuse the whole comparison instead.
+  const afterValues = new Map(pair.after.measurements.map(m => [m.code, m.value]));
+  if (pair.before.measurements.some(m => afterValues.has(m.code) && Number.isFinite(m.value) && Number.isFinite(afterValues.get(m.code))
+    && !Number.isFinite((afterValues.get(m.code) as number) - m.value))) invalid();
   const result: CanonicalCephComparison = { projection: "ceph-saved-comparison", patientId: pair.patientId, before: summary(pair.before), after: summary(pair.after), normSource: "historical-norm-not-stored",
     rows: comparison.measurements.map(m => ({ code: m.key, before: m.before, after: m.after, delta: m.delta })), onlyBefore: comparison.onlyBefore, onlyAfter: comparison.onlyAfter };
   if (!isCanonicalCephComparison(result, pair.patientId, first, second)) invalid();

@@ -38,7 +38,9 @@ it("all/owner retain the admitted list and legacy source selection remains uncha
 });
 it("hidden care and financial facts cannot expand the response; closed cases retain their recorded pending review", async () => {
   const before = await read("own"); await fx.pool.query("UPDATE ortho_adjustments SET note='SYN changed private note' WHERE id=$1", [ids.review]); await fx.pool.query("UPDATE ortho_cases SET note='SYN changed private care',status='completed' WHERE id=$1", [ids.caseId]);
-  try { expect(await read("own")).toEqual(before); } finally { await fx.pool.query("UPDATE ortho_cases SET status='active' WHERE id=$1", [ids.caseId]); }
+  // The case stays closed: staging's reopen guard (0125) allows reopening only through the evidenced
+  // reopen command, and the pending review it retains is exactly what the later tests read.
+  expect(await read("own")).toEqual(before);
 });
 it("one RR connection observes a coherent pending decision across a concurrent resolution", async () => {
   const session = await fx.session("own"), original = db.listPendingOrthoDecisionSummariesWith, pool = db.getPool(), connect = vi.spyOn(pool, "connect"), query = vi.spyOn(pool, "query"), ensure = vi.spyOn(db, "ensureSchema");

@@ -17,10 +17,10 @@ async function scenario(owned=true){
  const patient=(await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'SYN patient',$2) RETURNING id",[`SYN-CAP-${++sequence}`,owned?fx.parties.own:null])).rows[0].id;
  let snapshot:unknown;
  const observed={query:async(sql:string,values?:unknown[])=>{const result=await fx.pool.query(sql,values);if(sql.startsWith("WITH candidates AS MATERIALIZED"))snapshot=result.rows[0]?.sources?.[0]?.snapshot;return result;}};
- const s=await seedCanonicalCoverage(observed as Pick<Pool,"query">,{patientId:patient,actorId:fx.ids.own,doctorId:fx.parties.own!,save:false});
+ const s=await seedCanonicalCoverage(observed as Pick<Pool,"query">,{patientId:patient,actorId:fx.ids.own,doctorId:fx.parties.own!,save:false,status:"active"});
  const {fingerprint,invoiceNumber:_i,serviceName:_s,...source}=s.source;
  const command:FollowupCoverageCommand={schemaVersion:1,commandId:randomUUID(),expectedRevisionId:null,source,expectedSourceFingerprint:fingerprint,scope:"routine_adjustments",decision:"included",reason:"SYN explicit routine coverage"};
- await fx.pool.query("UPDATE ortho_cases SET status='active' WHERE id=$1",[s.ortho]);
+ // Seeded open: staging's reopen guard (0125) forbids reopening a closed case without reopen evidence.
  return {...s,command,snapshot};
 }
 type Scenario=Awaited<ReturnType<typeof scenario>>;
