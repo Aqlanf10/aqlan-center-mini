@@ -36,11 +36,12 @@ export const ORTHO_WORKUP_GROUPS = [
   { id: "retention", pillar: "retention", title: "التثبيت والإقفال", icon: "🛡️", entry: 11, steps: [11] },
   { id: "presentation", pillar: "presentation", title: "دراسة الحالة المحفوظة", icon: "📋", entry: 12, steps: [12] },
 ] as const satisfies readonly { id: string; pillar: OrthoWorkupPillar; title: string; icon: string; entry: number; steps: readonly number[] }[];
-/** The case view's sections, in the same lifecycle order as the workup groups. */
+/** The case view's sections: follow-up visits first, as the clinic works daily (owner, #483 2026-11-13),
+ * then staging's order, with clear names. The workup groups keep the treatment-path order (6838132093). */
 export const ORTHO_CASE_PILLARS: readonly { id: OrthoWorkupPillar; title: string; icon: string }[] = [
+  { id: "wires", title: "زيارات المتابعة والشدّ", icon: "⚡" },
   { id: "diagnostics", title: "السجلات والتشخيص", icon: "📐" },
   { id: "prescription", title: "خطة العلاج والميكانيكا", icon: "⚙️" },
-  { id: "wires", title: "زيارات المتابعة والشدّ", icon: "⚡" },
   { id: "retention", title: "التثبيت والإقفال", icon: "🛡️" },
   { id: "presentation", title: "دراسة الحالة المحفوظة", icon: "📋" },
 ];

@@ -15,7 +15,7 @@ describe("case-scoped workup navigation", () => {
       "خطة العلاج والميكانيكا", "زيارات المتابعة والشدّ", "التثبيت والإقفال", "دراسة الحالة المحفوظة"]);
     // Group order never goes backwards through the step order.
     expect(ORTHO_WORKUP_GROUPS.map(group => group.entry)).toEqual([...ORTHO_WORKUP_GROUPS.map(group => group.entry)].sort((a, b) => a - b));
-    expect(ORTHO_CASE_PILLARS.map(item => item.id)).toEqual(["diagnostics", "prescription", "wires", "retention", "presentation"]);
+    expect(ORTHO_CASE_PILLARS.map(item => item.id)).toEqual(["wires", "diagnostics", "prescription", "retention", "presentation"]);
     expect(ORTHO_WORKUP_STEPS[ORTHO_WORKUP_ENTRY_STEP].id).toBe("identity");
   });
   it("opens a case in treatment on its visits and a case in retention on retention, so the routine visit needs no detour", () => {

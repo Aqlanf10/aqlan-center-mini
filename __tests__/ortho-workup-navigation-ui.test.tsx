@@ -21,12 +21,13 @@ describe("consistent case and workup tab order", () => {
     const cases = OrthoCaseNavigation({ pillar: "wires", onSelect: select });
     const workup = OrthoWorkupNavigation({ step: 10, legacy: false, onSelect: select, onClose: close });
     const caseButtons = buttons(cases, "أقسام حالة التقويم"), groupButtons = buttons(workup, "مجموعات ملف التقويم");
-    expect(caseButtons.map(button => button.props["aria-label"])).toEqual(["السجلات والتشخيص", "خطة العلاج والميكانيكا", "زيارات المتابعة والشدّ", "التثبيت والإقفال", "دراسة الحالة المحفوظة"]);
+    expect(caseButtons.map(button => button.props["aria-label"])).toEqual(["زيارات المتابعة والشدّ", "السجلات والتشخيص", "خطة العلاج والميكانيكا", "التثبيت والإقفال", "دراسة الحالة المحفوظة"]);
     expect(caseButtons.map(button => button.props["aria-label"])).toEqual(ORTHO_CASE_PILLARS.map(item => item.title));
     expect(groupButtons.map(text)).toEqual(ORTHO_WORKUP_GROUPS.map(group => group.title));
-    // The case view's sections and the workup groups follow the same pillar order.
-    expect([...new Set(ORTHO_WORKUP_GROUPS.map(group => group.pillar))]).toEqual(ORTHO_CASE_PILLARS.map(item => item.id));
-    expect(caseButtons.map(button => button.props["aria-pressed"])).toEqual([false, false, true, false, false]);
+    // The case view opens with follow-up visits first (owner, #483); the workup groups keep the treatment path.
+    expect(ORTHO_CASE_PILLARS[0].id).toBe("wires");
+    expect([...new Set(ORTHO_WORKUP_GROUPS.map(group => group.pillar))]).toEqual(["diagnostics", "prescription", "wires", "retention", "presentation"]);
+    expect(caseButtons.map(button => button.props["aria-pressed"])).toEqual([true, false, false, false, false]);
     expect(groupButtons.map(button => button.props["aria-pressed"])).toEqual([false, false, false, false, true, false, false]);
     for (const button of caseButtons) {
       expect(button.props.type).toBe("button");
@@ -34,7 +35,7 @@ describe("consistent case and workup tab order", () => {
       expect(nodes(button).some(node => String(node.props.className ?? "").includes("hidden"))).toBe(false);
     }
     expect(select).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled();
-    click(caseButtons[0]); expect(select).toHaveBeenCalledExactlyOnceWith("diagnostics");
+    click(caseButtons[1]); expect(select).toHaveBeenCalledExactlyOnceWith("diagnostics");
   });
 
   it("opens the interview from examination but does not reset an already selected examination section", () => {

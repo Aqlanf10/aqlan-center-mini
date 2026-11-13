@@ -460,3 +460,36 @@ describe("standalone adjustment input fidelity", () => {
     expect(body()).not.toHaveProperty("lowerWireAction");
   });
 });
+
+describe("expanded wire choices in the same session form (owner, #483)", () => {
+  const options = (label: string) => elements(input(label)).filter(entry => entry.type === "option").map(entry => String(entry.props.value));
+  const groups = (label: string) => elements(input(label)).filter(entry => entry.type === "optgroup").map(entry => String(entry.props.label));
+  it("keeps the no-change default first, then the usual sequence, the catalog groups and an explicit other", () => {
+    const upper = options("السلك العلوي");
+    expect(upper[0]).toBe("");
+    expect(groups("السلك العلوي").slice(0, 1)).toEqual(["تسلسل الشق المعتاد"]);
+    for (const code of ["018×025 SS", "016 CuNiTi", "017×025 HA NiTi", "0175 Braided SS"]) expect(upper).toContain(code);
+    expect(upper.at(-1)).toBe("__other__");
+    expect(options("السلك السفلي")).toEqual(upper);
+  });
+  it("saves a catalog wire chosen from the list", async () => {
+    chooseWire("السلك العلوي", "018×025 SS");
+    await submit();
+    expect(body()).toMatchObject({ upperWire: "018×025 SS", lowerWire: "012 NiTi" });
+  });
+  it("saves a typed other wire, trimmed by the server's own rules, without any extra required step", async () => {
+    edit("السلك السفلي", "__other__");
+    expect(input("سلك سفلي آخر").props.maxLength).toBe(40);
+    edit("سلك سفلي آخر", "SYN 0.0215 lingual NiTi");
+    await submit();
+    expect(body()).toMatchObject({ upperWire: "014 NiTi", lowerWire: "SYN 0.0215 lingual NiTi" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("shows an off-list wire recorded earlier and keeps it unchanged when not touched", async () => {
+    caseRow = { ...structuredClone(base), upperWire: "SYN legacy braided 0.0195" };
+    expect(groups("السلك العلوي")[0]).toBe("مسجّل سابقًا");
+    expect(input("السلك العلوي").props.value).toBe("SYN legacy braided 0.0195");
+    await submit();
+    expect(body()).toMatchObject({ upperWire: "SYN legacy braided 0.0195" });
+  });
+});

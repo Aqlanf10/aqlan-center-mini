@@ -18,19 +18,29 @@ import { addDays } from "./schedule";
 
 /* ─────────────────────────── الجهاز والفكّان ─────────────────────────── */
 
-export type Appliance = "fixed_metal" | "fixed_ceramic" | "aligners" | "removable" | "functional";
+export type Appliance = "fixed_metal" | "fixed_ceramic" | "self_ligating_metal" | "self_ligating_ceramic"
+  | "lingual" | "sapphire" | "aligners" | "removable" | "functional";
 
+/** Saved values keep their meaning: new types are only added (owner, #483 2026-11-13), never renamed. */
 export const APPLIANCE_LABEL: Record<Appliance, string> = {
   fixed_metal: "ثابت معدني",
   fixed_ceramic: "ثابت خزفي",
+  self_ligating_metal: "ثابت ذاتي الربط معدني",
+  self_ligating_ceramic: "ثابت ذاتي الربط خزفي",
+  lingual: "ثابت لساني",
+  sapphire: "ثابت سافاير",
   aligners: "شفّاف متحرّك",
   removable: "متحرّك",
   functional: "وظيفي",
 };
 
+const ARCHWIRE_APPLIANCES: ReadonlySet<Appliance> = new Set([
+  "fixed_metal", "fixed_ceramic", "self_ligating_metal", "self_ligating_ceramic", "lingual", "sapphire",
+]);
+
 /** الجهاز الثابت وحده هو الذي تُتابَع أسلاكه — والمتحرّك يُتابع بخطواته. */
 export function usesArchwires(appliance: Appliance | null): boolean {
-  return appliance === "fixed_metal" || appliance === "fixed_ceramic";
+  return appliance !== null && ARCHWIRE_APPLIANCES.has(appliance);
 }
 
 export type Arches = "upper" | "lower" | "both";
@@ -154,6 +164,33 @@ export const WIRE_SEQUENCE: Record<SlotSize, Archwire[]> = {
     { code: "017×025 TMA", material: "TMA", round: false, phase: "finishing" },
   ],
 };
+
+/**
+ * The full wire list offered in the adjustment session (owner, #483 2026-11-13). It is a list of choices
+ * only: the slot's usual sequence (WIRE_SEQUENCE) and the "next wire" suggestion are unchanged, nothing
+ * is moved or rewritten automatically, and any saved code outside this list stays valid as written.
+ */
+export const ARCHWIRE_CATALOG: readonly { id: string; label: string; codes: readonly string[] }[] = [
+  { id: "niti-round", label: "NiTi مستدير", codes: ["012 NiTi", "013 NiTi", "014 NiTi", "016 NiTi", "018 NiTi"] },
+  { id: "niti-rect", label: "NiTi مستطيل", codes: ["016×016 NiTi", "016×022 NiTi", "017×025 NiTi", "018×025 NiTi", "019×025 NiTi"] },
+  { id: "heat-niti", label: "NiTi حراري التنشيط", codes: ["014 HA NiTi", "016 HA NiTi", "016×022 HA NiTi", "017×025 HA NiTi", "019×025 HA NiTi"] },
+  { id: "cuniti", label: "CuNiTi", codes: ["014 CuNiTi", "016 CuNiTi", "016×022 CuNiTi", "017×025 CuNiTi", "019×025 CuNiTi"] },
+  { id: "ss-round", label: "فولاذ مستدير SS", codes: ["014 SS", "016 SS", "018 SS", "020 SS"] },
+  { id: "ss-rect", label: "فولاذ مستطيل SS", codes: ["016×022 SS", "017×025 SS", "018×025 SS", "019×025 SS"] },
+  { id: "tma", label: "TMA", codes: ["016×022 TMA", "017×025 TMA", "019×025 TMA"] },
+  { id: "braided", label: "مضفور ومحوري", codes: ["0175 Braided SS", "015 Coaxial", "019×025 Braided SS"] },
+];
+
+/** Session choices: the slot's sequence first, then the catalog, then any recorded code outside both. */
+export function archwireChoices(slot: SlotSize | null, recorded: readonly (string | null | undefined)[]) {
+  const sequence = wiresFor(slot).map((wire) => wire.code);
+  const shown = new Set(sequence);
+  const groups = ARCHWIRE_CATALOG.map((group) => ({ id: group.id, label: group.label, codes: group.codes.filter((code) => !shown.has(code)) }))
+    .filter((group) => group.codes.length > 0);
+  for (const group of groups) for (const code of group.codes) shown.add(code);
+  const other = [...new Set(recorded.filter((code): code is string => typeof code === "string" && code.trim() !== "" && !shown.has(code)))];
+  return { sequence, groups, recorded: other };
+}
 
 export function wiresFor(slot: SlotSize | null): Archwire[] {
   return slot === null ? [] : WIRE_SEQUENCE[slot] ?? WIRE_SEQUENCE["022"];

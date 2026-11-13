@@ -27,7 +27,7 @@ import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 import {
   APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, ELASTIC_LABEL, PHASE_HINT,
   PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL, SLOT_LABEL,
-  nextAdjustmentDate, usesArchwires, wiresFor,
+  archwireChoices, nextAdjustmentDate, usesArchwires, wiresFor,
   type Appliance, type Arches, type CaseStatus, type ElasticClass,
   type OrthoPhase, type RetainerType, type SlotSize,
 } from "@/lib/ortho";
@@ -2060,7 +2060,7 @@ function NewCase({ patientId, today, onSaved, onError }: {
   );
 }
 
-export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: {
+export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: {
   caseRow: OrthoCase; today: string; wires: { code: string }[]; patientId: number;
   onSaved: (result: {
     adjustmentId: number; caseId: number; doneOn: string;
@@ -2075,6 +2075,9 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   const [lowerWire, setLowerWire] = form.field("lowerWire", caseRow.lowerWire ?? "");
   const [removeUpperWire, setRemoveUpperWire] = form.field("removeUpperWire", false);
   const [removeLowerWire, setRemoveLowerWire] = form.field("removeLowerWire", false);
+  // "Other wire" keeps the typed code in the same wire field; the flag only chooses the input (owner, #483).
+  const [upperWireOther, setUpperWireOther] = form.field("upperWireOther", false);
+  const [lowerWireOther, setLowerWireOther] = form.field("lowerWireOther", false);
   const previousAdjustment = caseRow.adjustments[0] ?? null;
   // The baseline stores a description, not an elastic class. Never infer one from its text.
   const baselineElasticNote = previousAdjustment ? "" : caseRow.elastics?.trim() ?? "";
@@ -2261,8 +2264,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     finally { form.finish(operation); }
   };
 
-  const options = [...new Set([...wires.map((wire) => wire.code),
-    upperWire, lowerWire, caseRow.upperWire, caseRow.lowerWire].filter(Boolean) as string[])];
+  const choices = archwireChoices(caseRow.slot, [upperWire, lowerWire, caseRow.upperWire, caseRow.lowerWire]);
 
   const savedPhotoHistory = savedFullPhotoSetHistory({
     patientId, orthoCaseId: caseRow.id, adjustments: caseRow.adjustments, today, asOfDate: doneOn,
@@ -2296,12 +2298,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
             <span className="mb-1 block text-[10px] font-bold text-slate-500">
               السلك العلوي {caseRow.upperWire ? `(الحالي ${caseRow.upperWire})` : ""}
             </span>
-            <select disabled={removeUpperWire} value={upperWire} onChange={(event) => setUpperWire(event.target.value)}
-              aria-label="السلك العلوي" dir="ltr"
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
-              <option value="">— بلا تغيير —</option>
-              {options.map((code) => <option key={code} value={code}>{code}</option>)}
-            </select>
+            {wireSelect({ label: "السلك العلوي", otherLabel: "سلك علوي آخر", choices, disabled: removeUpperWire, value: upperWire,
+              onChange: setUpperWire, other: upperWireOther, onOtherChange: setUpperWireOther })}
             <span className="mt-1 block text-xs"><input type="checkbox" aria-label="إزالة السلك العلوي" checked={removeUpperWire}
               onChange={(event) => setRemoveUpperWire(event.target.checked)} /> إزالة السلك العلوي صراحةً</span>
           </label>
@@ -2309,12 +2307,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
             <span className="mb-1 block text-[10px] font-bold text-slate-500">
               السلك السفلي {caseRow.lowerWire ? `(الحالي ${caseRow.lowerWire})` : ""}
             </span>
-            <select disabled={removeLowerWire} value={lowerWire} onChange={(event) => setLowerWire(event.target.value)}
-              aria-label="السلك السفلي" dir="ltr"
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
-              <option value="">— بلا تغيير —</option>
-              {options.map((code) => <option key={code} value={code}>{code}</option>)}
-            </select>
+            {wireSelect({ label: "السلك السفلي", otherLabel: "سلك سفلي آخر", choices, disabled: removeLowerWire, value: lowerWire,
+              onChange: setLowerWire, other: lowerWireOther, onOtherChange: setLowerWireOther })}
             <span className="mt-1 block text-xs"><input type="checkbox" aria-label="إزالة السلك السفلي" checked={removeLowerWire}
               onChange={(event) => setRemoveLowerWire(event.target.checked)} /> إزالة السلك السفلي صراحةً</span>
           </label>
@@ -2877,3 +2871,40 @@ function OrthoStudyPanel({ patientId, caseId, patientName }: { patientId: number
   if (!binding) return <p role="alert">تعذّر تأكيد هوية الحساب لفتح دراسة الحالة. أعد تحميل الصفحة أو سجّل الدخول من جديد.</p>;
   return <OrthoCaseStudyMount owner={binding} patientName={patientName} confirmDiscard={() => window.confirm("هل تريد تجاهل التعديلات غير المحفوظة؟")} />;
 }
+
+const OTHER_WIRE = "__other__";
+/**
+ * The session's wire choice (owner, #483 2026-11-13): the same select in the same place, with the slot's
+ * usual sequence first, then the full catalog by material and shape, any code recorded earlier, and an
+ * optional typed "other" code. It changes no step, and the "next wire" suggestion is untouched.
+ */
+/* A plain render helper (no hooks), so the selects stay in the form's own element tree. */
+function wireSelect({ label, otherLabel, choices, disabled, value, onChange, other, onOtherChange }: {
+  label: string; otherLabel: string; choices: ReturnType<typeof archwireChoices>; disabled: boolean; value: string;
+  onChange(value: string): void; other: boolean; onOtherChange(other: boolean): void;
+}) {
+  return <>
+    <select disabled={disabled} value={other ? OTHER_WIRE : value} aria-label={label} dir="ltr"
+      onChange={(event) => {
+        if (event.target.value === OTHER_WIRE) { onOtherChange(true); onChange(""); return; }
+        onOtherChange(false); onChange(event.target.value);
+      }}
+      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
+      <option value="">— بلا تغيير —</option>
+      {choices.recorded.length ? <optgroup label="مسجّل سابقًا">
+        {choices.recorded.map((code) => <option key={code} value={code}>{code}</option>)}
+      </optgroup> : null}
+      {choices.sequence.length ? <optgroup label="تسلسل الشق المعتاد">
+        {choices.sequence.map((code) => <option key={code} value={code}>{code}</option>)}
+      </optgroup> : null}
+      {choices.groups.map((group) => <optgroup key={group.id} label={group.label}>
+        {group.codes.map((code) => <option key={code} value={code}>{code}</option>)}
+      </optgroup>)}
+      <option value={OTHER_WIRE}>آخر (اكتبه)…</option>
+    </select>
+    {other && !disabled ? <input type="text" dir="ltr" maxLength={40} value={value} onChange={(event) => onChange(event.target.value)}
+      aria-label={otherLabel} placeholder="مثل 018×025 SS"
+      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono" /> : null}
+  </>;
+}
+

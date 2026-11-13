@@ -1,3 +1,4 @@
+import { APPLIANCE_LABEL } from "@/lib/ortho";
 import { readOrthoCreateDuration } from "@/lib/ortho-create-duration";
 import { isDocumentAcquisitionDate } from "@/lib/document-acquisition-date";
 import { isClinicalId, parseClinicalId } from "@/lib/patient-navigation";
@@ -27,7 +28,8 @@ export const dynamic = "force-dynamic";
 
 const ACCESS_BATCH_SIZE = 8;
 
-const APPLIANCES = ["fixed_metal", "fixed_ceramic", "aligners", "removable", "functional"];
+// One list for every entry point: the saved labels decide which appliance values are accepted.
+const APPLIANCES: readonly string[] = Object.keys(APPLIANCE_LABEL);
 const ARCHES = ["upper", "lower", "both"];
 const SLOTS = ["018", "022"];
 
