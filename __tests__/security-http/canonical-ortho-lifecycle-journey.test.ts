@@ -71,7 +71,7 @@ it("browser: retainer delivery then explicit completion refreshes the visible te
     await editor.getByLabel("تاريخ التسليم (اختياري)", { exact: true }).fill("2026-10-31");
     await editor.getByRole("button", { name: "تأكيد تحديث حالة التقويم", exact: true }).click();
     await page.getByText("حُفظ تحديث حالة التقويم وسُجّل أثره.", { exact: true }).waitFor();
-    expect((await journey.db.query("SELECT status,retainer,retainer_on::text FROM ortho_cases WHERE id=$1", [caseId])).rows).toEqual([{ status: "retention", retainer: "essix", retainer_on: "2026-10-31" }]);
+    expect((await journey.db.query("SELECT status,retainer,retainer_on::text FROM ortho_cases WHERE id=$1", [caseId])).rows).toEqual([{ status: "active", retainer: "essix", retainer_on: "2026-10-31" }]); // retainer metadata never changes the lifecycle (staging rule)
     editor = await openEditor(page, "own", true);
     await editor.getByLabel("الإجراء", { exact: true }).selectOption("completed");
     await editor.getByLabel("ملاحظة الإقفال (اختيارية)", { exact: true }).fill("SYN reviewed completion");

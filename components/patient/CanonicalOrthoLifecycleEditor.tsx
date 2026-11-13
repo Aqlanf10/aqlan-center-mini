@@ -27,7 +27,8 @@ export function CanonicalOrthoLifecycleEditor({patientId,caseId,ownerKey,feed,re
    const response=await fetch(`/api/ortho/${caseId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:request.signal});
    const result=await response.json().catch(()=>null);if(!active.current)return;
    if(!response.ok){if(response.status<500&&result&&(response.status===401||/^(STAFF_|ortho_lifecycle_|invalid_ortho_lifecycle$)/.test(String(result.code)))){erase();setDraft(null);setMessage(typeof result.message==="string"?result.message:"لم تتغيّر الحالة. راجع السجل.");refresh();}else unknown();return;}
-   const expectedStatus=draft.kind==="phase"?feed.case.status:draft.kind==="retainer"?"retention":draft.kind;
+   // Staging rule: retainer metadata never infers a lifecycle transition, so phase and retainer saves keep the status.
+   const expectedStatus=draft.kind==="phase"||draft.kind==="retainer"?feed.case.status:draft.kind;
    if(!result||Object.keys(result).sort().join(",")!=="caseId,ok,status"||result.ok!==true||result.caseId!==caseId||result.status!==expectedStatus){unknown();return;}
    erase();setDraft(null);onChanged();
   }catch{if(active.current)unknown();}finally{clearTimeout(timeout);sending.current=false;if(active.current)setBusy(false);}
