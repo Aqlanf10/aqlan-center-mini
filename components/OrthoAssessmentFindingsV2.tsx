@@ -41,19 +41,19 @@ export function OrthoAssessmentFindingsV2({ draft, owner, sources, onChange, foc
     return <section ref={metadataPanel} tabIndex={-1} className="scroll-mt-24 space-y-3 rounded-lg border bg-white p-3" aria-label={`مصدر ${title}`}>
       <h4 className="font-bold">مصدر وتاريخ {title}</h4>
             <p className="text-xs">المنفذ الموثق مستقل عن مسجّل المراجعة. لا يُفترض تاريخ اليوم أو اسم الطبيب.</p>
-            <label className="block text-xs">حالة تاريخ {title}<select className={control} value={value.dateState} disabled={!editable}
+            <label className="block text-xs">حالة تاريخ {title}<select aria-label={`حالة تاريخ ${title}`} className={control} value={value.dateState} disabled={!editable}
               onChange={event => patch(id, { dateState: event.target.value as MeasurementValueDraftV2["dateState"] })}>
               <option value="">اختر حالة التاريخ…</option><option value="known">معلوم</option><option value="unknown">غير معلوم</option></select></label>
             {value.dateState === "known" ? <label className="block text-xs">تاريخ {title}<input className={control} type="date" value={value.date} disabled={!editable}
               onChange={event => patch(id, { date: event.target.value })} /></label> : value.dateState === "unknown" ? <label className="block text-xs">سبب غياب تاريخ {title}
               <input className={control} value={value.dateReason} disabled={!editable} onChange={event => patch(id, { dateReason: event.target.value })} /></label> : null}
-            <label className="block text-xs">طريقة توثيق {title}<select className={control} value={value.method} disabled={!editable}
+            <label className="block text-xs">طريقة توثيق {title}<select aria-label={`طريقة توثيق ${title}`} className={control} value={value.method} disabled={!editable}
               onChange={event => patch(id, { method: event.target.value as MeasurementValueDraftV2["method"] })}>
               <option value="">اختر الطريقة…</option><option value="direct_examination">مقابلة / فحص مباشر</option><option value="manual_record_measurement">قياس سجل</option>
               <option value="external_report">تقرير خارجي</option>{value.copiedFrom && <option value="legacy_revision">نسخة تاريخية</option>}</select></label>
             <label className="block text-xs">وصف طريقة توثيق {title}<input className={control} value={value.methodDescription} disabled={!editable}
               onChange={event => patch(id, { methodDescription: event.target.value })} /></label>
-            <label className="block text-xs">من أجرى فحص {title}<select className={control} value={value.performer} disabled={!editable}
+            <label className="block text-xs">من أجرى فحص {title}<select aria-label={`من أجرى فحص ${title}`} className={control} value={value.performer} disabled={!editable}
               onChange={event => patch(id, { performer: event.target.value as MeasurementValueDraftV2["performer"] })}>
               <option value="unknown">غير معلوم</option><option value="documented">إسناد موثق</option></select></label>
             {value.performer === "documented" && <label className="block text-xs">إسناد منفذ {title}<input className={control} value={value.performerAttribution} disabled={!editable}
@@ -101,7 +101,7 @@ export function OrthoAssessmentFindingsV2({ draft, owner, sources, onChange, foc
     <section aria-label="مصدر جلسة الفحص المشترك" className="space-y-2 rounded-xl border border-navy-200 bg-navy-50 p-3">
       <h4 className="text-sm font-bold">مصدر واحد لعدة حقول من الجلسة نفسها</h4>
       <p className="text-xs">اكتب النتائج مباشرة، ثم اختر حقلًا مرجعيًا ووثّق مصدره مرة واحدة. اختر الحقول الأخرى وراجع التغييرات قبل تطبيقها؛ لا حفظ تلقائي.</p>
-      <label className="block text-xs">الحقل المرجعي لمصدر الجلسة<select className={control} value={metadataId ?? ""} disabled={!editable}
+      <label className="block text-xs">الحقل المرجعي لمصدر الجلسة<select aria-label="الحقل المرجعي لمصدر الجلسة" className={control} value={metadataId ?? ""} disabled={!editable}
         onChange={event => { if (owner?.active() && owner.editable()) { setMetadataId(event.target.value || null); setTargets([]); } }}>
         <option value="">اختر حقلًا أدخلت نتيجته…</option>
         {CLINICAL_FIELDS_V2.filter(([field]) => isClinicalFieldIdentityV2(draft, field) && draft.values[clinicalFieldIdV2(field)]?.state !== "not_recorded" && !!draft.values[clinicalFieldIdV2(field)]).map(([field, title]) =>
@@ -129,7 +129,7 @@ export function OrthoAssessmentFindingsV2({ draft, owner, sources, onChange, foc
           {["not_recorded", "measured"].includes(value.state) && numeric && <label className="block text-xs">{title} بالملليمتر<input aria-label={`${title} بالملليمتر`} className={control} dir="ltr" inputMode="decimal"
             value={value.numberText} disabled={!editable} onChange={event => { const next = editClinicalFindingValueV2(draft, field, event.target.value); if (next) publish(next); }} />
             <span>الصفر أو القيمة السالبة قياس صريح؛ الفراغ لا يُحسب.</span></label>}
-          <label className="block text-xs">حالة {title}<select className={control} disabled={!editable} value={value.state}
+          <label className="block text-xs">حالة {title}<select aria-label={`حالة ${title}`} className={control} disabled={!editable} value={value.state}
             onChange={event => patch(id, { state: event.target.value as MeasurementValueDraftV2["state"] })}>
             {states.map(state => <option key={state} value={state}>{labels[state]}</option>)}</select></label>
           {!["not_recorded", "measured", "recorded"].includes(value.state) && <label className="block text-xs">سبب حالة {title}

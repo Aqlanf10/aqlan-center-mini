@@ -110,7 +110,9 @@ describe("value-first clinical entry in real React", () => {
       await page.getByRole("button", { name: "اختيار القياسات المدخلة في هذه المجموعة (2)", exact: true }).click();
       const preview = page.getByRole("region", { name: "مراجعة تطبيق مصدر الجلسة", exact: true });
       expect(await preview.innerText()).toContain("FDI 12"); expect(await preview.innerText()).toContain("FDI 13");
-      await preview.getByLabel("إبقاء FDI 13 ضمن التطبيق", { exact: true }).uncheck();
+      // Excluding a measurement removes it from the reviewed preview (the checkbox is not left unchecked in place).
+      await preview.getByLabel("إبقاء FDI 13 ضمن التطبيق", { exact: true }).click();
+      await expect.poll(async () => preview.innerText()).not.toContain("FDI 13"); expect(await preview.innerText()).toContain("FDI 12");
       const before = await read();
       await page.evaluate(() => {
         window.confirm = () => { (window as unknown as FixtureWindow).fixture.revoke(); return true; };

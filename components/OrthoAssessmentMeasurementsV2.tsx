@@ -47,7 +47,7 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
     const candidates = rows.filter(row => matchesMeasurementInputV2(row, target));
     const link = (id?: string) => { if (set) { const next = linkMeasurementInputV2(draft, set.id, target, id); if (next) publish(next); } };
     return <div className="rounded-lg border border-dashed p-2" key={title}><p>{title}: لا قياس مرتبط</p>
-      {!!candidates.length && <label className="block text-xs">ربط قياس محفوظ: {title}<select className={control} value="" disabled={!editable || !set}
+      {!!candidates.length && <label className="block text-xs">ربط قياس محفوظ: {title}<select aria-label={`ربط قياس محفوظ: ${title}`} className={control} value="" disabled={!editable || !set}
         onChange={event => { if (event.target.value) link(event.target.value); }}><option value="">اختر القياس صراحة…</option>
         {candidates.map(row => <option key={row.id} value={row.id}>{row.label} · {row.id}</option>)}</select></label>}
       <button type="button" className={control} disabled={!editable || !set} onClick={() => link()}>إضافة قياس غير مسجل: {title}</button></div>;
@@ -59,9 +59,9 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
       <p className="font-bold">{title}{dentition ? "" : " · mm"}</p>
       {!dentition && ["not_recorded", "measured"].includes(value.state) && <label className="block text-xs">قيمة {title} (mm)<input className={control} dir="ltr" inputMode="decimal" maxLength={80}
         disabled={!editable} value={value.numberText} onChange={event => { const next = editMeasurementNumberV2(draft, id, event.target.value); if (next) publish(next); }} /></label>}
-      {dentition && ["not_recorded", "recorded"].includes(value.state) && <label className="block text-xs">نوع الأسنان<select className={control} value={value.text} disabled={!editable}
+      {dentition && ["not_recorded", "recorded"].includes(value.state) && <label className="block text-xs">نوع الأسنان<select aria-label="نوع الأسنان" className={control} value={value.text} disabled={!editable}
         onChange={event => patch(id, { text: event.target.value, state: value.state === "not_recorded" && !event.target.value ? "not_recorded" : "recorded" })}><option value="">اختر النوع الموثق…</option><option value="primary">لبنية</option><option value="mixed">مختلطة</option><option value="permanent">دائمة</option></select></label>}
-      <label className="block text-xs">حالة {title}<select className={control} disabled={!editable} value={value.state}
+      <label className="block text-xs">حالة {title}<select aria-label={`حالة ${title}`} className={control} disabled={!editable} value={value.state}
         onChange={event => patch(id, { state: event.target.value as MeasurementValueDraftV2["state"] })}>{allowed.map(state => <option key={state} value={state}>{states[state]}</option>)}</select></label>
       {!["not_recorded", "measured", "recorded"].includes(value.state) && <label className="block text-xs">سبب {title}<input className={control} maxLength={500}
         value={value.reason} disabled={!editable} onChange={event => patch(id, { reason: event.target.value })} /></label>}
@@ -110,13 +110,13 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
       <p>مرجعا Bolton الأمامي <bdi dir="ltr">77.2%</bdi> والكلي <bdi dir="ltr">91.3%</bdi> نسب من عينة مرجعية؛ ليست حدوداً طبيعية لكل عمر أو جنس أو مجتمع. ملاءمة المرجع للحالة وتفسير الفروق مسؤولية الطبيب.</p>
     </details>
     {!editable && <p role="status">القياسات للقراءة فقط في السياق الحالي.</p>}
-    <div className="grid gap-2 sm:grid-cols-2"><label>مجموعة القياسات<select className={control} value={selected} onChange={event => {
+    <div className="grid gap-2 sm:grid-cols-2"><label>مجموعة القياسات<select aria-label="مجموعة القياسات" className={control} value={selected} onChange={event => {
       if ((!owner || owner.active()) && event.target.value !== selected) {
         setSelected(event.target.value); setMetadataId(null); setTargets([]); setMessage(null);
         setSelectionNotice(targets.length ? "أُلغي اختيار المدخلات عند تغيير مجموعة القياسات. بقيت القيم ومصادرها في المسودة دون تغيير." : null);
       }
     }}>{draft.payload.measurementSets.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}</select></label>
-      <label>الفاصل العشري<select className={control} disabled={!editable} value={draft.decimal} onChange={event => publish(changeMeasurementDecimalV2(draft, event.target.value as MeasurementEditorDraftV2["decimal"]))}>
+      <label>الفاصل العشري<select aria-label="الفاصل العشري" className={control} disabled={!editable} value={draft.decimal} onChange={event => publish(changeMeasurementDecimalV2(draft, event.target.value as MeasurementEditorDraftV2["decimal"]))}>
         <option value=".">نقطة .</option><option value="٫">فاصل عربي ٫</option><option value=",">فاصلة ,</option></select></label></div>
     {selectionNotice && <p role="status" className="text-sm">{selectionNotice}</p>}
     <button type="button" className={control} disabled={!editable || draft.payload.measurementSets.length >= 12} onClick={() => {
@@ -128,7 +128,7 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
     <section aria-label="مصدر جلسة القياس المشترك" className="space-y-2 rounded-xl border border-navy-200 bg-navy-50 p-3">
       <h4 className="text-sm font-bold">توثيق مصدر القياسات مرة واحدة</h4>
       <p className="text-xs">أدخل الأرقام مباشرة، ثم اختر قياسًا مرجعيًا وحدد القياسات التي تخص الجلسة والطريقة نفسها. السن غير المقاس أو الغائب لا يُستبدل بصفر.</p>
-      <label className="block text-xs">القياس المرجعي لمصدر الجلسة<select className={control} disabled={!editable} value={metadataId ?? ""}
+      <label className="block text-xs">القياس المرجعي لمصدر الجلسة<select aria-label="القياس المرجعي لمصدر الجلسة" className={control} disabled={!editable} value={metadataId ?? ""}
         onChange={event => { if (owner?.active() && owner.editable()) { setMetadataId(event.target.value || null); setTargets([]); } }}>
         <option value="">اختر قياسًا أدخلته…</option>
         {sessionIds.filter(id => draft.values[id] && draft.values[id].state !== "not_recorded").map(id => <option key={id} value={id}>{rows.find(row => row.id === id)?.label ?? id}</option>)}
