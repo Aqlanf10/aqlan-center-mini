@@ -187,7 +187,7 @@ describe("legacy checklist confirmed-context refresh in the real parent", () => 
       await f.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       expect(await f.checklist.innerText()).toContain(included);
       expect(await f.checklist.innerText()).not.toContain(reviewRequired);
-      expect(f.writes).toEqual([{ planId: null }]); f.isolated();
+      expect(f.writes).toEqual([{ planId: null, expectedVersion: expect.stringMatching(/^[a-f0-9]{64}$/) }]); f.isolated();
       expect((await db.query("SELECT plan_id FROM ortho_cases WHERE id = $1 AND patient_id = $2", [caseId, patientId])).rows).toEqual([{ plan_id: planId }]);
       expect(await moneySnapshot()).toEqual(before);
     } finally {
