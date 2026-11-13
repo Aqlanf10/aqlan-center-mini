@@ -170,6 +170,8 @@ because document storage refuses temporary directories by design.
 | Plan unlink write | The merge dropped staging's assertion that the unlink carries `expectedVersion`. | Assertion restored. |
 | Coverage journeys | The fixture now creates a completed case; reopening it is refused by the reopen guard (0125). | The journeys request an active case. |
 | Case card at 390px | The merged card grew about 135px: the case navigation took three rows, and the admin-only responsibility box sat above the clinical header. | One-row navigation (icon above the full label on phones); the responsibility setting moved into the case reference context. |
+| Diagnostic case section name | Staging's records and diagnosis journeys open the section by the word "السجلات"; #538 renamed it "التشخيص" and stage 3 renamed it "الفحص والتشخيص". | Named "السجلات والتشخيص" (records, then diagnosis). |
+| Workup step selector | Staging's journeys used the step selector, which #538's direct section navigation replaced. | The journeys open the workspace and the exact section directly. Leaving and returning through sections keeps the unsent draft. |
 | Package read-state wait | The hydration wait targeted a summary text that the merged screen no longer has. | The wait targets the current summary text. |
 
 ## 8. Migration allocation for the finance additions (#483 6833690789)
