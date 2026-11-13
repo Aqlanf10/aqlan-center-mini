@@ -152,6 +152,26 @@ regressions were changed.
 | Medication catalog (6839071994) | The new tests had a wrong column, a wrong revision, a timing-based revocation and no concurrency proof. | Revocation now committed behind the identity fence; two concurrent dose edits from one observed version: one saves, the other is refused with no effect; a stale legacy edit is refused. |
 | Preflight artifact (local only) | With `node_modules` symlinked, esbuild sees dependency paths outside `node_modules/`. | Not a defect; passes from a real checkout. |
 
+## 7b. Hosted browser verification fixes (CI run 43377703712 on d6d6c71d: 55 failures in 13 files)
+
+The hosted HTTP and browser shards ran this branch's and staging's journeys together for the first time.
+Every failure was investigated against both sides. Local reproduction ran from the durable gate worktree,
+because document storage refuses temporary directories by design.
+
+| Area | Cause | Resolution |
+|---|---|---|
+| Ceph discard (canonical) | Section 4's integration dropped #539's observed-version check: a stale discard removed a draft that was edited after it was read. | Version check restored inside the admitted operation (patient → study → children share-locked), with a strict body and `{ok, studyId, status}`. Staging's writer still audits. |
+| Ceph create (canonical) | Section 4 dropped #539's checks: a posted orthodontic case ID was linked without the `clinical.ortho.view` grant (201 instead of 403), and image refusals differed per reason. | Grant check and one private reference refusal restored before staging's creator. The duplicate warning no longer lists other study numbers. |
+| Ceph edit (study journey) | The journey still sent #539's body; edit follows staging's `expectedDiagnosis` contract (section 4). | Journey uses staging's body; the completed study still refuses with 409. |
+| Legacy ceph compare/superimpose | #539's test compared completed studies without a provenance witness; staging refuses them by design. | Staging rule kept; the test asserts the refusal in both orders with no computed values. |
+| Canonical assessment (read-only) | Staging's client role check (admin/doctor) hid the canonical view from a reception user who holds the explicit `clinical.ortho.view` grant. | Role check kept on the legacy editable path. The canonical read-only view follows slice 31 and the M2 map: the server admits it by grant and scope. |
+| Lifecycle editor | The editor expected a retainer save to move the case to retention (see 7a), so it reported a committed save as uncertain. | It now expects the status unchanged. |
+| Legacy case entry | #539 requires an administrator to choose the responsible doctor; staging's journey did not. | The journey selects the doctor explicitly. |
+| Plan unlink write | The merge dropped staging's assertion that the unlink carries `expectedVersion`. | Assertion restored. |
+| Coverage journeys | The fixture now creates a completed case; reopening it is refused by the reopen guard (0125). | The journeys request an active case. |
+| Case card at 390px | The merged card grew about 135px: the case navigation took three rows, and the admin-only responsibility box sat above the clinical header. | One-row navigation (icon above the full label on phones); the responsibility setting moved into the case reference context. |
+| Package read-state wait | The hydration wait targeted a summary text that the merged screen no longer has. | The wait targets the current summary text. |
+
 ## 8. Migration allocation for the finance additions (#483 6833690789)
 
 Coordinating allocation for this integration line only; not an exclusive or global lock. Re-checked
