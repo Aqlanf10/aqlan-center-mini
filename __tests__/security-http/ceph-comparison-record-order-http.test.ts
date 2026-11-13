@@ -13,20 +13,23 @@ beforeAll(async () => {
   ids = await seedCanonicalCephComparison(db, patient);
 }, 120_000);
 afterAll(async () => { await db?.end(); });
-it.each(["compare", "superimpose"])("legacy %s orders actual stored imaging dates before contrary registration dates", async endpoint => {
+// Staging's rule wins over the earlier expectation here: completed history without an immutable
+// provenance witness (units, algorithm, source identity) is never compared or overlaid by the legacy
+// routes, in either order, and nothing is recomputed with today's definitions. Imaging-date ordering of
+// saved facts is covered by the canonical comparison journey on the same fixture.
+const unwitnessed = /غير موثقة بإصدار الحساب والوحدات|تعذّر التحقق من سلامة مصدر الدراسة المعتمدة/;
+it.each(["compare", "superimpose"])("legacy %s refuses unwitnessed completed studies in both orders without computed values", async endpoint => {
   for (const [first, second] of [[ids.before, ids.after], [ids.after, ids.before]]) {
     const response = await authedGet(`/api/ceph/${endpoint}?first=${first}&second=${second}`, h.sessions.doctorA);
-    expect(response.status).toBe(200); const body = await response.json();
-    expect(Number(body.before.id)).toBe(ids.before); expect(Number(body.after.id)).toBe(ids.after);
-    expect(body.before.xrayDate).toBe("2024-01-15"); expect(body.after.xrayDate).toBe("2025-01-15");
+    expect(response.status).toBe(409); const body = await response.json();
+    expect(Object.keys(body)).toEqual(["message"]); expect(body.message).toMatch(unwitnessed);
   }
 });
 it("legacy comparison never replaces missing approved measurements with today's computed values", async () => {
   const empty = await seedCanonicalCephComparison(db, ids.patientId);
   await db.query("DELETE FROM ceph_measurements WHERE analysis_id=$1", [empty.before]);
   const response = await authedGet(`/api/ceph/compare?first=${empty.before}&second=${empty.after}`, h.sessions.doctorA);
-  expect(response.status).toBe(200); const body = await response.json();
-  const saved = [body.before, body.after].find(study => Number(study.id) === empty.before);
-  expect(saved.status).toBe("completed"); expect(saved.measurements).toEqual([]);
+  expect(response.status).toBe(409); const body = await response.json();
+  expect(Object.keys(body)).toEqual(["message"]); expect(body.message).toMatch(unwitnessed);
   expect((await db.query("SELECT count(*)::int n FROM ceph_measurements WHERE analysis_id=$1", [empty.before])).rows[0].n).toBe(0);
 });
