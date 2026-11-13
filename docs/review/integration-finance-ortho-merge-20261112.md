@@ -61,11 +61,18 @@ admitted staff operation, instead of keeping a second writer:
   writer locks the patient row, canonical admission proves current patient scope and identity
   (`canonical-ceph-admission.ts`) in place of the legacy session re-proof. Capability is the one the
   operation was opened for and is re-asserted before commit.
-- Request bodies and responses are the legacy route's: completion takes the reviewed snapshot and
-  source identity, edits take the observed prior calibration/landmarks/diagnosis, a correction copy
-  takes the correction-source token. `ceph-draft-edit.ts` is now shared by both routes.
-- The canonical study read adds staging's source identity (drafts) and correction token (completed
-  studies), computed by the same helpers as the legacy read; the canonical screen sends them back.
+- Edits take the legacy route's body (observed prior calibration/landmarks/diagnosis; `ceph-draft-edit.ts`
+  is shared by both routes). Completion and correction copy take a **server-computed fingerprint** instead
+  of staging's snapshot/identity/token, because those carry internal identifiers (image document, case)
+  that the canonical study read never discloses. The read returns only
+  `completionSources: {state, fingerprint}` (drafts) and `correctionSource: {state, fingerprint}`
+  (completed studies). The command rebuilds the snapshot, sources and token inside the admitted
+  operation (`canonical-ceph-review-fingerprint.ts`, the same builder the read uses), refuses on any
+  difference (409, no effect), and hands the rebuilt values to staging's writer, which re-checks them
+  under its own locks. A completed study is rebuilt too, so a lost-response replay still reaches
+  staging's read-only replay rule. The legacy route's bodies are unchanged.
+- Runtime handle: staging's writer passes its savepoint view of the transaction to the admission
+  callback; runtime calls use the operation's own client (same transaction), which the handle is bound to.
 - Scope: no record scope → the runtime's 403 refusal; a patient outside "own" → 404, identical to a
   missing study.
 
@@ -140,6 +147,10 @@ regressions were changed.
 | Ceph comparison overflow | Staging's comparator skips a pair whose difference overflows, so a saved value could vanish from the canonical answer. | Canonical comparison refuses the whole pair (`ceph_pair_invalid`) when a value present in both studies has a non-finite difference. |
 | Ceph completion fixtures | Index-derived landmark positions are collinear for several measurements, which staging's completion gate refuses; the PG test also passed the BIGINT id as a string. | Shared defined synthetic geometry (`__tests__/fixtures/ceph-valid-geometry.ts`, same as staging's identity fixture) and a numeric id. |
 | Schema ownership | Table count. | 132 (merge base) + 17 (staging) + 14 (this branch) = 163. |
+| Canonical ceph read | Staging's correction token and source identity exposed `documentId`/`orthoCaseId` through the canonical read. | Fingerprint contract (section 4). |
+| Canonical ceph/catalog fixtures | Migrations-only databases have no seeded reference set; BIGINT ids arrived as strings. | Synthetic reference set seeded in the fixture; numeric ids. |
+| Medication catalog (6839071994) | The new tests had a wrong column, a wrong revision, a timing-based revocation and no concurrency proof. | Revocation now committed behind the identity fence; two concurrent dose edits from one observed version: one saves, the other is refused with no effect; a stale legacy edit is refused. |
+| Preflight artifact (local only) | With `node_modules` symlinked, esbuild sees dependency paths outside `node_modules/`. | Not a defect; passes from a real checkout. |
 
 ## 8. Migration allocation for the finance additions (#483 6833690789)
 

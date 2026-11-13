@@ -23,10 +23,11 @@ beforeEach(async () => {
   studyId = (await seedCanonicalCeph(journey.db, { patientId })).id;
   await journey.db.query("INSERT INTO ceph_landmarks(analysis_id,code,x,y,source,confirmed_by) VALUES($1,'SYN_OLD_CODE',1.25,2.75,'manual','SYN original')", [studyId]);
 });
-/** Staging's correction contract: the correction-source token observed in the canonical study read. */
+/** Canonical correction contract: the fingerprint of the correction source observed in the canonical study read. */
 async function observedToken(cookie: string, id = studyId) {
-  const response = await journey.api(`/api/ceph/${id}`, cookie); if (response.status !== 200) return { schemaVersion: 1, expectedCorrectionSource: { analysisId: id } };
-  const study = await response.json(); return { schemaVersion: 1, expectedCorrectionSource: study.correctionSource?.state === "available" ? study.correctionSource.token : { analysisId: id } };
+  const response = await journey.api(`/api/ceph/${id}`, cookie); if (response.status !== 200) return { schemaVersion: 1, expectedFingerprint: "0".repeat(64) };
+  const study = await response.json(); expect(JSON.stringify(study)).not.toMatch(/documentId|orthoCaseId|sourceSha256/);
+  return { schemaVersion: 1, expectedFingerprint: study.correctionSource?.state === "available" ? study.correctionSource.fingerprint : "0".repeat(64) };
 }
 const copy = async (cookie: string, id = studyId, body?: unknown) => journey.api(`/api/ceph/${id}/duplicate`, cookie, {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body === undefined ? await observedToken((await journey.login("owner")).cookie, id) : body),
@@ -56,8 +57,8 @@ it("HTTP: reader/none/anonymous and foreign patients do not gain analysis author
 });
 it("HTTP: a missing, foreign or altered correction token and query aliases are refused without effects", async () => {
   const cookie = (await journey.login("own")).cookie, token = await observedToken(cookie);
-  for (const body of [{}, [], null, "", false, 0, { actor: "owner" }, { schemaVersion: 2, expectedCorrectionSource: token.expectedCorrectionSource },
-    { schemaVersion: 1, expectedCorrectionSource: { ...token.expectedCorrectionSource, analysisId: studyId + 1 } }]) {
+  for (const body of [{}, [], null, "", false, 0, { actor: "owner" }, { schemaVersion: 2, expectedFingerprint: token.expectedFingerprint },
+    { schemaVersion: 1, expectedCorrectionSource: { analysisId: studyId } }, { ...token, expectedFingerprint: token.expectedFingerprint.toUpperCase() }]) {
     const response = await copy(cookie, studyId, body); expect(response.status, JSON.stringify(body)).toBe(400);
   }
   const query = await journey.api(`/api/ceph/${studyId}/duplicate?force=1`, cookie, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(token) });

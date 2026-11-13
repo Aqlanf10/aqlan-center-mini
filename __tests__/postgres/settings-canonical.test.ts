@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
+import { waitForBlockedBy } from "./_canonical-ready-fixture";
 assertRealPostgresUrl();
 stubPostgresEnv();
 vi.stubEnv("SESSION_SECRET", "synthetic-canonical-settings-secret-2026");
@@ -199,7 +200,7 @@ describe("canonical medication catalog write (staging contract)", () => {
   const catalog = (entries: unknown[]) => JSON.stringify({ schemaVersion: 1, entries });
   it("a granted doctor saves with the observed version and a reason; one audit row; existing prescriptions keep their doses", async () => {
     const patient = (await fx.pool.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-CATALOG-RX','SYN catalog patient') RETURNING id")).rows[0].id;
-    const rx = (await fx.pool.query("INSERT INTO prescriptions(patient_id,doctor_name,items,created_by) VALUES($1,'SYN','[{\"drug\":\"SYN canonical medicine\",\"dose\":\"1 mg\"}]','SYN') RETURNING id,items::text items", [patient])).rows[0];
+    const rx = (await fx.pool.query("INSERT INTO prescriptions(patient_id,items,created_by) VALUES($1,'[{\"drug\":\"SYN canonical medicine\",\"dose\":\"1 mg\"}]','SYN') RETURNING id,items::text items", [patient])).rows[0];
     await update("catalogDoctor", { [KEY]: catalog([entry]) }, { __reason: "SYN add synthetic medicine" });
     expect(JSON.parse((await stored(KEY))!).entries).toHaveLength(1);
     expect(await audits(KEY)).toEqual([expect.objectContaining({ actor: ACCOUNTS.catalogDoctor.username })]);
@@ -209,27 +210,49 @@ describe("canonical medication catalog write (staging contract)", () => {
     const before = await stored(KEY), beforeAudits = (await audits(KEY)).length;
     await expect(update("owner", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) })).rejects.toMatchObject({ status: expect.any(Number) });
     await expect(update("both", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) }, { __reason: "SYN settings grants are not the catalog grant" })).rejects.toMatchObject({ code: "setting_not_granted" });
-    await expect(update("adminLabel", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) }, { __reason: "SYN admin label alone" })).rejects.toMatchObject({ status: 403 });
+    await expect(update("adminLabel", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) }, { __reason: "SYN admin label alone" })).rejects.toThrow("STAFF_OPERATION_CAPABILITY_DENIED");
     await expect(update("owner", { [KEY]: catalog([]) }, { __reason: "SYN delete is not allowed" })).rejects.toMatchObject({ code: "setting_rule" });
     const stale = settings.parseCanonicalSettingsUpdate({ [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]), __versions: { [KEY]: "2000-01-01T00:00:00.000Z" }, __reason: "SYN stale" });
     await expect(settings.commandCanonicalSettingsWrite(await fx.session("owner"), stale)).rejects.toMatchObject({ code: "setting_conflict" });
     expect(await stored(KEY)).toBe(before); expect(await audits(KEY)).toHaveLength(beforeAudits);
   });
-  it("revocation between admission and the catalog lock writes nothing", async () => {
-    const before = await stored(KEY);
-    const blocker = new Client({ connectionString: fx.pool.options.connectionString as string }); await blocker.connect();
+  it("revocation committed behind the identity fence writes nothing for the stale session", async () => {
+    const before = await stored(KEY), beforeAudits = (await audits(KEY)).length;
+    // The session and the observed version are taken before the revocation, so the write is stale on arrival.
+    const session = await fx.session("catalogDoctor"), current = await read("owner");
+    const write = settings.parseCanonicalSettingsUpdate({ [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]),
+      __versions: { [KEY]: current.__versions[KEY] ?? null }, __reason: "SYN revoked while waiting" });
+    const holder = new Client({ connectionString: fx.pool.options.connectionString as string }); await holder.connect();
+    let pending: Promise<unknown> | undefined;
     try {
-      await blocker.query("BEGIN"); await blocker.query("SELECT pg_advisory_xact_lock(hashtext('clinic-setting:' || $1))", [KEY]);
-      const pending = update("catalogDoctor", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) }, { __reason: "SYN revoked while waiting" });
-      await new Promise(resolve => setTimeout(resolve, 300));
-      await fx.pool.query("UPDATE users SET permissions=jsonb_set(jsonb_set(permissions::jsonb,'{revision}',to_jsonb((permissions::jsonb->>'revision')::int+1)),'{grants,clinical.medication-catalog.manage}','false')::text WHERE username=$1", [ACCOUNTS.catalogDoctor.username]);
-      await blocker.query("COMMIT");
-      await expect(pending).rejects.toBeTruthy();
-    } finally { await blocker.query("ROLLBACK").catch(() => undefined); await blocker.end(); }
-    expect(await stored(KEY)).toBe(before);
+      await holder.query("BEGIN"); const pid = (await holder.query("SELECT pg_backend_pid() pid")).rows[0].pid;
+      await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", ["aqlan.canonical.identity.substrate.v1:public"]);
+      await holder.query("UPDATE users SET permissions=jsonb_set(jsonb_set(permissions::jsonb,'{revision}',to_jsonb((permissions::jsonb->>'revision')::int+1)),'{grants,clinical.medication-catalog.manage}','false')::text WHERE username=$1", [ACCOUNTS.catalogDoctor.username]);
+      pending = settings.commandCanonicalSettingsWrite(session, write).then(() => "saved", error => error);
+      await waitForBlockedBy(fx.pool, pid);
+      await holder.query("COMMIT");
+      expect(await pending).toBeInstanceOf(Error);
+    } finally { await holder.query("ROLLBACK").catch(() => undefined); await holder.end(); await pending; }
+    expect(await stored(KEY)).toBe(before); expect(await audits(KEY)).toHaveLength(beforeAudits);
   });
   it("a revisioned disable is accepted for the owner", async () => {
     await update("owner", { [KEY]: catalog([{ ...entry, revision: 2, enabled: false }]) }, { __reason: "SYN disable" });
     expect(JSON.parse((await stored(KEY))!).entries[0]).toMatchObject({ enabled: false, revision: 2 });
+  });
+  it("two concurrent dose edits from the same observed version: exactly one saves, the other is refused as stale without effects", async () => {
+    const current = await read("owner"), observed = current.__versions[KEY] ?? null, beforeAudits = (await audits(KEY)).length;
+    const edit = (amount: string) => settings.parseCanonicalSettingsUpdate({ [KEY]: catalog([{ ...entry, revision: 3, enabled: false, amount }]),
+      __versions: { [KEY]: observed }, __reason: `SYN concurrent dose ${amount}` });
+    const results = await Promise.allSettled([
+      settings.commandCanonicalSettingsWrite(await fx.session("owner"), edit("SYN 1 tablet")),
+      settings.commandCanonicalSettingsWrite(await fx.session("owner"), edit("SYN 2 tablets")),
+    ]);
+    const saved = results.filter(r => r.status === "fulfilled"), refused = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(saved).toHaveLength(1); expect(refused).toHaveLength(1);
+    // The loser is refused either by the version check or by the revision rule (its revision is no longer the next one).
+    expect(["setting_conflict", "setting_rule"]).toContain((refused[0].reason as { code?: string }).code);
+    const winner = results[0].status === "fulfilled" ? "SYN 1 tablet" : "SYN 2 tablets";
+    expect(JSON.parse((await stored(KEY))!).entries[0]).toMatchObject({ amount: winner, revision: 3 });
+    expect(await audits(KEY)).toHaveLength(beforeAudits + 1);
   });
 });

@@ -3,7 +3,7 @@ import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journe
 import { REQUIRED_LANDMARKS } from "../../lib/ceph";
 import { validCephPoint } from "../fixtures/ceph-valid-geometry";
 import { seedCanonicalCeph } from "../fixtures/canonical-ceph";
-import { cephCompletionRequestFromStudy } from "../../lib/canonical-ceph-projection";
+import { cephCompletionFingerprintFromStudy } from "../../lib/canonical-ceph-projection";
 const ANALYZE = { "clinical.xrays.view": true, "clinical.ceph.analyze": true };
 const ACCOUNTS = {
   owner: { username: "canon-complete-owner", password: "Canon#CompleteOwner1", role: "admin", display: "المالك التجريبي" },
@@ -13,7 +13,12 @@ const ACCOUNTS = {
   none: { username: "canon-complete-none", password: "Canon#CompleteNone1", role: "doctor", doctor: true, display: "بلا نطاق", patientScope: "none", grants: ANALYZE },
 } as const;
 let journey: CanonicalJourney<keyof typeof ACCOUNTS>, sequence = 0, patientId: number, studyId: number;
-beforeAll(async () => { journey = await openCanonicalJourney({ portOffset: 69, secret: "canonical-ceph-complete-secret-0123456789", accounts: ACCOUNTS, ownerKey: "owner", async seed() {} }); }, 300000);
+beforeAll(async () => { journey = await openCanonicalJourney({ portOffset: 69, secret: "canonical-ceph-complete-secret-0123456789", accounts: ACCOUNTS, ownerKey: "owner", async seed(db) {
+  // Migrations-only database: the runtime initializer that seeds the built-in reference set never runs,
+  // so completion's reference source is seeded explicitly (synthetic values).
+  const set = (await db.query("INSERT INTO ceph_reference_sets(key,name,population,version,created_by) VALUES('builtin_default','SYN reference','SYN population','SYN-v1','SYN') ON CONFLICT (key) DO UPDATE SET version=EXCLUDED.version RETURNING id")).rows[0].id;
+  await db.query("INSERT INTO ceph_reference_values(set_id,code,mean,sd) VALUES($1,'ANB',2,2),($1,'SNA',82,3.5) ON CONFLICT (set_id,code) DO NOTHING", [set]);
+} }); }, 300000);
 afterAll(async () => { await journey?.close(); }, 60000);
 beforeEach(async () => {
   patientId = (await journey.db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'SYN draft edit patient',$2) RETURNING id", [`SYN-CEPH-COMPLETE-${++sequence}`, journey.parties.own])).rows[0].id;
@@ -23,7 +28,7 @@ beforeEach(async () => {
 });
 const complete = (cookie: string, id: number, body: unknown) => journey.api(`/api/ceph/${id}/complete`, cookie, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 /** Staging's completion contract, built from the canonical study read exactly as the screen does. */
-async function reviewed(cookie: string, id = studyId) { const response = await journey.api(`/api/ceph/${id}`, cookie); expect(response.status).toBe(200); const request = cephCompletionRequestFromStudy(await response.json()); expect(request).not.toBeNull(); return request!; }
+async function reviewed(cookie: string, id = studyId) { const response = await journey.api(`/api/ceph/${id}`, cookie); expect(response.status).toBe(200); const study = await response.json(); expect(JSON.stringify(study)).not.toMatch(/documentId|orthoCaseId|imageSha256/); const fingerprint = cephCompletionFingerprintFromStudy(study); expect(fingerprint).not.toBeNull(); return { expectedFingerprint: fingerprint! }; }
 it("HTTP: scoped analyst explicitly seals one observed draft and its audit",async()=>{
  const cookie=(await journey.login("own")).cookie,response=await complete(cookie,studyId,await reviewed(cookie));
  expect(response.status).toBe(200);expect(await response.json()).toMatchObject({ok:true,measurements:expect.any(Array)});
@@ -42,12 +47,12 @@ it("HTTP: anonymous, reader, none and foreign patients refuse without effects", 
   await journey.db.query("UPDATE patients SET primary_doctor_id=NULL WHERE id=$1", [patientId]); const own = (await journey.login("own")).cookie;
   const foreign = await complete(own, studyId, input), absent = await complete(own, 2147483647, input); expect(foreign.status).toBe(404); expect(absent.status).toBe(404); expect(await foreign.json()).toEqual(await absent.json()); expect(await audits()).toBe(0);
 });
-it("HTTP: malformed snapshots and query parameters are refused; body fields cannot select the actor or the measurements",async()=>{
+it("HTTP: malformed fingerprints, staging snapshots and query parameters are refused; body fields cannot select the actor or the measurements",async()=>{
  const cookie=(await journey.login("own")).cookie,input=await reviewed(cookie);
- for(const body of [null,[],{},{expectedSnapshot:[]},{expectedSnapshot:{...input.expectedSnapshot,landmarks:"all"}},{...input,expectedSources:{}}]){const response=await complete(cookie,studyId,body);expect(response.status).toBe(400);expect(response.headers.get("cache-control")).toContain("no-store");}
+ for(const body of [null,[],{},{expectedSnapshot:[]},{expectedFingerprint:"A".repeat(64)},{...input,expectedSources:{}}]){const response=await complete(cookie,studyId,body);expect(response.status).toBe(400);expect(response.headers.get("cache-control")).toContain("no-store");}
  expect((await journey.api(`/api/ceph/${studyId}/complete?force=1`,cookie,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)})).status).toBe(400);expect(await audits()).toBe(0);
- // Extra fields are ignored: the signer is the admitted actor and measurements are recomputed on the server.
- expect((await complete(cookie,studyId,{...input,actor:"owner",measurements:[{code:"ANB",value:99}]})).status).toBe(200);
+ // Extra fields are refused (the body is the reviewed fingerprint only); the signer is the admitted actor and measurements are recomputed on the server.
+ expect((await complete(cookie,studyId,{...input,actor:"owner",measurements:[{code:"ANB",value:99}]})).status).toBe(400);expect(await audits()).toBe(0);expect((await complete(cookie,studyId,input)).status).toBe(200);
  expect((await journey.db.query("SELECT completed_by FROM ceph_analyses WHERE id=$1",[studyId])).rows[0].completed_by).toBe(ACCOUNTS.own.username);
  expect((await journey.db.query("SELECT value FROM ceph_measurements WHERE analysis_id=$1 AND code='ANB'",[studyId])).rows[0]?.value).not.toBe(99);
 });

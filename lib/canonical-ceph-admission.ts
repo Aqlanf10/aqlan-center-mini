@@ -14,8 +14,12 @@ import { staffOperationIdentity, staffOperationPatientScope, type StaffOperation
  * operation re-asserts it before commit. Out of scope is refused as 404-like "not available",
  * never as a different patient's data.
  */
-export function canonicalCephAdmission(session: VerifiedDurableSession, handle: StaffOperationHandle, action: StaffRuntimeAction): CephCanonicalAdmit {
-  return async (client: DbClient, patientId: number): Promise<SessionPayload> => {
+export function canonicalCephAdmission(session: VerifiedDurableSession, handle: StaffOperationHandle, action: StaffRuntimeAction,
+  operationClient: DbClient): CephCanonicalAdmit {
+  // The writer passes its savepoint view of the same transaction; the runtime handle is bound to the
+  // operation's own client, so every runtime call uses that client (same transaction, same locks).
+  return async (_writerClient: DbClient, patientId: number): Promise<SessionPayload> => {
+    const client = operationClient;
     const scope = await staffOperationPatientScope(client, handle, action);
     if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
     if (scope.kind === "own" && !await doctorOwnsPatient(scope.clinicianPartyId, patientId, client, "nowait")) {

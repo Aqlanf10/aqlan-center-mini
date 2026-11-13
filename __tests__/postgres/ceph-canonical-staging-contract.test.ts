@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
 import { REQUIRED_LANDMARKS } from "../../lib/ceph";
+import { validCephPoint } from "../fixtures/ceph-valid-geometry";
 vi.mock("server-only", () => ({})); assertRealPostgresUrl(); stubPostgresEnv(); vi.stubEnv("SESSION_SECRET", "synthetic-ceph-canonical-contract-secret-0123456789");
 const db = await import("../../lib/db");
 const reads = await import("../../lib/canonical-ceph-reads");
@@ -27,7 +28,13 @@ const ACCOUNTS = {
 } as const;
 type Key = keyof typeof ACCOUNTS;
 let fx: CanonicalInventoryDatabase<Key>, seq = 0;
-beforeAll(async () => { fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner"); }, 180000);
+beforeAll(async () => {
+  fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner");
+  // The canonical fixture is built from migrations only; the runtime initializer that seeds the built-in
+  // reference set never runs here, so a synthetic active reference set is seeded explicitly.
+  const set = (await fx.pool.query("INSERT INTO ceph_reference_sets(key,name,population,version,created_by) VALUES('builtin_default','SYN reference','SYN population','SYN-v1','SYN') ON CONFLICT (key) DO UPDATE SET version=EXCLUDED.version RETURNING id")).rows[0].id;
+  await fx.pool.query("INSERT INTO ceph_reference_values(set_id,code,mean,sd) VALUES($1,'ANB',2,2),($1,'SNA',82,3.5) ON CONFLICT (set_id,code) DO NOTHING", [set]);
+}, 180000);
 afterAll(async () => { await fx?.close(); });
 
 async function draft(own = true) {
@@ -35,12 +42,18 @@ async function draft(own = true) {
   const patientId = (await q.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,$1,$2) RETURNING id", [`SYN-CCS-${++seq}`, own ? fx.parties.own : null])).rows[0].id as number;
   const documentId = (await q.query("INSERT INTO patient_documents(patient_id,kind,title,mime_type,size_bytes,sha256,storage_key,uploaded_by) VALUES($1,'imaging','SYN ceph image','image/png',1,$2,$3,'SYN') RETURNING id", [patientId, "c".repeat(64), `SYN/ccs-${seq}.png`])).rows[0].id as number;
   const id = (await q.query("INSERT INTO ceph_analyses(patient_id,document_id,status,created_by,cal_x1,cal_y1,cal_x2,cal_y2,cal_mm,mm_per_pixel) VALUES($1,$2,'draft','SYN',0,0,100,0,50,0.5) RETURNING id", [patientId, documentId])).rows[0].id as number;
-  for (const [i, code] of REQUIRED_LANDMARKS.entries()) await q.query("INSERT INTO ceph_landmarks(analysis_id,code,x,y,source,confirmed_by) VALUES($1,$2,$3,$4,'manual','SYN')", [id, code, 40 + (i * 37) % 400, 30 + (i * 53) % 380]);
+  for (const code of REQUIRED_LANDMARKS) await q.query("INSERT INTO ceph_landmarks(analysis_id,code,x,y,source,confirmed_by) VALUES($1,$2,$3,$4,'manual','SYN')", [id, code, validCephPoint(code).x, validCephPoint(code).y]);
   await q.query("INSERT INTO ceph_diagnoses(analysis_id,final_dx,created_by) VALUES($1,'SYN draft conclusion','SYN')", [id]);
-  return { id, patientId, documentId };
+  // pg returns BIGINT identities as text; the route hands the reader and commands numbers.
+  return { id: Number(id), patientId: Number(patientId), documentId: Number(documentId) };
 }
 type Study = Awaited<ReturnType<typeof draft>>;
 const observe = async (s: Study, key: Key = "owner") => reads.readCanonicalCephStudy(await fx.session(key), s.id);
+/** The canonical read discloses only a fingerprint of the reviewed snapshot and sources; the command rebuilds them. */
+const completionRequest = (feed: Awaited<ReturnType<typeof observe>>) => {
+  const fingerprint = projection.cephCompletionFingerprintFromStudy(feed);
+  return fingerprint === null ? null : { expectedFingerprint: fingerprint };
+};
 const state = async (s: Study) => (await fx.pool.query(`SELECT
   (SELECT to_jsonb(a) - 'updated_at' FROM ceph_analyses a WHERE id=$1) study,
   (SELECT jsonb_agg(to_jsonb(l) ORDER BY id) FROM ceph_landmarks l WHERE analysis_id=$1) landmarks,
@@ -52,7 +65,7 @@ const state = async (s: Study) => (await fx.pool.query(`SELECT
 
 it("completes the reviewed snapshot with staging's witness, for own, all and the owner", async () => {
   for (const key of ["own", "all", "owner"] as const) {
-    const s = await draft(), feed = await observe(s, key), request = projection.cephCompletionRequestFromStudy(feed);
+    const s = await draft(), feed = await observe(s, key), request = completionRequest(feed);
     expect(request).not.toBeNull();
     const result = await complete.commandCanonicalCephComplete(await fx.session(key), String(s.id), request);
     expect(result).toMatchObject({ ok: true, measurements: expect.any(Array) });
@@ -73,7 +86,7 @@ it("refuses a stale snapshot, a changed image or reference source, out-of-scope 
     ["capability not granted", "read", async () => undefined, /STAFF/],
   ];
   for (const [label, key, change, outcome] of cases) {
-    const s = await draft(), request = projection.cephCompletionRequestFromStudy(await observe(s));
+    const s = await draft(), request = completionRequest(await observe(s));
     await change(s);
     const before = await state(s);
     const attempt = complete.commandCanonicalCephComplete(await fx.session(key), String(s.id), request);
@@ -86,7 +99,7 @@ it("refuses a stale snapshot, a changed image or reference source, out-of-scope 
 });
 
 it("an audit failure inside the writer rolls back the witness, measurements and approval together", async () => {
-  const s = await draft(), request = projection.cephCompletionRequestFromStudy(await observe(s)), before = await state(s);
+  const s = await draft(), request = completionRequest(await observe(s)), before = await state(s);
   await fx.pool.query(`CREATE FUNCTION syn_ccs_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='ceph.complete' THEN RAISE EXCEPTION 'SYN completion audit refused'; END IF; RETURN NEW; END $$;
     CREATE TRIGGER syn_ccs_audit BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION syn_ccs_audit()`);
   try {
@@ -115,24 +128,31 @@ it("discards a draft once, never a completed study", async () => {
   expect((await fx.pool.query("SELECT status FROM ceph_analyses WHERE id=$1", [s.id])).rows[0].status).toBe("discarded");
   await expect(discard.commandCanonicalCephDiscard(await fx.session("all"), String(s.id), {})).rejects.toMatchObject({ status: 404 });
   const done = await draft();
-  await complete.commandCanonicalCephComplete(await fx.session("own"), String(done.id), projection.cephCompletionRequestFromStudy(await observe(done)));
+  await complete.commandCanonicalCephComplete(await fx.session("own"), String(done.id), completionRequest(await observe(done)));
   const before = await state(done);
   await expect(discard.commandCanonicalCephDiscard(await fx.session("all"), String(done.id), {})).rejects.toMatchObject({ status: 409 });
   expect(await state(done)).toEqual(before);
 });
 
-it("opens a correction copy only from the observed correction token", async () => {
+it("opens a correction copy only from the observed correction fingerprint", async () => {
   const s = await draft();
-  await complete.commandCanonicalCephComplete(await fx.session("own"), String(s.id), projection.cephCompletionRequestFromStudy(await observe(s)));
+  await complete.commandCanonicalCephComplete(await fx.session("own"), String(s.id), completionRequest(await observe(s)));
   const feed = await observe(s);
   expect(feed.correctionSource?.state).toBe("available");
-  const token = feed.correctionSource!.state === "available" ? feed.correctionSource!.token : null;
-  await expect(copy.commandCanonicalCephCopy(await fx.session("own"), String(s.id), { schemaVersion: 1, expectedCorrectionSource: { ...token!, analysisId: s.id + 100000 } }))
+  const fingerprint = feed.correctionSource!.state === "available" ? feed.correctionSource!.fingerprint : null;
+  // No internal image or case identifier is disclosed by the read.
+  expect(JSON.stringify(feed)).not.toMatch(/documentId|orthoCaseId|sourceSha256/);
+  await expect(copy.commandCanonicalCephCopy(await fx.session("own"), String(s.id), { schemaVersion: 1, expectedCorrectionSource: { analysisId: s.id } }))
     .rejects.toMatchObject({ status: 400 });
-  const created = await copy.commandCanonicalCephCopy(await fx.session("own"), String(s.id), { schemaVersion: 1, expectedCorrectionSource: token });
+  const before = await state(s);
+  await expect(copy.commandCanonicalCephCopy(await fx.session("own"), String(s.id), { schemaVersion: 1, expectedFingerprint: "f".repeat(64) }))
+    .rejects.toMatchObject({ status: 409 });
+  expect(await state(s)).toEqual(before);
+  const token = { schemaVersion: 1, expectedFingerprint: fingerprint };
+  const created = await copy.commandCanonicalCephCopy(await fx.session("own"), String(s.id), token);
   expect(created.id).toBeGreaterThan(s.id);
   expect((await fx.pool.query("SELECT status,patient_id FROM ceph_analyses WHERE id=$1", [created.id])).rows[0]).toEqual({ status: "draft", patient_id: s.patientId });
-  await expect(copy.commandCanonicalCephCopy(await fx.session("none"), String(s.id), { schemaVersion: 1, expectedCorrectionSource: token })).rejects.toThrow(/STAFF_OPERATION_RECORD_SCOPE_DENIED/);
+  await expect(copy.commandCanonicalCephCopy(await fx.session("none"), String(s.id), token)).rejects.toThrow(/STAFF_OPERATION_RECORD_SCOPE_DENIED/);
 });
 
 it("creates a draft on the patient's own image, and refuses another patient's image or scope", async () => {

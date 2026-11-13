@@ -1,13 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { isCanonicalCephList } from "@/lib/canonical-ceph-projection";
-import type { CephCorrectionSourceToken } from "@/lib/ceph-correction-origin";
 
 const button = "min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800 disabled:opacity-50";
-export function CanonicalCephCopy({ patientId, studyId, ownerKey, correctionToken, onCopied, refreshStudy }: {
+export function CanonicalCephCopy({ patientId, studyId, ownerKey, correctionFingerprint, onCopied, refreshStudy }: {
   patientId: string; studyId: number; ownerKey: string;
-  /** Staging's correction-source token of the observed completed study; without it no copy is requested. */
-  correctionToken: CephCorrectionSourceToken | null; onCopied: () => void; refreshStudy: () => void;
+  /** Fingerprint of the observed completed study's correction source; without it no copy is requested. */
+  correctionFingerprint: string | null; onCopied: () => void; refreshStudy: () => void;
 }) {
   const storageKey = `aqlan.ceph-copy.pending:${encodeURIComponent(ownerKey)}:${patientId}:${studyId}`;
   const [initial] = useState(() => { try { return { pending: sessionStorage.getItem(storageKey) !== null, warning: false }; } catch { return { pending: false, warning: true }; } });
@@ -23,7 +22,7 @@ export function CanonicalCephCopy({ patientId, studyId, ownerKey, correctionToke
   const erase = () => { try { sessionStorage.removeItem(storageKey); } catch { setWarning(true); } };
   async function copy() {
     if (!active.current || sending.current || pendingRef.current) return;
-    if (!correctionToken) { setMessage("تعذّر إثبات أصل التصحيح لهذه الدراسة؛ لم يُرسل طلب. حدّث الدراسة."); return; }
+    if (!correctionFingerprint) { setMessage("تعذّر إثبات أصل التصحيح لهذه الدراسة؛ لم يُرسل طلب. حدّث الدراسة."); return; }
     sending.current = true; setBusy(true); setMessage(null); setChecked(null);
     const request = new AbortController(); controller.current = request;
     try { sessionStorage.setItem(storageKey, "pending"); } catch { setWarning(true); }
@@ -33,7 +32,7 @@ export function CanonicalCephCopy({ patientId, studyId, ownerKey, correctionToke
       setMessage("لم تتأكد نتيجة نسخة التصحيح. لن نعيد الطلب تلقائيًا؛ تحقق من الدراسات الحالية.");
     };
     try {
-      const response = await fetch(`/api/ceph/${studyId}/duplicate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, expectedCorrectionSource: correctionToken }), signal: request.signal });
+      const response = await fetch(`/api/ceph/${studyId}/duplicate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, expectedFingerprint: correctionFingerprint }), signal: request.signal });
       const result = await response.json().catch(() => null); if (!active.current) return;
       if (!response.ok) {
         if (response.status < 500 && result && (response.status === 401 || /^(STAFF_|ceph_copy_|invalid_ceph_copy$)/.test(String(result.code)))) {

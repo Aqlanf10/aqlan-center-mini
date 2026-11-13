@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { cephCompletionRequestFromStudy, type CanonicalCephStudy } from "@/lib/canonical-ceph-projection";
+import { cephCompletionFingerprintFromStudy, type CanonicalCephStudy } from "@/lib/canonical-ceph-projection";
 const button = "min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800 disabled:opacity-50";
 /** Explicit clinical completion from the saved observation, with ambiguous-response recovery and no automatic retry. */
 export function CanonicalCephComplete({ patientId, studyId, ownerKey, feed, refresh, onCompleted }: { patientId: string; studyId: number; ownerKey: string; feed: CanonicalCephStudy | null; refresh: () => void; onCompleted: () => void }) {
   const storageKey = `aqlan.ceph-complete.pending:${encodeURIComponent(ownerKey)}:${patientId}:${studyId}`;
   const [initial] = useState(() => { try { return { pending: sessionStorage.getItem(storageKey) !== null, warning: false }; } catch { return { pending: false, warning: true }; } });
   const [pending, setPending] = useState(initial.pending), [warning, setWarning] = useState(initial.warning), [busy, setBusy] = useState(false);
-  const [intent, setIntent] = useState<string | null>(null), [reviewed, setReviewed] = useState<ReturnType<typeof cephCompletionRequestFromStudy>>(null), [message, setMessage] = useState<string | null>(null), [unverified, setUnverified] = useState<CanonicalCephStudy | null>(null);
+  const [intent, setIntent] = useState<string | null>(null), [reviewed, setReviewed] = useState<{ expectedFingerprint: string } | null>(null), [message, setMessage] = useState<string | null>(null), [unverified, setUnverified] = useState<CanonicalCephStudy | null>(null);
   const active = useRef(false), sending = useRef(false), pendingRef = useRef(initial.pending), controller = useRef<AbortController | null>(null);
   useEffect(() => { active.current = true; return () => { active.current = false; controller.current?.abort(); }; }, [storageKey]);
   useEffect(() => { const leave = (e: BeforeUnloadEvent) => { if (sending.current || pendingRef.current) { e.preventDefault(); e.returnValue = ""; } }; window.addEventListener("beforeunload", leave); return () => window.removeEventListener("beforeunload", leave); }, []);
@@ -18,8 +18,8 @@ export function CanonicalCephComplete({ patientId, studyId, ownerKey, feed, refr
   const clear = () => { setIntent(null); setReviewed(null); };
   function begin() {
     if (!editable || !feed || sending.current || pendingRef.current) return;
-    // The reviewed snapshot and sources are frozen now; the server refuses if either changed since.
-    const request = cephCompletionRequestFromStudy(feed);
+    // The reviewed snapshot and sources are frozen now (as their fingerprint); the server refuses if either changed since.
+    const fingerprint = cephCompletionFingerprintFromStudy(feed), request = fingerprint ? { expectedFingerprint: fingerprint } : null;
     if (!request) { setMessage("تعذّر إثبات مصادر الدراسة (الصورة والمرجع)؛ لا يمكن طلب الاعتماد الآن. حدّث الدراسة وراجعها."); return; }
     setIntent(feed.discardVersion!); setReviewed(request); setMessage(null);
   }

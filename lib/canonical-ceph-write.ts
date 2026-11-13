@@ -50,14 +50,14 @@ export async function runCanonicalCephWrite<T>(
         const { rows: [study] } = await client.query<{ patient_id: number; document_id: number }>(
           "SELECT patient_id, document_id FROM ceph_analyses WHERE id = $1 AND status <> 'discarded'", [target.id]);
         if (!study) throw new CanonicalCephWriteFailure("not_found", NOT_AVAILABLE);
-        patientId = study.patient_id; documentId = study.document_id;
+        patientId = Number(study.patient_id); documentId = Number(study.document_id);
       } else ({ patientId, documentId } = target);
       if (!await scopeAllows(client, handle, action, patientId)) throw new CanonicalCephWriteFailure("not_found", NOT_AVAILABLE);
       const identity = await staffOperationIdentity(client, handle, action);
       const claims = revalidateVerifiedDurableSession(session);
       if (!claims || claims.userId !== identity.userId || claims.username !== identity.username) throw new CanonicalCephWriteFailure("expired", "انتهت الجلسة أو تغيّرت صلاحياتها.");
       const actor = { userId: identity.userId, username: identity.username, role: identity.role, expiresAt: claims.expiresAt };
-      const admit = canonicalCephAdmission(session, handle, action);
+      const admit = canonicalCephAdmission(session, handle, action, client);
       const result = await runCephWritersInTransaction(client, () => write({ client, handle, patientId, documentId, admit, actor }));
       if (!result.ok) throw new CanonicalCephWriteFailure("conflict", result.message);
       return result.value;
