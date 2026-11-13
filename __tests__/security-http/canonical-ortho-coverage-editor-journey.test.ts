@@ -17,7 +17,7 @@ let journey:CanonicalJourney<keyof typeof ACCOUNTS>,patientId:number,caseId:numb
 beforeAll(async()=>{journey=await openCanonicalJourney({portOffset:99,secret:"canonical-coverage-editor-0123456789abcdef",accounts:ACCOUNTS,ownerKey:"owner",async seed(){}});},300000);
 beforeEach(async()=>{
  patientId=(await journey.db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'مريض تجريبي',$2) RETURNING id",["SYN-CAPPEND-"+(++sequence),journey.parties.own])).rows[0].id;
- const seeded=await seedCanonicalCoverage(journey.db,{patientId,actorId:journey.ids.own,doctorId:journey.parties.own!,save:false});caseId=seeded.ortho;await journey.db.query("UPDATE ortho_cases SET status='active' WHERE id=$1",[caseId]);
+ const seeded=await seedCanonicalCoverage(journey.db,{patientId,actorId:journey.ids.own,doctorId:journey.parties.own!,save:false,status:"active"});caseId=seeded.ortho;
  const {fingerprint,invoiceNumber:_invoice,serviceName:_service,...source}=seeded.source;
  command={schemaVersion:1,commandId:randomUUID(),expectedRevisionId:null,source,expectedSourceFingerprint:fingerprint,scope:"routine_adjustments",decision:"included",reason:"SYN explicit synthetic coverage"};
 });
