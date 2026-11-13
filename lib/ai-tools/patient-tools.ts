@@ -68,17 +68,22 @@ export async function searchPatient(
     if (/^\d+$/.test(term) && Number(term) > 0 && Number(term) < 100000) {
       const numericId = Number(term);
       const canReadDirect = await canAccessPatient(session, numericId).catch(() => false);
-      if (canReadDirect) {
-        const file = await getPatientFile(numericId).catch(() => null);
-        if (file?.patient) {
-          matches = [{
-            id: file.patient.id,
-            patientNumber: file.patient.patientNumber,
-            fullName: file.patient.fullName,
-            phone: file.patient.phone,
-            medicalAlert: file.patient.medicalAlert,
-          }];
-        }
+      if (!canReadDirect) {
+        return {
+          success: false,
+          textSummary: "🔒 **تنبيه أمني:** ليس لديك صلاحية للوصول إلى ملف هذا المريض (عزل الكادر السريري §39).",
+          warnings: ["محاولة وصول لملف مريض غير مسند للطبيب"],
+        };
+      }
+      const file = await getPatientFile(numericId).catch(() => null);
+      if (file?.patient) {
+        matches = [{
+          id: file.patient.id,
+          patientNumber: file.patient.patientNumber,
+          fullName: file.patient.fullName,
+          phone: file.patient.phone,
+          medicalAlert: file.patient.medicalAlert,
+        }];
       }
     }
 

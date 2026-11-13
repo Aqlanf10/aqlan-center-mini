@@ -226,6 +226,9 @@ describe("DEF-02a: إغلاق مسارات Fail-Open للطبيب المقيد �
     expect(mocks.searchPatients).not.toHaveBeenCalled();
 
     const idSearchRes = await executeAiTool("search_patient", { term: "77" }, DOCTOR_A);
+    expect(idSearchRes.success).toBe(false);
+    expect(idSearchRes.textSummary).toContain("ليس لديك صلاحية");
+    expect(idSearchRes.textSummary).not.toContain("77");
     expect(idSearchRes.textSummary).not.toContain(PATIENT_COLLEAGUE.fullName);
     expect(mocks.getPatientFile).not.toHaveBeenCalledWith(77);
   });
