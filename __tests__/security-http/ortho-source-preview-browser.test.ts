@@ -102,7 +102,10 @@ describe("built measurement session provenance preview", () => {
         expect(await metadata.getByLabel("وصف طريقة القياس", { exact: true }).inputValue()).toBe(method);
         expect(await metadata.getByLabel("إسناد منفذ الفحص", { exact: true }).inputValue()).toBe(operator);
       }
-      await step.selectOption("1"); await step.selectOption("4");
+      // Leave for the interview section and come back: the unsent draft survives direct navigation.
+      const sections = page.getByRole("region", { name: "مساحة عمل ملف التقويم", exact: true });
+      await sections.getByRole("button", { name: "المقابلة والشكوى", exact: true }).click();
+      await sections.getByRole("button", { name: "القياسات وتحليل الموديلات", exact: true }).click();
       expect(await page.getByLabel("قيمة السن 12 (mm)", { exact: true }).inputValue()).toBe("8.1");
       expect(writes).toEqual([]);
       await page.getByLabel("سبب إنشاء هذه المراجعة", { exact: true }).fill("توثيق اصطناعي بعد مراجعة المصدر والاستبعاد");
