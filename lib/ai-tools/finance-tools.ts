@@ -31,11 +31,36 @@ export async function generateInternalReport(
 ): Promise<ToolExecutionResult> {
   const role = context.role || context.userRole;
 
-  // فحص الصلاحية
+  // فحص الصلاحية: لا يُستبدل doctorPartyId بـ userId أبدًا (جدولان مختلفان users vs parties)
   if (!context.canViewClinicFinance && role !== "admin") {
-    // إذا كان طبيباً ويريد تقرير عمولته الشخصية فقط
     if (role === "doctor" && params.reportType === "doctor") {
-      params.doctorId = context.doctorPartyId ?? context.userId;
+      const ownCommAllowed =
+        context.canViewOwnCommissions !== false && context.permissions?.canViewOwnCommissions !== false;
+      if (!ownCommAllowed) {
+        return {
+          success: false,
+          textSummary: "🔒 **تنبيه أمني:** صلاحية الاطلاع على عمولاتك الخاصة غير مفعّلة لحسابك.",
+          message: "🔒 **تنبيه أمني:** صلاحية العمولات غير مفعّلة.",
+          warnings: ["غير مصرح: صلاحية العمولات الشخصية غير مفعّلة"],
+        };
+      }
+      if (typeof context.doctorPartyId !== "number" || context.doctorPartyId <= 0) {
+        return {
+          success: false,
+          textSummary: "🔒 **تنبيه أمني:** حساب الطبيب غير مرتبط بجهة طبيب — لا يمكن استخراج تقرير عمولات.",
+          message: "🔒 **تنبيه أمني:** حساب الطبيب غير مرتبط بجهة طبيب.",
+          warnings: ["عزل الأطباء: حساب طبيب غير مرتبط بجهة طبيب"],
+        };
+      }
+      if (params.doctorId && params.doctorId !== context.doctorPartyId) {
+        return {
+          success: false,
+          textSummary: "🔒 **تنبيه أمني:** غير مصرح للطبيب بالاطلاع على عمولات أو مستحقات أطباء آخرين.",
+          message: "🔒 **تنبيه أمني:** غير مصرح بالاطلاع على عمولة طبيب آخر.",
+          warnings: ["غير مصرح: استعلام عمولة طبيب آخر"],
+        };
+      }
+      params = { ...params, doctorId: context.doctorPartyId };
     } else {
       return {
         success: false,
@@ -77,11 +102,13 @@ export async function generateInternalReport(
     const filters: ReportFilters = parseFilters(searchParams, today);
     const result: ReportResult = await buildReport(params.reportType, filters);
 
+    const baseCurrency = result.baseCurrency || CLINIC_BASE_CURRENCY;
+
     // تحويل مؤشرات التقرير (KPIs) إلى بطاقات جاهزة للعرض
     const cards: KpiCard[] = result.kpis.slice(0, 6).map((kpi) => {
       let val = "";
       if (typeof kpi.minor === "number") {
-        val = formatMoney(kpi.minor, kpi.currency || result.baseCurrency);
+        val = formatMoney(kpi.minor, kpi.currency || baseCurrency);
       } else if (typeof kpi.count === "number") {
         val = kpi.count.toLocaleString();
       } else {
@@ -104,7 +131,7 @@ export async function generateInternalReport(
         result.columns!.map((col) => {
           const v = row[col.key];
           if (col.type === "money" && typeof v === "number") {
-            return formatMoney(v, result.baseCurrency);
+            return formatMoney(v, baseCurrency);
           }
           return v !== null && v !== undefined ? String(v) : "—";
         }),
@@ -117,17 +144,19 @@ export async function generateInternalReport(
       };
     }
 
+    const printQuery = new URLSearchParams(searchParams);
+    printQuery.set("report", params.reportType);
     const actions: ActionButton[] = [
       { label: "فتح التقرير الكامل", href: `/reports?report=${params.reportType}`, actionType: "navigate" },
-      { label: "طباعة التقرير", href: `/print/report/${params.reportType}`, actionType: "print" },
+      { label: "طباعة التقرير", href: `/print/report?${printQuery.toString()}`, actionType: "print" },
     ];
 
     const kpiSummary = result.kpis.map((k) => {
-      const v = typeof k.minor === "number" ? formatMoney(k.minor, k.currency || result.baseCurrency) : k.count ?? k.text;
+      const v = typeof k.minor === "number" ? formatMoney(k.minor, k.currency || baseCurrency) : k.count ?? k.text;
       return `• **${k.label}**: **${v}**`;
     }).join("\n");
 
-    const textSummary = `📊 **${result.title}** (${result.periodLabel}):\n\n${kpiSummary}\n\n*المرجع: محرك التقارير المحاسبي لمركز د. عقلان (عملة الأساس: ${result.baseCurrency})*.`;
+    const textSummary = `📊 **${result.title}** (${result.periodLabel}):\n\n${kpiSummary}\n\n*المرجع: محرك التقارير المحاسبي لمركز د. عقلان (عملة الأساس: ${baseCurrency})*.`;
 
     return {
       success: true,
@@ -212,20 +241,31 @@ export async function getDoctorCommissionReport(
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
   const role = context.role || context.userRole;
-  const myPartyId = context.doctorPartyId ?? context.userId;
+  const myPartyId = typeof context.doctorPartyId === "number" && context.doctorPartyId > 0
+    ? context.doctorPartyId
+    : undefined;
 
-  // عزل الطبيب: إذا حاول الطبيب استعلام عمولة طبيب آخر يُرفض فوراً
-  if (role === "doctor" && params.doctorId && myPartyId && params.doctorId !== myPartyId) {
-    return {
-      success: false,
-      textSummary: "🔒 **تنبيه أمني:** غير مصرح للطبيب بالاطلاع على عمولات أو مستحقات أطباء آخرين.",
-      message: "🔒 **تنبيه أمني:** غير مصرح بالاطلاع على عمولة طبيب آخر.",
-      warnings: ["غير مصرح: استعلام عمولة طبيب آخر"],
-    };
+  if (role === "doctor" && !context.canViewClinicFinance) {
+    if (!myPartyId) {
+      return {
+        success: false,
+        textSummary: "🔒 **تنبيه أمني:** حساب الطبيب غير مرتبط بجهة طبيب — لا يمكن استخراج تقرير العمولات.",
+        message: "🔒 **تنبيه أمني:** حساب الطبيب غير مرتبط بجهة طبيب.",
+        warnings: ["عزل الأطباء: حساب طبيب غير مرتبط بجهة طبيب"],
+      };
+    }
+    if (params.doctorId && params.doctorId !== myPartyId) {
+      return {
+        success: false,
+        textSummary: "🔒 **تنبيه أمني:** غير مصرح للطبيب بالاطلاع على عمولات أو مستحقات أطباء آخرين.",
+        message: "🔒 **تنبيه أمني:** غير مصرح بالاطلاع على عمولة طبيب آخر.",
+        warnings: ["غير مصرح: استعلام عمولة طبيب آخر"],
+      };
+    }
   }
 
   let targetDocId = params.doctorId;
-  if (role === "doctor") {
+  if (role === "doctor" && !context.canViewClinicFinance) {
     targetDocId = myPartyId;
   }
 

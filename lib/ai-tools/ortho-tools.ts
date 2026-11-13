@@ -25,15 +25,26 @@ export async function getOrthoFollowupsDue(
   }
 
   try {
+    const role = context.role || context.userRole;
+    const isRestrictedDoctor =
+      role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients;
+    if (isRestrictedDoctor && (typeof context.doctorPartyId !== "number" || context.doctorPartyId <= 0)) {
+      return {
+        success: false,
+        textSummary: "🔒 **تنبيه أمني:** حساب الطبيب غير مرتبط بجهة طبيب في المركز — لا يمكن استعراض لوحة متابعات التقويم.",
+        warnings: ["عزل الأطباء: حساب طبيب غير مرتبط بجهة طبيب"],
+      };
+    }
+
     const today = context.todayISO || new Date().toISOString().slice(0, 10);
     let board = await orthoFollowupBoard(today).catch(() => []);
 
     /* عزل الطبيب (P0.14): اللوحة والتجميعات والأعداد كلها تُحسب بعد التصفية —
        فلا يتسرب للطبيب حتى «عدد» مرضى تقويم زملائه. والمنح العامة وحدها
        (canViewAllPatients) تفتح اللوحة كاملة. */
-    if (context.role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients && context.doctorPartyId) {
+    if (isRestrictedDoctor) {
       const candidateIds = Array.from(new Set(board.map((row) => row.patientId)));
-      const owned = await doctorOwnedPatientIds(context.doctorPartyId, candidateIds).catch(() => new Set<number>());
+      const owned = await doctorOwnedPatientIds(context.doctorPartyId!, candidateIds).catch(() => new Set<number>());
       board = board.filter((row) => owned.has(row.patientId));
     }
     const classified = classifyFollowups({ cases: board, today });
@@ -119,7 +130,14 @@ export async function getCephalometricSummary(
     partyId: context.doctorPartyId ?? undefined,
   };
 
-  const allowed = await canAccessPatient(session, patientId);
+  if (context.permissions?.canViewXrays === false) {
+    return {
+      success: false,
+      textSummary: "🔒 **تنبيه أمني:** صلاحية عرض الأشعة والتحليلات السيفالومترية (canViewXrays) غير مفعّلة لحسابك.",
+    };
+  }
+
+  const allowed = await canAccessPatient(session, patientId, "canViewXrays");
   if (!allowed) {
     return {
       success: false,

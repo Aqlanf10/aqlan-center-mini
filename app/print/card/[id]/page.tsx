@@ -41,7 +41,7 @@ export default async function AppointmentCardPage({ params }: { params: Promise<
 
   return (
     <>
-      <PrintButton docType="statement" docId={id} />
+      <PrintButton />
       <div className="sheet sheet-a6">
         <PrintHeader settings={settings} title="بطاقة موعد" compact />
 

@@ -1907,7 +1907,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         onClose={() => { if (currentOwner()) setPostOpOpen(false); }}
         patientId={visit?.patientId ?? 0}
         patientName={visit?.patientName ?? ""}
+        patientPhone={readyPatientContext?.phone ?? null}
         initialTreatmentText={notes.treatmentDone || notes.diagnosis || ""}
+        visitId={visit?.id ?? null}
+        savedVisitNotes={visit?.nextPlan ?? null}
       />
     </div>
   );

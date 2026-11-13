@@ -2743,6 +2743,58 @@ export async function getVisitOwner(
   return { found: true, patientId: rows[0].patient_id ?? null };
 }
 
+export interface VisitPostOpContext {
+  id: number;
+  patientId: number | null;
+  arrivedAt: string;
+  signedAt: string | null;
+  signedBy: string | null;
+  doctorId: number | null;
+  doctorName: string | null;
+  nextPlan: string | null;
+  addendum: string | null;
+}
+
+/**
+ * سياق الزيارة الموثّق لطباعة إرشادات ما بعد الإجراء (F-07):
+ * يقرأ الملاحظات السريرية المحفوظة في القاعدة واسم الطبيب المعالج الفعلي للزيارة
+ * بدل الثقة بأي نص أو اسم ممرّر في رابط الطباعة.
+ */
+export async function getVisitPostOpContext(visitId: number): Promise<VisitPostOpContext | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number;
+    patient_id: number | null;
+    arrived_at: Date;
+    signed_at: Date | null;
+    signed_by: string | null;
+    doctor_id: number | null;
+    doctor_name: string | null;
+    next_plan: string | null;
+    addendum: string | null;
+  }>(
+    `SELECT v.id, v.patient_id, v.arrived_at, v.signed_at, v.signed_by,
+            v.doctor_id, p.name AS doctor_name, v.next_plan, v.addendum
+       FROM visits v
+       LEFT JOIN parties p ON p.id = v.doctor_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    patientId: row.patient_id ?? null,
+    arrivedAt: row.arrived_at.toISOString(),
+    signedAt: row.signed_at ? row.signed_at.toISOString() : null,
+    signedBy: row.signed_by ?? null,
+    doctorId: row.doctor_id ?? null,
+    doctorName: row.doctor_name ?? null,
+    nextPlan: row.next_plan ?? null,
+    addendum: row.addendum ?? null,
+  };
+}
+
 /**
  * (VISIT-2) فتح ملفٍّ للمريض الجديد من زيارته السريرية — قبل التوقيع لا بعده.
  *
@@ -26161,15 +26213,17 @@ const MESSAGE_COLUMNS = `
   LEFT JOIN patients rp ON rm.sender_type = 'patient' AND rp.id = rm.sender_patient_id`;
 
 function toMessageView(row: MessageRow): MessageView {
+  const isDeleted = Boolean(row.deleted_at);
+  const isReplyDeleted = Boolean(row.reply_deleted_at);
   const reply: MessageReplyView | null = row.reply_to_id && row.reply_kind
     ? {
         id: row.reply_to_id,
         senderName: row.reply_sender_name,
         kind: row.reply_kind,
-        body: row.reply_body,
-        voiceMs: row.reply_voice_ms,
-        fileName: row.reply_file_name,
-        deleted: Boolean(row.reply_deleted_at),
+        body: isReplyDeleted ? null : row.reply_body,
+        voiceMs: isReplyDeleted ? null : row.reply_voice_ms,
+        fileName: isReplyDeleted ? null : row.reply_file_name,
+        deleted: isReplyDeleted,
       }
     : null;
   return {
@@ -26181,13 +26235,13 @@ function toMessageView(row: MessageRow): MessageView {
     recipientType: row.recipient_type,
     recipientUserId: row.recipient_user_id,
     recipientPatientId: row.recipient_patient_id,
-    body: row.body,
+    body: isDeleted ? null : row.body,
     kind: row.kind,
-    voiceMime: row.voice_mime,
-    voiceMs: row.voice_ms,
-    fileName: row.file_name,
-    fileMime: row.file_mime,
-    fileSize: row.file_size,
+    voiceMime: isDeleted ? null : row.voice_mime,
+    voiceMs: isDeleted ? null : row.voice_ms,
+    fileName: isDeleted ? null : row.file_name,
+    fileMime: isDeleted ? null : row.file_mime,
+    fileSize: isDeleted ? null : row.file_size,
     createdAt: row.created_at.toISOString(),
     isUrgent: Boolean(row.is_urgent),
     editedAt: row.edited_at ? row.edited_at.toISOString() : null,
@@ -26481,15 +26535,24 @@ export async function editStaffMessage(
   return { ok: true, message: view };
 }
 
-/** حذف لطيف لرسالة أرسلها عضو طاقم — قبرٌ يُرى مكانه، لا اختفاء يُنكر الكلام. */
+/** حذف لطيف لرسالة أرسلها عضو طاقم — قبرٌ يُرى مكانه مع محو المحتوى والمرفقات فعليًا من القاعدة. */
 export async function deleteStaffMessage(
   messageId: number, userId: number,
 ): Promise<MessageMutationResult> {
   await ensureSchema();
   const { rowCount } = await getPool().query(
-    `UPDATE messages SET deleted_at = NOW()
-     WHERE id = $1 AND sender_type = 'user' AND sender_user_id = $2
-       AND deleted_at IS NULL`,
+    `UPDATE messages
+        SET deleted_at = NOW(),
+            body = NULL,
+            voice_mime = NULL,
+            voice_data = NULL,
+            voice_ms = NULL,
+            file_name = NULL,
+            file_mime = NULL,
+            file_size = NULL,
+            file_data = NULL
+      WHERE id = $1 AND sender_type = 'user' AND sender_user_id = $2
+        AND deleted_at IS NULL`,
     [messageId, userId],
   );
   if (!rowCount) return { ok: false, reason: "not-allowed" };
@@ -26515,15 +26578,24 @@ export async function editPatientMessage(
   return { ok: true, message: view };
 }
 
-/** حذف لطيف لرسالة المريض من البوابة. */
+/** حذف لطيف لرسالة المريض من البوابة مع محو المحتوى والمرفقات فعليًا من القاعدة. */
 export async function deletePatientMessage(
   messageId: number, patientId: number,
 ): Promise<MessageMutationResult> {
   await ensureSchema();
   const { rowCount } = await getPool().query(
-    `UPDATE messages SET deleted_at = NOW()
-     WHERE id = $1 AND sender_type = 'patient' AND sender_patient_id = $2
-       AND deleted_at IS NULL`,
+    `UPDATE messages
+        SET deleted_at = NOW(),
+            body = NULL,
+            voice_mime = NULL,
+            voice_data = NULL,
+            voice_ms = NULL,
+            file_name = NULL,
+            file_mime = NULL,
+            file_size = NULL,
+            file_data = NULL
+      WHERE id = $1 AND sender_type = 'patient' AND sender_patient_id = $2
+        AND deleted_at IS NULL`,
     [messageId, patientId],
   );
   if (!rowCount) return { ok: false, reason: "not-allowed" };
@@ -26716,6 +26788,7 @@ export async function staffConversationList(
 
   const staff: StaffConversationItem[] = usersRes.rows.map((user) => {
     const last = lastByOther.get(user.id);
+    const lastDeleted = Boolean(last?.deleted_at);
     return {
       userId: user.id,
       username: user.username,
@@ -26723,12 +26796,12 @@ export async function staffConversationList(
       role: user.role,
       lastMessageId: last?.id ?? null,
       lastKind: last?.kind ?? null,
-      lastBody: last?.body ?? null,
-      lastVoiceMs: last?.voice_ms ?? null,
-      lastFileName: last?.file_name ?? null,
+      lastBody: lastDeleted ? null : (last?.body ?? null),
+      lastVoiceMs: lastDeleted ? null : (last?.voice_ms ?? null),
+      lastFileName: lastDeleted ? null : (last?.file_name ?? null),
       lastAt: last ? last.created_at.toISOString() : null,
       lastFromMe: last ? last.sender_user_id === userId : false,
-      lastDeleted: Boolean(last?.deleted_at),
+      lastDeleted,
       lastUrgent: Boolean(last?.is_urgent),
       unread: unreadBySender.get(user.id) ?? 0,
     };
@@ -26736,23 +26809,26 @@ export async function staffConversationList(
 
   const unreadByPatient = new Map(patientUnreadRes.rows.map((row) => [row.patient_id, row.unread]));
   const urgentByPatient = new Map(patientUrgentRes.rows.map((row) => [row.patient_id, row.urgent]));
-  const patients: PatientConversationItem[] = patientLastRes.rows.map((row) => ({
-    patientId: row.patient_id,
-    patientName: row.patient_name,
-    patientNumber: row.patient_number,
-    phone: row.phone,
-    lastMessageId: row.id,
-    lastKind: row.kind,
-    lastBody: row.body,
-    lastVoiceMs: row.voice_ms,
-    lastFileName: row.file_name,
-    lastAt: row.created_at.toISOString(),
-    lastFromPatient: row.sender_type === "patient",
-    lastDeleted: Boolean(row.deleted_at),
-    lastUrgent: Boolean(row.is_urgent),
-    unread: unreadByPatient.get(row.patient_id) ?? 0,
-    urgentUnread: urgentByPatient.get(row.patient_id) ?? 0,
-  }));
+  const patients: PatientConversationItem[] = patientLastRes.rows.map((row) => {
+    const lastDeleted = Boolean(row.deleted_at);
+    return {
+      patientId: row.patient_id,
+      patientName: row.patient_name,
+      patientNumber: row.patient_number,
+      phone: row.phone,
+      lastMessageId: row.id,
+      lastKind: row.kind,
+      lastBody: lastDeleted ? null : row.body,
+      lastVoiceMs: lastDeleted ? null : row.voice_ms,
+      lastFileName: lastDeleted ? null : row.file_name,
+      lastAt: row.created_at.toISOString(),
+      lastFromPatient: row.sender_type === "patient",
+      lastDeleted,
+      lastUrgent: Boolean(row.is_urgent),
+      unread: unreadByPatient.get(row.patient_id) ?? 0,
+      urgentUnread: urgentByPatient.get(row.patient_id) ?? 0,
+    };
+  });
 
   patients.sort((a, b) => {
     if (a.urgentUnread !== b.urgentUnread) return b.urgentUnread - a.urgentUnread;
@@ -26761,15 +26837,16 @@ export async function staffConversationList(
   });
 
   const lastBroadcast = broadcastRes.rows[0];
+  const broadcastDeleted = Boolean(lastBroadcast?.deleted_at);
   const broadcast: BroadcastSummary = {
     lastMessageId: lastBroadcast?.id ?? null,
     lastKind: lastBroadcast?.kind ?? null,
-    lastBody: lastBroadcast?.body ?? null,
-    lastVoiceMs: lastBroadcast?.voice_ms ?? null,
-    lastFileName: lastBroadcast?.file_name ?? null,
+    lastBody: broadcastDeleted ? null : (lastBroadcast?.body ?? null),
+    lastVoiceMs: broadcastDeleted ? null : (lastBroadcast?.voice_ms ?? null),
+    lastFileName: broadcastDeleted ? null : (lastBroadcast?.file_name ?? null),
     lastAt: lastBroadcast ? lastBroadcast.created_at.toISOString() : null,
     lastFromMe: lastBroadcast ? lastBroadcast.sender_user_id === userId : false,
-    lastDeleted: Boolean(lastBroadcast?.deleted_at),
+    lastDeleted: broadcastDeleted,
     lastUrgent: Boolean(lastBroadcast?.is_urgent),
     lastSenderName: lastBroadcast?.sender_name ?? null,
     unread: Number(broadcastUnreadRes.rows[0]?.unread ?? 0),
@@ -26836,6 +26913,56 @@ export async function urgentUnreadMessageCount(
   return Number(rows[0]?.c ?? 0);
 }
 
+export interface MessageAttachmentAccessMeta {
+  mime: string;
+  senderType: "user" | "patient";
+  senderUserId: number | null;
+  senderPatientId: number | null;
+  recipientType: "user" | "patient" | "staff_all";
+  recipientUserId: number | null;
+  recipientPatientId: number | null;
+}
+
+/**
+ * بيانات التحقق من صلاحية مرفق رسالة (ملف أو صوت) دون قراءة بايتات Base64 من القاعدة (F-05):
+ * يضمن رفض الطلبات غير المصرحة (403) قبل تحميل ميغابايتات المرفق في ذاكرة الخادم.
+ */
+export async function getMessageAttachmentMeta(
+  id: number,
+  kind: "file" | "voice",
+): Promise<MessageAttachmentAccessMeta | null> {
+  await ensureSchema();
+  const dataExpr = kind === "file" ? "file_data IS NOT NULL" : "voice_data IS NOT NULL";
+  const mimeCol = kind === "file" ? "file_mime" : "voice_mime";
+  const fallbackMime = kind === "file" ? "application/octet-stream" : "audio/webm";
+  const { rows } = await getPool().query<{
+    mime: string | null;
+    sender_type: "user" | "patient";
+    sender_user_id: number | null;
+    sender_patient_id: number | null;
+    recipient_type: "user" | "patient" | "staff_all";
+    recipient_user_id: number | null;
+    recipient_patient_id: number | null;
+  }>(
+    `SELECT ${mimeCol} AS mime, sender_type, sender_user_id, sender_patient_id,
+            recipient_type, recipient_user_id, recipient_patient_id
+       FROM messages
+      WHERE id = $1 AND kind = $2 AND deleted_at IS NULL AND ${dataExpr}`,
+    [id, kind],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    mime: row.mime ?? fallbackMime,
+    senderType: row.sender_type,
+    senderUserId: row.sender_user_id,
+    senderPatientId: row.sender_patient_id,
+    recipientType: row.recipient_type,
+    recipientUserId: row.recipient_user_id,
+    recipientPatientId: row.recipient_patient_id,
+  };
+}
+
 /** جسم رسالة صوتية مع تحقق الوصول قبل الكشف عن بايت واحد. */
 export async function voiceMessagePayload(id: number): Promise<{
   mime: string; data: string;
@@ -26858,7 +26985,7 @@ export async function voiceMessagePayload(id: number): Promise<{
   }>(
     `SELECT voice_mime, voice_data, sender_type, sender_user_id, sender_patient_id,
        recipient_type, recipient_user_id, recipient_patient_id
-     FROM messages WHERE id = $1 AND kind = 'voice' AND voice_data IS NOT NULL`,
+     FROM messages WHERE id = $1 AND kind = 'voice' AND deleted_at IS NULL AND voice_data IS NOT NULL`,
     [id],
   );
   const row = rows[0];
@@ -26923,7 +27050,7 @@ export async function fileMessagePayload(id: number): Promise<{
   }>(
     `SELECT file_mime, file_name, file_size, file_data, sender_type, sender_user_id, sender_patient_id,
        recipient_type, recipient_user_id, recipient_patient_id
-     FROM messages WHERE id = $1 AND kind = 'file' AND file_data IS NOT NULL`,
+     FROM messages WHERE id = $1 AND kind = 'file' AND deleted_at IS NULL AND file_data IS NOT NULL`,
     [id],
   );
   const row = rows[0];
