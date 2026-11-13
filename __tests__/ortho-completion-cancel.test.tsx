@@ -142,7 +142,7 @@ async function settle() { for (let index = 0; index < 40; index++) await Promise
 async function openRetention(status: "active" | "retention") {
   caseRow = { ...fixture, status };
   render(); await settle();
-  await click(button("التثبيت والاستبقاء"));
+  await click(button("التثبيت والإقفال"));
   expect(buttons(COMPLETE_LABEL)).toHaveLength(1);
   expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"])).toEqual([
     [`/api/ortho?patientId=${PATIENT_ID}`, "GET"], [`/api/patients/${PATIENT_ID}`, "GET"],

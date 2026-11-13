@@ -20,18 +20,39 @@ export const ORTHO_WORKUP_STEPS: readonly {
   { id: "retention", title: "النتيجة والإنهاء والتثبيت", pillar: "retention", hint: "راجع قرار إنهاء العلاج ومتابعة التثبيت لكل فك، دون افتراض تواريخ أو أجهزة غير مسجلة." },
   { id: "presentation", title: "دراسة الحالة المحفوظة", pillar: "presentation", hint: "احفظ دراسة الحالة وراجع مصادرها وصلاحية مراجعتها؛ التصدير خطوة اختيارية مستقلة." },
 ];
-/** Use the existing case-pillar order in both navigation views: wires first,
- * diagnosis second; the remaining pillars retain their prior order. Step indices
- * stay stable for saved bookmarks and every record keeps its command owner.
- * The diagnostic entry opens the interview, not an inferred diagnosis. */
+/**
+ * Clinical lifecycle order (6838132093): case summary → examination and records → analysis and problem
+ * list → plan → follow-up/adjustment visits → retention and closure, then the saved case study.
+ * Step indices are unchanged, so saved bookmarks keep working, and every record keeps its command owner.
+ * Groups are direct destinations, not a wizard: the routine visit opens on its own group (see
+ * orthoWorkupEntryStep) without passing through the diagnostic screens.
+ */
 export const ORTHO_WORKUP_GROUPS = [
-  { id: "wires", title: "الأسلاك والشدّات", icon: "⚡", entry: 10, steps: [10] },
-  { id: "diagnostics", title: "التشخيص", icon: "📐", entry: 1, steps: [0, 1, 2, 3, 4, 5, 6, 7] },
-  { id: "prescription", title: "خطة العلاج والميكانيكا", icon: "⚙️", entry: 8, steps: [8, 9] },
-  { id: "retention", title: "التثبيت والاستبقاء", icon: "🛡️", entry: 11, steps: [11] },
-  { id: "presentation", title: "دراسة الحالة المحفوظة", icon: "📋", entry: 12, steps: [12] },
-] as const;
+  { id: "summary", pillar: "diagnostics", title: "ملخص الحالة", icon: "🗂️", entry: 0, steps: [0] },
+  { id: "exam", pillar: "diagnostics", title: "الفحص والسجلات", icon: "🔎", entry: 1, steps: [1, 2, 3, 4, 5, 6] },
+  { id: "analysis", pillar: "diagnostics", title: "التحليل وقائمة المشكلات", icon: "📐", entry: 7, steps: [7] },
+  { id: "plan", pillar: "prescription", title: "خطة العلاج والميكانيكا", icon: "⚙️", entry: 8, steps: [8, 9] },
+  { id: "visits", pillar: "wires", title: "زيارات المتابعة والشدّ", icon: "⚡", entry: 10, steps: [10] },
+  { id: "retention", pillar: "retention", title: "التثبيت والإقفال", icon: "🛡️", entry: 11, steps: [11] },
+  { id: "presentation", pillar: "presentation", title: "دراسة الحالة المحفوظة", icon: "📋", entry: 12, steps: [12] },
+] as const satisfies readonly { id: string; pillar: OrthoWorkupPillar; title: string; icon: string; entry: number; steps: readonly number[] }[];
+/** The case view's sections, in the same lifecycle order as the workup groups. */
+export const ORTHO_CASE_PILLARS: readonly { id: OrthoWorkupPillar; title: string; icon: string }[] = [
+  { id: "diagnostics", title: "الفحص والتشخيص", icon: "📐" },
+  { id: "prescription", title: "خطة العلاج والميكانيكا", icon: "⚙️" },
+  { id: "wires", title: "زيارات المتابعة والشدّ", icon: "⚡" },
+  { id: "retention", title: "التثبيت والإقفال", icon: "🛡️" },
+  { id: "presentation", title: "دراسة الحالة المحفوظة", icon: "📋" },
+];
+/** Bookmark-free default entry: the case summary. */
 export const ORTHO_WORKUP_ENTRY_STEP = ORTHO_WORKUP_GROUPS[0].entry;
+/** Where opening the workup lands: a case under assessment starts at its summary, a case in retention
+ * at retention, and any other case in treatment at its follow-up/adjustment visits, so the routine visit
+ * needs no detour through the diagnostic screens. */
+export function orthoWorkupEntryStep(phase: string | null | undefined): number {
+  if (phase === "assessment" || phase == null) return ORTHO_WORKUP_ENTRY_STEP;
+  return phase === "retention" ? ORTHO_WORKUP_GROUPS[5].entry : ORTHO_WORKUP_GROUPS[4].entry;
+}
 const id = (value: number) => Number.isSafeInteger(value) && value > 0 && value <= 2147483647;
 export function workupBookmark(patientId: number, caseId: number, step: number) {
   if (!id(patientId) || !id(caseId) || !Number.isInteger(step) || !ORTHO_WORKUP_STEPS[step]) throw Error("invalid_workup_bookmark");

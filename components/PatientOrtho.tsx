@@ -2,7 +2,7 @@
 import { OrthoComparison } from "./OrthoPhotoComparison";
 export { OrthoComparison } from "./OrthoPhotoComparison";
 import { OrthoCaseNavigation, OrthoWorkupNavigation } from "./OrthoWorkupNavigation";
-import { ORTHO_WORKUP_ENTRY_STEP, ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore, type OrthoWorkupPillar } from "@/lib/ortho-workup-navigation";
+import { orthoWorkupEntryStep, ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore, type OrthoWorkupPillar } from "@/lib/ortho-workup-navigation";
 import { makeOrthoWorkupOwners, OrthoWorkupOwnersContext } from "./OrthoWorkupOwners";
 import { OrthoDiagnosticNavigation } from "./OrthoDiagnosticNavigation";
 import OrthoSessionDetails from "./OrthoSessionDetails";
@@ -1248,7 +1248,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
 
                     <div className="flex flex-wrap items-center gap-2">
                       {!workup && <button type="button" className="min-h-11 rounded-lg border border-navy-300 bg-white px-3 text-xs font-bold"
-                        onClick={() => navigateWorkup(ORTHO_WORKUP_ENTRY_STEP)}>فتح مساحة عمل التقويم</button>}
+                        onClick={() => navigateWorkup(orthoWorkupEntryStep(row.phase))}>فتح مساحة عمل التقويم</button>}
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-[11px] font-black border ${
                           live
@@ -2328,7 +2328,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       ) : null}
       <div className="mb-2 flex flex-wrap gap-2">
         <label className="min-w-[8rem] flex-1">
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">المطاطات</span>
+          <span className="mb-1 block text-[10px] font-bold text-slate-500">المطاطات{previousAdjustment
+            ? <> <span className="font-normal" data-testid="adjustment-elastics-source">(المسجّلة في جلسة <bdi dir="ltr">{previousAdjustment.doneOn}</bdi>؛ غيّرها إن تغيّرت اليوم)</span></> : null}</span>
           <select value={elastics} onChange={(event) => {
             const value = event.target.value as ElasticClass | "";
             setElastics(value);
@@ -2451,7 +2452,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
             className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
         </label>
         <label className="w-36">
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">القادمة بعد (أسابيع)</span>
+          <span className="mb-1 block text-[10px] font-bold text-slate-500">القادمة بعد (أسابيع){previousAdjustment
+            ? <> <span className="font-normal" data-testid="adjustment-interval-source">(كما في جلسة <bdi dir="ltr">{previousAdjustment.doneOn}</bdi>)</span></> : null}</span>
           <input value={nextWeeks} onChange={(event) => setNextWeeks(event.target.value)}
             aria-label="أسابيع حتى الشدّة القادمة" inputMode="numeric" dir="ltr"
             className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />

@@ -1,20 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { ORTHO_WORKUP_ENTRY_STEP, ORTHO_WORKUP_GROUPS, ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, workupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore } from "../lib/ortho-workup-navigation";
+import { ORTHO_CASE_PILLARS, ORTHO_WORKUP_ENTRY_STEP, ORTHO_WORKUP_GROUPS, ORTHO_WORKUP_STEPS, orthoWorkupEntryStep, readWorkupBookmark, replaceWorkupBookmark, workupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore } from "../lib/ortho-workup-navigation";
 describe("case-scoped workup navigation", () => {
-  it("exposes every existing destination exactly once in five direct groups without changing bookmark indices", () => {
-    expect(ORTHO_WORKUP_GROUPS).toHaveLength(5);
+  it("exposes every existing destination exactly once in seven direct groups without changing bookmark indices", () => {
+    expect(ORTHO_WORKUP_GROUPS).toHaveLength(7);
     expect(ORTHO_WORKUP_GROUPS.flatMap(group => [...group.steps]).sort((a, b) => a - b)).toEqual(ORTHO_WORKUP_STEPS.map((_, index) => index));
-    expect(ORTHO_WORKUP_GROUPS[2].steps.map(index => ORTHO_WORKUP_STEPS[index].id)).toEqual(["strategy", "agreement"]);
+    expect(ORTHO_WORKUP_GROUPS[3].steps.map(index => ORTHO_WORKUP_STEPS[index].id)).toEqual(["strategy", "agreement"]);
     for (const group of ORTHO_WORKUP_GROUPS) {
       expect(group.steps.some(step => step === group.entry)).toBe(true);
-      expect(group.steps.every(step => ORTHO_WORKUP_STEPS[step].pillar === group.id)).toBe(true);
+      expect(group.steps.every(step => ORTHO_WORKUP_STEPS[step].pillar === group.pillar)).toBe(true);
     }
   });
-  it("starts with wires, then diagnosis, and keeps the remaining existing pillars in order", () => {
-    expect(ORTHO_WORKUP_GROUPS.map(group => group.id)).toEqual(["wires", "diagnostics", "prescription", "retention", "presentation"]);
-    expect(ORTHO_WORKUP_GROUPS.slice(0, 2).map(group => group.title)).toEqual(["الأسلاك والشدّات", "التشخيص"]);
-    expect(ORTHO_WORKUP_STEPS[ORTHO_WORKUP_ENTRY_STEP].id).toBe("visits");
-    expect(ORTHO_WORKUP_STEPS[ORTHO_WORKUP_GROUPS[1].entry].id).toBe("interview");
+  it("follows the clinical lifecycle: summary, examination and records, analysis and problem list, plan, visits, retention and closure", () => {
+    expect(ORTHO_WORKUP_GROUPS.map(group => group.title)).toEqual(["ملخص الحالة", "الفحص والسجلات", "التحليل وقائمة المشكلات",
+      "خطة العلاج والميكانيكا", "زيارات المتابعة والشدّ", "التثبيت والإقفال", "دراسة الحالة المحفوظة"]);
+    // Group order never goes backwards through the step order.
+    expect(ORTHO_WORKUP_GROUPS.map(group => group.entry)).toEqual([...ORTHO_WORKUP_GROUPS.map(group => group.entry)].sort((a, b) => a - b));
+    expect(ORTHO_CASE_PILLARS.map(item => item.id)).toEqual(["diagnostics", "prescription", "wires", "retention", "presentation"]);
+    expect(ORTHO_WORKUP_STEPS[ORTHO_WORKUP_ENTRY_STEP].id).toBe("identity");
+  });
+  it("opens a case in treatment on its visits and a case in retention on retention, so the routine visit needs no detour", () => {
+    expect(ORTHO_WORKUP_STEPS[orthoWorkupEntryStep("assessment")].id).toBe("identity");
+    expect(ORTHO_WORKUP_STEPS[orthoWorkupEntryStep(null)].id).toBe("identity");
+    for (const phase of ["aligning", "working", "finishing"]) expect(ORTHO_WORKUP_STEPS[orthoWorkupEntryStep(phase)].id).toBe("visits");
+    expect(ORTHO_WORKUP_STEPS[orthoWorkupEntryStep("retention")].id).toBe("retention");
   });
   it("places measurements before radiographs and preserves the separate agreement, visit, retention and study owners", () => {
     expect(ORTHO_WORKUP_STEPS.map(step => step.id)).toEqual(["identity", "interview", "extraoral", "intraoral", "measurements", "radiographs", "ceph", "diagnosis", "strategy", "agreement", "visits", "retention", "presentation"]);

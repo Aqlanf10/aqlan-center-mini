@@ -4,7 +4,7 @@ import { Client } from "pg";
 import { chromium, type Browser, type Page } from "playwright";
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import { baseUrl, harness, authedMutation } from "./_server";
-import { ORTHO_WORKUP_ENTRY_STEP, ORTHO_WORKUP_GROUPS, ORTHO_WORKUP_STEPS } from "../../lib/ortho-workup-navigation";
+import { ORTHO_CASE_PILLARS, ORTHO_WORKUP_ENTRY_STEP, ORTHO_WORKUP_GROUPS, ORTHO_WORKUP_STEPS } from "../../lib/ortho-workup-navigation";
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser;
 beforeAll(async () => { h = await harness(); expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http"); db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect(); browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined }); await mkdir(".settings-ui-artifacts", { recursive: true }); });
 afterAll(async () => { await browser?.close(); await db?.end(); });
@@ -27,16 +27,17 @@ describe("one workup path over the existing record owners", () => {
       await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=ortho&orthoCaseId=${orthoCaseId}&pillar=diagnostics`);
       const caseTabs = page.getByRole("navigation", { name: "أقسام حالة التقويم", exact: true });
       await caseTabs.waitFor({ state: "visible" });
-      expect(await caseTabs.getByRole("button").allTextContents()).toEqual(ORTHO_WORKUP_GROUPS.map(group => `${group.icon}${group.title}`));
+      expect(await caseTabs.getByRole("button").allTextContents()).toEqual(ORTHO_CASE_PILLARS.map(item => `${item.icon}${item.title}`));
       await page.getByRole("button", { name: "فتح مساحة عمل التقويم", exact: true }).click();
       const guide = page.getByRole("region", { name: "مساحة عمل ملف التقويم", exact: true });
       const groups = guide.getByRole("navigation", { name: "مجموعات ملف التقويم", exact: true });
       await groups.waitFor({ state: "visible" });
-      expect(await groups.getByRole("button").count()).toBe(5);
+      expect(await groups.getByRole("button").count()).toBe(7);
       expect(await groups.getByRole("button").allTextContents()).toEqual(ORTHO_WORKUP_GROUPS.map(group => group.title));
       const currentSection = () => String(Number(new URL(page.url()).hash.split("/").at(-1)) - 1);
       expect(currentSection()).toBe(String(ORTHO_WORKUP_ENTRY_STEP));
-      expect(await page.getByText("لا توجد شدّات مسجلة بعد في هذه الحالة.", { exact: true }).isVisible()).toBe(true);
+      // A case under assessment opens on its summary (lifecycle order), not on the visits.
+      expect(await groups.getByRole("button", { name: "ملخص الحالة", exact: true }).getAttribute("aria-pressed")).toBe("true");
       expect(writes).toEqual([]);
       const openSection = async (index: number) => {
         const group = ORTHO_WORKUP_GROUPS.find(item => item.steps.some(step => step === index))!;

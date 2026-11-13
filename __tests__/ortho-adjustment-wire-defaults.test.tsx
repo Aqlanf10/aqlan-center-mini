@@ -288,6 +288,24 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     },
   );
 
+  it("labels the carried-over regimen and interval with the session they come from, so nothing is copied silently", async () => {
+    previous({ doneOn: "2026-09-14", elastics: "class_ii", elasticNote: "3/16 light", nextWeeks: 6 });
+    const tree = elements(render());
+    const source = (id: string) => tree.find((entry) => entry.props["data-testid"] === id);
+    expect(source("adjustment-elastics-source")).toBeDefined();
+    expect(source("adjustment-interval-source")).toBeDefined();
+    expect(JSON.stringify(source("adjustment-elastics-source")!.props.children)).toContain("2026-09-14");
+    expect(JSON.stringify(source("adjustment-interval-source")!.props.children)).toContain("2026-09-14");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows no source label when there is no previous session", async () => {
+    caseRow.adjustments = [];
+    const tree = elements(render());
+    expect(tree.some((entry) => entry.props["data-testid"] === "adjustment-elastics-source")).toBe(false);
+    expect(tree.some((entry) => entry.props["data-testid"] === "adjustment-interval-source")).toBe(false);
+  });
+
   it.each([1, 5, 52])("retains the saved %i-week interval instead of resetting to four", async (nextWeeks) => {
     previous({ nextWeeks });
     expect(input("أسابيع حتى الشدّة القادمة").props.value).toBe(String(nextWeeks));
