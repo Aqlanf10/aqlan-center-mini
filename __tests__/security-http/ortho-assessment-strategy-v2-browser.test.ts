@@ -33,7 +33,7 @@ async function seed(width: number) {
 const records = async (ortho: number) => (await db.query("SELECT id,version,command_id,content_sha256,content FROM ortho_assessment_revisions WHERE ortho_case_id=$1 ORDER BY version", [ortho])).rows;
 async function openAssessment(page: Page, patient: number) {
   await page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=ortho`);
-  await page.getByRole("button", { name: /السجلات والسيفالومتري/ }).click();
+  await page.getByRole("button", { name: "السجلات والتشخيص", exact: true }).click();
   await page.getByRole("button", { name: "فتح التقييم السريري والقياسات", exact: true }).click();
   await page.getByTestId("assessment-v2-saved").waitFor();
 }
@@ -97,7 +97,7 @@ describe("existing linked episodes: real built assessment/strategy editors", () 
       expect(await stale.getByLabel("سبب إنشاء هذه المراجعة").inputValue()).toBe("مسودة تبويب قديم تبقى دون نقل صامت");
       expect(await records(scope.ortho)).toEqual(committed);
       await page.reload();
-      await page.getByRole("button", { name: /السجلات والسيفالومتري/ }).click();
+      await page.getByRole("button", { name: "السجلات والتشخيص", exact: true }).click();
       await page.getByRole("button", { name: "فتح التقييم السريري والقياسات", exact: true }).click();
       await expect.poll(async () => page.getByTestId("assessment-v2-saved").innerText()).toContain("نسخة 2");
       await page.getByRole("button", { name: /خطة العلاج والميكانيكا/ }).click();
@@ -131,7 +131,7 @@ describe("existing linked episodes: real built assessment/strategy editors", () 
       expect(await staleStrategy.getByLabel("الاستراتيجية (نص الطبيب)", { exact: true }).inputValue()).toBe("استراتيجية موثقة دون تنفيذ آلي");
       expect(await strategyRows()).toEqual(strategyCommitted);
       await page.screenshot({ path: `.settings-ui-artifacts/ortho-v2-strategy-${width}.png`, fullPage: true });
-      await page.getByRole("button", { name: /السجلات والسيفالومتري/ }).click();
+      await page.getByRole("button", { name: "السجلات والتشخيص", exact: true }).click();
       // The existing owner retains its opened assessment across pillar remounts.
       await page.getByTestId("assessment-v2-saved").waitFor();
       await page.screenshot({ path: `.settings-ui-artifacts/ortho-v2-assessment-${width}.png`, fullPage: true });
