@@ -89,7 +89,7 @@ it("browser: reuses the verified clinical record at 390px, opens older revisions
     if(process.env.HR_EVIDENCE_DIR){mkdirSync(process.env.HR_EVIDENCE_DIR,{recursive:true});await page.screenshot({path:join(process.env.HR_EVIDENCE_DIR,"ortho-assessment-390.png"),fullPage:true});}
     const selector=panel.getByLabel("نسخة التقييم"),options=await selector.locator("option").evaluateAll(nodes=>nodes.map(n=>(n as HTMLOptionElement).value));
     await selector.selectOption(options[1]);await panel.getByText("السجل المحفوظ: نسخة 1",{exact:true}).waitFor();
-    await panel.getByTestId("assessment-v2-saved").locator("summary").click();await panel.getByText(/SYN محفوظ أول/).waitFor();
+    const saved=panel.getByTestId("assessment-v2-saved");await saved.locator("summary").click();await saved.getByText(/SYN محفوظ أول/).waitFor();
     expect(calls.filter(call=>call.includes("/api/")&&!new RegExp(`^(GET /api/(auth/me|patients/${ids.own}(/(contact|timeline|family))?|ortho(/${ids.active}(/assessment)?)?)|POST /api/auth/login)$`).test(call))).toEqual([]);
     expect(await panel.locator("img").count()).toBe(0);
   }finally{await context.close();}
