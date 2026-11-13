@@ -38,7 +38,7 @@ export const ORTHO_WORKUP_GROUPS = [
 ] as const satisfies readonly { id: string; pillar: OrthoWorkupPillar; title: string; icon: string; entry: number; steps: readonly number[] }[];
 /** The case view's sections, in the same lifecycle order as the workup groups. */
 export const ORTHO_CASE_PILLARS: readonly { id: OrthoWorkupPillar; title: string; icon: string }[] = [
-  { id: "diagnostics", title: "الفحص والتشخيص", icon: "📐" },
+  { id: "diagnostics", title: "السجلات والتشخيص", icon: "📐" },
   { id: "prescription", title: "خطة العلاج والميكانيكا", icon: "⚙️" },
   { id: "wires", title: "زيارات المتابعة والشدّ", icon: "⚡" },
   { id: "retention", title: "التثبيت والإقفال", icon: "🛡️" },

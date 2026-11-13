@@ -21,7 +21,7 @@ describe("consistent case and workup tab order", () => {
     const cases = OrthoCaseNavigation({ pillar: "wires", onSelect: select });
     const workup = OrthoWorkupNavigation({ step: 10, legacy: false, onSelect: select, onClose: close });
     const caseButtons = buttons(cases, "أقسام حالة التقويم"), groupButtons = buttons(workup, "مجموعات ملف التقويم");
-    expect(caseButtons.map(button => button.props["aria-label"])).toEqual(["الفحص والتشخيص", "خطة العلاج والميكانيكا", "زيارات المتابعة والشدّ", "التثبيت والإقفال", "دراسة الحالة المحفوظة"]);
+    expect(caseButtons.map(button => button.props["aria-label"])).toEqual(["السجلات والتشخيص", "خطة العلاج والميكانيكا", "زيارات المتابعة والشدّ", "التثبيت والإقفال", "دراسة الحالة المحفوظة"]);
     expect(caseButtons.map(button => button.props["aria-label"])).toEqual(ORTHO_CASE_PILLARS.map(item => item.title));
     expect(groupButtons.map(text)).toEqual(ORTHO_WORKUP_GROUPS.map(group => group.title));
     // The case view's sections and the workup groups follow the same pillar order.
