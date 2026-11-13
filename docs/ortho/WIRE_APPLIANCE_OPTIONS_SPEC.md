@@ -64,3 +64,22 @@ Display, select, save and reopen at 390px and 1280px:
    during a session (B2), or both?
 2. Is the wire list in A3 complete for the clinic? Add or remove any sizes or materials.
 3. Should the "other wire" text box be offered, or only the list?
+
+## Owner decision (#483, 2026-11-13 23:17 and 23:20 UTC)
+
+Approved: the full wire catalog with an "other" option; the usual sequence and next-wire suggestion kept,
+with no automatic change to records; more case appliance types; optional auxiliary appliances with an
+"other" option; old records kept compatible; visits first, with clear section names. Any migration is
+coordinated with the other lines before its number is allocated.
+
+Auxiliary list from the owner: Hyrax / MARPE, Nance Button, TPA, TAD / Mini-screw, Closed Coil NiTi,
+Open Coil, Power Chain, Laceback / Bendback, Bite Turbo, Carriere Motion, Herbst, Forsus, Twin Block,
+Lip Bumper, Lingual Holding Arch, Quad Helix, and "other" (free text).
+
+## Status
+
+- Done (`ef54ef1e`, `ff9d6da6`): A1–A4 (wires, including "other") and B1 (self-ligating metal and
+  ceramic, lingual, sapphire). Visits are first again. Covered by unit tests and a built-app journey at
+  390px and 1280px.
+- Waiting: B2, the auxiliaries. They need one nullable column on `ortho_adjustments`; migration number 0132
+  is proposed and awaits Dot's allocation (#483 comment 6867434231).
