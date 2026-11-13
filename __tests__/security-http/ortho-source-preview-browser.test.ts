@@ -54,8 +54,11 @@ describe("built measurement session provenance preview", () => {
     page.on("request", request => { if (!["GET", "HEAD"].includes(request.method())) writes.push(request.url()); });
     try {
       await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=ortho&orthoCaseId=${orthoCaseId}&pillar=diagnostics`);
-      await page.getByRole("button", { name: "إعداد ملف التقويم خطوة بخطوة", exact: true }).click();
-      const step = page.getByLabel("خطوة إعداد ملف التقويم", { exact: true }); await step.selectOption("4");
+      // Direct entry (#538/6838132093): open the workspace, then the measurements section, with no forced steps.
+      await page.getByRole("button", { name: "فتح مساحة عمل التقويم", exact: true }).click();
+      const workspace = page.getByRole("region", { name: "مساحة عمل ملف التقويم", exact: true });
+      await workspace.getByRole("navigation", { name: "مجموعات ملف التقويم", exact: true }).getByRole("button", { name: "الفحص والسجلات", exact: true }).click();
+      await workspace.getByRole("button", { name: "القياسات وتحليل الموديلات", exact: true }).click();
       await page.getByRole("button", { name: "فتح التقييم السريري والقياسات", exact: true }).click();
       await page.getByRole("button", { name: "بدء تقييم غير معبأ", exact: true }).click();
       await measurement(page, 11, "7.5", "2026-10-01", "طريقة مصدر اصطناعية", "منفذ مصدر اصطناعي");
