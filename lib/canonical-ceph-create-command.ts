@@ -1,6 +1,7 @@
 import "server-only";
 import { createCephAnalysis, getPool, type CephPhase } from "./db";
 import { CanonicalCephWriteFailure, runCanonicalCephWrite } from "./canonical-ceph-write";
+import { staffOperationCapabilities } from "./staff-operation-runtime";
 import type { VerifiedDurableSession } from "./staff-durable-session";
 
 export class CanonicalCephCreateRefusal extends Error {
@@ -9,6 +10,8 @@ export class CanonicalCephCreateRefusal extends Error {
   }
 }
 const invalid = () => new CanonicalCephCreateRefusal("invalid_ceph_create", 400, "بيانات فتح مسودة السيفالومتري غير صالحة.");
+// One private refusal for a hidden, removed, foreign or missing image or case, as in #539.
+const reference = () => new CanonicalCephWriteFailure("conflict", "تعذّر التحقق من صورة المريض أو الحالة المرتبطة؛ لم تُنشأ مسودة.");
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 const phases = new Set(["pretreatment", "during", "posttreatment", "followup"]);
 export function parseCanonicalCephCreate(raw: string, body: unknown) {
@@ -31,20 +34,32 @@ export function parseCanonicalCephCreate(raw: string, body: unknown) {
 /**
  * One new draft through staging's protected creator (patient → image lock order, same-patient
  * image and orthodontic case, audit), admitted by clinical.xrays.upload and current patient scope.
- * Same response as the legacy route, including the non-blocking same-image warning.
+ * Before the creator runs, #539's checks hold in the same transaction: the image must be the patient's
+ * current image (one private refusal for hidden, removed, foreign or missing references), and linking an
+ * orthodontic case needs the same clinical.ortho.view grant that shows the case chooser.
  */
 export async function commandCanonicalCephCreate(session: VerifiedDurableSession, rawId: string, body: unknown, pool = getPool()) {
   const input = parseCanonicalCephCreate(rawId, body);
   try {
-    return await runCanonicalCephWrite(session, "clinical.xrays.upload", { kind: "patient", patientId: input.patientId, documentId: input.documentId }, async ({ client, admit }) => {
-      const { rows: same } = await client.query<{ id: number }>(
-        "SELECT id FROM ceph_analyses WHERE patient_id=$1 AND document_id=$2 AND status<>'discarded' ORDER BY id", [input.patientId, input.documentId]);
+    return await runCanonicalCephWrite(session, "clinical.xrays.upload", { kind: "patient", patientId: input.patientId, documentId: input.documentId }, async ({ client, handle, admit }) => {
+      await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [input.patientId]);
+      const { rows: [document] } = await client.query<{ mime_type: string; removed_at: Date | null }>(
+        "SELECT mime_type,removed_at FROM patient_documents WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT", [input.documentId, input.patientId]);
+      if (!document || document.removed_at !== null || !document.mime_type.startsWith("image/")) throw reference();
+      if (input.orthoCaseId !== null) {
+        const grants = await staffOperationCapabilities(client, handle, "clinical.xrays.upload", ["clinical.ortho.view"]);
+        if (!grants.has("clinical.ortho.view")) throw new Error("STAFF_OPERATION_CAPABILITY_DENIED");
+        const ortho = await client.query("SELECT id FROM ortho_cases WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT", [input.orthoCaseId, input.patientId]);
+        if (!ortho.rows.length) throw reference();
+      }
+      const { rows: [history] } = await client.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM ceph_analyses WHERE patient_id=$1 AND document_id=$2 AND status<>'discarded'", [input.patientId, input.documentId]);
+      const count = Number(history.count);
       const created = await createCephAnalysis({ patientId: input.patientId, documentId: input.documentId, createdBy: "",
         orthoCaseId: input.orthoCaseId, phase: input.phase, xrayDate: input.xrayDate, device: input.device, refSet: input.refSet },
       { patientId: input.patientId, documentId: input.documentId, admit });
       if (!created.ok) return created;
-      const duplicateWarning = same.length > 0
-        ? `للهذه الشععة ${same.length} دراسة سابقة (${same.map((a) => `#${a.id}`).join("، ")}) — تابع إن كان ذلك مقصودًا.` : null;
+      const duplicateWarning = count > 0 ? `لهذه الصورة ${count} دراسة سابقة؛ تأكد أن فتح دراسة أخرى مقصود.` : null;
       return { ok: true as const, value: { id: created.id, duplicateWarning } };
     }, pool);
   } catch (error) {

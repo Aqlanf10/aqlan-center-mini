@@ -42,8 +42,7 @@ it("a correction copy takes only the reviewed correction fingerprint, never a cl
     { schemaVersion: 1, expectedCorrectionSource: { analysisId: 7 } }])
     expect(() => parseCanonicalCephCopy("7", body)).toThrow(/أصل التصحيح/);
 });
-it("discard keeps the legacy body: an optional textual note only", () => {
-  expect(parseCanonicalCephDiscard("7", { note: "SYN wrong image" })).toEqual({ id: 7, note: "SYN wrong image" });
-  expect(parseCanonicalCephDiscard("7", { note: 5, actor: "owner" })).toEqual({ id: 7, note: null });
-  expect(parseCanonicalCephDiscard("7", null)).toEqual({ id: 7, note: null });
+it("discard requires the observed draft version and an explicit note, as in #539", () => {
+  expect(() => parseCanonicalCephDiscard("7", { note: "SYN wrong image" })).toThrow(/راجع المسودة/);
+  expect(() => parseCanonicalCephDiscard("7", null)).toThrow(/راجع المسودة/);
 });

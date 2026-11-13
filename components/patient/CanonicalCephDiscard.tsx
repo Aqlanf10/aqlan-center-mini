@@ -56,7 +56,7 @@ export function CanonicalCephDiscard({ patientId, ownerKey, draftId, refresh, on
     const timeout = setTimeout(() => request.abort(), 10000);
     const uncertain = () => { pendingRef.current = true; setPending(true); setObserved(null); setNote(""); setMessage("لم تتأكد نتيجة رفض المسودة. لن نعيد الطلب تلقائيًا."); };
     try {
-      const response = await fetch(`/api/ceph/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: note.trim() || null }), signal: request.signal });
+      const response = await fetch(`/api/ceph/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: observed.discardVersion, note: note.trim() || null }), signal: request.signal });
       const result = await response.json().catch(() => null); if (!active.current) return;
       if (!response.ok) {
         if (response.status < 500 && result && (response.status === 401 || /^(STAFF_|ceph_discard_|invalid_ceph_discard$)/.test(String(result.code)))) {
@@ -65,7 +65,7 @@ export function CanonicalCephDiscard({ patientId, ownerKey, draftId, refresh, on
         } else uncertain();
         return;
       }
-      if (!result || Object.keys(result).join(",") !== "ok" || result.ok !== true) { uncertain(); return; }
+      if (!result || Object.keys(result).sort().join(",") !== "ok,status,studyId" || result.ok !== true || result.studyId !== id || result.status !== "discarded") { uncertain(); return; }
       erase(); setObserved(null); setNote(""); onDiscarded();
     } catch { if (active.current) uncertain(); }
     finally { clearTimeout(timeout); sending.current = false; if (active.current) setBusy(false); }

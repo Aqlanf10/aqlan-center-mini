@@ -122,15 +122,26 @@ it("edits the diagnosis only against its observed prior value", async () => {
   await expect(edit.commandCanonicalCephEdit(await fx.session("own"), String(s.id), { diagnosis: next, landmarks: [] })).rejects.toMatchObject({ status: 400 });
 });
 
-it("discards a draft once, never a completed study", async () => {
-  const s = await draft();
-  expect(await discard.commandCanonicalCephDiscard(await fx.session("all"), String(s.id), { note: "SYN wrong image" })).toEqual({ ok: true });
+it("discards a draft once on the observed version, never a stale draft or a completed study", async () => {
+  const s = await draft(), noVersion = "0".repeat(64);
+  const observed = (await observe(s)).discardVersion!;
+  expect(observed).toMatch(/^[a-f0-9]{64}$/);
+  await expect(discard.commandCanonicalCephDiscard(await fx.session("all"), String(s.id), { note: "SYN wrong image" })).rejects.toMatchObject({ status: 400 });
+  // A child edit after the read changes the version: the stale intent is refused and nothing is written.
+  await fx.pool.query("UPDATE ceph_landmarks SET x=x+1 WHERE analysis_id=$1 AND code=(SELECT min(code) FROM ceph_landmarks WHERE analysis_id=$1)", [s.id]);
+  const edited = await state(s);
+  await expect(discard.commandCanonicalCephDiscard(await fx.session("all"), String(s.id), { expectedVersion: observed, note: "SYN wrong image" })).rejects.toMatchObject({ status: 409 });
+  expect(await state(s)).toEqual(edited);
+  expect((await fx.pool.query("SELECT count(*)::int n FROM audit_log WHERE action='ceph.discard' AND entity_id=$1", [String(s.id)])).rows[0].n).toBe(0);
+  const current = (await observe(s)).discardVersion!;
+  expect(await discard.commandCanonicalCephDiscard(await fx.session("all"), String(s.id), { expectedVersion: current, note: "SYN wrong image" })).toEqual({ ok: true, studyId: s.id, status: "discarded" });
   expect((await fx.pool.query("SELECT status FROM ceph_analyses WHERE id=$1", [s.id])).rows[0].status).toBe("discarded");
-  await expect(discard.commandCanonicalCephDiscard(await fx.session("all"), String(s.id), {})).rejects.toMatchObject({ status: 404 });
+  expect((await fx.pool.query("SELECT count(*)::int n FROM audit_log WHERE action='ceph.discard' AND entity_id=$1", [String(s.id)])).rows[0].n).toBe(1);
+  await expect(discard.commandCanonicalCephDiscard(await fx.session("all"), String(s.id), { expectedVersion: current, note: null })).rejects.toMatchObject({ status: 404 });
   const done = await draft();
   await complete.commandCanonicalCephComplete(await fx.session("own"), String(done.id), completionRequest(await observe(done)));
   const before = await state(done);
-  await expect(discard.commandCanonicalCephDiscard(await fx.session("all"), String(done.id), {})).rejects.toMatchObject({ status: 409 });
+  await expect(discard.commandCanonicalCephDiscard(await fx.session("all"), String(done.id), { expectedVersion: noVersion, note: null })).rejects.toMatchObject({ status: 409 });
   expect(await state(done)).toEqual(before);
 });
 
@@ -157,7 +168,7 @@ it("opens a correction copy only from the observed correction fingerprint", asyn
 
 it("creates a draft on the patient's own image, and refuses another patient's image or scope", async () => {
   const s = await draft();
-  await discard.commandCanonicalCephDiscard(await fx.session("own"), String(s.id), {});
+  await discard.commandCanonicalCephDiscard(await fx.session("own"), String(s.id), { expectedVersion: (await observe(s)).discardVersion!, note: null });
   const created = await create.commandCanonicalCephCreate(await fx.session("own"), String(s.patientId), { documentId: s.documentId, phase: "pretreatment" });
   expect(created).toMatchObject({ id: expect.any(Number), duplicateWarning: null });
   const other = await draft();
