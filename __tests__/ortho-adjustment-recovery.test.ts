@@ -35,6 +35,8 @@ describe("shared provenance rule", () => {
       expect(recordedSessionMatchesRequest(sessionLikeB, { ...bodyB, ...change }), JSON.stringify(change)).toBe(false);
     }
     expect(recordedSessionMatchesRequest({ ...sessionLikeB, auxiliaries: null, auxiliaryOther: null }, { ...bodyB, auxiliaries: undefined, auxiliaryOther: undefined })).toBe(true);
+    // A read projection presenting an empty recorded note as "" is the same recorded value.
+    expect(recordedSessionMatchesRequest({ ...sessionLikeB, elasticNote: "" }, bodyB)).toBe(true);
     // phase and note are judged only when the caller knows them (the server); the screen never sends them.
     expect(recordedSessionMatchesRequest({ ...sessionLikeB, phase: "aligning" }, bodyB)).toBe(true);
     expect(recordedSessionMatchesRequest({ ...sessionLikeB, phase: "aligning" }, { ...bodyB, phase: null })).toBe(false);

@@ -2182,13 +2182,9 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
 
   const [queue, setQueue] = form.field<QueuedPhoto[]>("queue", []);
   // Review #483 6873798343: queued photos live only in this page (never stored in the browser for privacy).
-  // Warn before a reload or close would lose them; the refusal notice also offers saving them to the device.
-  useLayoutEffect(() => {
-    if (queue.length === 0 || typeof window === "undefined") return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [queue.length]);
+  // The page's leave guard is deliberately scoped to in-app tabs (no browser unload dialog, pinned by the
+  // navigation journey), so the warning is in the page: the refusal notice states that queued photos are
+  // lost on a reload and offers saving them to the device.
   const saveQueuedPhotosToDevice = () => {
     queue.forEach((photo, index) => {
       const link = document.createElement("a");

@@ -11,8 +11,8 @@ import { adjustmentRequestHash } from "../../lib/ortho-adjustment-request-hash";
 
 // Review on #483 (6873798343), real browser on the built app, synthetic data only.
 // 1. Reload after a refusal: the typed values come back from session storage; queued photos are never
-//    stored in the browser, so the page warns before a reload would lose them, offers saving them to the
-//    device, and after the reload says how many were not kept. Nothing reaches the recorded session.
+//    stored in the browser, so the refusal notice warns that a reload loses them, offers saving them to the
+//    device, and after the reload the notice says how many were not kept. Nothing reaches the recorded session.
 // 2. A receipt cached by an earlier screen (acknowledged B pointing to session A recorded from other values)
 //    is not shown as saved and causes no follow-up or upload; a legitimate cached receipt still recovers.
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser;
@@ -103,7 +103,7 @@ async function expectB(page: Page) {
   expect(await form.getByTestId("adjustment-auxiliaries-state").textContent()).toBe("TAD / Mini-screw، آخر: SYN Pendulum");
 }
 
-for (const width of [390, 1280]) it(`keeps a refused session's values across a reload and warns before queued photos are lost at ${width}px`, async () => {
+for (const width of [390, 1280]) it(`keeps a refused session's values across a reload and warns in the page that queued photos are lost at ${width}px`, async () => {
   const { patientId, caseId } = await fixedCase(width, "reload");
   const today = (await get(`/api/ortho?patientId=${patientId}`)).today as string;
   const { context, page, errors } = await open(width);
@@ -133,11 +133,11 @@ for (const width of [390, 1280]) it(`keeps a refused session's values across a r
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "حفظ الصور غير المرفوعة على الجهاز", exact: true }).click();
     expect((await download).suggestedFilename()).toBe("syn-b-before.png");
-    // The reload is preceded by a leave-page warning while photos are queued.
+    // The warning is in the page (the leave guard is scoped to in-app tabs by design; no unload dialog).
     const dialogs: string[] = [];
     page.on("dialog", async (dialog) => { dialogs.push(dialog.type()); await dialog.accept(); });
     await page.reload(); await page.getByText("SYN session A").first().waitFor();
-    expect(dialogs).toContain("beforeunload");
+    expect(dialogs).toEqual([]);
     // After the reload: B's values come back, the notice says the photo was not kept, nothing was uploaded.
     await openForm(page);
     await expectB(page);

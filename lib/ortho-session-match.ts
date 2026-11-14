@@ -31,10 +31,12 @@ export function recordedSessionMatchesRequest(recorded: RecordedSessionValues, r
     // screen never sends them and leaves them undefined, so they are not judged there).
     && (request.phase === undefined || (request.phase ?? null) === recorded.phase)
     && request.elastics === recorded.elastics && request.nextWeeks === recorded.nextWeeks
-    && text(request.elasticNote) === recorded.elasticNote && text(request.done) === recorded.done
-    && (request.note === undefined || text(request.note) === recorded.note)
-    && wire(recorded.upperWire, request.upperWire, request.upperWireAction)
-    && wire(recorded.lowerWire, request.lowerWire, request.lowerWireAction)
+    // Both sides are normalized: the writer stores trimmed text with empty as null, but a read projection
+    // (or a synthetic one) may present an empty string for the same recorded value.
+    && text(request.elasticNote) === text(recorded.elasticNote) && text(request.done) === text(recorded.done)
+    && (request.note === undefined || text(request.note) === text(recorded.note))
+    && wire(text(recorded.upperWire), request.upperWire, request.upperWireAction)
+    && wire(text(recorded.lowerWire), request.lowerWire, request.lowerWireAction)
     && JSON.stringify(sentAuxiliaries) === JSON.stringify(savedAuxiliaries)
-    && (sentAuxiliaries === null ? recorded.auxiliaryOther === null : text(request.auxiliaryOther) === recorded.auxiliaryOther);
+    && (sentAuxiliaries === null ? text(recorded.auxiliaryOther) === null : text(request.auxiliaryOther) === text(recorded.auxiliaryOther));
 }
