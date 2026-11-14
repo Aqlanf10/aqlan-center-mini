@@ -703,9 +703,9 @@ export default function FinancePage() {
           ) : null}
           {/* Keep same-shift drafts mounted, but no stale UI can be seen or used.
               A new shift/principal gets a fresh form, never the old counted cash. */}
+          {/* Review #483 6882465665: an unconfirmed expense request of this user stays here until verified. */}
+          <PendingExpenseAttempts actor={session?.username} onSettled={(id) => { if (id) setLastVoucherId(id); void load(); }} />
           {feed && feedPrincipal === principalKey ? <div hidden={shiftReadState !== "ready"} inert={shiftReadState !== "ready"}>
-            {/* Review #483 6882465665: an unconfirmed expense request of this user stays here until verified. */}
-            <PendingExpenseAttempts actor={session?.username} onSettled={(id) => { if (id) setLastVoucherId(id); void load(); }} />
             <CashShiftTab
               key={`${principalKey}:${feed.open?.id ?? "closed"}`}
               canMutate={!readOnlyMoney}
