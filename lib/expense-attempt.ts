@@ -9,7 +9,10 @@ import { IDEMPOTENCY_KEY_PATTERN, newIdempotencyKey } from "./idempotency-key";
  *  - "saved": a readable receipt (a voucher id and number). A replay of the same key returns the same
  *    receipt, so resending a pending attempt can only ever confirm it.
  *  - "refused": a refusal in which the server states `requestKeyState: "unused"`, i.e. it checked the
- *    key under its lock and nothing is recorded under it.
+ *    key under its lock and nothing is recorded under it, AND this answer belongs to the attempt's only
+ *    send. "Nothing recorded" is true only at the moment the server checked (review #483 6883224187): an
+ *    earlier send of the same key may still be in flight and create the voucher afterwards. After more
+ *    than one send, such a refusal is reported as "unknown" with its message and the attempt stays.
  *  - everything else is "unknown": a network failure, a 5xx, a redirect, a success whose body cannot be
  *    read, a 401/403 (the request never reached the key check), a key conflict, or a refusal without the
  *    server's statement. The attempt and its key are kept, never replaced by a new key.
@@ -35,6 +38,8 @@ export interface ExpenseAttempt {
   /** A short Arabic description for the pending notice. */
   label: string;
   createdAt: number;
+  /** How many times this key was handed to the network (counted before each send, kept across reloads). */
+  sends?: number;
 }
 export type ExpenseAnswer = "saved" | "refused" | "unknown";
 
@@ -46,7 +51,8 @@ function valid(row: unknown): row is ExpenseAttempt {
   const a = row as Record<string, unknown>;
   return typeof a.key === "string" && IDEMPOTENCY_KEY_PATTERN.test(a.key) && typeof a.actor === "string" && a.actor.length > 0
     && (a.surface === "petty" || a.surface === "bill") && typeof a.match === "string" && typeof a.body === "string"
-    && typeof a.label === "string" && typeof a.createdAt === "number";
+    && typeof a.label === "string" && typeof a.createdAt === "number"
+    && (a.sends === undefined || (Number.isSafeInteger(a.sends) && (a.sends as number) >= 0));
 }
 function readStored(storage: StorageLike | null): ExpenseAttempt[] | null {
   if (!storage) return null;
@@ -100,7 +106,7 @@ export function beginExpenseAttempt(storage: StorageLike | null, input: Omit<Exp
     const updated = { ...found, body: input.body, label: input.label };
     return { attempt: updated, persisted: write(storage, rows.map((row) => row.key === found.key ? updated : row)) };
   }
-  const attempt: ExpenseAttempt = { ...input, key: newIdempotencyKey("exp"), createdAt: Date.now() };
+  const attempt: ExpenseAttempt = { ...input, key: newIdempotencyKey("exp"), createdAt: Date.now(), sends: 0 };
   return { attempt, persisted: write(storage, [...rows, attempt]) };
 }
 
@@ -137,6 +143,13 @@ export function resetExpenseAttemptMemoryForTesting() { memory.clear(); }
  */
 export async function sendExpenseAttempt(storage: StorageLike | null, attempt: ExpenseAttempt, transport: typeof fetch = fetch):
   Promise<{ answer: ExpenseAnswer; status: number | null; payload: Record<string, unknown> | null }> {
+  // Counted before the request leaves: a send that never answers still counts after a reload. A stored row
+  // without a count (written before the count existed) is treated as already sent.
+  const rows = all(storage);
+  const current = rows.find((row) => row.key === attempt.key);
+  const sends = (current?.sends ?? (current ? 1 : attempt.sends ?? 1)) + 1;
+  const priorSends = sends - 1;
+  if (current) write(storage, rows.map((row) => row.key === attempt.key ? { ...row, sends } : row));
   let response: Response;
   try {
     response = await transport("/api/expenses", { method: "POST",
@@ -149,7 +162,9 @@ export async function sendExpenseAttempt(storage: StorageLike | null, attempt: E
     const parsed: unknown = await response.json();
     payload = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
   } catch { payload = null; }
-  const answer = classifyExpenseAnswer(response.status, response.redirected, payload);
+  let answer = classifyExpenseAnswer(response.status, response.redirected, payload);
+  // A refusal proves the key empty only if no other send of it exists (review #483 6883224187).
+  if (answer === "refused" && priorSends > 0) answer = "unknown";
   if (answer !== "unknown") settleExpenseAttempt(storage, attempt.key);
   return { answer, status: response.status, payload };
 }

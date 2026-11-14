@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EXPENSE_ATTEMPT_STORAGE_KEY, beginExpenseAttempt, classifyExpenseAnswer, dismissExpenseAttempt,
-  pendingExpenseAttempts, resetExpenseAttemptMemoryForTesting, settleExpenseAttempt,
+  pendingExpenseAttempts, resetExpenseAttemptMemoryForTesting, sendExpenseAttempt, settleExpenseAttempt,
 } from "../lib/expense-attempt";
 import { IDEMPOTENCY_KEY_PATTERN } from "../lib/idempotency-key";
 
@@ -90,5 +90,53 @@ describe("what an answer proves", () => {
       [409, { code: "expense_request_conflict" }], [400, { message: "SYN" }], [500, null], [502, { requestKeyState: "unused" }]] as const) {
       expect(classifyExpenseAnswer(status, false, payload), `${status}`).toBe("unknown");
     }
+  });
+});
+
+// Review #483 6883224187: "the key holds nothing" is true only at the moment the server checked it. If an
+// earlier send of the same key is still in flight, it can create the voucher afterwards. So a refusal
+// settles an attempt only when this answer belongs to the attempt's only send.
+describe("a refusal after an earlier unproven send", () => {
+  const refusal = () => new Response(JSON.stringify({ code: "exceeds_drawer_cash", requestKeyState: "unused", message: "يتجاوز النقد" }), { status: 409 });
+  it("keeps the attempt pending and unresolved when the key was sent before", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    // First send: held before reaching the server (never answers in this page).
+    const held = sendExpenseAttempt(store, attempt, () => new Promise<Response>(() => {}));
+    void held;
+    const retry = await sendExpenseAttempt(store, pendingExpenseAttempts(store, "syn-cashier")[0], async () => refusal());
+    expect(retry.answer).toBe("unknown");
+    expect(retry.payload?.message).toBe("يتجاوز النقد");
+    expect(pendingExpenseAttempts(store, "syn-cashier").map(row => row.key)).toEqual([attempt.key]);
+    // Re-entering the same form still reuses the same key: no second voucher can come from a new key.
+    expect(start(store).attempt.key).toBe(attempt.key);
+  });
+  it("counts sends across a reload", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    await sendExpenseAttempt(store, attempt, async () => { throw new TypeError("network"); });
+    resetExpenseAttemptMemoryForTesting();
+    const after = await sendExpenseAttempt(store, pendingExpenseAttempts(store, "syn-cashier")[0], async () => refusal());
+    expect(after.answer).toBe("unknown");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toHaveLength(1);
+  });
+  it("still settles a refusal of the attempt's only send (a correctable error)", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    expect((await sendExpenseAttempt(store, attempt, async () => refusal())).answer).toBe("refused");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+  });
+  it("treats a stored attempt without a send count as already sent", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    const legacy = { ...attempt } as Record<string, unknown>; delete legacy.sends;
+    store.setItem(EXPENSE_ATTEMPT_STORAGE_KEY, JSON.stringify([legacy]));
+    resetExpenseAttemptMemoryForTesting();
+    const row = pendingExpenseAttempts(store, "syn-cashier")[0];
+    expect((await sendExpenseAttempt(store, row, async () => refusal())).answer).toBe("unknown");
   });
 });

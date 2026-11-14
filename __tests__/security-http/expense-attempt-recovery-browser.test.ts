@@ -95,6 +95,56 @@ describe("petty expense on the cash screen", () => {
     } finally { await context.close(); }
   });
 
+  // Review #483 6883224187: the first send leaves the page and its connection drops; the server has not
+  // seen it yet. A retry is refused ("nothing recorded under the key" — true only at that moment). The
+  // first request then arrives and writes the voucher. The page must never have declared the refusal final.
+  it("a first send still on its way: a later refusal stays unresolved, and the late voucher is confirmed once", async () => {
+    const note = `SYN-REC-INFLIGHT-${++serial}-${Date.now()}`;
+    const { context, page } = await open("admin");
+    try {
+      const drawer = Number((await db.query(`SELECT opening_yer FROM cashier_shifts WHERE status = 'open'`)).rows[0].opening_yer);
+      const amount = String(drawer * 50 + 1_000_000); // more than the open drawer holds now
+      await startExpense(page, note, amount);
+      let firstHeaders: Record<string, string> | null = null, firstBody: string | null = null;
+      let held = false;
+      await page.route("**/api/expenses", async (route: Route) => {
+        if (held || route.request().method() !== "POST") return route.continue();
+        held = true;
+        firstHeaders = await route.request().allHeaders();
+        firstBody = route.request().postData();
+        await route.abort("connectionreset"); // the page sees a dropped connection; the server sees nothing yet
+      });
+      await save(page);
+      await uncertain(page);
+      await count(pending(page), 1);
+      expect(await evidence(note)).toEqual({ vouchers: 0, audits: 0, drawerOut: 0 });
+      // The retry of the same key reaches the server and is refused for the drawer, key unused at that moment.
+      const refused = page.waitForResponse((r) => r.url().endsWith("/api/expenses") && r.request().method() === "POST");
+      await pending(page).getByRole("button", { name: "تحقّق" }).click();
+      const answer = await refused;
+      expect(answer.status()).toBe(409);
+      expect(await answer.json()).toMatchObject({ code: "exceeds_drawer_cash", requestKeyState: "unused" });
+      // Not final: the attempt stays, with the reason and the warning; no "proved not recorded".
+      await expect.poll(() => page.getByTestId("pending-expense-attempts").innerText(), { timeout: 15_000 }).toMatch(/قد يكون سُجّل/);
+      expect(await page.getByTestId("pending-expense-attempts").innerText()).not.toMatch(/ثبت أنه لم يُسجَّل/);
+      await count(pending(page), 1);
+      // Cash arrives in the drawer, then the first request finally reaches the server and writes the voucher.
+      const { rows: [{ id: patientId }] } = await db.query<{ id: number }>(
+        "INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض اصطناعي للتعافي') RETURNING id", [`SYN-REC-P-${serial}`]);
+      await db.query(`INSERT INTO payments (receipt_number, patient_id, shift_id, kind, amount_minor, currency, base_amount_minor, method, created_by)
+        SELECT $1, $2, id, 'payment', $3, 'YER', $3, 'cash', 'syn-expense-recovery' FROM cashier_shifts WHERE status = 'open'`,
+        [`SYN-REC-TOPUP-${serial}`, patientId, Number(amount) * 2]);
+      const headers = Object.fromEntries(Object.entries(firstHeaders!).filter(([name]) => !/^(host|content-length|connection)$/i.test(name)));
+      const late = await fetch(`${baseUrl}/api/expenses`, { method: "POST", headers, body: firstBody! });
+      expect(late.status).toBe(201);
+      expect(await evidence(note)).toMatchObject({ vouchers: 1, audits: 1 });
+      // Verifying the same pending attempt now confirms that one voucher; nothing new is written.
+      await pending(page).getByRole("button", { name: "تحقّق" }).click();
+      await count(pending(page), 0);
+      expect(await evidence(note)).toEqual({ vouchers: 1, audits: 1, drawerOut: Number(amount) });
+    } finally { await context.close(); }
+  });
+
   it("an unreadable success, then the same click again: one voucher", async () => {
     const note = `SYN-REC-UNREAD-AGAIN-${++serial}-${Date.now()}`;
     const { context, page } = await open("admin");
