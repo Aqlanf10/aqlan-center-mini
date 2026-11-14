@@ -115,7 +115,9 @@ export function retireAdjustmentCommand(storage: StorageLike, command: Adjustmen
 /** Codes the server returns only after rolling back everything for this request: no receipt was written
  * for its key, so the key is unused and the frozen command may be dropped. Any other failure stays
  * uncertain and keeps the command for same-key reconciliation. */
-export const DEFINITIVE_ADJUSTMENT_REFUSALS: readonly string[] = ["adjustment_visit_already_recorded"];
+// adjustment_receipt_bound_to_other_session: the key's historical receipt points to a session recorded
+// from other values; the same key always gets the same refusal, so dropping the local command is safe.
+export const DEFINITIVE_ADJUSTMENT_REFUSALS: readonly string[] = ["adjustment_visit_already_recorded", "adjustment_receipt_bound_to_other_session"];
 export function isDefinitiveAdjustmentRefusal(status: number, payload: unknown): payload is { code: string; message: string; existingAdjustmentId?: number } {
   return status === 409 && !!payload && typeof payload === "object"
     && DEFINITIVE_ADJUSTMENT_REFUSALS.includes(String((payload as { code?: unknown }).code))
