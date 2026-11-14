@@ -14,7 +14,9 @@ beforeEach(async () => {
   await dropPublicSchema(target.testUrl.toString());
   await client.query("CREATE TABLE public.users(id integer PRIMARY KEY); CREATE TABLE public.inventory_movements(id integer PRIMARY KEY)");
 });
-afterAll(async () => { await client.end(); });
+// The stub users/inventory tables must not outlive this file: a later suite on the same
+// disposable database runs ensureSchema, whose CREATE TABLE IF NOT EXISTS keeps the stub.
+afterAll(async () => { await client.end(); await dropPublicSchema(target.testUrl.toString()); });
 async function install(register = true) {
   await client.query(migration.sql);
   if (register) {
