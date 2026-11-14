@@ -2094,6 +2094,26 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
   // Review #483 6871207083: a refusal is shown beside the save button, not only at the top of the page.
   // It lives in the draft, like the typed values, so the history refresh that remounts the form keeps it.
   const [refusal] = form.field<string | null>("refusal", null);
+  const auxiliaryBody = auxiliaries === null ? {}
+    : { auxiliaries: [...auxiliaries], ...(auxiliaries.includes("other") ? { auxiliaryOther } : {}) };
+  const previousAdjustment = caseRow.adjustments[0] ?? null;
+  // The baseline stores a description, not an elastic class. Never infer one from its text.
+  const baselineElasticNote = previousAdjustment ? "" : caseRow.elastics?.trim() ?? "";
+  const [elastics, setElastics] = form.field<ElasticClass | "">("elastics",
+    previousAdjustment?.elastics ?? (baselineElasticNote ? "" : "none"),
+  );
+  const [elasticNote, setElasticNote] = form.field("elasticNote", previousAdjustment ? previousAdjustment.elasticNote ?? "" : baselineElasticNote);
+  const [done, setDone] = form.field("done", "");
+  const [nextWeeks, setNextWeeks] = form.field("nextWeeks", String(previousAdjustment?.nextWeeks ?? 4));
+  const intervalWeeks = parseAdjustmentInterval(nextWeeks);
+  const dateValid = isAdjustmentDate(doneOn);
+  const saving = form.draft.busy;
+  // Persistence follows the immutable actor, not changing grants. The draft's
+  // separate sessionScope still invalidates handlers on every authority change.
+  const actorId = form.session?.userId;
+  const hasActor = Number.isSafeInteger(actorId) && Number(actorId) > 0;
+  const authority = hasActor ? `user:${actorId}` : "";
+  const commandScope = useMemo(() => ({ patientId, caseId: caseRow.id, authority }), [patientId, caseRow.id, authority]);
   // Review #483 6873798343. Put a request's own values back into the fields (never another session's).
   const restoreFromBody = (raw: string) => {
     const sent = JSON.parse(raw) as Record<string, unknown>;
@@ -2125,26 +2145,6 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
     restoreFromBody(command.body);
     form.commit("refusal", cachedReceiptMessage(command.receipt?.id ?? 0));
   };
-  const auxiliaryBody = auxiliaries === null ? {}
-    : { auxiliaries: [...auxiliaries], ...(auxiliaries.includes("other") ? { auxiliaryOther } : {}) };
-  const previousAdjustment = caseRow.adjustments[0] ?? null;
-  // The baseline stores a description, not an elastic class. Never infer one from its text.
-  const baselineElasticNote = previousAdjustment ? "" : caseRow.elastics?.trim() ?? "";
-  const [elastics, setElastics] = form.field<ElasticClass | "">("elastics",
-    previousAdjustment?.elastics ?? (baselineElasticNote ? "" : "none"),
-  );
-  const [elasticNote, setElasticNote] = form.field("elasticNote", previousAdjustment ? previousAdjustment.elasticNote ?? "" : baselineElasticNote);
-  const [done, setDone] = form.field("done", "");
-  const [nextWeeks, setNextWeeks] = form.field("nextWeeks", String(previousAdjustment?.nextWeeks ?? 4));
-  const intervalWeeks = parseAdjustmentInterval(nextWeeks);
-  const dateValid = isAdjustmentDate(doneOn);
-  const saving = form.draft.busy;
-  // Persistence follows the immutable actor, not changing grants. The draft's
-  // separate sessionScope still invalidates handlers on every authority change.
-  const actorId = form.session?.userId;
-  const hasActor = Number.isSafeInteger(actorId) && Number(actorId) > 0;
-  const authority = hasActor ? `user:${actorId}` : "";
-  const commandScope = useMemo(() => ({ patientId, caseId: caseRow.id, authority }), [patientId, caseRow.id, authority]);
   // Durable recovery has a render snapshot and a synchronous callback authority.
   // Never publish another scope during render, including an abandoned render.
   type CommandState = { scope: typeof commandScope; command: AdjustmentCommand | null; blocked: boolean };
