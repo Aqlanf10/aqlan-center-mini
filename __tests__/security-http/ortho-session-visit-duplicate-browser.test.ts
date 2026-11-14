@@ -112,7 +112,10 @@ for (const width of [390, 1280]) it(`does not report a second session in the sam
     await typeSecond(page, form);
     await form.getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).click();
     await page.getByText(new RegExp(`جلسة شدّ مسجّلة سابقًا \\(رقم ${existingId}\\)؛ لم تُحفظ هذه الجلسة`)).first().waitFor();
-    expect(await page.getByText("سُجّلت الشدّة في زيارة اليوم.", { exact: true }).count()).toBe(0);
+    // Nothing from the refused request is presented as saved: no saved-session result and no follow-up
+    // derived from its interval. (The visit-sign card may say the visit has a session: that is the
+    // other device's session, read from the server.)
+    expect(await page.getByText("📅 الجلسة القادمة المقترحة", { exact: true }).count()).toBe(0);
     // The refusal sits beside the save button and is on screen after the click, at phone width too.
     const alert = form.getByTestId("adjustment-refused");
     expect(await alert.textContent()).toContain(`رقم ${existingId}`);
