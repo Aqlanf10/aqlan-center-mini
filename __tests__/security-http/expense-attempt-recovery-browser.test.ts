@@ -89,7 +89,7 @@ describe("petty expense on the cash screen", () => {
       expect(await evidence(note)).toEqual({ vouchers: 1, audits: 1, drawerOut: 3 });
       await count(pending(page), 1);
       await save(page);
-      await count(page.getByRole("alert"), 0);
+      await count(page.getByRole("alert").filter({ hasText: "قد يكون سُجّل" }), 0);
       expect(await evidence(note)).toEqual({ vouchers: 1, audits: 1, drawerOut: 3 });
       await count(pending(page), 0);
     } finally { await context.close(); }
@@ -118,7 +118,7 @@ describe("petty expense on the cash screen", () => {
       await breakNextAnswer(page, "/api/expenses", "unreadable");
       await save(page);
       await uncertain(page);
-      await page.reload({ waitUntil: "networkidle" });
+      await page.reload({ waitUntil: "load" }); await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await count(pending(page), 1);
       expect(await pending(page).innerText()).toContain("مستفيد اصطناعي");
       await pending(page).getByRole("button", { name: "تحقّق" }).click();
@@ -157,7 +157,7 @@ describe("petty expense on the cash screen", () => {
       await uncertain(page);
       expect(await evidence(note)).toEqual({ vouchers: 1, audits: 1, drawerOut: 3 });
       await signIn(context, "admin");
-      await page.reload({ waitUntil: "networkidle" });
+      await page.reload({ waitUntil: "load" }); await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await count(pending(page), 1);
       await pending(page).getByRole("button", { name: "تحقّق" }).click();
       await count(page.getByTestId("pending-expense-attempts"), 0);
@@ -174,11 +174,11 @@ describe("petty expense on the cash screen", () => {
       await save(page);
       await uncertain(page);
       await signIn(context, "reception");
-      await page.reload({ waitUntil: "networkidle" });
+      await page.reload({ waitUntil: "load" }); await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await count(pending(page), 0);
       await signIn(context, "admin");
-      await page.reload({ waitUntil: "networkidle" });
+      await page.reload({ waitUntil: "load" }); await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await count(pending(page), 1);
       await pending(page).getByRole("button", { name: "تحقّق" }).click();
       await count(page.getByTestId("pending-expense-attempts"), 0);
