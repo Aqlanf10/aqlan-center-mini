@@ -113,11 +113,19 @@ for (const width of [390, 1280]) it(`does not report a second session in the sam
     await form.getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).click();
     await page.getByText(new RegExp(`جلسة شدّ مسجّلة سابقًا \\(رقم ${existingId}\\)؛ لم تُحفظ هذه الجلسة`)).first().waitFor();
     expect(await page.getByText("سُجّلت الشدّة في زيارة اليوم.", { exact: true }).count()).toBe(0);
+    // The refusal sits beside the save button and is on screen after the click, at phone width too.
+    const alert = form.getByTestId("adjustment-refused");
+    expect(await alert.textContent()).toContain(`رقم ${existingId}`);
+    await alert.scrollIntoViewIfNeeded(); expect(await alert.isVisible()).toBe(true);
+    // The history is refreshed to show the visit's existing session; the typed draft survives the refresh.
+    await page.getByText("SYN session saved on another device").first().waitFor();
     await expectRetained(page, form);
     // The queued photo is still in the form and nothing was attached to the existing session.
     expect(await form.locator("img[src^='blob:']").count()).toBeGreaterThan(0);
     expect(await state(caseId)).toEqual(before);
-    expect(before.adjustments).toHaveLength(1);
+    // The fixture's earlier session (four weeks ago) and today's session from the other device; nothing else.
+    expect(before.adjustments.map((row: { done: string }) => row.done)).toEqual(["SYN earlier session", "SYN session saved on another device"]);
+    expect(before.adjustments[1]).toMatchObject({ id: existingId, upper_wire: "016 NiTi", next_weeks: 4, auxiliaries: ["tpa"] });
     expect(before.wires).toEqual({ upper_wire: "016 NiTi", lower_wire: null });
     await page.screenshot({ path: `${out}/refused-${width}.png` });
     // After a reload the history shows only the saved session.

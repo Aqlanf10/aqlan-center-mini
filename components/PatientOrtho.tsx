@@ -1441,6 +1441,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                                 refreshAfterConfirmedChange();
                               }}
                               onError={safeError}
+                              onConflictRefresh={refreshAfterConfirmedChange}
                             />
                           ) : (
                             <button
@@ -2066,8 +2067,10 @@ function NewCase({ patientId, today, onSaved, onError }: {
   );
 }
 
-export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: {
+export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, onConflictRefresh }: {
   caseRow: OrthoCase; today: string; wires: { code: string }[]; patientId: number;
+  /** Reloads the case history so the visit's existing session is visible; the draft is kept. */
+  onConflictRefresh?: () => void;
   onSaved: (result: {
     adjustmentId: number; caseId: number; doneOn: string;
     nextWeeks: number; photosUploaded: number; visitId: number | null;
@@ -2088,6 +2091,8 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
   // null = not recorded; [] = an explicit "none" chosen by the clinician.
   const [auxiliaries, setAuxiliaries] = form.field<OrthoAuxiliary[] | null>("auxiliaries", null);
   const [auxiliaryOther, setAuxiliaryOther] = form.field("auxiliaryOther", "");
+  // Review #483 6871207083: a refusal is shown beside the save button, not only at the top of the page.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const auxiliaryBody = auxiliaries === null ? {}
     : { auxiliaries: [...auxiliaries], ...(auxiliaries.includes("other") ? { auxiliaryOther } : {}) };
   const previousAdjustment = caseRow.adjustments[0] ?? null;
@@ -2192,7 +2197,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
     const operation = recovered ? form.beginRetry(allowed) : form.begin(allowed);
     if (!operation) return;
     const submittedPhotos = recovered ? [] : [...queue];
-    onError(null);
+    onError(null); setRefusal(null);
     try {
       const command = commandState.command ?? createAdjustmentCommand(sessionStorage, commandScope, {
         doneOn, upperWire: removeUpperWire ? "" : upperWire, lowerWire: removeLowerWire ? "" : lowerWire,
@@ -2228,7 +2233,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
           }
           // Settled outcome: the fields are editable again but nothing is marked saved.
           form.acknowledge(operation, {});
-          onError(payload.message); return;
+          setRefusal(payload.message); onError(payload.message); onConflictRefresh?.(); return;
         }
         // A receipt for another request is never success: only this key's own replay may say "existing".
         if (payload && typeof payload === "object" && (payload as { existing?: unknown }).existing === true
@@ -2502,6 +2507,8 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
         {!dateValid ? "موعد المتابعة المقترح غير متاح حتى إدخال تاريخ جلسة صحيح." : intervalWeeks === null ? "موعد المتابعة المقترح غير متاح حتى إدخال عدد صحيح من أسبوع إلى 52 أسبوعًا." : <>الموعد المقترح: {friendlyDateLong(nextAdjustmentDate(doneOn, intervalWeeks))}</>}
       </p>
 
+      {refusal ? <p role="alert" data-testid="adjustment-refused"
+        className="mb-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">{refusal}</p> : null}
       <button type={commandState.command ? "button" : "submit"}
         data-testid={commandState.command ? "adjustment-reconcile" : undefined}
         onClick={commandState.command ? (event) => submit(event, true) : undefined}
