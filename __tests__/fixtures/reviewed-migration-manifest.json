@@ -570,6 +570,12 @@
     "checksum": "d3e61eb1ea1d3a7c5a479b0a3cde4b3663506a0fc919b5dc923b572386045234"
   },
   {
+    "version": "0128",
+    "name": "expense_commands",
+    "filename": "0128_expense_commands.sql",
+    "checksum": "5d972c35c00344309dfc2c508ce34997ab4836a4734290e894b0c1c681670e3d"
+  },
+  {
     "version": "0132",
     "name": "ortho_adjustment_auxiliaries",
     "filename": "0132_ortho_adjustment_auxiliaries.sql",

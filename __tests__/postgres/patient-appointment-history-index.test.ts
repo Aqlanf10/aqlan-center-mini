@@ -97,7 +97,7 @@ it("serializes numbered/runtime racers and retries idempotently on a populated 0
   const competitor = new Pool({ connectionString: pool.options.connectionString!, ssl: false });
   try {
     const [runtime, numbered] = await Promise.all([applyRuntimeMigrationFiles(pool, [index]), migrate(competitor, { apply: true, files })]);
-    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0126", "0132"]);
+    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0126", "0128", "0132"]);
   } finally { await competitor.end(); }
   const oid = (await pool.query("SELECT 'appointments_patient_history_idx'::regclass::oid AS oid")).rows;
   expect(await applyRuntimeMigrationFiles(pool, [index])).toEqual([]);

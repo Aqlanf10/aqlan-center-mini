@@ -49,6 +49,7 @@ describe("patient appointment history index provenance", () => {
       "0124_ceph_correction_lineage.sql",
       "0125_ortho_case_reopen.sql",
       "0126_commission_case_participations.sql",
+      "0128_expense_commands.sql",
       "0132_ortho_adjustment_auxiliaries.sql",
     ]);
   });

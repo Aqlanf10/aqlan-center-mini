@@ -814,6 +814,28 @@ here. Decisions commit with their audit row in one transaction under the case ro
 lock. Rollback of application code must not delete the table or migration
 registry history. Exact-head CI and Staging verification remain required before
 Production rollout.
+### 0128_expense_commands.sql
+
+Expense commands (owner decision on #483, comment 6831365228, items 2 and 3; number allocated in
+6833690789; contract `docs/finance/EXPENSE_COMMANDS_0128.md`). Adds seven nullable columns to `expenses`,
+with no default and no backfill:
+
+- `idempotency_key` and `idempotency_request_hash`: the request key every HTTP expense create carries and
+  the fingerprint of that request. A unique partial index makes a key record at most one voucher. A CHECK
+  requires both or neither, the shared key pattern, a 64-character hex hash, and no key on a reversal.
+  The same key with the same request replays the first voucher; with a different request it is refused.
+- `payment_source`, `drawer_amount_minor`, `owner_private_amount_minor`, `owner_private_reason` and
+  `owner_private_user_id`: the real source of the money. A CHECK requires all five NULL (a voucher written
+  before 0128, whose whole amount left the drawer) or a source of `drawer`, `owner_private` or
+  `drawer_and_owner_private` whose two parts carry the voucher's sign, add up to `amount_minor` and match
+  the source; a private part needs the owner's user id and a trimmed 3–300 character reason.
+
+A new UPDATE trigger keeps the seven columns append-only like the rest of the voucher. Adding the CHECK
+constraints scans `expenses` once under a short exclusive lock; every existing row is NULL and passes.
+Numbered and checksum-checked runtime SQL use identical bytes. The number was verified free on all 336
+remote branches before the work started; 0127 belongs to the patient portal security line and is not
+filled here. Rollback of application code leaves the columns unused; it must not drop them or delete the
+registry row. Exact-head CI and Staging verification remain required before Production rollout.
 ### 0132_ortho_adjustment_auxiliaries.sql
 
 Adds two nullable columns to `ortho_adjustments` for the auxiliary appliances documented in an adjustment

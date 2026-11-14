@@ -3,6 +3,8 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, ratesFromSettings, recordExpense, voidExpense } from "@/lib/db";
 import { parseExpenseRequest, refusalStatus } from "@/lib/expense-request";
+import { expenseRequestHash } from "@/lib/expense-request-hash";
+import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { refusalMessage } from "@/lib/supplier-payments";
 import { clinicDateString } from "@/lib/schedule";
@@ -51,6 +53,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 
+  // 0128 (owner #483 6831365228 item 3): one key per intended voucher, reused for every retry of it.
+  const requestKey = request.headers.get("Idempotency-Key");
+  if (!requestKey || !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) {
+    return NextResponse.json({ code: "expense_request_key_required",
+      message: "طلب الصرف بلا مفتاح طلب صالح؛ لم يُسجَّل شيء. حدّث الصفحة ثم أعد التسجيل." }, { status: 400 });
+  }
+
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
@@ -64,8 +73,10 @@ export async function POST(request: Request) {
   if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: parsed.status });
   const request_ = parsed.value;
 
+  const hash = expenseRequestHash(session.username, request_,
+    { source: "drawer", drawerMinor: request_.amountMinor, ownerPrivateMinor: 0, ownerPrivateReason: null });
   try {
-    const { expense, reason, quote } = await recordExpense({
+    const { expense, reason, quote, replayed } = await recordExpense({
       category: request_.category, partyId: request_.partyId, payeeText: request_.payeeText,
       amountMinor: request_.amountMinor, currency: request_.currency, baseCurrency: base,
       exchangeRate: request_.exchangeRate, payableId: request_.payableId, note: request_.note,
@@ -74,6 +85,7 @@ export async function POST(request: Request) {
       rateOverrideReason: request_.rateOverrideReason,
       prepaymentReason: request_.prepaymentReason,
       expectedQuote: request_.expectedQuote,
+      request: { key: requestKey, hash },
     });
     if (reason) {
       return NextResponse.json(
@@ -81,9 +93,10 @@ export async function POST(request: Request) {
         { status: refusalStatus(reason) },
       );
     }
+    if (replayed) return NextResponse.json({ ...expense, existing: true, replayed: true }, { status: 200 });
     return NextResponse.json(expense, { status: 201 });
   } catch {
-    return NextResponse.json({ message: "تعذّر تسجيل الصرف. أعد المحاولة." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر تأكيد تسجيل الصرف. أعد الإرسال بالطلب نفسه للتحقق قبل تسجيل سند آخر." }, { status: 500 });
   }
 }
 

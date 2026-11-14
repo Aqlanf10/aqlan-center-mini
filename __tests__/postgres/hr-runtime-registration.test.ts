@@ -7,6 +7,7 @@ import { INVOICE_SERVICE_ADDITIONS_SQL } from "../../lib/invoice-service-additio
 import { LAB_SHADE_SPECIFICATION_SQL } from "../../lib/lab-shade-schema";
 import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "../../lib/commission-participation-schema";
 import { ORTHO_ADJUSTMENT_AUXILIARIES_SQL } from "../../lib/ortho-adjustment-auxiliaries-schema";
+import { EXPENSE_COMMANDS_SQL } from "../../lib/expense-commands-schema";
 import { AGREEMENT_REMINDER_GUARD_SQL } from "../../lib/agreement-reminder-guard-schema";
 import { AGREEMENT_RECONCILIATION_SQL } from "../../lib/agreement-reconciliation-schema";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "../../lib/patient-appointment-history-schema";
@@ -61,6 +62,7 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0089", name: "lab_shade_specification", checksum: createHash("sha256").update(LAB_SHADE_SPECIFICATION_SQL).digest("hex") },
     ...reviewedMigrations.filter(file => ["0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125"].includes(file.version)),
     { version: "0126", name: "commission_case_participations", checksum: createHash("sha256").update(COMMISSION_CASE_PARTICIPATIONS_SQL).digest("hex") },
+    { version: "0128", name: "expense_commands", checksum: createHash("sha256").update(EXPENSE_COMMANDS_SQL).digest("hex") },
     { version: "0132", name: "ortho_adjustment_auxiliaries", checksum: createHash("sha256").update(ORTHO_ADJUSTMENT_AUXILIARIES_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {

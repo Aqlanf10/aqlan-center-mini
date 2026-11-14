@@ -13,17 +13,21 @@ const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sq
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
   it("accepts the complete saved-study, space and retention journal chain and rejects missing or renamed dependencies", async () => {
     const files = await loadMigrationFiles();
-    expect(files).toHaveLength(96);
+    expect(files).toHaveLength(97);
     expect(() => periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0106"))).toThrow();
     expect(files.at(-1)?.filename).toBe("0132_ortho_adjustment_auxiliaries.sql");
-    expect(files.at(-2)?.filename).toBe("0126_commission_case_participations.sql");
+    expect(files.at(-2)?.filename).toBe("0128_expense_commands.sql");
+    expect(files.at(-3)?.filename).toBe("0126_commission_case_participations.sql");
     expect(periodontalCandidateMigrationVersion(files)).toBe("9000");
     // 0126 follows the reviewed tail 0125 on the composed chain; it never fills a removed predecessor.
     expect(() => periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0125"))).toThrow();
-    // 0132 follows 0126 directly; the reserved gap 0127–0131 is never filled.
+    // 0128 follows 0126 directly and 0132 follows 0128; 0127 and 0129–0131 are never filled here.
     expect(() => periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0126"))).toThrow();
     expect(periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0132"))).toBe("9000");
-    expect(files.slice(-10, -2).map(file => file.filename)).toEqual([
+    // Heads pushed before 0128 existed: 0132 directly after 0126.
+    expect(periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0128"))).toBe("9000");
+    expect(() => periodontalCandidateMigrationVersion([...files.filter(file => file.version !== "0132"), files.at(-3)!])).toThrow();
+    expect(files.slice(-11, -3).map(file => file.filename)).toEqual([
       "0118_ortho_problem_source_submissions.sql",
       "0119_ortho_space_ledger.sql",
       "0120_ortho_space_submissions.sql",
@@ -43,7 +47,7 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     }
 
     expect(() => periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0111"))).toThrow();
-    for (const version of ["0074", "0079", "0080", "0081", "0082", "0090", "0091", "0092", "0093", "0106", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0126", "0132"]) {
+    for (const version of ["0074", "0079", "0080", "0081", "0082", "0090", "0091", "0092", "0093", "0106", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0126", "0128", "0132"]) {
       expect(() => periodontalCandidateMigrationVersion(files.map(file => file.version === version
         ? { ...file, filename: `${version}_unknown.sql` } : file))).toThrow();
     }
@@ -51,7 +55,7 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
 
   it("accepts the exact composed 0066–0069 chain and reviewed branch variants, retaining sentinel 9000", async () => {
     // The orthodontic/Rx chain without the finance additions (0074, 0079–0082, 0126) and 0132, which follows 0126.
-    const files = (await loadMigrationFiles()).filter(file => !["0074", "0079", "0080", "0081", "0082", "0090", "0091", "0092", "0093", "0106", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0126", "0132"].includes(file.version));
+    const files = (await loadMigrationFiles()).filter(file => !["0074", "0079", "0080", "0081", "0082", "0090", "0091", "0092", "0093", "0106", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0126", "0128", "0132"].includes(file.version));
     expect(files).toHaveLength(68);
     expect(files[67]).toMatchObject({ version: "0109", filename: "0109_ortho_adjustment_requests.sql" });
     expect(files[66]).toMatchObject({ version: "0108", filename: "0108_ortho_assessment_intake.sql" });
@@ -81,7 +85,8 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
   });
   it("accepts the finance chain (0074, 0079–0082, 0126) without the orthodontic/Rx additions, retaining sentinel 9000", async () => {
     const files = (await loadMigrationFiles()).filter(file => !["0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0132"].includes(file.version));
-    expect(files).toHaveLength(72);
+    expect(files).toHaveLength(73);
+    expect(files[72]).toMatchObject({ version: "0128", filename: "0128_expense_commands.sql" });
     expect(files[71]).toMatchObject({ version: "0126", filename: "0126_commission_case_participations.sql" });
     expect(files[70]).toMatchObject({ version: "0089", filename: "0089_lab_shade_specification.sql" });
     expect(files[69]).toMatchObject({ version: "0087", filename: "0087_agreement_reminder_metadata.sql" });
@@ -102,7 +107,7 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(periodontalCandidateMigrationVersion(files.slice(0,61))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,60))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0067"))).toBe("9000");
-    expect(periodontalCandidateMigrationVersion(files.filter(file => !["0066", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0126"].includes(file.version)))).toBe("9000");
+    expect(periodontalCandidateMigrationVersion(files.filter(file => !["0066", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0126", "0128"].includes(file.version)))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,59))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,58))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,57))).toBe("9000");

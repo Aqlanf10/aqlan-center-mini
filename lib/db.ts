@@ -66,6 +66,7 @@ import type { PlannedVisitContext } from "./planned-visit-context";
 import {labVisitSignatureVersion} from "./lab-visit-signature";
 import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "./commission-participation-schema";
 import { ORTHO_ADJUSTMENT_AUXILIARIES_SQL } from "./ortho-adjustment-auxiliaries-schema";
+import { EXPENSE_COMMANDS_SQL } from "./expense-commands-schema";
 import type { OrthoAuxiliary } from "./ortho-auxiliaries";
 import { recordedSessionMatchesRequest, type SessionRequestValues } from "./ortho-session-match";
 import { loadCaseParticipationsAt } from "./commission-participation-read";
@@ -2218,6 +2219,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0124", name: "ceph_correction_lineage", filename: "0124_ceph_correction_lineage.sql", sql: CEPH_CORRECTION_LINEAGE_SQL, checksum: checksumOf(CEPH_CORRECTION_LINEAGE_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0125", name: "ortho_case_reopen", filename: "0125_ortho_case_reopen.sql", sql: ORTHO_REOPEN_SQL, checksum: checksumOf(ORTHO_REOPEN_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0126", name: "commission_case_participations", filename: "0126_commission_case_participations.sql", sql: COMMISSION_CASE_PARTICIPATIONS_SQL, checksum: checksumOf(COMMISSION_CASE_PARTICIPATIONS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0128", name: "expense_commands", filename: "0128_expense_commands.sql", sql: EXPENSE_COMMANDS_SQL, checksum: checksumOf(EXPENSE_COMMANDS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0132", name: "ortho_adjustment_auxiliaries", filename: "0132_ortho_adjustment_auxiliaries.sql", sql: ORTHO_ADJUSTMENT_AUXILIARIES_SQL, checksum: checksumOf(ORTHO_ADJUSTMENT_AUXILIARIES_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
@@ -13908,6 +13910,11 @@ export interface RecordExpenseInput {
   /** (P0-2) ما رآه المستخدم في المعاينة — إن تغيّر السعر أو المتبقي قبل التأكيد يُرفض
    * السند (`stale_quote`) ولا يُحفظ غير ما أُكِّد. */
   expectedQuote?: ExpectedQuote | null;
+  /**
+   * 0128 (docs/finance/EXPENSE_COMMANDS_0128.md §2.1): the request key and its fingerprint, both or
+   * neither. HTTP creates always carry them; internal settlements (payroll, lab batch) do not.
+   */
+  request?: { key: string; hash: string } | null;
 }
 
 export interface ExpectedQuote {
@@ -13921,6 +13928,8 @@ export interface RecordExpenseResult {
   expense: Expense | null;
   reason: SupplierPaymentRefusal | null;
   quote: SettlementQuote | null;
+  /** True when the key had already recorded this exact request: nothing new was written. */
+  replayed?: boolean;
 }
 
 /**
@@ -14084,11 +14093,11 @@ export async function recordExpenseInTx(
        voucher_number, category, party_id, payee_text, shift_id, amount_minor, currency,
        exchange_rate, base_amount_minor, base_currency, payable_id, note, created_by,
        payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
-       rate_override_reason)
+       rate_override_reason, idempotency_key, idempotency_request_hash)
      SELECT
        ${documentNumberSql("voucher")},
        $1, $2::int, $3::text, s.id, $4, $5, $6, $7, $8, $9::int, $10::text, $11,
-       $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text
+       $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text, $17::text, $18::text
        FROM cashier_shifts s
       WHERE s.status = 'open'
       LIMIT 1
@@ -14100,6 +14109,7 @@ export async function recordExpenseInTx(
       input.exchangeRate, baseAmount, input.baseCurrency, input.payableId, note, input.createdBy,
       snapshot?.currency ?? null, snapshot?.amountMinor ?? null, snapshot?.exchangeRate ?? null,
       snapshot?.settledMinor ?? null, input.rateOverrideReason?.trim() || null,
+      input.request?.key ?? null, input.request?.hash ?? null,
     ],
   );
   if (!rows[0]) return { id: null, reason: "no_shift", quote };
@@ -14135,6 +14145,22 @@ export async function recordExpense(input: RecordExpenseInput): Promise<RecordEx
   };
   try {
     await client.query("BEGIN");
+    if (input.request && !input.quoteOnly) {
+      // Lock-then-admit on the key: concurrent sends of one key queue here, then see the winner's row.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`aqlan.expense.request:${input.request.key}`]);
+      const { rows: prior } = await client.query<{ id: number; idempotency_request_hash: string }>(
+        "SELECT id, idempotency_request_hash FROM expenses WHERE idempotency_key = $1", [input.request.key]);
+      if (prior[0]) {
+        if (prior[0].idempotency_request_hash !== input.request.hash) {
+          await rollback();
+          return { expense: null, reason: "expense_request_conflict", quote: null };
+        }
+        const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [prior[0].id]);
+        if (!rows[0]) throw new Error("Replayed expense receipt missing");
+        await rollback();
+        return { expense: toExpense(rows[0]), reason: null, quote: null, replayed: true };
+      }
+    }
     const result = await recordExpenseInTx(client, input, settingsRates);
     if (result.id === null) {
       await rollback();
@@ -14154,6 +14180,7 @@ export async function recordExpense(input: RecordExpenseInput): Promise<RecordEx
         البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
         سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
         الجهة: expense.partyId ?? expense.payeeText,
+        ...(input.request ? { مفتاح_الطلب: input.request.key } : {}),
         ...(expense.payableId !== null ? {
           الالتزام: expense.payableId, عملة_الفاتورة: expense.payableCurrency,
           قيمة_الفاتورة: expense.payableAmountMinor, سعر_الفاتورة: expense.payableExchangeRate,

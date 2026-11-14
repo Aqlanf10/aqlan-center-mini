@@ -13,8 +13,15 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
   // Exact session-auxiliaries suffix (orthodontics, owner #483; number allocated in #483 6867852606):
   // directly after case participation (0126) on the composed chain. 0127–0131 are reserved elsewhere and
   // are never filled here; any other predecessor fails closed.
+  // Exact expense-commands suffix (finance, owner #483 6831365228; number allocated in #483 6833690789):
+  // directly after case participation (0126). 0132 follows it on the composed chain, or follows 0126
+  // directly on the reviewed heads pushed before 0128 existed. Any other predecessor fails closed.
   if (files.at(-1)?.version === "0132") {
-    if (files.at(-2)?.filename !== "0126_commission_case_participations.sql" || files.at(-1)?.filename !== "0132_ortho_adjustment_auxiliaries.sql") throw new Error("Unreviewed session auxiliaries migration suffix.");
+    if (!["0126_commission_case_participations.sql", "0128_expense_commands.sql"].includes(files.at(-2)?.filename ?? "") || files.at(-1)?.filename !== "0132_ortho_adjustment_auxiliaries.sql") throw new Error("Unreviewed session auxiliaries migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  if (files.at(-1)?.version === "0128") {
+    if (files.at(-2)?.filename !== "0126_commission_case_participations.sql" || files.at(-1)?.filename !== "0128_expense_commands.sql") throw new Error("Unreviewed expense commands migration suffix.");
     return periodontalCandidateMigrationVersion(files.slice(0, -1));
   }
   if (files.at(-1)?.version === "0126") {

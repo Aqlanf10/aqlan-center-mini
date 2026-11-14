@@ -194,6 +194,14 @@ work of other sessions is not visible to this check. It is repeated before the f
 None of these files exists on this branch yet. If a collision appears, only that number is held and
 reported (file, branch, blob, whether published or applied); published migrations are never renamed.
 
+### 8b. 0128 in use (2026-11-14)
+
+`0128_expense_commands.sql` is now written on this branch (contract `docs/finance/EXPENSE_COMMANDS_0128.md`).
+Collision check first: a tree-only fetch of all 336 remote branches found no `0128_*` file; only 0127
+(two patient-portal security branches) and 0132 (this branch) exist in 0127–0139. 0128 sits between 0126
+and 0132 in the runtime registration; the reviewed-chain checks accept 0132 after 0128 and, for heads
+pushed before 0128 existed, after 0126. 0129–0131 are still unused.
+
 ### 8a. 0132, session auxiliary appliances (#483 6867852606)
 
 | Version | File | Purpose | Owner | Depends on |

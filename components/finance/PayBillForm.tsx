@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { CLINIC_BASE_CURRENCY, CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import type { SettlementQuote } from "@/lib/supplier-payments";
+import { EXPENSE_UNCERTAIN, expenseAttemptKey, isDefinitiveExpenseAnswer, sessionStorageOrNull, settleExpenseAttempt } from "@/lib/expense-attempt";
 
 /**
  * (P0-2) سداد فاتورة مورد/مختبر بعينها — مع معاينةٍ قبل التأكيد.
@@ -75,8 +76,14 @@ export default function PayBillForm({
       /* التأكيد يحمل ما رآه المستخدم: إن تغيّر السعر أو المتبقي منذ المعاينة يرفض
          الخادم (stale_quote) فتُعاد المعاينة — لا يُحفظ غير ما أُكِّد. */
       const quoted = preview.quote;
-      const response = await fetch("/api/expenses", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      // 0128: the key follows the payment itself (not the preview values), so a retry after a lost
+      // response replays the first voucher even if the preview was refreshed in between.
+      const storage = sessionStorageOrNull();
+      const requestKey = expenseAttemptKey(storage, key);
+      let response: Response;
+      try {
+        response = await fetch("/api/expenses", {
+        method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey },
         body: JSON.stringify({
           ...body,
           expected: {
@@ -86,7 +93,13 @@ export default function PayBillForm({
             payableRemainingBeforeMinor: quoted.payable?.remainingBeforeMinor ?? null,
           },
         }),
-      });
+        });
+      } catch {
+        setError(EXPENSE_UNCERTAIN);
+        return;
+      }
+      if (!isDefinitiveExpenseAnswer(response.status) || response.redirected) { setError(EXPENSE_UNCERTAIN); return; }
+      settleExpenseAttempt(storage, requestKey);
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         if (payload?.code === "stale_quote") { setPreview(null); setPreviewKey(null); }
