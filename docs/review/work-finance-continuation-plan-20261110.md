@@ -52,7 +52,10 @@ Gate finding on `817106ac`: the interim commits had not regenerated `docs/securi
 - Owner decision on #483 and Dot's allocation 6867852606: optional auxiliary appliances in the adjustment
   session, migration 0132 (two nullable columns, no backfill). Spec and status:
   `docs/ortho/WIRE_APPLIANCE_OPTIONS_SPEC.md`; allocation record: merge record section 8a.
-- Next after this: CI on the pushed head, then Stage 4 finance (0128–0131) with a fresh collision check.
+- Reviews on the session screen closed the same day (#483 6871207083, 6872647524, 6873798343): one session
+  per visit with a 409 for a new key, receipt provenance by recorded values, cached-receipt and reload
+  recovery. Head `9247b768`, hosted CI green 6/6. Details in HANDOFF (2026-11-14).
+- Next: Stage 4 finance (0128–0131) with a fresh collision check.
 
 ## 3. Finance queue (order by risk to patient balances and the cash box)
 
