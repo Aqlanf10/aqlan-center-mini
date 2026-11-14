@@ -111,8 +111,10 @@ for (const width of [390, 1280]) it(`does not treat a historical receipt bound t
     await page.getByRole("button", { name: "⚡ سجّل شدّة وجلسة جديدة الآن", exact: true }).click();
     const form = page.locator("form").filter({ has: page.getByTestId("adjustment-reconcile") });
     await form.waitFor();
-    // A photo queued for B before the user checks the pending request.
+    // While B is unresolved the form takes no new photos (existing behaviour): nothing can be queued for,
+    // or uploaded to, a session whose outcome is not known.
     await form.locator('input[type="file"]:not([capture])').setInputFiles({ name: "syn-b.png", mimeType: "image/png", buffer: PNG });
+    expect(await form.locator("img[src^='blob:']").count()).toBe(0);
     await page.getByTestId("adjustment-reconcile").click();
     const alert = page.getByTestId("adjustment-refused");
     await alert.waitFor();
@@ -125,6 +127,8 @@ for (const width of [390, 1280]) it(`does not treat a historical receipt bound t
     expect(await editable.getByRole("textbox", { name: "ما نُفّذ في الشدّة", exact: true }).inputValue()).toBe("SYN request B never saved");
     expect(await page.getByRole("combobox", { name: "السلك العلوي", exact: true }).inputValue()).toBe("019×025 SS");
     expect(await editable.getByTestId("adjustment-auxiliaries-state").textContent()).toBe("TAD / Mini-screw، آخر: SYN Pendulum");
+    // Once the refusal settles the form is editable again: a photo can be queued, and nothing was uploaded.
+    await editable.locator('input[type="file"]:not([capture])').setInputFiles({ name: "syn-b.png", mimeType: "image/png", buffer: PNG });
     expect(await editable.locator("img[src^='blob:']").count()).toBeGreaterThan(0);
     await page.getByText("SYN session A").first().waitFor();
     expect(await state(caseId)).toEqual(before);
