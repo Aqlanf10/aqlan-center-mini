@@ -25586,10 +25586,20 @@ export async function recordAdjustment(input: {
   request?: OrthoAdjustmentRequest;
 }): Promise<
   | { ok: true; id: number; created: boolean; visitId: number | null; attachedToToday: boolean; replayed?: boolean }
-  | { ok: false; message: string; status?: number; code?: string }
+  | { ok: false; message: string; status?: number; code?: string; existingAdjustmentId?: number; visitId?: number | null }
 > {
   await ensureSchema();
   const client = await getPool().connect();
+  // Review finding #483 6871207083: one session per visit stays the rule, but a NEW request key that meets
+  // the visit's existing session is a different intention, not a retry. It is refused and nothing about it
+  // is recorded (no receipt, no audit, no wire change), so the screen never reports it as saved. The same
+  // key is still replayed through its own receipt above; internal callers without a request keep the
+  // historical return of the existing session.
+  const visitAlreadyRecorded = async (existingAdjustmentId: number, visitId: number | null) => {
+    await client.query("ROLLBACK");
+    return { ok: false as const, status: 409, code: "adjustment_visit_already_recorded", existingAdjustmentId, visitId,
+      message: `لهذه الزيارة جلسة شدّ مسجّلة سابقًا (رقم ${existingAdjustmentId})؛ لم تُحفظ هذه الجلسة ولم تُرفع صورها. بياناتك باقية في النموذج؛ راجع الجلسة المسجّلة في السجل.` };
+  };
   try {
     await client.query("BEGIN");
     const prepared = input.request ? await prepareAdjustmentRequest(client, input, input.request) : null;
@@ -25658,9 +25668,7 @@ export async function recordAdjustment(input: {
         );
         if (existing.rows[0]) {
           await recordedVisitOrthoSource(client, visitId, rows[0].patient_id);
-          if (prepared) await saveAdjustmentRequest(client, prepared, {
-            id: existing.rows[0].id, visitId, attachedToToday: false,
-          });
+          if (prepared) return await visitAlreadyRecorded(existing.rows[0].id, visitId);
           await client.query("COMMIT");
           return { ok: true, id: existing.rows[0].id, created: false, visitId, attachedToToday: false };
         }
@@ -25673,6 +25681,7 @@ export async function recordAdjustment(input: {
       await client.query("ROLLBACK");
       return { ok: false, message: ORTHO_SESSION_REFUSAL[result.reason] };
     }
+    if (prepared && !result.created) return await visitAlreadyRecorded(result.id, visitId);
     if (prepared) await saveAdjustmentRequest(client, prepared, { id: result.id, visitId, attachedToToday });
     await client.query("COMMIT");
     return { ok: true, id: result.id, created: result.created, visitId, attachedToToday };

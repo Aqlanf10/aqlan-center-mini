@@ -119,7 +119,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         newDateAdmissionError: source.doneOn == null || isAdjustmentDate(source.doneOn) ? null : ADJUSTMENT_DATE_ERROR,
         newIntervalAdmissionError: source.nextWeeks == null || parseAdjustmentInterval(source.nextWeeks) !== null ? null : ADJUSTMENT_INTERVAL_ERROR },
     });
-    if (!result.ok) return NextResponse.json({ message: result.message, ...(result.code ? { code: result.code } : {}) }, { status: result.status ?? 409 });
+    if (!result.ok) return NextResponse.json({ message: result.message, ...(result.code ? { code: result.code } : {}),
+      // The visit's existing session, named so the screen can point to it; never a receipt for this request.
+      ...(result.existingAdjustmentId ? { existingAdjustmentId: result.existingAdjustmentId, visitId: result.visitId ?? null } : {}) },
+      { status: result.status ?? 409 });
     // (CASE-1) شدّةٌ لهذه الزيارة موجودة سلفًا (نقرة مزدوجة/إعادة محاولة): تُعاد هي ولا يُدرج صفٌّ ثانٍ.
     // (VISIT-FLOW-1) visitId: زيارة اليوم التي رُبطت بها الشدّة (أو null) — لتقول الشاشة ذلك.
     const receipt = { id: result.id, patientId: found.patientId, caseId, requestKey,

@@ -14,7 +14,7 @@ import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { readOpenAssessmentCommand, readStartTreatmentCommand, verifyIntakeReceipt, type OpenAssessmentCommand, type StartTreatmentCommand, type IntakeReceipt } from "@/lib/ortho-assessment-intake";
-import { adjustmentNewCommandError, createAdjustmentCommand, readAdjustmentCommand, completeAdjustmentCommand, retireAdjustmentCommand, isAdjustmentReceipt, type AdjustmentCommand } from "@/lib/ortho-adjustment-command";
+import { adjustmentNewCommandError, createAdjustmentCommand, readAdjustmentCommand, completeAdjustmentCommand, retireAdjustmentCommand, isAdjustmentReceipt, isDefinitiveAdjustmentRefusal, discardRefusedAdjustmentCommand, type AdjustmentCommand } from "@/lib/ortho-adjustment-command";
 import { parseAdjustmentInterval } from "@/lib/ortho-adjustment-interval";
 import { AUXILIARY_OTHER_LIMIT, auxiliariesText, ORTHO_AUXILIARY_KEYS, ORTHO_AUXILIARY_LABEL, type OrthoAuxiliary } from "@/lib/ortho-auxiliaries";
 import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "@/lib/ortho-adjustment-date";
@@ -2211,6 +2211,30 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
         if (!form.checkHeaders(response, operation)) return;
         const payload = await response.json().catch(() => null);
         if (!form.current(operation)) return;
+        if (isDefinitiveAdjustmentRefusal(response.status, payload)) {
+          // Review #483 6871207083: the visit already has a session and nothing was recorded for this
+          // request. Drop its unused key, keep every field and queued photo, upload nothing, report nothing
+          // as saved. A request recovered after a reload puts its own values back into the fields.
+          discardRefusedAdjustmentCommand(sessionStorage, command);
+          publishCommand({ ...commandState, command: null });
+          if (recovered) {
+            const sent = JSON.parse(command.body) as Record<string, unknown>;
+            for (const name of ["doneOn", "upperWire", "lowerWire", "elastics", "elasticNote", "done"] as const) form.commit(name, String(sent[name] ?? ""));
+            form.commit("nextWeeks", String(sent.nextWeeks ?? ""));
+            form.commit("removeUpperWire", sent.upperWireAction === "remove");
+            form.commit("removeLowerWire", sent.lowerWireAction === "remove");
+            form.commit("auxiliaries", Array.isArray(sent.auxiliaries) ? sent.auxiliaries : null);
+            form.commit("auxiliaryOther", typeof sent.auxiliaryOther === "string" ? sent.auxiliaryOther : "");
+          }
+          // Settled outcome: the fields are editable again but nothing is marked saved.
+          form.acknowledge(operation, {});
+          onError(payload.message); return;
+        }
+        // A receipt for another request is never success: only this key's own replay may say "existing".
+        if (payload && typeof payload === "object" && (payload as { existing?: unknown }).existing === true
+          && (payload as { replayed?: unknown }).replayed !== true) {
+          form.uncertain(); onError("أعاد الخادم جلسة مسجّلة سابقًا بدل هذا الطلب؛ لم تُعتبر محفوظة. راجع السجل."); return;
+        }
         if (!response.ok || !isAdjustmentReceipt(payload, command)) {
           form.uncertain(); onError(payload?.message ?? "تعذّر تأكيد تسجيل الشدّة. أعد التحقق بنفس الطلب المحفوظ."); return;
         }

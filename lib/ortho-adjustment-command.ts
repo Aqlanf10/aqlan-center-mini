@@ -112,3 +112,19 @@ export function retireAdjustmentCommand(storage: StorageLike, command: Adjustmen
   storage.removeItem(adjustmentCommandStorageKey(command.scope));
   if (readAdjustmentCommand(storage, command.scope)) throw new Error("تعذّر بدء شدّة جديدة بأمان.");
 }
+/** Codes the server returns only after rolling back everything for this request: no receipt was written
+ * for its key, so the key is unused and the frozen command may be dropped. Any other failure stays
+ * uncertain and keeps the command for same-key reconciliation. */
+export const DEFINITIVE_ADJUSTMENT_REFUSALS: readonly string[] = ["adjustment_visit_already_recorded"];
+export function isDefinitiveAdjustmentRefusal(status: number, payload: unknown): payload is { code: string; message: string; existingAdjustmentId?: number } {
+  return status === 409 && !!payload && typeof payload === "object"
+    && DEFINITIVE_ADJUSTMENT_REFUSALS.includes(String((payload as { code?: unknown }).code))
+    && typeof (payload as { message?: unknown }).message === "string";
+}
+/** Drops only this exact unacknowledged command after a definitive refusal. Never drops a receipt. */
+export function discardRefusedAdjustmentCommand(storage: StorageLike, command: AdjustmentCommand) {
+  const current = readAdjustmentCommand(storage, command.scope);
+  if (!current || current.key !== command.key || current.receipt !== null) throw new Error("تعذّر التحقق من طلب الشدّة المرفوض؛ راجع السجل.");
+  storage.removeItem(adjustmentCommandStorageKey(command.scope));
+  if (readAdjustmentCommand(storage, command.scope)) throw new Error("تعذّر إزالة طلب الشدّة المرفوض بأمان.");
+}
