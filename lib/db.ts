@@ -67,6 +67,7 @@ import {labVisitSignatureVersion} from "./lab-visit-signature";
 import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "./commission-participation-schema";
 import { ORTHO_ADJUSTMENT_AUXILIARIES_SQL } from "./ortho-adjustment-auxiliaries-schema";
 import type { OrthoAuxiliary } from "./ortho-auxiliaries";
+import { recordedSessionMatchesRequest, type SessionRequestValues } from "./ortho-session-match";
 import { loadCaseParticipationsAt } from "./commission-participation-read";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
@@ -25563,31 +25564,16 @@ export async function decideOrthoAdjustmentBillingInTransaction(client: DbClient
  * في المعاملة نفسها؛ الإدخال المتأخر الأقدم يبقى في السجل ولا يستبدل السلك الحالي.
  * السلك الحالي يُقرأ من صفّ الحالة، بلا إعادة بناءٍ للتاريخ أو تغييرٍ للقطة سابقة.
  */
-interface RecordedSessionValues {
+interface RecordedSessionRow {
   phase: string | null; upper_wire: string | null; lower_wire: string | null; elastics: string;
   elastic_note: string | null; done: string | null; next_weeks: number; note: string | null;
   auxiliaries: string[] | null; auxiliary_other: string | null;
 }
-/**
- * Provenance check for a replayed receipt: do the recorded session values equal what this request would
- * have written? Same normalization as writeOrthoSessionInTx (trimmed text, empty → NULL). A blank wire
- * without "remove" kept the case's wire at that time, so it is not compared. The visit date is already
- * bound by the fingerprint (including the omitted-date legacy path) and is not compared again.
- */
-function sessionMatchesRequest(row: RecordedSessionValues, input: {
-  phase: string | null; upperWire: string | null; lowerWire: string | null; upperWireAction?: "remove"; lowerWireAction?: "remove";
-  elastics: string; elasticNote: string | null; done: string | null; nextWeeks: number; note: string | null;
-  auxiliaries?: readonly string[] | null; auxiliaryOther?: string | null;
-}): boolean {
-  const text = (value: string | null | undefined) => value?.trim() || null;
-  const wire = (recorded: string | null, sent: string | null, action?: "remove") =>
-    action === "remove" ? recorded === null : text(sent) === null || recorded === text(sent);
-  const sentAuxiliaries = input.auxiliaries == null ? null : [...input.auxiliaries];
-  return (input.phase ?? null) === row.phase && input.elastics === row.elastics && input.nextWeeks === row.next_weeks
-    && text(input.elasticNote) === row.elastic_note && text(input.done) === row.done && text(input.note) === row.note
-    && wire(row.upper_wire, input.upperWire, input.upperWireAction) && wire(row.lower_wire, input.lowerWire, input.lowerWireAction)
-    && JSON.stringify(sentAuxiliaries) === JSON.stringify(row.auxiliaries ?? null)
-    && (sentAuxiliaries === null ? row.auxiliary_other === null : (input.auxiliaryOther ?? null) === row.auxiliary_other);
+/** Server side of the shared provenance rule (lib/ortho-session-match.ts). */
+function sessionMatchesRequest(row: RecordedSessionRow, input: SessionRequestValues): boolean {
+  return recordedSessionMatchesRequest({ phase: row.phase, upperWire: row.upper_wire, lowerWire: row.lower_wire, elastics: row.elastics,
+    elasticNote: row.elastic_note, done: row.done, nextWeeks: row.next_weeks, note: row.note,
+    auxiliaries: row.auxiliaries, auxiliaryOther: row.auxiliary_other }, input);
 }
 
 export async function recordAdjustment(input: {
@@ -25648,7 +25634,7 @@ export async function recordAdjustment(input: {
       // when that session's recorded clinical values are the ones this request carries; otherwise it is
       // refused as a historical binding. Nothing is rewritten or deleted, and the refusal is the same on
       // every retry because recorded session values do not change.
-      const { rows: [recordedSession] } = await client.query<RecordedSessionValues>(
+      const { rows: [recordedSession] } = await client.query<RecordedSessionRow>(
         `SELECT phase, upper_wire, lower_wire, elastics, elastic_note, done, next_weeks, note, auxiliaries, auxiliary_other
            FROM ortho_adjustments WHERE id = $1 AND case_id = $2`, [prepared.prior.id, prepared.caseId]);
       if (!recordedSession || !sessionMatchesRequest(recordedSession, input)) {

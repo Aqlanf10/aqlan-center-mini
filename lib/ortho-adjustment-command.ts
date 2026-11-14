@@ -2,6 +2,7 @@ import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "./ortho-adjustment-date
 import { parseAdjustmentInterval, ADJUSTMENT_INTERVAL_ERROR } from "./ortho-adjustment-interval";
 import { IDEMPOTENCY_KEY_PATTERN, newIdempotencyKey } from "./idempotency-key";
 import { parseAuxiliariesInput } from "./ortho-auxiliaries";
+import { recordedSessionMatchesRequest, type RecordedSessionValues } from "./ortho-session-match";
 
 export type AdjustmentCommandScope = { patientId: number; caseId: number; authority: string };
 export type AdjustmentCommandBody = { doneOn: string; upperWire: string; lowerWire: string;
@@ -123,10 +124,63 @@ export function isDefinitiveAdjustmentRefusal(status: number, payload: unknown):
     && DEFINITIVE_ADJUSTMENT_REFUSALS.includes(String((payload as { code?: unknown }).code))
     && typeof (payload as { message?: unknown }).message === "string";
 }
-/** Drops only this exact unacknowledged command after a definitive refusal. Never drops a receipt. */
-export function discardRefusedAdjustmentCommand(storage: StorageLike, command: AdjustmentCommand) {
+/** Drops only this exact command after a definitive refusal. A cached receipt is dropped only when the
+ * caller proved it does not describe the recorded session (`unverifiedReceipt`); a receipt is never
+ * dropped otherwise. The server's receipt row itself is never touched. */
+export function discardRefusedAdjustmentCommand(storage: StorageLike, command: AdjustmentCommand, options: { unverifiedReceipt?: boolean } = {}) {
   const current = readAdjustmentCommand(storage, command.scope);
-  if (!current || current.key !== command.key || current.receipt !== null) throw new Error("تعذّر التحقق من طلب الشدّة المرفوض؛ راجع السجل.");
+  if (!current || current.key !== command.key || (current.receipt !== null && options.unverifiedReceipt !== true)) throw new Error("تعذّر التحقق من طلب الشدّة المرفوض؛ راجع السجل.");
   storage.removeItem(adjustmentCommandStorageKey(command.scope));
   if (readAdjustmentCommand(storage, command.scope)) throw new Error("تعذّر إزالة طلب الشدّة المرفوض بأمان.");
+}
+
+/**
+ * Review #483 6873798343, cached acknowledgement: a receipt cached by an earlier version of the screen may
+ * point to a session recorded from other values. Three outcomes, never conflated:
+ * - "match": the named session is loaded with the values this request carries (same rule as the server);
+ * - "mismatch": the named session is loaded with other values: an unambiguous refusal, never a save;
+ * - "unknown": the named session is not in the loaded history (for example, a save whose refresh has not
+ *   arrived yet). It is not judged. Recovery never uploads photos, so no outcome attaches this request's
+ *   photos to a session.
+ */
+export type CachedReceiptProvenance = "match" | "mismatch" | "unknown";
+export function cachedReceiptProvenance(command: AdjustmentCommand, sessions: readonly (RecordedSessionValues & { id: number })[]): CachedReceiptProvenance {
+  if (!command.receipt) return "unknown";
+  const session = sessions.find((row) => row.id === command.receipt!.id);
+  if (!session) return "unknown";
+  const body = JSON.parse(command.body) as AdjustmentCommandBody;
+  // The screen sends no phase or note, so they are not judged here.
+  return recordedSessionMatchesRequest(session, body) ? "match" : "mismatch";
+}
+
+/**
+ * Review #483 6873798343, reload after a refusal: the refused request's typed values are kept in session
+ * storage (the same storage and the same body the pending request already used) so a reload can put them
+ * back. Photos are never stored in the browser; only how many were queued, so the screen can say they
+ * were not kept. Cleared by an explicit dismissal or a later saved session.
+ */
+export type RefusedAdjustmentDraft = { version: 1; scope: AdjustmentCommandScope; body: string; code: string;
+  existingAdjustmentId: number | null; photoCount: number };
+export function refusedDraftStorageKey(scope: AdjustmentCommandScope) {
+  return `ortho-adjustment-refused:v1:${JSON.stringify([scope.patientId, scope.caseId, scope.authority])}`;
+}
+export function writeRefusedAdjustmentDraft(storage: StorageLike, draft: RefusedAdjustmentDraft) {
+  if (!validBody(draft.body)) throw new Error("تعذّر حفظ قيم الجلسة المرفوضة.");
+  storage.setItem(refusedDraftStorageKey(draft.scope), JSON.stringify(draft));
+}
+/** Fails closed to null: a corrupt or foreign record is ignored, never restored. */
+export function readRefusedAdjustmentDraft(storage: StorageLike, scope: AdjustmentCommandScope): RefusedAdjustmentDraft | null {
+  try {
+    const raw = storage.getItem(refusedDraftStorageKey(scope));
+    if (raw === null) return null;
+    const draft = JSON.parse(raw) as RefusedAdjustmentDraft;
+    const ok = draft && draft.version === 1 && draft.scope?.patientId === scope.patientId && draft.scope.caseId === scope.caseId
+      && draft.scope.authority === scope.authority && validBody(draft.body) && typeof draft.code === "string"
+      && (draft.existingAdjustmentId === null || positive(draft.existingAdjustmentId))
+      && Number.isSafeInteger(draft.photoCount) && draft.photoCount >= 0;
+    return ok ? draft : null;
+  } catch { return null; }
+}
+export function clearRefusedAdjustmentDraft(storage: StorageLike, scope: AdjustmentCommandScope) {
+  try { storage.removeItem(refusedDraftStorageKey(scope)); } catch { /* storage unavailable: nothing to clear */ }
 }

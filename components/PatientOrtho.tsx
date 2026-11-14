@@ -14,7 +14,7 @@ import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { readOpenAssessmentCommand, readStartTreatmentCommand, verifyIntakeReceipt, type OpenAssessmentCommand, type StartTreatmentCommand, type IntakeReceipt } from "@/lib/ortho-assessment-intake";
-import { adjustmentNewCommandError, createAdjustmentCommand, readAdjustmentCommand, completeAdjustmentCommand, retireAdjustmentCommand, isAdjustmentReceipt, isDefinitiveAdjustmentRefusal, discardRefusedAdjustmentCommand, type AdjustmentCommand } from "@/lib/ortho-adjustment-command";
+import { adjustmentNewCommandError, createAdjustmentCommand, readAdjustmentCommand, completeAdjustmentCommand, retireAdjustmentCommand, isAdjustmentReceipt, isDefinitiveAdjustmentRefusal, discardRefusedAdjustmentCommand, cachedReceiptProvenance, writeRefusedAdjustmentDraft, readRefusedAdjustmentDraft, clearRefusedAdjustmentDraft, type AdjustmentCommand, type RefusedAdjustmentDraft } from "@/lib/ortho-adjustment-command";
 import { parseAdjustmentInterval } from "@/lib/ortho-adjustment-interval";
 import { AUXILIARY_OTHER_LIMIT, auxiliariesText, ORTHO_AUXILIARY_KEYS, ORTHO_AUXILIARY_LABEL, type OrthoAuxiliary } from "@/lib/ortho-auxiliaries";
 import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "@/lib/ortho-adjustment-date";
@@ -2094,6 +2094,37 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
   // Review #483 6871207083: a refusal is shown beside the save button, not only at the top of the page.
   // It lives in the draft, like the typed values, so the history refresh that remounts the form keeps it.
   const [refusal] = form.field<string | null>("refusal", null);
+  // Review #483 6873798343. Put a request's own values back into the fields (never another session's).
+  const restoreFromBody = (raw: string) => {
+    const sent = JSON.parse(raw) as Record<string, unknown>;
+    for (const name of ["doneOn", "upperWire", "lowerWire", "elastics", "elasticNote", "done"] as const) form.commit(name, String(sent[name] ?? ""));
+    form.commit("nextWeeks", String(sent.nextWeeks ?? ""));
+    form.commit("removeUpperWire", sent.upperWireAction === "remove");
+    form.commit("removeLowerWire", sent.lowerWireAction === "remove");
+    form.commit("auxiliaries", Array.isArray(sent.auxiliaries) ? sent.auxiliaries : null);
+    form.commit("auxiliaryOther", typeof sent.auxiliaryOther === "string" ? sent.auxiliaryOther : "");
+  };
+  // Clinical values only: a withheld photo history is never read for this check.
+  const recordedSessions = caseRow.adjustments.map((row) => ({ id: row.id, doneOn: row.doneOn, phase: row.phase, upperWire: row.upperWire,
+    lowerWire: row.lowerWire, elastics: row.elastics, elasticNote: row.elasticNote, done: row.done, nextWeeks: row.nextWeeks, note: row.note,
+    auxiliaries: row.auxiliaries ?? null, auxiliaryOther: row.auxiliaryOther ?? null }));
+  const cachedReceiptMessage = (id: number) =>
+    `مرجع الجلسة المحفوظ في هذا المتصفح يشير إلى جلسة مسجّلة (رقم ${id}) بقيم مختلفة؛ لم يُعتبر طلبك محفوظًا ولم يُرفع شيء. استُعيدت قيمك في النموذج؛ راجع الجلسة المسجّلة.`;
+  const restoredMessage = (record: RefusedAdjustmentDraft) =>
+    `استُعيدت قيم جلسة لم تُحفظ${record.existingAdjustmentId ? ` (لهذه الزيارة جلسة مسجّلة رقم ${record.existingAdjustmentId})` : ""}؛ راجعها قبل أي حفظ.`
+    + (record.photoCount > 0 ? ` كانت ${record.photoCount} صورة في الطابور ولم تُرفع؛ الصور لا تُحفظ في المتصفح حمايةً لخصوصية المريض، فأعد اختيارها من جهازك.` : "");
+  /** Keeps a refused request's values (never its photos) for a reload; best effort, never blocks the refusal. */
+  const keepRefusedValues = (body: string, code: string, existingAdjustmentId: number | null, photoCount: number) => {
+    try { writeRefusedAdjustmentDraft(sessionStorage, { version: 1, scope: commandScope, body, code, existingAdjustmentId, photoCount }); } catch { /* storage unavailable */ }
+    form.commit("refusedRestored", true);
+  };
+  /** A cached acknowledgement that does not describe the recorded session is a refusal, never a save. */
+  const refuseCachedReceipt = (command: AdjustmentCommand) => {
+    keepRefusedValues(command.body, "cached_receipt_unverified", command.receipt?.id ?? null, 0);
+    discardRefusedAdjustmentCommand(sessionStorage, command, { unverifiedReceipt: true });
+    restoreFromBody(command.body);
+    form.commit("refusal", cachedReceiptMessage(command.receipt?.id ?? 0));
+  };
   const auxiliaryBody = auxiliaries === null ? {}
     : { auxiliaries: [...auxiliaries], ...(auxiliaries.includes("other") ? { auxiliaryOther } : {}) };
   const previousAdjustment = caseRow.adjustments[0] ?? null;
@@ -2130,7 +2161,13 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
     committedCommandPublication.current = commandPublication;
     try {
       if (!commandScope.authority) throw new Error("Missing immutable actor identity");
-      const command = readAdjustmentCommand(sessionStorage, commandScope);
+      const stored = readAdjustmentCommand(sessionStorage, commandScope);
+      let command = stored;
+      if (stored?.receipt && cachedReceiptProvenance(stored, recordedSessions) === "mismatch") { refuseCachedReceipt(stored); command = null; }
+      else if (!stored && form.draft.values.get("refusedRestored") !== true) {
+        const record = readRefusedAdjustmentDraft(sessionStorage, commandScope);
+        if (record) { restoreFromBody(record.body); form.commit("refusedRestored", true); form.commit("refusal", restoredMessage(record)); }
+      }
       publishCommand({ scope: commandScope, command, blocked: false });
       if (command) form.uncertain();
     } catch { publishCommand({ scope: commandScope, command: null, blocked: true }); form.uncertain(); }
@@ -2144,6 +2181,21 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
   }, [commandPublication]);
 
   const [queue, setQueue] = form.field<QueuedPhoto[]>("queue", []);
+  // Review #483 6873798343: queued photos live only in this page (never stored in the browser for privacy).
+  // Warn before a reload or close would lose them; the refusal notice also offers saving them to the device.
+  useLayoutEffect(() => {
+    if (queue.length === 0 || typeof window === "undefined") return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [queue.length]);
+  const saveQueuedPhotosToDevice = () => {
+    queue.forEach((photo, index) => {
+      const link = document.createElement("a");
+      link.href = photo.preview; link.download = photo.file.name || `unsaved-session-photo-${index + 1}.jpg`;
+      document.body.appendChild(link); link.click(); link.remove();
+    });
+  };
   const [stage, setStage] = form.field<PhotoStage>("stage", () =>
     caseRow.phase !== "assessment" && caseRow.startDate !== null ? suggestPhotoStage({
       date: today, startDate: caseRow.startDate, phase: caseRow.phase,
@@ -2210,6 +2262,11 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
       publishCommand({ ...commandState, command });
       const frozen = JSON.parse(command.body) as { doneOn: string; nextWeeks: number };
       let receipt = command.receipt;
+      if (receipt && cachedReceiptProvenance(command, recordedSessions) === "mismatch") {
+        // Never a clinical-success or attachment side effect from an unverified cached acknowledgement.
+        refuseCachedReceipt(command); publishCommand({ ...commandState, command: null });
+        form.acknowledge(operation, {}); onError(cachedReceiptMessage(receipt.id)); return;
+      }
       if (!receipt) {
         const response = await fetch(`/api/ortho/${command.scope.caseId}`, {
           method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": command.key }, body: command.body,
@@ -2221,17 +2278,10 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
           // Review #483 6871207083: the visit already has a session and nothing was recorded for this
           // request. Drop its unused key, keep every field and queued photo, upload nothing, report nothing
           // as saved. A request recovered after a reload puts its own values back into the fields.
+          keepRefusedValues(command.body, payload.code, payload.existingAdjustmentId ?? null, queue.length);
           discardRefusedAdjustmentCommand(sessionStorage, command);
           publishCommand({ ...commandState, command: null });
-          if (recovered) {
-            const sent = JSON.parse(command.body) as Record<string, unknown>;
-            for (const name of ["doneOn", "upperWire", "lowerWire", "elastics", "elasticNote", "done"] as const) form.commit(name, String(sent[name] ?? ""));
-            form.commit("nextWeeks", String(sent.nextWeeks ?? ""));
-            form.commit("removeUpperWire", sent.upperWireAction === "remove");
-            form.commit("removeLowerWire", sent.lowerWireAction === "remove");
-            form.commit("auxiliaries", Array.isArray(sent.auxiliaries) ? sent.auxiliaries : null);
-            form.commit("auxiliaryOther", typeof sent.auxiliaryOther === "string" ? sent.auxiliaryOther : "");
-          }
+          if (recovered) restoreFromBody(command.body);
           // Settled outcome: the fields are editable again but nothing is marked saved.
           form.acknowledge(operation, {});
           form.commit("refusal", payload.message); onError(payload.message); onConflictRefresh?.(); return;
@@ -2282,6 +2332,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
       for (const photo of queue) form.release(photo.preview);
       form.commit("queue", []);
       form.uncertain(); // Keep the durable acknowledgement until explicit new intent.
+      clearRefusedAdjustmentDraft(sessionStorage, commandScope);
       onSaved({ adjustmentId, caseId: command.scope.caseId, doneOn: frozen.doneOn,
         nextWeeks: frozen.nextWeeks, photosUploaded: uploaded, visitId });
     } catch (error) {
@@ -2305,6 +2356,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
       // Auxiliaries are documented per session (0132): a new session starts unrecorded, never carried over.
       form.commit("auxiliaries", null);
       form.commit("auxiliaryOther", "");
+      clearRefusedAdjustmentDraft(sessionStorage, commandScope); form.commit("refusal", null);
       publishCommand({ ...commandState, command: null });
       onError(null);
     } catch { form.uncertain(); onError("تعذّر بدء شدّة جديدة بأمان. راجع السجل."); }
@@ -2508,8 +2560,18 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
         {!dateValid ? "موعد المتابعة المقترح غير متاح حتى إدخال تاريخ جلسة صحيح." : intervalWeeks === null ? "موعد المتابعة المقترح غير متاح حتى إدخال عدد صحيح من أسبوع إلى 52 أسبوعًا." : <>الموعد المقترح: {friendlyDateLong(nextAdjustmentDate(doneOn, intervalWeeks))}</>}
       </p>
 
-      {refusal ? <p role="alert" data-testid="adjustment-refused"
-        className="mb-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">{refusal}</p> : null}
+      {refusal ? <div role="alert" data-testid="adjustment-refused"
+        className="mb-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">
+        <p>{refusal}</p>
+        {queue.length > 0 ? <p className="mt-1 font-normal" data-testid="adjustment-unsaved-photos">
+          {queue.length} صورة في الطابور لم تُرفع ولا تُحفظ في المتصفح؛ ستُفقد عند إعادة التحميل أو إغلاق الصفحة.
+          {" "}<button type="button" className="min-h-11 underline" onClick={saveQueuedPhotosToDevice}>حفظ الصور غير المرفوعة على الجهاز</button>
+        </p> : null}
+        <button type="button" className="mt-1 min-h-11 text-[11px] font-normal underline" data-testid="adjustment-refusal-dismiss"
+          onClick={() => { clearRefusedAdjustmentDraft(sessionStorage, commandScope); form.commit("refusal", null); }}>
+          إخفاء التنبيه (لن تُستعاد هذه القيم بعد إعادة التحميل)
+        </button>
+      </div> : null}
       <button type={commandState.command ? "button" : "submit"}
         data-testid={commandState.command ? "adjustment-reconcile" : undefined}
         onClick={commandState.command ? (event) => submit(event, true) : undefined}
