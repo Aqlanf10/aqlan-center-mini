@@ -36,7 +36,7 @@ describe("0059 existing-debt allocation storage",()=>{
     expect(readFileSync("migrations/0059_invoice_debt_installments.sql","utf8")).toBe(DEBT_INSTALLMENTS_SQL);
     expect((await q("SELECT to_jsonb(i) AS facts FROM invoices i WHERE id=$1",[invoiceId]))[0].facts).toEqual(oldInvoice);
     expect(await q("SELECT version,name,checksum FROM schema_migrations ORDER BY version")).toEqual(
-      reviewedMigrations.filter(file => file.version <= "0059" || ["0063", "0064", "0065", "0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0126"].includes(file.version))
+      reviewedMigrations.filter(file => file.version <= "0059" || ["0063", "0064", "0065", "0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0126", "0132"].includes(file.version))
         .map(({version,name,checksum}) => ({version,name,checksum})),
     );
   });

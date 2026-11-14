@@ -29,6 +29,7 @@ interface CommandInput {
   elasticNote: string | null; done: string | null; nextWeeks: number; note: string | null;
   recordedBy: string; actorRole?: string | null;
   upperWireAction?: "remove"; lowerWireAction?: "remove";
+  auxiliaries?: readonly string[] | null; auxiliaryOther?: string | null;
 }
 export interface AdjustmentResult { id: number; visitId: number | null; attachedToToday: boolean }
 export class OrthoAdjustmentRequestError extends Error {
@@ -70,7 +71,10 @@ export async function prepareAdjustmentRequest(client: DbClient, input: CommandI
     // Explicit removal is newer than the v1 fingerprint; it is hashed only when present,
     // so every earlier request keeps its exact hash and a toggled removal is a different body.
     ...(input.upperWireAction === "remove" ? { upperWireAction: "remove" } : {}),
-    ...(input.lowerWireAction === "remove" ? { lowerWireAction: "remove" } : {}) })).digest("hex");
+    ...(input.lowerWireAction === "remove" ? { lowerWireAction: "remove" } : {}),
+    // 0132 auxiliaries follow the same rule: hashed only when recorded (an empty list included), so a
+    // request without them keeps its earlier hash and "none" differs from "not recorded".
+    ...(input.auxiliaries == null ? {} : { auxiliaries: [...input.auxiliaries], auxiliaryOther: input.auxiliaryOther ?? null }) })).digest("hex");
   let hash = hashForDate(input.doneOn);
   // Fence reset before taking patient/visit/plan locks. Reset protects nonempty
   // command history and must never erase a key while an adjustment is in flight.

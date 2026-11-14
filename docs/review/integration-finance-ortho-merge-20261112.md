@@ -193,3 +193,17 @@ work of other sessions is not visible to this check. It is repeated before the f
 
 None of these files exists on this branch yet. If a collision appears, only that number is held and
 reported (file, branch, blob, whether published or applied); published migrations are never renamed.
+
+### 8a. 0132, session auxiliary appliances (#483 6867852606)
+
+| Version | File | Purpose | Owner | Depends on |
+|---|---|---|---|---|
+| 0132 | `0132_ortho_adjustment_auxiliaries.sql` | Optional auxiliary appliances in an adjustment session: two nullable columns on `ortho_adjustments` (NULL = not recorded, `{}` = explicitly none), key and length check | Orthodontic session screen, this integration line (allocated by Dot, #483 6867852606) | 0126 |
+
+Collision check before the first push (2026-11-14 00:00 UTC): a tree-only fetch of all 336 remote
+branches into a separate scratch repository, then a search of every tree for `migrations/0127_*` …
+`migrations/0139_*`. Only `0127_patient_portal_security.sql` exists, on
+`security/patient-isolation-and-hardening-20261111` and
+`security/staging-integration-portal-hardening-20261114`. 0132 is unused everywhere. 0127–0131 are not
+filled and no placeholder migration is added for the gap. The check is repeated before the final
+integration; on a collision only 0132 is held and reported.

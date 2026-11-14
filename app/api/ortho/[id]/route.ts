@@ -6,6 +6,7 @@ import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "@/lib/ortho-adjustment-
 import { parseAdjustmentInterval, ADJUSTMENT_INTERVAL_ERROR } from "@/lib/ortho-adjustment-interval";
 import { adjustmentTextAdmissionError } from "@/lib/ortho-adjustment-text-input";
 import { orthoWireActionError } from "@/lib/ortho-baseline";
+import { parseAuxiliariesInput } from "@/lib/ortho-auxiliaries";
 import { OrthoRetainerAuthorityError } from '@/lib/ortho-retainer-authority';
 import { OrthoPhaseAuthorityError } from '@/lib/ortho-phase-authority';
 import { CanonicalOrthoPlanLinkRefusal, commandCanonicalOrthoPlanLink } from "@/lib/canonical-ortho-plan-link-command";
@@ -82,6 +83,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   // admitted before any write: an unknown action, or removal plus a wire, is refused.
   const wireActionError = orthoWireActionError(source);
   if (wireActionError) return NextResponse.json({ code: "invalid_adjustment_wire_action", message: wireActionError }, { status: 400 });
+  // 0132 auxiliaries are newer still: exact keys and the "other" length are checked here, before any
+  // write or replay lookup. Nothing is trimmed to fit and nothing is prefilled.
+  const auxiliaries = parseAuxiliariesInput(source);
+  if (!auxiliaries.ok) return NextResponse.json({ code: "invalid_adjustment_auxiliaries", message: auxiliaries.message }, { status: 400 });
 
   const requestKey = request.headers.get("Idempotency-Key");
   if (!requestKey || !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) {
@@ -104,6 +109,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       done: text(source.done, 400),
       nextWeeks,
       note: text(source.note, 300),
+      ...(auxiliaries.value.auxiliaries === null ? {} : auxiliaries.value),
       recordedBy: session.username,
       actorRole: session.role,
       request: { key: requestKey, patientId: found.patientId, session, newTextAdmissionError: adjustmentTextAdmissionError(source),

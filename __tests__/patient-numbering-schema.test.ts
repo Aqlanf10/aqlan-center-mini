@@ -7,7 +7,7 @@ it("registers exact 0080 bytes between reconciliation and invoice actions alongs
  const files=await loadMigrationFiles();
  expect(checksumOf(PATIENT_NUMBERING_SQL)).toBe("b2bee7694f0781775bbddeea3715cb16ab701f4ee3fd748785ef1016c0f2e10a");
  expect(readFileSync("migrations/0080_patient_numbering.sql","utf8")).toBe(PATIENT_NUMBERING_SQL);
- expect(files.filter(file=>file.version>="0078").map(file=>file.version)).toEqual(["0078","0079","0080","0081","0082","0087","0089","0090","0091","0092","0093","0106","0108","0109","0110","0111","0112","0113","0114","0115","0116","0117","0118","0119","0120","0121","0122","0123","0124","0125","0126"]);
+ expect(files.filter(file=>file.version>="0078").map(file=>file.version)).toEqual(["0078","0079","0080","0081","0082","0087","0089","0090","0091","0092","0093","0106","0108","0109","0110","0111","0112","0113","0114","0115","0116","0117","0118","0119","0120","0121","0122","0123","0124","0125","0126","0132"]);
  expect(files.find(file=>file.version==="0080")).toEqual({version:"0080",name:"patient_numbering",filename:"0080_patient_numbering.sql",sql:PATIENT_NUMBERING_SQL,checksum:checksumOf(PATIENT_NUMBERING_SQL)});
  const runtime=readFileSync("lib/db.ts","utf8");
  expect(runtime).toContain('version: "0080", name: "patient_numbering", filename: "0080_patient_numbering.sql", sql: PATIENT_NUMBERING_SQL, checksum: checksumOf(PATIENT_NUMBERING_SQL)');

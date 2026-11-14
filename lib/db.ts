@@ -65,6 +65,8 @@ import { readPlannedVisitContexts } from "./planned-visit-context-db";
 import type { PlannedVisitContext } from "./planned-visit-context";
 import {labVisitSignatureVersion} from "./lab-visit-signature";
 import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "./commission-participation-schema";
+import { ORTHO_ADJUSTMENT_AUXILIARIES_SQL } from "./ortho-adjustment-auxiliaries-schema";
+import type { OrthoAuxiliary } from "./ortho-auxiliaries";
 import { loadCaseParticipationsAt } from "./commission-participation-read";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
@@ -2215,6 +2217,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0124", name: "ceph_correction_lineage", filename: "0124_ceph_correction_lineage.sql", sql: CEPH_CORRECTION_LINEAGE_SQL, checksum: checksumOf(CEPH_CORRECTION_LINEAGE_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0125", name: "ortho_case_reopen", filename: "0125_ortho_case_reopen.sql", sql: ORTHO_REOPEN_SQL, checksum: checksumOf(ORTHO_REOPEN_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0126", name: "commission_case_participations", filename: "0126_commission_case_participations.sql", sql: COMMISSION_CASE_PARTICIPATIONS_SQL, checksum: checksumOf(COMMISSION_CASE_PARTICIPATIONS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0132", name: "ortho_adjustment_auxiliaries", filename: "0132_ortho_adjustment_auxiliaries.sql", sql: ORTHO_ADJUSTMENT_AUXILIARIES_SQL, checksum: checksumOf(ORTHO_ADJUSTMENT_AUXILIARIES_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -24877,6 +24880,9 @@ export interface OrthoAdjustment {
   nextWeeks: number;
   note: string | null;
   recordedBy: string;
+  /** 0132: null = not recorded (every earlier session); [] = explicitly none. Documentation only. */
+  auxiliaries: OrthoAuxiliary[] | null;
+  auxiliaryOther: string | null;
   /** ألبوم الجلسة: صور صُوّرت فيها وارتبطت بالشدّة — السجلّ والصورة في المكان نفسه. */
   photos: PatientDocument[];
 }
@@ -24898,6 +24904,7 @@ interface AdjustmentRow {
   upper_wire: string | null; lower_wire: string | null; elastics: string;
   elastic_note: string | null; done: string | null; next_weeks: number;
   note: string | null; recorded_by: string;
+  auxiliaries: string[] | null; auxiliary_other: string | null;
 }
 
 const CASE_SELECT = `
@@ -24923,6 +24930,8 @@ const toAdjustment = (row: AdjustmentRow, photos: PatientDocument[] = []): Ortho
   nextWeeks: row.next_weeks,
   note: row.note,
   recordedBy: row.recorded_by,
+  auxiliaries: row.auxiliaries as OrthoAuxiliary[] | null,
+  auxiliaryOther: row.auxiliary_other,
   photos,
 });
 
@@ -24934,7 +24943,8 @@ async function hydrateCasesWith(q: Pick<DbClient, "query">, rows: CaseRow[], tod
   const { rows: adjustmentRows } = await q.query<AdjustmentRow>(
     `SELECT a.id, a.case_id, a.visit_id, v.signed_at IS NOT NULL AS visit_signed,
             a.done_on, a.phase, a.upper_wire, a.lower_wire, a.elastics,
-            a.elastic_note, a.done, a.next_weeks, a.note, a.recorded_by
+            a.elastic_note, a.done, a.next_weeks, a.note, a.recorded_by,
+            a.auxiliaries, a.auxiliary_other
        FROM ortho_adjustments a LEFT JOIN visits v ON v.id = a.visit_id
       WHERE a.case_id = ANY($1::int[])
       ORDER BY a.case_id, a.done_on DESC, a.id DESC`,
@@ -25105,7 +25115,8 @@ export async function getOrthoClinicalDetailWith(
     "SELECT count(*)::int AS count,max(done_on) AS last FROM ortho_adjustments WHERE case_id=$1", [caseId],
   )).rows[0];
   const history = (await q.query<Omit<AdjustmentRow, "case_id" | "visit_id" | "visit_signed">>(
-    `SELECT id,done_on,phase,upper_wire,lower_wire,elastics,elastic_note,done,next_weeks,note,recorded_by
+    `SELECT id,done_on,phase,upper_wire,lower_wire,elastics,elastic_note,done,next_weeks,note,recorded_by,
+       auxiliaries,auxiliary_other
      FROM ortho_adjustments WHERE case_id=$1 ORDER BY done_on DESC,id DESC LIMIT 101`, [caseId],
   )).rows;
   return {
@@ -25128,6 +25139,7 @@ export async function getOrthoClinicalDetailWith(
       id: a.id, doneOn: dateText(a.done_on), phase: a.phase as OrthoPhase | null,
       upperWire: a.upper_wire, lowerWire: a.lower_wire, elastics: a.elastics as ElasticClass,
       elasticNote: a.elastic_note, done: a.done, nextWeeks: a.next_weeks, note: a.note, recordedBy: a.recorded_by,
+      auxiliaries: a.auxiliaries as OrthoAuxiliary[] | null, auxiliaryOther: a.auxiliary_other,
     })),
     hasMore: history.length > 100,
     // An assessment-only case has no start or plan length: no progress is invented.
@@ -25567,6 +25579,9 @@ export async function recordAdjustment(input: {
   note: string | null;
   recordedBy: string;
   actorRole?: string | null;
+  /** 0132, admitted by the HTTP route before any write. Absent or null: not recorded. */
+  auxiliaries?: OrthoAuxiliary[] | null;
+  auxiliaryOther?: string | null;
   /** Required by the HTTP writer; legacy internal callers retain visit-bound behavior. */
   request?: OrthoAdjustmentRequest;
 }): Promise<
@@ -32454,6 +32469,9 @@ async function writeOrthoSessionInTx(
     actorRole?: string | null;
     /** مريض الزيارة المعروف للمستدعي (التوقيع) — حالةٌ لمريضٍ آخر مرفوضة. */
     expectPatientId?: number | null;
+    /** 0132: only the adjustment-session screen records these; absent or null stays "not recorded". */
+    auxiliaries?: readonly string[] | null;
+    auxiliaryOther?: string | null;
     source: "ortho_tab" | "visit_sign";
   },
 ): Promise<{ ok: true; id: number; created: boolean } | { ok: false; reason: OrthoSessionRefusal }> {
@@ -32503,15 +32521,17 @@ async function writeOrthoSessionInTx(
   const { rows } = await client.query<{ id: number }>(
     `INSERT INTO ortho_adjustments
        (case_id, visit_id, done_on, phase, upper_wire, lower_wire, elastics,
-        elastic_note, done, next_weeks, note, recorded_by)
+        elastic_note, done, next_weeks, note, recorded_by, auxiliaries, auxiliary_other)
      VALUES ($1, $2::int, $3::date, $4::text, $5::text, $6::text, $7, $8::text,
-             $9::text, $10, $11::text, $12)
+             $9::text, $10, $11::text, $12, $13::text[], $14::text)
      RETURNING id`,
     [
       input.caseId, input.visitId, input.doneOn, input.phase, upper, lower,
       input.elastics, input.elasticNote?.trim() || null, input.done?.trim() || null,
       input.nextWeeks,
       input.note?.trim() || null, input.recordedBy,
+      input.auxiliaries == null ? null : [...input.auxiliaries],
+      input.auxiliaries == null ? null : input.auxiliaryOther ?? null,
     ],
   );
   // Late entry is retained in history, but must not replace a newer session's
@@ -32533,6 +32553,10 @@ async function writeOrthoSessionInTx(
       السلك_العلوي: upper ?? "—", السلك_السفلي: lower ?? "—",
       ...(input.upperWireAction ? { إجراء_السلك_العلوي: "إزالة" } : {}),
       ...(input.lowerWireAction ? { إجراء_السلك_السفلي: "إزالة" } : {}),
+      ...(input.auxiliaries == null ? {} : {
+        الأجهزة_المساعدة: input.auxiliaries.length ? input.auxiliaries.join("، ") : "لا شيء (مسجّل صراحةً)",
+        ...(input.auxiliaryOther ? { جهاز_مساعد_آخر: input.auxiliaryOther } : {}),
+      }),
       المصدر: input.source === "visit_sign" ? "توقيع الزيارة" : "تبويب التقويم",
     },
     actor: input.recordedBy, actorRole: input.actorRole ?? null,

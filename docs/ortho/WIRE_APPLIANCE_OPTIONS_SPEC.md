@@ -1,4 +1,4 @@
-# Wire and appliance options in the adjustment session (spec, awaiting owner confirmation)
+# Wire and appliance options in the adjustment session (spec; owner decision recorded below)
 
 Owner directives on #483 (2026-11-13):
 - 23:05 UTC: «خطوات جلسات الشد ما اريد تغيريها»
@@ -81,5 +81,24 @@ Lip Bumper, Lingual Holding Arch, Quad Helix, and "other" (free text).
 - Done (`ef54ef1e`, `ff9d6da6`): A1–A4 (wires, including "other") and B1 (self-ligating metal and
   ceramic, lingual, sapphire). Visits are first again. Covered by unit tests and a built-app journey at
   390px and 1280px.
-- Waiting: B2, the auxiliaries. They need one nullable column on `ortho_adjustments`; migration number 0132
-  is proposed and awaits Dot's allocation (#483 comment 6867434231).
+- Done on the integration branch (not yet pushed when this line was written): B2, the auxiliaries, with
+  migration `0132_ortho_adjustment_auxiliaries.sql` allocated by Dot (#483 6867852606).
+  - Storage: `ortho_adjustments.auxiliaries TEXT[]` and `auxiliary_other TEXT`, both nullable, no default and no
+    backfill. NULL means not recorded (every earlier session), `{}` is an explicit "none". A CHECK (through the
+    immutable function `ortho_adjustment_auxiliaries_valid`) accepts only the 17 owner keys, each once and in
+    catalog order, and requires the «آخر» name (1–80 characters, trimmed) exactly when «آخر» is chosen.
+  - Server: `parseAuxiliariesInput` (`lib/ortho-auxiliaries.ts`) refuses unknown keys, duplicates, a missing or
+    over-long «آخر» name and a name without «آخر» with 400 `invalid_adjustment_auxiliaries`, before any write.
+    Nothing is trimmed to fit. The replay fingerprint includes the list only when it is recorded, so earlier
+    receipts keep their hashes and "none" differs from "not recorded".
+  - Screen: a collapsed «الأجهزة المساعدة (اختياري)» section under the wires, unselected by default and never
+    prefilled from the previous session; an explicit «لا توجد أجهزة مساعدة في هذه الجلسة» box; «آخر» reveals a
+    text box. Clearing the last choice returns to "not recorded". The routine path stays 3 actions.
+  - History: a line under the session when a list is recorded; the session details always show one of
+    «غير مسجّلة في هذه الجلسة», «لا أجهزة مساعدة (سُجّل صراحةً)» or the list.
+  - Only the adjustment-session screen writes the list; the visit-sign writer leaves it NULL.
+  - Tests: unit `__tests__/ortho-auxiliaries.test.ts`; PostgreSQL
+    `__tests__/postgres/ortho-adjustment-auxiliaries.test.ts` (real route: three states, refusals, replay,
+    fingerprint compatibility, patient scope, constraint, re-initialisation) and
+    `ortho-adjustment-auxiliaries-upgrade.test.ts` (populated 0126 → 0132, no backfill, re-run no-op); browser
+    `__tests__/security-http/ortho-session-auxiliaries-browser.test.ts` at 390px and 1280px.

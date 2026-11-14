@@ -5,8 +5,8 @@
   "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
     "tables": 164,
-    "columns": 2097,
-    "constraints": 2812,
+    "columns": 2099,
+    "constraints": 2813,
     "indexes": 530,
     "triggers": 240
   },
@@ -12033,6 +12033,14 @@
     },
     "ortho_adjustments": {
       "columns": {
+        "auxiliaries": {
+          "type": "_text",
+          "nullable": true
+        },
+        "auxiliary_other": {
+          "type": "text",
+          "nullable": true
+        },
         "billing_class": {
           "type": "text",
           "nullable": true
@@ -12123,6 +12131,7 @@
       ],
       "unique": [],
       "checks": [
+        "ortho_adjustments_auxiliaries_valid",
         "ortho_adjustments_billing_decision_check"
       ],
       "foreignKeys": [

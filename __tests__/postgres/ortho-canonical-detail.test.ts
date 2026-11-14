@@ -53,7 +53,7 @@ it.each(["all", "owner"] as const)("%s sees active and closed native clinical hi
   expect(result.editVersion).toMatch(/^[a-f0-9]{64}$/);
   expect((await read(key, ids.closed)).editVersion).toBeNull();
   expect(Object.keys(result.case).sort()).toEqual(["id", "patientId", "patientName", "appliance", "arches", "slot", "bracketSystem", "status", "phase", "startDate", "plannedMonths", "upperWire", "lowerWire", "retainer", "retainerOn", "note", "closedAt", "closedNote", "baselineKind", "baselineRecordedAt", "elastics", "remainingObjectives", "responsibleDoctorId", "responsibleDoctorName"].sort());
-  expect(Object.keys(result.adjustments[0]).sort()).toEqual(["id", "doneOn", "phase", "upperWire", "lowerWire", "elastics", "elasticNote", "done", "nextWeeks", "note", "recordedBy"].sort());
+  expect(Object.keys(result.adjustments[0]).sort()).toEqual(["id", "doneOn", "phase", "upperWire", "lowerWire", "elastics", "elasticNote", "done", "nextWeeks", "note", "recordedBy", "auxiliaries", "auxiliaryOther"].sort());
   expect(JSON.stringify(result)).not.toMatch(/planId|legacyFinancialMode|photos|visitId|visitSigned|closedBy|invoice|balance/);
 });
 it.each(["adjacent", "none", "unlinked"] as const)("denies %s instead of widening by role or adjacent grants", async key => {

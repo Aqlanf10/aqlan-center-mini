@@ -425,6 +425,9 @@ export interface OrthoClinicalAdjustment {
   nextWeeks: number;
   note: string | null;
   recordedBy: string;
+  /** 0132: null = not recorded; [] = explicitly none. */
+  auxiliaries: string[] | null;
+  auxiliaryOther: string | null;
 }
 export interface OrthoClinicalDetail {
   /** Server-resolved zone supplied by the canonical detail read. */

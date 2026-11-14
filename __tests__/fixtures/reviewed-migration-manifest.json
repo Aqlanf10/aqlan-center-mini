@@ -568,5 +568,11 @@
     "name": "commission_case_participations",
     "filename": "0126_commission_case_participations.sql",
     "checksum": "d3e61eb1ea1d3a7c5a479b0a3cde4b3663506a0fc919b5dc923b572386045234"
+  },
+  {
+    "version": "0132",
+    "name": "ortho_adjustment_auxiliaries",
+    "filename": "0132_ortho_adjustment_auxiliaries.sql",
+    "checksum": "a0c463c0f756203cbd6797655bf981d26f4b4fb1ce4e1dd21af1c24993e3f4d9"
   }
 ]

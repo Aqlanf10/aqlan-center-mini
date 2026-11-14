@@ -814,3 +814,24 @@ here. Decisions commit with their audit row in one transaction under the case ro
 lock. Rollback of application code must not delete the table or migration
 registry history. Exact-head CI and Staging verification remain required before
 Production rollout.
+### 0132_ortho_adjustment_auxiliaries.sql
+
+Adds two nullable columns to `ortho_adjustments` for the auxiliary appliances documented in an adjustment
+session (owner decision on #483, 2026-11-13; number allocated by the integration reviewer, #483
+6867852606): `auxiliaries TEXT[]` and `auxiliary_other TEXT`. There is no default and no backfill: every
+existing session keeps NULL, which the screens read as "not recorded". An empty array is an explicit
+record that no auxiliary appliance was used. The immutable function `ortho_adjustment_auxiliaries_valid`
+and the CHECK constraint that calls it accept only the 17 owner-listed keys, each at most once and in
+catalog order, and require `auxiliary_other` (1–80 characters, already trimmed) exactly when the list
+contains `other`. The server applies the same rules before any write and refuses, never trims, a bad
+value.
+
+The record is documentation only, not a treatment recommendation, and nothing is prefilled from an
+earlier session. Only the adjustment-session screen writes it; the visit-sign writer leaves it NULL. The
+replay fingerprint includes the list only when it is recorded, so earlier request receipts keep their
+hashes. Adding the constraint scans `ortho_adjustments` once under a short exclusive lock; every
+existing row is NULL and passes. Numbered and checksum-checked runtime SQL use identical bytes. The
+number was verified free on all 336 remote branches before the first push; 0127 belongs to the patient
+portal security line and 0128–0131 are reserved for the finance additions, and none of them is filled
+here. Rollback of application code leaves the nullable columns unused; it must not drop them or delete
+the registry row. Exact-head CI and Staging verification remain required before Production rollout.

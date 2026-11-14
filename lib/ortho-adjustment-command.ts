@@ -1,12 +1,15 @@
 import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "./ortho-adjustment-date";
 import { parseAdjustmentInterval, ADJUSTMENT_INTERVAL_ERROR } from "./ortho-adjustment-interval";
 import { IDEMPOTENCY_KEY_PATTERN, newIdempotencyKey } from "./idempotency-key";
+import { parseAuxiliariesInput } from "./ortho-auxiliaries";
 
 export type AdjustmentCommandScope = { patientId: number; caseId: number; authority: string };
 export type AdjustmentCommandBody = { doneOn: string; upperWire: string; lowerWire: string;
   elastics: string; elasticNote: string; done: string; nextWeeks: number;
   /** Explicit removal only; absent means a blank wire keeps the current one. */
-  upperWireAction?: "remove"; lowerWireAction?: "remove" };
+  upperWireAction?: "remove"; lowerWireAction?: "remove";
+  /** 0132, optional. Absent: not recorded. [] is an explicit "none". auxiliaryOther only with "other". */
+  auxiliaries?: string[]; auxiliaryOther?: string | null };
 export type AdjustmentReceipt = { id: number; patientId: number; caseId: number; requestKey: string;
   visitId: number | null; attachedToToday: boolean };
 export type AdjustmentCommand = { version: 1; scope: AdjustmentCommandScope; key: string;
@@ -21,7 +24,11 @@ function validBody(body: unknown): body is string {
   try {
     const parsed = JSON.parse(body);
     const actions = (["lowerWireAction", "upperWireAction"] as const).filter((key) => Object.hasOwn(parsed ?? {}, key));
-    return parsed && Object.keys(parsed).sort().join(",") === ["done", "doneOn", "elasticNote", "elastics", ...actions, "lowerWire", "nextWeeks", "upperWire"].sort().join(",")
+    // Commands stored before 0132 carry neither key and stay valid; a stored list must still be exact.
+    const auxiliaryKeys = (["auxiliaries", "auxiliaryOther"] as const).filter((key) => Object.hasOwn(parsed ?? {}, key));
+    if (auxiliaryKeys.length && (!Object.hasOwn(parsed, "auxiliaries") || !Array.isArray(parsed.auxiliaries)
+      || !parseAuxiliariesInput(parsed).ok)) return false;
+    return parsed && Object.keys(parsed).sort().join(",") === ["done", "doneOn", "elasticNote", "elastics", ...actions, ...auxiliaryKeys, "lowerWire", "nextWeeks", "upperWire"].sort().join(",")
       && actions.every((key) => parsed[key] === "remove" && parsed[key.replace("Action", "")].trim() === "")
       && ["doneOn", "upperWire", "lowerWire", "elastics", "elasticNote", "done"].every((key) => typeof parsed[key] === "string")
       && /^\d{4}-\d{2}-\d{2}$/.test(parsed.doneOn)
@@ -61,6 +68,11 @@ export function adjustmentNewCommandError(body: AdjustmentCommandBody): string |
     const action = body[`${arch}WireAction`];
     if (action !== undefined && action !== "remove") return "إجراء السلك غير صالح.";
     if (action === "remove" && typeof body[`${arch}Wire`] === "string" && body[`${arch}Wire`].trim()) return "اختر إزالة السلك أو تسجيل سلك، لا كليهما.";
+  }
+  if (Object.hasOwn(body, "auxiliaries") || Object.hasOwn(body, "auxiliaryOther")) {
+    if (!Array.isArray(body.auxiliaries)) return "قائمة الأجهزة المساعدة غير صالحة؛ لم يبدأ الحفظ.";
+    const auxiliaries = parseAuxiliariesInput(body);
+    if (!auxiliaries.ok) return auxiliaries.message;
   }
   for (const [key, limit, label] of fields) {
     if (typeof body[key] !== "string") return "بيانات الشدّة النصية غير صالحة؛ لم يبدأ الحفظ.";

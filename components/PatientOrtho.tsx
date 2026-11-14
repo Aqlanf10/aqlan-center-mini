@@ -16,6 +16,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { readOpenAssessmentCommand, readStartTreatmentCommand, verifyIntakeReceipt, type OpenAssessmentCommand, type StartTreatmentCommand, type IntakeReceipt } from "@/lib/ortho-assessment-intake";
 import { adjustmentNewCommandError, createAdjustmentCommand, readAdjustmentCommand, completeAdjustmentCommand, retireAdjustmentCommand, isAdjustmentReceipt, type AdjustmentCommand } from "@/lib/ortho-adjustment-command";
 import { parseAdjustmentInterval } from "@/lib/ortho-adjustment-interval";
+import { AUXILIARY_OTHER_LIMIT, auxiliariesText, ORTHO_AUXILIARY_KEYS, ORTHO_AUXILIARY_LABEL, type OrthoAuxiliary } from "@/lib/ortho-auxiliaries";
 import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "@/lib/ortho-adjustment-date";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { OrthoFollowupCoveragePanel } from "./OrthoFollowupCoveragePanel";
@@ -97,6 +98,8 @@ interface Adjustment {
   upperWire: string | null; lowerWire: string | null; elastics: ElasticClass;
   elasticNote: string | null; done: string | null; nextWeeks: number;
   note: string | null; recordedBy: string;
+  /** 0132: null = not recorded; [] = explicitly none. Absent on older payloads. */
+  auxiliaries?: OrthoAuxiliary[] | null; auxiliaryOther?: string | null;
   photos: SessionPhoto[];
 }
 
@@ -1490,6 +1493,9 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                                   {" · "}{entry.recordedBy}
                                 </p>
 
+                                {entry.auxiliaries?.length ? <p className="mt-1 text-[11px] text-slate-600" data-testid="session-auxiliaries">
+                                  الأجهزة المساعدة: {auxiliariesText(entry.auxiliaries, entry.auxiliaryOther)}
+                                </p> : null}
                                 <p className="mt-1 text-[11px] text-slate-500">{SESSION_FOLLOWUP_DISCLAIMER}</p>
                                 <OrthoSessionDetails entry={entry} />
 
@@ -2078,6 +2084,12 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
   // "Other wire" keeps the typed code in the same wire field; the flag only chooses the input (owner, #483).
   const [upperWireOther, setUpperWireOther] = form.field("upperWireOther", false);
   const [lowerWireOther, setLowerWireOther] = form.field("lowerWireOther", false);
+  // Auxiliaries (0132, owner #483): optional documentation, never prefilled from an earlier session.
+  // null = not recorded; [] = an explicit "none" chosen by the clinician.
+  const [auxiliaries, setAuxiliaries] = form.field<OrthoAuxiliary[] | null>("auxiliaries", null);
+  const [auxiliaryOther, setAuxiliaryOther] = form.field("auxiliaryOther", "");
+  const auxiliaryBody = auxiliaries === null ? {}
+    : { auxiliaries: [...auxiliaries], ...(auxiliaries.includes("other") ? { auxiliaryOther } : {}) };
   const previousAdjustment = caseRow.adjustments[0] ?? null;
   // The baseline stores a description, not an elastic class. Never infer one from its text.
   const baselineElasticNote = previousAdjustment ? "" : caseRow.elastics?.trim() ?? "";
@@ -2172,6 +2184,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
         elastics, elasticNote, done, nextWeeks: intervalWeeks!,
         ...(removeUpperWire ? { upperWireAction: "remove" as const } : {}),
         ...(removeLowerWire ? { lowerWireAction: "remove" as const } : {}),
+        ...auxiliaryBody,
       });
       if (inputError) { if (form.editable()) onError(inputError); return; }
     }
@@ -2186,6 +2199,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
         elastics, elasticNote, done, nextWeeks: intervalWeeks!,
         ...(removeUpperWire ? { upperWireAction: "remove" as const } : {}),
         ...(removeLowerWire ? { lowerWireAction: "remove" as const } : {}),
+        ...auxiliaryBody,
       });
       publishCommand({ ...commandState, command });
       const frozen = JSON.parse(command.body) as { doneOn: string; nextWeeks: number };
@@ -2258,6 +2272,9 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
       retireAdjustmentCommand(sessionStorage, commandState.command);
       for (const photo of queue) form.release(photo.preview);
       form.commit("queue", []);
+      // Auxiliaries are documented per session (0132): a new session starts unrecorded, never carried over.
+      form.commit("auxiliaries", null);
+      form.commit("auxiliaryOther", "");
       publishCommand({ ...commandState, command: null });
       onError(null);
     } catch { form.uncertain(); onError("تعذّر بدء شدّة جديدة بأمان. راجع السجل."); }
@@ -2314,6 +2331,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
           </label>
         </div>
       ) : null}
+      {auxiliarySection({ value: auxiliaries, onChange: setAuxiliaries, other: auxiliaryOther, onOtherChange: setAuxiliaryOther })}
 
       {baselineElasticNote ? (
         <p role="status" data-testid="adjustment-baseline-elastics"
@@ -2873,6 +2891,38 @@ function OrthoStudyPanel({ patientId, caseId, patientName }: { patientId: number
 }
 
 const OTHER_WIRE = "__other__";
+
+/** Plain render helper (not a component), like wireSelect: the unit tests walk this form's element tree. */
+function auxiliarySection({ value, onChange, other, onOtherChange }: {
+  value: OrthoAuxiliary[] | null; onChange(value: OrthoAuxiliary[] | null): void;
+  other: string; onOtherChange(value: string): void;
+}) {
+  const toggle = (key: OrthoAuxiliary, checked: boolean) => {
+    const chosen = new Set(value ?? []);
+    if (checked) chosen.add(key); else chosen.delete(key);
+    // Clearing the last choice returns to "not recorded"; only the explicit box records "none".
+    onChange(chosen.size ? ORTHO_AUXILIARY_KEYS.filter((item) => chosen.has(item)) : null);
+  };
+  return <details className="mb-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" data-testid="adjustment-auxiliaries">
+    <summary className="flex min-h-11 cursor-pointer items-center gap-1 font-bold text-slate-600">
+      الأجهزة المساعدة (اختياري) · <span className="font-normal" data-testid="adjustment-auxiliaries-state">{auxiliariesText(value, other)}</span>
+    </summary>
+    <p className="mb-1 text-[11px] text-slate-500">توثيق لما استُخدم في هذه الجلسة فقط، وليس توصية علاجية. اتركه دون تحديد إن لم تُرد تسجيله.</p>
+    <label className="mb-1 flex min-h-11 items-center gap-2 font-bold">
+      <input type="checkbox" checked={value !== null && value.length === 0} onChange={(event) => onChange(event.target.checked ? [] : null)} />
+      لا توجد أجهزة مساعدة في هذه الجلسة
+    </label>
+    <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
+      {ORTHO_AUXILIARY_KEYS.map((key) => <label key={key} className="flex min-h-11 items-center gap-2">
+        <input type="checkbox" checked={value?.includes(key) ?? false} onChange={(event) => toggle(key, event.target.checked)} />
+        <bdi dir={key === "other" ? "rtl" : "ltr"}>{ORTHO_AUXILIARY_LABEL[key]}</bdi>
+      </label>)}
+    </div>
+    {value?.includes("other") ? <input type="text" value={other} maxLength={AUXILIARY_OTHER_LIMIT} required
+      onChange={(event) => onOtherChange(event.target.value)} aria-label="اسم الجهاز المساعد الآخر" dir="auto"
+      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : null}
+  </details>;
+}
 /**
  * The session's wire choice (owner, #483 2026-11-13): the same select in the same place, with the slot's
  * usual sequence first, then the full catalog by material and shape, any code recorded earlier, and an

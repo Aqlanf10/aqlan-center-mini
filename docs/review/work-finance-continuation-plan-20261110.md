@@ -47,6 +47,13 @@ Gate finding on `817106ac`: the interim commits had not regenerated `docs/securi
 - `feat/claude-integration-finance-ortho-20261112` carries #539 merged into the staging orthodontic line plus post-merge reconciliation (merge record sections 7/7a), canonical ceph writes on staging's writers (fingerprint contract), and the medication-catalog grant (owner decision 6839071994).
 - Next on this plan after the stage-1/2 gate and Draft PR: upgrade proof from the staging schema, then orthodontic UI (stage 3), then finance migrations 0128–0131 (stage 4; re-check numbering collisions first; 0126/0127 protected).
 
+### 2026-11-14 — session auxiliaries (0132)
+
+- Owner decision on #483 and Dot's allocation 6867852606: optional auxiliary appliances in the adjustment
+  session, migration 0132 (two nullable columns, no backfill). Spec and status:
+  `docs/ortho/WIRE_APPLIANCE_OPTIONS_SPEC.md`; allocation record: merge record section 8a.
+- Next after this: CI on the pushed head, then Stage 4 finance (0128–0131) with a fresh collision check.
+
 ## 3. Finance queue (order by risk to patient balances and the cash box)
 
 Three read-only audits ran on 2026-11-10/11, one per area (they stopped once at the usage limit and were resumed). Their reports are leads; the state column says what I verified myself.
