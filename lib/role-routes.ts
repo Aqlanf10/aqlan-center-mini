@@ -87,6 +87,7 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/invoices/archive" },
     { path: "/api/expenses", methods: ["GET", "POST"] },
     { path: "/api/expenses/quote", methods: ["POST"] },
+    { path: "/api/expenses/attempts/retire", methods: ["POST"] },
     { path: "/api/expenses/[id]/attachments", methods: ["GET", "POST"] },
     { path: "/api/expense-attachments/[id]" },
     { path: "/api/finance/expense-categories" },
@@ -196,7 +197,7 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
   if (role === "cashier") {
     if (pathname === "/api/shifts" && (verb === "POST" || verb === "PATCH") && !access.operateShift) return false;
     if ((pathname === "/api/payments" || pathname === "/api/payments/attempts/retire") && verb === "POST" && !access.collectPayments) return false;
-    if ((pathname === "/api/expenses" || pathname === "/api/expenses/quote"
+    if ((pathname === "/api/expenses" || pathname === "/api/expenses/quote" || pathname === "/api/expenses/attempts/retire"
       || /^\/api\/expenses\/\d+\/attachments$/.test(pathname)) && verb === "POST" && !access.createExpenses) return false;
     if ((!access.viewPatientLedger) && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
       || /^\/api\/patients\/\d+\/(arrival-panel|legacy-balance-arrangement)$/.test(pathname)

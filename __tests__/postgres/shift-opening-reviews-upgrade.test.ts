@@ -18,7 +18,7 @@ it("adds 0129 to a populated database that already has 0128 and 0132, leaving ev
     expect((await f.pool.query("SELECT to_jsonb(s)::text AS row FROM cashier_shifts s ORDER BY id")).rows).toEqual(before);
     expect((await f.pool.query("SELECT count(*)::int AS n FROM shift_opening_reviews")).rows).toEqual([{ n: 0 }]);
     expect((await f.pool.query("SELECT version FROM schema_migrations WHERE version BETWEEN '0126' AND '0139' ORDER BY version")).rows)
-      .toEqual([{ version: "0126" }, { version: "0128" }, { version: "0129" }, { version: "0132" }]);
+      .toEqual([{ version: "0126" }, { version: "0128" }, { version: "0129" }, { version: "0132" }, { version: "0133" }]);
     await migrate(f.pool, { apply: true, files });
     expect((await f.pool.query("SELECT count(*)::int AS n FROM schema_migrations WHERE version='0129'")).rows).toEqual([{ n: 1 }]);
     // A row can reference a pre-upgrade close and is append-only from the start.

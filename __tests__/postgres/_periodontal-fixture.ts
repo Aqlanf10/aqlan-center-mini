@@ -18,6 +18,12 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
   // directly on the reviewed heads pushed before 0128 existed. Any other predecessor fails closed.
   // Exact shift-opening-reviews suffix (finance, owner #483 6831365228 item 1; number allocated in #483
   // 6833690789): directly after expense commands (0128). 0132 follows it on the composed chain.
+  // Exact expense-request-retirements suffix (finance, review #483 6883224187; number allocated in #483
+  // 6883984936): directly after 0132.
+  if (files.at(-1)?.version === "0133") {
+    if (files.at(-2)?.filename !== "0132_ortho_adjustment_auxiliaries.sql" || files.at(-1)?.filename !== "0133_expense_request_retirements.sql") throw new Error("Unreviewed expense request retirements migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   if (files.at(-1)?.version === "0132") {
     if (!["0126_commission_case_participations.sql", "0128_expense_commands.sql", "0129_shift_opening_reviews.sql"].includes(files.at(-2)?.filename ?? "") || files.at(-1)?.filename !== "0132_ortho_adjustment_auxiliaries.sql") throw new Error("Unreviewed session auxiliaries migration suffix.");
     return periodontalCandidateMigrationVersion(files.slice(0, -1));

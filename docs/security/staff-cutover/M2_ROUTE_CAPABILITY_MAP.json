@@ -787,6 +787,22 @@
   "note": "Paying from the treasury also requires an open cashier shift."
  },
  {
+  "route": "/api/expenses/attempts/retire",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier"
+  ],
+  "need": [
+   "finance.expenses.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "0133 (review #483 6883224187, number 6883984936): the sender ends an unknown expense request for good. The exact sent body is fingerprinted for the current actor as the create does; under the 0128 key lock the request is retired (no later send of it can write), or the voucher already saved under the key is returned, or nothing is written (conflict, unbindable body, refusal). Canonical branch through the same admission as the create; a canonical session never falls through to the legacy role."
+ },
+ {
   "route": "/api/expenses/quote",
   "method": "POST",
   "legacyRoles": [

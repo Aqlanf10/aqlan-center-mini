@@ -68,6 +68,7 @@ import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "./commission-participation-s
 import { ORTHO_ADJUSTMENT_AUXILIARIES_SQL } from "./ortho-adjustment-auxiliaries-schema";
 import { EXPENSE_COMMANDS_SQL } from "./expense-commands-schema";
 import { SHIFT_OPENING_REVIEWS_SQL } from "./shift-opening-reviews-schema";
+import { EXPENSE_REQUEST_RETIREMENTS_SQL } from "./expense-request-retirements-schema";
 import { CASHIER_SHIFT_LIFECYCLE_LOCK, detectOpeningDifferences, listOpeningReviewsWith, OpeningDifferenceNoteRequired, pendingOpeningReviewCountWith, recordOpeningDifferences, type OpeningReview } from "./shift-opening-reviews";
 import type { OrthoAuxiliary } from "./ortho-auxiliaries";
 import { recordedSessionMatchesRequest, type SessionRequestValues } from "./ortho-session-match";
@@ -2224,6 +2225,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0128", name: "expense_commands", filename: "0128_expense_commands.sql", sql: EXPENSE_COMMANDS_SQL, checksum: checksumOf(EXPENSE_COMMANDS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0129", name: "shift_opening_reviews", filename: "0129_shift_opening_reviews.sql", sql: SHIFT_OPENING_REVIEWS_SQL, checksum: checksumOf(SHIFT_OPENING_REVIEWS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0132", name: "ortho_adjustment_auxiliaries", filename: "0132_ortho_adjustment_auxiliaries.sql", sql: ORTHO_ADJUSTMENT_AUXILIARIES_SQL, checksum: checksumOf(ORTHO_ADJUSTMENT_AUXILIARIES_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0133", name: "expense_request_retirements", filename: "0133_expense_request_retirements.sql", sql: EXPENSE_REQUEST_RETIREMENTS_SQL, checksum: checksumOf(EXPENSE_REQUEST_RETIREMENTS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -14022,6 +14024,50 @@ export interface RecordExpenseResult {
   replayed?: boolean;
   /** True on a refusal decided after the key check under its lock: nothing is recorded under the key. */
   keyUnused?: boolean;
+  /**
+   * 0133: "retired" only once a retirement of this request (key, fingerprint, actor) has COMMITTED after
+   * the refusal's rollback, so no later send of it can write a voucher. Absent when that is not proven.
+   */
+  keyState?: "retired";
+}
+
+/** 0133 (docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md): the outcome of retiring one expense request. */
+export type ExpenseRequestRetirement = { state: "retired" } | { state: "saved"; expense: Expense } | { state: "conflict" };
+export interface ExpenseRequestBinding { key: string; hash: string; actor: string }
+
+/**
+ * Retire one request under the 0128 key lock, on the caller's transaction. Saved first wins (its receipt
+ * is returned; nothing is cancelled); retired first wins for that exact request. Only the same key,
+ * fingerprint and actor count as the same request; anything else is a conflict and writes nothing.
+ */
+export async function retireExpenseRequestWith(c: DbClient, input: ExpenseRequestBinding): Promise<ExpenseRequestRetirement> {
+  await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`aqlan.expense.request:${input.key}`]);
+  const { rows: prior } = await c.query<{ id: number; idempotency_request_hash: string }>(
+    "SELECT id, idempotency_request_hash FROM expenses WHERE idempotency_key = $1", [input.key]);
+  if (prior[0]) {
+    if (prior[0].idempotency_request_hash !== input.hash) return { state: "conflict" };
+    const { rows } = await c.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [prior[0].id]);
+    if (!rows[0]) throw new Error("Saved expense receipt missing");
+    return { state: "saved", expense: toExpense(rows[0]) };
+  }
+  const { rows: retired } = await c.query<{ request_hash: string; retired_by: string }>(
+    "SELECT request_hash, retired_by FROM expense_request_retirements WHERE idempotency_key = $1", [input.key]);
+  if (retired[0]) return retired[0].request_hash === input.hash && retired[0].retired_by === input.actor ? { state: "retired" } : { state: "conflict" };
+  await c.query("INSERT INTO expense_request_retirements (idempotency_key, request_hash, retired_by) VALUES ($1, $2, $3)",
+    [input.key, input.hash, input.actor]);
+  return { state: "retired" };
+}
+/** The same on its own transaction; the answer is returned only after COMMIT succeeded. */
+export async function retireExpenseRequest(input: ExpenseRequestBinding): Promise<ExpenseRequestRetirement> {
+  await ensureSchema();
+  return withTransaction(getPool(), c => retireExpenseRequestWith(c, input));
+}
+/**
+ * After a refusal's rollback: retire that request and report "retired" only if the retirement committed.
+ * Any error, a saved voucher or a conflict reports nothing (the outcome stays unknown to the screen).
+ */
+export async function retireRefusedExpenseRequest(input: ExpenseRequestBinding): Promise<"retired" | undefined> {
+  try { return (await retireExpenseRequest(input)).state === "retired" ? "retired" : undefined; } catch { return undefined; }
 }
 
 /**
@@ -14294,6 +14340,11 @@ export async function recordExpenseOn(client: DbClient, input: RecordExpenseInpu
       if (!rows[0]) throw new Error("Replayed expense receipt missing");
       return { expense: toExpense(rows[0]), reason: null, quote: null, replayed: true };
     }
+    // 0133: this exact request was retired; a late send of it writes nothing (the insert trigger agrees).
+    const { rows: retired } = await client.query(
+      "SELECT 1 FROM expense_request_retirements WHERE idempotency_key = $1 AND request_hash = $2 AND retired_by = $3",
+      [input.request.key, input.request.hash, input.createdBy]);
+    if (retired[0]) return { expense: null, reason: "expense_request_retired", quote: null, keyState: "retired" };
   }
   const result = await recordExpenseInTx(client, input, settingsRates);
   if (result.id === null) {
@@ -14365,6 +14416,12 @@ export async function recordExpense(input: RecordExpenseInput): Promise<RecordEx
     const result = await recordExpenseOn(client, input, settingsRates);
     if (result.expense === null || result.replayed) {
       await rollback();
+      // 0133: a refusal decided after the key check retires that request in its own transaction, after
+      // the rollback, so the retirement survives it and no late send of the same request can write.
+      if (result.keyUnused && input.request) {
+        const keyState = await retireRefusedExpenseRequest({ key: input.request.key, hash: input.request.hash, actor: input.createdBy });
+        return keyState ? { ...result, keyState } : result;
+      }
       return result;
     }
     await client.query("COMMIT");

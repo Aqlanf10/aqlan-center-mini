@@ -877,3 +877,21 @@ number was verified free on all 336 remote branches before the first push; 0127 
 portal security line and 0128–0131 are reserved for the finance additions, and none of them is filled
 here. Rollback of application code leaves the nullable columns unused; it must not drop them or delete
 the registry row. Exact-head CI and Staging verification remain required before Production rollout.
+
+### 0133_expense_request_retirements.sql
+
+Expense request retirements (review on #483, comment 6883224187; number allocated in 6883984936,
+conditional; contract `docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md`). Creates
+`expense_request_retirements`: one row per retired 0128 request key, binding the key to the request
+fingerprint (`idempotency_request_hash`) and the actor (`created_by`). Both the retirement and every expense
+insert carrying a key take the 0128 per-key transaction lock in a trigger, so they cannot interleave:
+- a retirement is refused when an expense already holds the key;
+- an expense whose key, fingerprint and actor match a retirement is refused.
+
+A request with another fingerprint or actor is not fenced. Rows are permanent: no update, no delete, and
+TRUNCATE only of an empty table. They are kept through the clinic reset and never block it. Nothing is
+backfilled, and 0128 is not changed. Numbered and checksum-checked runtime SQL use identical bytes. The
+number was verified free on all 336 remote branches on 2026-11-14 (only 0127, 0128 and 0132 exist in
+0127–0139). Rollback of application code leaves the table and triggers in place; they only refuse
+requests that were retired. Exact-head CI and Staging verification remain required before Production
+rollout.

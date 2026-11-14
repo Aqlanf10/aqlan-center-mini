@@ -137,10 +137,13 @@ describe("refusals and reversals", () => {
   });
 });
 
-describe("what a refusal proves about the key (review #483 6882465665)", () => {
-  it("says the key holds nothing only after checking it, for every refusal that wrote nothing", async () => {
+describe("what a refusal proves about the key (review #483 6882465665; 0133)", () => {
+  it("retires a request refused after its fingerprint is known, and says only \"unused\" before that", async () => {
+    // 0133: a refusal decided by the writer retires that exact request after the rollback, so it is final.
     const stale = await send(body({ currency: "SAR", amount: "10", expected: { paymentExchangeRate: 999 } }), "syn-expense-state-stale-1");
-    expect(await stale.json()).toMatchObject({ code: "stale_quote", requestKeyState: "unused" });
+    expect(await stale.json()).toMatchObject({ code: "stale_quote", requestKeyState: "retired" });
+    expect(await q("SELECT count(*)::int AS n FROM expense_request_retirements WHERE idempotency_key = 'syn-expense-state-stale-1'")).toEqual([{ n: 1 }]);
+    // Refused before the request could be bound (invalid values, a private part on a legacy session).
     const invalid = await send(body({ amount: "0" }), "syn-expense-state-invalid");
     expect(invalid.status).toBe(400);
     expect(await invalid.json()).toMatchObject({ requestKeyState: "unused" });

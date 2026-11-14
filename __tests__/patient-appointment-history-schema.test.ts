@@ -51,7 +51,7 @@ describe("patient appointment history index provenance", () => {
       "0126_commission_case_participations.sql",
       "0128_expense_commands.sql",
       "0129_shift_opening_reviews.sql",
-      "0132_ortho_adjustment_auxiliaries.sql",
+      "0132_ortho_adjustment_auxiliaries.sql", "0133_expense_request_retirements.sql",
     ]);
   });
 

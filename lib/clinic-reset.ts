@@ -291,6 +291,9 @@ export const RESET_KEEP_TABLES = [
   "login_limits",
   "staff_login_limits",
   "audit_log",
+  // (0133) Expense request retirements are kept through a reset and never block it: they hold no money and
+  // no patient data, and a kept retirement keeps a delayed send of its exact request from writing afterwards.
+  "expense_request_retirements",
   "schema_migrations",
 ] as const;
 

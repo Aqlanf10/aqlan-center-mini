@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EXPENSE_ATTEMPT_STORAGE_KEY, beginExpenseAttempt, classifyExpenseAnswer, dismissExpenseAttempt,
-  pendingExpenseAttempts, resetExpenseAttemptMemoryForTesting, sendExpenseAttempt, settleExpenseAttempt,
+  pendingExpenseAttempts, resetExpenseAttemptMemoryForTesting, retireExpenseAttempt, sendExpenseAttempt, settleExpenseAttempt,
 } from "../lib/expense-attempt";
 import { IDEMPOTENCY_KEY_PATTERN } from "../lib/idempotency-key";
 
@@ -138,5 +138,40 @@ describe("a refusal after an earlier unproven send", () => {
     resetExpenseAttemptMemoryForTesting();
     const row = pendingExpenseAttempts(store, "syn-cashier")[0];
     expect((await sendExpenseAttempt(store, row, async () => refusal())).answer).toBe("unknown");
+  });
+});
+
+// 0133: the server's committed retirement is final whatever the send count; the explicit retirement settles
+// only on "retired" or on the saved voucher, and always sends the exact stored body and key.
+describe("retired requests (0133)", () => {
+  it("settles a refusal the server retired even after earlier sends", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    await sendExpenseAttempt(store, attempt, async () => { throw new TypeError("network"); });
+    const retired = new Response(JSON.stringify({ code: "exceeds_drawer_cash", requestKeyState: "retired", message: "يتجاوز" }), { status: 409 });
+    expect((await sendExpenseAttempt(store, pendingExpenseAttempts(store, "syn-cashier")[0], async () => retired)).answer).toBe("refused");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+  });
+  it("retires with the exact body and key and settles only on a proven answer", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    const sent: Array<{ url: string; body: unknown }> = [];
+    const answerWith = (status: number, payload: unknown) => async (url: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify(payload), { status });
+    };
+    expect((await retireExpenseAttempt(store, attempt, answerWith(409, { code: "expense_retirement_unproven" }))).answer).toBe("unknown");
+    expect((await retireExpenseAttempt(store, attempt, answerWith(500, {}))).answer).toBe("unknown");
+    expect((await retireExpenseAttempt(store, attempt, async () => { throw new TypeError("network"); })).answer).toBe("unknown");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toHaveLength(1);
+    expect(sent.every(s => s.url === "/api/expenses/attempts/retire")).toBe(true);
+    expect(sent[0].body).toEqual({ key: attempt.key, body: attempt.body });
+    expect((await retireExpenseAttempt(store, attempt, answerWith(200, { requestKeyState: "retired" }))).answer).toBe("retired");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+    const again = start(store).attempt;
+    expect((await retireExpenseAttempt(store, again, answerWith(200, { id: 7, voucherNumber: "SYN-7", existing: true }))).answer).toBe("saved");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
   });
 });

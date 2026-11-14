@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
-    "tables": 165,
-    "columns": 2122,
-    "constraints": 2834,
-    "indexes": 535,
-    "triggers": 243
+    "tables": 166,
+    "columns": 2126,
+    "constraints": 2842,
+    "indexes": 536,
+    "triggers": 246
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -4481,6 +4481,60 @@
         }
       }
     },
+    "expense_request_retirements": {
+      "columns": {
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "retired_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "retired_by": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "idempotency_key"
+      ],
+      "unique": [],
+      "checks": [
+        "expense_request_retirements_idempotency_key_check",
+        "expense_request_retirements_request_hash_check",
+        "expense_request_retirements_retired_by_check"
+      ],
+      "foreignKeys": [],
+      "indexes": {
+        "expense_request_retirements_pkey": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "expense_request_retirement_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "expense_request_retirement_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
     "expenses": {
       "columns": {
         "amount_minor": {
@@ -4699,6 +4753,12 @@
         }
       },
       "triggers": {
+        "expense_request_key_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
         "expenses_append_only": {
           "timing": "BEFORE",
           "events": [

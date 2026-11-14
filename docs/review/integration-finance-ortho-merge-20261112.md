@@ -210,6 +210,14 @@ branches found no `0129_*`, `0130_*` or `0131_*` file. 0129 follows 0128 in the 
 precedes 0132; the reviewed-chain checks accept 0129 only directly after 0128, and 0132 after 0126, 0128 or
 0129. 0130 and 0131 are still unused.
 
+### 8d. 0133 in use (2026-11-14)
+
+`0133_expense_request_retirements.sql` (contract `docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md`) closes
+the late-request race found in review 6883224187. Number allocated in 6883984936, conditionally. A tree-only
+fetch of all 336 remote branches found only 0127, 0128 and 0132 in 0127–0139. 0133 follows 0132 in the
+runtime registration, and the reviewed-chain checks accept it only directly after 0132. 0130 and 0131 are
+still unused.
+
 ### 8a. 0132, session auxiliary appliances (#483 6867852606)
 
 | Version | File | Purpose | Owner | Depends on |

@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, expenseRequestKeyIsUnused, findUserByUsername, getSettings, listExpensesBetween, ratesFromSettings, recordExpense, voidExpense } from "@/lib/db";
-import { parseExpenseRequest, refusalStatus } from "@/lib/expense-request";
-import { expenseRequestHash } from "@/lib/expense-request-hash";
+import { refusalStatus } from "@/lib/expense-request";
+import { legacyExpenseFingerprint } from "@/lib/legacy-expense-fingerprint";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { refusalMessage } from "@/lib/supplier-payments";
@@ -81,7 +81,9 @@ async function canonicalExpenseCreate(request: Request) {
   } catch (error) {
     if (error instanceof CanonicalExpenseRefusal) {
       return NextResponse.json({ code: error.code, message: error.message, quote: error.quote,
-        ...(error.keyUnused ? { requestKeyState: "unused" } : {}),
+        // 0133: "retired" is final for this request; "unused" (a refusal before the request could be bound)
+        // is the interim proof the screen accepts only for an attempt's only send.
+        ...(error.keyState === "retired" ? { requestKeyState: "retired" } : error.keyUnused ? { requestKeyState: "unused" } : {}),
         ...(error.code === "exceeds_drawer_cash" ? { drawerAvailableMinor: error.quote?.drawer?.availableMinor ?? null } : {}) },
       { status: error.status, headers: NO_STORE });
     }
@@ -117,14 +119,12 @@ export async function POST(request: Request) {
   // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف لحظة الدفع.
   const base = CLINIC_BASE_CURRENCY;
   const settingsRates = ratesFromSettings(await getSettings());
-  const parsed = parseExpenseRequest(source, settingsRates, isAdmin(session.role));
-  if (!parsed.ok) return NextResponse.json({ message: parsed.message, ...await keyState(requestKey) }, { status: parsed.status });
-  const request_ = parsed.value;
-
-  const hash = expenseRequestHash(session.username, request_,
-    { source: "drawer", drawerMinor: request_.amountMinor, ownerPrivateMinor: 0, ownerPrivateReason: null });
+  // 0128 fingerprint, shared with the 0133 retirement (lib/legacy-expense-fingerprint.ts).
+  const fingerprint = legacyExpenseFingerprint(session.username, isAdmin(session.role), source, settingsRates);
+  if (!fingerprint.ok) return NextResponse.json({ message: fingerprint.message, ...await keyState(requestKey) }, { status: fingerprint.status });
+  const { request: request_, hash } = fingerprint;
   try {
-    const { expense, reason, quote, replayed, keyUnused } = await recordExpense({
+    const { expense, reason, quote, replayed, keyState: retiredState } = await recordExpense({
       category: request_.category, partyId: request_.partyId, payeeText: request_.payeeText,
       amountMinor: request_.amountMinor, currency: request_.currency, baseCurrency: base,
       exchangeRate: request_.exchangeRate, payableId: request_.payableId, note: request_.note,
@@ -138,7 +138,8 @@ export async function POST(request: Request) {
     if (reason) {
       return NextResponse.json(
         { message: refusalMessage(reason, quote), code: reason, quote,
-          ...(keyUnused ? { requestKeyState: "unused" } : {}),
+          // 0133: the request was retired after the refusal's rollback (committed), so no late send can write.
+          ...(retiredState === "retired" ? { requestKeyState: "retired" } : {}),
           ...(reason === "exceeds_drawer_cash" ? { drawerAvailableMinor: quote?.drawer?.availableMinor ?? null } : {}) },
         { status: refusalStatus(reason) },
       );

@@ -8,7 +8,7 @@ it("upgrades a populated 0126 database without backfilling or changing existing 
   const f = await openPeriodontalFixture(process.env, { pristine: true });
   try {
     const files = await loadMigrationFiles();
-    expect(files.at(-1)?.version).toBe("0132");
+    expect(files.slice(-2).map((file) => file.version)).toEqual(["0132", "0133"]);
     await migrate(f.pool, { apply: true, files: files.filter((file) => file.version <= "0126") });
     const patient = (await f.pool.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-AUX-UPGRADE','Synthetic upgrade') RETURNING id")).rows[0].id;
     const orthoCase = (await f.pool.query("INSERT INTO ortho_cases(patient_id,status,created_by) VALUES($1,'active','synthetic') RETURNING id", [patient])).rows[0].id;
@@ -21,7 +21,7 @@ it("upgrades a populated 0126 database without backfilling or changing existing 
       .toEqual([{ auxiliaries: null, auxiliary_other: null }, { auxiliaries: null, auxiliary_other: null }]);
     // 0128 (expense commands) and 0129 (shift opening reviews) apply on the way; 0127, 0130 and 0131 stay empty: no placeholder version is recorded.
     expect((await f.pool.query("SELECT version FROM schema_migrations WHERE version BETWEEN '0126' AND '0139' ORDER BY version")).rows)
-      .toEqual([{ version: "0126" }, { version: "0128" }, { version: "0129" }, { version: "0132" }]);
+      .toEqual([{ version: "0126" }, { version: "0128" }, { version: "0129" }, { version: "0132" }, { version: "0133" }]);
     await migrate(f.pool, { apply: true, files });
     expect((await f.pool.query("SELECT count(*)::int AS n FROM schema_migrations WHERE version='0132'")).rows).toEqual([{ n: 1 }]);
     // An existing session can take a recorded value afterwards only in the normalized shape.

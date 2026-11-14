@@ -2,7 +2,7 @@
 
 import { useState, useSyncExternalStore } from "react";
 import {
-  EXPENSE_UNCERTAIN, NO_EXPENSE_ATTEMPTS, dismissExpenseAttempt, expenseAttemptsSnapshot, sendExpenseAttempt,
+  EXPENSE_UNCERTAIN, NO_EXPENSE_ATTEMPTS, dismissExpenseAttempt, expenseAttemptsSnapshot, retireExpenseAttempt, sendExpenseAttempt,
   sessionStorageOrNull, subscribeExpenseAttempts, type ExpenseAttempt, type ExpenseSurface,
 } from "@/lib/expense-attempt";
 
@@ -41,6 +41,25 @@ export default function PendingExpenseAttempts({ actor, surface, onSettled }: {
       }
     } finally { setBusy(null); }
   };
+  // 0133: ends the request for good on the server (no later send of it can write), or confirms its voucher.
+  const retire = async (attempt: ExpenseAttempt) => {
+    if (busy) return;
+    if (!window.confirm("سيُنهى هذا الطلب نهائيًا: إن لم يكن قد سُجّل فلن يُسجَّل به سند بعد الآن، وإن كان قد سُجّل يُعرض سنده. متابعة؟")) return;
+    setBusy(attempt.key);
+    try {
+      const result = await retireExpenseAttempt(sessionStorageOrNull(), attempt);
+      const message = typeof result.payload?.message === "string" ? result.payload.message : "";
+      if (result.answer === "retired") {
+        setNotes((n) => ({ ...n, [attempt.key]: "أُنهي الطلب نهائيًا: لم يُسجَّل به سند ولن يُسجَّل." }));
+        onSettled?.(null);
+      } else if (result.answer === "saved") {
+        setNotes((n) => ({ ...n, [attempt.key]: `تأكّد: السند ${String(result.payload?.voucherNumber ?? "")} محفوظ مرة واحدة.` }));
+        onSettled?.(Number(result.payload?.id));
+      } else {
+        setNotes((n) => ({ ...n, [attempt.key]: message ? `${message}\n${EXPENSE_UNCERTAIN}` : EXPENSE_UNCERTAIN }));
+      }
+    } finally { setBusy(null); }
+  };
   const dismiss = (attempt: ExpenseAttempt) => {
     if (!window.confirm("لم تثبت نتيجة هذا الطلب. أخفِه فقط إن تحققت بنفسك من سجل الصرف أن السند سُجّل أو لم يُسجّل. متابعة؟")) return;
     dismissExpenseAttempt(sessionStorageOrNull(), attempt.key);
@@ -58,6 +77,8 @@ export default function PendingExpenseAttempts({ actor, surface, onSettled }: {
               className="rounded-lg bg-amber-700 px-3 py-1 font-black text-white disabled:opacity-50">
               {busy === attempt.key ? "جارٍ التحقق…" : "تحقّق"}
             </button>
+            <button type="button" onClick={() => void retire(attempt)} disabled={busy !== null}
+              className="rounded-lg border border-amber-700 bg-white px-3 py-1 font-black text-amber-900 disabled:opacity-50">أنهِ هذا الطلب نهائيًا</button>
             <button type="button" onClick={() => dismiss(attempt)} disabled={busy !== null}
               className="rounded-lg border border-amber-400 px-3 py-1 font-bold">إخفاء بعد تحقق يدوي</button>
             {notes[attempt.key] ? <span className="w-full whitespace-pre-line" role="status">{notes[attempt.key]}</span> : null}
