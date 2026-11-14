@@ -10,6 +10,9 @@ ALTER TABLE expenses ADD COLUMN drawer_amount_minor BIGINT;
 ALTER TABLE expenses ADD COLUMN owner_private_amount_minor BIGINT;
 ALTER TABLE expenses ADD COLUMN owner_private_reason TEXT;
 ALTER TABLE expenses ADD COLUMN owner_private_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT;
+-- The account credited for the private part, captured when the voucher is written so a later settings
+-- change never rewrites an earlier derived journal entry.
+ALTER TABLE expenses ADD COLUMN owner_private_account_code TEXT;
 CREATE UNIQUE INDEX expenses_idempotency_key_uniq ON expenses (idempotency_key)
  WHERE idempotency_key IS NOT NULL;
 ALTER TABLE expenses ADD CONSTRAINT expenses_idempotency_valid CHECK (
@@ -20,18 +23,19 @@ ALTER TABLE expenses ADD CONSTRAINT expenses_idempotency_valid CHECK (
 );
 ALTER TABLE expenses ADD CONSTRAINT expenses_payment_source_valid CHECK (
  (payment_source IS NULL AND drawer_amount_minor IS NULL AND owner_private_amount_minor IS NULL
-  AND owner_private_reason IS NULL AND owner_private_user_id IS NULL)
+  AND owner_private_reason IS NULL AND owner_private_user_id IS NULL AND owner_private_account_code IS NULL)
  OR (payment_source IS NOT NULL AND drawer_amount_minor IS NOT NULL AND owner_private_amount_minor IS NOT NULL
   AND drawer_amount_minor + owner_private_amount_minor = amount_minor
   AND sign(drawer_amount_minor) IN (0, sign(amount_minor))
   AND sign(owner_private_amount_minor) IN (0, sign(amount_minor))
   AND CASE payment_source
    WHEN 'drawer' THEN owner_private_amount_minor = 0
-    AND owner_private_reason IS NULL AND owner_private_user_id IS NULL
+    AND owner_private_reason IS NULL AND owner_private_user_id IS NULL AND owner_private_account_code IS NULL
    WHEN 'owner_private' THEN drawer_amount_minor = 0 AND owner_private_amount_minor <> 0
    WHEN 'drawer_and_owner_private' THEN drawer_amount_minor <> 0 AND owner_private_amount_minor <> 0
    ELSE FALSE END
   AND (payment_source = 'drawer' OR (owner_private_user_id IS NOT NULL
+   AND owner_private_account_code IS NOT NULL AND owner_private_account_code ~ '^[0-9]{4,8}$'
    AND owner_private_reason IS NOT NULL AND owner_private_reason = btrim(owner_private_reason)
    AND char_length(owner_private_reason) BETWEEN 3 AND 300)))
 );
@@ -44,7 +48,8 @@ BEGIN
   OR NEW.drawer_amount_minor IS DISTINCT FROM OLD.drawer_amount_minor
   OR NEW.owner_private_amount_minor IS DISTINCT FROM OLD.owner_private_amount_minor
   OR NEW.owner_private_reason IS DISTINCT FROM OLD.owner_private_reason
-  OR NEW.owner_private_user_id IS DISTINCT FROM OLD.owner_private_user_id THEN
+  OR NEW.owner_private_user_id IS DISTINCT FROM OLD.owner_private_user_id
+  OR NEW.owner_private_account_code IS DISTINCT FROM OLD.owner_private_account_code THEN
   RAISE EXCEPTION 'expenses مفتاح الطلب ومصدر الدفع تاريخيان (append-only): التصحيح بقيد إبطال معاكس صريح.';
  END IF;
  RETURN NEW;

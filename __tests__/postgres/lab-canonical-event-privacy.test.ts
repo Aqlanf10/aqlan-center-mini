@@ -29,7 +29,7 @@ const read = async (key: keyof typeof accounts, id = mine) => lab.readCanonicalL
 beforeAll(async () => {
   fx = await openCanonicalInventoryDatabase(db, accounts, "owner");
   const party = (await q("INSERT INTO parties(name,kind) VALUES('SYN event lab','lab') RETURNING id"))[0].id as number;
-  await q("INSERT INTO cashier_shifts(opened_by) VALUES($1)", [accounts.owner.username]);
+  await q("INSERT INTO cashier_shifts(opened_by, opening_yer, opening_sar, opening_usd) VALUES($1, 100000000, 100000000, 100000000)", [accounts.owner.username]); // 0128: drawer cash
   const order = async (suffix: string, doctor: number | null, amount: number) => {
     const patient = (await q("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'SYN event patient',$2) RETURNING id", [`SYN-EVENT-${suffix}`, doctor]))[0].id;
     const id = (await q(`INSERT INTO lab_orders(patient_id,party_id,lab_name,work_type,status,due_date,cost_minor,cost_currency,financial_status)

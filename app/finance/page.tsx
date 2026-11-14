@@ -462,6 +462,8 @@ export default function FinancePage() {
       note: string;
       prepayment?: boolean;
       prepaymentReason?: string;
+      ownerPrivateAmount?: string;
+      ownerPrivateReason?: string;
     }) => {
       if (busy || !financeRequest.current.shiftReady) return;
       setBusy(true);
@@ -726,6 +728,7 @@ export default function FinancePage() {
               onOpenShift={handleOpenShift}
               onCloseShift={handleCloseShift}
               onCreateExpense={handleCreateExpense}
+              canPayPrivately={session?.canonical === true && session?.isOwner === true}
               onRemoveExpense={handleRemoveExpense}
               onOpenQuickCollect={() => setIsQuickCollectOpen(true)}
               lastVoucherId={lastVoucherId}

@@ -248,7 +248,8 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     // 1. Open cashier shift
     const shift = await openShift({
       openedBy: "hr-admin-finance",
-      opening: { YER: 500000, SAR: 0, USD: 0 },
+      // 0128: the drawer must hold the 15,000,000 payout.
+      opening: { YER: 20000000, SAR: 0, USD: 0 },
     });
     expect(shift).not.toBeNull();
     if (!shift) throw new Error("Could not open cashier shift");

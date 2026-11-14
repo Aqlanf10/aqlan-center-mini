@@ -17,7 +17,7 @@ it("adds 0128 to a populated database that already has 0132, leaving existing vo
     const before = (await f.pool.query("SELECT to_jsonb(e)::text AS row FROM expenses e ORDER BY id")).rows;
     await migrate(f.pool, { apply: true, files });
     const added = ["idempotency_key", "idempotency_request_hash", "payment_source", "drawer_amount_minor",
-      "owner_private_amount_minor", "owner_private_reason", "owner_private_user_id"];
+      "owner_private_amount_minor", "owner_private_reason", "owner_private_user_id", "owner_private_account_code"];
     expect((await f.pool.query(`SELECT (to_jsonb(e) - $1::text[])::text AS row FROM expenses e ORDER BY id`, [added])).rows).toEqual(before);
     expect((await f.pool.query(`SELECT ${added.join(", ")} FROM expenses ORDER BY id`)).rows)
       .toEqual([0, 1].map(() => Object.fromEntries(added.map((column) => [column, null]))));

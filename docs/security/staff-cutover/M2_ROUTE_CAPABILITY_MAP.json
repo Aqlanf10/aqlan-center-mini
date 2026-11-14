@@ -751,7 +751,7 @@
   "anyOf": [],
   "scope": null,
   "status": "existing",
-  "note": "Paying from the treasury also requires an open cashier shift."
+  "note": "Paying from the treasury also requires an open cashier shift. Canonical branch (0128, slice 97 first route): a rate different from the settings needs finance.fx.manage; a prepayment above a supplier balance needs finance.payables.record; a part paid from the owner's private source is the protected owner's only, with finance.owner_private_funding_account set. Every create carries an Idempotency-Key; the drawer part never exceeds the open drawer's cash."
  },
  {
   "route": "/api/expenses/[id]/attachments",

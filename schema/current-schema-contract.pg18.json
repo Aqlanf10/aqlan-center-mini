@@ -5,7 +5,7 @@
   "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
     "tables": 164,
-    "columns": 2106,
+    "columns": 2107,
     "constraints": 2816,
     "indexes": 531,
     "triggers": 241
@@ -4532,6 +4532,10 @@
           "nullable": true
         },
         "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "owner_private_account_code": {
           "type": "text",
           "nullable": true
         },

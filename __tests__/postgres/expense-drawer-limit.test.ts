@@ -99,6 +99,20 @@ describe("the drawer limit", () => {
   });
 });
 
+describe("a private part from a legacy session", () => {
+  it.each(["admin", "reception"])("is refused for %s (no owner proof) and nothing is written", async (role) => {
+    await drawer({ YER: 5000, SAR: 0, USD: 0 });
+    context.role = role;
+    try {
+      const before = await footprint();
+      const refused = await send(body("300", "YER", { ownerPrivateAmount: "200", ownerPrivateReason: "SYN private" }));
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ code: "owner_private_requires_owner" });
+      expect(await footprint()).toEqual(before);
+    } finally { context.role = "admin"; }
+  });
+});
+
 describe("the payment source of a drawer voucher", () => {
   it("is recorded as the drawer for every new voucher, and a void mirrors it", async () => {
     await drawer({ YER: 5000, SAR: 0, USD: 0 });
@@ -128,11 +142,11 @@ describe("0128 payment-source storage", () => {
     const [{ id: user }] = await q<{ id: number }>(`INSERT INTO users(username, display_name, password_hash, role)
       VALUES('syn-drawer-owner','SYN','x','admin') RETURNING id`);
     const insert = (amount: number, source: string | null, drawerPart: number | null, privatePart: number | null,
-      reason: string | null, owner: number | null) => db.getPool().query(`INSERT INTO expenses(voucher_number, category, payee_text,
+      reason: string | null, owner: number | null, account?: string | null) => db.getPool().query(`INSERT INTO expenses(voucher_number, category, payee_text,
         shift_id, amount_minor, currency, base_amount_minor, payment_source, drawer_amount_minor, owner_private_amount_minor,
-        owner_private_reason, owner_private_user_id) VALUES($1,'other','SYN',$2,$3,'YER',$3,$4,$5,$6,$7,$8)`,
-      [`SYN-SRC-${++serial}`, shift.id, amount, source, drawerPart, privatePart, reason, owner]);
-    type Shape = [number, string | null, number | null, number | null, string | null, number | null];
+        owner_private_reason, owner_private_user_id, owner_private_account_code) VALUES($1,'other','SYN',$2,$3,'YER',$3,$4,$5,$6,$7,$8,$9)`,
+      [`SYN-SRC-${++serial}`, shift.id, amount, source, drawerPart, privatePart, reason, owner, account === undefined ? (owner === null ? null : "3101") : account]);
+    type Shape = [number, string | null, number | null, number | null, string | null, number | null, (string | null)?];
     for (const valid of <Shape[]>[[100, "drawer", 100, 0, null, null], [100, "owner_private", 0, 100, "SYN reason", user],
       [100, "drawer_and_owner_private", 40, 60, "SYN reason", user], [-100, "drawer_and_owner_private", -40, -60, "SYN reason", user]]) {
       await expect(insert(...valid), JSON.stringify(valid)).resolves.toBeDefined();
@@ -142,6 +156,8 @@ describe("0128 payment-source storage", () => {
       [100, "owner_private", 0, 100, null, user], [100, "owner_private", 0, 100, "SYN reason", null], [100, "owner_private", 10, 90, "SYN reason", user],
       [100, "drawer_and_owner_private", 100, 0, "SYN reason", user], [100, "drawer_and_owner_private", 120, -20, "SYN reason", user],
       [100, "owner_private", 0, 100, " SYN", user], [100, "owner_private", 0, 100, "ab", user], [100, "bank", 100, 0, null, null],
+      [100, "owner_private", 0, 100, "SYN reason", user, null], [100, "owner_private", 0, 100, "SYN reason", user, "cash"],
+      [100, "drawer", 100, 0, null, null, "3101"],
     ]) {
       await expect(insert(...invalid), JSON.stringify(invalid)).rejects.toMatchObject({ code: "23514" });
     }

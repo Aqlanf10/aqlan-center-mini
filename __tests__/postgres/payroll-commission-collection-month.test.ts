@@ -62,7 +62,7 @@ beforeEach(async () => {
   await db.ensureSchema();
   const actorId = await id(`INSERT INTO users(username,display_name,password_hash,role) VALUES('syn-late-admin','SYN actor','synthetic-late-hash','admin') RETURNING id`);
   admin = { userId: actorId, username: "syn-late-admin", role: "admin", expiresAt: Date.now() + 3_600_000, credentialVersion: sessionCredentialVersion("synthetic-late-hash") };
-  await id("INSERT INTO cashier_shifts(opened_by) VALUES($1) RETURNING id", [admin.username]);
+  await id("INSERT INTO cashier_shifts(opened_by, opening_yer, opening_sar, opening_usd) VALUES($1, 100000000, 100000000, 100000000) RETURNING id", [admin.username]); // 0128: payouts need drawer cash
 }, 120_000);
 afterAll(async () => { await db.resetPoolForTesting(); });
 

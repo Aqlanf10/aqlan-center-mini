@@ -13951,7 +13951,10 @@ export interface ExpensePaymentSplitInput {
   drawerMinor: number;
   ownerPrivateMinor: number;
   ownerPrivateReason: string | null;
+  /** The protected owner proved by the caller inside this transaction. */
   ownerUserId: number | null;
+  /** The configured funding account at the moment of the write (`finance.owner_private_funding_account`). */
+  accountCode: string | null;
 }
 
 /** The voucher source implied by its two parts. */
@@ -13986,10 +13989,11 @@ export async function recordExpenseInTx(
   settingsRates: RateMap,
 ): Promise<{ id: number | null; reason: SupplierPaymentRefusal | null; quote: SettlementQuote | null }> {
   const split: ExpensePaymentSplitInput = input.paymentSplit
-    ?? { drawerMinor: input.amountMinor, ownerPrivateMinor: 0, ownerPrivateReason: null, ownerUserId: null };
+    ?? { drawerMinor: input.amountMinor, ownerPrivateMinor: 0, ownerPrivateReason: null, ownerUserId: null, accountCode: null };
+  const privatePart = split.ownerPrivateMinor > 0;
   if (!Number.isSafeInteger(split.drawerMinor) || !Number.isSafeInteger(split.ownerPrivateMinor) || split.drawerMinor < 0
     || split.ownerPrivateMinor < 0 || split.drawerMinor + split.ownerPrivateMinor !== input.amountMinor
-    || (split.ownerPrivateMinor > 0) !== (split.ownerUserId !== null && Boolean(split.ownerPrivateReason?.trim()))) {
+    || privatePart !== (split.ownerUserId !== null && Boolean(split.ownerPrivateReason?.trim()) && Boolean(split.accountCode))) {
     throw new Error("Invalid expense payment split");
   }
   const baseAmount = toBaseAmount(input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate);
@@ -14162,12 +14166,13 @@ export async function recordExpenseInTx(
        exchange_rate, base_amount_minor, base_currency, payable_id, note, created_by,
        payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
        rate_override_reason, idempotency_key, idempotency_request_hash,
-       payment_source, drawer_amount_minor, owner_private_amount_minor, owner_private_reason, owner_private_user_id)
+       payment_source, drawer_amount_minor, owner_private_amount_minor, owner_private_reason, owner_private_user_id,
+       owner_private_account_code)
      SELECT
        ${documentNumberSql("voucher")},
        $1, $2::int, $3::text, s.id, $4, $5, $6, $7, $8, $9::int, $10::text, $11,
        $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text, $17::text, $18::text,
-       $19::text, $20::bigint, $21::bigint, $22::text, $23::int
+       $19::text, $20::bigint, $21::bigint, $22::text, $23::int, $24::text
        FROM cashier_shifts s
       WHERE s.status = 'open'
       LIMIT 1
@@ -14183,6 +14188,7 @@ export async function recordExpenseInTx(
       expensePaymentSource(split), split.drawerMinor, split.ownerPrivateMinor,
       split.ownerPrivateMinor > 0 ? split.ownerPrivateReason!.trim() : null,
       split.ownerPrivateMinor > 0 ? split.ownerUserId : null,
+      split.ownerPrivateMinor > 0 ? split.accountCode : null,
     ],
   );
   if (!rows[0]) return { id: null, reason: "no_shift", quote };
@@ -14208,6 +14214,82 @@ export async function recordExpenseInTx(
  * الدفع، محفوظًا لقطةً في السند)، ولا صرف لمورد/مختبر فوق رصيده المستحق إلا
  * «دفعة مقدمة» بسببٍ مكتوب. والمعاينة (quoteOnly) هي الحساب نفسه بلا تسجيل.
  */
+/**
+ * The expense create on a caller-owned transaction (0128): request-key replay, the voucher, its receipt
+ * read and every audit row. It never commits or rolls back. A refusal or a replay wrote nothing, and the
+ * caller must roll back (or, for a replay, may commit an empty transaction).
+ */
+export async function recordExpenseOn(client: DbClient, input: RecordExpenseInput, settingsRates: RateMap): Promise<RecordExpenseResult> {
+  if (input.request && !input.quoteOnly) {
+    // Lock-then-admit on the key: concurrent sends of one key queue here, then see the winner's row.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`aqlan.expense.request:${input.request.key}`]);
+    const { rows: prior } = await client.query<{ id: number; idempotency_request_hash: string }>(
+      "SELECT id, idempotency_request_hash FROM expenses WHERE idempotency_key = $1", [input.request.key]);
+    if (prior[0]) {
+      if (prior[0].idempotency_request_hash !== input.request.hash) {
+        return { expense: null, reason: "expense_request_conflict", quote: null };
+      }
+      const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [prior[0].id]);
+      if (!rows[0]) throw new Error("Replayed expense receipt missing");
+      return { expense: toExpense(rows[0]), reason: null, quote: null, replayed: true };
+    }
+  }
+  const result = await recordExpenseInTx(client, input, settingsRates);
+  if (result.id === null) {
+    return { expense: null, reason: result.reason, quote: result.quote };
+  }
+  // Read the receipt and insert required evidence before committing. A failed
+  // audit/read must not leave cash out with missing evidence or a false failure.
+  const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [result.id]);
+  if (!rows[0]) throw new Error("Expense receipt missing inside its transaction");
+  const expense = toExpense(rows[0]);
+  const quote = result.quote;
+  const context = { entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
+    actor: input.createdBy, actorRole: input.actorRole ?? null };
+  await insertAuditRow(client, {
+    ...context, action: "expense.create",
+    details: {
+      البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
+      سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
+      الجهة: expense.partyId ?? expense.payeeText,
+      ...(input.request ? { مفتاح_الطلب: input.request.key } : {}),
+      // 0128 (§2.2): the real source and both parts; a private part also records the owner proof and the account.
+      مصدر_الدفع: expense.paymentSource, جزء_الدرج: expense.drawerAmountMinor, جزء_المالك: expense.ownerPrivateAmountMinor,
+      ...(expense.ownerPrivateAmountMinor !== 0 ? {
+        سبب_المالك: expense.ownerPrivateReason, حساب_تمويل_المالك: input.paymentSplit?.accountCode ?? null,
+        إثبات_المالك: input.paymentSplit?.ownerUserId != null,
+      } : {}),
+      ...(expense.payableId !== null ? {
+        الالتزام: expense.payableId, عملة_الفاتورة: expense.payableCurrency,
+        قيمة_الفاتورة: expense.payableAmountMinor, سعر_الفاتورة: expense.payableExchangeRate,
+        المخصوم_من_الفاتورة: expense.payableSettledMinor,
+        المتبقي_بعد: quote?.payable?.remainingAfterMinor,
+      } : {}),
+    },
+  });
+  if (expense.rateOverrideReason) {
+    await insertAuditRow(client, {
+      ...context, action: "expense.rate_override",
+      details: {
+        العملة: expense.currency, سعر_الإعدادات: rateOf(expense.currency, settingsRates),
+        السعر_المستعمل: expense.exchangeRate, عملة_الفاتورة: expense.payableCurrency,
+        سعر_الفاتورة_بالإعدادات: expense.payableCurrency ? settingsRates[expense.payableCurrency] ?? null : null,
+        سعر_الفاتورة_المستعمل: expense.payableExchangeRate, السبب: expense.rateOverrideReason,
+      },
+    });
+  }
+  if (quote?.party?.prepayment) {
+    await insertAuditRow(client, {
+      ...context, action: "expense.prepayment",
+      details: {
+        الجهة: expense.partyId, المبلغ: expense.amountMinor, العملة: expense.currency,
+        المستحق_قبل: quote.party.outstandingBeforeMinor, السبب: input.prepaymentReason,
+      },
+    });
+  }
+  return { expense, reason: null, quote };
+}
+
 export async function recordExpense(input: RecordExpenseInput): Promise<RecordExpenseResult> {
   await ensureSchema();
   const settingsRates = input.rates ?? ratesFromSettings(await getSettings());
@@ -14218,72 +14300,13 @@ export async function recordExpense(input: RecordExpenseInput): Promise<RecordEx
   };
   try {
     await client.query("BEGIN");
-    if (input.request && !input.quoteOnly) {
-      // Lock-then-admit on the key: concurrent sends of one key queue here, then see the winner's row.
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`aqlan.expense.request:${input.request.key}`]);
-      const { rows: prior } = await client.query<{ id: number; idempotency_request_hash: string }>(
-        "SELECT id, idempotency_request_hash FROM expenses WHERE idempotency_key = $1", [input.request.key]);
-      if (prior[0]) {
-        if (prior[0].idempotency_request_hash !== input.request.hash) {
-          await rollback();
-          return { expense: null, reason: "expense_request_conflict", quote: null };
-        }
-        const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [prior[0].id]);
-        if (!rows[0]) throw new Error("Replayed expense receipt missing");
-        await rollback();
-        return { expense: toExpense(rows[0]), reason: null, quote: null, replayed: true };
-      }
-    }
-    const result = await recordExpenseInTx(client, input, settingsRates);
-    if (result.id === null) {
+    const result = await recordExpenseOn(client, input, settingsRates);
+    if (result.expense === null || result.replayed) {
       await rollback();
-      return { expense: null, reason: result.reason, quote: result.quote };
-    }
-    // Read the receipt and insert required evidence before committing. A failed
-    // audit/read must not leave cash out with missing evidence or a false failure.
-    const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [result.id]);
-    if (!rows[0]) throw new Error("Expense receipt missing inside its transaction");
-    const expense = toExpense(rows[0]);
-    const quote = result.quote;
-    const context = { entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
-      actor: input.createdBy, actorRole: input.actorRole ?? null };
-    await insertAuditRow(client, {
-      ...context, action: "expense.create",
-      details: {
-        البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
-        سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
-        الجهة: expense.partyId ?? expense.payeeText,
-        ...(input.request ? { مفتاح_الطلب: input.request.key } : {}),
-        ...(expense.payableId !== null ? {
-          الالتزام: expense.payableId, عملة_الفاتورة: expense.payableCurrency,
-          قيمة_الفاتورة: expense.payableAmountMinor, سعر_الفاتورة: expense.payableExchangeRate,
-          المخصوم_من_الفاتورة: expense.payableSettledMinor,
-          المتبقي_بعد: quote?.payable?.remainingAfterMinor,
-        } : {}),
-      },
-    });
-    if (expense.rateOverrideReason) {
-      await insertAuditRow(client, {
-        ...context, action: "expense.rate_override",
-        details: {
-          العملة: expense.currency, سعر_الإعدادات: rateOf(expense.currency, settingsRates),
-          السعر_المستعمل: expense.exchangeRate, عملة_الفاتورة: expense.payableCurrency,
-          سعر_الفاتورة_بالإعدادات: expense.payableCurrency ? settingsRates[expense.payableCurrency] ?? null : null,
-          سعر_الفاتورة_المستعمل: expense.payableExchangeRate, السبب: expense.rateOverrideReason,
-        },
-      });
-    }
-    if (quote?.party?.prepayment) {
-      await insertAuditRow(client, {
-        ...context, action: "expense.prepayment",
-        details: {
-          الجهة: expense.partyId, المبلغ: expense.amountMinor, العملة: expense.currency,
-          المستحق_قبل: quote.party.outstandingBeforeMinor, السبب: input.prepaymentReason,
-        },
-      });
+      return result;
     }
     await client.query("COMMIT");
-    return { expense, reason: null, quote };
+    return result;
   } catch (error) {
     await rollback().catch(() => {});
     throw error;
@@ -14446,14 +14469,16 @@ export async function voidExpenseInTx(
          voucher_number, category, party_id, payee_text, shift_id, amount_minor, currency,
          exchange_rate, base_amount_minor, base_currency, note, created_by, reversal_of_id,
          payable_id, payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
-         payment_source, drawer_amount_minor, owner_private_amount_minor, owner_private_reason, owner_private_user_id)
+         payment_source, drawer_amount_minor, owner_private_amount_minor, owner_private_reason, owner_private_user_id,
+         owner_private_account_code)
        SELECT
          ${documentNumberSql("reversal")},
          $1, $2::int, $3::text, $4, -$5::bigint, $6, $7::numeric, -$8::bigint, $9,
          $10::text, $11, $12::int,
          $13::int, $14::text, $15::bigint, $16::numeric, -$17::bigint,
          -- 0128: the reversal mirrors the source; the drawer part returns to the drawer, the private part to the owner.
-         o.payment_source, -o.drawer_amount_minor, -o.owner_private_amount_minor, o.owner_private_reason, o.owner_private_user_id
+         o.payment_source, -o.drawer_amount_minor, -o.owner_private_amount_minor, o.owner_private_reason, o.owner_private_user_id,
+         o.owner_private_account_code
          FROM expenses o WHERE o.id = $12::int
        RETURNING id, voucher_number`,
       [
@@ -17179,8 +17204,10 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       payable_id: number | null; linked_payable_id: number | null; linked_party_id: number | null;
       linked_payable_currency: string | null; linked_settled_minor: string | null;
       linked_payable_account_code: string | null; linked_snapshot_currency: string | null;
+      drawer_amount_minor: string | null; owner_private_amount_minor: string | null; owner_private_account_code: string | null;
     }>(
       `SELECT e.id, e.voucher_number, e.created_at, e.category, e.currency, e.amount_minor, ec.category_match_count,
+              e.drawer_amount_minor, e.owner_private_amount_minor, e.owner_private_account_code,
               e.party_id, t.kind AS party_kind, t.name AS party_name, e.payee_text,
               COALESCE(t.expense_account_code, ec.account_code) AS expense_account_code,
               t.payable_account_code,
@@ -17422,6 +17449,10 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       settlements,
       expenseAccountCode: row.expense_account_code,
       payableAccountCode: row.payable_account_code,
+      // 0128: only the drawer part credits cash; a private part credits the account captured on the voucher.
+      drawerMinor: row.drawer_amount_minor === null ? amountMinor : toMinor(row.drawer_amount_minor),
+      ownerPrivate: row.owner_private_amount_minor === null || toMinor(row.owner_private_amount_minor) === 0 ? null
+        : { amountMinor: toMinor(row.owner_private_amount_minor), accountCode: row.owner_private_account_code ?? invalidSettlement("حساب تمويل المالك غير محفوظ") },
     }));
   }
 

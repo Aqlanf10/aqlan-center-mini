@@ -11,6 +11,10 @@ import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { canDoctorViewExpenses } from "@/lib/doctor-permissions";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalErrorResponse, NO_STORE } from "@/lib/canonical-route";
+import { CanonicalExpenseRefusal, commandCanonicalExpenseCreate } from "@/lib/canonical-expense-create";
+import { requestsOwnerPrivatePart } from "@/lib/expense-payment-split";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +50,42 @@ export async function GET(request: Request) {
   }
 }
 
+const KEY_REQUIRED = { code: "expense_request_key_required",
+  message: "طلب الصرف بلا مفتاح طلب صالح؛ لم يُسجَّل شيء. حدّث الصفحة ثم أعد التسجيل." } as const;
+
+/** M2 slice 97 (first route) and 0128: a canonical session never falls through to the legacy role path.
+ * The domain command owns admission, its transaction, the voucher, the audit and the owner proof. */
+async function canonicalExpenseCreate(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "legacy" || selected.kind === "none") return null;
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  const requestKey = request.headers.get("Idempotency-Key");
+  if (!requestKey || !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) return NextResponse.json(KEY_REQUIRED, { status: 400, headers: NO_STORE });
+  let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
+    const response = bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+    response.headers.set("Cache-Control", NO_STORE["Cache-Control"]);
+    return response;
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+  try {
+    const { expense, replayed } = await commandCanonicalExpenseCreate(selected.handle, { source: body as Record<string, unknown>, requestKey });
+    return replayed
+      ? NextResponse.json({ ...expense, existing: true, replayed: true }, { status: 200, headers: NO_STORE })
+      : NextResponse.json(expense, { status: 201, headers: NO_STORE });
+  } catch (error) {
+    if (error instanceof CanonicalExpenseRefusal) {
+      return NextResponse.json({ code: error.code, message: error.message, quote: error.quote,
+        ...(error.code === "exceeds_drawer_cash" ? { drawerAvailableMinor: error.quote?.drawer?.availableMinor ?? null } : {}) },
+      { status: error.status, headers: NO_STORE });
+    }
+    return canonicalErrorResponse(error);
+  }
+}
+
 export async function POST(request: Request) {
+  const canonical = await canonicalExpenseCreate(request);
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
@@ -55,16 +94,18 @@ export async function POST(request: Request) {
 
   // 0128 (owner #483 6831365228 item 3): one key per intended voucher, reused for every retry of it.
   const requestKey = request.headers.get("Idempotency-Key");
-  if (!requestKey || !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) {
-    return NextResponse.json({ code: "expense_request_key_required",
-      message: "طلب الصرف بلا مفتاح طلب صالح؛ لم يُسجَّل شيء. حدّث الصفحة ثم أعد التسجيل." }, { status: 400 });
-  }
+  if (!requestKey || !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) return NextResponse.json(KEY_REQUIRED, { status: 400 });
 
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  // 0128 (§2.2): a legacy session cannot prove the protected owner, so it can never record a private part.
+  if (requestsOwnerPrivatePart(source)) {
+    return NextResponse.json({ code: "owner_private_requires_owner",
+      message: "الدفع من المصدر الخاص للمالك وحده، ويتطلب جلسة موثّقة للمالك؛ لم يُسجَّل شيء. سجّل المصروف من الدرج." }, { status: 403 });
+  }
 
   // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف لحظة الدفع.
   const base = CLINIC_BASE_CURRENCY;
