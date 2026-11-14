@@ -2912,7 +2912,7 @@ function auxiliarySection({ value, onChange, other, onOtherChange }: {
       <input type="checkbox" checked={value !== null && value.length === 0} onChange={(event) => onChange(event.target.checked ? [] : null)} />
       لا توجد أجهزة مساعدة في هذه الجلسة
     </label>
-    <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
+    <div className="grid grid-cols-2 gap-x-3">
       {ORTHO_AUXILIARY_KEYS.map((key) => <label key={key} className="flex min-h-11 items-center gap-2">
         <input type="checkbox" checked={value?.includes(key) ?? false} onChange={(event) => toggle(key, event.target.checked)} />
         <bdi dir={key === "other" ? "rtl" : "ltr"}>{ORTHO_AUXILIARY_LABEL[key]}</bdi>

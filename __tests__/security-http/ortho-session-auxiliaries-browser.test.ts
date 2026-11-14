@@ -13,9 +13,10 @@ import { authedGet, authedMutation, baseUrl, harness } from "./_server";
 // 390px and 1280px:
 // - the section is collapsed and unselected; saving without opening it keeps the routine 3 actions and
 //   stores "not recorded";
-// - an earlier session reads as "not recorded", never as "none";
-// - a list with «آخر» is chosen, saved and reopened; an explicit "none" is a separate state;
-// - nothing is prefilled from the previous session.
+// - an earlier session reads as "not recorded", never as "none", and nothing is prefilled from it;
+// - a list with «آخر» is chosen, saved and reopened; an explicit "none" is a separate state.
+// One session per case: the writer attaches a session to today's visit and returns the existing one on a
+// second save in the same visit (unchanged behaviour), so each state uses its own synthetic case.
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser;
 const out = ".settings-ui-artifacts/ortho-session-auxiliaries";
 beforeAll(async () => {
@@ -34,8 +35,8 @@ async function get(path: string) {
   const response = await authedGet(path, h.sessions.admin); expect(response.status).toBe(200); return response.json();
 }
 
-async function fixedCase(width: number) {
-  const patientName = `SYN auxiliaries ${width}`;
+async function fixedCase(width: number, label: string) {
+  const patientName = `SYN auxiliaries ${label} ${width}`;
   const patientId = Number((await db.query("INSERT INTO patients(patient_number,full_name) VALUES($1,$2) RETURNING id", [randomUUID(), patientName])).rows[0].id);
   const opened = await post("/api/ortho/intake", { patientId, command: { schemaVersion: 1, clientRequestId: randomUUID(), reason: "Synthetic assessment intake" } });
   const caseId = opened.orthoCaseId, clinicalCaseId = opened.clinicalCaseId;
@@ -72,63 +73,59 @@ async function openForm(page: Page) {
 const optionValues = (page: Page, label: string) => page.getByRole("combobox", { name: label, exact: true }).locator("option").evaluateAll(nodes => nodes.map(n => (n as HTMLOptionElement).value));
 
 
-const saveSession = async (page: Page, form: Awaited<ReturnType<typeof openForm>>, done: string) => {
-  await form.getByRole("textbox", { name: "ما نُفّذ في الشدّة", exact: true }).fill(done);
-  await form.getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).click();
-  await page.getByText("سُجّلت الشدّة في زيارة اليوم.", { exact: true }).waitFor();
-};
-async function startAnother(page: Page) {
-  await page.reload(); await page.getByText("سُجّلت الشدّة في زيارة اليوم.", { exact: true }).waitFor();
-  const startAgain = page.getByRole("button", { name: "⚡ سجّل شدّة وجلسة جديدة الآن", exact: true });
-  const newIntent = page.getByRole("button", { name: "تسجيل شدّة جديدة مستقلة", exact: true });
-  if (await startAgain.isVisible()) await startAgain.click();
-  if (await newIntent.isVisible()) await newIntent.click();
-  const form = page.locator("form").filter({ has: page.getByRole("textbox", { name: "ما نُفّذ في الشدّة", exact: true }) });
-  await form.waitFor(); return form;
-}
 const rows = async (caseId: number) => (await db.query("SELECT done,auxiliaries,auxiliary_other FROM ortho_adjustments WHERE case_id=$1 ORDER BY id", [caseId])).rows;
+type Mode = "untouched" | "list" | "none";
+const EXPECTED: Record<Mode, { auxiliaries: string[] | null; auxiliary_other: string | null; text: string }> = {
+  untouched: { auxiliaries: null, auxiliary_other: null, text: "غير مسجّلة في هذه الجلسة" },
+  list: { auxiliaries: ["tad", "other"], auxiliary_other: "SYN Pendulum", text: "TAD / Mini-screw، آخر: SYN Pendulum" },
+  none: { auxiliaries: [], auxiliary_other: null, text: "لا أجهزة مساعدة (سُجّل صراحةً)" },
+};
 
-for (const width of [390, 1280]) it(`records optional auxiliaries without new steps and keeps old sessions unrecorded at ${width}px`, async () => {
-  const { patientId, caseId } = await fixedCase(width);
+for (const width of [390, 1280]) for (const mode of ["untouched", "list", "none"] as const) it(`saves auxiliaries "${mode}" in one session and reopens it at ${width}px`, async () => {
+  const { patientId, caseId } = await fixedCase(width, mode);
   const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE", timezoneId: "Asia/Aden" });
   const [name, ...value] = h.sessions.admin.cookie.split("="); await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage(); page.setDefaultTimeout(20000);
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  let actions = 0;
   try {
     await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=ortho`);
-    // 1. Routine save without touching the section: same 3 actions, stored as "not recorded".
-    let form = await openForm(page);
+    const form = await openForm(page); actions++;
+    // Collapsed, unselected, and not carried over from the earlier session.
     const section = form.getByTestId("adjustment-auxiliaries");
     expect(await section.evaluate(node => (node as HTMLDetailsElement).open)).toBe(false);
     expect(await form.getByTestId("adjustment-auxiliaries-state").textContent()).toBe("غير مسجّلة في هذه الجلسة");
-    await saveSession(page, form, "SYN routine session");
-    expect((await rows(caseId)).at(-1)).toEqual({ done: "SYN routine session", auxiliaries: null, auxiliary_other: null });
-    // 2. A list with «آخر»: nothing is prefilled from the earlier session.
-    form = await startAnother(page);
-    await form.getByTestId("adjustment-auxiliaries").locator("summary").click();
-    expect(await form.getByTestId("adjustment-auxiliaries").getByRole("checkbox", { checked: true }).count()).toBe(0);
-    await form.getByRole("checkbox", { name: "TAD / Mini-screw", exact: true }).check();
-    await form.getByRole("checkbox", { name: "آخر", exact: true }).check();
-    await form.getByRole("textbox", { name: "اسم الجهاز المساعد الآخر", exact: true }).fill("SYN Pendulum");
-    await page.screenshot({ path: `${out}/form-${width}.png` });
-    await saveSession(page, form, "SYN session with auxiliaries");
-    expect((await rows(caseId)).at(-1)).toEqual({ done: "SYN session with auxiliaries", auxiliaries: ["tad", "other"], auxiliary_other: "SYN Pendulum" });
-    // 3. An explicit "none" is a separate state from "not recorded".
-    form = await startAnother(page);
-    expect(await form.getByTestId("adjustment-auxiliaries-state").textContent()).toBe("غير مسجّلة في هذه الجلسة");
-    await form.getByTestId("adjustment-auxiliaries").locator("summary").click();
-    await form.getByRole("checkbox", { name: "لا توجد أجهزة مساعدة في هذه الجلسة", exact: true }).check();
-    await saveSession(page, form, "SYN session explicit none");
-    expect((await rows(caseId)).map(row => row.auxiliaries)).toEqual([null, null, ["tad", "other"], []]);
-    // Reopen: history shows the recorded list; details keep the three states apart.
-    await page.reload(); await page.getByText("سُجّلت الشدّة في زيارة اليوم.", { exact: true }).waitFor();
-    await page.getByTestId("session-auxiliaries").filter({ hasText: "TAD / Mini-screw، آخر: SYN Pendulum" }).first().waitFor();
-    const details = page.getByText(/تفاصيل الجلسة المسجلة #/);
-    for (let index = 0; index < await details.count(); index++) await details.nth(index).click();
-    for (const text of ["غير مسجّلة في هذه الجلسة", "لا أجهزة مساعدة (سُجّل صراحةً)", "TAD / Mini-screw، آخر: SYN Pendulum"]) {
-      await page.getByText(text, { exact: true }).first().waitFor();
+    if (mode !== "untouched") {
+      await section.locator("summary").click();
+      expect(await section.getByRole("checkbox", { checked: true }).count()).toBe(0);
     }
-    await page.screenshot({ path: `${out}/history-${width}.png`, fullPage: true });
+    if (mode === "list") {
+      await form.getByRole("checkbox", { name: "TAD / Mini-screw", exact: true }).check();
+      await form.getByRole("checkbox", { name: "آخر", exact: true }).check();
+      await form.getByRole("textbox", { name: "اسم الجهاز المساعد الآخر", exact: true }).fill("SYN Pendulum");
+      await page.screenshot({ path: `${out}/form-${mode}-${width}.png` });
+    }
+    if (mode === "none") await form.getByRole("checkbox", { name: "لا توجد أجهزة مساعدة في هذه الجلسة", exact: true }).check();
+    expect(await form.getByTestId("adjustment-auxiliaries-state").textContent()).toBe(EXPECTED[mode].text);
+    await form.getByRole("textbox", { name: "ما نُفّذ في الشدّة", exact: true }).fill(`SYN session ${mode}`); actions++;
+    await form.getByRole("button", { name: "احفظ الشدّة والصور", exact: true }).click(); actions++;
+    await page.getByText("سُجّلت الشدّة في زيارة اليوم.", { exact: true }).waitFor();
+    // The routine path without the optional section stays at 3 actions.
+    if (mode === "untouched") expect(actions).toBe(3);
+    const { text, ...saved } = EXPECTED[mode];
+    expect(await rows(caseId)).toEqual([
+      { done: "SYN earlier session", auxiliaries: null, auxiliary_other: null },
+      { done: `SYN session ${mode}`, ...saved },
+    ]);
+    // Reopen: the earlier session reads "not recorded"; this session reads its own state.
+    await page.reload(); await page.getByText("سُجّلت الشدّة في زيارة اليوم.", { exact: true }).waitFor();
+    if (mode === "list") await page.getByTestId("session-auxiliaries").filter({ hasText: text }).first().waitFor();
+    else expect(await page.getByTestId("session-auxiliaries").count()).toBe(0);
+    const details = page.locator("details").filter({ has: page.getByText(/تفاصيل الجلسة المسجلة #/) });
+    for (let index = 0; index < await details.count(); index++) await details.nth(index).locator("summary").click();
+    const shown = await details.getByText(/^(غير مسجّلة في هذه الجلسة|لا أجهزة مساعدة \(سُجّل صراحةً\)|TAD \/ Mini-screw، آخر: SYN Pendulum)$/).allTextContents();
+    expect(shown).toEqual([text, "غير مسجّلة في هذه الجلسة"]);
+    await page.screenshot({ path: `${out}/history-${mode}-${width}.png`, fullPage: true });
     expect(errors).toEqual([]);
   } finally { await context.close(); }
 }, 300_000);
