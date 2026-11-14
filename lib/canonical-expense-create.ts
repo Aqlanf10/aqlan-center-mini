@@ -1,5 +1,5 @@
 import "server-only";
-import { getPool, getSettingsWith, ratesFromSettings, recordExpenseOn, type Expense } from "./db";
+import { expenseRequestKeyIsUnused, getPool, getSettingsWith, ratesFromSettings, recordExpenseOn, type Expense } from "./db";
 import { parseExpenseRequest, refusalStatus } from "./expense-request";
 import { expenseRequestHash } from "./expense-request-hash";
 import { ownerFundingAccountProblem, parseExpensePaymentSplit } from "./expense-payment-split";
@@ -31,7 +31,9 @@ const ACTION = "finance.expenses.create" as const;
 
 export class CanonicalExpenseRefusal extends Error {
   constructor(readonly code: string, readonly status: 400 | 403 | 404 | 409, message: string,
-    readonly quote: SettlementQuote | null = null) {
+    readonly quote: SettlementQuote | null = null,
+    /** Checked under the key's lock inside this operation: nothing is recorded under the request key. */
+    readonly keyUnused = false) {
     super(message); this.name = "CanonicalExpenseRefusal";
   }
 }
@@ -46,6 +48,15 @@ export interface CanonicalExpenseCommand {
 export async function commandCanonicalExpenseCreate(session: VerifiedDurableSession, command: CanonicalExpenseCommand,
   pool = getPool()): Promise<{ expense: Expense; replayed: boolean }> {
   return withStaffOperation(pool, session, ACTION, async (client, handle) => {
+    try { return await create(client, handle); } catch (error) {
+      if (error instanceof CanonicalExpenseRefusal && !error.keyUnused && error.code !== "expense_request_conflict"
+        && await expenseRequestKeyIsUnused(command.requestKey, client)) {
+        throw new CanonicalExpenseRefusal(error.code, error.status, error.message, error.quote, true);
+      }
+      throw error;
+    }
+  });
+  async function create(client: Parameters<Parameters<typeof withStaffOperation>[3]>[0], handle: Parameters<Parameters<typeof withStaffOperation>[3]>[1]) {
     const held = await staffOperationCapabilities(client, handle, ACTION, [ACTION, "finance.fx.manage", "finance.payables.record"] as const);
     const owner = await staffOperationIsProtectedOwner(client, handle, ACTION);
     if (!owner && !held.has(ACTION)) throw new Error("STAFF_OPERATION_CAPABILITY_DENIED");
@@ -100,9 +111,9 @@ export async function commandCanonicalExpenseCreate(session: VerifiedDurableSess
     }, rates);
     if (result.reason) {
       throw new CanonicalExpenseRefusal(result.reason, refusalStatus(result.reason) as 400 | 404 | 409,
-        refusalMessage(result.reason, result.quote), result.quote);
+        refusalMessage(result.reason, result.quote), result.quote, result.keyUnused === true);
     }
     if (!result.expense) throw new Error("Canonical expense create returned no voucher");
     return { expense: result.expense, replayed: result.replayed === true };
-  });
+  }
 }

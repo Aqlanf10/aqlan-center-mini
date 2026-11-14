@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "5861b2cc9ca6f5cfa8d88e19df9599ce473bde64e3f6e63effd4384bb72cad6f",
+  "sourceDigest": "bb6eff2617c4ee1ed998fb5922df26c7d448d6288355d2af7df53b912d2fe488",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -1053,11 +1053,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 89
+          "line": 95
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 155
         },
         {
           "symbol": "findUserByUsername",
@@ -5917,11 +5917,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 89
+          "line": 95
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 155
         },
         {
           "symbol": "findUserByUsername",
@@ -5959,11 +5959,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 89
+          "line": 95
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 155
         },
         {
           "symbol": "findUserByUsername",
@@ -5999,11 +5999,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 89
+          "line": 95
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 155
         },
         {
           "symbol": "findUserByUsername",

@@ -13976,6 +13976,23 @@ export interface RecordExpenseResult {
   quote: SettlementQuote | null;
   /** True when the key had already recorded this exact request: nothing new was written. */
   replayed?: boolean;
+  /** True on a refusal decided after the key check under its lock: nothing is recorded under the key. */
+  keyUnused?: boolean;
+}
+
+/**
+ * Review #483 6882465665: prove, under the key's lock, that nothing is recorded under an expense request
+ * key. Used before a refusal is reported as `requestKeyState: "unused"`; on its own transaction, or on the
+ * caller's when one is given.
+ */
+export async function expenseRequestKeyIsUnused(key: string, client?: DbClient): Promise<boolean> {
+  const run = async (c: DbClient) => {
+    await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`aqlan.expense.request:${key}`]);
+    return (await c.query("SELECT 1 FROM expenses WHERE idempotency_key = $1", [key])).rows.length === 0;
+  };
+  if (client) return run(client);
+  await ensureSchema();
+  return withTransaction(getPool(), run);
 }
 
 /**
@@ -14236,7 +14253,8 @@ export async function recordExpenseOn(client: DbClient, input: RecordExpenseInpu
   }
   const result = await recordExpenseInTx(client, input, settingsRates);
   if (result.id === null) {
-    return { expense: null, reason: result.reason, quote: result.quote };
+    // Decided after the key check above (with its lock still held): nothing is recorded under this key.
+    return { expense: null, reason: result.reason, quote: result.quote, ...(input.request && result.reason ? { keyUnused: true } : {}) };
   }
   // Read the receipt and insert required evidence before committing. A failed
   // audit/read must not leave cash out with missing evidence or a false failure.

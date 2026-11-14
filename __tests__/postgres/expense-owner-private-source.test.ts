@@ -109,7 +109,7 @@ describe("who may record a private part", () => {
     await freshDrawer("1000"); await setAccount("3101");
     const before = await footprint();
     await expect(create(key, { category: "other", payee: "SYN", amount: "100", currency: "YER", ownerPrivateAmount: "100", ownerPrivateReason: "SYN try" }))
-      .rejects.toMatchObject({ code: "owner_private_requires_owner", status: 403 });
+      .rejects.toMatchObject({ code: "owner_private_requires_owner", status: 403, keyUnused: true });
     expect(await footprint()).toEqual(before);
     // The same account may still pay from the drawer.
     await expect(create(key, { category: "other", payee: "SYN", amount: "100", currency: "YER" })).resolves.toMatchObject({ expense: { paymentSource: "drawer" } });
@@ -168,7 +168,7 @@ describe("the request shape", () => {
     const before = await footprint();
     await expect(create("owner", body, "syn-owner-src-replay-01")).resolves.toMatchObject({ expense: { id: first.expense.id }, replayed: true });
     await expect(create("owner", { ...body, ownerPrivateAmount: "100" }, "syn-owner-src-replay-01"))
-      .rejects.toMatchObject({ code: "expense_request_conflict", status: 409 });
+      .rejects.toMatchObject({ code: "expense_request_conflict", status: 409, keyUnused: false });
     expect(await footprint()).toEqual(before);
   });
 

@@ -137,6 +137,29 @@ describe("refusals and reversals", () => {
   });
 });
 
+describe("what a refusal proves about the key (review #483 6882465665)", () => {
+  it("says the key holds nothing only after checking it, for every refusal that wrote nothing", async () => {
+    const stale = await send(body({ currency: "SAR", amount: "10", expected: { paymentExchangeRate: 999 } }), "syn-expense-state-stale-1");
+    expect(await stale.json()).toMatchObject({ code: "stale_quote", requestKeyState: "unused" });
+    const invalid = await send(body({ amount: "0" }), "syn-expense-state-invalid");
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ requestKeyState: "unused" });
+    const privatePart = await send(body({ ownerPrivateAmount: "10", ownerPrivateReason: "SYN" }), "syn-expense-state-private");
+    expect(privatePart.status).toBe(403);
+    expect(await privatePart.json()).toMatchObject({ code: "owner_private_requires_owner", requestKeyState: "unused" });
+  });
+  it("never says so for a key that holds a voucher", async () => {
+    const payload = body();
+    expect((await send(payload, "syn-expense-state-used-1")).status).toBe(201);
+    const conflict = await send({ ...payload, amount: "999" }, "syn-expense-state-used-1");
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).not.toHaveProperty("requestKeyState");
+    const invalid = await send({ ...payload, amount: "0" }, "syn-expense-state-used-1");
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).not.toHaveProperty("requestKeyState");
+  });
+});
+
 describe("0128 storage", () => {
   it("is registered once and survives a second initialisation", async () => {
     await db.ensureSchema();

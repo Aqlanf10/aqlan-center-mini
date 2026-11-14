@@ -1,41 +1,94 @@
 import { describe, expect, it } from "vitest";
-import { EXPENSE_ATTEMPT_STORAGE_KEY, expenseAttemptKey, isDefinitiveExpenseAnswer, settleExpenseAttempt } from "../lib/expense-attempt";
+import {
+  EXPENSE_ATTEMPT_STORAGE_KEY, beginExpenseAttempt, classifyExpenseAnswer, dismissExpenseAttempt,
+  pendingExpenseAttempts, resetExpenseAttemptMemoryForTesting, settleExpenseAttempt,
+} from "../lib/expense-attempt";
 import { IDEMPOTENCY_KEY_PATTERN } from "../lib/idempotency-key";
 
-// docs/finance/EXPENSE_COMMANDS_0128.md §2.1 (owner #483 6831365228 item 3). Synthetic values only.
+// docs/finance/EXPENSE_COMMANDS_0128.md §2.1 and the owner's review #483 6882465665: an unsettled expense
+// request is never lost and never silently replaced by a new key. Synthetic values only.
 function storage() {
   const map = new Map<string, string>();
   return { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); },
     removeItem: (k: string) => { map.delete(k); }, map };
 }
+function broken() {
+  return { getItem: () => { throw new Error("SecurityError"); }, setItem: () => { throw new Error("QuotaExceededError"); },
+    removeItem: () => { throw new Error("SecurityError"); } };
+}
 const body = JSON.stringify({ category: "other", amount: "125", currency: "YER", payee: "SYN" });
+const start = (store: Parameters<typeof beginExpenseAttempt>[0], extra: Partial<Parameters<typeof beginExpenseAttempt>[1]> = {}) =>
+  beginExpenseAttempt(store, { actor: "syn-cashier", surface: "petty", match: body, body, label: "SYN 125", ...extra });
 
-describe("expense request key on the client", () => {
-  it("reuses the key for the same body until a definitive answer, then mints a new one", () => {
+describe("one key per intended voucher", () => {
+  it("reuses the pending key for the same user and entry, and mints a new one only after a settled answer", () => {
+    resetExpenseAttemptMemoryForTesting();
     const store = storage();
-    const first = expenseAttemptKey(store, body);
-    expect(first).toMatch(IDEMPOTENCY_KEY_PATTERN);
-    expect(expenseAttemptKey(store, body)).toBe(first);
-    expect(expenseAttemptKey(store, JSON.stringify({ ...JSON.parse(body), amount: "126" }))).not.toBe(first);
-    settleExpenseAttempt(store, first);
-    expect(expenseAttemptKey(store, body)).not.toBe(first);
+    const first = start(store).attempt;
+    expect(first.key).toMatch(IDEMPOTENCY_KEY_PATTERN);
+    expect(start(store).attempt.key).toBe(first.key);
+    expect(start(store, { match: "{\"amount\":\"126\"}" }).attempt.key).not.toBe(first.key);
+    settleExpenseAttempt(store, first.key);
+    expect(start(store).attempt.key).not.toBe(first.key);
   });
-  it("survives a reload through storage and ignores tampered rows", () => {
+
+  it("survives a reload through storage", () => {
+    resetExpenseAttemptMemoryForTesting();
     const store = storage();
-    const key = expenseAttemptKey(store, body);
-    expect(expenseAttemptKey(storage(), body)).not.toBe(key);
+    const key = start(store).attempt.key;
+    resetExpenseAttemptMemoryForTesting();
     const reloaded = storage(); reloaded.setItem(EXPENSE_ATTEMPT_STORAGE_KEY, store.getItem(EXPENSE_ATTEMPT_STORAGE_KEY)!);
-    expect(expenseAttemptKey(reloaded, body)).toBe(key);
-    reloaded.setItem(EXPENSE_ATTEMPT_STORAGE_KEY, JSON.stringify([{ body, key: "bad key" }]));
-    expect(expenseAttemptKey(reloaded, body)).not.toBe("bad key");
-    reloaded.setItem(EXPENSE_ATTEMPT_STORAGE_KEY, "{not json");
-    expect(expenseAttemptKey(reloaded, body)).toMatch(IDEMPOTENCY_KEY_PATTERN);
+    expect(start(reloaded).attempt.key).toBe(key);
+    expect(pendingExpenseAttempts(reloaded, "syn-cashier").map((a) => a.key)).toEqual([key]);
   });
-  it("works without storage, minting a key per send", () => {
-    expect(expenseAttemptKey(null, body)).toMatch(IDEMPOTENCY_KEY_PATTERN);
+
+  it("keeps the key stable in the page when storage throws, and says it cannot survive a reload", () => {
+    resetExpenseAttemptMemoryForTesting();
+    const first = start(broken());
+    expect(first.persisted).toBe(false);
+    const again = start(broken());
+    expect(again.attempt.key).toBe(first.attempt.key);
+    expect(pendingExpenseAttempts(broken(), "syn-cashier").map((a) => a.key)).toEqual([first.attempt.key]);
+    expect(start(null).attempt.key).toBe(first.attempt.key);
   });
-  it("treats 2xx and 4xx as definitive and 5xx or redirects as unknown", () => {
-    for (const status of [200, 201, 400, 401, 403, 409]) expect(isDefinitiveExpenseAnswer(status), String(status)).toBe(true);
-    for (const status of [302, 500, 502, 503]) expect(isDefinitiveExpenseAnswer(status), String(status)).toBe(false);
+
+  it("never hands another user's pending attempt to this user, and never shows it to them", () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const mine = start(store).attempt;
+    const theirs = start(store, { actor: "syn-reception" }).attempt;
+    expect(theirs.key).not.toBe(mine.key);
+    expect(pendingExpenseAttempts(store, "syn-reception").map((a) => a.key)).toEqual([theirs.key]);
+    expect(pendingExpenseAttempts(store, "syn-cashier").map((a) => a.key)).toEqual([mine.key]);
+  });
+
+  it("ignores tampered rows and keeps the exact body to resend", () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    store.setItem(EXPENSE_ATTEMPT_STORAGE_KEY, JSON.stringify([{ key: "bad key", actor: "syn-cashier", match: body, body }]));
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+    const sent = start(store, { body: JSON.stringify({ ...JSON.parse(body), expected: { paymentExchangeRate: 1 } }) }).attempt;
+    expect(JSON.parse(pendingExpenseAttempts(store, "syn-cashier")[0].body)).toMatchObject({ expected: { paymentExchangeRate: 1 } });
+    dismissExpenseAttempt(store, sent.key);
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+  });
+});
+
+describe("what an answer proves", () => {
+  const receipt = { id: 9, voucherNumber: "SYN-V-9" };
+  it("is saved only with a readable receipt", () => {
+    expect(classifyExpenseAnswer(201, false, receipt)).toBe("saved");
+    expect(classifyExpenseAnswer(200, false, { ...receipt, replayed: true })).toBe("saved");
+    expect(classifyExpenseAnswer(201, false, null)).toBe("unknown");
+    expect(classifyExpenseAnswer(201, false, { id: "9" })).toBe("unknown");
+    expect(classifyExpenseAnswer(200, true, receipt)).toBe("unknown");
+  });
+  it("is a proven refusal only when the server says the key holds nothing", () => {
+    expect(classifyExpenseAnswer(409, false, { code: "exceeds_drawer_cash", requestKeyState: "unused" })).toBe("refused");
+    expect(classifyExpenseAnswer(400, false, { code: "invalid_payment_split", requestKeyState: "unused" })).toBe("refused");
+    for (const [status, payload] of [[401, { message: "SYN" }], [403, { code: "owner_private_requires_owner" }],
+      [409, { code: "expense_request_conflict" }], [400, { message: "SYN" }], [500, null], [502, { requestKeyState: "unused" }]] as const) {
+      expect(classifyExpenseAnswer(status, false, payload), `${status}`).toBe("unknown");
+    }
   });
 });

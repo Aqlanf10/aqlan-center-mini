@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, ratesFromSettings, recordExpense, voidExpense } from "@/lib/db";
+import { CLINIC_TIME_ZONE, expenseRequestKeyIsUnused, findUserByUsername, getSettings, listExpensesBetween, ratesFromSettings, recordExpense, voidExpense } from "@/lib/db";
 import { parseExpenseRequest, refusalStatus } from "@/lib/expense-request";
 import { expenseRequestHash } from "@/lib/expense-request-hash";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
@@ -50,6 +50,11 @@ export async function GET(request: Request) {
   }
 }
 
+/** Review #483 6882465665: a refusal says the key holds nothing only after checking it under its lock. */
+async function keyState(requestKey: string): Promise<{ requestKeyState?: "unused" }> {
+  try { return await expenseRequestKeyIsUnused(requestKey) ? { requestKeyState: "unused" } : {}; } catch { return {}; }
+}
+
 const KEY_REQUIRED = { code: "expense_request_key_required",
   message: "طلب الصرف بلا مفتاح طلب صالح؛ لم يُسجَّل شيء. حدّث الصفحة ثم أعد التسجيل." } as const;
 
@@ -76,6 +81,7 @@ async function canonicalExpenseCreate(request: Request) {
   } catch (error) {
     if (error instanceof CanonicalExpenseRefusal) {
       return NextResponse.json({ code: error.code, message: error.message, quote: error.quote,
+        ...(error.keyUnused ? { requestKeyState: "unused" } : {}),
         ...(error.code === "exceeds_drawer_cash" ? { drawerAvailableMinor: error.quote?.drawer?.availableMinor ?? null } : {}) },
       { status: error.status, headers: NO_STORE });
     }
@@ -104,20 +110,21 @@ export async function POST(request: Request) {
   // 0128 (§2.2): a legacy session cannot prove the protected owner, so it can never record a private part.
   if (requestsOwnerPrivatePart(source)) {
     return NextResponse.json({ code: "owner_private_requires_owner",
-      message: "الدفع من المصدر الخاص للمالك وحده، ويتطلب جلسة موثّقة للمالك؛ لم يُسجَّل شيء. سجّل المصروف من الدرج." }, { status: 403 });
+      message: "الدفع من المصدر الخاص للمالك وحده، ويتطلب جلسة موثّقة للمالك؛ لم يُسجَّل شيء. سجّل المصروف من الدرج.",
+      ...await keyState(requestKey) }, { status: 403 });
   }
 
   // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف لحظة الدفع.
   const base = CLINIC_BASE_CURRENCY;
   const settingsRates = ratesFromSettings(await getSettings());
   const parsed = parseExpenseRequest(source, settingsRates, isAdmin(session.role));
-  if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: parsed.status });
+  if (!parsed.ok) return NextResponse.json({ message: parsed.message, ...await keyState(requestKey) }, { status: parsed.status });
   const request_ = parsed.value;
 
   const hash = expenseRequestHash(session.username, request_,
     { source: "drawer", drawerMinor: request_.amountMinor, ownerPrivateMinor: 0, ownerPrivateReason: null });
   try {
-    const { expense, reason, quote, replayed } = await recordExpense({
+    const { expense, reason, quote, replayed, keyUnused } = await recordExpense({
       category: request_.category, partyId: request_.partyId, payeeText: request_.payeeText,
       amountMinor: request_.amountMinor, currency: request_.currency, baseCurrency: base,
       exchangeRate: request_.exchangeRate, payableId: request_.payableId, note: request_.note,
@@ -131,6 +138,7 @@ export async function POST(request: Request) {
     if (reason) {
       return NextResponse.json(
         { message: refusalMessage(reason, quote), code: reason, quote,
+          ...(keyUnused ? { requestKeyState: "unused" } : {}),
           ...(reason === "exceeds_drawer_cash" ? { drawerAvailableMinor: quote?.drawer?.availableMinor ?? null } : {}) },
         { status: refusalStatus(reason) },
       );

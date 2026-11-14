@@ -38,7 +38,8 @@ import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { financeAccessFor } from "@/lib/finance-permissions";
 import { useLabBalanceOverview } from "@/components/finance/useLabBalanceOverview";
-import { EXPENSE_UNCERTAIN, expenseAttemptKey, isDefinitiveExpenseAnswer, sessionStorageOrNull, settleExpenseAttempt } from "@/lib/expense-attempt";
+import { EXPENSE_NOT_PERSISTED, EXPENSE_UNCERTAIN, beginExpenseAttempt, sendExpenseAttempt, sessionStorageOrNull } from "@/lib/expense-attempt";
+import PendingExpenseAttempts from "@/components/finance/PendingExpenseAttempts";
 
 interface Feed {
   /** Resolved server zone; optional for compatibility with an older shift feed. */
@@ -452,6 +453,7 @@ export default function FinancePage() {
   );
 
   // تسجيل سند صرف نثري
+  const sessionUsername = session?.username;
   const handleCreateExpense = useCallback(
     async (form: {
       category: ExpenseCategory;
@@ -468,31 +470,25 @@ export default function FinancePage() {
       if (busy || !financeRequest.current.shiftReady) return;
       setBusy(true);
       try {
-        // 0128: the same entry reuses its request key until the server answers definitively.
+        // 0128 + review #483 6882465665: one key per intended voucher, owned by this user, kept until an
+        // answer proves the outcome (a readable receipt, or the server's "key holds nothing").
+        const actor = sessionUsername;
+        if (!actor) { setError("انتهت الجلسة. سجّل الدخول من جديد."); return; }
         const requestBody = JSON.stringify(form);
         const storage = sessionStorageOrNull();
-        const requestKey = expenseAttemptKey(storage, requestBody);
-        let res: Response;
-        try {
-          res = await fetch("/api/expenses", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey },
-            body: requestBody,
-          });
-        } catch {
-          setError(EXPENSE_UNCERTAIN);
+        const { attempt, persisted } = beginExpenseAttempt(storage, { actor, surface: "petty", match: requestBody, body: requestBody,
+          label: `${form.amount} ${form.currency} — ${form.payee || form.category}` });
+        const result = await sendExpenseAttempt(storage, attempt);
+        const message = typeof result.payload?.message === "string" ? result.payload.message : null;
+        if (result.answer === "unknown") {
+          setError([message, EXPENSE_UNCERTAIN, persisted ? null : EXPENSE_NOT_PERSISTED].filter(Boolean).join("\n"));
           return;
         }
-        if (!isDefinitiveExpenseAnswer(res.status) || res.redirected) {
-          setError(EXPENSE_UNCERTAIN);
+        if (result.answer === "refused") {
+          setError(message ?? "تعذّر تسجيل سند الصرف.");
           return;
         }
-        settleExpenseAttempt(storage, requestKey);
-        const payload = await res.json().catch(() => null);
-        if (!res.ok) {
-          setError(payload?.message ?? "تعذّر تسجيل سند الصرف.");
-          return;
-        }
+        const payload = result.payload;
         setLastVoucherId((payload as { id: number }).id);
         setSpending(false);
         setError(null);
@@ -504,7 +500,7 @@ export default function FinancePage() {
         setBusy(false);
       }
     },
-    [busy, load]
+    [busy, load, sessionUsername]
   );
 
   // حذف سند صرف (للمدير مع التدقيق)
@@ -708,6 +704,8 @@ export default function FinancePage() {
           {/* Keep same-shift drafts mounted, but no stale UI can be seen or used.
               A new shift/principal gets a fresh form, never the old counted cash. */}
           {feed && feedPrincipal === principalKey ? <div hidden={shiftReadState !== "ready"} inert={shiftReadState !== "ready"}>
+            {/* Review #483 6882465665: an unconfirmed expense request of this user stays here until verified. */}
+            <PendingExpenseAttempts actor={session?.username} onSettled={(id) => { if (id) setLastVoucherId(id); void load(); }} />
             <CashShiftTab
               key={`${principalKey}:${feed.open?.id ?? "closed"}`}
               canMutate={!readOnlyMoney}
