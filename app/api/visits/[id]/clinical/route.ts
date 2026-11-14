@@ -99,7 +99,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
     }
     const requestedDoctorId = Number(source.doctorId) || null;
-    const needsDoctorScopeCheck = session.role === "doctor"
+    const needsDoctorScopeCheck = action !== "sign"
+      && session.role === "doctor"
       && (visit.patientId === null || (requestedDoctorId !== null && requestedDoctorId !== (session.partyId ?? null)));
     const postScope = needsDoctorScopeCheck ? await resolveRestrictedDoctorScope(session) : null;
     if (postScope?.restricted && (postScope.blockAllPatients || (visit.patientId === null && visit.doctorId !== null && visit.doctorId !== postScope.doctorPartyId))) {
