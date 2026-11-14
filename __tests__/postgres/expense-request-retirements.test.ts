@@ -31,6 +31,9 @@ const evidence = async (note: string) => ({
   vouchers: await n("SELECT count(*) AS n FROM expenses WHERE note = $1", [note]),
   audits: await n("SELECT count(*) AS n FROM audit_log WHERE action = 'expense.create' AND entity_id IN (SELECT id::text FROM expenses WHERE note = $1)", [note]),
 });
+/** Audit rows of an explicit retirement (the user's own "end this request for good"); automatic ones write none. */
+const retireAudits = (requestKey: string) => n("SELECT count(*) AS n FROM audit_log WHERE action = 'expense.request_retire' AND entity = 'expense_request' AND entity_id = $1", [requestKey]);
+const EXPLICIT = { actorRole: "reception" };
 const hashOf = (text: string) => createHash("sha256").update(text).digest("hex");
 const key = () => `syn-ret-${++serial}-${Date.now()}`;
 
@@ -86,6 +89,7 @@ describe("a late first request after the key was retired", () => {
     gate.open();
     expect(await first).toMatchObject({ expense: null, reason: "expense_request_retired" });
     expect(await evidence(note)).toEqual({ vouchers: 0, audits: 0 });
+    expect(await retireAudits(requestKey)).toBe(0);
   });
 
   it("canonical command: the same, under the operation's own transaction", async () => {
@@ -102,6 +106,7 @@ describe("a late first request after the key was retired", () => {
     gate.open();
     await expect(first).rejects.toMatchObject({ code: "expense_request_retired", status: 409 });
     expect(await evidence(note)).toEqual({ vouchers: 0, audits: 0 });
+    expect(await retireAudits(requestKey)).toBe(0);
   });
 });
 
@@ -110,18 +115,24 @@ describe("explicit retirement", () => {
     const note = `SYN-RET-SAVED-${++serial}`, requestKey = key(), input = legacyInput(note, 10, requestKey);
     const saved = await db.recordExpense(input);
     expect(saved.expense?.id).toBeGreaterThan(0);
-    expect(await db.retireExpenseRequest({ key: requestKey, hash: input.request.hash, actor: input.createdBy }))
+    expect(await db.retireExpenseRequest({ key: requestKey, hash: input.request.hash, actor: input.createdBy }, EXPLICIT))
       .toMatchObject({ state: "saved", expense: { id: saved.expense!.id } });
-    expect(await db.retireExpenseRequest({ key: requestKey, hash: hashOf("other"), actor: input.createdBy })).toEqual({ state: "conflict" });
+    expect(await db.retireExpenseRequest({ key: requestKey, hash: hashOf("other"), actor: input.createdBy }, EXPLICIT)).toEqual({ state: "conflict" });
     expect(await n("SELECT count(*) AS n FROM expense_request_retirements WHERE idempotency_key = $1", [requestKey])).toBe(0);
+    expect(await retireAudits(requestKey)).toBe(0);
     expect(await evidence(note)).toEqual({ vouchers: 1, audits: 1 });
   });
 
   it("retired first: the late request writes nothing; a second identical retirement is idempotent; another one conflicts", async () => {
     const note = `SYN-RET-FIRST-${++serial}`, requestKey = key(), input = legacyInput(note, 10, requestKey);
-    expect(await db.retireExpenseRequest({ key: requestKey, hash: input.request.hash, actor: input.createdBy })).toEqual({ state: "retired" });
-    expect(await db.retireExpenseRequest({ key: requestKey, hash: input.request.hash, actor: input.createdBy })).toEqual({ state: "retired" });
-    expect(await db.retireExpenseRequest({ key: requestKey, hash: hashOf("x"), actor: input.createdBy })).toEqual({ state: "conflict" });
+    expect(await db.retireExpenseRequest({ key: requestKey, hash: input.request.hash, actor: input.createdBy }, EXPLICIT)).toEqual({ state: "retired" });
+    // The explicit retirement is audited once, in its own transaction; the idempotent repeat and the conflict add nothing.
+    expect(await retireAudits(requestKey)).toBe(1);
+    expect((await q<{ actor: string; actor_role: string; summary: string }>("SELECT actor, actor_role, summary FROM audit_log WHERE action = 'expense.request_retire' AND entity_id = $1", [requestKey])))
+      .toEqual([{ actor: input.createdBy, actor_role: "reception", summary: expect.stringMatching(/[؀-ۿ]/) }]);
+    expect(await db.retireExpenseRequest({ key: requestKey, hash: input.request.hash, actor: input.createdBy }, EXPLICIT)).toEqual({ state: "retired" });
+    expect(await db.retireExpenseRequest({ key: requestKey, hash: hashOf("x"), actor: input.createdBy }, EXPLICIT)).toEqual({ state: "conflict" });
+    expect(await retireAudits(requestKey)).toBe(1);
     expect(await db.recordExpense(input)).toMatchObject({ expense: null, reason: "expense_request_retired" });
     expect(await evidence(note)).toEqual({ vouchers: 0, audits: 0 });
   });
@@ -142,7 +153,10 @@ describe("explicit retirement", () => {
     await new Promise(resolve => setTimeout(resolve, 20)); // the token's own expiry, not a race barrier
     await expect(create.commandCanonicalRetireExpenseRequest(expiring, { requestKey, source: body })).rejects.toThrow(/SESSION|EXPIRED/);
     expect(await n("SELECT count(*) AS n FROM expense_request_retirements WHERE idempotency_key = $1", [requestKey])).toBe(0);
+    expect(await retireAudits(requestKey)).toBe(0);
     expect(await create.commandCanonicalRetireExpenseRequest(await fx.session("clerk"), { requestKey, source: body })).toEqual({ state: "retired" });
+    expect((await q("SELECT actor, actor_role FROM audit_log WHERE action = 'expense.request_retire' AND entity_id = $1", [requestKey])))
+      .toEqual([{ actor: ACCOUNTS.clerk.username, actor_role: "reception" }]);
     await expect(create.commandCanonicalExpenseCreate(await fx.session("clerk"), { source: body, requestKey }))
       .rejects.toMatchObject({ code: "expense_request_retired" });
     // The same key from another user is another request: it is not fenced by the clerk's retirement.

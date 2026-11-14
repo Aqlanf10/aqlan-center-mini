@@ -66,6 +66,11 @@ no expense can be written under that key **for that request**.
      - the saved voucher (same fingerprint);
      - 409 conflict (another fingerprint or actor holds the key);
      - 401/403 (expired or unauthorized: nothing is written).
+   - A newly written explicit retirement writes one audit row, `expense.request_retire` (entity
+     `expense_request`, the key as the entity id, the actor and role), in the retirement's own transaction.
+     An idempotent repeat, the saved-voucher answer, a conflict and every refusal write none. An automatic
+     retirement (case 1) writes no audit row: its retirement row records who, when and which fingerprint, and a
+     refusal adds nothing to the audit log, as before.
    - This is how an attempt whose sends never got any answer is closed for good. It replaces "hide after
      checking by hand" as the normal way out; hiding stays available.
 
@@ -146,6 +151,10 @@ exact body and key. Browser, on both screens (the petty expense and the supplier
 - Canonical: the command computes the fingerprint once (`fingerprint()`, shared with
   `commandCanonicalRetireExpenseRequest`). It retires after the operation's rollback. If that retirement did
   not commit, it reports neither "retired" nor "unused".
+- Audit (found by the TD-06 audit-coverage guard on the gate of `dc341d2c`): the explicit retirement now writes
+  `expense.request_retire` in its transaction (§2.1). PostgreSQL proves one row on the first explicit
+  retirement, none on its repeat or a conflict, none on the saved answer, none on an automatic retirement, and
+  the canonical actor and role; it was red 2/9 before the code.
 - Reset: `expense_request_retirements` is in the reset keep list. Unlike 0068, it never blocks a reset,
   because every refusal now leaves a row.
 - Red before green:

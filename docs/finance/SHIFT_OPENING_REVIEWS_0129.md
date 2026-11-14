@@ -27,7 +27,10 @@ trail, without changing the previous shift's close and without inventing a cash 
   the higher id). Its `counted_*` amounts are what was physically left in the drawer.
 - For each currency (YER, SAR, USD), the difference is `opening − previous counted`. A positive
   difference is more cash at opening than was counted at close; a negative one is less.
-- **The opener counts blind.** The opening form never shows the previous count. When at least one
+- **The opening form does not show the previous count.** It starts empty and is never prefilled from the
+  previous close, and the refusal below never returns that count. This is not a full blind count: the shift
+  history on the same screen (and `GET /api/shifts`) still lists past closes, with their counted amounts, to
+  anyone who may view shifts (§6). When at least one
   currency differs, the server refuses the first attempt with 409 `opening_difference_note_required`. The
   refusal names each differing currency with its signed difference, the same way the close refuses
   a count that does not match the expected cash. Nothing is written. The opener recounts. If the count is right,
@@ -131,7 +134,7 @@ registered after 0128 and before 0132 in `applyRuntimeMigrationFiles`.
 - `POST /api/shifts` (open), both paths: the optional `openingDifferenceNote`. A mismatch without a note
   returns 409 `opening_difference_note_required` with `differences: [{currency, differenceMinor |
   null}]`, and with `previousCountKnown` per currency. The previous counted amounts are not returned, so
-  that the count stays blind. The 201 body adds `openingReviews` (the rows written).
+  that the form never learns it (see §6 for what the history still shows). The 201 body adds `openingReviews` (the rows written).
 - `GET /api/shifts`: the open shift carries `openingReviews`. The response carries `pendingOpeningReviews`,
   a number.
 - `POST /api/shifts/opening-reviews` (new, canonical only), body `{id, reason, settlement}`. The action
@@ -174,7 +177,7 @@ PostgreSQL, synthetic data only:
    backfilled. The next opening compares with the last close.
 
 Unit tests: the refusal message, the difference arithmetic, and the route dispatch (a canonical session
-never falls back to legacy). Browser journey: the blind opening, the mismatch notice, the note, the
+never falls back to legacy). Browser journey: the empty opening form, the mismatch notice, the note, the
 pending notice, and the review by the owner.
 
 ## 7. Implementation decisions (2026-11-14)
@@ -205,3 +208,7 @@ pending notice, and the review by the owner.
 - The review is text. It does not post any entry. Moving cash between the drawer and a bank or the owner
   is still outside the system, as it is today.
 - A shift opened before 0129 is never compared retroactively.
+- **Not a full blind count** (corrected 2026-11-14, found by the browser journey): the opening form and the
+  refusal hide the previous count, but the shift history and the shifts feed still show the last close's
+  counted amount to every shift viewer, the opener included. Hiding it from openers until the next opening
+  would change an existing screen and report, so it is an owner question, not done here.

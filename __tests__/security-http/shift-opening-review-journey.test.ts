@@ -62,8 +62,11 @@ it("Browser: the opener explains after recounting; the reviewer reviews once; th
     await page.goto(`${journey.baseUrl}/finance`);
     const view = page.getByTestId("canonical-shifts");
     await view.getByRole("button", { name: "تأكيد فتح وردية جديدة" }).waitFor();
-    // The previous close counted 950; the form never shows it.
-    expect(await view.innerText()).not.toMatch(/950/);
+    // The previous close counted 950. The opening form starts empty: nothing is prefilled from that close.
+    // (The shift history on the same screen still lists past closes to shift viewers; see the contract §6.)
+    for (const currency of ["YER", "SAR", "USD"]) {
+      expect(await view.getByRole("textbox", { name: `الافتتاحي ${currency}`, exact: true }).inputValue()).toBe("");
+    }
     await view.getByRole("textbox", { name: "الافتتاحي YER", exact: true }).fill("1000");
     await view.getByRole("button", { name: "تأكيد فتح وردية جديدة" }).click();
     await view.getByTestId("opening-difference-note").waitFor();

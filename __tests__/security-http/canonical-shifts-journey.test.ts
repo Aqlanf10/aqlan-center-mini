@@ -78,7 +78,14 @@ it("HTTP: untrusted bodies, cross-origin writes, and stale sessions have no effe
 
 it("HTTP: complete aggregates survive projection; receipt scope, expenses and unattributed notes have separate gates", async () => {
   const owner = await journey.login("owner");
-  const opened = await request(owner.cookie, "POST", { opening: { YER: "100", SAR: "2", USD: "3" } });
+  // 0129: the previous close counted 999 / 12.34 / 56.78; this opening differs, so it is refused once
+  // (nothing written) and opens with the opener's note.
+  const shiftsBefore = (await journey.db.query("SELECT count(*)::int AS n FROM cashier_shifts")).rows[0].n;
+  const refusedOpen = await request(owner.cookie, "POST", { opening: { YER: "100", SAR: "2", USD: "3" } });
+  expect(refusedOpen.status).toBe(409);
+  expect((await refusedOpen.json()).code).toBe("opening_difference_note_required");
+  expect((await journey.db.query("SELECT count(*)::int AS n FROM cashier_shifts")).rows[0].n).toBe(shiftsBefore);
+  const opened = await request(owner.cookie, "POST", { opening: { YER: "100", SAR: "2", USD: "3" }, openingDifferenceNote: "فرق تجريبي بعد إعادة العدّ" });
   expect(opened.status).toBe(201);
   const shift = await opened.json();
   const rows = (await journey.db.query(`INSERT INTO payments(receipt_number,patient_id,shift_id,kind,amount_minor,currency,base_amount_minor,method,note)
@@ -230,7 +237,9 @@ it("browser: a revoked grant clears already displayed details before the refused
 it("browser: a lost committed open response followed by an external close cannot auto-open another shift, even after reload", async () => {
   const owner = await journey.login("owner");
   const current = await (await journey.api("/api/shifts", owner.cookie)).json();
-  expect((await request(owner.cookie, "PATCH", { id: current.open.id, counted: { YER: "200", SAR: "2", USD: "3" } })).status).toBe(200);
+  // 0129: close at 55 / 0 / 0 (with the difference's reason) so that the tab's first opening of 55 matches
+  // the previous close and commits; the later opening of 77 then differs from the external close's 55.
+  expect((await request(owner.cookie, "PATCH", { id: current.open.id, counted: { YER: "55", SAR: "0", USD: "0" }, differenceReason: "فرق جرد تجريبي قبل الرحلة" })).status).toBe(200);
   const before = Number((await journey.db.query("SELECT count(*) FROM audit_log WHERE action='shift.open'")).rows[0].count);
   const context = await journey.browser.newContext({ viewport: { width: 390, height: 900 }, locale: "ar" });
   try {

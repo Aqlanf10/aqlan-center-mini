@@ -14034,13 +14034,20 @@ export interface RecordExpenseResult {
 /** 0133 (docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md): the outcome of retiring one expense request. */
 export type ExpenseRequestRetirement = { state: "retired" } | { state: "saved"; expense: Expense } | { state: "conflict" };
 export interface ExpenseRequestBinding { key: string; hash: string; actor: string }
+/**
+ * Given only by an explicit retirement (the sender's «أنهِ هذا الطلب نهائيًا»): a newly written retirement then
+ * writes its audit row in the same transaction. An automatic retirement after a refusal passes none; its
+ * retirement row is its record.
+ */
+export interface ExpenseRequestRetirementAudit { actorRole: string | null }
 
 /**
  * Retire one request under the 0128 key lock, on the caller's transaction. Saved first wins (its receipt
  * is returned; nothing is cancelled); retired first wins for that exact request. Only the same key,
  * fingerprint and actor count as the same request; anything else is a conflict and writes nothing.
  */
-export async function retireExpenseRequestWith(c: DbClient, input: ExpenseRequestBinding): Promise<ExpenseRequestRetirement> {
+export async function retireExpenseRequestWith(c: DbClient, input: ExpenseRequestBinding,
+  audit?: ExpenseRequestRetirementAudit): Promise<ExpenseRequestRetirement> {
   await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`aqlan.expense.request:${input.key}`]);
   const { rows: prior } = await c.query<{ id: number; idempotency_request_hash: string }>(
     "SELECT id, idempotency_request_hash FROM expenses WHERE idempotency_key = $1", [input.key]);
@@ -14055,12 +14062,17 @@ export async function retireExpenseRequestWith(c: DbClient, input: ExpenseReques
   if (retired[0]) return retired[0].request_hash === input.hash && retired[0].retired_by === input.actor ? { state: "retired" } : { state: "conflict" };
   await c.query("INSERT INTO expense_request_retirements (idempotency_key, request_hash, retired_by) VALUES ($1, $2, $3)",
     [input.key, input.hash, input.actor]);
+  if (audit) {
+    await insertAuditRow(c, { action: "expense.request_retire", entity: "expense_request", entityId: input.key,
+      details: { مفتاح_الطلب: input.key }, actor: input.actor, actorRole: audit.actorRole });
+  }
   return { state: "retired" };
 }
 /** The same on its own transaction; the answer is returned only after COMMIT succeeded. */
-export async function retireExpenseRequest(input: ExpenseRequestBinding): Promise<ExpenseRequestRetirement> {
+export async function retireExpenseRequest(input: ExpenseRequestBinding,
+  audit?: ExpenseRequestRetirementAudit): Promise<ExpenseRequestRetirement> {
   await ensureSchema();
-  return withTransaction(getPool(), c => retireExpenseRequestWith(c, input));
+  return withTransaction(getPool(), c => retireExpenseRequestWith(c, input, audit));
 }
 /**
  * After a refusal's rollback: retire that request and report "retired" only if the retirement committed.

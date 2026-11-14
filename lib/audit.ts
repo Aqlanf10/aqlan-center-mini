@@ -22,6 +22,8 @@ export type AuditAction =
   /* (RC-1) تصحيح سند قبض خطأ: عكسٌ + سندٌ بديل (أو إبطالٌ وحده) — بسببٍ مكتوب. */
   | "payment.correct"
   | "expense.create"
+  /* (0133) المرسِل أنهى طلب صرف لم يُعرف مصيره نهائيًا: لا يكتب به سند بعد ذلك. */
+  | "expense.request_retire"
   | "shift.open" | "shift.close" | "shift.opening_review"
   | "patient.create" | "patient.update" | "patient.number.change" | "patient.numbering.configure"
   /* (P2-7) دمج ملفٍّ مكرَّر في الملف الأصلي. */
@@ -201,6 +203,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "payment.correct": "تصحيح سند قبض",
   "payment.idempotent_replay": "إعادة طلب مالي بمفتاح الإعادة",
   "expense.create": "سند صرف",
+  "expense.request_retire": "إنهاء طلب صرف معلّق نهائيًا دون سند",
   "shift.open": "فتح وردية",
   "shift.close": "إغلاق وردية وجرد",
   "shift.opening_review": "مراجعة فرق افتتاح وردية",

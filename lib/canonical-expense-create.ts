@@ -165,6 +165,7 @@ export async function commandCanonicalRetireExpenseRequest(session: VerifiedDura
       }
       throw error;
     }
-    return retireExpenseRequestWith(client, { key: command.requestKey, hash: f.hash, actor: f.identity.username });
+    return retireExpenseRequestWith(client, { key: command.requestKey, hash: f.hash, actor: f.identity.username },
+      { actorRole: f.identity.role });
   });
 }

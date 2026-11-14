@@ -71,7 +71,8 @@ export async function POST(request: Request) {
   try {
     const fingerprint = legacyExpenseFingerprint(session.username, isAdmin(session.role), input.source, ratesFromSettings(await getSettings()));
     if (!fingerprint.ok) return NextResponse.json(UNPROVEN, { status: 409 });
-    return answer(await retireExpenseRequest({ key: input.key, hash: fingerprint.hash, actor: session.username }));
+    return answer(await retireExpenseRequest({ key: input.key, hash: fingerprint.hash, actor: session.username },
+      { actorRole: session.role }));
   } catch {
     return NextResponse.json({ message: "تعذّر تأكيد إنهاء الطلب؛ يبقى معلّقًا. أعد المحاولة." }, { status: 500 });
   }

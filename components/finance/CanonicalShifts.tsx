@@ -45,7 +45,7 @@ export function CanonicalShifts({ username }: { username: string }) {
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [needsReason, setNeedsReason] = useState(false);
-  // 0129: blind opening count; a difference with the previous close is revealed by the server, then explained.
+  // 0129: the opening form is never prefilled from the previous close; a difference with the previous close is revealed by the server, then explained.
   const [openingNote, setOpeningNote] = useState("");
   const [needsOpeningNote, setNeedsOpeningNote] = useState(false);
   const sequence = useRef(0), inFlight = useRef(false);
