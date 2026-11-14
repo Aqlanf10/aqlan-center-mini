@@ -8,6 +8,10 @@ import { restoreClientConfigFor } from "./client-config";
 import { readTarGzEntries } from "./archive";
 import { validateBackupArchive, type ValidationOk } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
+import { finalizeRestoredStaffIdentityInTransaction } from "../staff-authority-lifecycle.mjs";
+import { randomUUID } from "node:crypto";
+import { STAFF_AUTHORITY_RELATIONS, staffLifecycleLockKey } from "../legacy-staff-schema.mjs";
+import { RestoreHoldError, installRestoreHold } from "./restore-hold";
 import { loginPhotoRestoreProblem } from "./login-photo";
 
 /**
@@ -34,10 +38,19 @@ export interface StagedRestoreOptions {
   stagingDir: string;
   /** يرفض الهدف غير الفارغ افتراضًا — لا استعادة فوق بيانات بلا علم صريح. */
   allowNonEmptyTarget?: boolean;
+  /**
+   * Installs schema proposals that are not registered migrations yet (inventory,
+   * supplier transport) on the target, after the hold and the registered migrations and
+   * before the replay. Disposable evidence only until M4 registers them; then this seam
+   * is removed. No production caller passes it.
+   */
+  installUnregisteredProposals?: (client: Client) => Promise<void>;
 }
 
 export interface StagedRestoreResult {
   ok: boolean;
+  /** Canonical source (manifest identity provenance): the target stays held until its own seal. */
+  restoreHold: boolean;
   targetIdentity: { host: string; port: string; database: string; user: string } | null;
   validationErrors: string[];
   documentsRestored: number;
@@ -127,6 +140,7 @@ async function nonDeferrableCyclicForeignKeys(client: Client): Promise<ForeignKe
 export async function stagedRestore(options: StagedRestoreOptions): Promise<StagedRestoreResult> {
   const result: StagedRestoreResult = {
     ok: false,
+    restoreHold: false,
     targetIdentity: parseDatabaseHost(options.targetUrl),
     validationErrors: [],
     documentsRestored: 0,
@@ -170,8 +184,26 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   try {
     await client.connect();
 
+    // ── الخطوة ٢أ: مصدرٌ موحّد الهوية (بروتوكول الاستعادة R1): الحجز الدائم قبل أي مخطط أو بيانات.
+    // الهدف يجب أن يكون فارغًا تمامًا وبلا أي أثر هوية، ولا خيار لتجاوز ذلك هنا.
+    const canonicalSource = Boolean(validated.manifest.identityProvenance);
+    if (canonicalSource) {
+      const manifestBytes = archive.entries.get("manifest.json")!.data;
+      try {
+        await installRestoreHold(client, { holdId: randomUUID(), manifestDigest: createHash("sha256").update(manifestBytes).digest("hex") });
+      } catch (error) {
+        result.errors.push(error instanceof RestoreHoldError
+          ? (error.code === "restore_target_has_identity"
+            ? "الهدف يحمل هوية موحّدة (جاهزة أو معزولة). استعادة مصدر موحّد إليه مرفوضة؛ استعد إلى قاعدة فارغة جديدة."
+            : "الهدف ليس فارغًا. استعادة مصدر موحّد تحتاج قاعدة فارغة جديدة، ولا يُتجاوز ذلك.")
+          : `تعذّر تثبيت حجز الاستعادة؛ لم يُستعد شيء: ${error instanceof Error ? error.message : String(error)}`);
+        return result;
+      }
+      result.restoreHold = true;
+    }
+
     // ── الخطوة ٢: الهدف فارغ؟ (رفض غير الفارغ افتراضًا)
-    const tables = await targetTableCount(client);
+    const tables = canonicalSource ? 0 : await targetTableCount(client);
     if (tables > 0 && !options.allowNonEmptyTarget) {
       result.errors.push(
         `الهدف ليس فارغًا (${tables} جدولًا). الاستعادة فوق بيانات قائمة مرفوضة `
@@ -190,6 +222,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
       await client.query("SET standard_conforming_strings = on");
       const migrationRun = await migrate(migrationPool, { apply: true, files: migrationFiles });
       result.migrationsApplied = migrationRun.appliedVersions;
+      if (options.installUnregisteredProposals) await options.installUnregisteredProposals(client);
 
     // ── الخطوة ٤: بيانات SQL — مع استبعاد صفوف تسجيل الهجرات نفسها:
     // حالة الهجرات في الهدف تُعرَّف بما طبَّقته الخطوة ٣ (الملفات الحالية)، لا
@@ -199,6 +232,8 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
       const dataSql = prepared.dataSql;
       await client.query("BEGIN");
       try {
+        // R2: the replay is an authority-changing writer of this target: lifecycle fence first.
+        if (canonicalSource) await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [staffLifecycleLockKey("public")]);
         const cyclicKeys = await nonDeferrableCyclicForeignKeys(client);
         for (const key of cyclicKeys) {
           await client.query(
@@ -208,6 +243,22 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
         }
         await client.query("SET CONSTRAINTS ALL DEFERRED");
         await client.query(dataSql);
+        if (canonicalSource) {
+          // B1: no source authority row may arrive (the backup excludes them).
+          const { rows: imported } = await client.query(
+            `SELECT c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY($1::text[]) AND c.relname <> 'staff_restore_hold'`,
+            [[...STAFF_AUTHORITY_RELATIONS]]);
+          if (imported.length > 0) throw new Error("restore_source_identity_present");
+          // B2 bound to the owner's decision: an imported permission document is historical
+          // data, never a grant. Every one becomes pending until the owner confirms it.
+          await client.query(
+            `UPDATE users SET permissions = jsonb_set(permissions::jsonb, '{confirmation}', '"pending"')::text
+              WHERE permissions IS NOT NULL AND jsonb_typeof(permissions::jsonb) = 'object' AND permissions::jsonb ? 'schemaVersion'`);
+        }
+        // Preserve historical realm/subjects, but never reopen a rolled-back
+        // command history under the original execution epoch.
+        await finalizeRestoredStaffIdentityInTransaction(client);
         // Force every deferred foreign key check before restoring its original declaration.
         await client.query("SET CONSTRAINTS ALL IMMEDIATE");
         for (const key of cyclicKeys) {

@@ -1,0 +1,177 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts (19 tests | 19 failed) 2570ms
+   × owner, own and all analysts can copy; read, none and unlinked actors cannot 24ms
+   × outside, missing and discarded studies are unavailable without effects 22ms
+   × copies original calibration, date, phase, reference and unknown historical landmarks without new approved results 37ms
+   × draft-only and existing-draft refusals preserve the original one-draft rule 36ms
+   × foreign document reference refuses before reading or locking foreign content 25ms
+   × foreign ortho reference refuses before reading or locking foreign content 30ms
+   × retained unavailable image and same-patient ortho association are preserved without file or responsibility changes 22ms
+   × copy bounds refuse oversized stored data without truncating a historical study 28ms
+   × two actual canonical waiters create one draft and one audit 22ms
+   × legacy and canonical copy contend safely on the same original and unique draft constraint 20ms
+   × audit failure rolls back the new study and copied landmarks 21ms
+   × uses one admitted connection without a schema initializer or rich legacy reader 28ms
+   × expire changes during the patient-lock wait prevent copying 17ms
+   × scope changes during the patient-lock wait prevent copying 28ms
+   × source changes during the patient-lock wait prevent copying 23ms
+   × analysis revocation at the identity fence defeats a previously signed request 30ms
+   × expiry after the INSERT inside audit rolls back the entire copy 20ms
+   × inverse study lock refuses rather than hanging or leaving a draft 21ms
+   × inverse document lock refuses rather than hanging or leaving a draft 23ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 19 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > owner, own and all analysts can copy; read, none and unlinked actors cannot
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:40:67
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > outside, missing and discarded studies are unavailable without effects
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:45:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > copies original calibration, date, phase, reference and unknown historical landmarks without new approved results
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:52:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > draft-only and existing-draft refusals preserve the original one-draft rule
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:60:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > foreign document reference refuses before reading or locking foreign content
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > foreign ortho reference refuses before reading or locking foreign content
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:66:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > retained unavailable image and same-patient ortho association are preserved without file or responsibility changes
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:73:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > copy bounds refuse oversized stored data without truncating a historical study
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:79:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > two actual canonical waiters create one draft and one audit
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:87:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > legacy and canonical copy contend safely on the same original and unique draft constraint
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:96:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > audit failure rolls back the new study and copied landmarks
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:106:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > uses one admitted connection without a schema initializer or rich legacy reader
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:112:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > expire changes during the patient-lock wait prevent copying
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > scope changes during the patient-lock wait prevent copying
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > source changes during the patient-lock wait prevent copying
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:117:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > analysis revocation at the identity fence defeats a previously signed request
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:129:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > expiry after the INSERT inside audit rolls back the entire copy
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:138:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/19]⎯
+
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > inverse study lock refuses rather than hanging or leaving a draft
+ FAIL  __tests__/postgres/ceph-copy-canonical-command.test.ts > inverse document lock refuses rather than hanging or leaving a draft
+error: new row for relation "ceph_analyses" violates check constraint "ceph_analyses_phase_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ scenario __tests__/postgres/ceph-copy-canonical-command.test.ts:26:3
+
+ ❯ __tests__/postgres/ceph-copy-canonical-command.test.ts:144:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/19]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  19 failed | 16 passed (35)
+   Start at  08:09:52
+   Duration  8.02s (transform 2.58s, setup 0ms, import 3.20s, tests 4.10s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

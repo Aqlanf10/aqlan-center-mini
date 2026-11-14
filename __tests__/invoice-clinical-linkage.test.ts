@@ -92,6 +92,12 @@ describe("(INV-LINK TOOTH) per-service tooth scope and site validation", () => {
     const filling = validateLineSite({ category: "filling", toothCode: 26, surfaces: "o, m" });
     expect(filling.ok && filling.site.surfaces).toBe("MO");
     expect(validateLineSite({ category: "filling", toothCode: 26, surfaces: "MQ" })).toEqual({ ok: false, reason: "bad_surfaces" });
+    for (const category of ["filling", "sealant"]) {
+      for (const episodeTeeth of [[26, 27], [27]]) {
+        expect(validateLineSite({ category, toothCode: 26, surfaces: "MO", episodeTeeth })).toEqual({ ok: false, reason: "episode_split_required" });
+      }
+      expect(validateLineSite({ category, toothCode: 26, surfaces: "MO", episodeTeeth: [26] })).toMatchObject({ ok: true });
+    }
     expect(validateLineSite({ category: "ortho", toothCode: null, scope: "both" })).toMatchObject({ ok: true, site: { scope: "both" } });
     expect(validateLineSite({ category: "ortho", toothCode: null })).toEqual({ ok: false, reason: "bad_scope" });
     expect(validateLineSite({ category: "ortho", toothCode: 11 })).toEqual({ ok: false, reason: "bad_scope" });

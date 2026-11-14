@@ -34,7 +34,7 @@ export function decodeAssessmentStoredRow(row:AssessmentStoredRow,scope:Assessme
 /** Patient/current-user/access locks must already be held. Prior revisions are immutable;
  * external source locks are sorted and precede Ortho/bridge locks. No foreign-owner row is locked.
  */
-export async function collectAssessmentSourceClosure(client:DbClient,scope:AssessmentScope,direct:AssessmentSourceV2[]):Promise<{external:AssessmentSourceV2[];revisions:Map<number,AnyAssessmentRevision>}>{
+export async function collectAssessmentSourceClosure(client:Pick<DbClient,"query">,scope:AssessmentScope,direct:AssessmentSourceV2[]):Promise<{external:AssessmentSourceV2[];revisions:Map<number,AnyAssessmentRevision>}>{
   const wanted=new Map<string,AssessmentSourceV2>(),revisions=new Map<number,AnyAssessmentRevision>(),queue: {source:AssessmentSourceV2;parentVersion:number|null}[]=direct.map(source=>({source,parentVersion:null}));
   let storedBytes=0;
   while(queue.length){const {source,parentVersion}=queue.shift()!,existing=wanted.get(key(source));
@@ -87,7 +87,7 @@ export const ASSESSMENT_CEPH_CLINICAL_V1 = "jsonb_build_object('projection','cep
 export const ASSESSMENT_HISTORY_CLINICAL_V1 = "jsonb_build_object('projection','patient-history-clinical-v1','answers',h.answers,'allergies',h.allergies,'medications',h.medications,'asaClass',h.asa_class,'bloodGroup',h.blood_group,'notes',h.notes,'patientConfirmed',h.patient_confirmed,'recordedBy',h.recorded_by,'recordedAt',h.recorded_at)";
 
 /** Only a minimal clinical projection enters source hashing; no invoice/price fields. */
-async function currentAssessmentExternalSources(client:DbClient,scope:AssessmentScope,sources:readonly Pick<AssessmentSourceV2,"kind"|"id">[],lock:boolean):Promise<AssessmentExternalCapture>{
+async function currentAssessmentExternalSources(client:Pick<DbClient,"query">,scope:AssessmentScope,sources:readonly Pick<AssessmentSourceV2,"kind"|"id">[],lock:boolean):Promise<AssessmentExternalCapture>{
   const readable=new Set<string>(),result:AssessmentExternalCapture=Object.assign(new Map<string,AssessmentSourceChoiceV2>(),{historicallyReadable:readable}),ids=(kind:AssessmentSourceV2["kind"])=>sources.filter(s=>s.kind===kind).map(s=>s.id);
   let admittedBytes=0;
   const admit=(raw:unknown)=>{const bytes=assessmentStoredByteCount(raw);if(bytes===null)assessmentFail(409,"invalid_source_budget","تعذّر التحقق من حجم المصدر.");admittedBytes+=bytes;if(admittedBytes>ASSESSMENT_EXTERNAL_SOURCE_MAX_BYTES)assessmentFail(409,"source_resource_limit","المصادر السريرية تتجاوز حد القراءة الآمنة.");};
@@ -159,4 +159,13 @@ export async function listAssessmentSourceChoices(client:DbClient,scope:Assessme
   const candidates=[...(await currentAssessmentExternalSources(client,scope,sources,false)).values(),...history.slice(0,100).map(r=>({kind:"assessment_revision" as const,id:r.id,version:`sha256:${r.contentHash}`,label:`تقييم محفوظ · نسخة ${r.version}`}))];
   truncated ||= history.length>100||candidates.length>100;
   return {items:candidates.slice(0,100),truncated,imaging:imagingVisible?"allowed":"restricted"};
+}
+
+/** SELECT-only capture on a caller-owned canonical RR READ ONLY snapshot.
+ * This entry does not alter the locking capture used by existing writers. */
+export async function readAssessmentExternalSourcesWith(client:Pick<DbClient,"query">,scope:AssessmentScope,union:readonly Pick<AssessmentSourceV2,"kind"|"id">[]):Promise<AssessmentExternalCapture>{
+  if(union.some(s=>!positiveId(s.id)||!["document","ceph_study","patient_history","clinical_visit"].includes(s.kind)))assessmentFail(400,"invalid_source_target","هدف المرجع الخارجي غير صالح.");
+  const unique=[...new Map(union.map(s=>[key(s),s])).values()];
+  if(unique.length>128)assessmentFail(409,"source_reference_limit","مراجع السجل تتجاوز حد القراءة الآمنة؛ لم يُختصر السجل.");
+  return currentAssessmentExternalSources(client,scope,unique,false);
 }

@@ -78,3 +78,50 @@ export function decideProcedurePrice(input: PriceCheckInput): PriceDecision {
   }
   return { ok: true, unitPriceMinor: requested, override: { kind: "discount", catalogMinor: catalog, requestedMinor: requested, discountPercent, reason } };
 }
+
+/**
+ * The same decision by explicit grants (M2 slice 85, the approved route map's
+ * `priceOverrides` fields). A role label never decides here:
+ * - discount within `billing.max_discount_percent`: `finance.discounts.apply`, with a reason;
+ * - discount beyond the ceiling: `finance.discounts.override`;
+ * - price above the catalogue: `finance.price-increases.apply`, with a reason;
+ * - a manual price for an unpriced service: also `finance.price-increases.apply` (a price
+ *   above the catalogue's none; narrower than the legacy doctor/admin reach).
+ * `requestedMinor === null` means "the server price": an unchanged saved line keeps its saved
+ * price (decided and audited when set); a new line takes the catalogue price. Never a request.
+ */
+export interface PriceGrants { discount: boolean; discountOverride: boolean; increase: boolean }
+export function decideProcedurePriceByGrants(
+  input: Omit<PriceCheckInput, "role" | "requestedMinor"> & {
+    requestedMinor: number | null;
+    /** An unchanged saved line's price: already decided and audited when it was set. */
+    keptMinor?: number | null;
+  },
+  grants: PriceGrants,
+): PriceDecision {
+  const unpriced = !input.priceConfigured || input.catalogMinor <= 0;
+  if (input.requestedMinor === null && typeof input.keptMinor === "number") return { ok: true, unitPriceMinor: input.keptMinor, override: null };
+  if (input.requestedMinor === null) return { ok: true, unitPriceMinor: unpriced ? 0 : input.catalogMinor, override: null };
+  const requested = Math.max(0, Math.round(input.requestedMinor));
+  const reason = cleanReason(input.reason);
+  if (unpriced) {
+    if (requested === 0) return { ok: true, unitPriceMinor: 0, override: null };
+    if (!grants.increase) return { ok: false, message: `«${input.serviceName}» غير مسعّرة في الدليل — تسعيرها يدويًا يحتاج صلاحية تطبيق زيادة السعر.` };
+    if (!reason) return { ok: false, message: `اكتب سبب السعر اليدوي لـ«${input.serviceName}».` };
+    return { ok: true, unitPriceMinor: requested, override: { kind: "unpriced", catalogMinor: input.catalogMinor, requestedMinor: requested, discountPercent: null, reason } };
+  }
+  const catalog = input.catalogMinor;
+  if (requested === catalog) return { ok: true, unitPriceMinor: catalog, override: null };
+  if (requested > catalog) {
+    if (!grants.increase) return { ok: false, message: `سعر «${input.serviceName}» أعلى من سعر الدليل — يحتاج صلاحية تطبيق زيادة السعر.` };
+    if (!reason) return { ok: false, message: `اكتب سبب تغيير سعر «${input.serviceName}» عن سعر الدليل.` };
+    return { ok: true, unitPriceMinor: requested, override: { kind: "increase", catalogMinor: catalog, requestedMinor: requested, discountPercent: null, reason } };
+  }
+  const discountPercent = Math.round(((catalog - requested) / catalog) * 1000) / 10;
+  if (!grants.discount && !grants.discountOverride) return { ok: false, message: `الخصم على «${input.serviceName}» يحتاج صلاحية تطبيق الخصم.` };
+  if (!reason) return { ok: false, message: `اكتب سبب الخصم على «${input.serviceName}» (${discountPercent}٪ عن سعر الدليل).` };
+  if (!grants.discountOverride && discountPercent > Math.max(0, input.maxDiscountPercent)) {
+    return { ok: false, message: `الخصم على «${input.serviceName}» ${discountPercent}٪ يتجاوز الحد المسموح (${Math.max(0, input.maxDiscountPercent)}٪) — يحتاج صلاحية تجاوز حد الخصم.` };
+  }
+  return { ok: true, unitPriceMinor: requested, override: { kind: "discount", catalogMinor: catalog, requestedMinor: requested, discountPercent, reason } };
+}

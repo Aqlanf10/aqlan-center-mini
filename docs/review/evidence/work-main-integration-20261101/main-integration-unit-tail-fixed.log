@@ -1,0 +1,81 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ __tests__/ortho-followup-coverage-schema.test.ts (2 tests | 1 failed) 29ms
+   × registers exact reviewed 0079 bytes without changing adjacent migrations or adopting proposal tables 26ms
+ ❯ __tests__/patient-numbering-schema.test.ts (3 tests | 1 failed) 35ms
+   × registers exact 0080 bytes between reconciliation and invoice actions alongside separately reviewed 0079 33ms
+ ❯ __tests__/treatment-financial-context.test.ts (18 tests | 1 failed) 19ms
+     × qualifies the full-package caveat without overriding specific adjustment coverage 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ortho-followup-coverage-schema.test.ts > registers exact reviewed 0079 bytes without changing adjacent migrations or adopting proposal tables
+AssertionError: expected [ Array(7) ] to deeply equal [ Array(5) ]
+
+- Expected
++ Received
+
+@@ -2,6 +2,8 @@
+    "0078",
+    "0079",
+    "0080",
+    "0081",
+    "0082",
++   "0087",
++   "0089",
+  ]
+
+ ❯ __tests__/ortho-followup-coverage-schema.test.ts:11:63
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/patient-numbering-schema.test.ts > registers exact 0080 bytes between reconciliation and invoice actions alongside separately reviewed 0079
+AssertionError: expected [ Array(7) ] to deeply equal [ Array(5) ]
+
+- Expected
++ Received
+
+@@ -2,6 +2,8 @@
+    "0078",
+    "0079",
+    "0080",
+    "0081",
+    "0082",
++   "0087",
++   "0089",
+  ]
+
+ ❯ __tests__/patient-numbering-schema.test.ts:10:75
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  __tests__/treatment-financial-context.test.ts > read-only treatment financial references > qualifies the full-package caveat without overriding specific adjustment coverage
+AssertionError: expected 'REVIEW_REQUIRED' to be 'OUTSIDE_CONTRACT' // Object.is equality
+
+Expected: "OUTSIDE_CONTRACT"
+Received: "REVIEW_REQUIRED"
+
+ ❯ __tests__/treatment-financial-context.test.ts:47:75
+     45|     const input = { legacy: true, financialMode: null, openingCurrenci…
+     46|     expect(classifyOrthoAdjustment({ ...input, legacyAgreement: true }…
+     47|     expect(classifyOrthoAdjustment({ ...input, legacyAgreement: false …
+       |                                                                           ^
+     48|     // Copy contract only: UI lifecycle/classifier rendering is separa…
+     49|     // by legacy-onboarding-checklist-refresh.test.tsx, including unre…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  3 failed | 20 passed (23)
+   Start at  04:24:26
+   Duration  829ms (transform 144ms, setup 0ms, import 215ms, tests 83ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

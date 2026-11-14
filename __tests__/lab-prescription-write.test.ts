@@ -1,0 +1,40 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { dispatchOrder } from "./fixtures/lab-dispatch";
+import { labPrescriptionVersion } from "../lib/lab-prescription-input";
+import type { SessionPayload } from "../lib/auth";
+const mocks=vi.hoisted(()=>({query:vi.fn(),release:vi.fn(),access:vi.fn(),schema:vi.fn(),revalidate:vi.fn(),audit:vi.fn()}));
+vi.mock("../lib/db",()=>({ensureSchema:mocks.schema,insertAuditRow:mocks.audit,getPool:()=>({connect:async()=>({query:mocks.query,release:mocks.release})})}));
+vi.mock("../lib/patient-access",()=>({canAccessPatient:mocks.access}));
+vi.mock("../lib/session",()=>({revalidateSessionInTransaction:mocks.revalidate}));
+import { completeLabPrescription } from "../lib/lab-prescription-write";
+const session={username:"synthetic",role:"admin",expiresAt:Date.now()+999999} as SessionPayload;
+const input={partyId:47,shade:"A2",stumpShade:"",toothNumbers:"27(Crown)",dueDate:"2026-11-01",impressionType:"physical",priority:"normal"};
+const order=dispatchOrder({status:"needed",partyId:null,shade:null,stumpShade:null,toothNumbers:null,impressionType:"physical",priority:"normal",dueDate:input.dueDate,source:"auto",toothCode:27,workType:"تاج"});
+let row:Record<string,unknown>;
+beforeEach(()=>{vi.resetAllMocks();row={patient_id:910007,status:"needed",party_id:null,shade:null,stump_shade:null,tooth_numbers:null,due_date:input.dueDate,impression_type:"physical",priority:"normal",cost_minor:null,payable_id:null,source:"auto",tooth_code:27,work_type:"تاج",visit_id:order.visitId};mocks.access.mockResolvedValue(true);mocks.revalidate.mockResolvedValue(session);mocks.query.mockImplementation(async(sql:string)=>({rows:sql.startsWith("SELECT patient_id")?[row]:sql.startsWith("SELECT name")?[{name:"Synthetic lab",phone:null}]:[]}));});
+const run=(dispatch=false)=>completeLabPrescription(381,input,labPrescriptionVersion(order),dispatch,session);
+describe("lab prescription transaction boundaries",()=>{
+ it("rolls back if the mandatory audit fails",async()=>{mocks.audit.mockRejectedValueOnce(Error("audit unavailable"));await expect(run()).rejects.toThrow("audit unavailable");expect(mocks.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");});
+ it("maps an active clinical table boundary to recoverable conflict",async()=>{mocks.query.mockImplementationOnce(async()=>({rows:[]})).mockRejectedValueOnce(Object.assign(Error("lock busy"),{code:"55P03"}));await expect(run()).rejects.toMatchObject({status:409});expect(mocks.revalidate).not.toHaveBeenCalled();});
+ it("rejects revoked or downgraded session inside transaction",async()=>{mocks.revalidate.mockResolvedValue(null);await expect(run()).rejects.toMatchObject({status:403});expect(mocks.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");});
+ it("rejects changing the signed source tooth to another tooth",async()=>{await expect(completeLabPrescription(381,{...input,toothNumbers:"18(Crown)"},labPrescriptionVersion(order),false,session)).rejects.toMatchObject({status:409});expect(mocks.audit).not.toHaveBeenCalled();});
+ it("writes clinical before/after audit in the same transaction",async()=>{await run();expect(mocks.audit).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({action:"lab_order.prescription_updated",details:expect.objectContaining({after:input,sourceTooth:27,sourceWorkType:"تاج"})}));});
+
+ it.each([false,true])("updates same row and records actor with no money or provenance rewrites: dispatch=%s",async dispatch=>{
+  expect(await run(dispatch)).toEqual({id:381,status:dispatch?"sent":"needed"});
+  const sql=mocks.query.mock.calls.map(c=>c[0]).join("\n");
+  expect(sql).toContain("FOR UPDATE");expect(sql).toContain("FOR SHARE");
+  expect(sql).not.toMatch(/INSERT INTO lab_orders|UPDATE (?:visits|invoices|payables)|INSERT INTO payables|SET.*cost_minor/i);
+  const update=mocks.query.mock.calls.find(c=>c[0].startsWith("UPDATE lab_orders"));
+  expect(update?.[1]).toEqual([381,47,"Synthetic lab",null,"A2",null,"27(Crown)",input.dueDate,"physical","normal",dispatch]);
+  expect(update?.[0]).not.toMatch(/visit_id|tooth_code|source|doctor_id|cost_minor|is_posted|payable_id/);
+  expect(mocks.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
+ });
+ it.each(["sent","cancelled","received"])("refuses already-transitioned order %s",async status=>{row.status=status;await expect(run()).rejects.toMatchObject({status:409});expect(mocks.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");});
+ it("rejects stale clinical data",async()=>{row.shade="A3";await expect(run()).rejects.toMatchObject({status:409});});
+ it("rejects unauthorized patient access inside transaction",async()=>{mocks.access.mockResolvedValue(false);await expect(run()).rejects.toMatchObject({status:403});expect(mocks.access).toHaveBeenCalledWith(session,910007,undefined,expect.anything(),"nowait");});
+ it.each(["accountant", "reception", "assistant"] as const)("rejects non-clinical-edit actor %s before connecting",async(role)=>{await expect(completeLabPrescription(381,input,labPrescriptionVersion(order),false,{...session,role})).rejects.toMatchObject({status:403});expect(mocks.query).not.toHaveBeenCalled();});
+ it.each([{cost_minor:"0"},{cost_minor:"500"},{payable_id:13}])("refuses financially linked provider reassignment %j",async change=>{Object.assign(row,change);await expect(run()).rejects.toMatchObject({status:409});});
+ it("refuses missing or inactive provider",async()=>{mocks.query.mockImplementation(async(sql:string)=>({rows:sql.startsWith("SELECT patient_id")?[row]:[]}));await expect(run()).rejects.toMatchObject({status:409});});
+ it("rolls back metadata if tracking write fails",async()=>{mocks.query.mockImplementation(async(sql:string)=>{if(sql.startsWith("INSERT INTO lab_order_tracking"))throw Error("synthetic failure");return {rows:sql.startsWith("SELECT patient_id")?[row]:sql.startsWith("SELECT name")?[{name:"Synthetic lab",phone:null}]:[]};});await expect(run()).rejects.toThrow("synthetic failure");expect(mocks.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");expect(mocks.release).toHaveBeenCalledOnce();});
+});

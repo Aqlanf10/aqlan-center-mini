@@ -1,0 +1,27 @@
+{
+  "base": "f5ff01a2c132f2ad3cacc4f10168c76441f5d6c3",
+  "checks": {
+    "unrelated_db_prefix": true,
+    "unrelated_db_suffix": true,
+    "native_domain_body_exact_except_indent": true,
+    "legacy_POST": true,
+    "legacy_PATCH_and_entire_GET": true,
+    "lib/canonical-ortho-lifecycle-command.ts": true,
+    "lib/canonical-ortho-lifecycle-version.ts": true,
+    "lib/canonical-ortho-reads.ts": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/staff-capability-catalogue.ts": true,
+    "lib/canonical-read-snapshot.ts": true,
+    "lib/canonical-ortho-assessment-command.ts": true,
+    "lib/canonical-ortho-strategy-command.ts": true,
+    "lib/canonical-ortho-coverage-command.ts": true,
+    "lib/ortho-followup-coverage-db.ts": true,
+    "lib/commission.ts": true,
+    "lib/fullBackup.ts": true,
+    "lib/restore/staging.ts": true,
+    "no_migration_change": true
+  },
+  "passed": 19,
+  "historicalSourceHashes": 857,
+  "nativeBodySha256": "bcfec89f74c570d8c7759b9380d10919f9249519c688c914a0e921d760b2e3ed"
+}

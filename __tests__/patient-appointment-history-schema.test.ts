@@ -17,7 +17,12 @@ describe("patient appointment history index provenance", () => {
       "0067_patient_appointment_history_index.sql",
       "0068_collection_attempt_retirements.sql",
       "0069_unpaid_currency_transitions.sql",
+      "0074_lab_work_intents.sql",
       "0078_agreement_reconciliation.sql",
+      "0079_ortho_followup_coverage.sql",
+      "0080_patient_numbering.sql",
+      "0081_invoice_archive.sql",
+      "0082_invoice_service_additions.sql",
       "0087_agreement_reminder_metadata.sql",
       "0089_lab_shade_specification.sql",
       "0090_booking_request_preferences.sql",
@@ -43,6 +48,9 @@ describe("patient appointment history index provenance", () => {
       "0123_ortho_study_export_archive.sql",
       "0124_ceph_correction_lineage.sql",
       "0125_ortho_case_reopen.sql",
+      "0126_commission_case_participations.sql",
+      "0128_expense_commands.sql",
+      "0132_ortho_adjustment_auxiliaries.sql",
     ]);
   });
 

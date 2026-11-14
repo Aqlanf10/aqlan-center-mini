@@ -1,0 +1,42 @@
+{
+  "base": "1d7524f9",
+  "checks": [
+    {
+      "file": "app/api/patients/[id]/ceph/route.ts",
+      "function": "GET",
+      "sha256": "8c6bd93b72ca16a866caf93438722c6aa24e5fecd611120afd67703b9c7674a4",
+      "unchanged": true
+    },
+    {
+      "file": "app/api/patients/[id]/ceph/route.ts",
+      "function": "POST",
+      "sha256": "bda558a22df01ed9cec5cff004ae66c678ffcac806def023aef30bfec72fc83c",
+      "unchanged": true
+    },
+    {
+      "file": "lib/canonical-ortho-assessment.ts",
+      "sha256": "a8717164ecd01ce833ef25db0f2d78c3ae61aad2f33d4ea1519b748cf10e7b35",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-assessment-store.ts",
+      "sha256": "dc13e538d0e3618df6713a5feb7643b4ed1483c1b7d3c2de8264943c6738b3fa",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-assessment-versioned-sources.ts",
+      "sha256": "f5f9dd9e5523e7a65aec0aa3f6f210054829802a9cae0329c2783e1a1a361ed8",
+      "unchanged": true
+    },
+    {
+      "file": "lib/staff-authority-proof-internal.ts",
+      "sha256": "c259bbdbefc02d01b0e004e053c1bb487bb637947be32d82eb6f25473b40c96a",
+      "unchanged": true
+    },
+    {
+      "file": "lib/db.ts",
+      "sha256": "ca59467d9f3424c0eab870564606eb438c30bb253d786d459e92510edbeb07c7",
+      "unchanged": true
+    }
+  ]
+}

@@ -10,7 +10,7 @@ import { fullBackupBlocks } from "../../lib/fullBackup";
 import { stagedRestore } from "../../lib/restore/staging";
 import type { DbClient, DbPool } from "../../lib/db";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { ProtectedOrthoStudyHistoryError } from "../../lib/clinic-reset";
+import { ProtectedOrthoStudyHistoryError, ProtectedPatientNumberHistoryError } from "../../lib/clinic-reset";
 import { ORTHO_STUDY_SUBMISSION_SQL } from "../../lib/ortho-study-submission-schema";
 import { openPeriodontalFixture } from "./_periodontal-fixture";
 
@@ -80,11 +80,17 @@ it("registers exact migration provenance and allows an empty fenced reset", asyn
   expect((await f.pool.query("SELECT name,checksum,adopted FROM schema_migrations WHERE version='0112'")).rows).toEqual([{
     name: "ortho_study_submissions", checksum: createHash("sha256").update(ORTHO_STUDY_SUBMISSION_SQL).digest("hex"), adopted: false,
   }]);
-  await scope(); let backed = false;
+  let backed = false;
   const reset = await f.db.resetClinicData({ actor: "synthetic", actorRole: "admin" }, async () => {
     backed = true; return { ok: true, backupId: "synthetic-empty-history-reset" };
   });
-  expect(reset).toMatchObject({ ok: true, counts: { patients: 1 } }); expect(backed).toBe(true);
+  expect(reset).toMatchObject({ ok: true, counts: { patients: 0 } }); expect(backed).toBe(true);
+  // With a patient file present the patient-number protection refuses before backup.
+  await scope(); let reached = false;
+  await expect(f.db.resetClinicData({ actor: "synthetic", actorRole: "admin" }, async () => {
+    reached = true; return { ok: true, backupId: "must-not-reach" };
+  })).rejects.toBeInstanceOf(ProtectedPatientNumberHistoryError);
+  expect(reached).toBe(false);
 });
 it("serializes an empty-history reset behind an in-flight generic patient merge", async () => {
   const owner = await scope(), target = await patient(), blocker = await f.pool.connect();
@@ -101,7 +107,8 @@ it("serializes an empty-history reset behind an in-flight generic patient merge"
     await expect.poll(async () => (await f.pool.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT pg_advisory_xact_lock(hashtextextended%') waiting")).rows[0].waiting, { timeout: 5000 }).toBe(true);
     await blocker.query("SELECT pg_advisory_unlock(744112)");
     expect(await merge).toMatchObject({ ok: true });
-    expect(await reset).toEqual({ ok: false, failure: "synthetic backup declined" });
+    // The reset waited behind the merge; it then meets the merged patient files and refuses before backup.
+    expect(await reset).toBeInstanceOf(ProtectedPatientNumberHistoryError);
   } finally {
     await blocker.query("SELECT pg_advisory_unlock(744112)"); blocker.release();
     await Promise.all([merge, reset]);

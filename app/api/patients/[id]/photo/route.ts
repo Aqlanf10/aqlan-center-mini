@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalDocumentFailure, commandCanonicalPatientPhoto } from "@/lib/canonical-documents";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { recordAudit, setPatientPhoto } from "@/lib/db";
@@ -16,6 +19,16 @@ const REFUSAL: Record<"not_found" | "document_not_found" | "not_image", { messag
 
 /** (PAT-3) صورة المريض: مستندٌ صوريٌّ من مستنداته، أو null لإزالتها. */
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 75: patients.edit inside the patient scope; an image of the patient's own visible documents. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let canonicalBody: Record<string, unknown> = {};
+    try { const raw = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); canonicalBody = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>; }
+    catch (error) { return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+    try { return NextResponse.json(await commandCanonicalPatientPhoto(selected.handle, (await context.params).id, canonicalBody), { headers: NO_STORE }); }
+    catch (error) { return canonicalDocumentFailure(error, "تعذّر حفظ صورة المريض."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (isRestrictedRole(session.role)) {

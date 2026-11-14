@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+
+ Test Files  6 passed (6)
+      Tests  197 passed (197)
+   Start at  23:56:42
+   Duration  7.64s (transform 1.14s, setup 0ms, import 1.79s, tests 5.05s, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

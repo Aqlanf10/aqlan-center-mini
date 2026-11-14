@@ -1,0 +1,146 @@
+{
+  "head": "8e12f9591ebd0aafc578587b4d6c3e5e657eee6f",
+  "qualification": "No unresolved git conflict. This tracks only whether the parent explicitly confirmed a bounded independent review of a conflict file; CI success is separate. Migration union acceptance does not certify every schema/test conflict.",
+  "files": [
+    {
+      "path": "__tests__/lab-accounting-fx-snapshot.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/lab-accounting-monetary-intent-route.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/migrations.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/patient-appointment-history-schema.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/periodontal-candidate-chain.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/periodontal-schema.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/postgres/_periodontal-fixture.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/postgres/debt-installments-storage.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/postgres/hr-composed-backup.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/postgres/hr-runtime-registration.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/postgres/patient-appointment-history-index.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/postgres/periodontal-restore.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/postgres/schema-ownership.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/schema-preflight-cli.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "__tests__/security-http/hr-temporal-history-ui.test.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "app/api/lab/[id]/route.ts",
+      "review": "limited finance/migration review; other sections remain unconfirmed"
+    },
+    {
+      "path": "app/layout.tsx",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "app/login/page.tsx",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "app/print/lab/[id]/page.tsx",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "app/settings/page.tsx",
+      "review": "bounded review reported for backup/restore/settings"
+    },
+    {
+      "path": "components/LabDentalChart.tsx",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "components/PatientLabOrders.tsx",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "components/inventory/DoctorCustody.tsx",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "components/inventory/ProcurementAdministration.tsx",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "components/inventory/ProcurementOperations.tsx",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "docs/DATABASE_MIGRATIONS.md",
+      "review": "limited finance/migration review; other sections remain unconfirmed"
+    },
+    {
+      "path": "lib/audit.ts",
+      "review": "limited finance/migration review; other sections remain unconfirmed"
+    },
+    {
+      "path": "lib/db.ts",
+      "review": "limited finance/migration review; other sections remain unconfirmed"
+    },
+    {
+      "path": "lib/fullBackup.ts",
+      "review": "bounded review reported for backup/restore/settings"
+    },
+    {
+      "path": "lib/restore/staging.ts",
+      "review": "bounded review reported for backup/restore/settings"
+    },
+    {
+      "path": "lib/settings-definitions.ts",
+      "review": "bounded review reported for backup/restore/settings"
+    },
+    {
+      "path": "schema/current-schema-contract.pg18.json",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "schema/preflight-disclosure.pg18.json",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    },
+    {
+      "path": "scripts/verify-schema-ownership.ts",
+      "review": "no independent acceptance explicitly reported for this conflict file"
+    }
+  ]
+}

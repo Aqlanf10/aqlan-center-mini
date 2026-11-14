@@ -72,7 +72,7 @@ it('connects real HTTP assessment/review/strategy owners to one browser-saved vi
     await page.getByTestId('assessment-v2-saved').waitFor();
     await page.getByRole('button', { name: /خطة العلاج والميكانيكا/ }).click();
     await eventually(() => page.getByTestId('ortho-strategy-saved').innerText()).toContain(strategy.rows[0].objective);
-    await page.getByRole('button', { name: 'مسار الأسلاك والشدّات', exact: true }).click();
+    await page.getByRole('button', { name: 'زيارات المتابعة والشدّ', exact: true }).click();
     await page.getByRole('button', { name: '⚡ سجّل شدّة وجلسة جديدة الآن', exact: true }).click();
     const form = page.locator('form').filter({ has: page.getByRole('textbox', { name: 'ما نُفّذ في الشدّة', exact: true }) });
     const done = 'Synthetic actual session entry; no inferred clinical intervention';

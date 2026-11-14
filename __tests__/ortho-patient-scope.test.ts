@@ -45,7 +45,7 @@ function fixture(id: number, patientId: number): OrthoCase {
     adjustments: [{
       id: id + 1000, visitId: null, visitSigned: false, doneOn: "2026-10-01", phase: "aligning",
       upperWire: "014 NiTi", lowerWire: "014 NiTi", elastics: "none", elasticNote: null,
-      done: `Synthetic procedure ${id}`, nextWeeks: 4, note: "Synthetic adjustment note", recordedBy: "synthetic",
+      done: `Synthetic procedure ${id}`, nextWeeks: 4, note: "Synthetic adjustment note", recordedBy: "synthetic", auxiliaries: null, auxiliaryOther: null,
       photos: [{ id: id + 2000, patientId, title: `Synthetic image ${patientId}`, note: "Synthetic private image note" } as PatientDocument],
     }],
     progress: { monthsElapsed: 0, monthsPlanned: 18, monthsRemaining: 18, percent: 0, overdue: false,

@@ -96,7 +96,7 @@ describe("Scenario A — clinical visit → invoice → collection → shift →
     expect(closed.reason).toBeNull();
     expect(closed.breakdown?.expected.YER).toBe(30000);
     expect(closed.difference).toEqual({ YER: 0, SAR: 0, USD: 0 });
-    await openShift({ openedBy: "cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
+    await openShift({ openedBy: "cashier", opening: { YER: 100000000, SAR: 100000000, USD: 100000000 } }); // 0128: vouchers need drawer cash
   });
 });
 

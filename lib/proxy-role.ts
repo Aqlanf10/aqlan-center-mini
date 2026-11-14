@@ -1,3 +1,5 @@
+import { classifySessionEnvelope, decodeSessionBody, splitSessionEnvelope } from "./session-envelope";
+
 /**
  * (P2-1) دور الجلسة كما يراه الباب (proxy) — بتحقق توقيعٍ كامل بـ Web Crypto.
  *
@@ -27,12 +29,6 @@ function toBase64Url(bytes: ArrayBuffer): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function fromBase64Url(value: string): string {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
-  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
-}
-
 function sameString(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -40,22 +36,30 @@ function sameString(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** Signed role and its per-user finance limits, or null for an invalid token. */
-export async function verifiedSessionAccess(token: string | undefined | null, secret = process.env.SESSION_SECRET): Promise<{
-  role: string; financeAccess?: Record<string, unknown>;
-} | null> {
-  if (!token || !secret || secret.length < 32) return null;
-  const [body, signature] = token.split(".");
-  if (!body || !signature) return null;
+export type VerifiedProxySessionAccess =
+  | { kind: "canonical"; role?: undefined; financeAccess?: undefined }
+  | { kind: "legacy"; role?: string; financeAccess?: Record<string, unknown> };
+
+/** Uses the same signed-envelope and legacy eligibility grammar as lib/auth.
+ * A canonical envelope is selected without legacy grants: a caller must not
+ * replace it with a Bearer just because the legacy route will reject it.
+ * Current account/credential/permission revocation remains the handler's job. */
+export async function verifiedSessionAccess(token: string | undefined | null, secret = process.env.SESSION_SECRET): Promise<VerifiedProxySessionAccess | null> {
+  const envelope = splitSessionEnvelope(token);
+  if (!envelope || !secret || secret.length < 32) return null;
+  const { body, signature } = envelope;
   try {
     const expected = toBase64Url(await crypto.subtle.sign("HMAC", await hmacKey(secret), encoder.encode(body)));
     if (!sameString(expected, signature)) return null;
-    const payload = JSON.parse(fromBase64Url(body)) as { role?: unknown; expiresAt?: unknown; financeAccess?: unknown };
-    if (typeof payload.expiresAt !== "number" || payload.expiresAt < Date.now()) return null;
-    return typeof payload.role === "string"
-      ? { role: payload.role, financeAccess: payload.financeAccess && typeof payload.financeAccess === "object"
-        ? payload.financeAccess as Record<string, unknown> : undefined }
-      : null;
+    const selection = classifySessionEnvelope(decodeSessionBody(body));
+    if (!selection || selection.kind === "canonical") return selection;
+    const { payload } = selection;
+    return {
+      kind: "legacy",
+      role: typeof payload.role === "string" ? payload.role : undefined,
+      financeAccess: payload.financeAccess && typeof payload.financeAccess === "object"
+        ? payload.financeAccess as Record<string, unknown> : undefined,
+    };
   } catch {
     return null;
   }

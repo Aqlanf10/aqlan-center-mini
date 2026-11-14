@@ -16,7 +16,7 @@ const {
 
 beforeAll(async () => {
   await ensureSchema();
-  await openShift({ openedBy: "guard-test", opening: { YER: 0, SAR: 0, USD: 0 } });
+  await openShift({ openedBy: "guard-test", opening: { YER: 100_000_000, SAR: 100_000_000, USD: 100_000_000 } }); // 0128: vouchers need drawer cash
 }, 60000);
 
 afterAll(async () => {

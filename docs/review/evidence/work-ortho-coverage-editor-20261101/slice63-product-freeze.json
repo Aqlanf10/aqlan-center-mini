@@ -1,0 +1,11 @@
+{
+  "base": "0f7f3a20bd99390d6ed8971dffd4ebc8afe7d106",
+  "buildId": "Iy1KEObpXB6JNLVOyEkBB",
+  "files": {
+    "app/api/ortho/[id]/followup-coverage/route.ts": "5b00fb01da068516e21dabf09010cce0669f1beaeb9769b4009b04c50a4d862a",
+    "lib/canonical-ortho-coverage-editor.ts": "cfb87f84fb1059fb462bf008347b5e3c4fdc275ec06e3cabb4a6d855dddfce79",
+    "lib/canonical-ortho-coverage-editor-projection.ts": "9b66a84991b6e197e2dbbc37d71b915fb3696c8cdf696cc6b2ce8b1d404fa4af",
+    "components/OrthoFollowupCoveragePanel.tsx": "185d9be5e960ab365f1b0360131b7ab20402870fb03cbac39a24db7660440b65",
+    "components/patient/CanonicalOrthoCoverage.tsx": "9411d2bc5f7c632f57cbbc17cc17988f1ab90b1e5d8c9363800886c5e368a24e"
+  }
+}

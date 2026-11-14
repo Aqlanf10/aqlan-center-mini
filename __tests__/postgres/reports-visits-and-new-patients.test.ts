@@ -34,8 +34,7 @@ let cleaning = 0;
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
-  // Preserve empty HR history guards: DELETE fixture parents after clearing their financial rows.
-  await q(`TRUNCATE payments, invoice_items, invoices, visits, appointments, patients RESTART IDENTITY CASCADE`);
+  // Fresh schema has no patient rows; remove only seeded party fixtures.
   await q("DELETE FROM parties");
   const [doctor] = await q<{ id: number }>(`INSERT INTO parties (name, kind) VALUES ('د. التقرير', 'doctor') RETURNING id`);
   doctorA = doctor.id;

@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+
+ Test Files  4 passed (4)
+      Tests  40 passed (40)
+   Start at  12:56:00
+   Duration  14.42s (transform 3.07s, setup 0ms, import 6.56s, tests 6.49s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

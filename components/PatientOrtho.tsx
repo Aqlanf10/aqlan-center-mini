@@ -1,20 +1,25 @@
 "use client";
 import { OrthoComparison } from "./OrthoPhotoComparison";
 export { OrthoComparison } from "./OrthoPhotoComparison";
-import { OrthoWorkupNavigation } from "./OrthoWorkupNavigation";
-import { ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore } from "@/lib/ortho-workup-navigation";
+import { OrthoCaseNavigation, OrthoWorkupNavigation } from "./OrthoWorkupNavigation";
+import { orthoWorkupEntryStep, ORTHO_WORKUP_STEPS, readWorkupBookmark, replaceWorkupBookmark, clearWorkupBookmark, makeWorkupBookmarkStore, type OrthoWorkupPillar } from "@/lib/ortho-workup-navigation";
 import { makeOrthoWorkupOwners, OrthoWorkupOwnersContext } from "./OrthoWorkupOwners";
 import { OrthoDiagnosticNavigation } from "./OrthoDiagnosticNavigation";
 import OrthoSessionDetails from "./OrthoSessionDetails";
 import OrthoSessionBillingReview from "./OrthoSessionBillingReview";
 import { sessionExpectedFollowup, SESSION_FOLLOWUP_DISCLAIMER } from "@/lib/ortho-session-display";
+import { useReturnBookingContext } from "@/components/useReturnBookingContext";
+import PatientResponsibilitySettings from "./PatientResponsibilitySettings";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { readOpenAssessmentCommand, readStartTreatmentCommand, verifyIntakeReceipt, type OpenAssessmentCommand, type StartTreatmentCommand, type IntakeReceipt } from "@/lib/ortho-assessment-intake";
-import { adjustmentNewCommandError, createAdjustmentCommand, readAdjustmentCommand, completeAdjustmentCommand, retireAdjustmentCommand, isAdjustmentReceipt, type AdjustmentCommand } from "@/lib/ortho-adjustment-command";
+import { adjustmentNewCommandError, createAdjustmentCommand, readAdjustmentCommand, completeAdjustmentCommand, retireAdjustmentCommand, isAdjustmentReceipt, isDefinitiveAdjustmentRefusal, discardRefusedAdjustmentCommand, cachedReceiptProvenance, writeRefusedAdjustmentDraft, readRefusedAdjustmentDraft, clearRefusedAdjustmentDraft, type AdjustmentCommand, type RefusedAdjustmentDraft } from "@/lib/ortho-adjustment-command";
 import { parseAdjustmentInterval } from "@/lib/ortho-adjustment-interval";
+import { AUXILIARY_OTHER_LIMIT, auxiliariesText, ORTHO_AUXILIARY_KEYS, ORTHO_AUXILIARY_LABEL, type OrthoAuxiliary } from "@/lib/ortho-auxiliaries";
 import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "@/lib/ortho-adjustment-date";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
+import { OrthoFollowupCoveragePanel } from "./OrthoFollowupCoveragePanel";
 import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
 import { OrthoPackageLink } from "./OrthoPackageLink";
 import { canViewMoney } from "@/lib/roles";
@@ -23,7 +28,7 @@ import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 import {
   APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, ELASTIC_LABEL, PHASE_HINT,
   PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL, SLOT_LABEL,
-  nextAdjustmentDate, usesArchwires, wiresFor,
+  archwireChoices, nextAdjustmentDate, usesArchwires, wiresFor,
   type Appliance, type Arches, type CaseStatus, type ElasticClass,
   type OrthoPhase, type RetainerType, type SlotSize,
 } from "@/lib/ortho";
@@ -48,7 +53,7 @@ import { makeStudyRecoveryLedger } from "@/lib/ortho-case-study-recovery";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
-  LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore,
+  LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore, checkOrthoSessionDraft,
   type LegacyFinancialMode,
 } from "@/lib/ortho-baseline";
 import { useSession, type SessionInfo } from "./SessionProvider";
@@ -93,6 +98,8 @@ interface Adjustment {
   upperWire: string | null; lowerWire: string | null; elastics: ElasticClass;
   elasticNote: string | null; done: string | null; nextWeeks: number;
   note: string | null; recordedBy: string;
+  /** 0132: null = not recorded; [] = explicitly none. Absent on older payloads. */
+  auxiliaries?: OrthoAuxiliary[] | null; auxiliaryOther?: string | null;
   photos: SessionPhoto[];
 }
 
@@ -116,15 +123,7 @@ interface OrthoCase {
   } | null;
 }
 
-type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention" | "presentation";
-
-const PILLAR_TABS: { key: OrthoPillar; label: string; icon: string }[] = [
-  { key: "wires", label: "مسار الأسلاك والشدّات", icon: "⚡" },
-  { key: "diagnostics", label: "السجلات والسيفالومتري (WebCeph)", icon: "📐" },
-  { key: "prescription", label: "خطة العلاج والميكانيكا", icon: "⚙️" },
-  { key: "retention", label: "التثبيت والاستبقاء", icon: "🛡️" },
-  { key: "presentation", label: "دراسة الحالة المحفوظة", icon: "📋" },
-];
+type OrthoPillar = OrthoWorkupPillar;
 
 function monthsText(months: number): string {
   if (months < 1) return "أقل من شهر";
@@ -1108,6 +1107,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
           patientPhone={patient?.phone ?? null}
           draftKey={`next:${saved.adjustmentId}`} contactReady={owner.contact}
           caseId={saved.caseId}
+          adjustmentId={saved.adjustmentId}
           doneOn={saved.doneOn}
           nextWeeks={saved.nextWeeks}
           photosUploaded={saved.photosUploaded}
@@ -1250,7 +1250,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
 
                     <div className="flex flex-wrap items-center gap-2">
                       {!workup && <button type="button" className="min-h-11 rounded-lg border border-navy-300 bg-white px-3 text-xs font-bold"
-                        onClick={() => navigateWorkup(0)}>{row.status === "assessment" ? "إعداد ملف التقويم خطوة بخطوة" : "استكمال ملف التقويم خطوة بخطوة"}</button>}
+                        onClick={() => navigateWorkup(orthoWorkupEntryStep(row.phase))}>فتح مساحة عمل التقويم</button>}
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-[11px] font-black border ${
                           live
@@ -1281,6 +1281,10 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
                       planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={row.id}
                       onOpenClinicalContext={(reference) => onContextChange?.(reference)} />
+                    <OrthoFollowupCoveragePanel patientId={patientId} orthoCaseId={row.id} onSaved={refreshAfterConfirmedChange} />
+                    {/* Admin-only booking responsibility sits with the case's reference context, below the clinical
+                        header, so the doctor's case identity and today's session are not pushed down by a settings box. */}
+                    {live ? <PatientResponsibilitySettings patientId={patientId} kind="ortho" sourceId={row.id} onSaved={refreshAfterConfirmedChange} /> : null}
                     {(row.status === "active" || row.status === "retention")
                       ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
                           refreshRevision={onboardingRevision} onOpenAccount={onOpenAccount} /> : null}
@@ -1350,28 +1354,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </> : <p className="mt-3 rounded-lg border bg-white p-3 text-sm">ملف تقييم فقط؛ لم يُسجل بدء علاج أو جهاز أو مدة علاج.</p>}
                 </div>
 
-                {/* أشرطة الأركان الأربعة التخصصية (Pillar Navigation) */}
-                {!workup && <div className="flex border-b border-slate-200 bg-white">
-                  {PILLAR_TABS.map((tab) => {
-                    const isSelected = currentPillar === tab.key;
-                    return (
-                      <button
-                        key={tab.key}
-                        aria-label={tab.label}
-                        onClick={() => { if (currentCase(row.id)) setPillarForCase(row.id, tab.key); }}
-                        className={`flex-1 py-2.5 text-xs font-black transition-all border-b-2 flex items-center justify-center gap-1.5 ${
-                          isSelected
-                            ? "border-navy-800 text-navy-900 bg-navy-50/40"
-                            : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-                        }`}
-                      >
-                        <span>{tab.icon}</span>
-                        <span className="hidden sm:inline">{tab.label}</span>
-                        <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
-                      </button>
-                    );
-                  })}
-                </div>}
+                {!workup && <OrthoCaseNavigation pillar={currentPillar}
+                  onSelect={pillar => { if (currentCase(row.id)) setPillarForCase(row.id, pillar); }} />}
 
                 {/* محتوى الركن المختار */}
                 <div className={currentPillar === "prescription" ? "px-2 py-1 sm:p-4" : "p-4"}>
@@ -1457,6 +1441,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                                 refreshAfterConfirmedChange();
                               }}
                               onError={safeError}
+                              onConflictRefresh={refreshAfterConfirmedChange}
                             />
                           ) : (
                             <button
@@ -1509,6 +1494,9 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                                   {" · "}{entry.recordedBy}
                                 </p>
 
+                                {entry.auxiliaries?.length ? <p className="mt-1 text-[11px] text-slate-600" data-testid="session-auxiliaries">
+                                  الأجهزة المساعدة: {auxiliariesText(entry.auxiliaries, entry.auxiliaryOther)}
+                                </p> : null}
                                 <p className="mt-1 text-[11px] text-slate-500">{SESSION_FOLLOWUP_DISCLAIMER}</p>
                                 <OrthoSessionDetails entry={entry} />
 
@@ -1802,11 +1790,11 @@ function SignTodayVisitCard({ visitId, patientId, onError, onUncertain, onSigned
 }
 
 function NextAppointmentCard({
-  patientId, patientName, patientPhone, caseId, doneOn, nextWeeks,
+  patientId, patientName, patientPhone, caseId, adjustmentId, doneOn, nextWeeks,
   photosUploaded, onDismiss, onError, draftKey, contactReady,
 }: {
   patientId: number; patientName: string; patientPhone: string | null;
-  caseId: number; doneOn: string; nextWeeks: number; photosUploaded: number;
+  caseId: number; adjustmentId: number; doneOn: string; nextWeeks: number; photosUploaded: number;
   draftKey: string; contactReady: boolean;
   onDismiss: () => void; onError: (message: string | null) => void;
 }) {
@@ -1818,7 +1806,9 @@ function NextAppointmentCard({
   const [date, setDate] = form.field("date", suggested);
   const [time, setTime] = form.field("time", "16:00");
   const busy = form.draft.busy;
-  const [booked] = form.field<{ date: string; time: string } | null>("booked", null);
+  const [booked] = form.field<{ date: string; time: string; doctorName: string | null } | null>("booked", null);
+  const returnContext = useReturnBookingContext({ patientId, source: { kind: "ortho_adjustment", id: adjustmentId }, enabled: contactReady && !booked, locked: busy });
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([patientId, caseId, adjustmentId, draftKey, date, time, booking, returnContext.fingerprint]));
   // The card survives Back/success, but a captured form command must not.
   // Retained draft values alone cannot distinguish two separate form openings.
   const bookingView = useMemo(() => makeViewLease(), [booking, form.draft]);
@@ -1847,27 +1837,28 @@ function NextAppointmentCard({
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const operation = form.begin(currentBookingView() && contactReady && form.owner.contact);
+    const operation = form.begin(currentBookingView() && contactReady && form.owner.contact && returnContext.ready && returnContext.isCurrent());
     if (!operation) return;
     onError(null);
     try {
-      const response = await fetch("/api/appointments", {
+      const response = await bookingFetch("/api/appointments", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patientId, date, time, durationMinutes: 15,
+          patientId, date, time, durationMinutes: 15, ...returnContext.payload,
           appointmentType: "follow_up",
           note: "جلسة شدّ تقويم — من كابينة التقويم",
         }),
-      });
+      }, () => form.current(operation) && currentBookingView() && contactReady && returnContext.isCurrent());
       if (!form.checkHeaders(response, operation)) return;
       const payload = await response.json().catch(() => null);
       if (!form.current(operation)) return;
       if (!response.ok) {
+        returnContext.handleRejection(payload);
         if (response.status >= 500) form.uncertain();
         onError(payload?.suggestionMessage || payload?.message || "تعذّر الحجز.");
         return;
       }
-      form.commit("booked", { date, time });
+      form.commit("booked", { date, time, doctorName: typeof payload?.doctorName === "string" ? payload.doctorName : null });
       bookingView.retire();
       form.commit("booking", false);
     } catch {
@@ -1879,6 +1870,7 @@ function NextAppointmentCard({
 
   return (
     <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-4 shadow-xs">
+      {nearbyBookingDialog}
       <p className="mb-1 text-sm font-black text-emerald-900">
         {booked ? "تم حجز الجلسة القادمة بنجاح" : "📅 الجلسة القادمة المقترحة"}
       </p>
@@ -1894,6 +1886,7 @@ function NextAppointmentCard({
         {booked ? ` · الساعة ${friendlyTime(booked.time)}` : ""}
       </p>
 
+      {booked ? <p className="mb-2 text-xs font-bold text-emerald-900">الطبيب: {booked.doctorName ?? "راجع الطبيب المسجل في الموعد"}</p> : returnContext.view}
       {booked ? (
         <>
           {contactReady && waLink && message ? (
@@ -1944,7 +1937,7 @@ function NextAppointmentCard({
             </label>
           </div>
           <div className="flex gap-2">
-            <button type="submit" disabled={busy || form.draft.uncertain || !contactReady || !date || !time}
+            <button type="submit" disabled={busy || form.draft.uncertain || !contactReady || !returnContext.ready || !date || !time}
               className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-black text-white disabled:opacity-50">
               {busy ? "جارٍ الحجز…" : "أكّد الحجز"}
             </button>
@@ -2074,8 +2067,10 @@ function NewCase({ patientId, today, onSaved, onError }: {
   );
 }
 
-export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: {
+export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, onConflictRefresh }: {
   caseRow: OrthoCase; today: string; wires: { code: string }[]; patientId: number;
+  /** Reloads the case history so the visit's existing session is visible; the draft is kept. */
+  onConflictRefresh?: () => void;
   onSaved: (result: {
     adjustmentId: number; caseId: number; doneOn: string;
     nextWeeks: number; photosUploaded: number; visitId: number | null;
@@ -2087,6 +2082,20 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   // Recording a session must not advance either arch without an explicit selection.
   const [upperWire, setUpperWire] = form.field("upperWire", caseRow.upperWire ?? "");
   const [lowerWire, setLowerWire] = form.field("lowerWire", caseRow.lowerWire ?? "");
+  const [removeUpperWire, setRemoveUpperWire] = form.field("removeUpperWire", false);
+  const [removeLowerWire, setRemoveLowerWire] = form.field("removeLowerWire", false);
+  // "Other wire" keeps the typed code in the same wire field; the flag only chooses the input (owner, #483).
+  const [upperWireOther, setUpperWireOther] = form.field("upperWireOther", false);
+  const [lowerWireOther, setLowerWireOther] = form.field("lowerWireOther", false);
+  // Auxiliaries (0132, owner #483): optional documentation, never prefilled from an earlier session.
+  // null = not recorded; [] = an explicit "none" chosen by the clinician.
+  const [auxiliaries, setAuxiliaries] = form.field<OrthoAuxiliary[] | null>("auxiliaries", null);
+  const [auxiliaryOther, setAuxiliaryOther] = form.field("auxiliaryOther", "");
+  // Review #483 6871207083: a refusal is shown beside the save button, not only at the top of the page.
+  // It lives in the draft, like the typed values, so the history refresh that remounts the form keeps it.
+  const [refusal] = form.field<string | null>("refusal", null);
+  const auxiliaryBody = auxiliaries === null ? {}
+    : { auxiliaries: [...auxiliaries], ...(auxiliaries.includes("other") ? { auxiliaryOther } : {}) };
   const previousAdjustment = caseRow.adjustments[0] ?? null;
   // The baseline stores a description, not an elastic class. Never infer one from its text.
   const baselineElasticNote = previousAdjustment ? "" : caseRow.elastics?.trim() ?? "";
@@ -2105,6 +2114,37 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   const hasActor = Number.isSafeInteger(actorId) && Number(actorId) > 0;
   const authority = hasActor ? `user:${actorId}` : "";
   const commandScope = useMemo(() => ({ patientId, caseId: caseRow.id, authority }), [patientId, caseRow.id, authority]);
+  // Review #483 6873798343. Put a request's own values back into the fields (never another session's).
+  const restoreFromBody = (raw: string) => {
+    const sent = JSON.parse(raw) as Record<string, unknown>;
+    for (const name of ["doneOn", "upperWire", "lowerWire", "elastics", "elasticNote", "done"] as const) form.commit(name, String(sent[name] ?? ""));
+    form.commit("nextWeeks", String(sent.nextWeeks ?? ""));
+    form.commit("removeUpperWire", sent.upperWireAction === "remove");
+    form.commit("removeLowerWire", sent.lowerWireAction === "remove");
+    form.commit("auxiliaries", Array.isArray(sent.auxiliaries) ? sent.auxiliaries : null);
+    form.commit("auxiliaryOther", typeof sent.auxiliaryOther === "string" ? sent.auxiliaryOther : "");
+  };
+  // Clinical values only: a withheld photo history is never read for this check.
+  const recordedSessions = caseRow.adjustments.map((row) => ({ id: row.id, doneOn: row.doneOn, phase: row.phase, upperWire: row.upperWire,
+    lowerWire: row.lowerWire, elastics: row.elastics, elasticNote: row.elasticNote, done: row.done, nextWeeks: row.nextWeeks, note: row.note,
+    auxiliaries: row.auxiliaries ?? null, auxiliaryOther: row.auxiliaryOther ?? null }));
+  const cachedReceiptMessage = (id: number) =>
+    `مرجع الجلسة المحفوظ في هذا المتصفح يشير إلى جلسة مسجّلة (رقم ${id}) بقيم مختلفة؛ لم يُعتبر طلبك محفوظًا ولم يُرفع شيء. استُعيدت قيمك في النموذج؛ راجع الجلسة المسجّلة.`;
+  const restoredMessage = (record: RefusedAdjustmentDraft) =>
+    `استُعيدت قيم جلسة لم تُحفظ${record.existingAdjustmentId ? ` (لهذه الزيارة جلسة مسجّلة رقم ${record.existingAdjustmentId})` : ""}؛ راجعها قبل أي حفظ.`
+    + (record.photoCount > 0 ? ` كانت ${record.photoCount} صورة في الطابور ولم تُرفع؛ الصور لا تُحفظ في المتصفح حمايةً لخصوصية المريض، فأعد اختيارها من جهازك.` : "");
+  /** Keeps a refused request's values (never its photos) for a reload; best effort, never blocks the refusal. */
+  const keepRefusedValues = (body: string, code: string, existingAdjustmentId: number | null, photoCount: number) => {
+    try { writeRefusedAdjustmentDraft(sessionStorage, { version: 1, scope: commandScope, body, code, existingAdjustmentId, photoCount }); } catch { /* storage unavailable */ }
+    form.commit("refusedRestored", true);
+  };
+  /** A cached acknowledgement that does not describe the recorded session is a refusal, never a save. */
+  const refuseCachedReceipt = (command: AdjustmentCommand) => {
+    keepRefusedValues(command.body, "cached_receipt_unverified", command.receipt?.id ?? null, 0);
+    discardRefusedAdjustmentCommand(sessionStorage, command, { unverifiedReceipt: true });
+    restoreFromBody(command.body);
+    form.commit("refusal", cachedReceiptMessage(command.receipt?.id ?? 0));
+  };
   // Durable recovery has a render snapshot and a synchronous callback authority.
   // Never publish another scope during render, including an abandoned render.
   type CommandState = { scope: typeof commandScope; command: AdjustmentCommand | null; blocked: boolean };
@@ -2121,7 +2161,13 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     committedCommandPublication.current = commandPublication;
     try {
       if (!commandScope.authority) throw new Error("Missing immutable actor identity");
-      const command = readAdjustmentCommand(sessionStorage, commandScope);
+      const stored = readAdjustmentCommand(sessionStorage, commandScope);
+      let command = stored;
+      if (stored?.receipt && cachedReceiptProvenance(stored, recordedSessions) === "mismatch") { refuseCachedReceipt(stored); command = null; }
+      else if (!stored && form.draft.values.get("refusedRestored") !== true) {
+        const record = readRefusedAdjustmentDraft(sessionStorage, commandScope);
+        if (record) { restoreFromBody(record.body); form.commit("refusedRestored", true); form.commit("refusal", restoredMessage(record)); }
+      }
       publishCommand({ scope: commandScope, command, blocked: false });
       if (command) form.uncertain();
     } catch { publishCommand({ scope: commandScope, command: null, blocked: true }); form.uncertain(); }
@@ -2135,6 +2181,17 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   }, [commandPublication]);
 
   const [queue, setQueue] = form.field<QueuedPhoto[]>("queue", []);
+  // Review #483 6873798343: queued photos live only in this page (never stored in the browser for privacy).
+  // The page's leave guard is deliberately scoped to in-app tabs (no browser unload dialog, pinned by the
+  // navigation journey), so the warning is in the page: the refusal notice states that queued photos are
+  // lost on a reload and offers saving them to the device.
+  const saveQueuedPhotosToDevice = () => {
+    queue.forEach((photo, index) => {
+      const link = document.createElement("a");
+      link.href = photo.preview; link.download = photo.file.name || `unsaved-session-photo-${index + 1}.jpg`;
+      document.body.appendChild(link); link.click(); link.remove();
+    });
+  };
   const [stage, setStage] = form.field<PhotoStage>("stage", () =>
     caseRow.phase !== "assessment" && caseRow.startDate !== null ? suggestPhotoStage({
       date: today, startDate: caseRow.startDate, phase: caseRow.phase,
@@ -2177,7 +2234,11 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         return;
       }
       const inputError = adjustmentNewCommandError({
-        doneOn, upperWire, lowerWire, elastics, elasticNote, done, nextWeeks: intervalWeeks!,
+        doneOn, upperWire: removeUpperWire ? "" : upperWire, lowerWire: removeLowerWire ? "" : lowerWire,
+        elastics, elasticNote, done, nextWeeks: intervalWeeks!,
+        ...(removeUpperWire ? { upperWireAction: "remove" as const } : {}),
+        ...(removeLowerWire ? { lowerWireAction: "remove" as const } : {}),
+        ...auxiliaryBody,
       });
       if (inputError) { if (form.editable()) onError(inputError); return; }
     }
@@ -2185,14 +2246,23 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     const operation = recovered ? form.beginRetry(allowed) : form.begin(allowed);
     if (!operation) return;
     const submittedPhotos = recovered ? [] : [...queue];
-    onError(null);
+    onError(null); form.commit("refusal", null);
     try {
       const command = commandState.command ?? createAdjustmentCommand(sessionStorage, commandScope, {
-        doneOn, upperWire, lowerWire, elastics, elasticNote, done, nextWeeks: intervalWeeks!,
+        doneOn, upperWire: removeUpperWire ? "" : upperWire, lowerWire: removeLowerWire ? "" : lowerWire,
+        elastics, elasticNote, done, nextWeeks: intervalWeeks!,
+        ...(removeUpperWire ? { upperWireAction: "remove" as const } : {}),
+        ...(removeLowerWire ? { lowerWireAction: "remove" as const } : {}),
+        ...auxiliaryBody,
       });
       publishCommand({ ...commandState, command });
       const frozen = JSON.parse(command.body) as { doneOn: string; nextWeeks: number };
       let receipt = command.receipt;
+      if (receipt && cachedReceiptProvenance(command, recordedSessions) === "mismatch") {
+        // Never a clinical-success or attachment side effect from an unverified cached acknowledgement.
+        refuseCachedReceipt(command); publishCommand({ ...commandState, command: null });
+        form.acknowledge(operation, {}); onError(cachedReceiptMessage(receipt.id)); return;
+      }
       if (!receipt) {
         const response = await fetch(`/api/ortho/${command.scope.caseId}`, {
           method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": command.key }, body: command.body,
@@ -2200,6 +2270,23 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         if (!form.checkHeaders(response, operation)) return;
         const payload = await response.json().catch(() => null);
         if (!form.current(operation)) return;
+        if (isDefinitiveAdjustmentRefusal(response.status, payload)) {
+          // Review #483 6871207083: the visit already has a session and nothing was recorded for this
+          // request. Drop its unused key, keep every field and queued photo, upload nothing, report nothing
+          // as saved. A request recovered after a reload puts its own values back into the fields.
+          keepRefusedValues(command.body, payload.code, payload.existingAdjustmentId ?? null, queue.length);
+          discardRefusedAdjustmentCommand(sessionStorage, command);
+          publishCommand({ ...commandState, command: null });
+          if (recovered) restoreFromBody(command.body);
+          // Settled outcome: the fields are editable again but nothing is marked saved.
+          form.acknowledge(operation, {});
+          form.commit("refusal", payload.message); onError(payload.message); onConflictRefresh?.(); return;
+        }
+        // A receipt for another request is never success: only this key's own replay may say "existing".
+        if (payload && typeof payload === "object" && (payload as { existing?: unknown }).existing === true
+          && (payload as { replayed?: unknown }).replayed !== true) {
+          form.uncertain(); onError("أعاد الخادم جلسة مسجّلة سابقًا بدل هذا الطلب؛ لم تُعتبر محفوظة. راجع السجل."); return;
+        }
         if (!response.ok || !isAdjustmentReceipt(payload, command)) {
           form.uncertain(); onError(payload?.message ?? "تعذّر تأكيد تسجيل الشدّة. أعد التحقق بنفس الطلب المحفوظ."); return;
         }
@@ -2241,6 +2328,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       for (const photo of queue) form.release(photo.preview);
       form.commit("queue", []);
       form.uncertain(); // Keep the durable acknowledgement until explicit new intent.
+      clearRefusedAdjustmentDraft(sessionStorage, commandScope);
       onSaved({ adjustmentId, caseId: command.scope.caseId, doneOn: frozen.doneOn,
         nextWeeks: frozen.nextWeeks, photosUploaded: uploaded, visitId });
     } catch (error) {
@@ -2261,14 +2349,17 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       retireAdjustmentCommand(sessionStorage, commandState.command);
       for (const photo of queue) form.release(photo.preview);
       form.commit("queue", []);
+      // Auxiliaries are documented per session (0132): a new session starts unrecorded, never carried over.
+      form.commit("auxiliaries", null);
+      form.commit("auxiliaryOther", "");
+      clearRefusedAdjustmentDraft(sessionStorage, commandScope); form.commit("refusal", null);
       publishCommand({ ...commandState, command: null });
       onError(null);
     } catch { form.uncertain(); onError("تعذّر بدء شدّة جديدة بأمان. راجع السجل."); }
     finally { form.finish(operation); }
   };
 
-  const options = [...new Set([...wires.map((wire) => wire.code),
-    upperWire, lowerWire, caseRow.upperWire, caseRow.lowerWire].filter(Boolean) as string[])];
+  const choices = archwireChoices(caseRow.slot, [upperWire, lowerWire, caseRow.upperWire, caseRow.lowerWire]);
 
   const savedPhotoHistory = savedFullPhotoSetHistory({
     patientId, orthoCaseId: caseRow.id, adjustments: caseRow.adjustments, today, asOfDate: doneOn,
@@ -2302,26 +2393,23 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
             <span className="mb-1 block text-[10px] font-bold text-slate-500">
               السلك العلوي {caseRow.upperWire ? `(الحالي ${caseRow.upperWire})` : ""}
             </span>
-            <select value={upperWire} onChange={(event) => setUpperWire(event.target.value)}
-              aria-label="السلك العلوي" dir="ltr"
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
-              <option value="">— بلا تغيير —</option>
-              {options.map((code) => <option key={code} value={code}>{code}</option>)}
-            </select>
+            {wireSelect({ label: "السلك العلوي", otherLabel: "سلك علوي آخر", choices, disabled: removeUpperWire, value: upperWire,
+              onChange: setUpperWire, other: upperWireOther, onOtherChange: setUpperWireOther })}
+            <span className="mt-1 block text-xs"><input type="checkbox" aria-label="إزالة السلك العلوي" checked={removeUpperWire}
+              onChange={(event) => setRemoveUpperWire(event.target.checked)} /> إزالة السلك العلوي صراحةً</span>
           </label>
           <label className="min-w-[9rem] flex-1">
             <span className="mb-1 block text-[10px] font-bold text-slate-500">
               السلك السفلي {caseRow.lowerWire ? `(الحالي ${caseRow.lowerWire})` : ""}
             </span>
-            <select value={lowerWire} onChange={(event) => setLowerWire(event.target.value)}
-              aria-label="السلك السفلي" dir="ltr"
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
-              <option value="">— بلا تغيير —</option>
-              {options.map((code) => <option key={code} value={code}>{code}</option>)}
-            </select>
+            {wireSelect({ label: "السلك السفلي", otherLabel: "سلك سفلي آخر", choices, disabled: removeLowerWire, value: lowerWire,
+              onChange: setLowerWire, other: lowerWireOther, onOtherChange: setLowerWireOther })}
+            <span className="mt-1 block text-xs"><input type="checkbox" aria-label="إزالة السلك السفلي" checked={removeLowerWire}
+              onChange={(event) => setRemoveLowerWire(event.target.checked)} /> إزالة السلك السفلي صراحةً</span>
           </label>
         </div>
       ) : null}
+      {auxiliarySection({ value: auxiliaries, onChange: setAuxiliaries, other: auxiliaryOther, onOtherChange: setAuxiliaryOther })}
 
       {baselineElasticNote ? (
         <p role="status" data-testid="adjustment-baseline-elastics"
@@ -2332,7 +2420,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       ) : null}
       <div className="mb-2 flex flex-wrap gap-2">
         <label className="min-w-[8rem] flex-1">
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">المطاطات</span>
+          <span className="mb-1 block text-[10px] font-bold text-slate-500">المطاطات{previousAdjustment
+            ? <> <span className="font-normal" data-testid="adjustment-elastics-source">(المسجّلة في جلسة <bdi dir="ltr">{previousAdjustment.doneOn}</bdi>؛ غيّرها إن تغيّرت اليوم)</span></> : null}</span>
           <select value={elastics} onChange={(event) => {
             const value = event.target.value as ElasticClass | "";
             setElastics(value);
@@ -2455,7 +2544,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
             className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
         </label>
         <label className="w-36">
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">القادمة بعد (أسابيع)</span>
+          <span className="mb-1 block text-[10px] font-bold text-slate-500">القادمة بعد (أسابيع){previousAdjustment
+            ? <> <span className="font-normal" data-testid="adjustment-interval-source">(كما في جلسة <bdi dir="ltr">{previousAdjustment.doneOn}</bdi>)</span></> : null}</span>
           <input value={nextWeeks} onChange={(event) => setNextWeeks(event.target.value)}
             aria-label="أسابيع حتى الشدّة القادمة" inputMode="numeric" dir="ltr"
             className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
@@ -2466,6 +2556,18 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         {!dateValid ? "موعد المتابعة المقترح غير متاح حتى إدخال تاريخ جلسة صحيح." : intervalWeeks === null ? "موعد المتابعة المقترح غير متاح حتى إدخال عدد صحيح من أسبوع إلى 52 أسبوعًا." : <>الموعد المقترح: {friendlyDateLong(nextAdjustmentDate(doneOn, intervalWeeks))}</>}
       </p>
 
+      {refusal ? <div role="alert" data-testid="adjustment-refused"
+        className="mb-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">
+        <p>{refusal}</p>
+        {queue.length > 0 ? <p className="mt-1 font-normal" data-testid="adjustment-unsaved-photos">
+          {queue.length} صورة في الطابور لم تُرفع ولا تُحفظ في المتصفح؛ ستُفقد عند إعادة التحميل أو إغلاق الصفحة.
+          {" "}<button type="button" className="min-h-11 underline" onClick={saveQueuedPhotosToDevice}>حفظ الصور غير المرفوعة على الجهاز</button>
+        </p> : null}
+        <button type="button" className="mt-1 min-h-11 text-[11px] font-normal underline" data-testid="adjustment-refusal-dismiss"
+          onClick={() => { clearRefusedAdjustmentDraft(sessionStorage, commandScope); form.commit("refusal", null); }}>
+          إخفاء التنبيه (لن تُستعاد هذه القيم بعد إعادة التحميل)
+        </button>
+      </div> : null}
       <button type={commandState.command ? "button" : "submit"}
         data-testid={commandState.command ? "adjustment-reconcile" : undefined}
         onClick={commandState.command ? (event) => submit(event, true) : undefined}
@@ -2526,17 +2628,18 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
   const saving = form.draft.busy;
 
   useEffect(() => {
+    if (form.session?.role !== "admin") return;
     let alive = true;
     void fetch("/api/parties?kind=doctor", { cache: "no-store" })
       .then(async (response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (!alive || !payload) return;
         const list = Array.isArray(payload) ? payload : payload.balances ?? [];
-        setDoctors(list.map((one: { id: number; name: string }) => ({ id: one.id, name: one.name })));
+        setDoctors(list.filter((one: { isActive?: boolean }) => one.isActive === true).map((one: { id: number; name: string }) => ({ id: one.id, name: one.name })));
       })
       .catch(() => {});
     return () => { alive = false; };
-  }, []);
+  }, [form.session?.role]);
 
   // Blank is unknown input, never zero. Accept an explicitly entered decimal
   // integer only; do not coerce exponent/hex notation into a clinical duration.
@@ -2556,6 +2659,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
     if (elapsedNumber === null) { onError("الأشهر المنقضية: أدخل عددًا صحيحًا بين 0 و120؛ الفراغ ليس صفرًا."); return; }
     if (remainingNumber === null) { onError("الأشهر المتبقية: أدخل عددًا صحيحًا بين 0 و120؛ الفراغ ليس صفرًا."); return; }
     if (!financialMode) { onError("اختر كيف عومل المال قبل النظام."); return; }
+    if (form.session?.role === "admin" && !doctors.some(doctor => doctor.id === Number(doctorId))) { onError("اختر طبيبًا مسؤولًا نشطًا للحالة."); return; }
     const operation = form.begin((form.session?.role === "admin" || form.session?.role === "doctor") && !form.owner.cases.some((row) => row.status === "assessment" || row.status === "active" || row.status === "retention"));
     if (!operation) return;
     onError(null);
@@ -2566,7 +2670,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
           patientId, appliance, arches, slot, phase, upperWire, lowerWire, elastics,
           monthsElapsed: elapsedNumber, monthsRemaining: remainingNumber,
           financialMode, remainingObjectives: objectives,
-          responsibleDoctorId: doctorId ? Number(doctorId) : null,
+          responsibleDoctorId: form.session?.role === "admin" && doctorId ? Number(doctorId) : null,
         }),
       });
       if (!form.checkHeaders(response, operation)) return;
@@ -2666,11 +2770,11 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
         </label>
         <label>
           <span className={label}>الطبيب المسؤول</span>
-          <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)}
+          {form.session?.role === "admin" ? <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)}
             aria-label="الطبيب المسؤول" className={field}>
-            <option value="">— الطبيب الذي يسجّل —</option>
+            <option value="">— اختر الطبيب المسؤول —</option>
             {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
-          </select>
+          </select> : <p className="text-xs text-slate-600">تُسجّل المسؤولية على حساب الطبيب الحالي بعد التحقق من نشاطه وصلاحيته؛ تغيير المسؤولية لاحقًا للمدير.</p>}
         </label>
       </div>
 
@@ -2692,7 +2796,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
           aria-label="الأهداف المتبقية" placeholder="إغلاق فراغ القلع العلوي، تصحيح الخط المتوسط…" className={field} />
       </label>
 
-      <button type="submit" disabled={saving || form.draft.uncertain}
+      <button type="submit" disabled={saving || form.draft.uncertain || (form.session?.role === "admin" && !doctorId)}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white disabled:opacity-50">
         {saving ? "جارٍ التسجيل…" : "سجّل الحالة السابقة"}
       </button>
@@ -2782,7 +2886,7 @@ function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView }: { patientId
   const canWrite = session?.role === "admin" || session?.role === "doctor";
   const [opened, setOpened] = useState(() => parent.assessments.has(caseRow.id));
   if (!canWrite) return null;
-  if (!opened) return <button type="button" className="mb-4 min-h-11 rounded-lg border px-3 py-2 text-sm"
+  if (!opened && sectionView === undefined) return <button type="button" className="mb-4 min-h-11 rounded-lg border px-3 py-2 text-sm"
     onClick={() => { if (parent.active && !parent.denied && parent.clinical) setOpened(true); }}>فتح التقييم السريري والقياسات</button>;
   return <OwnedAssessmentV2 patientId={patientId} caseRow={caseRow} sectionView={sectionView} />;
 }
@@ -2794,11 +2898,16 @@ function OwnedAssessmentV2({ patientId, caseRow, sectionView }: { patientId: num
     deny: () => parent.deny(),
   }));
   const [, redraw] = useState(0);
+  const [binding, setBinding] = useState<AssessmentOwnerV2 | null>(null);
   useLayoutEffect(() => {
     parent.assessments.set(caseRow.id, owner); owner.activate();
     const unsubscribe = owner.subscribe(() => redraw(value => value + 1));
+    setBinding(owner);
     return unsubscribe; // Parent retirement owns disposal, not a temporary view.
   }, [owner, parent, caseRow.id]);
+  // Do not present initial attachment as an authorization failure. The child
+  // still checks the live authority on every read, edit and save after binding.
+  if (binding !== owner) return <p role="status">جارٍ تهيئة سياق التقييم…</p>;
   const lifetime: AssessmentLifetimeV2 = {
     identity: owner, active: owner.active, editable: owner.editable, denied: owner.denied,
     busy: owner.busy, uncertain: owner.uncertain, dirty: owner.dirty, readVersion: owner.readVersion,
@@ -2870,3 +2979,72 @@ function OrthoStudyPanel({ patientId, caseId, patientName }: { patientId: number
   if (!binding) return <p role="alert">تعذّر تأكيد هوية الحساب لفتح دراسة الحالة. أعد تحميل الصفحة أو سجّل الدخول من جديد.</p>;
   return <OrthoCaseStudyMount owner={binding} patientName={patientName} confirmDiscard={() => window.confirm("هل تريد تجاهل التعديلات غير المحفوظة؟")} />;
 }
+
+const OTHER_WIRE = "__other__";
+
+/** Plain render helper (not a component), like wireSelect: the unit tests walk this form's element tree. */
+function auxiliarySection({ value, onChange, other, onOtherChange }: {
+  value: OrthoAuxiliary[] | null; onChange(value: OrthoAuxiliary[] | null): void;
+  other: string; onOtherChange(value: string): void;
+}) {
+  const toggle = (key: OrthoAuxiliary, checked: boolean) => {
+    const chosen = new Set(value ?? []);
+    if (checked) chosen.add(key); else chosen.delete(key);
+    // Clearing the last choice returns to "not recorded"; only the explicit box records "none".
+    onChange(chosen.size ? ORTHO_AUXILIARY_KEYS.filter((item) => chosen.has(item)) : null);
+  };
+  return <details className="mb-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" data-testid="adjustment-auxiliaries">
+    <summary className="flex min-h-11 cursor-pointer items-center gap-1 font-bold text-slate-600">
+      الأجهزة المساعدة (اختياري) · <span className="font-normal" data-testid="adjustment-auxiliaries-state">{auxiliariesText(value, other)}</span>
+    </summary>
+    <p className="mb-1 text-[11px] text-slate-500">توثيق لما استُخدم في هذه الجلسة فقط، وليس توصية علاجية. اتركه دون تحديد إن لم تُرد تسجيله.</p>
+    <label className="mb-1 flex min-h-11 items-center gap-2 font-bold">
+      <input type="checkbox" checked={value !== null && value.length === 0} onChange={(event) => onChange(event.target.checked ? [] : null)} />
+      لا توجد أجهزة مساعدة في هذه الجلسة
+    </label>
+    <div className="grid grid-cols-2 gap-x-3">
+      {ORTHO_AUXILIARY_KEYS.map((key) => <label key={key} className="flex min-h-11 items-center gap-2">
+        <input type="checkbox" checked={value?.includes(key) ?? false} onChange={(event) => toggle(key, event.target.checked)} />
+        <bdi dir={key === "other" ? "rtl" : "ltr"}>{ORTHO_AUXILIARY_LABEL[key]}</bdi>
+      </label>)}
+    </div>
+    {value?.includes("other") ? <input type="text" value={other} maxLength={AUXILIARY_OTHER_LIMIT} required
+      onChange={(event) => onOtherChange(event.target.value)} aria-label="اسم الجهاز المساعد الآخر" dir="auto"
+      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : null}
+  </details>;
+}
+/**
+ * The session's wire choice (owner, #483 2026-11-13): the same select in the same place, with the slot's
+ * usual sequence first, then the full catalog by material and shape, any code recorded earlier, and an
+ * optional typed "other" code. It changes no step, and the "next wire" suggestion is untouched.
+ */
+/* A plain render helper (no hooks), so the selects stay in the form's own element tree. */
+function wireSelect({ label, otherLabel, choices, disabled, value, onChange, other, onOtherChange }: {
+  label: string; otherLabel: string; choices: ReturnType<typeof archwireChoices>; disabled: boolean; value: string;
+  onChange(value: string): void; other: boolean; onOtherChange(other: boolean): void;
+}) {
+  return <>
+    <select disabled={disabled} value={other ? OTHER_WIRE : value} aria-label={label} dir="ltr"
+      onChange={(event) => {
+        if (event.target.value === OTHER_WIRE) { onOtherChange(true); onChange(""); return; }
+        onOtherChange(false); onChange(event.target.value);
+      }}
+      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
+      <option value="">— بلا تغيير —</option>
+      {choices.recorded.length ? <optgroup label="مسجّل سابقًا">
+        {choices.recorded.map((code) => <option key={code} value={code}>{code}</option>)}
+      </optgroup> : null}
+      {choices.sequence.length ? <optgroup label="تسلسل الشق المعتاد">
+        {choices.sequence.map((code) => <option key={code} value={code}>{code}</option>)}
+      </optgroup> : null}
+      {choices.groups.map((group) => <optgroup key={group.id} label={group.label}>
+        {group.codes.map((code) => <option key={code} value={code}>{code}</option>)}
+      </optgroup>)}
+      <option value={OTHER_WIRE}>آخر (اكتبه)…</option>
+    </select>
+    {other && !disabled ? <input type="text" dir="ltr" maxLength={40} value={value} onChange={(event) => onChange(event.target.value)}
+      aria-label={otherLabel} placeholder="مثل 018×025 SS"
+      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono" /> : null}
+  </>;
+}
+

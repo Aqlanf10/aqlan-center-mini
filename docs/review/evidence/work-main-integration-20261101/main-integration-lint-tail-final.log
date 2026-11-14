@@ -1,0 +1,12 @@
+
+/workspace/aqlan-main-reconcile/app/print/lab/[id]/page.tsx
+  99:15  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+✖ 1 problem (0 errors, 1 warning)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

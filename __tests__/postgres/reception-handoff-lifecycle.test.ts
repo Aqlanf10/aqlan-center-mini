@@ -160,21 +160,40 @@ describe("durable reception task lifecycle on PostgreSQL", () => {
     expect(await complete({ ...visit, patientId: other.patientId })).toEqual({ ok: false, reason: "stale" });
     expect(await complete(unsigned)).toEqual({ ok: false, reason: "not_signed" });
     expect(await audit(visit.visitId)).toHaveLength(0);
-    expect(await complete(visit)).toMatchObject({ ok: true });
-    await q(`UPDATE visits SET signed_at = signed_at + INTERVAL '1 second' WHERE id = $1`, [visit.visitId]);
-    expect(await complete(visit)).toEqual({ ok: false, reason: "stale" });
+    const staleSignedAt = new Date(Date.parse(visit.signedAt) - 1000).toISOString();
+    expect(await complete({ ...visit, signedAt: staleSignedAt })).toEqual({ ok: false, reason: "stale" });
+    // Model an imported stale audit, not an illegal rewrite of signed history.
+    await q(`INSERT INTO audit_log(action,entity,entity_id,summary,actor,actor_role,details)
+      SELECT $2,'visit',id::text,'Synthetic stale completion',$3,$4,
+        jsonb_build_object('patientId',patient_id,'signedAt',$5::text,
+          'signatureVersion',to_char((signed_at - INTERVAL '1 second') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+          'reason','Synthetic prior signature') FROM visits WHERE id=$1`,
+    [visit.visitId, action, reception.actor, reception.actorRole, staleSignedAt]);
+    const before = await financeSnapshot(visit.patientId, visit.visitId);
     expect(await item(visit.visitId)).toMatchObject({ status: "pending" });
-    const fresh = await db.visitWalkout(visit.visitId);
-    expect(await complete({ ...visit, signedAt: fresh!.signedAt! })).toMatchObject({ ok: true });
-    expect(await audit(visit.visitId)).toHaveLength(2);
-  });
-  it("does not carry an audit across a sub-millisecond signature change", async () => {
-    const visit = await fixture();
-    await q(`UPDATE visits SET signed_at = date_trunc('milliseconds', signed_at) WHERE id = $1`, [visit.visitId]);
     expect(await complete(visit)).toMatchObject({ ok: true });
-    await q(`UPDATE visits SET signed_at = signed_at + INTERVAL '1 microsecond' WHERE id = $1`, [visit.visitId]);
+    expect(await audit(visit.visitId)).toHaveLength(2);
+    expect(await financeSnapshot(visit.patientId, visit.visitId)).toEqual(before);
+  });
+  it("does not carry an audit with a different sub-millisecond signature identity", async () => {
+    const visit = await fixture();
+    // Preserve the real immutable signature and seed a mismatched historical audit
+    // with the same public millisecond timestamp but different database precision.
+    await q(`INSERT INTO audit_log(action,entity,entity_id,summary,actor,actor_role,details)
+      SELECT $2,'visit',id::text,'Synthetic stale precision completion',$3,$4,
+        jsonb_build_object('patientId',patient_id,'signedAt',$5::text,
+          'signatureVersion',to_char((date_trunc('milliseconds',signed_at) +
+            CASE WHEN signed_at=date_trunc('milliseconds',signed_at) THEN INTERVAL '1 microsecond' ELSE INTERVAL '0' END)
+            AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+          'reason','Synthetic prior signature') FROM visits WHERE id=$1`,
+    [visit.visitId, action, reception.actor, reception.actorRole, visit.signedAt]);
+    const before = await financeSnapshot(visit.patientId, visit.visitId);
     expect((await db.visitWalkout(visit.visitId))?.signedAt).toBe(visit.signedAt);
     expect(await item(visit.visitId)).toMatchObject({ status: "pending" });
+    expect(await complete(visit)).toMatchObject({ ok: true });
+    expect(await item(visit.visitId)).toMatchObject({ status: "handled" });
+    expect(await audit(visit.visitId)).toHaveLength(2);
+    expect(await financeSnapshot(visit.patientId, visit.visitId)).toEqual(before);
   });
   it("rejects non-front-desk actors directly at the service boundary", async () => {
     const visit = await fixture();

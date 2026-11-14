@@ -1,0 +1,11 @@
+{
+  "base": "3acfee5d867afda56e0e9c6ad8255cea91c5fbac",
+  "checks": {
+    "GET body": true,
+    "POST body": true,
+    "legacy PUT body": true,
+    "export async function appendFollowupCoverage": true,
+    "export async function readFollowupCoverageCommandStatus": true
+  },
+  "qualification": "Only shared terminal receipt SELECT now explicitly names the rejection projection columns and adds an optional bounded path; default legacy false path preserves immutable receipt/fingerprint semantics. Existing status wrapper and decision writer bodies unchanged. Native PG concurrency/restore/migration gates pass."
+}

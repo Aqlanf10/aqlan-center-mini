@@ -1,0 +1,11 @@
+{
+  "sourceSqlByteIdentical": true,
+  "originalTestsByteIdentical": [
+    "__tests__/reports-generated-time-route.test.ts",
+    "__tests__/durable-signer-boundary.test.ts",
+    "__tests__/staff-session-selection.test.ts"
+  ],
+  "eagerExpansionBefore": "reports-generated-time-route suite failed at import; 11 tests not collected",
+  "after": "52/52 focused units in four files; 34/34 PostgreSQL in four files",
+  "separateInvocationError": "Full-unit invocation omitted SESSION_SECRET: five signer/session tests failed. Synthetic environment is set explicitly for reruns. No production guard changed."
+}

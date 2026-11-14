@@ -4,7 +4,7 @@ import { readSessionBillingReview } from '@/lib/ortho-session-billing-review-con
 import type { BillingClassification } from '@/lib/billing-classification';
 interface ViewOwner { active: boolean; denied: boolean; clinical: boolean; readSequence: number; deny(): void }
 interface Props { owner: ViewOwner; readVersion: number; patientId: number; orthoCaseId: number; actorId: number; expectedAccess: 'clinical' | 'clinical_financial' }
-const classes: Record<BillingClassification, string> = { INCLUDED: 'مشمولة وفق التصنيف المسجل', LEGACY_INCLUDED: 'مشمولة ضمن علاج سابق وفق التصنيف المسجل', NEW_BILLABLE: 'قابلة للفوترة وفق التصنيف المسجل', OUTSIDE_CONTRACT: 'خارج الاتفاق وفق التصنيف المسجل', NO_CHARGE: 'بلا رسوم وفق التصنيف المسجل' };
+const classes: Record<BillingClassification, string> = { INCLUDED: 'مشمولة وفق التصنيف المسجل', LEGACY_INCLUDED: 'مشمولة ضمن علاج سابق وفق التصنيف المسجل', NEW_BILLABLE: 'قابلة للفوترة وفق التصنيف المسجل', OUTSIDE_CONTRACT: 'خارج الاتفاق وفق التصنيف المسجل', REVIEW_REQUIRED: 'شمولها ضمن الاتفاق غير محدد؛ تحتاج مراجعة', NO_CHARGE: 'بلا رسوم وفق التصنيف المسجل' };
 const valid = (p: Props) => p.owner.active && !p.owner.denied && p.owner.clinical && p.owner.readSequence === p.readVersion;
 export default function OrthoSessionBillingReview(props: Props) {
   const [open, setOpen] = useState(false);

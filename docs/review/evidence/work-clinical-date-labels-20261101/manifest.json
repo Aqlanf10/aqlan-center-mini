@@ -1,0 +1,90 @@
+{
+  "format": "work-clinical-date-labels-v1",
+  "baseRevision": "f7ef90b790c1957296061ef6206d7a4586baab90",
+  "sourceCommitStatus": "Source hashes refer to the pinned date correction commit; subsequent evidence updates are separate.",
+  "buildId": "z9dm33uOCMXzi0KHgP5Ay",
+  "acceptance": {
+    "originalWitnessBefore": {
+      "failed": 7
+    },
+    "originalWitnessAfter": {
+      "passed": 7
+    },
+    "expandedUnitGuards": {
+      "passed": 120,
+      "files": 7
+    },
+    "PG": {
+      "passed": 226,
+      "files": 8
+    },
+    "HTTPFirst": {
+      "passed": 95,
+      "failed": 3,
+      "files": 9
+    },
+    "HTTPCorrectedAffectedFiles": {
+      "passed": 21,
+      "files": 2
+    },
+    "HTTPDistinctCovered": 98,
+    "typeBuildLintBodyEnvironmentMoneyPreflight": "passed",
+    "fullCombinedGates": "pending",
+    "exactHeadCI": "unpublished",
+    "independentReview": "pending"
+  },
+  "sourceSha256": {
+    "__tests__/canonical-case-projection.test.ts": "18fd43a4a6dd6d024295a3976b1a0a85d1bce6644c7e07bd21c0784aa9097ddd",
+    "__tests__/canonical-ceph-projection.test.ts": "f672a247ceaffc665a7585b25f3dccc538b4d8d0c71e278763ee17d07c1f2f36",
+    "__tests__/canonical-clinical-date-labels.test.tsx": "fcd2d7d42a16f99a69ed24bd4aa5d481bfcf96b81c4c194b02041e9a66274b3b",
+    "__tests__/canonical-plan-projection.test.ts": "7b7afcfc559bd692a59f6e21c1b2769dd659e46d0683bcf71ed8642b185c0770",
+    "__tests__/postgres/ceph-canonical-list.test.ts": "56402a0b762f14389f791f794dc81c413b9df272509e0a99598d156f1121c827",
+    "__tests__/postgres/ceph-canonical-study.test.ts": "ada589263aa7a8c707f09d012a89c7e52405da00a156004058c29a6b3a7cc2d2",
+    "__tests__/postgres/ortho-canonical-detail.test.ts": "0b05112cfc00b0f3a20ff547f236f1d2598df9b95c45c447bb84a1612437da18",
+    "__tests__/postgres/patient-cases-canonical-read.test.ts": "7b12c48674dbfee430f2535e1ae79d398a8a70014b8fcfdc2c30b86cc230cd5c",
+    "__tests__/postgres/plans-canonical-clinical.test.ts": "3dab26f49ebeb7f66d179734592a7843ac3c53d60e43413e93e576f2f32365c0",
+    "__tests__/security-http/canonical-ceph-list-journey.test.ts": "5672744cc4d8ee9ba5d6a60153c5d69b1da66bb91d5aa249cd379fd5e27960df",
+    "__tests__/security-http/canonical-ceph-study-journey.test.ts": "ffa0317372a78592ea88aeed7ad4b3a0b785524adfce1408179b3f573358866f",
+    "__tests__/security-http/canonical-ortho-detail-journey.test.ts": "b6740575de443b55416036b68cafbf57a47f187b1063be5a4f307830995aa362",
+    "__tests__/security-http/canonical-patient-cases-journey.test.ts": "771fbb4564782e3a4d0620f0ad1b497849001d73980fea88c9cb609071dc4ba0",
+    "__tests__/security-http/canonical-plan-clinical-journey.test.ts": "25c05eafc2df2356c8977f737b4f8340b73af0889bc75d60d191e52b9c6dd40d",
+    "components/patient/CanonicalCephComparison.tsx": "69881bf8ad2d8cfb3e4955d2ddf523f0dee0c7e66f8343bc8d6b2d7d17f1270f",
+    "components/patient/CanonicalCephDiscard.tsx": "a9d4a0051ff1d8ae46c482a3c804436f19d123effa08fa881433ff1ba0ba499b",
+    "components/patient/CanonicalCephStudies.tsx": "5981eba5c06ca4c8865b619649e6af5184fac4c1bc898e299428a088e75f7711",
+    "components/patient/CanonicalCephStudy.tsx": "ee5213b88dd17f97bd6a7d2b40aa1fca432558c127f38bc4fac9cd595b1a124a",
+    "components/patient/CanonicalClinicalPlans.tsx": "1ff25695b9deaf46ff9196421b9ec09b014094601d6d8863b6e2576817c21e74",
+    "components/patient/CanonicalOrthoDetail.tsx": "3d2e97e1bf373d7d0687fee4fd0c061dda820ea9d258c3338b79fdf2f5b28707",
+    "components/patient/CanonicalPatientCases.tsx": "d1c6e3bf7cad8cfc4deb04745ae5ad2ac0205ec23f86c69bf654ca3d8127ec72",
+    "lib/canonical-case-projection.ts": "691d6bfcec722898f099a804666bc4936c77e141d3c026bb97be60630fb48d25",
+    "lib/canonical-case-reads.ts": "29a1d59b0dec7dae956bfb096a624a6cb8325834f608660af8a56f7a6d072782",
+    "lib/canonical-ceph-projection.ts": "f11e968f145fb8690bb413ab34bf67ee5fd3035339270ae33f812f2a04936a3b",
+    "lib/canonical-ceph-reads.ts": "2fb73738db487a59a54843d8a10a89a56c39ca2bafc4a4cf603f691a89e814c3",
+    "lib/canonical-ortho-reads.ts": "654b3379fc4b679808d0ab5bfb53fee7be55baa1776d483a68a6f8ca6cdf245d",
+    "lib/canonical-plan-projection.ts": "82f4557b1cffa2c9dac506384d15a58108eb36ed99cf93633ed88a2d3987214d",
+    "lib/canonical-plan-reads.ts": "fb4dd4a9e1035aa0a26bcd6799a49740048dbb706f40e5be1a8349e69e997160",
+    "lib/ortho.ts": "bbfb2a6daf0efd9237872e08d41ebfd81364c8bc8048cb8f9a381f630a0632c7"
+  },
+  "artifacts": {
+    "clinical-date-body.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "clinical-date-build.log": "91202b55b4c331f0d804427e9074fe6a31e9a327ee997cefc5a67aafd7a41c31",
+    "clinical-date-environment.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "clinical-date-final-source-freeze.json": "31706a50208c5f4be6b189063b3162575275685a6112f5d0883ff70b909487d5",
+    "clinical-date-first-source-freeze.json": "73cddc4bdc97bd48a61db85c44aec615bacbfe5ba364a2c02a43b2afd16dfda2",
+    "clinical-date-http-corrected-fixtures.log": "e3ddd00c91d80b19d5bd68728c97fee2e04ad5a77383c25cd429e2b89976aedf",
+    "clinical-date-http-first.log": "1499ef545e3f6362afd6af3986cb14ecae43664fa3727cb06d1037ed1fb3ae3a",
+    "clinical-date-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "clinical-date-labels-after.log": "045afa096f25069e28da118e9c23649653ec0db686a38a2288756f36c780bf29",
+    "clinical-date-labels-before.log": "5792014b6478e34bb75ba7ceaf6f932824e846fb8041f4cf799c9f32d9bfc1e5",
+    "clinical-date-labels-tsc-first.log": "9413ce4e4bf685f57a79a6ff98e4985b682d9fb95ff6167cbff9bb1546c17a64",
+    "clinical-date-labels-tsc-second.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "clinical-date-labels-unit.log": "70e8fe1abfc10c76d8e791a48b0b9cd7153a26aa7025c752ce4e8e3437d45102",
+    "clinical-date-lint.log": "d579808f166dea4ce3fb5f0a648abdb7049aae55fc2a10c87094a9438bc635bf",
+    "clinical-date-money.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "clinical-date-pg.log": "407b74750b010ce0c9ece664e810c5e161c10c63a8bea40e5fbe9cd1295d1ca5",
+    "clinical-date-preflight.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "clinical-date-source-proof.json": "d81f92b719775fd3ed0cdbe69d0c971389c5e2e5131f302b87801f89ad47be75",
+    "clinical-date-unit-guards-final.log": "b88976c3722ecebf4abf352680acf231f5ee4a672ad0afdc68821c66b2455910",
+    "original-seven-component-witnesses.tsx.txt": "4ab3f0b6d2a90196de507492f3674d35ef6569a394084e4700477768b3c7fa4a"
+  },
+  "sourceRevision": "f4ba8dcb554a9d12637702163d6846796ddc0628"
+}

@@ -46,6 +46,11 @@
  * Flex label/value spreading fragments the native PDF reading order. */
 /* Preserve the original field typography as well as its inline grouping.
  * Reducing its mixed Arabic/Latin label and identifier changes PDF word runs. */
-.sheet .labIdentity { display: block; line-height: 1.35; }
+/* Mixed Arabic/Latin glyph boxes exceed 1.35 when a long identifier wraps.
+ * Keep the label and identifier size, but reserve space for the Arabic font. */
+.sheet .labIdentity { display: block; line-height: 1.8; }
+/* Long laboratory identities need a full metadata row, including their phone.
+ * Override the shared odd/even column placement without changing other fields. */
+.sheet .labIdentity:nth-child(n) { grid-column: 1 / -1; }
 .sheet .labIdentity > span:first-child { font-weight: bold; }
 .sheet .labIdentity > strong { font-size: 10.5pt; }

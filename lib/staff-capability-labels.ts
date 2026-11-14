@@ -1,0 +1,180 @@
+/** Browser-safe Arabic presentation of the canonical capability catalogue. Labels
+ * never grant anything; the server decides every operation from the stored document. */
+import { STAFF_CAPABILITIES, STAFF_CAPABILITY_PREREQUISITES, type StaffCapability, type StaffRecordScope } from "./staff-capability-catalogue";
+
+export const STAFF_CAPABILITY_GROUPS = [
+ { key: "patients", label: "المرضى" },
+ { key: "clinical", label: "السريري" },
+ { key: "appointments", label: "المواعيد" },
+ { key: "finance", label: "المالية" },
+ { key: "reports", label: "التقارير" },
+ { key: "inventory", label: "المخزون والمشتريات" },
+ { key: "staff", label: "الطاقم" },
+ { key: "settings", label: "الإعدادات" },
+ { key: "audit", label: "سجل التدقيق" },
+ { key: "visits", label: "الزيارات والوصول" },
+ { key: "hr", label: "الموارد البشرية" },
+ { key: "work", label: "المهام والرسائل" },
+] as const;
+export type StaffCapabilityGroup = typeof STAFF_CAPABILITY_GROUPS[number]["key"];
+
+/** What a capability does and does not reveal or decide, where the owner fixed it (owner
+ * decision 6629149113). Shown under the capability in the staff editor; never grants. */
+export const STAFF_CAPABILITY_NOTES: Readonly<Partial<Record<StaffCapability, string>>> = Object.freeze({
+ "finance.invoices.view": "يُظهر أسعار الزيارة ومجاميعها وعملتها ومرجع فاتورتها في شاشة الزيارة. لا يكشف كشف حساب المريض؛ تلك صلاحية مستقلة.",
+ "finance.patient-ledger.view": "كشف حساب المريض وأرصدته. لا يكشف أسعار الزيارة ولا مرجع فاتورتها؛ عرض الفواتير صلاحية مستقلة.",
+ "clinical.ortho.edit": "توثيق التقويم. قرار «بلا رسوم» لشدّة خارج الاتفاق للمالك، ولطبيب الحالة المسؤول عنها بهذه الصلاحية فقط إذا فعّل المالك ذلك في الإعدادات.",
+ "finance.invoices.create": "لا يمنح قرار «بلا رسوم» لشدّة التقويم خارج الاتفاق.",
+ "finance.agreements.manage": "لا يمنح قرار «بلا رسوم» لشدّة التقويم خارج الاتفاق.",
+});
+
+export const STAFF_CAPABILITY_LABELS: Readonly<Record<StaffCapability, string>> = Object.freeze({
+ "patients.create": "إضافة مريض",
+ "patients.edit": "تعديل بيانات المريض",
+ "patients.delete": "حذف/أرشفة مريض",
+ "patients.export": "تصدير بيانات المرضى",
+ "clinical.plans.view": "عرض خطط العلاج",
+ "clinical.plans.edit": "تعديل خطط العلاج",
+ "clinical.xrays.view": "عرض الأشعة والصور",
+ "clinical.xrays.upload": "رفع الأشعة والصور",
+ "clinical.visits.document": "توثيق الزيارة السريرية",
+ "clinical.visits.sign": "توقيع الزيارة",
+ "appointments.create": "حجز موعد",
+ "appointments.edit": "تعديل موعد",
+ "appointments.cancel": "إلغاء موعد",
+ "appointments.override-capacity": "تجاوز سعة الجدول",
+ "finance.invoices.view": "عرض الفواتير",
+ "finance.invoices.create": "إنشاء فاتورة",
+ "finance.invoices.cancel": "إلغاء فاتورة",
+ "finance.invoices.mark-paid": "تعليم الفاتورة مدفوعة",
+ "finance.payments.view": "عرض المدفوعات",
+ "finance.payments.collect": "تحصيل دفعة",
+ "finance.payments.refund": "استرداد دفعة",
+ "finance.payments.void": "إبطال دفعة",
+ "finance.expenses.view": "عرض المصروفات",
+ "finance.expenses.create": "تسجيل مصروف",
+ "finance.expenses.void": "إبطال مصروف",
+ "finance.shifts.view": "عرض ورديات الصندوق",
+ "finance.shifts.operate": "فتح وإغلاق وردية الصندوق",
+ "finance.patient-ledger.view": "عرض كشف حساب المريض",
+ "finance.service-prices.view": "عرض أسعار الخدمات",
+ "finance.service-prices.edit": "تعديل أسعار الخدمات",
+ "finance.cost-prices.view": "عرض أسعار التكلفة",
+ "finance.discounts.apply": "تطبيق خصم",
+ "finance.discounts.override": "تجاوز حد الخصم",
+ "finance.price-increases.apply": "تطبيق زيادة سعر",
+ "finance.commissions.view-own": "عرض مستحقاتي (العمولة الشخصية)",
+ "finance.commissions.view-all": "عرض عمولات جميع الأطباء",
+ "finance.commissions.manage-rates": "إدارة نسب العمولات",
+ "finance.revenue.view": "عرض الإيرادات",
+ "finance.profits.view": "عرض الأرباح",
+ "finance.suppliers.view": "عرض حسابات الموردين",
+ "finance.reconciliation.view": "عرض المطابقات",
+ "finance.export": "تصدير البيانات المالية",
+ "reports.operational.view": "التقارير التشغيلية",
+ "reports.financial.view": "التقارير المالية",
+ "reports.clinical.view": "التقارير السريرية",
+ "reports.export": "تصدير التقارير",
+ "inventory.references.view": "عرض أصناف ووحدات ومواقع المخزون",
+ "inventory.items.create": "إضافة صنف مخزون",
+ "inventory.units.revise": "تعديل وحدات الصنف",
+ "inventory.locations.create": "إضافة موقع تخزين",
+ "inventory.approval-policy.manage": "إدارة حدود اعتماد المشتريات",
+ "inventory.requests.view": "عرض طلبات الشراء",
+ "inventory.requests.create": "إنشاء وتعديل طلب شراء",
+ "inventory.requests.approve": "اعتماد طلبات الشراء",
+ "inventory.orders.view": "عرض أوامر الشراء والاستلام",
+ "inventory.orders.manage": "إصدار وتعديل أوامر الشراء",
+ "inventory.receipts.post": "استلام البضاعة وفحصها",
+ "inventory.quarantine.resolve": "البت في البضاعة المحجوزة",
+ "inventory.supplier-invoices.record": "تسجيل ومطابقة فواتير الموردين",
+ "inventory.supplier-invoices.cancel": "إلغاء فاتورة مورد",
+ "inventory.custody.view": "عرض عهدة الأطباء",
+ "inventory.custody.dispatch": "صرف مواد إلى العهدة",
+ "inventory.custody.acknowledge": "استلام العهدة",
+ "inventory.custody.use": "تسجيل استهلاك أو إرجاع من العهدة",
+ "inventory.custody.stocktake": "جرد العهدة وإغلاق العبوات",
+ "inventory.custody.approve-waste": "اعتماد التالف",
+ "inventory.custody.settlement.propose": "اقتراح تسوية العهدة",
+ "inventory.custody.settlement.object": "الاعتراض على تسوية العهدة",
+ "inventory.reconcile": "مطابقة الحركات التاريخية وتسوية المخزون",
+ "inventory.costs.view": "عرض تكلفة المواد والمخزون",
+ "staff.view": "عرض دليل الطاقم",
+ "staff.profile.edit": "تعديل بيانات موظف",
+ "staff.accounts.create": "إنشاء حساب موظف",
+ "staff.accounts.disable": "تعطيل حساب موظف",
+ "staff.permissions.edit": "إدارة صلاحيات الطاقم",
+ "settings.view": "عرض الإعدادات",
+ "settings.operational.edit": "تعديل الإعدادات التشغيلية",
+ "settings.finance.edit": "تعديل الإعدادات المالية",
+ "audit.view": "عرض سجل التدقيق",
+ "audit.export": "تصدير سجل التدقيق",
+ "appointments.schedule.manage": "إدارة حجب أوقات الأطباء",
+ "visits.manage": "تسجيل الوصول وإدارة الزيارة",
+ "visits.delete": "حذف زيارة",
+ "clinical.ortho.view": "عرض حالات التقويم",
+ "clinical.ortho.edit": "توثيق حالات التقويم وخططها",
+ "clinical.ceph.analyze": "تحليل السيفالومتري",
+ "clinical.prescriptions.write": "كتابة الوصفات وإلغاؤها",
+ "clinical.medication-catalog.manage": "تعديل دليل الأدوية وجرعاته الافتراضية (لا يغيّر الوصفات القائمة)",
+ "clinical.referrals.manage": "الإحالات",
+ "clinical.lab.view": "عرض أوامر المختبر وأسعاره",
+ "clinical.lab.order": "طلب وتحديث أعمال المختبر",
+ "clinical.lab.cancel": "إلغاء أمر مختبر",
+ "clinical.laboratories.manage": "إدارة المختبرات",
+ "finance.lab-prices.edit": "تعديل أسعار المختبر وخدماته",
+ "patients.merge": "دمج ملفين",
+ "patients.number.manage": "تعديل رقم الملف",
+ "patients.documents.delete": "حذف مستند مريض",
+ "patients.history.record": "تسجيل الوثائق التاريخية",
+ "patients.history.correct": "تصحيح وثيقة تاريخية",
+ "finance.patient-ledger.manage": "مسؤولية الدفع وحساب المريض",
+ "finance.legacy.record": "تسجيل المعالجات والأرصدة السابقة",
+ "finance.legacy.void": "إبطال اتفاق سابق",
+ "finance.agreements.manage": "تعديل الاتفاقيات والتسويات",
+ "finance.invoices.correct": "تصحيح فاتورة",
+ "finance.payables.record": "تسجيل مستحق مورد يدوي",
+ "finance.parties.manage": "إدارة الجهات (موردون/مختبرات)",
+ "finance.opening-balances.manage": "الأرصدة الافتتاحية",
+ "finance.fx.manage": "أسعار الصرف",
+ "finance.journal.post": "قيد يدوي",
+ "finance.reconciliation.manage": "اعتماد تسويات المختبر",
+ "hr.directory.view": "دليل الموظفين والجداول",
+ "hr.attendance.record": "تسجيل الحضور",
+ "hr.attendance.correct": "تصحيح الحضور",
+ "hr.staff.manage": "ملفات الموظفين والعقود",
+ "hr.leaves.request": "طلب الإجازات وعرضها",
+ "hr.leaves.approve": "اعتماد الإجازات والأرصدة",
+ "hr.schedules.manage": "إدارة جداول الدوام",
+ "hr.payroll.manage": "الرواتب وصرفها",
+ "hr.reports.view": "تقارير الموارد البشرية",
+ "hr.settings.edit": "إعدادات الموارد البشرية",
+ "tasks.use": "المهام (المسندة والمنشأة)",
+ "messages.use": "الرسائل الداخلية والخارجية",
+ "patients.operational-summary.view": "ملخص المريض التشغيلي (للحجز والتنسيق)",
+});
+export function staffCapabilityGroup(capability: StaffCapability): StaffCapabilityGroup {
+ const prefix = capability.split(".")[0];
+ if (prefix === "tasks" || prefix === "messages") return "work";
+ return (STAFF_CAPABILITY_GROUPS.some(group => group.key === prefix) ? prefix : "settings") as StaffCapabilityGroup;
+}
+export const STAFF_SCOPE_LABELS: Readonly<Record<StaffRecordScope, string>> = Object.freeze({
+ none: "لا شيء",
+ own: "مرضاه/مواعيده فقط (حسب الطبيب المرتبط)",
+ all: "الجميع",
+});
+/** Granting a capability also grants its prerequisites; removing a prerequisite removes dependants. */
+export function toggleStaffCapability(grants: ReadonlySet<StaffCapability>, capability: StaffCapability, on: boolean): Set<StaffCapability> {
+ const next = new Set(grants);
+ if (on) {
+  const add = (c: StaffCapability) => { next.add(c); for (const required of STAFF_CAPABILITY_PREREQUISITES[c] ?? []) add(required); };
+  add(capability);
+ } else {
+  const remove = (c: StaffCapability) => {
+   next.delete(c);
+   for (const dependant of STAFF_CAPABILITIES) if (next.has(dependant) && (STAFF_CAPABILITY_PREREQUISITES[dependant] ?? []).includes(c)) remove(dependant);
+  };
+  remove(capability);
+ }
+ return next;
+}

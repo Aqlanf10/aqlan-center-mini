@@ -5,8 +5,12 @@ import { isAdjustmentVisitInput, ADJUSTMENT_VISIT_INPUT_ERROR } from "@/lib/orth
 import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "@/lib/ortho-adjustment-date";
 import { parseAdjustmentInterval, ADJUSTMENT_INTERVAL_ERROR } from "@/lib/ortho-adjustment-interval";
 import { adjustmentTextAdmissionError } from "@/lib/ortho-adjustment-text-input";
+import { orthoWireActionError } from "@/lib/ortho-baseline";
+import { parseAuxiliariesInput } from "@/lib/ortho-auxiliaries";
 import { OrthoRetainerAuthorityError } from '@/lib/ortho-retainer-authority';
 import { OrthoPhaseAuthorityError } from '@/lib/ortho-phase-authority';
+import { CanonicalOrthoPlanLinkRefusal, commandCanonicalOrthoPlanLink } from "@/lib/canonical-ortho-plan-link-command";
+import { CanonicalOrthoLifecycleRefusal, commandCanonicalOrthoLifecycle } from "@/lib/canonical-ortho-lifecycle-command";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -20,6 +24,11 @@ import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { canChangeOrthoPlanLink } from "@/lib/ortho-plan-link-access";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
+
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalOrthoCaseId, readCanonicalOrthoCase } from "@/lib/canonical-ortho-reads";
+
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +79,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const text = (value: unknown, limit: number) =>
     typeof value === "string" && value.trim() ? value.trim().slice(0, limit) : null;
 
+  // Explicit wire removal is a newer field with no legacy journal to replay, so it is
+  // admitted before any write: an unknown action, or removal plus a wire, is refused.
+  const wireActionError = orthoWireActionError(source);
+  if (wireActionError) return NextResponse.json({ code: "invalid_adjustment_wire_action", message: wireActionError }, { status: 400 });
+  // 0132 auxiliaries are newer still: exact keys and the "other" length are checked here, before any
+  // write or replay lookup. Nothing is trimmed to fit and nothing is prefilled.
+  const auxiliaries = parseAuxiliariesInput(source);
+  if (!auxiliaries.ok) return NextResponse.json({ code: "invalid_adjustment_auxiliaries", message: auxiliaries.message }, { status: 400 });
+
   const requestKey = request.headers.get("Idempotency-Key");
   if (!requestKey || !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) {
     return NextResponse.json({ code: "ADJUSTMENT_REQUEST_KEY_REQUIRED",
@@ -84,11 +102,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       doneOn, phase,
       upperWire: text(source.upperWire, 40),
       lowerWire: text(source.lowerWire, 40),
+      ...(source.upperWireAction === "remove" ? { upperWireAction: "remove" as const } : {}),
+      ...(source.lowerWireAction === "remove" ? { lowerWireAction: "remove" as const } : {}),
       elastics,
       elasticNote: text(source.elasticNote, 120),
       done: text(source.done, 400),
       nextWeeks,
       note: text(source.note, 300),
+      ...(auxiliaries.value.auxiliaries === null ? {} : auxiliaries.value),
       recordedBy: session.username,
       actorRole: session.role,
       request: { key: requestKey, patientId: found.patientId, session, newTextAdmissionError: adjustmentTextAdmissionError(source),
@@ -98,7 +119,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         newDateAdmissionError: source.doneOn == null || isAdjustmentDate(source.doneOn) ? null : ADJUSTMENT_DATE_ERROR,
         newIntervalAdmissionError: source.nextWeeks == null || parseAdjustmentInterval(source.nextWeeks) !== null ? null : ADJUSTMENT_INTERVAL_ERROR },
     });
-    if (!result.ok) return NextResponse.json({ message: result.message, ...(result.code ? { code: result.code } : {}) }, { status: result.status ?? 409 });
+    if (!result.ok) return NextResponse.json({ message: result.message, ...(result.code ? { code: result.code } : {}),
+      // The visit's existing session, named so the screen can point to it; never a receipt for this request.
+      ...(result.existingAdjustmentId ? { existingAdjustmentId: result.existingAdjustmentId, visitId: result.visitId ?? null } : {}) },
+      { status: result.status ?? 409 });
     // (CASE-1) شدّةٌ لهذه الزيارة موجودة سلفًا (نقرة مزدوجة/إعادة محاولة): تُعاد هي ولا يُدرج صفٌّ ثانٍ.
     // (VISIT-FLOW-1) visitId: زيارة اليوم التي رُبطت بها الشدّة (أو null) — لتقول الشاشة ذلك.
     const receipt = { id: result.id, patientId: found.patientId, caseId, requestKey,
@@ -113,6 +137,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
 /** تغيير المرحلة، أو تسجيل المثبّت، أو إغلاق الحالة. */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const body: unknown = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalOrthoLifecycleRefusal("invalid_ortho_lifecycle", 400, "تحديث الحالة لا يقبل مرشحات إضافية.");
+      const command = body && typeof body === "object" && !Array.isArray(body) && Object.hasOwn(body, "planId") ? commandCanonicalOrthoPlanLink : commandCanonicalOrthoLifecycle;
+      return NextResponse.json(await command(selected.handle, (await context.params).id, body), { headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
+      if (error instanceof CanonicalOrthoLifecycleRefusal || error instanceof CanonicalOrthoPlanLinkRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد تحديث حالة التقويم. تحقق من السجل قبل أي طلب جديد.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);
@@ -194,6 +233,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const caseId = canonicalOrthoCaseId((await context.params).id, new URL(_request.url).searchParams);
+      return NextResponse.json(await readCanonicalOrthoCase(selected.handle, caseId), { headers: NO_STORE });
+    } catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل تفاصيل التقويم."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);

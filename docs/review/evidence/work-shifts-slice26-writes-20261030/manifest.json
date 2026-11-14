@@ -1,0 +1,65 @@
+{
+  "schema": "work-shifts-slice26-writes-local-evidence-v1",
+  "baseSha": "8e477eb8c15323567fdb6f75496a6f5925dee9fd",
+  "synthetic": true,
+  "fullSliceAccepted": false,
+  "readProjectionDecision": "pending",
+  "normalization": "Local worktree path replaced by <worktree>; framed base64 chunks omitted from logs; verified receipt query-plan payload stored separately; failed-PDF metadata retained. Trailing whitespace and empty EOF lines stripped.",
+  "files": [
+    {
+      "path": "browser-install-denial.log",
+      "bytes": 3441,
+      "sha256": "9ac4237bdf306adb9699dd6cdccecde2669624f113101d964c53bdc576355f5a"
+    },
+    {
+      "path": "build.log",
+      "bytes": 13110,
+      "sha256": "822e06651c1d54299a33c9ff2f9338f0a80f02f97e61ebd570df7408c82b2dba"
+    },
+    {
+      "path": "finance-browser-isolated.log",
+      "bytes": 2016,
+      "sha256": "fc06bcddf67d67e2de0f28dc81259656fce3c180a1b72f817ce702f3e8205bd0"
+    },
+    {
+      "path": "http-receipt-pdf-attempt.log",
+      "bytes": 6185,
+      "sha256": "bbe784f0a97767d24dafe73c678d435668608903a2283da00b5a45510ade45b3"
+    },
+    {
+      "path": "http-writes-and-browser-attempt.log",
+      "bytes": 5666,
+      "sha256": "99023cc17da15f6db1901dfdd87e5ec9f78169f9192a8c12949ca464e6a40052"
+    },
+    {
+      "path": "lint.log",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "money-guard.log",
+      "bytes": 1843,
+      "sha256": "ff7a749c31030a99b300f9a1ef147404fb8290adfc27895e32dd8e2efb78ccc3"
+    },
+    {
+      "path": "pg-focused.log",
+      "bytes": 7632,
+      "sha256": "b98f1205810a51cb92a77c02e5ab9093acb65d8c80abfa69c0ac3377982d219c"
+    },
+    {
+      "path": "pg-payment-admission-fresh.log",
+      "bytes": 595,
+      "sha256": "0bfacd06f10464f6dbc356ad4d1b22cef997aef3ea14f93ecbcad61300079531"
+    },
+    {
+      "path": "receipt-query-plan.pg18.json",
+      "bytes": 107700,
+      "sha256": "af03f3298bc2f0e2428fc82f1bb19c8358ef00a223612951c0c3031980639c78"
+    },
+    {
+      "path": "units.log",
+      "bytes": 200,
+      "sha256": "9b97f445bc4d781683a3b4c713a4ec1a28691234e25207ba9e62a05748cedd2b"
+    }
+  ]
+}

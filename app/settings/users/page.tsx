@@ -1005,7 +1005,7 @@ export default function UsersAndDoctorsPage() {
                             ...current,
                             role,
                             // Admin defaults and prior-role grants do not authorize export in a new role.
-                            permissions: { ...current.permissions, canExportOrthoStudies: false },
+                            permissions: { ...current.permissions, canExportOrthoStudies: false, canManageMedicationCatalog: false },
                             commissionConfig: current.commissionBaseline,
                           }));
                           setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
@@ -2390,6 +2390,11 @@ export default function UsersAndDoctorsPage() {
                       <input type="checkbox" checked={editForm.permissions.canPrintSavedPrescriptions === true}
                         onChange={event => { if (currentPrincipal() && editorPrincipal.current === principalOwner && editorOwner.current === editForm.owner) setEditForm(current => ({ ...current, permissions: { ...current.permissions, canPrintSavedPrescriptions: event.target.checked } })); }} />
                       <span>إعادة طباعة الوصفات المحفوظة الفاعلة فقط — دون إنشاء أو تعديل أو إبطال</span>
+                    </label>}
+                    {editForm.role === "doctor" && <label className="flex gap-3 rounded-xl border p-4">
+                      <input type="checkbox" checked={editForm.permissions.canManageMedicationCatalog === true}
+                        onChange={event => { if (currentPrincipal() && editorPrincipal.current === principalOwner && editorOwner.current === editForm.owner) setEditForm(current => ({ ...current, permissions: { ...current.permissions, canManageMedicationCatalog: event.target.checked } })); }} />
+                      <span>تعديل دليل الأدوية وجرعاته الافتراضية — لا يغيّر وصفات المرضى المحفوظة</span>
                     </label>}
                     {(editForm.role === "doctor" || editForm.role === "reception") && <label className="flex gap-3 rounded-xl border p-4">
                       <input type="checkbox" checked={editForm.permissions.canExportOrthoStudies === true}

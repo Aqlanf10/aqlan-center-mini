@@ -1,0 +1,43 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ceph-create-canonical-command.test.ts (22 tests | 1 failed | 21 skipped) 2812ms
+   × an uploader without ortho view cannot submit an undisclosed case link directly 286ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ceph-create-canonical-command.test.ts > an uploader without ortho view cannot submit an undisclosed case link directly
+AssertionError: promise resolved "{ id: 2, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "duplicateWarning": "لهذه الصورة 1 دراسة سابقة؛ تأكد أن فتح دراسة أخرى مقصود.",
++   "id": 2,
+  }
+
+ ❯ __tests__/postgres/ceph-create-canonical-command.test.ts:116:51
+    114| it("an uploader without ortho view cannot submit an undisclosed case l…
+    115|  const s=await scenario(),ortho=Number((await fx.pool.query("INSERT IN…
+    116|  await expect(create("all",s,{orthoCaseId:ortho})).rejects.toThrow(/CA…
+       |                                                   ^
+    117|  expect(await drafts(s)).toEqual([]);expect(await audits(s)).toEqual([…
+    118| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 21 skipped (22)
+   Start at  16:51:46
+   Duration  7.38s (transform 2.97s, setup 0ms, import 3.70s, tests 2.81s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

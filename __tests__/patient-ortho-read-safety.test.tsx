@@ -102,7 +102,7 @@ vi.mock("react", async (original) => {
 type Element = ReactElement<Record<string, unknown>>;
 type Component = (props: Record<string, unknown>) => ReactNode;
 type Case = ComponentProps<typeof AdjustmentForm>["caseRow"];
-type ResponseLike = { ok: boolean; status: number; json: () => Promise<unknown> }
+type ResponseLike = { ok: boolean; status: number; json: () => Promise<unknown>; clone?: () => { json: () => Promise<unknown> } }
   & Pick<Response, "headers" | "redirected" | "text">;
 type Pending = { id: number; url: string; method: string; init?: RequestInit; json: ReturnType<typeof vi.fn>; text: ReturnType<typeof vi.fn>;
   headers: (status: number) => void; body: (value: unknown) => void; fail: (message?: string) => void };
@@ -129,6 +129,9 @@ const fixture = (id = patientId, changes: Partial<Case> = {}): Case & { patientI
     overdue: false, adjustments: 1, lastAdjustment: "2026-09-04", daysSinceLast: 30 }, ...changes,
 });
 const contact = (id = patientId) => ({ patient: { id, fullName: "Synthetic patient", phone: "700000001" } });
+const providerContext = () => ({ ok: true, patientId: 19, source: { kind: "ortho_adjustment", id: 81 }, orthoCaseId: 41,
+  doctorId: 71, doctorName: "Synthetic source clinician", fingerprint: "a".repeat(64), settingsTarget: { kind: "ortho", id: 41 } });
+let bookingContext: Record<string, unknown> = providerContext();
 let patientId: number; let requests: Pending[]; let unexpected: string[];
 let scopes = new Map<string, Scope>(); let componentIds = new Map<unknown, number>(); let seen = new Set<string>();
 let executed = new Set<string>();
@@ -270,6 +273,7 @@ function addPhoto(name = "synthetic.png") {
 beforeEach(() => {
   hooks.cephProbe = false;
   unmount(); scopes = new Map(); componentIds = new Map(); executed = new Set(); hooks.changed = false; hooks.retiredWrites = 0;
+  bookingContext = providerContext();
   patientId = 19; hooks.session = principalA(); hooks.existingRefresh = null; hooks.studyMount = null; requests = []; unexpected = []; fetchMock.mockReset(); createURL.mockReset(); revokeURL.mockReset();
   navigationRegistration = null; navigationRegistrations = []; delayNavigationCleanup = false; delayedNavigationCleanup = [];
   confirmLeave.mockReset(); confirmLeave.mockReturnValue(false);
@@ -289,6 +293,7 @@ beforeEach(() => {
   fetchMock.mockImplementation((url, init) => {
     const method = init?.method ?? "GET";
     if (method === "GET" && url === "/api/parties?kind=doctor") return Promise.resolve(new Response(JSON.stringify([{ id: 71, name: "Synthetic responsible doctor" }])));
+    if (method === "GET" && /^\/api\/patients\/(19|20)\/return-booking-context\?kind=ortho_adjustment&sourceId=81$/.test(url)) return Promise.resolve(new Response(JSON.stringify(bookingContext)));
     // The local panels now bootstrap durable recovery before reading their own
     // clinical content. Keep those reads deferred and observable, just like the
     // parent reads; do not stub the panels, guards, or recovery verifiers.
@@ -301,7 +306,7 @@ beforeEach(() => {
     const text = vi.fn(async () => JSON.stringify(await body.promise));
     requests.push({ id: requests.length + 1, url, method, init, json, text,
       headers: (status) => head.resolve({ ok: status >= 200 && status < 300, status, json, text,
-        redirected: false, headers: new Headers({ "cache-control": "private, no-store" }) }),
+        redirected: false, headers: new Headers({ "cache-control": "private, no-store" }), clone: () => ({ json }) }),
       body: body.resolve, fail: (message = "Synthetic transport failure") => head.reject(new TypeError(message)) });
     // AbortSignal is recorded but intentionally ignored by transport completion.
     return head.promise;
@@ -447,9 +452,10 @@ describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () =>
     expect(confirmLeave).toHaveBeenCalledTimes(1); expect(revokeURL).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks a held save synchronously without confirmation even when its draft has only unedited defaults", async () => {
+  it("blocks a held documented save synchronously without confirmation", async () => {
     await mount(); click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
     const registered = currentNavigation(); expect(registered.guard()).toBe(true);
+    edit("ما نُفّذ في الشدّة", "Explicit synthetic review without change");
     const pending = submit(); expect(writes()).toHaveLength(1);
     // No render between the request and guard: busy ownership must be synchronous.
     expect(registered.guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
@@ -616,7 +622,7 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
     expect(financial.props.open).toBeUndefined();
     expect(text(financial)).toContain("مرجع الحالة المالي وشمول الشدّة");
     expect(text(prescriptionValue())).toBe("غير مسجّلة");
-    const tab = one(node => node.type === "button" && node.props["aria-label"] === "مسار الأسلاك والشدّات");
+    const tab = one(node => node.type === "button" && node.props["aria-label"] === "زيارات المتابعة والشدّ");
     click(tab);
     expect(one(node => node.props["data-testid"] === "ortho-financial-context").type).toBe("div");
     expect(row).toEqual(before); expect(writes()).toEqual([]);
@@ -686,7 +692,7 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
 
 describe.each([
   { endpoint: "space-ledger", label: "خطة العلاج والميكانيكا", panel: "OrthoSpacePanel" },
-  { endpoint: "problem-sources", label: "السجلات والسيفالومتري (WebCeph)", panel: "OrthoProblemSourcesPanel" },
+  { endpoint: "problem-sources", label: "السجلات والتشخيص", panel: "OrthoProblemSourcesPanel" },
 ])("PatientOrtho $endpoint recovery read ownership", ({ endpoint, label, panel }) => {
   const metadata = () => ({ ok: true, actorId: 7,
     scope: { patientId: 19, orthoCaseId: 41, clinicalCaseId: 51 }, recovery: null });
@@ -887,7 +893,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     await failClinical(); await retry(true); expect(fields()).toEqual(newDraft); await submit(oldNewForm); expect(writes()).toEqual([]);
     click(button("✕ إغلاق النموذج")); click(button("تسجيل حالة سابقة (قبل النظام)")); await flush();
     edit("النظام المالي السابق", "prepaid_included"); edit("المطاطات الحالية", "private-draft baseline");
-    edit("الطبيب المسؤول", "71"); edit("الأهداف المتبقية", "private-draft objectives");
+    expect(elements(render()).some(node => node.props["aria-label"] === "الطبيب المسؤول")).toBe(false); edit("الأهداف المتبقية", "private-draft objectives");
     const baselineDraft = fields(); const oldBaseline = form(); await failClinical(); await retry(true);
     expect(fields()).toEqual(baselineDraft); await submit(oldBaseline); expect(writes()).toEqual([]);
     expect(executed.has("NewCase")).toBe(true); expect(executed.has("LegacyBaselineForm")).toBe(true);
@@ -1204,7 +1210,7 @@ describe('recorded session detail and chronology entry',()=>{
 
 describe("diagnostic section jump navigation", () => {
   it("exposes four in-page controls without hiding existing sections or issuing requests", async () => {
-    render(); await grant(); click(control("السجلات والسيفالومتري (WebCeph)"));
+    render(); await grant(); click(control("السجلات والتشخيص"));
     const nav = elements(render()).filter(node => node.type === "nav" && node.props["aria-label"] === "الانتقال بين أقسام التشخيص");
     expect(nav).toHaveLength(1);
     expect(elements(nav[0]).filter(node => node.type === "button")).toHaveLength(4);
@@ -1221,7 +1227,7 @@ describe("diagnostic section jump navigation", () => {
     return { target, root };
   };
   it("retains mounted child state and pending reads through every jump", async () => {
-    hooks.cephProbe = true; await mount(); click(control("السجلات والسيفالومتري (WebCeph)"));
+    hooks.cephProbe = true; await mount(); click(control("السجلات والتشخيص"));
     edit("synthetic-ceph-draft", "unsaved synthetic text");
     const beforeScopes = new Map(scopes), beforeRequests = requests.length;
     const pending = reads().find(request => request.url.includes("problem-sources/recovery"))!;
@@ -1237,7 +1243,7 @@ describe("diagnostic section jump navigation", () => {
     expect(hooks.retiredWrites).toBe(0);
   });
   it("retires old jump callbacks during parent refresh and after revalidation", async () => {
-    await mount(); click(control("السجلات والسيفالومتري (WebCeph)")); const { target } = attach();
+    await mount(); click(control("السجلات والتشخيص")); const { target } = attach();
     const old = button("السيفالومتري"); refresh();
     (old.props.onClick as () => void)(); expect(target.focus).not.toHaveBeenCalled();
     await grant(); (old.props.onClick as () => void)(); expect(target.focus).not.toHaveBeenCalled();
@@ -1248,7 +1254,7 @@ describe("diagnostic section jump navigation", () => {
 
 describe('photo comparison parent read ownership',()=>{
  const source={id:91,patientId:19,orthoCaseId:41,title:'synthetic comparison source',isImage:true,photoStage:'initial',photoView:null,takenOn:null,uploadedAt:'2026-01-01T00:00:00.000Z',removedAt:null,note:null};
- async function open(){render();const current=pair();respond(current.ortho,{cases:[fixture(19,{photosVisible:true})]});respond(current.patient,contact());await flush();click(control('السجلات والسيفالومتري (WebCeph)'));await flush();}
+ async function open(){render();const current=pair();respond(current.ortho,{cases:[fixture(19,{photosVisible:true})]});respond(current.patient,contact());await flush();click(control('السجلات والتشخيص'));await flush();}
  it('withdraws loaded comparison images during parent refresh and denied reread',async()=>{
   const base=fetchMock.getMockImplementation()!;fetchMock.mockImplementation((url,init)=>url==='/api/patients/19/documents'&&(!init?.method||init.method==='GET')?Promise.resolve(new Response(JSON.stringify({documents:[source]}),{headers:{'content-type':'application/json'}})):base(url,init));
   await open();expect(elements(render()).some(n=>n.type==='img'&&n.props.src==='/api/documents/91')).toBe(true);
@@ -1258,4 +1264,42 @@ describe('photo comparison parent read ownership',()=>{
   const held=deferred<Response>(),base=fetchMock.getMockImplementation()!;fetchMock.mockImplementation((url,init)=>url==='/api/patients/19/documents'&&(!init?.method||init.method==='GET')?held.promise:base(url,init));
   await open();refresh();held.resolve(new Response(JSON.stringify({documents:[source]}),{headers:{'content-type':'application/json'}}));await flush();expect(elements(render()).filter(n=>n.type==='img')).toHaveLength(0);expect(writes()).toHaveLength(0);
  });
+});
+describe("orthodontic suggested booking current clinical responsibility", () => {
+  async function suggestion() {
+    await mount(); adjustment(); const saving = submit(); respond(writes()[0], { id: 81 });
+    await saving; await flush(); await grant();
+    click(button("📅 حجز الموعد المقترح الآن")); await flush();
+  }
+  it("keeps the verified current clinician visible without a one-off doctor picker, and binds the POST and receipt", async () => {
+    await suggestion(); expect(text(render())).toContain("Synthetic source clinician");
+    expect(elements(render()).some(node => node.props["aria-label"] === "طبيب الجلسة القادمة")).toBe(false);
+    const pending = submit();
+    const body = JSON.parse(String(writes()[1].init!.body));
+    expect(body).toMatchObject({ returnBookingSource: { kind: "ortho_adjustment", id: 81 }, returnBookingFingerprint: "a".repeat(64) });
+    expect(body).not.toHaveProperty("doctorId");
+    respond(writes()[1], { doctorId: 71, doctorName: "Synthetic saved clinician" }, 201); await pending; await flush();
+    expect(text(render())).toContain("Synthetic saved clinician");
+  });
+  it.each(["responsibility_missing", "responsibility_inactive"])("blocks %s with a settings link, never a substitute doctor", async code => {
+    bookingContext = { ok: false, code, message: "اضبط المسؤولية الحالية", contexts: [{ source: { kind: "ortho_case", id: 41 },
+      label: "حالة تقويم تجريبية", available: false, doctorId: null, doctorName: null, settingsTarget: { kind: "ortho", id: 41 } }] };
+    await suggestion(); await submit(); expect(writes()).toHaveLength(1);
+    expect(text(render())).toContain("اضبط المسؤولية الحالية");
+    expect(elements(render()).some(node => node.type === "a" && String(node.props.href).includes("orthoCaseId=41"))).toBe(true);
+    expect(elements(render()).some(node => node.props["aria-label"] === "طبيب الجلسة القادمة")).toBe(false);
+  });
+  it("refreshes a stale clinician source without losing booking date/time or silently retrying", async () => {
+    await suggestion(); edit("تاريخ الجلسة القادمة", "2026-12-12"); edit("وقت الجلسة القادمة", "17:45");
+    const first = submit(); bookingContext = { ...providerContext(), doctorId: 72, doctorName: "Synthetic current clinician", fingerprint: "b".repeat(64) };
+    respond(writes()[1], { code: "return_booking_source_changed", message: "تغيّر طبيب الحالة" }, 409); await first; await flush();
+    expect(writes()).toHaveLength(2); expect(control("تاريخ الجلسة القادمة").props.value).toBe("2026-12-12");
+    expect(control("وقت الجلسة القادمة").props.value).toBe("17:45"); expect(text(render())).toContain("Synthetic current clinician");
+    const second = submit(); expect(JSON.parse(String(writes()[2].init!.body))).toMatchObject({ returnBookingFingerprint: "b".repeat(64), date: "2026-12-12", time: "17:45" });
+    respond(writes()[2], { doctorId: 72, doctorName: "Synthetic current clinician" }, 201); await second; await flush();
+  });
+  it("does not show or book another patient's context", async () => {
+    bookingContext = { ...providerContext(), patientId: 20 }; await suggestion();
+    expect(text(render())).not.toContain("Synthetic source clinician"); await submit(); expect(writes()).toHaveLength(1);
+  });
 });

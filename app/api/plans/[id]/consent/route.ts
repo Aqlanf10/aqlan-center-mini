@@ -5,6 +5,11 @@ import { CLINIC_TIME_ZONE, recordPlanConsent, schedulePlanInstallments } from "@
 import { canHandleMoney } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalPlanRefusal } from "@/lib/canonical-plan-writes";
+import { commandCanonicalPlanConsent } from "@/lib/canonical-plan-items";
+import type { VerifiedDurableSession } from "@/lib/staff-durable-session";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +23,39 @@ export const dynamic = "force-dynamic";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+/** M2 slice 94c (G4-8): consent and its optional schedule by clinical.plans.edit inside the
+ * patient scope, one operation; the schedule is validated before anything is written. */
+async function canonicalConsent(request: Request, context: { params: Promise<{ id: string }> }, handle: VerifiedDurableSession) {
+  const planId = Number((await context.params).id);
+  if (!Number.isInteger(planId) || planId <= 0) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400, headers: NO_STORE });
+  let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+  }
+  const source = (body ?? {}) as Record<string, unknown>;
+  const count = Math.round(Number(source.count ?? 0));
+  let schedule: { count: number; everyDays: number; firstDueDate: string } | null = null;
+  if (Number.isFinite(count) && count >= 1) {
+    if (count > 60) return NextResponse.json({ message: "عدد الأقساط بين 1 و60." }, { status: 400, headers: NO_STORE });
+    const everyDays = Math.round(Number(source.everyDays ?? 30));
+    if (!Number.isFinite(everyDays) || everyDays < 1 || everyDays > 365) return NextResponse.json({ message: "المدة بين الأقساط بين 1 و365 يومًا." }, { status: 400, headers: NO_STORE });
+    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    schedule = { count, everyDays, firstDueDate: typeof source.firstDueDate === "string" && DATE_PATTERN.test(source.firstDueDate) ? source.firstDueDate : today };
+  }
+  try {
+    const result = await commandCanonicalPlanConsent(handle, planId, typeof source.note === "string" ? source.note.slice(0, 300) : null, schedule);
+    if (result.kind === "schedule_refused") return NextResponse.json({ message: result.message }, { status: 409, headers: NO_STORE });
+    return NextResponse.json({ totalMinor: result.totalMinor, installments: result.installments }, { status: 201, headers: NO_STORE });
+  } catch (error) {
+    if (error instanceof CanonicalPlanRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+    return canonicalPatientReadFailure(error, "تعذّر تسجيل الموافقة.");
+  }
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return canonicalConsent(request, context, selected.handle);
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

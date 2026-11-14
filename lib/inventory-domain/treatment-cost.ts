@@ -51,7 +51,8 @@ export function proportionalCostMinor(amountMinor: number, quantityAtoms: number
 export interface TreatmentAllocation {
   readonly id: string;
   readonly patientId: string;
-  readonly visitId: string;
+  /** Null preserves evidenced patient-only consumption without inventing a visit. */
+  readonly visitId: string | null;
   readonly caseId: string | null;
   /** Null means shared visit material, not the first procedure. */
   readonly procedureId: string | null;
@@ -77,6 +78,7 @@ export interface TreatmentReturn {
   readonly quantityAtoms: number;
 }
 export type TreatmentScope = { readonly patientId: string } & (
+  | { readonly kind: "patient" }
   | { readonly kind: "case"; readonly caseId: string }
   | { readonly kind: "visit"; readonly visitId: string }
   | { readonly kind: "procedure"; readonly visitId: string; readonly procedureId: string }
@@ -103,9 +105,9 @@ export function summarizeTreatmentCost(input: {
 }): TreatmentCostSummary {
   requireCurrency(input.currency, "treatment", "scope");
   text(input.scope.patientId, "patient");
-  if (!["case", "visit", "procedure"].includes(input.scope.kind)) throw new Error("invalid_treatment_scope");
+  if (!["patient", "case", "visit", "procedure"].includes(input.scope.kind)) throw new Error("invalid_treatment_scope");
   if (input.scope.kind === "case") text(input.scope.caseId, "case");
-  else {
+  else if (input.scope.kind !== "patient") {
     text(input.scope.visitId, "visit");
     if (input.scope.kind === "procedure") text(input.scope.procedureId, "procedure");
   }
@@ -128,7 +130,7 @@ export function summarizeTreatmentCost(input: {
     else { integer(issue.cost.amountMinor, "amount"); integer(issue.cost.pricedQuantityAtoms, "priced_quantity", true); }
     let allocated = 0n;
     for (const allocation of issue.allocations) {
-      text(allocation.id, "allocation"); text(allocation.patientId, "patient"); text(allocation.visitId, "visit");
+      text(allocation.id, "allocation"); text(allocation.patientId, "patient"); if (allocation.visitId !== null) text(allocation.visitId, "visit");
       if (allocation.caseId !== null) text(allocation.caseId, "case");
       if (allocation.procedureId !== null) text(allocation.procedureId, "procedure");
       integer(allocation.quantityAtoms, "allocation_quantity", true);
@@ -155,9 +157,11 @@ export function summarizeTreatmentCost(input: {
   let hasEstimated = false;
   for (const { issue, allocation } of allocations.values()) {
     const scope = input.scope;
-    const matches = allocation.patientId === scope.patientId && (scope.kind === "case"
-      ? allocation.caseId === scope.caseId
-      : allocation.visitId === scope.visitId && (scope.kind === "visit" || allocation.procedureId === scope.procedureId));
+    const matches = allocation.patientId === scope.patientId && (
+      scope.kind === "patient" || (scope.kind === "case"
+        ? allocation.caseId === scope.caseId
+        : allocation.visitId === scope.visitId && (scope.kind === "visit" || allocation.procedureId === scope.procedureId))
+    );
     if (!matches) continue;
     selected.push(allocation.id);
     const qty = BigInt(allocation.quantityAtoms) - (returned.get(allocation.id) ?? 0n);

@@ -1,0 +1,40 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-lifecycle
+
+ ❯ __tests__/canonical-ortho-strategy-owner.test.ts (12 tests | 2 failed) 33ms
+   × retiring an unresolved owner releases navigation without resurrecting private bytes (busy=false) 5ms
+   × retiring an unresolved owner releases navigation without resurrecting private bytes (busy=true) 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/canonical-ortho-strategy-owner.test.ts > retiring an unresolved owner releases navigation without resurrecting private bytes (busy=false)
+ FAIL  __tests__/canonical-ortho-strategy-owner.test.ts > retiring an unresolved owner releases navigation without resurrecting private bytes (busy=true)
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ __tests__/canonical-ortho-strategy-owner.test.ts:60:37
+     58| it.each([false,true])("retiring an unresolved owner releases navigatio…
+     59|   const {owner,life}=fixture();life.settle("document","private receipt…
+     60|   expect(owner.canLeave(()=>false)).toBe(true);expect(owner.needsUnloa…
+       |                                     ^
+     61|   op.finish();expect(life.values.document).toBe("");expect(owner.canLe…
+     62| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 10 passed (12)
+   Start at  15:33:55
+   Duration  445ms (transform 56ms, setup 0ms, import 71ms, tests 33ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

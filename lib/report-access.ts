@@ -109,12 +109,13 @@ export function canAccessUnifiedReport(
   role: string | null | undefined,
   report: string,
   /** صلاحيات المحاسب الدقيقة من الجلسة (`financeAccess`) — بلا قيمة: الافتراضي الكامل للدور. */
-  access?: { viewCommissions?: boolean } | null,
+  access?: { viewReports?: boolean; viewCommissions?: boolean } | null,
 ): boolean {
   if (!isKnownUnifiedReport(report)) return false;
   if (role === "admin") return true;
   if (role === "reception") return RECEPTION_REPORTS.has(report);
   if (role === "accountant") {
+    if (access?.viewReports === false) return false;
     if (COMMISSION_REPORTS.has(report) && access?.viewCommissions === false) return false;
     return ACCOUNTANT_REPORTS.has(report);
   }
@@ -129,7 +130,7 @@ export function reportIsAdminOnly(report: string): boolean {
 export function reportVisibleToRole(
   role: string | null | undefined,
   report: string,
-  access?: { viewCommissions?: boolean } | null,
+  access?: { viewReports?: boolean; viewCommissions?: boolean } | null,
 ): boolean {
   return canAccessUnifiedReport(role, report, access);
 }

@@ -1,0 +1,35 @@
+
+ RUN  v4.1.12 /workspace/aqlan-coverage-ui
+
+ ❯ __tests__/development-runtime-tracing.test.ts (5 tests | 1 failed) 6280ms
+     × does not let runtime app, component or library imports depend on excluded development tooling 6118ms
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/development-runtime-tracing.test.ts > temporary development-only runtime tracing boundary > does not let runtime app, component or library imports depend on excluded development tooling
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/development-runtime-tracing.test.ts:137:3
+    135|   });
+    136|
+    137|   it("does not let runtime app, component or library imports depend on…
+       |   ^
+    138|     expect(runtimeSources.length).toBeGreaterThan(600);
+    139|     const violations: string[] = [];
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 874 passed (875)
+      Tests  1 failed | 14829 passed (14830)
+   Start at  19:01:28
+   Duration  755.01s (transform 35.93s, setup 0ms, import 148.76s, tests 467.99s, environment 99ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

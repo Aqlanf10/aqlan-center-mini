@@ -1,0 +1,78 @@
+
+ RUN  v4.1.12 <worktree>
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built finance shift read state > keeps unknown through initial failure then recovers from the visible retry, network=false 3272ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built finance shift read state > keeps unknown through initial failure then recovers from the visible retry, network=true 2443ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built finance shift read state > preserves accountant read-only controls after a confirmed open read 2077ms
+ × __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > keeps unknown through initial failure then recovers from the visible retry, network=false 3320ms
+   → expected +0 to be 1 // Object.is equality
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > keeps unknown through initial failure then recovers from the visible retry, network=true 1926ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > preserves accountant read-only controls after a confirmed open read 1424ms
+ × __tests__/security-http/finance-shift-read-state-ui.test.ts > built cash form draft identity across real GET refreshes > keeps opening balances mounted, hidden and unfocusable until the same confirmed-closed snapshot recovers 1762ms
+   → expected +0 to be 1 // Object.is equality
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built cash form draft identity across real GET refreshes > preserves same-shift expense/count drafts and resets them only when a different shift is confirmed 2364ms
+ ✓ __tests__/security-http/canonical-shifts-journey.test.ts > HTTP: exact grants control writes; role labels and adjacent read grants do not authorize opening or closing 1083ms
+ ✓ __tests__/security-http/canonical-shifts-journey.test.ts > HTTP: untrusted bodies, cross-origin writes, and stale sessions have no effect 202ms
+ ✓ __tests__/security-http/shift-close-http.test.ts > إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب > GET يعرض الدرج بالقاعدة الواحدة (نقدٌ فقط) 59ms
+ ✓ __tests__/security-http/shift-close-http.test.ts > إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب > معدودٌ مخالف بلا سبب ⇒ 409 برسالة تكشف الفرق وتطلب سببه، والوردية تبقى مفتوحة 34ms
+ ✓ __tests__/security-http/shift-close-http.test.ts > إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب > مع السبب ⇒ يُقفَل، ويُدقَّق بالمعدود والمتوقَّع والفرق والسبب 25ms
+ ✓ __tests__/security-http/shift-close-http.test.ts > إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب > تقرير الإقفال (Z) يُطبع للاستقبال ولا يُفتح للطبيب 113ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > keeps unknown through initial failure then recovers from the visible retry, network=false
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ fixture __tests__/security-http/finance-shift-read-state-ui.test.ts:85:45
+     83|   try {
+     84|     await page.goto(`${baseUrl}${mode === "finance" ? "/finance" : "/f…
+     85|     await expect.poll(() => pending.length).toBe(1);
+       |                                             ^
+     86|     return {
+     87|       page, context, pending, writes, unexpected, errors,
+ ❯ __tests__/security-http/finance-shift-read-state-ui.test.ts:117:17
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ fixture __tests__/security-http/finance-shift-read-state-ui.test.ts:85:5
+ ❯ __tests__/security-http/finance-shift-read-state-ui.test.ts:117:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/finance-shift-read-state-ui.test.ts > built cash form draft identity across real GET refreshes > keeps opening balances mounted, hidden and unfocusable until the same confirmed-closed snapshot recovers
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ fixture __tests__/security-http/finance-shift-read-state-ui.test.ts:85:45
+     83|   try {
+     84|     await page.goto(`${baseUrl}${mode === "finance" ? "/finance" : "/f…
+     85|     await expect.poll(() => pending.length).toBe(1);
+       |                                             ^
+     86|     return {
+     87|       page, context, pending, writes, unexpected, errors,
+ ❯ __tests__/security-http/finance-shift-read-state-ui.test.ts:147:15
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ fixture __tests__/security-http/finance-shift-read-state-ui.test.ts:85:5
+ ❯ __tests__/security-http/finance-shift-read-state-ui.test.ts:147:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 12 passed (14)
+   Start at  02:26:48
+   Duration  35.86s (transform 363ms, setup 0ms, import 953ms, tests 27.73s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

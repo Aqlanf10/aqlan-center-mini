@@ -1,10 +1,16 @@
 import { isAdjustmentDate, ADJUSTMENT_DATE_ERROR } from "./ortho-adjustment-date";
 import { parseAdjustmentInterval, ADJUSTMENT_INTERVAL_ERROR } from "./ortho-adjustment-interval";
 import { IDEMPOTENCY_KEY_PATTERN, newIdempotencyKey } from "./idempotency-key";
+import { parseAuxiliariesInput } from "./ortho-auxiliaries";
+import { recordedSessionMatchesRequest, type RecordedSessionValues } from "./ortho-session-match";
 
 export type AdjustmentCommandScope = { patientId: number; caseId: number; authority: string };
 export type AdjustmentCommandBody = { doneOn: string; upperWire: string; lowerWire: string;
-  elastics: string; elasticNote: string; done: string; nextWeeks: number };
+  elastics: string; elasticNote: string; done: string; nextWeeks: number;
+  /** Explicit removal only; absent means a blank wire keeps the current one. */
+  upperWireAction?: "remove"; lowerWireAction?: "remove";
+  /** 0132, optional. Absent: not recorded. [] is an explicit "none". auxiliaryOther only with "other". */
+  auxiliaries?: string[]; auxiliaryOther?: string | null };
 export type AdjustmentReceipt = { id: number; patientId: number; caseId: number; requestKey: string;
   visitId: number | null; attachedToToday: boolean };
 export type AdjustmentCommand = { version: 1; scope: AdjustmentCommandScope; key: string;
@@ -18,7 +24,13 @@ function validBody(body: unknown): body is string {
   if (typeof body !== "string" || body.length > 100_000) return false;
   try {
     const parsed = JSON.parse(body);
-    return parsed && Object.keys(parsed).sort().join(",") === "done,doneOn,elasticNote,elastics,lowerWire,nextWeeks,upperWire"
+    const actions = (["lowerWireAction", "upperWireAction"] as const).filter((key) => Object.hasOwn(parsed ?? {}, key));
+    // Commands stored before 0132 carry neither key and stay valid; a stored list must still be exact.
+    const auxiliaryKeys = (["auxiliaries", "auxiliaryOther"] as const).filter((key) => Object.hasOwn(parsed ?? {}, key));
+    if (auxiliaryKeys.length && (!Object.hasOwn(parsed, "auxiliaries") || !Array.isArray(parsed.auxiliaries)
+      || !parseAuxiliariesInput(parsed).ok)) return false;
+    return parsed && Object.keys(parsed).sort().join(",") === ["done", "doneOn", "elasticNote", "elastics", ...actions, ...auxiliaryKeys, "lowerWire", "nextWeeks", "upperWire"].sort().join(",")
+      && actions.every((key) => parsed[key] === "remove" && parsed[key.replace("Action", "")].trim() === "")
       && ["doneOn", "upperWire", "lowerWire", "elastics", "elasticNote", "done"].every((key) => typeof parsed[key] === "string")
       && /^\d{4}-\d{2}-\d{2}$/.test(parsed.doneOn)
       && ["none", "class_ii", "class_iii", "vertical", "triangle", "cross"].includes(parsed.elastics)
@@ -53,6 +65,16 @@ export function adjustmentNewCommandError(body: AdjustmentCommandBody): string |
     ["upperWire", 40, "السلك العلوي"], ["lowerWire", 40, "السلك السفلي"],
     ["elasticNote", 120, "وصف المطاطات"], ["done", 400, "ما نُفّذ في الشدّة"],
   ] as const;
+  for (const arch of ["upper", "lower"] as const) {
+    const action = body[`${arch}WireAction`];
+    if (action !== undefined && action !== "remove") return "إجراء السلك غير صالح.";
+    if (action === "remove" && typeof body[`${arch}Wire`] === "string" && body[`${arch}Wire`].trim()) return "اختر إزالة السلك أو تسجيل سلك، لا كليهما.";
+  }
+  if (Object.hasOwn(body, "auxiliaries") || Object.hasOwn(body, "auxiliaryOther")) {
+    if (!Array.isArray(body.auxiliaries)) return "قائمة الأجهزة المساعدة غير صالحة؛ لم يبدأ الحفظ.";
+    const auxiliaries = parseAuxiliariesInput(body);
+    if (!auxiliaries.ok) return auxiliaries.message;
+  }
   for (const [key, limit, label] of fields) {
     if (typeof body[key] !== "string") return "بيانات الشدّة النصية غير صالحة؛ لم يبدأ الحفظ.";
     if (body[key].trim().length > limit) {
@@ -90,4 +112,75 @@ export function retireAdjustmentCommand(storage: StorageLike, command: Adjustmen
   if (!current?.receipt || current.key !== command.key) throw new Error("يجب تأكيد نتيجة الشدّة السابقة أولًا.");
   storage.removeItem(adjustmentCommandStorageKey(command.scope));
   if (readAdjustmentCommand(storage, command.scope)) throw new Error("تعذّر بدء شدّة جديدة بأمان.");
+}
+/** Codes the server returns only after rolling back everything for this request: no receipt was written
+ * for its key, so the key is unused and the frozen command may be dropped. Any other failure stays
+ * uncertain and keeps the command for same-key reconciliation. */
+// adjustment_receipt_bound_to_other_session: the key's historical receipt points to a session recorded
+// from other values; the same key always gets the same refusal, so dropping the local command is safe.
+export const DEFINITIVE_ADJUSTMENT_REFUSALS: readonly string[] = ["adjustment_visit_already_recorded", "adjustment_receipt_bound_to_other_session"];
+export function isDefinitiveAdjustmentRefusal(status: number, payload: unknown): payload is { code: string; message: string; existingAdjustmentId?: number } {
+  return status === 409 && !!payload && typeof payload === "object"
+    && DEFINITIVE_ADJUSTMENT_REFUSALS.includes(String((payload as { code?: unknown }).code))
+    && typeof (payload as { message?: unknown }).message === "string";
+}
+/** Drops only this exact command after a definitive refusal. A cached receipt is dropped only when the
+ * caller proved it does not describe the recorded session (`unverifiedReceipt`); a receipt is never
+ * dropped otherwise. The server's receipt row itself is never touched. */
+export function discardRefusedAdjustmentCommand(storage: StorageLike, command: AdjustmentCommand, options: { unverifiedReceipt?: boolean } = {}) {
+  const current = readAdjustmentCommand(storage, command.scope);
+  if (!current || current.key !== command.key || (current.receipt !== null && options.unverifiedReceipt !== true)) throw new Error("تعذّر التحقق من طلب الشدّة المرفوض؛ راجع السجل.");
+  storage.removeItem(adjustmentCommandStorageKey(command.scope));
+  if (readAdjustmentCommand(storage, command.scope)) throw new Error("تعذّر إزالة طلب الشدّة المرفوض بأمان.");
+}
+
+/**
+ * Review #483 6873798343, cached acknowledgement: a receipt cached by an earlier version of the screen may
+ * point to a session recorded from other values. Three outcomes, never conflated:
+ * - "match": the named session is loaded with the values this request carries (same rule as the server);
+ * - "mismatch": the named session is loaded with other values: an unambiguous refusal, never a save;
+ * - "unknown": the named session is not in the loaded history (for example, a save whose refresh has not
+ *   arrived yet). It is not judged. Recovery never uploads photos, so no outcome attaches this request's
+ *   photos to a session.
+ */
+export type CachedReceiptProvenance = "match" | "mismatch" | "unknown";
+export function cachedReceiptProvenance(command: AdjustmentCommand, sessions: readonly (RecordedSessionValues & { id: number })[]): CachedReceiptProvenance {
+  if (!command.receipt) return "unknown";
+  const session = sessions.find((row) => row.id === command.receipt!.id);
+  if (!session) return "unknown";
+  const body = JSON.parse(command.body) as AdjustmentCommandBody;
+  // The screen sends no phase or note, so they are not judged here.
+  return recordedSessionMatchesRequest(session, body) ? "match" : "mismatch";
+}
+
+/**
+ * Review #483 6873798343, reload after a refusal: the refused request's typed values are kept in session
+ * storage (the same storage and the same body the pending request already used) so a reload can put them
+ * back. Photos are never stored in the browser; only how many were queued, so the screen can say they
+ * were not kept. Cleared by an explicit dismissal or a later saved session.
+ */
+export type RefusedAdjustmentDraft = { version: 1; scope: AdjustmentCommandScope; body: string; code: string;
+  existingAdjustmentId: number | null; photoCount: number };
+export function refusedDraftStorageKey(scope: AdjustmentCommandScope) {
+  return `ortho-adjustment-refused:v1:${JSON.stringify([scope.patientId, scope.caseId, scope.authority])}`;
+}
+export function writeRefusedAdjustmentDraft(storage: StorageLike, draft: RefusedAdjustmentDraft) {
+  if (!validBody(draft.body)) throw new Error("تعذّر حفظ قيم الجلسة المرفوضة.");
+  storage.setItem(refusedDraftStorageKey(draft.scope), JSON.stringify(draft));
+}
+/** Fails closed to null: a corrupt or foreign record is ignored, never restored. */
+export function readRefusedAdjustmentDraft(storage: StorageLike, scope: AdjustmentCommandScope): RefusedAdjustmentDraft | null {
+  try {
+    const raw = storage.getItem(refusedDraftStorageKey(scope));
+    if (raw === null) return null;
+    const draft = JSON.parse(raw) as RefusedAdjustmentDraft;
+    const ok = draft && draft.version === 1 && draft.scope?.patientId === scope.patientId && draft.scope.caseId === scope.caseId
+      && draft.scope.authority === scope.authority && validBody(draft.body) && typeof draft.code === "string"
+      && (draft.existingAdjustmentId === null || positive(draft.existingAdjustmentId))
+      && Number.isSafeInteger(draft.photoCount) && draft.photoCount >= 0;
+    return ok ? draft : null;
+  } catch { return null; }
+}
+export function clearRefusedAdjustmentDraft(storage: StorageLike, scope: AdjustmentCommandScope) {
+  try { storage.removeItem(refusedDraftStorageKey(scope)); } catch { /* storage unavailable: nothing to clear */ }
 }

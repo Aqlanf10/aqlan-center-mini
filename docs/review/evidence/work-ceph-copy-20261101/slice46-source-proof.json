@@ -1,0 +1,29 @@
+{
+  "baseRevision": "f3ce7bbb7b22ea0a4800154b6a1d7dbe037bf2a0",
+  "checks": {
+    "exact_original_copy_body_without_transaction_controls": true,
+    "db_prefix_unchanged": true,
+    "db_suffix_unchanged": true,
+    "legacy_route_tail_identical": true,
+    "legacy_post_commit_audit_and_unique_refusal_unchanged": true,
+    "lib/canonical-ceph-reads.ts": true,
+    "lib/canonical-ceph-pair-reads.ts": true,
+    "lib/canonical-ceph-projection.ts": true,
+    "lib/staff-capability-catalogue.ts": true,
+    "lib/canonical-record-reads.ts": true,
+    "lib/commission.ts": true,
+    "lib/canonical-patient-reads.ts": true,
+    "lib/canonical-problem-create-command.ts": true,
+    "lib/canonical-plan-dependency-command.ts": true,
+    "components/PatientCeph.tsx": true,
+    "components/CephTracer.tsx": true,
+    "components/CephCompareView.tsx": true,
+    "app/ceph/[id]/page.tsx": true,
+    "app/print/ceph/[id]/page.tsx": true,
+    "only_exact_analyze_action_added_to_runtime": true,
+    "only_exact_action_added_to_literal_guard": true,
+    "immutable_migrations": true
+  },
+  "passed": 22,
+  "historicalSourceHashes": 554
+}

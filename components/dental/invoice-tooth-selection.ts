@@ -5,7 +5,7 @@
  * هنا فقط: كيف يتحوّل اختيار المخطط إلى أسطر الفاتورة، وما يُرسل للمعاينة والحفظ، ومتى يُمنع الحفظ (fail closed).
  * - عصب/وتد/زراعة/خلع/جراحة: سطرٌ وحالةٌ مستقلة لكل سن — لا حالة عصبٍ واحدة لعدة أسنان.
  * - تاج/قشرة/جسر: سطرٌ لكل سن، وكلها تحمل `episodeTeeth` = الاختيار كله (حلقةٌ واحدة) — لا تُستنتج الدعامات.
- * - حشوة/سدّ شقوق: سنٌّ واحد وأسطحه (اختيارية).
+ * - حشوة/سدّ شقوق: سطر مستقل لكل سن وأسطحه (اختيارية).
  * - تنظيف/لثة: كامل الفم (افتراضي) أو فك أو سن. تقويم: علوي/سفلي/الفكّان — لا سنٌّ منفرد.
  */
 import { normalizeSurfaces } from "@/lib/dental";
@@ -32,7 +32,7 @@ export function usesToothChart(mode: ToothScopeMode): boolean {
 
 /** هل يختار المخطط عدة أسنان في نقرةٍ واحدة لكلٍّ منها؟ */
 export function multiSelect(mode: ToothScopeMode): boolean {
-  return mode === "per_tooth_episode" || mode === "multi_tooth_episode";
+  return mode === "per_tooth_episode" || mode === "multi_tooth_episode" || mode === "tooth_surfaces";
 }
 
 export interface ToothFields {
@@ -55,8 +55,17 @@ export interface ToothRowLike extends ToothFields {
 
 export interface ToothSelection {
   teeth: number[];
+  /** Legacy single-tooth callers only; never broadcast to multiple teeth. */
   surfaces: string;
+  surfacesByTooth?: Record<number, string>;
   scope: SiteScope | null;
+}
+
+/** Each surface set belongs to its tooth, including an explicitly empty set. */
+export function selectedToothSurfaces(selection: ToothSelection, tooth: number): string {
+  const raw = selection.surfacesByTooth?.[tooth]
+    ?? (selection.teeth.length === 1 && selection.teeth[0] === tooth ? selection.surfaces : "");
+  return normalizeSurfaces(raw) ?? "";
 }
 
 export function emptyToothFields(mode: ToothScopeMode): ToothFields {
@@ -107,7 +116,7 @@ export function setRowScope<R extends ToothRowLike>(rows: readonly R[], index: n
  * - per_tooth_episode: N سن ⇒ N سطر (الخدمة والسعر والطبيب والوصف نفسها)، كلٌّ بسنّه.
  * - multi_tooth_episode: N سن ⇒ N سطر، كلها تحمل الاختيار كله (`episodeTeeth`) — حلقةٌ واحدة.
  *   تعديل حلقةٍ قائمة يستبدل أسطرها كلها، ويحفظ سطر السن الذي بقي مختارًا (سعره/حالته).
- * - tooth_surfaces / region: سنٌّ واحد (والأسطح للحشوة؛ وللمنطقة يلغي النطاق).
+ * - tooth_surfaces: سطر مستقل لكل سن بأسطحه؛ region: سن واحد يلغي النطاق.
  * `makeKey` يعطي مفتاحًا ثابتًا لكل سطرٍ جديد.
  */
 export function applyToothSelection<R extends ToothRowLike>(
@@ -118,14 +127,16 @@ export function applyToothSelection<R extends ToothRowLike>(
   const teeth = sorted(selection.teeth);
   const keepCase = (tooth: number | null, base: R) => base.toothCode === tooth ? base.caseId : "";
 
-  if (mode === "per_tooth_episode") {
+  if (mode === "per_tooth_episode" || mode === "tooth_surfaces") {
     const released = releaseFromGroup(rows, index);
     const base = released[index];
     const replacements: R[] = teeth.length === 0
       ? [{ ...base, toothCode: null, surfaces: "", scope: null, episodeTeeth: null, groupId: null, caseId: "" }]
       : teeth.map((tooth, i) => ({
-          ...base, key: i === 0 ? base.key : makeKey(), toothCode: tooth, surfaces: "", scope: null,
-          episodeTeeth: null, groupId: null, caseId: keepCase(tooth, base),
+          ...base, key: i === 0 ? base.key : makeKey(), toothCode: tooth,
+          surfaces: mode === "tooth_surfaces" ? selectedToothSurfaces(selection, tooth) : "", scope: null,
+          episodeTeeth: null, groupId: null,
+          caseId: mode === "tooth_surfaces" && selectedToothSurfaces(selection, tooth) !== base.surfaces ? "" : keepCase(tooth, base),
         }));
     return [...released.slice(0, index), ...replacements, ...released.slice(index + 1)];
   }
@@ -155,12 +166,12 @@ export function applyToothSelection<R extends ToothRowLike>(
     return [...before, ...replacements, ...after];
   }
 
-  if (mode === "tooth_surfaces" || mode === "region") {
+  if (mode === "region") {
     const tooth = teeth[0] ?? null;
     return rows.map((other, i) => i !== index ? other : {
       ...other, toothCode: tooth,
-      surfaces: mode === "tooth_surfaces" && tooth !== null ? normalizeSurfaces(selection.surfaces) ?? "" : "",
-      scope: mode === "region" && tooth === null ? selection.scope ?? "full_mouth" : null,
+      surfaces: "",
+      scope: tooth === null ? selection.scope ?? "full_mouth" : null,
       episodeTeeth: null, groupId: null, caseId: keepCase(tooth, other),
     });
   }
@@ -215,7 +226,7 @@ export const MODE_HINT: Record<ToothScopeMode, string> = {
   none: "",
   per_tooth_episode: "اختر سنًّا أو أكثر بالنقر على المخطط. سيُنشأ سطر وحالة مستقلة لكل سن.",
   multi_tooth_episode: "اختر أسنان الحلقة (تاج/قشرة/جسر). سطرٌ لكل سن ضمن حلقةٍ علاجية واحدة — بلا استنتاج للدعامات.",
-  tooth_surfaces: "اختر سنًّا واحدًا، ثم أسطحه إن لزم (اختياري).",
+  tooth_surfaces: "اختر سنًّا أو أكثر، ثم راجع أسطح كل سن على حدة (اختياري). لكل سن عمل علاجي مستقل.",
   region: "اختر سنًّا واحدًا — أو ألغِ لتبقى على نطاق الفم.",
   arch: "",
 };
@@ -228,6 +239,8 @@ export const PER_TOOTH_SPLIT_NOTICE = "سيُنشأ سطر وحالة مستقل
 export function applyHistoricalToothSelection<R extends ToothRowLike>(
   rows: readonly R[], index: number, mode: ToothScopeMode, selection: ToothSelection, makeKey: () => string,
 ): R[] {
+  // Historical entry keeps its existing single-tooth filling contract.
+  if (mode === "tooth_surfaces") return applyToothSelection(rows,index,mode,{...selection,teeth:sorted(selection.teeth).slice(0,1)},makeKey);
   if (mode !== "multi_tooth_episode") return applyToothSelection(rows,index,mode,selection,makeKey);
   const teeth=sorted(selection.teeth),row=rows[index];
   if(!row)return [...rows];

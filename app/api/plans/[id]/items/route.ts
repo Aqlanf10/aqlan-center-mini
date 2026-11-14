@@ -8,6 +8,11 @@ import { canHandleMoney } from "@/lib/roles";
 import { CLINIC_BASE_CURRENCY, parseAmount } from "@/lib/money";
 import { requireSession } from "@/lib/session";
 import type { BillingRule } from "@/lib/plans";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalPlanRefusal } from "@/lib/canonical-plan-writes";
+import { commandCanonicalPlanItemAdd, commandCanonicalPlanItemRemove, commandCanonicalPlanItemUpdate } from "@/lib/canonical-plan-items";
+import type { VerifiedDurableSession } from "@/lib/staff-durable-session";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +78,68 @@ async function doctorBlockedForPlan(session: { username: string; role: string; p
   return null;
 }
 
+
+/** M2 slice 94c (G4-1, G4-8): plan items by clinical.plans.edit inside the patient scope. */
+const canonicalDenied = () => NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+function canonicalItemFailure(error: unknown, fallback: string) {
+  if (error instanceof CanonicalPlanRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  return canonicalPatientReadFailure(error, fallback);
+}
+async function canonicalBody(request: Request): Promise<Record<string, unknown> | NextResponse> {
+  try { return ((await readJsonBody(request, JSON_BODY_LIMIT_BYTES)) ?? {}) as Record<string, unknown>; }
+  catch (error) { return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+}
+async function canonicalAdd(request: Request, planId: number, handle: VerifiedDurableSession) {
+  const source = await canonicalBody(request);
+  if (source instanceof NextResponse) return source;
+  const serviceId = Number(source.serviceId);
+  if (!Number.isInteger(serviceId) || serviceId <= 0) return NextResponse.json({ message: "اختر الخدمة من الدليل." }, { status: 400, headers: NO_STORE });
+  const quantity = Math.round(Number(source.quantity ?? 1));
+  if (!Number.isFinite(quantity) || quantity < 1 || quantity > 99) return NextResponse.json({ message: "العدد بين 1 و99." }, { status: 400, headers: NO_STORE });
+  const toothCode = source.toothCode === null || source.toothCode === undefined || source.toothCode === "" ? null : Number(source.toothCode);
+  if (toothCode !== null && !Number.isInteger(toothCode)) return NextResponse.json({ message: "رقم السن غير صالح." }, { status: 400, headers: NO_STORE });
+  try {
+    const result = await commandCanonicalPlanItemAdd(handle, planId, {
+      serviceId, quantity, toothCode, surfaces: typeof source.surfaces === "string" ? source.surfaces : null,
+      note: typeof source.note === "string" ? source.note.slice(0, 300) : null,
+      plannedVisitNumber: normalizeCount(source.plannedVisitNumber, 1, 30), billingRule: billingRuleFrom(source.billingRule),
+      sessionCount: normalizeCount(source.sessionCount, 1, 30), doctorId: doctorIdFrom(source.doctorId),
+      price: source.price, priceReason: typeof source.priceReason === "string" ? source.priceReason : null,
+    });
+    return NextResponse.json(result, { status: 201, headers: NO_STORE });
+  } catch (error) { return canonicalItemFailure(error, "تعذّر إضافة البند."); }
+}
+async function canonicalUpdate(request: Request, planId: number, handle: VerifiedDurableSession) {
+  const source = await canonicalBody(request);
+  if (source instanceof NextResponse) return source;
+  const itemId = Number(source.itemId);
+  if (!Number.isInteger(itemId) || itemId <= 0) return NextResponse.json({ message: "رقم البند غير صالح." }, { status: 400, headers: NO_STORE });
+  try {
+    return NextResponse.json(await commandCanonicalPlanItemUpdate(handle, planId, {
+      itemId,
+      plannedVisitNumber: source.plannedVisitNumber !== undefined ? normalizeCount(source.plannedVisitNumber, 1, 30) : undefined,
+      billingRule: source.billingRule !== undefined ? billingRuleFrom(source.billingRule) : undefined,
+      sessionCount: source.sessionCount !== undefined ? normalizeCount(source.sessionCount, 1, 30) : undefined,
+      doctorId: source.doctorId !== undefined ? doctorIdFrom(source.doctorId) : undefined,
+      note: source.note !== undefined ? (typeof source.note === "string" ? source.note.slice(0, 300) : null) : undefined,
+    }), { headers: NO_STORE });
+  } catch (error) { return canonicalItemFailure(error, "تعذّر تحديث البند."); }
+}
+async function canonicalRemove(request: Request, planId: number, handle: VerifiedDurableSession) {
+  const itemId = Number(new URL(request.url).searchParams.get("itemId"));
+  if (!Number.isInteger(itemId) || itemId <= 0) return NextResponse.json({ message: "رقم البند غير صالح." }, { status: 400, headers: NO_STORE });
+  try { return NextResponse.json(await commandCanonicalPlanItemRemove(handle, planId, itemId), { headers: NO_STORE }); }
+  catch (error) { return canonicalItemFailure(error, "تعذّر حذف البند."); }
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") {
+    const canonicalPlanId = await planIdFrom(context);
+    if (!canonicalPlanId) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400, headers: NO_STORE });
+    return canonicalAdd(request, canonicalPlanId, selected.handle);
+  }
   const session = await requireSession();
   if (!session) return denied();
 
@@ -198,6 +264,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 /** تحديث بند خطة: توزيع الجلسات — الزيارة المخطَّطة وقاعدة الفوترة والجلسات
  * والطبيب والملاحظة. تنظيميٌ لا مالي: لا يغيّر السعر ولا الكمية ولا الحالة. */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") {
+    const canonicalPlanId = await planIdFrom(context);
+    if (!canonicalPlanId) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400, headers: NO_STORE });
+    return canonicalUpdate(request, canonicalPlanId, selected.handle);
+  }
   const session = await requireSession();
   if (!session) return denied();
 
@@ -242,6 +315,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") {
+    const canonicalPlanId = await planIdFrom(context);
+    if (!canonicalPlanId) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400, headers: NO_STORE });
+    return canonicalRemove(request, canonicalPlanId, selected.handle);
+  }
   const session = await requireSession();
   if (!session) return denied();
 

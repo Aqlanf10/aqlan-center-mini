@@ -76,7 +76,7 @@ beforeEach(async () => {
   admin = { userId: actor.id, username: "payroll-journal-admin", role: "admin", expiresAt: Date.now() + 3_600_000,
     credentialVersion: sessionCredentialVersion(actor.password_hash) };
   expect(await db.findUserByUsername(admin.username)).toMatchObject({ id: actor.id, role: "admin", isActive: true });
-  shiftId = await id("INSERT INTO cashier_shifts(opened_by) VALUES($1) RETURNING id", [admin.username]);
+  shiftId = await id("INSERT INTO cashier_shifts(opened_by, opening_yer, opening_sar, opening_usd) VALUES($1, 100000000, 100000000, 100000000) RETURNING id", [admin.username]); // 0128: payouts need drawer cash
 }, 180_000);
 afterAll(async () => { await db.resetPoolForTesting(); });
 

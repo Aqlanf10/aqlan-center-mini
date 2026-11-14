@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run --exclude .next/** scripts/audits/m2-route-capability-map.test.mjs scripts/audits/staff-cutover-readiness.test.mjs __tests__/canonical-ceph-reference-projection.test.ts __tests__/ceph-reference-route-compat.test.ts __tests__/canonical-ceph-projection.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+
+ Test Files  5 passed (5)
+      Tests  67 passed (67)
+   Start at  01:27:54
+   Duration  7.38s (transform 217ms, setup 0ms, import 2.32s, tests 4.22s, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

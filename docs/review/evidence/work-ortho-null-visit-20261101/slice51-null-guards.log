@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /workspace/aqlan-null-visit-repro
+
+No test files found, exiting with code 1
+
+filter: __tests__/staff-cutover-readiness.test.mjs, __tests__/m2-route-capability-map.test.mjs
+include: **/*.{test,spec}.?(c|m)[jt]s?(x)
+exclude:  **/node_modules/**, **/dist/**, **/cypress/**, **/.{idea,git,cache,output,temp}/**, **/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,eslint,prettier}.config.*, __tests__/postgres/**, __tests__/security-http/**, __tests__/print-visual/**
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

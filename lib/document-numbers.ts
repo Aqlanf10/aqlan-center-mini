@@ -69,8 +69,9 @@ export function documentNumberSql(kind: DocumentKind): string {
     + ` || '-' || ${paddedSequenceSql(SEQUENCE[kind])}`;
 }
 
-/** (DN-1) رقم ملف المريض التالي «P-00042» — بالقاعدة نفسها (لا قصّ بعد ٩٩٬٩٩٩). */
-export const PATIENT_NUMBER_SQL = `'P-' || ${paddedSequenceSql("patient_number_seq")}`;
+/** Shared allocator owns floor, forward-only sequence and retired-number fencing.
+ * Installed by the patient-numbering migration; prefix P- and minimum width5 stay fixed. */
+export const PATIENT_NUMBER_SQL = "aqlan_allocate_patient_number()";
 
 /** تحقق قيمة البادئة المكتوبة في الإعدادات — رسالة عربية أو null. */
 export function documentPrefixProblem(value: string): string | null {

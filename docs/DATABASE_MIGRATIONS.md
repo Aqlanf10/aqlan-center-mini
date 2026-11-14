@@ -589,6 +589,51 @@ Require exact-head PostgreSQL, schema/ownership, populated SQL/full-archive
 restore, HTTP/browser retry and Staging acceptance evidence before release.
 Neither this listing nor passing unit tests alone authorizes Production rollout.
 
+### 0081_invoice_archive.sql / 0082_invoice_service_additions.sql
+
+Local activation candidate: immutable documentary archive events/refusals and separate dated service-addition receipts/refusals. Runtime registers exact migration bytes under the common migration lock; no baseline adoption;0079 is the separately reviewed routine orthodontic coverage migration and0080 is the separately reviewed patient-numbering migration below. Archive never changes financial/clinical rows; adding service creates a separate invoice through existing financial/clinical authority.
+
+All four evidence tables are protected reset history: any row refuses reset before backup; empty tables participate under EXCLUSIVE locks and READ COMMITTED-only empty TRUNCATE guards. Backup restores archive versions in order and invoice items before addition receipts. Historical actor status and subsequent source cancellation do not invalidate restore; current authorization remains enforced by command writers.
+
+These changes are local only pending complete synthetic activation/ownership evidence and root review; no production activation or deployment is claimed.
+
+### 0080_patient_numbering.sql
+
+Local patient-file numbering activation: new generated files start at P-07000 or
+above the sequence/current/retired high-water. Existing numbers are never mass
+rewritten. Explicit admin edits retain stable patient IDs and immutable aliases;
+normalized current/retired ownership is enforced, including official restore.
+Runtime/file SQL bytes and checksum must match;0079 is separately registered routine orthodontic coverage.0081/0082
+may already be locally registered before this migration is added.
+
+Predeployment `--patient-numbering-readiness` is a mandatory count-only read-only
+gate: ambiguous historical aliases block release and require separate reviewed
+correction, never automatic cleanup. Current patients or historical aliases block
+factory reset; the patient-number sequence is never restarted. Local verification
+is not a Production readiness claim.
+
+### 0079_ortho_followup_coverage.sql
+
+Local activation of explicit routine-adjustment coverage revisions and durable
+exact-command refusal receipts. An ordinary invoice alone does not imply covered
+followups. Current source applicability is checked separately from immutable
+historical decisions; signed visits carry exact adjustment/revision manifests.
+Existing signed history cannot acquire a new proof or have its proof rewritten.
+Patient reassignment preserves recorded ownership and requires current-source
+review, not retrospective financial or clinical mutation.
+
+Numbered and runtime SQL are byte-identical and registered by checksum. Prior
+migration files remain unchanged. An exact registered 0080/0081/0082 database may
+apply missing 0079 as an additive migration; pre-existing unregistered proposal
+tables are refused, not adopted. Both coverage history tables are protected from
+populated reset and restore with their guards enabled. Migration-driven populated
+SQL/full-archive replay, upgrade, ownership and local UI evidence are required;
+local activation does not authorize Production deployment.
+
+
+## Local laboratory identity reservation (2026-10-26)
+
+`0074_lab_work_intents.sql` is locally registered in the isolated unified lab branch, with exact paired runtime SQL. It excludes deferred0073 clinical authorization and keeps0075 cross-domain corrections unregistered. It adds explicit work/member/source/command identity without legacy-source backfill, protects historical graphs and fresh-snapshot lab history, and uses READ COMMITTED UUID insertion fences compatible with0080. See [local scope, baseline adoption refusal and remaining gates](LAB_UNIFIED_LOCAL_ACCEPTANCE_20261026.md). This is not a live migration or deployment approval.
 ### 0087_agreement_reminder_metadata.sql
 
 Additive replacement of the reconciliation terms guard permits only
@@ -750,3 +795,65 @@ appointments, visits, treatment data and financial records are not rewritten by
 this operation. Merge/reset preflight protects command history. No production
 or staging database was changed; local PostgreSQL verification and final-head
 CI are separate evidence.
+### 0126_commission_case_participations.sql
+
+Adds one additive, append-only table, `commission_case_participations`, for the
+centre's decision on how doctors share a clinical case (owner decision
+2026-11-11): the participants and their shares in basis points, the status
+(`approved`, `pending`, `void`), the source, the written reason, who decided and
+when. An immutable validation function and a CHECK constraint require an approved
+split to add up to exactly 10,000 with distinct doctors; a pending or void row
+carries no participants. One head per case is enforced by two partial unique
+indexes, and a trigger refuses every UPDATE and DELETE.
+
+No existing table, column or published migration is changed, and nothing is
+backfilled: a case without a decision is paid as before. Numbered and
+checksum-checked runtime SQL use identical bytes. The number was verified free on
+every active branch; numbers 0090–0125 belong to other lines and are not filled
+here. Decisions commit with their audit row in one transaction under the case row
+lock. Rollback of application code must not delete the table or migration
+registry history. Exact-head CI and Staging verification remain required before
+Production rollout.
+### 0128_expense_commands.sql
+
+Expense commands (owner decision on #483, comment 6831365228, items 2 and 3; number allocated in
+6833690789; contract `docs/finance/EXPENSE_COMMANDS_0128.md`). Adds seven nullable columns to `expenses`,
+with no default and no backfill:
+
+- `idempotency_key` and `idempotency_request_hash`: the request key every HTTP expense create carries and
+  the fingerprint of that request. A unique partial index makes a key record at most one voucher. A CHECK
+  requires both or neither, the shared key pattern, a 64-character hex hash, and no key on a reversal.
+  The same key with the same request replays the first voucher; with a different request it is refused.
+- `payment_source`, `drawer_amount_minor`, `owner_private_amount_minor`, `owner_private_reason` and
+  `owner_private_user_id`: the real source of the money. A CHECK requires all five NULL (a voucher written
+  before 0128, whose whole amount left the drawer) or a source of `drawer`, `owner_private` or
+  `drawer_and_owner_private` whose two parts carry the voucher's sign, add up to `amount_minor` and match
+  the source; a private part needs the owner's user id and a trimmed 3–300 character reason.
+
+A new UPDATE trigger keeps the seven columns append-only like the rest of the voucher. Adding the CHECK
+constraints scans `expenses` once under a short exclusive lock; every existing row is NULL and passes.
+Numbered and checksum-checked runtime SQL use identical bytes. The number was verified free on all 336
+remote branches before the work started; 0127 belongs to the patient portal security line and is not
+filled here. Rollback of application code leaves the columns unused; it must not drop them or delete the
+registry row. Exact-head CI and Staging verification remain required before Production rollout.
+### 0132_ortho_adjustment_auxiliaries.sql
+
+Adds two nullable columns to `ortho_adjustments` for the auxiliary appliances documented in an adjustment
+session (owner decision on #483, 2026-11-13; number allocated by the integration reviewer, #483
+6867852606): `auxiliaries TEXT[]` and `auxiliary_other TEXT`. There is no default and no backfill: every
+existing session keeps NULL, which the screens read as "not recorded". An empty array is an explicit
+record that no auxiliary appliance was used. The immutable function `ortho_adjustment_auxiliaries_valid`
+and the CHECK constraint that calls it accept only the 17 owner-listed keys, each at most once and in
+catalog order, and require `auxiliary_other` (1–80 characters, already trimmed) exactly when the list
+contains `other`. The server applies the same rules before any write and refuses, never trims, a bad
+value.
+
+The record is documentation only, not a treatment recommendation, and nothing is prefilled from an
+earlier session. Only the adjustment-session screen writes it; the visit-sign writer leaves it NULL. The
+replay fingerprint includes the list only when it is recorded, so earlier request receipts keep their
+hashes. Adding the constraint scans `ortho_adjustments` once under a short exclusive lock; every
+existing row is NULL and passes. Numbered and checksum-checked runtime SQL use identical bytes. The
+number was verified free on all 336 remote branches before the first push; 0127 belongs to the patient
+portal security line and 0128–0131 are reserved for the finance additions, and none of them is filled
+here. Rollback of application code leaves the nullable columns unused; it must not drop them or delete
+the registry row. Exact-head CI and Staging verification remain required before Production rollout.

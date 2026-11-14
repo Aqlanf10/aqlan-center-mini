@@ -1,0 +1,15 @@
+RUN  v4.1.12 <checkout>
+
+No test files found, exiting with code 1
+
+filter: __tests__/security-http/canonical-display-journey.test.ts
+include: __tests__/security-http/**/*.test.ts
+exclude:  __tests__/security-http/inventory-procurement-http-ui.test.ts, __tests__/security-http/inventory-supplier-operational-http-ui.test.ts, __tests__/security-http/inventory-reference-closed-http-ui.test.ts
+
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: connect ECONNREFUSED 127.0.0.1:55437
+ ❯ TCPConnectWrap.afterConnect [as oncomplete] node:net:1638:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -111, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 55437 }

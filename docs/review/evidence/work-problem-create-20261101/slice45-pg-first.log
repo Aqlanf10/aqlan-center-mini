@@ -1,0 +1,28 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/problem-create-canonical-command.test.ts (15 tests | 1 failed) 7812ms
+   × preserves optional fields, exact maximal text and existing case status 20ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/problem-create-canonical-command.test.ts > preserves optional fields, exact maximal text and existing case status
+error: new row for relation "clinical_cases" violates check constraint "clinical_cases_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ __tests__/postgres/problem-create-canonical-command.test.ts:41:28
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 43 passed (44)
+   Start at  07:20:38
+   Duration  23.82s (transform 2.12s, setup 0ms, import 3.37s, tests 19.52s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

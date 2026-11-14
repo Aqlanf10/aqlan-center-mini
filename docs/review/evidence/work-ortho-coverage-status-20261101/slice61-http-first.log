@@ -1,0 +1,235 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+[security-http] الخادم جاهز على http://127.0.0.1:12917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-coverage-status-journey.test.ts (8 tests | 3 failed) 15279ms
+   × HTTP: anonymous, none and adjacent role cannot read even a known receipt 597ms
+   × HTTP: exact committed receipt does not expose its financial source snapshot or another actor's result 1233ms
+   × browser: an authenticated scoped browser can explicitly check the exact outcome without a create request 2803ms
+ ❯ __tests__/security-http/canonical-ortho-coverage-journey.test.ts (11 tests | 1 failed) 29921ms
+   × HTTP: GET and refused command/status writes preserve money, signed proof, history and audit 692ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-coverage-journey.test.ts > HTTP: GET and refused command/status writes preserve money, signed proof, history and audit
+AssertionError: expected [ { revisions: [ { …(20) } ], …(3) } ] to deeply equal [ { revisions: [ { …(20) } ], …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,8 +1,8 @@
+  [
+    {
+-     "audits": 9,
++     "audits": 10,
+      "invoices": [
+        {
+          "base_currency": "YER",
+          "created_at": "2026-11-01T17:15:41.614445+00:00",
+          "created_by": null,
+
+ ❯ __tests__/security-http/canonical-ortho-coverage-journey.test.ts:70:46
+     68|   const denied = await journey.api(path(), (await journey.login("adjac…
+     69|   expect(denied.status).toBe(403);
+     70|   expect((await journey.db.query(sql)).rows).toEqual(before); expect(a…
+       |                                              ^
+     71| });
+     72| async function openCoverage(page: import("playwright").Page, key: keyo…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-coverage-status-journey.test.ts > HTTP: anonymous, none and adjacent role cannot read even a known receipt
+AssertionError: expected [ { revisions: [ { …(20) } ], …(4) } ] to deeply equal [ { revisions: [ { …(20) } ], …(4) } ]
+
+- Expected
++ Received
+
+@@ -18,10 +18,48 @@
+          "id": 1,
+          "source_ip": null,
+          "summary": "تسجيل دخول موظف (الهوية الموحّدة) — canon-cstatus-own",
+          "user_agent": "node",
+        },
++       {
++         "action": "auth.canonical_login",
++         "actor": "canon-cstatus-none",
++         "actor_role": "admin",
++         "created_at": "2026-11-01T17:15:29.944148+00:00",
++         "details": {
++           "generationId": "df1b9229-945e-463b-8aad-aeed1f19b673",
++           "owner": false,
++           "permissionRevision": 1,
++           "registryRevision": "6",
++           "subjectId": "0ca9450d-939c-4e0b-80e2-a39e715622f8",
++         },
++         "entity": "user",
++         "entity_id": "4",
++         "id": 2,
++         "source_ip": null,
++         "summary": "تسجيل دخول موظف (الهوية الموحّدة) — canon-cstatus-none",
++         "user_agent": "node",
++       },
++       {
++         "action": "auth.canonical_login",
++         "actor": "canon-cstatus-read",
++         "actor_role": "admin",
++         "created_at": "2026-11-01T17:15:30.184587+00:00",
++         "details": {
++           "generationId": "df1b9229-945e-463b-8aad-aeed1f19b673",
++           "owner": false,
++           "permissionRevision": 1,
++           "registryRevision": "6",
++           "subjectId": "1f7719aa-796a-48ea-8eea-0591fa6cbf0c",
++         },
++         "entity": "user",
++         "entity_id": "5",
++         "id": 3,
++         "source_ip": null,
++         "summary": "تسجيل دخول موظف (الهوية الموحّدة) — canon-cstatus-read",
++         "user_agent": "node",
++       },
+      ],
+      "invoices": [
+        {
+          "base_currency": "YER",
+          "created_at": "2026-11-01T17:15:28.961316+00:00",
+
+ ❯ __tests__/security-http/canonical-ortho-coverage-status-journey.test.ts:35:417
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-coverage-status-journey.test.ts > HTTP: exact committed receipt does not expose its financial source snapshot or another actor's result
+AssertionError: expected [ { …(5) } ] to deeply equal [ { …(5) } ]
+
+- Expected
++ Received
+
+@@ -56,10 +56,67 @@
+          "id": 3,
+          "source_ip": null,
+          "summary": "تسجيل دخول موظف (الهوية الموحّدة) — canon-cstatus-read",
+          "user_agent": "node",
+        },
++       {
++         "action": "auth.canonical_login",
++         "actor": "canon-cstatus-own",
++         "actor_role": "doctor",
++         "created_at": "2026-11-01T17:15:30.471647+00:00",
++         "details": {
++           "generationId": "df1b9229-945e-463b-8aad-aeed1f19b673",
++           "owner": false,
++           "permissionRevision": 1,
++           "registryRevision": "6",
++           "subjectId": "f1806db8-372c-4690-9dc4-5b76a8a70fe3",
++         },
++         "entity": "user",
++         "entity_id": "2",
++         "id": 4,
++         "source_ip": null,
++         "summary": "تسجيل دخول موظف (الهوية الموحّدة) — canon-cstatus-own",
++         "user_agent": "node",
++       },
++       {
++         "action": "auth.canonical_login",
++         "actor": "canon-cstatus-owner",
++         "actor_role": "admin",
++         "created_at": "2026-11-01T17:15:30.859837+00:00",
++         "details": {
++           "generationId": "df1b9229-945e-463b-8aad-aeed1f19b673",
++           "owner": true,
++           "permissionRevision": 1,
++           "registryRevision": "6",
++           "subjectId": "7c40a406-944b-4adf-9a7f-81e164c078a1",
++         },
++         "entity": "user",
++         "entity_id": "1",
++         "id": 5,
++         "source_ip": null,
++         "summary": "تسجيل دخول موظف (الهوية الموحّدة) — canon-cstatus-owner",
++         "user_agent": "node",
++       },
++       {
++         "action": "auth.canonical_login",
++         "actor": "canon-cstatus-all",
++         "actor_role": "reception",
++         "created_at": "2026-11-01T17:15:31.203518+00:00",
++         "details": {
++           "generationId": "df1b9229-945e-463b-8aad-aeed1f19b673",
++           "owner": false,
++           "permissionRevision": 1,
++           "registryRevision": "6",
++           "subjectId": "0099f7f7-3c91-4971-bf3d-c5c54ee62dfd",
++         },
++         "entity": "user",
++         "entity_id": "3",
++         "id": 6,
++         "source_ip": null,
++         "summary": "تسجيل دخول موظف (الهوية الموحّدة) — canon-cstatus-all",
++         "user_agent": "node",
++       },
+      ],
+      "invoices": [
+        {
+          "base_currency": "YER",
+          "created_at": "2026-11-01T17:15:28.961316+00:00",
+
+ ❯ __tests__/security-http/canonical-ortho-coverage-status-journey.test.ts:40:176
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-coverage-status-journey.test.ts > browser: an authenticated scoped browser can explicitly check the exact outcome without a create request
+AssertionError: expected [ { …(5) } ] to deeply equal [ { …(5) } ]
+
+- Expected
++ Received
+
+@@ -227,10 +227,29 @@
+          "id": 12,
+          "source_ip": null,
+          "summary": "تسجيل دخول موظف (الهوية الموحّدة) — canon-cstatus-own",
+          "user_agent": "node",
+        },
++       {
++         "action": "auth.canonical_login",
++         "actor": "canon-cstatus-own",
++         "actor_role": "doctor",
++         "created_at": "2026-11-01T17:15:34.644185+00:00",
++         "details": {
++           "generationId": "df1b9229-945e-463b-8aad-aeed1f19b673",
++           "owner": false,
++           "permissionRevision": 1,
++           "registryRevision": "6",
++           "subjectId": "f1806db8-372c-4690-9dc4-5b76a8a70fe3",
++         },
++         "entity": "user",
++         "entity_id": "2",
++         "id": 13,
++         "source_ip": null,
++         "summary": "تسجيل دخول موظف (الهوية الموحّدة) — canon-cstatus-own",
++         "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
++       },
+      ],
+      "invoices": [
+        {
+          "base_currency": "YER",
+          "created_at": "2026-11-01T17:15:28.961316+00:00",
+
+ ❯ __tests__/security-http/canonical-ortho-coverage-status-journey.test.ts:57:665
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 15 passed (19)
+   Start at  17:15:13
+   Duration  55.25s (transform 2.90s, setup 0ms, import 4.08s, tests 45.20s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

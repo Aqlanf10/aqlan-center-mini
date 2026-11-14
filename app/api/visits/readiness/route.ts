@@ -9,6 +9,9 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalVisitFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalChairReadiness } from "@/lib/canonical-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +26,22 @@ export const dynamic = "force-dynamic";
  * وحدها — والفحص هنا في الخادم لا في الشاشة. الرصيد معلومة: لا يمنع نداءً ولا علاجًا.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 13): one owning snapshot, rows inside the patient scope,
+    // checklist and balances by grant.
+    const params = new URL(request.url).searchParams;
+    if (params.getAll("patientId").length > 1 || [...params.keys()].some(key => key !== "patientId")) {
+      return NextResponse.json({ code: "invalid_visit_input", message: "طلب الجاهزية غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    const raw = params.get("patientId");
+    try {
+      return NextResponse.json(await readCanonicalChairReadiness(selected.handle, raw === null ? null : Number(raw)), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalVisitFailure(error, "تعذّر تحميل جاهزية الكرسي.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

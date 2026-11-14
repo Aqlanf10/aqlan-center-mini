@@ -58,7 +58,43 @@ async function snapshot(orderId: number) {
   };
 }
 
+async function markPaid(orderId: number) {
+  const shiftId = await id("INSERT INTO cashier_shifts(opened_by,status) VALUES('synthetic-lab-paid','closed') RETURNING id");
+  await q(`INSERT INTO expenses(voucher_number,category,party_id,shift_id,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,payable_id,payable_currency,payable_amount_minor,payable_exchange_rate,payable_settled_minor,created_by)
+    SELECT $2,'lab',p.party_id,$3,p.amount_minor,p.currency,p.exchange_rate,p.base_amount_minor,p.base_currency,p.id,p.currency,p.amount_minor,p.exchange_rate,p.amount_minor,'synthetic-lab-paid'
+    FROM payables p WHERE p.lab_order_id=$1`, [orderId, `${run}-paid-${++sequence}`, shiftId]);
+}
+
 describe("persisted lab accounting FX snapshot", () => {
+  it.each([false, true])("refuses zero/clear/currency-only changes without partial snapshots, paid=%s", async paid => {
+    const order = await fixture();
+    await db.updateLabOrderAccounting(order.id, { costMinor: 2500, costCurrency: "YER", exchangeRate: 1 });
+    if (paid) await markPaid(order.id);
+    const before = await snapshot(order.id);
+    for (const input of [
+      { costMinor: 0, costCurrency: "USD" as const, exchangeRate: 600 },
+      { costMinor: null, costCurrency: "USD" as const, exchangeRate: 600 },
+      { costCurrency: "USD" as const, exchangeRate: 600 },
+      { costMinor: 0 }, { costMinor: null },
+    ]) {
+      await expect(db.updateLabOrderAccounting(order.id, input)).rejects.toMatchObject({ code: paid ? "lab_settled_money_review" : "lab_accounting_money_review" });
+      expect(await snapshot(order.id)).toEqual(before);
+    }
+  });
+  it.each([false, true])("refuses repricing settled payable including missing order pointer=%s", async missingPointer => {
+    const order = await fixture(); await markPaid(order.id);
+    if (missingPointer) await q("UPDATE lab_orders SET payable_id=NULL WHERE id=$1", [order.id]);
+    const before = await snapshot(order.id);
+    for (const input of [
+      { costMinor: 3000, costCurrency: "USD" as const, exchangeRate: 531.125 },
+      { costMinor: 3000, costCurrency: "YER" as const, exchangeRate: 1 },
+      { exchangeRate: 600 },
+    ]) {
+      await expect(db.updateLabOrderAccounting(order.id, input)).rejects.toMatchObject({ code: missingPointer ? "lab_payable_link_review" : "lab_settled_money_review" });
+      expect(await snapshot(order.id)).toEqual(before);
+    }
+  });
+
   it.each([
     ["USD", 7500, 531.125, 39834], ["SAR", 7500, 141.25, 10594],
     ["YER", 7500, 1, 7500], ["USD", 1, 531.123456, 5],
@@ -103,25 +139,18 @@ describe("persisted lab accounting FX snapshot", () => {
     await db.updateLabOrderAccounting(order.id, { costMinor: 7500, costCurrency: "SAR", exchangeRate: 141.25 });
     await exactPair(order.id, 7500, "SAR", 141.25, 10594);
   });
-  it("retains the existing payable ID and updates FX when the unique order link conflicts", async () => {
+  it.each([null, 0, 2500])("refuses orphan reverse payable for all metadata/money edits, saved cost=%s", async savedCost => {
     const order = await fixture();
-    const before = await money(order.id);
-    await q("UPDATE lab_orders SET payable_id=NULL WHERE id=$1", [order.id]);
-    await db.updateLabOrderAccounting(order.id, { costMinor: 7500, costCurrency: "SAR", exchangeRate: 141.25 });
-    await exactPair(order.id, 7500, "SAR", 141.25, 10594);
-    expect((await money(order.id)).order.payable_id).toBe(before.order.payable_id);
-  });
-  it("metadata-only relinking preserves a conflicting payable's divergent historical snapshot", async () => {
-    const order = await fixture();
-    const payableId = (await money(order.id)).order.payable_id;
-    await q("UPDATE lab_orders SET payable_id=NULL,base_amount_minor=13001 WHERE id=$1", [order.id]);
-    await q(`UPDATE payables SET amount_minor=3333,currency='SAR',exchange_rate=140.75,base_amount_minor=4691
-      WHERE lab_order_id=$1`, [order.id]);
-    const before = await money(order.id);
-    await db.updateLabOrderAccounting(order.id, { isPosted: false, expenseAccountCode: "5101" });
-    const after = await money(order.id);
-    expect(after.payable).toEqual(before.payable);
-    expect(after.order).toEqual({ ...before.order, payable_id: payableId });
+    await q("UPDATE lab_orders SET payable_id=NULL,cost_minor=$2 WHERE id=$1", [order.id, savedCost]);
+    const before = await snapshot(order.id);
+    for (const input of [
+      { isPosted: false, expenseAccountCode: "5101" },
+      { costMinor: 0, costCurrency: "USD" as const, exchangeRate: 600 },
+      { costMinor: 7500, costCurrency: "SAR" as const, exchangeRate: 141.25 },
+    ]) {
+      await expect(db.updateLabOrderAccounting(order.id, input)).rejects.toMatchObject({ code: "lab_payable_link_review" });
+      expect(await snapshot(order.id)).toEqual(before);
+    }
   });
   it.each([
     { costMinor: 100, exchangeRate: 0.49999999, error: "lab_order_exchange_rate_invalid" },
@@ -172,7 +201,11 @@ describe("lab accounting settlement and period fences", () => {
       VALUES($1,$2,100,'USD',531.125,100)`, [expenseId, order.payableId]);
     const before = await snapshot(order.id);
     for (const input of [{ costMinor: 3000 }, { costCurrency: "SAR" as const }, { isPosted: false }, { expenseAccountCode: "5102" }]) {
-      await expect(db.updateLabOrderAccounting(order.id, input)).rejects.toThrow("lab_order_accounting_settled");
+      // WORK proves saved monetary lineage first; main additionally fences
+      // posting/account changes. Both refusal paths must preserve every row.
+      if ("costMinor" in input || "costCurrency" in input) {
+        await expect(db.updateLabOrderAccounting(order.id, input)).rejects.toMatchObject({ code: "lab_settled_money_review" });
+      } else await expect(db.updateLabOrderAccounting(order.id, input)).rejects.toThrow("lab_order_accounting_settled");
       expect(await snapshot(order.id)).toEqual(before);
     }
   });
@@ -182,7 +215,9 @@ describe("lab accounting settlement and period fences", () => {
     try {
       await holder.query("BEGIN");
       await holder.query("SELECT id FROM payables WHERE id=$1 FOR UPDATE", [order.payableId]);
-      await expect(db.updateLabOrderAccounting(order.id, { costMinor: 3000 })).rejects.toThrow("lab_order_accounting_busy");
+      // WORK's earlier linked-payable NOWAIT lock raises native contention;
+      // the HTTP boundary already maps 55P03 to the stable 409 busy response.
+      await expect(db.updateLabOrderAccounting(order.id, { costMinor: 3000 })).rejects.toMatchObject({ code: "55P03" });
     } finally { await holder.query("ROLLBACK"); holder.release(); }
     expect(await snapshot(order.id)).toEqual(before);
   });

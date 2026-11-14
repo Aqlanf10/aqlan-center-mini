@@ -1,0 +1,52 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+ ❯ __tests__/canonical-ortho-history-clock.test.tsx (2 tests | 2 failed) 33ms
+   × the canonical assessment history option uses the clinic day at midnight 25ms
+   × the canonical strategy history and selected saved revision use the clinic day 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/canonical-ortho-history-clock.test.tsx > the canonical assessment history option uses the clinic day at midnight
+AssertionError: expected '<section dir="rtl" data-testid="ortho…' to contain 'نسخة 1 · الأحد 01/11/2026 · SYN'
+
+Expected: "نسخة 1 · الأحد 01/11/2026 · SYN"
+Received: "<section dir="rtl" data-testid="ortho-case-assessment-v2" aria-label="التقييم والقياسات المحفوظة" class="min-w-0 space-y-4 rounded-xl border bg-white p-3"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-bold">التقييم وقياسات الحالة</h3><button type="button" class="min-h-11 min-w-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-40">تحديث سجل التقييم</button></div><p class="text-xs">توثيق الحالة ونتائج حسابية غير معتمدة سريريًا. الحفظ لا ينشئ خطة أو فاتورة ولا يغيّر التاريخ الطبي العام.</p><p role="status">عرض التقييمات والقياسات المحفوظة للقراءة فقط.</p><p class="text-xs">المريض #1 · التقويم #2 · الحالة السريرية #4</p><label class="block">نسخة التقييم<select class="min-h-11 min-w-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-40 w-full"><option value="3" selected="">نسخة 1 · 2026-10-31 · SYN</option></select></label><details class="rounded-lg border p-3" data-testid="assessment-v2-saved"><summary class="min-h-11 cursor-pointer">السجل المحفوظ: نسخة 1</summary><p>2026-10-31T22:30:00.000Z · SYN · SYN</p><p class="break-all text-xs">البصمة: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</p></details><p>مراجع الصور والأشعة مقيدة بالصلاحية الحالية.</p></section>"
+
+ ❯ __tests__/canonical-ortho-history-clock.test.tsx:19:70
+     17|   const data = { state: "ready", clinicalCaseId: 4, clinicalWritable: …
+     18|   hooks.cursor = 0; hooks.values = [undefined, 0, null, () => ({ gener…
+     19|   expect(renderToStaticMarkup(<OrthoCaseAssessmentV2 {...props} />)).t…
+       |                                                                      ^
+     20| });
+     21| it("the canonical strategy history and selected saved revision use the…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/canonical-ortho-history-clock.test.tsx > the canonical strategy history and selected saved revision use the clinic day
+AssertionError: expected '<section aria-label="خطة الحالة للمرج…' to contain 'نسخة 1 · الأحد 01/11/2026 · SYN'
+
+Expected: "نسخة 1 · الأحد 01/11/2026 · SYN"
+Received: "<section aria-label="خطة الحالة للمرجع فقط" data-testid="ortho-strategy-reference" class="min-w-0 rounded-2xl border border-slate-200 bg-white space-y-3 p-4"><div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:flex-wrap sm:justify-between"><h4 class="text-sm font-black text-navy-900">المشكلة ← الهدف ← الاستراتيجية</h4><button type="button" class="min-h-11 rounded-xl border border-slate-300 px-3 py-2 text-xs font-bold disabled:opacity-40">تحديث سجل الخطة</button></div><p class="text-xs text-slate-500">مرجع للقراءة فقط. لا ينسخ النص إلى الزيارة ولا يضيف إجراءً أو توقيعًا أو مبلغًا.</p><label class="block text-xs font-bold text-slate-600">النسخة المعروضة<select aria-label="نسخة خطة الحالة" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-100"><option value="3" selected="">نسخة 1 · 2026-10-31 · SYN</option></select></label><div data-testid="ortho-strategy-saved" class="space-y-3"><p class="text-xs text-slate-600">نسخة 1 · SYN · <time dateTime="2026-10-31T22:30:00.000Z">2026-10-31</time></p><p class="whitespace-pre-wrap text-xs text-slate-700">سبب النسخة: SYN</p><ol class="space-y-3"></ol><p class="text-[11px] text-slate-500">النصوص ومراجعها المحفوظة توثيق تاريخي؛ الحالات المعروضة للروابط هي حالاتها الحالية فقط.</p></div></section>"
+
+ ❯ __tests__/canonical-ortho-history-clock.test.tsx:26:16
+     24|   hooks.cursor = 0; hooks.values = [undefined, 0, () => ({ owner: hook…
+     25|   const html = renderToStaticMarkup(<OrthoTreatmentStrategy {...props}…
+     26|   expect(html).toContain(`نسخة 1 · ${label} · SYN`);
+       |                ^
+     27|   expect(html).toContain(`<time dateTime="${createdAt}">${label}</time…
+     28| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  13:32:30
+   Duration  580ms (transform 321ms, setup 0ms, import 424ms, tests 33ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -265,10 +265,12 @@ function securedNext(request: NextRequest): NextResponse {
   // أيضًا باسم صريح يقرؤه الخادم عند الحاجة.
   requestHeaders.set("Content-Security-Policy", csp);
   requestHeaders.set("x-nonce", nonce);
+  // Overwrite client input: the public display must never serialize staff context.
+  requestHeaders.set("x-aqlan-public-display", pathname === "/display" ? "1" : "0");
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("Content-Security-Policy", csp);
-  if (pathname.startsWith("/api/") || pathname.startsWith("/portal/") || pathname.startsWith("/print/")) {
+  if (pathname === "/display" || pathname.startsWith("/api/") || pathname.startsWith("/portal/") || pathname.startsWith("/print/")) {
     response.headers.set("Cache-Control", "private, no-store");
   }
   return response;
@@ -286,6 +288,8 @@ async function restrictedRoleVerdict(request: NextRequest, bearer: string | null
   // لا يمنعها كوكي كاشيرٍ قائم (القائمة تضيّق ما وراء الجلسة لا ما قبلها).
   if (PUBLIC_PATHS.has(pathname) || PUBLIC_API.has(pathname) || pathname.startsWith("/portal/")) return null;
   const cookieToken = request.cookies.get(SESSION_COOKIE)?.value;
+  // Keep the same signed-envelope eligibility and cookie precedence as lib/session.
+  // A canonical selection has no legacy grants, but must not fall through to Bearer.
   const access = (cookieToken ? await verifiedSessionAccess(cookieToken) : null)
     ?? (bearer ? await verifiedSessionAccess(bearer) : null);
   const role = access?.role;

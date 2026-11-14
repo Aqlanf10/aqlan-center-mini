@@ -1,0 +1,20 @@
+/** Slice 27: public screen and separately admitted staff controls, synthetic only. */
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
+const ACCOUNTS = {
+  owner: { username: "canon-display-owner", password: "Canon#DisplayOwner1", role: "admin", display: "مالك تجريبي" },
+  operator: { username: "canon-display-operator", password: "Canon#DisplayOperator1", role: "reception", display: "مشغل رسالة التأخير", grants: { "settings.view": true, "settings.operational.edit": true } },
+} as const;
+type Key = keyof typeof ACCOUNTS;
+let journey: CanonicalJourney<Key>;
+beforeAll(async () => {
+  journey = await openCanonicalJourney({ portOffset: 35, secret: "canonical-display-journey-secret-20261030-only", accounts: ACCOUNTS, ownerKey: "owner" });
+}, 300_000);
+afterAll(async () => { await journey?.close(); });
+
+it("admits the canonical notice reader by settings.view without granting a patient scope", async () => {
+  const login = await journey.login("operator");
+  const response = await journey.api("/api/display/notice", login.cookie);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ on: false });
+});

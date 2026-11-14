@@ -1,4 +1,6 @@
 import reviewedMigrations from "../fixtures/reviewed-migration-manifest.json";
+import type { SessionPayload } from "../../lib/auth";
+import { seedLegacyStaffAdmin, signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import { randomUUID } from "node:crypto";
 import { Client, Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -76,6 +78,7 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
   let admin: Client | undefined;
   let client: Client;
   let pool: Pool;
+  let staffAdmin: SessionPayload;
   let created = false;
   let adminConnected = false;
   let files: Awaited<ReturnType<typeof loadMigrationFiles>>;
@@ -134,6 +137,7 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
       initialFk = await doctorFk(client);
       initialAttribution = await visitAttribution(client, startupFixture.visitId);
     }
+    staffAdmin = await seedLegacyStaffAdmin("synthetic-fk-admin");
     expect(initialFk).toMatchObject({
       action: path === "legacy_no_action" ? "a" : "n",
       definition: path === "legacy_no_action"
@@ -202,22 +206,22 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
     expect((await client.query("SELECT party_id, is_active FROM users WHERE id = $1", [user.id])).rows)
       .toEqual([{ party_id: doctor.id, is_active: true }]);
     expect(await db.findUserByUsername("synthetic_fk_account")).not.toBeNull();
-    expect(await db.linkUserDoctor(user.id, doctor.id)).toBeNull();
+    expect(await db.linkUserDoctor(user.id, doctor.id, undefined, signedLegacyStaffProof(staffAdmin))).toBeNull();
     expect((await client.query("SELECT party_id FROM users WHERE id = $1", [user.id])).rows)
       .toEqual([{ party_id: doctor.id }]);
     await preserved();
 
     expect((await db.updateParty(doctor.id, { isActive: true }))?.isActive).toBe(true);
     await preserved();
-    expect((await db.linkUserDoctor(user.id, null))?.partyId).toBeNull();
+    expect((await db.linkUserDoctor(user.id, null, undefined, signedLegacyStaffProof(staffAdmin)))?.partyId).toBeNull();
     await preserved();
-    expect((await db.linkUserDoctor(user.id, doctor.id))?.partyId).toBe(doctor.id);
+    expect((await db.linkUserDoctor(user.id, doctor.id, undefined, signedLegacyStaffProof(staffAdmin)))?.partyId).toBe(doctor.id);
     await preserved();
-    expect(await db.updateUser(user.id, { isActive: false })).toMatchObject({ isActive: false, partyId: doctor.id });
+    expect(await db.updateUser(user.id, { isActive: false }, undefined, signedLegacyStaffProof(staffAdmin))).toMatchObject({ isActive: false, partyId: doctor.id });
     expect(await db.findUserByUsername("synthetic_fk_account")).toBeNull();
     expect((await db.getParty(doctor.id))?.isActive).toBe(true);
     await preserved();
-    expect(await db.updateUser(user.id, { isActive: true })).toMatchObject({ isActive: true, partyId: doctor.id });
+    expect(await db.updateUser(user.id, { isActive: true }, undefined, signedLegacyStaffProof(staffAdmin))).toMatchObject({ isActive: true, partyId: doctor.id });
     expect(await db.findUserByUsername("synthetic_fk_account")).not.toBeNull();
     await preserved();
 
@@ -266,6 +270,22 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
     expect(await doctorFk(client)).toEqual(initialFk);
   });
 
+  it("refuses a same-named lab index with the opposite intent predicate", async () => {
+    const before = await projectDetailedSchemaReadOnly(client);
+    const original = (await client.query<{ definition: string }>("SELECT pg_get_indexdef('public.lab_orders_visit_tooth_uniq'::regclass) AS definition")).rows[0].definition;
+    try {
+      await client.query("DROP INDEX lab_orders_visit_tooth_uniq");
+      await client.query("CREATE UNIQUE INDEX lab_orders_visit_tooth_uniq ON lab_orders(visit_id,tooth_code) WHERE visit_id IS NOT NULL AND status <> 'cancelled' AND lab_work_intent_id IS NOT NULL");
+      const probe = await runBaselineSchemaProbe(pool as unknown as db.DbPool, files[0].sql);
+      expect(probe.ok).toBe(false);
+      expect(probe.missingIndexes).toContain("CREATE UNIQUE INDEX lab_orders_visit_tooth_uniq ON lab_orders USING btree (visit_id, tooth_code) WHERE ((visit_id IS NOT NULL) AND (status <> 'cancelled'::text))");
+    } finally {
+      await client.query("DROP INDEX lab_orders_visit_tooth_uniq");
+      await client.query(original);
+    }
+    expect(await projectDetailedSchemaReadOnly(client)).toEqual(before);
+  });
+
   it("keeps the baseline probe action-sensitive and leaves schema, registry, and rows unchanged", async () => {
     const before = await projectDetailedSchemaReadOnly(client);
     const registryBefore = (await client.query("SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version")).rows;
@@ -296,7 +316,7 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
     expect((await client.query("SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
     // Runtime registers the exact reviewed additive extensions. The probe
     // must still never adopt the legacy baseline or rewrite any existing row.
-    const expectedFiles = path === "fresh_numbered" ? reviewedMigrations : reviewedMigrations.filter(file => ["0051", "0052", "0056", "0057", "0058", "0063", "0064", "0065", "0066", "0067", "0068", "0069", "0078", "0087", "0089", "0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125"].includes(file.version));
+    const expectedFiles = path === "fresh_numbered" ? reviewedMigrations : reviewedMigrations.filter(file => ["0051", "0052", "0056", "0057", "0058", "0063", "0064", "0065", "0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0090", "0091", "0092", "0093", "0106", "0108", "0109", "0110", "0111", "0112", "0113", "0114", "0115", "0116", "0117", "0118", "0119", "0120", "0121", "0122", "0123", "0124", "0125", "0126", "0128", "0132"].includes(file.version));
     expect(registryBefore.map(({version,name,checksum,adopted}) => ({version,name,checksum,adopted})))
       .toEqual(expectedFiles.map(({version,name,checksum}) => ({version,name,checksum,adopted:false})));
     expect((await client.query(

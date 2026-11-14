@@ -15,6 +15,7 @@ import {
   type RecallRow,
 } from "@/lib/recall";
 import { PageHeader } from "@/components/PageHeader";
+import { CanonicalProposalFollowUp } from "@/components/CanonicalProposalFollowUp";
 import { ProposalFollowUp } from "@/components/ProposalFollowUp";
 import { useSession } from "@/components/SessionProvider";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
@@ -43,7 +44,10 @@ const TEMPLATE_NAMES: Record<MessageTemplate, string> = {
 
 export default function RecallPage() {
   const session = useSession();
-  const canSeeProposals = session?.role === "admin" || session?.role === "reception";
+  /* A canonical session (M2 slice 24) reads the recall lists inside its patient scope and
+     books from the canonical day view; the legacy-only panels are not mounted for it. */
+  const canonical = session?.canonical === true;
+  const canSeeProposals = !canonical && (session?.role === "admin" || session?.role === "reception");
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
   const [feed, setFeed] = useState<RecallFeed>({ openPast: [], missed: [], lapsed: [], weeks: 6 });
@@ -62,6 +66,14 @@ export default function RecallPage() {
   const [rebookPatient, setRebookPatient] = useState<{ id: number; name: string } | null>(null);
 
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
+  const rebookFor = useCallback((row: RecallRow) => {
+    if (canonical) {
+      // The canonical day view's booking form, with this patient chosen (the server re-proves the scope).
+      window.location.assign(`/appointments?bookPatient=${row.patientId}&bookName=${encodeURIComponent(row.patientName)}`);
+      return;
+    }
+    setRebookPatient({ id: row.patientId, name: row.patientName });
+  }, [canonical]);
 
   const load = useCallback(async (targetWeeks: number, showSpinner = false) => {
     if (showSpinner) setLoading(true);
@@ -180,6 +192,8 @@ export default function RecallPage() {
 
       {/* (P1-E) عروض العلاج المعلّقة بعد الكشف — للإدارة والاستقبال. */}
       {canSeeProposals ? <ProposalFollowUp /> : null}
+      {canonical && (session?.isOwner === true || session?.capabilities?.includes("clinical.plans.edit") && ["own", "all"].includes(session.patientScope ?? "none"))
+        ? <CanonicalProposalFollowUp ownerKey={session?.username ?? ""} key={`${session?.username}:${session?.patientScope}:${session?.capabilities?.join(",")}`} /> : null}
 
       {/* بطاقات الإحصاءات السريعة */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -363,7 +377,7 @@ export default function RecallPage() {
                       today={today}
                       busy={busy}
                       onDone={markDone}
-                      onRebook={() => setRebookPatient({ id: row.patientId, name: row.patientName })}
+                      onRebook={() => rebookFor(row)}
                       clinicName={clinicName}
                       clinicPhone={clinicPhone}
                     />
@@ -394,7 +408,7 @@ export default function RecallPage() {
                       today={today}
                       busy={busy}
                       onDone={markDone}
-                      onRebook={() => setRebookPatient({ id: row.patientId, name: row.patientName })}
+                      onRebook={() => rebookFor(row)}
                       clinicName={clinicName}
                       clinicPhone={clinicPhone}
                     />
@@ -413,7 +427,7 @@ export default function RecallPage() {
       )}
 
       {/* نافذة إعادة حجز موعد مباشر */}
-      {rebookPatient ? (
+      {rebookPatient && !canonical ? (
         <QuickAppointmentModal
           patientId={rebookPatient.id}
           patientName={rebookPatient.name}

@@ -1,0 +1,15 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  5 passed (5)
+      Tests  97 passed (97)
+   Start at  23:25:43
+   Duration  16.54s (transform 2.28s, setup 0ms, import 3.70s, tests 11.79s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

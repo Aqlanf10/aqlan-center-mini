@@ -4,6 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { findPatientIdByNumber, getPatient, mergeDuplicatePatient } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { canonicalPatientLifecycleRoute, commandCanonicalPatientMerge, parseCanonicalMerge } from "@/lib/canonical-patient-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,11 @@ export const dynamic = "force-dynamic";
  * تعارض — لا دمج نصفيّ.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 79: one admitted patients.merge transaction; both files inside the patient scope;
+     the legacy body and its audit together; financial counts only with the ledger grant. */
+  const canonical = await canonicalPatientLifecycleRoute(request, async (handle, body) =>
+    commandCanonicalPatientMerge(handle, (await context.params).id, parseCanonicalMerge(body)), "تعذّر دمج الملفين. أعد المحاولة.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

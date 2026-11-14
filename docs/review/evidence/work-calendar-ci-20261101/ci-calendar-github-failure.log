@@ -1,0 +1,101 @@
+2026-11-01T00:44:41.0897559Z ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+2026-11-01T00:44:41.0898209Z
+2026-11-01T00:44:41.0899263Z  FAIL  __tests__/postgres/lab-commission-lineage.test.ts > refuses ambiguous active invoice lineage and rolls back payroll calculation
+2026-11-01T00:44:41.0904058Z AssertionError: promise resolved "{ id: 1, periodId: 1, …(17) }" instead of rejecting
+2026-11-01T00:44:41.0904500Z
+2026-11-01T00:44:41.0904729Z - Expected
+2026-11-01T00:44:41.0905073Z + Received
+2026-11-01T00:44:41.0905292Z
+2026-11-01T00:44:41.0905510Z - Error {
+2026-11-01T00:44:41.0905912Z -   "message": "rejected promise",
+2026-11-01T00:44:41.0906283Z + {
+2026-11-01T00:44:41.0906641Z +   "approvedAt": null,
+2026-11-01T00:44:41.0907048Z +   "approvedBy": null,
+2026-11-01T00:44:41.0907517Z +   "createdAt": "2026-11-01T00:31:18.293Z",
+2026-11-01T00:44:41.0908345Z +   "createdBy": "synthetic-lab-commission-f79bb14f-f685-45a3-a459-cc942ded2bcf",
+2026-11-01T00:44:41.0908955Z +   "currency": "YER",
+2026-11-01T00:44:41.0909315Z +   "id": 1,
+2026-11-01T00:44:41.0909702Z +   "itemsCount": undefined,
+2026-11-01T00:44:41.0910092Z +   "periodId": 1,
+2026-11-01T00:44:41.0910479Z +   "periodKey": "2026-10",
+2026-11-01T00:44:41.0910927Z +   "periodName": "مسير شهر 2026-10",
+2026-11-01T00:44:41.0911345Z +   "status": "draft",
+2026-11-01T00:44:41.0911795Z +   "totalAdvancesMinor": 0,
+2026-11-01T00:44:41.0912210Z +   "totalAllowancesMinor": 0,
+2026-11-01T00:44:41.0912636Z +   "totalBaseSalaryMinor": 0,
+2026-11-01T00:44:41.0913065Z +   "totalCommissionsMinor": 0,
+2026-11-01T00:44:41.0913488Z +   "totalDeductionsMinor": 0,
+2026-11-01T00:44:41.0913901Z +   "totalNetDueMinor": 0,
+2026-11-01T00:44:41.0914296Z +   "totalPaidMinor": 0,
+2026-11-01T00:44:41.0914702Z +   "totalRemainingMinor": 0,
+2026-11-01T00:44:41.0915047Z   }
+2026-11-01T00:44:41.0915501Z
+2026-11-01T00:44:41.0916014Z  ❯ __tests__/postgres/lab-commission-lineage.test.ts:165:69
+2026-11-01T00:44:41.0954845Z     163|   const period = await payroll.getOrCreatePayrollPeriod("2026-10", act…
+2026-11-01T00:44:41.0955769Z     164|   const before = await q("SELECT id FROM payables ORDER BY id");
+2026-11-01T00:44:41.0956559Z     165|   await expect(payroll.calculatePayrollRun(period.id, "YER", actor)).r…
+2026-11-01T00:44:41.0957181Z        |                                                                     ^
+2026-11-01T00:44:41.0958051Z     166|   expect(await q("SELECT id FROM hr_payroll_runs WHERE period_id=$1", …
+2026-11-01T00:44:41.0958710Z     167|   expect(await q("SELECT id FROM payables ORDER BY id")).toEqual(befor…
+2026-11-01T00:44:41.0959088Z
+2026-11-01T00:44:41.0959385Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+2026-11-01T00:44:41.0959640Z
+2026-11-01T00:44:41.0960807Z  FAIL  __tests__/postgres/performer-commission-reconciliation.test.ts > doctor report versus payroll settlement > reconciles each currency to its payable and journal, rejects repeat payout and restores balance on reversal
+2026-11-01T00:44:41.0962053Z TypeError: Cannot read properties of undefined (reading 'lines')
+2026-11-01T00:44:41.0962669Z  ❯ isBalanced lib/accounting.ts:263:13
+2026-11-01T00:44:41.1023928Z     261|  */
+2026-11-01T00:44:41.1026414Z     262| export function isBalanced(entry: JournalEntry): boolean {
+2026-11-01T00:44:41.1028302Z     263|   if (entry.lines.some((line) => !LEDGER_CURRENCIES.includes(line.curr…
+2026-11-01T00:44:41.1031242Z        |             ^
+2026-11-01T00:44:41.1031822Z     264|   return LEDGER_CURRENCIES.every(
+2026-11-01T00:44:41.1032513Z     265|     (currency) => sideTotal(entry, "debit", currency) === sideTotal(en…
+2026-11-01T00:44:41.1033624Z  ❯ __tests__/postgres/performer-commission-reconciliation.test.ts:169:14
+2026-11-01T00:44:41.1034086Z
+2026-11-01T00:44:41.1034379Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+2026-11-01T00:44:41.1034625Z
+2026-11-01T00:44:41.1035806Z  FAIL  __tests__/postgres/performer-commission-reconciliation.test.ts > explicit reservation and currency-boundary ordering > keeps allocatedInvoiceId reserved and starts the FIFO identity at the currency reissue
+2026-11-01T00:44:41.1037003Z AssertionError: expected [ …(3) ] to deeply equal [ …(2) ]
+2026-11-01T00:44:41.1037359Z
+2026-11-01T00:44:41.1037541Z - Expected
+2026-11-01T00:44:41.1041132Z + Received
+2026-11-01T00:44:41.1041376Z
+2026-11-01T00:44:41.1041570Z   [
+2026-11-01T00:44:41.1041811Z     {
+2026-11-01T00:44:41.1042076Z +     "covered": 8000,
+2026-11-01T00:44:41.1042358Z +     "doctor": 14,
+2026-11-01T00:44:41.1042642Z +     "earned": 3200,
+2026-11-01T00:44:41.1042916Z +     "invoice": 17,
+2026-11-01T00:44:41.1043141Z +   },
+2026-11-01T00:44:41.1043333Z +   {
+2026-11-01T00:44:41.1043573Z       "covered": 2000,
+2026-11-01T00:44:41.1043831Z       "doctor": 13,
+2026-11-01T00:44:41.1044088Z       "earned": 600,
+2026-11-01T00:44:41.1044340Z       "invoice": 18,
+2026-11-01T00:44:41.1044562Z     },
+2026-11-01T00:44:41.1044753Z     {
+2026-11-01T00:44:41.1044997Z -     "covered": 4000,
+2026-11-01T00:44:41.1045265Z +     "covered": 0,
+2026-11-01T00:44:41.1045520Z       "doctor": 14,
+2026-11-01T00:44:41.1045780Z -     "earned": 1600,
+2026-11-01T00:44:41.1046028Z +     "earned": 0,
+2026-11-01T00:44:41.1046516Z       "invoice": 19,
+2026-11-01T00:44:41.1046736Z     },
+2026-11-01T00:44:41.1046921Z   ]
+2026-11-01T00:44:41.1047022Z
+2026-11-01T00:44:41.1047496Z  ❯ check __tests__/postgres/performer-commission-reconciliation.test.ts:311:10
+2026-11-01T00:44:41.1090038Z     309|       expect(detail.lines.filter(line => line.patientId === p).map(lin…
+2026-11-01T00:44:41.1090749Z     310|         doctor: line.doctorId, covered: line.invoiceCoveredMinor, earn…
+2026-11-01T00:44:41.1091456Z     311|         .toEqual([{ invoice: earlierSar, doctor: a.id, covered: 2000, …
+2026-11-01T00:44:41.1091981Z        |          ^
+2026-11-01T00:44:41.1092523Z     312|           { invoice: target, doctor: b.id, covered: 4000, earned: 1600…
+2026-11-01T00:44:41.1093021Z     313|     };
+2026-11-01T00:44:41.1093716Z  ❯ __tests__/postgres/performer-commission-reconciliation.test.ts:314:5
+2026-11-01T00:44:41.1094120Z
+2026-11-01T00:44:41.1094231Z
+2026-11-01T00:44:41.1094550Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+2026-11-01T00:44:41.1094831Z
+2026-11-01T00:44:41.1107856Z  Test Files  2 failed | 376 passed (378)
+2026-11-01T00:44:41.1133632Z       Tests  3 failed | 4704 passed (4707)
+2026-11-01T00:44:41.1134243Z    Start at  00:10:04
+2026-11-01T00:44:41.1136967Z    Duration  2076.65s (transform 8.26s, setup 0ms, import 76.67s, tests 1971.53s, environment 19ms)
+2026-11-01T00:44:41.1138668Z

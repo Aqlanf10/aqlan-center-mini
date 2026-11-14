@@ -1,5 +1,6 @@
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 import { documentPrefixProblem } from "./document-numbers";
+import { ownerFundingAccountProblem } from "./expense-payment-split";
 /**
  * إعدادات المركز — مصدر واحد لكل قيمة قابلة للتغيير.
  *
@@ -29,6 +30,7 @@ export type SettingKey =
   | "finance.rate.USD"
   | "finance.rate_max_age_days"
   | "finance.locked_before"
+  | "finance.owner_private_funding_account"
   | "finance.commission_material_rate"
   | "billing.max_discount_percent"
   | "documents.invoice_prefix"
@@ -43,7 +45,11 @@ export type SettingKey =
   | "followup.proposal_days"
   | "documents.max_megabytes"
   | "workflow.doctor_financial_view"
+  | "ortho.case_doctor_no_charge"
   | "display.privacy_mode"
+  | "display.voice_uri"
+  | "display.voice_rate"
+  | "display.voice_pause_ms"
   | "display.voice"
   | "display.delay_notice"
   | "display.show_ortho"
@@ -117,6 +123,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "finance.rate_max_age_days": "7",
   // فارغ = لا قفل. يُملأ بتاريخ فيصير كل ما قبله مقفلًا لا يُعدَّل.
   "finance.locked_before": "",
+  /* 0128 (#483 6831365228): the account credited when the owner pays part of an expense from a private
+     source. Empty = not decided: no private part is accepted until the owner chooses (asked on #483). */
+  "finance.owner_private_funding_account": "",
   /* خصم إهلاك المواد المقدَّر (نسب التخصصات) من العمولة — قرار المالك،
      والافتراض مغلق فلا يتغيّر رقمٌ قائم. "on" يفعّله بعد تحديد النسب. */
   "finance.commission_material_rate": "off",
@@ -140,6 +149,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // والمال ليس عمله (راجع أدوار النظام). الإدارة تفعّله إن شاءت من الإعدادات —
   // والفحص في الخادم لا في الشاشة.
   "workflow.doctor_financial_view": "false",
+  // (قرار المالك 6629149113) «بلا رسوم» لشدّة تقويم خارج الاتفاق: للمالك دائمًا، ولطبيب
+  // الحالة المسؤول المخوّل بالتقويم فقط إذا فعّله المالك هنا. مغلق افتراضيًا: لا منح تلقائي.
+  "ortho.case_doctor_no_charge": "false",
   // عشرون ميغابايت تكفي أشعةً بانورامية بجودةٍ عالية، وتردّ ملفًّا رُفع بالخطأ
   // — مقطعَ فيديو مثلًا — قبل أن يملأ القرص.
   "documents.max_megabytes": "20",
@@ -150,6 +162,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // نطق الاسم صوتيًا عند النداء. المتصفح لا يسمح بالصوت قبل لمسة، فالنطق لا
   // يعمل فعلًا إلا بعد ضغطة «تشغيل صوت النداء» على التلفاز نفسه.
   "display.voice": "true",
+  "display.voice_uri": "",
+  "display.voice_rate": "0.9",
+  "display.voice_pause_ms": "300",
   // رسالة الاعتذار عن التأخير — يشغّلها الاستقبال بضغطة من لوحة اليوم،
   // فلا يبقى المرضى متضايقين بلا تفسير.
   "display.delay_notice": "false",
@@ -343,6 +358,10 @@ export function validateSetting(key: SettingKey, value: string): string | null {
     if (!Number.isFinite(rate) || rate <= 0) return "سعر الصرف رقم أكبر من صفر.";
     if (rate > 1_000_000) return "سعر الصرف غير منطقي.";
   }
+  if (key === "finance.owner_private_funding_account" && trimmed) {
+    const problem = ownerFundingAccountProblem(trimmed);
+    if (problem) return problem;
+  }
   if (key === "finance.locked_before") {
     // الفراغ مقبول: هو حالة «لا قفل». وتاريخ بصيغة أخرى يُقفل الدفاتر كلها أو لا
     // يُقفل شيئًا، وكلاهما خطأ صامت.
@@ -384,6 +403,9 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "display.voice" || key === "display.delay_notice" || key === "display.show_ortho") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
+  if (key === "display.voice_uri" && trimmed.length > 256) return "معرّف الصوت أطول من 256 حرفًا.";
+  if (key === "display.voice_rate" && (!trimmed || !Number.isFinite(Number(trimmed)) || Number(trimmed) < 0.7 || Number(trimmed) > 1.1)) return "سرعة الصوت بين 0.7 و1.1.";
+  if (key === "display.voice_pause_ms" && (!trimmed || !Number.isInteger(Number(trimmed)) || Number(trimmed) < 0 || Number(trimmed) > 1000)) return "الوقفة بين 0 و1000 مللي ثانية.";
   if (key === "display.announcements") {
     // السطر الفارغ مقبول: يعني «استعمل الافتراضي». السطر الموجود لا يُقبل إلا
     // بصيغة «العنوان | النص» — والرسالة تسمّي رقم السطر ليجده المدير فورًا.
@@ -482,6 +504,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "finance.rate.SAR", label: "سعر الريال السعودي", hint: "كم ريالًا يمنيًا يساوي ريالًا سعوديًا اليوم", kind: "number", group: "finance" },
   { key: "finance.rate.USD", label: "سعر الدولار", hint: "كم ريالًا يمنيًا يساوي دولارًا اليوم", kind: "number", group: "finance" },
   { key: "finance.locked_before", label: "قفل الدفاتر قبل تاريخ", hint: "لا يُقبل قيد أو تعديل قبل هذا التاريخ. اتركه فارغًا لإلغاء القفل.", kind: "date", group: "finance" },
+  { key: "finance.owner_private_funding_account", label: "حساب ما يدفعه المالك من مصدره الخاص", hint: "رقم حساب حقوق ملكية أو التزامات من الدليل. فارغ = لا يُقبل دفع من المصدر الخاص حتى يقرّر المالك.", kind: "text", group: "finance" },
   { key: "finance.commission_material_rate", label: "خصم إهلاك المواد من العمولة", hint: "on = خصم نسب التخصصات المحدَّدة في «نسب إهلاك المواد»؛ off = إبقاء الأرقام كما كانت.", kind: "text", group: "finance" },
 
   { key: "clinic.chairs", label: "عدد الكراسي", hint: "يحكم الحجز والانتظار وشاشة الصالة", kind: "number", group: "operations" },

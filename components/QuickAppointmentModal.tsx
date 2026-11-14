@@ -1,5 +1,8 @@
 "use client";
 
+import { useReturnBookingContext } from "@/components/useReturnBookingContext";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
+
 import { useEffect, useId, useRef, useState } from "react";
 import {
   SHIFTS, SHIFT_LABEL, WEEKDAYS, WEEKDAY_LABEL,
@@ -84,13 +87,16 @@ export function QuickAppointmentModal({
   const [selectedServiceId, setSelectedServiceId] = useState<number | undefined>();
   const [chairs, setChairs] = useState(0);
   const [chairNo, setChairNo] = useState<string>("");
+  const isReturnBooking = appointmentType === "follow_up" || services.some(service => service.id === selectedServiceId && isPeriodicFollowupService(service));
+  const returnContext = useReturnBookingContext({ patientId: selectedPatientId, enabled: isOpen && isReturnBooking, locked: busy });
+  const effectiveDoctorId = isReturnBooking ? returnContext.verified?.doctorId : selectedDoctorId;
   const chairForAvailability = services.find((service) => service.id === selectedServiceId)?.requiresChair === false
     ? "" : chairNo;
   const isNewPatientForBooking = !selectedPatientId || newPatientCreated;
   // Rendering can precede effect cleanup. Advice belongs only to the exact
   // request context, so a changed selection never renders the previous advice.
   const availabilityContext = JSON.stringify([
-    isOpen, selectedDoctorId ?? null, date, duration, selectedServiceId ?? null,
+    isOpen, effectiveDoctorId ?? null, date, duration, selectedServiceId ?? null,
     appointmentType, chairForAvailability, isNewPatientForBooking,
   ]);
   const ownsSlots = slotsContext === availabilityContext;
@@ -103,6 +109,7 @@ export function QuickAppointmentModal({
   const [overrideReason, setOverrideReason] = useState("");
   /* الرفض بلا وجهةٍ يعني مريضًا ضاع. فمن رُدّ يُكتب في قائمة الانتظار من
      اللوحة نفسها التي ردّته — لا من شاشةٍ أخرى يُنسى الانتقال إليها. */
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([patientId, isOpen, newPatientCreated || !selectedPatientId ? patientQuery : selectedPatientId, date, time, duration, appointmentType, note, selectedDoctorId, selectedServiceId, chairNo, overrideReason, returnContext.fingerprint]));
   const [waitingBusy, setWaitingBusy] = useState(false);
   const [waitingNote, setWaitingNote] = useState<string | null>(null);
   /* خطوةُ التفضيلات — تُفتح بالضغط على «أضِف إلى قائمة الانتظار».
@@ -139,7 +146,7 @@ export function QuickAppointmentModal({
 
   useEffect(() => {
     setSlotsContext(availabilityContext);
-    if (!isOpen || !selectedDoctorId || !date) {
+    if (!isOpen || !effectiveDoctorId || !date) {
       setDoctorSlots(null);
       setSlotsLoading(false);
       setSlotsError(false);
@@ -154,7 +161,7 @@ export function QuickAppointmentModal({
     const timer = setTimeout(async () => {
       try {
         const params = new URLSearchParams({
-          doctorId: String(selectedDoctorId), date, durationMinutes: duration,
+          doctorId: String(effectiveDoctorId), date, durationMinutes: duration,
           isNewPatient: String(isNewPatientForBooking),
         });
         if (selectedServiceId) params.set("serviceId", String(selectedServiceId));
@@ -165,7 +172,7 @@ export function QuickAppointmentModal({
         });
         if (!response.ok) throw new Error("availability failed");
         const data = parseDoctorAvailabilityResponse(await response.json(), {
-          doctorId: selectedDoctorId, date, durationMinutes: Number(duration),
+          doctorId: effectiveDoctorId, date, durationMinutes: Number(duration),
         });
         if (!data) throw new Error("invalid availability response");
         if (!controller.signal.aborted) {
@@ -179,7 +186,7 @@ export function QuickAppointmentModal({
       }
     }, 200);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [availabilityContext, isOpen, selectedDoctorId, date, duration, selectedServiceId, appointmentType, chairForAvailability, isNewPatientForBooking]);
+  }, [availabilityContext, isOpen, effectiveDoctorId, date, duration, selectedServiceId, appointmentType, chairForAvailability, isNewPatientForBooking]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -319,6 +326,7 @@ export function QuickAppointmentModal({
       setError(FOLLOWUP_SERVICE_REVIEW_MESSAGE);
       return;
     }
+    if (!returnContext.ready || !returnContext.isCurrent()) { setError("اختر الحالة وتحقق من الطبيب المسؤول الحالي قبل حجز المراجعة."); return; }
     const name = (patientQuery || selectedPatientName).trim();
     if (!selectedPatientId && !name) {
       setError("يرجى اختيار مريض أو كتابة اسم المريض الجديد.");
@@ -366,7 +374,7 @@ export function QuickAppointmentModal({
         }
       }
 
-      const res = await fetch("/api/appointments", {
+      const res = await bookingFetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -378,7 +386,8 @@ export function QuickAppointmentModal({
           appointmentType: appointmentType || undefined,
           bookingIntent: guardedFollowup ? "ortho_follow_up" : undefined,
           note: note.trim() || undefined,
-          doctorId: selectedDoctorId || undefined,
+          doctorId: isReturnBooking ? undefined : selectedDoctorId || undefined,
+          ...returnContext.payload,
           chairNo: chairApplies && chairNo ? Number(chairNo) : undefined,
           isNewPatient,
           overrideReason: overrideReason.trim() || undefined,
@@ -386,6 +395,7 @@ export function QuickAppointmentModal({
       });
 
       const data = await res.json().catch(() => null);
+      if (!res.ok) returnContext.handleRejection(data);
       if (res.status === 409 && data) {
         /* ليس خطأ إدخال: اليوم ممتلئ. تُعرض الأسباب والبديل، ويُفتح حقل السبب
            لمن يملك الصلاحية — ولا يُغلق النموذج فيفقد ما كُتب فيه. */
@@ -440,6 +450,7 @@ export function QuickAppointmentModal({
 
   return (
     <Modal onClose={onClose} labelledBy={`${formId}-title`} busy={busy} initialFocus="input">
+      {nearbyBookingDialog}
       {/* Include conflict/override and search-result controls as well as the form.
           Native disabling prevents pointer and keyboard edits during both writes. */}
       <fieldset
@@ -820,6 +831,7 @@ export function QuickAppointmentModal({
             </select>
           </div>
 
+          {isReturnBooking ? returnContext.view : (
           <div>
             <label htmlFor={`${formId}-doctor`} className="mb-1 flex items-center justify-between text-xs font-bold text-slate-700">
               <span>الطبيب المعالج</span>
@@ -840,7 +852,9 @@ export function QuickAppointmentModal({
             </select>
           </div>
 
-          {selectedDoctorId && (
+          )}
+
+          {effectiveDoctorId && (
             <section aria-label="أوقات الطبيب" className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-black text-navy-900">أوقات مقترحة وفق الدوام المسجّل</p>
@@ -932,7 +946,7 @@ export function QuickAppointmentModal({
             </button>
             <button
               type="submit"
-              disabled={busy || needsFollowupService}
+              disabled={busy || needsFollowupService || !returnContext.ready}
               className="flex-1 rounded-xl bg-navy-800 py-2 text-xs font-bold text-white shadow-xs hover:opacity-90 disabled:opacity-50"
             >
               {busy ? "جارٍ الحجز…" : "تأكيد الحجز"}

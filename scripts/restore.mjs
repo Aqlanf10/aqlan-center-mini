@@ -3,7 +3,8 @@ import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
 import { loadRestoreMigrationChecksums } from "../lib/restore/migration-provenance.mjs";
-import { prepareBackupSql } from "../lib/restore/sql.mjs";
+import { isCanonicalSourceSql, prepareBackupSql } from "../lib/restore/sql.mjs";
+import { finalizeRestoredStaffIdentityInTransaction } from "../lib/staff-authority-lifecycle.mjs";
 import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
 
 /**
@@ -42,7 +43,14 @@ try {
 
 let sql;
 try {
-  sql = prepareBackupSql(readFileSync(file, "utf8"), {migrationFiles: await loadRestoreMigrationChecksums()}).sql;
+  const text = readFileSync(file, "utf8");
+  // Restore protocol R1: a canonical source needs the staged restore and its hold.
+  if (isCanonicalSourceSql(text)) {
+    console.error("هذه نسخة من قاعدة بهوية موحّدة. استعادتها تمر بالاستعادة المرحلية مع حجز الاستعادة، لا بهذا الأمر.");
+    process.exit(2);
+  }
+  // Archived registry rows must match this build's reviewed migration checksums (staging rule).
+  sql = prepareBackupSql(text, {migrationFiles: await loadRestoreMigrationChecksums()}).dataSql;
 } catch (error) {
   console.error(`الملف ناقص أو غير مدعوم: ${error.message}`);
   process.exit(1);
@@ -53,13 +61,17 @@ try {
   await client.connect();
   // Match the backup writer's quote escaping even on a differently configured server.
   await client.query("SET standard_conforming_strings = on");
+  await client.query("BEGIN");
   await client.query(sql);
+  await finalizeRestoredStaffIdentityInTransaction(client);
+  await client.query("COMMIT");
   const { rows } = await client.query(
     `SELECT COUNT(*)::int AS tables FROM information_schema.tables
       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`,
   );
   console.log(`تمت الاستعادة. الجداول: ${rows[0].tables}`);
 } catch (error) {
+  await client.query("ROLLBACK").catch(() => {});
   console.error(`فشلت الاستعادة: ${error.message}`);
   process.exitCode = 1;
 } finally {

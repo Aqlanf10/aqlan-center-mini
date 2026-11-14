@@ -96,7 +96,7 @@ describe("native compact print regression witnesses", () => {
     const body = renderToStaticMarkup(<><PrintDocumentWatermark /><div className="print-root">{node}</div></>);
     const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
     const css = globalCss + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + (kind === "lab" ? labCss() : "") + (prescription ? readFileSync(resolve("app/print/prescription/[id]/prescription.css"), "utf8") : "");
-    if (kind === "lab") expect(css).toContain(`.${labStyles.sheet} .${labStyles.labIdentity} { display: block; line-height: 1.35; }`);
+    if (kind === "lab") expect(css).toContain(`.${labStyles.sheet} .${labStyles.labIdentity} { display: block; line-height: 1.8; }`);
     const output = resolve(".settings-ui-artifacts/unified-print");
     mkdirSync(output, { recursive: true });
     const html = `<!doctype html><html lang="ar" dir="rtl"><style>${css}</style><body>${body.replaceAll('src="/logo.png"', `src="${logo}"`)}</body></html>`;

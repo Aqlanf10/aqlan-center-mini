@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+
+ Test Files  2 passed (2)
+      Tests  41 passed (41)
+   Start at  11:08:20
+   Duration  7.23s (transform 5.24s, setup 0ms, import 6.83s, tests 41ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

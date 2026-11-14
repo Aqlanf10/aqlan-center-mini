@@ -1,0 +1,33 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/patient-cases-canonical-read.test.ts (35 tests | 1 failed) 4792ms
+   × refuses unknown stored case states without rewriting them 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/patient-cases-canonical-read.test.ts > refuses unknown stored case states without rewriting them
+error: new row for relation "clinical_cases" violates check constraint "clinical_cases_status_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ __tests__/postgres/patient-cases-canonical-read.test.ts:103:24
+    101| it.each(["case", "item", "plan", "ortho"])("refuses unknown stored %s …
+    102|   const patientId = await patient(`invalid-${kind}`), saved = await se…
+    103|   if (kind === "case") await fx.pool.query("UPDATE clinical_cases SET …
+       |                        ^
+    104|   if (kind === "item") await fx.pool.query("UPDATE plan_items SET stat…
+    105|   if (kind === "plan") await fx.pool.query("UPDATE treatment_plans SET…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 69 passed (70)
+   Start at  05:39:58
+   Duration  13.36s (transform 1.64s, setup 0ms, import 2.56s, tests 10.06s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

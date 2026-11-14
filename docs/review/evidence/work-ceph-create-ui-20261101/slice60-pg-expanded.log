@@ -1,0 +1,28 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ceph-create-canonical-context.test.ts (15 tests | 1 failed) 7841ms
+   × reference chooser accepts the complete200set boundary and refuses201 without silently changing defaults 80ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ceph-create-canonical-context.test.ts > reference chooser accepts the complete200set boundary and refuses201 without silently changing defaults
+error: null value in column "created_by" of relation "ceph_reference_sets" violates not-null constraint
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ __tests__/postgres/ceph-create-canonical-context.test.ts:88:6
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 60 passed (61)
+   Start at  16:38:50
+   Duration  33.51s (transform 2.89s, setup 0ms, import 4.36s, tests 28.19s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

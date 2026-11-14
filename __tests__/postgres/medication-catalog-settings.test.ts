@@ -32,3 +32,28 @@ it('revalidates role after waiting for the catalogue lock and writes no stale au
   const result=await attempt;expect(String(result.error)).toContain('MEDICATION_CATALOG_AUTHORITY_REQUIRED');expect((await getPool().query('SELECT key FROM settings WHERE key=$1',[KEY])).rows).toHaveLength(0);
  } finally {await blocker.query('ROLLBACK').catch(()=>{});blocker.release();await attempt;}
 });
+// Owner decision 6839071994: a doctor with the explicit catalog grant may edit default doses; a doctor
+// without it may not; saved prescriptions keep their own doses. Synthetic data only.
+it('accepts a granted doctor, refuses an ungranted doctor, and leaves saved prescriptions unchanged',async()=>{
+ const q=getPool();
+ const doctorId=(await q.query<{id:number}>("INSERT INTO users(username,display_name,password_hash,role,is_active,permissions) VALUES('catalog-test-doctor','Synthetic doctor','synthetic-password-hash','doctor',true,$1) RETURNING id",[JSON.stringify({canManageMedicationCatalog:false})])).rows[0].id;
+ const doctorSession=()=>({userId:doctorId,username:'catalog-test-doctor',role:'doctor',expiresAt:Date.now()+60000,credentialVersion:sessionCredentialVersion('synthetic-password-hash')});
+ const patient=(await q.query<{id:number}>("INSERT INTO patients(patient_number,full_name) VALUES('SYN-CAT-RX','Synthetic catalog patient') RETURNING id")).rows[0].id;
+ const rx=(await q.query<{id:number;items:string}>("INSERT INTO prescriptions(patient_id,items,created_by) VALUES($1,$2::jsonb,'catalog-test-doctor') RETURNING id,items::text items",[patient,JSON.stringify([{drug:'Synthetic medicine',dose:'1 mg'}])])).rows[0];
+ const version=async()=>(await q.query<{updated_at:Date}>('SELECT updated_at FROM settings WHERE key=$1',[KEY])).rows[0]?.updated_at.toISOString()??null;
+ const doctorWrite=async(v:string)=>saveSettingsAudited({values:{[KEY]:v},expected:{[KEY]:await version()},actor:'catalog-test-doctor',actorRole:'doctor',reason:'Synthetic dose review',session:doctorSession()});
+ // The catalogue already holds the medicine (added by the administrator); the doctor edits its default dose.
+ expect((await write()).ok).toBe(true);
+ const catalogBefore=(await q.query<{value:string}>('SELECT value FROM settings WHERE key=$1',[KEY])).rows[0].value;
+ const changed=JSON.stringify({schemaVersion:1,entries:[{...entry,amount:'2 tablets',revision:2}]});
+ await expect(doctorWrite(changed)).rejects.toThrow('MEDICATION_CATALOG_AUTHORITY_REQUIRED');
+ expect((await q.query<{value:string}>('SELECT value FROM settings WHERE key=$1',[KEY])).rows[0].value).toBe(catalogBefore);
+ await q.query("UPDATE users SET permissions=$2 WHERE id=$1",[doctorId,JSON.stringify({canManageMedicationCatalog:true})]);
+ const result=await doctorWrite(changed);
+ expect(result.ok).toBe(true);
+ expect(JSON.parse((await q.query<{value:string}>('SELECT value FROM settings WHERE key=$1',[KEY])).rows[0].value).entries[0]).toMatchObject({amount:'2 tablets',revision:2});
+ // A stale second edit from the same observed catalogue writes nothing.
+ expect(await saveSettingsAudited({values:{[KEY]:JSON.stringify({schemaVersion:1,entries:[{...entry,amount:'3 tablets',revision:2}]})},expected:{[KEY]:null},actor:'catalog-test-doctor',actorRole:'doctor',reason:'Synthetic stale dose',session:doctorSession()})).toMatchObject({ok:false});
+ expect((await q.query<{items:string}>('SELECT items::text items FROM prescriptions WHERE id=$1',[rx.id])).rows[0].items).toBe(rx.items);
+ expect((await q.query("SELECT count(*)::int n FROM audit_log WHERE entity_id=$1 AND actor='catalog-test-doctor'",[KEY])).rows[0].n).toBe(1);
+});

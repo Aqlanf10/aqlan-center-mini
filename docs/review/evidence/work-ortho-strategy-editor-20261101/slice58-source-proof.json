@@ -1,0 +1,16 @@
+{
+  "base": "d15a5967",
+  "checks": {
+    "sameDraftValue": true,
+    "makeDraft": true,
+    "currentMutation": true,
+    "beginMutation": true,
+    "endMutation": true,
+    "beginRetryMutation": true,
+    "lib/ortho-treatment-strategy.ts": true,
+    "lib/ortho-strategy-client.ts": true,
+    "native fingerprint": true,
+    "native INSERT": true
+  },
+  "qualification": "Two store receipt projections now affirm only actually empty stored link sets for canonical commands; legacy option defaults false. Strict client matcher, stored records, fingerprint, INSERT and grant checks remain. Canonical adapter enables this transport confirmation only; no read grant."
+}

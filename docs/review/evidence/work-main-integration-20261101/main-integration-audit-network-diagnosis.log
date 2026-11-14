@@ -1,0 +1,2 @@
+{"name":"TypeError","message":"fetch failed","cause":{"code":"EAI_AGAIN","message":"getaddrinfo EAI_AGAIN api.github.com"}}
+{"HTTPS_PROXY":true,"HTTP_PROXY":true,"NODE_USE_ENV_PROXY":false,"NODE_EXTRA_CA_CERTS":true,"NODE_USE_SYSTEM_CA":false}

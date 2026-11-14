@@ -1,4 +1,8 @@
 import { ClinicalMutationAuthorityError } from "@/lib/clinical-mutation-authority";
+import {settleRejectedClinicalLabCommand} from "@/lib/clinical-lab-command-settlement";
+import { createHash } from "node:crypto";
+import { parseLabWorkDraft, parseLabWorkRetirements, LabWorkContractError } from "@/lib/lab-work-intent-contract";
+import { LabWorkIntentError } from "@/lib/lab-work-intent-db";
 import { InventoryBusy, InventoryTrackingRequired } from "@/lib/inventory-domain/legacy-write-guard";
 import { ClinicalDoctorIdentityConflict } from "@/lib/clinical-doctor-identity";
 import { NextResponse } from "next/server";
@@ -13,6 +17,11 @@ import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { assistantProcedureChange } from "@/lib/clinical-finalizer";
+import { CLINICAL_SIGN_MESSAGES } from "@/lib/clinical-sign-messages";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalVisitClinical } from "@/lib/canonical-visit-clinical";
+import { canonicalVisitDocumentFailure, commandCanonicalVisitDocument } from "@/lib/canonical-visit-documentation";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +42,14 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 84: a clinical grant; the visit inside the scope (outside reads like missing);
+  // the money group only with finance.invoices.view or the protected owner.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalVisitClinical(selected.handle, (await context.params).id), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل الزيارة."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const visitId = await idFrom(context);
@@ -68,6 +85,18 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
  * بالخطأ.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 85: save and addendum on one admitted clinical.visits.document transaction;
+  // price overrides by the approved map's grants; signing, a currency change and a lab draft refuse (409).
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    let canonicalBody: unknown;
+    try { canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try { return NextResponse.json(await commandCanonicalVisitDocument(selected.handle, (await context.params).id, canonicalBody), { headers: NO_STORE }); }
+    catch (error) { return canonicalVisitDocumentFailure(error); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (session.role !== "doctor" && session.role !== "admin" && session.role !== "assistant") return clinicalOnly();
@@ -82,6 +111,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const source = (body ?? {}) as Record<string, unknown>;
   const action = String(source.action ?? "save");
+  const hasLabCommand = Object.hasOwn(source,"labRequestKey") || Object.hasOwn(source,"labRetirements")
+    || (Array.isArray(source.procedures) && source.procedures.some(row=>!!row && typeof row==="object" && !!(row as Record<string,unknown>).labWork));
+  if (hasLabCommand && !["admin","doctor"].includes(session.role)) return clinicalOnly();
+  if (hasLabCommand && (action !== "save" || !Array.isArray(source.procedures)
+    || !Number.isSafeInteger(source.labPatientId) || Number(source.labPatientId) <= 0
+    || typeof source.labRequestKey !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/.test(source.labRequestKey))) {
+    return NextResponse.json({message:"هوية عملية مسوّدة المختبر غير صالحة."},{status:400});
+  }
+  const labRequestHash = hasLabCommand ? createHash("sha256").update(JSON.stringify(source)).digest("hex") : null;
+  let labPatientId: number | null = null;
   const text = (value: unknown, max = 2000) =>
     typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 
@@ -91,6 +130,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
       return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
     }
+    if (hasLabCommand && source.labPatientId !== visit.patientId) {
+      return NextResponse.json({code:"source_changed",message:"تغيّر المريض المرتبط بالزيارة؛ حدّث الملف قبل حفظ عمل المختبر."},{status:409});
+    }
+    labPatientId = visit.patientId;
     if (assistant && assistantOutsideToday(visit)) {
       return NextResponse.json({ message: "المساعد السريري يعمل على زيارات اليوم وحدها." }, { status: 403 });
     }
@@ -137,21 +180,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         dependencyOverrideReason: typeof source.dependencyOverrideReason === "string" ? source.dependencyOverrideReason : null,
         orthoSession: orthoSession.value,
         outsideContractDecision,
+        labSignVersion: typeof source.labSignVersion === "string" ? source.labSignVersion : null,
       }, { patientId: visit.patientId, session });
-      const messages: Record<string, string> = {
-        not_found: "الزيارة غير موجودة.",
-        already_signed: "الزيارة موقَّعة سلفًا. التصحيح يكون بملحق.",
-        empty: "سجّل إجراءً أو تشخيصًا قبل توقيع الزيارة.",
-        no_patient: "اربط الزيارة بملف مريض قبل التوقيع — الفاتورة تدخل كشف حسابه.",
-        mixed_plan_currencies: "الزيارة تجمع بنود خطط بعملات اتفاقٍ مختلفة — لا تُفوتر فاتورةً واحدة. أفصل الإجراءات على زياراتٍ أو خططٍ بعملةٍ واحدة.",
-        no_treating_doctor: "حدّد الطبيب المعالج للزيارة (أو لكل إجراء) قبل التوقيع — لا يُفوتر إجراءٌ بلا طبيب، وإلا ضاعت عمولته.",
-        unmet_dependency: "بنودٌ في هذه الزيارة تتطلب ما لم يكتمل بعد — اكتب سبب المتابعة لتُكمل التوقيع.",
-        invalid_override_reason: "سبب المتابعة طويل جدًا — الحد الأقصى ٣٠٠ حرف.",
-        ortho_case_invalid: "حالة التقويم المرسلة مغلقة أو لا تخص مريض هذه الزيارة — حدّث الشاشة وأعد التوقيع.",
-        plan_session_unlinked: "إجراءٌ حرّ يطابق بندًا له تمويل قائم أو جلسات في خطة المريض — اربطه ببنده الأصلي، أو ببند جديد صريح للعمل الإضافي، قبل التوقيع.",
-        amended_plan_session_unlinked: "للخدمة تعديل مالي موثق؛ استقلال هذا العمل عن تغطيته غير متحقق. ربط الخدمة المعدلة سريريًا غير مدعوم حاليًا. تبقى الزيارة مسودة للمراجعة؛ لن تُنشأ فاتورة ثانية لهذا العمل.",
-        invalid_decision_reason: "اكتب سبب «بلا رسوم» للشدّة (من ٣ أحرف إلى ٣٠٠).",
-      };
+      const messages = CLINICAL_SIGN_MESSAGES;
       if (result.reason) {
         return NextResponse.json(
           result.reason === "unmet_dependency"
@@ -212,6 +243,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         .map((row) => row as Record<string, unknown>)
         .filter((row) => Number(row.serviceId) > 0)
         .map((row) => ({
+          ...(row.labWork !== undefined ? {labWork:parseLabWorkDraft(row.labWork)} : {}),
           serviceId: Number(row.serviceId),
           toothCode: Number(row.toothCode) || null,
           surfaces: typeof row.surfaces === "string" ? row.surfaces : null,
@@ -229,10 +261,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const overrides: ProcedurePriceOverride[] = [];
       // (DAY1) عملة الزيارة للإجراءات الحرّة، وأسعار الصرف للتحويل حين لا سعر خاص بها.
       if (source.billingCurrency !== undefined && source.billingCurrency !== null && !isCurrency(source.billingCurrency)) {
+        if(hasLabCommand)throw new LabWorkIntentError("invalid_billing_currency","عملة الزيارة غير صالحة.",409);
         return NextResponse.json({ message: "عملة الزيارة غير صالحة." }, { status: 400 });
       }
       const ok = await setVisitProcedures({
         visitId,
+        ...(hasLabCommand ? {labCommand:{expectedPatientId:source.labPatientId as number,requestKey:source.labRequestKey as string,requestHash:labRequestHash!,
+          retirements:parseLabWorkRetirements(source.labRetirements),session}} : {}),
         procedures,
         clinicalNotes,
         authority: { role: session.role, maxDiscountPercent: Number.isFinite(maxDiscount) ? maxDiscount : 0 },
@@ -241,6 +276,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         rates: foreignRatesFromSettings(settings),
       });
       if (!ok) {
+        if (hasLabCommand) throw new LabWorkIntentError("visit_signed","الزيارة موقَّعة — لا تُعدَّل إجراءاتها.",409);
         return NextResponse.json({ message: "الزيارة موقَّعة — لا تُعدَّل إجراءاتها." }, { status: 409 });
       }
       for (const override of overrides) {
@@ -265,11 +301,38 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       );
     }
 
-    return NextResponse.json(await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null }));
+    const saved = await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null });
+    return NextResponse.json(hasLabCommand ? {...saved,labWorkCommand:{requestKey:source.labRequestKey,
+      requestHash:labRequestHash,visitId,patientId:saved?.patientId,actor:session.username}} : saved);
   } catch (error) {
     if (error instanceof ClinicalMutationAuthorityError) {
       return NextResponse.json({ message: error.message }, { status: error.status });
     }
+    // A deterministic rolled-back refusal is terminal only after durable command settlement.
+    // Busy/authorization/schema/idempotency/unknown failures remain unresolved; HTTP status is not evidence.
+    const unresolved = new Set(["command_busy","intent_busy","clinical_boundary_busy","unauthorized","schema_unavailable","idempotency_conflict","source_changed","invalid_receipt"]);
+    const rejectionCode = error instanceof LabWorkContractError ? error.code
+      : error instanceof LabWorkIntentError && error.status === 409 && !unresolved.has(error.code) ? error.code
+      : error instanceof ClinicalDoctorIdentityConflict ? error.code
+      : error instanceof ClinicalPlanConflict ? "clinical_plan_conflict"
+      : error instanceof ProcedurePriceRejected ? "procedure_price_rejected" : null;
+    if (hasLabCommand && labPatientId !== null && labRequestHash && rejectionCode) {
+      try {
+        const result=await settleRejectedClinicalLabCommand({patientId:labPatientId,visitId,session,
+          requestKey:source.labRequestKey as string,requestHash:labRequestHash,code:rejectionCode});
+        const labWorkCommand={requestKey:source.labRequestKey,requestHash:labRequestHash,patientId:labPatientId,visitId,actor:session.username};
+        if(result.outcome === "applied") {
+          const saved=await getClinicalVisit(visitId,{actorPartyId:session.partyId??null});
+          if(saved?.patientId!==labPatientId)throw new Error("source changed");
+          return NextResponse.json({...saved,labWorkCommand});
+        }
+        return NextResponse.json({labWorkCommand,labWorkOutcome:"rejected",code:result.code,
+          message:"لم يُحفظ الطلب. حدّث البيانات وصحّحها ثم احفظ من جديد."},{status:409});
+      }catch { /* No terminal evidence: keep the reference unresolved and preserve the original error. */ }
+    }
+    if (error instanceof LabWorkContractError) return NextResponse.json({message:error.message,code:error.code},{status:400});
+    if (error instanceof LabWorkIntentError) return NextResponse.json({message:error.message,code:error.code},{status:error.status});
+    if ((error as {code?:string}).code === "55P03") return NextResponse.json({message:"يوجد تحديث سريري جارٍ؛ حدّث الزيارة وأعد المحاولة."},{status:409});
     if (error instanceof ClinicalDoctorIdentityConflict) {
       return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
     }

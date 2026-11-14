@@ -12,6 +12,9 @@ import { requireSession } from "@/lib/session";
 import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
 import { withoutPlanPayments } from "@/lib/plan-payment-projection";
 import { projectPlannedVisitRebooking } from "@/lib/planned-visit-projection";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalPlanReadRefusal, canonicalPlanPatientId, readCanonicalClinicalPlans } from "@/lib/canonical-plan-reads";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +35,17 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
  *   وكلٌّ ما هو مالي (أقساط، مدفوع، متأخر) يُسلب في الخادم إلا بإذن.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const patientId = canonicalPlanPatientId((await context.params).id, new URL(_request.url).searchParams);
+      return NextResponse.json(await readCanonicalClinicalPlans(selected.handle, patientId), { headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalPlanReadRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: 409, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تحميل الخطط السريرية؛ لم تُعتبر القائمة فارغة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

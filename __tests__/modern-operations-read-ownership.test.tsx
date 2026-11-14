@@ -2,12 +2,17 @@
  * Ref access during rendering is rejected: aborted renders cannot acquire/revoke a request. */
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { useReferenceCommand } from "../components/inventory/useReferenceCommand";
+import { useSupplierCommand } from "../components/inventory/useSupplierCommand";
 import { useLabBalanceOverview } from "../components/finance/useLabBalanceOverview";
 import { useLeadershipRead } from "../components/leadership/useLeadershipRead";
 import { HrContractsPanel } from "../components/hr/ContractsPanel";
 import { HrTasksPanel } from "../components/hr/TasksPanel";
 import { projectLabBalanceOverview } from "../lib/lab-balance-overview";
 
+const journals = vi.hoisted(() => ({ reference: vi.fn(), supplier: vi.fn() }));
+vi.mock("../lib/inventory-reference-journal", async original => ({ ...await original<typeof import("../lib/inventory-reference-journal")>(), readReferenceCommand: journals.reference }));
+vi.mock("../lib/inventory-supplier-journal", async original => ({ ...await original<typeof import("../lib/inventory-supplier-journal")>(), listSupplierCommands: journals.supplier }));
 type Slot = { value?: unknown; deps?: readonly unknown[]; cleanup?: () => void };
 type Frame = { slots: Slot[]; cursor: number; layouts: (() => void)[]; effects: (() => void)[] };
 const runtime = vi.hoisted(() => ({ frame: null as Frame | null, rendering: false }));
@@ -136,4 +141,30 @@ it("contract expiry is a committed clock observation, stable during render and r
   for (const slot of f.slots) { slot.cleanup?.(); slot.cleanup = undefined; }
   expect(listeners.has("focus")).toBe(false);
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it("an abandoned reference authority cannot replace the committed journal owner", async () => {
+  let resolve!: (value: unknown) => void;
+  journals.reference.mockReturnValue(new Promise(done => { resolve = done; }));
+  const a = { realmId: "synthetic", subjectId: "A", generation: "1" };
+  const f = frame(); render(f, () => useReferenceCommand(a, () => {})); commit(f);
+  render(speculative(f), () => useReferenceCommand({ ...a, subjectId: "B" }, () => {}));
+  resolve({ revision: 1, intent: null }); await settle();
+  expect(render(f, () => useReferenceCommand(a, () => {})).ready).toBe(true);
+  expect(fetch).not.toHaveBeenCalled();
+});
+it("an abandoned supplier authority cannot discard the committed storage read, while unmount retires it", async () => {
+  vi.stubGlobal("BroadcastChannel", class { addEventListener() {} close() {} });
+  let resolve!: (value: unknown) => void;
+  journals.supplier.mockReturnValue(new Promise(done => { resolve = done; }));
+  const a = { realmId: "synthetic", subjectId: "A", executionEpochId: "1" };
+  const f = frame(); render(f, () => useSupplierCommand(a, () => {})); commit(f);
+  render(speculative(f), () => useSupplierCommand({ ...a, subjectId: "B" }, () => {}));
+  resolve([]); await settle();
+  expect(render(f, () => useSupplierCommand(a, () => {})).ready).toBe(true);
+  const g = frame(); render(g, () => useSupplierCommand(a, () => {})); commit(g);
+  for (const s of g.slots) { s.cleanup?.(); s.cleanup = undefined; }
+  resolve([]); await settle();
+  expect(render(g, () => useSupplierCommand(a, () => {})).ready).toBe(false);
+  expect(fetch).not.toHaveBeenCalled();
 });

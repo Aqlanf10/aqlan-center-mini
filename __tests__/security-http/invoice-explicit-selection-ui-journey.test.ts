@@ -77,10 +77,17 @@ async function open(patientId: number, width: number) {
 async function tooth(page: Page, code: number) {
   await page.getByTestId("invoice-tooth-button-0").click();
   const dialog = page.getByTestId("tooth-dialog");
+  // The chart now supports multi-tooth groups. This helper means replace, not add:
+  // explicitly remove the existing selection before choosing the new single tooth.
+  const selected = dialog.locator('[data-testid^="odontogram-tooth-"][aria-pressed="true"]');
+  for (let count = await selected.count(); count > 0; count--) await selected.first().click();
   await dialog.getByTestId(`odontogram-tooth-${code}`).click();
+  expect(await selected.count()).toBe(1);
+  expect(await dialog.getByTestId(`odontogram-tooth-${code}`).getAttribute("aria-pressed")).toBe("true");
   await dialog.getByTestId("tooth-dialog-confirm").click();
   await dialog.waitFor({ state: "detached" });
   expect(await page.getByTestId("invoice-row-0").getAttribute("data-tooth")).toBe(String(code));
+  expect(await page.getByTestId("invoice-row-0").getAttribute("data-tooth-count")).toBe("1");
 }
 const ready = async (page: Page) => {
   const proof=page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]');

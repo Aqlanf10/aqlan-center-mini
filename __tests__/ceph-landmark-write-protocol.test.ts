@@ -39,7 +39,7 @@ function harness(initial: CephLandmarkInput[] = []) {
   const client = { query, release: vi.fn() };
   const audit = async (_executor: unknown, input: unknown) => { if (failAudit) throw new Error("Synthetic audit failure"); audits.push(input); };
   const dependencies = {
-    ensureSchema: async () => {}, getPool: () => ({ connect: async () => client }), isCephLandmarkCode,
+    ensureSchema: async () => {}, getPool: () => ({ connect: async () => client }), cephWriterClient: async () => client, /* integration: ceph writers take their client from cephWriterClient (pooled outside a canonical operation) */ isCephLandmarkCode,
     insertAuditRow: audit, recordAudit: async (input: unknown) => audit(null, input),
   };
   const output: Record<string, unknown> = {};
@@ -127,8 +127,9 @@ describe("ceph calibration writer finite scale", () => {
   ])("refuses a zero/infinite derived scale before persistence", async (calibration) => {
     const query = vi.fn(async (sql: string) => ({ rows: sql.includes("FROM ceph_analyses") ? [{ status: "draft" }] : [] }));
     const release = vi.fn(), output: Record<string, unknown> = {};
-    new Function("exports", "ensureSchema", "getPool", "parseCephCalibrationState", code)(output, async () => {},
-      () => ({ connect: async () => ({ query, release }) }), parseCephCalibrationState);
+    // Integration: ceph writers take their client from cephWriterClient (pooled outside a canonical operation).
+    new Function("exports", "ensureSchema", "getPool", "cephWriterClient", "parseCephCalibrationState", code)(output, async () => {},
+      () => ({ connect: async () => ({ query, release }) }), async () => ({ query, release }), parseCephCalibrationState);
     const write = output.updateCephCalibration as typeof import("../lib/db").updateCephCalibration;
     expect(await write(71, calibration, "synthetic-doctor", { calibration: null, mmPerPixel: null })).toEqual({ ok: false, message: "مقياس المعايرة غير صالح؛ اختر مسافة ونقطتين واضحتين." });
     expect(query.mock.calls.some(([sql]) => sql.includes("UPDATE ceph_analyses"))).toBe(false);

@@ -117,7 +117,7 @@ function reader(name: string, endMarker: string, query: (...args: unknown[]) => 
     readCephCompletionProvenance: async () => ({state:"unversioned",reason:"historical_completion_without_witness"}),
     getCephStudy: async () => ({...study,provenance:{state:"unversioned",reason:"historical_completion_without_witness"}}),
     readCephCorrectionSource:async()=>({state:'unavailable',reason:'synthetic'}), requireCephCorrectionAncestry:async()=>{},
-    ensureSchema: async () => {}, getPool: () => ({ query,connect:async()=>({query:async(sql:string,...args:unknown[])=>/^BEGIN|^COMMIT|^ROLLBACK/.test(sql)?{rows:[]}:query(sql,...args),release:()=>{}}) }), computeAll, isCephLandmarkCode,
+    ensureSchema: async () => {}, getPool: () => ({ query,connect:async()=>({query:async(sql:string,...args:unknown[])=>/^BEGIN|^COMMIT|^ROLLBACK/.test(sql)?{rows:[]}:query(sql,...args),release:()=>{}}) }), cephWriterClient:async()=>({query:async(sql:string,...args:unknown[])=>/^BEGIN|^COMMIT|^ROLLBACK/.test(sql)?{rows:[]}:query(sql,...args),release:()=>{}}), computeAll, isCephLandmarkCode,
     displayableCephSnapshot, isQuarantinedCephMeasurement, isDescriptiveCephMeasurement, mapCephAnalysis: (row: unknown) => row };
   return new Function(...Object.keys(dependencies), compiled + `\nreturn ${name};`)(...Object.values(dependencies));
 }

@@ -1,0 +1,246 @@
+{
+  "schema": 1,
+  "syntheticOnly": true,
+  "preparedAtUtc": "2026-10-31T00:57:43.247236+00:00",
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "branch": "feat/work-recovery-followup-20261027",
+  "baseCommit": "34b0d619a671f5b414fa0ccfea8d0489bf1721e5",
+  "baseCI": {
+    "id": 41145234489,
+    "status": "completed",
+    "conclusion": "success",
+    "source": "parent acceptance and preceding final handoff"
+  },
+  "readiness": "NOT_READY",
+  "inventorySourceDigest": "6ba8a7fce6dc1f51483d33e2295051616d710d44a2a96ca0c062bd277934763c",
+  "mapCounts": {
+    "total": 383,
+    "canonical-done": 50,
+    "entry": 4,
+    "excluded": 12,
+    "existing": 294,
+    "owner-only": 20,
+    "self": 3
+  },
+  "inventoryCounts": {
+    "routeMethods": 416,
+    "pages": 97
+  },
+  "environment": {
+    "node": "22.23.3",
+    "postgres": "18.4",
+    "browser": "system Chromium 151.0.7922.173",
+    "database": "owned loopback synthetic databases only"
+  },
+  "results": {
+    "postgres": {
+      "passed": 80,
+      "files": 4,
+      "exit": 0,
+      "newTests": 37
+    },
+    "httpBrowser": {
+      "passed": 19,
+      "files": 3,
+      "exit": 0,
+      "newTests": 9,
+      "ddlStatements": 0
+    },
+    "unitAll": {
+      "passed": 13398,
+      "files": 798,
+      "exit": 0
+    },
+    "unitFocusedIncludingMapGuards": {
+      "passed": 37,
+      "files": 6,
+      "exit": 0
+    },
+    "buildExit": 0,
+    "typecheckExit": 0,
+    "eslintAllExit": 0,
+    "eslintExistingWarnings": 209,
+    "eslintFocusedExistingWarnings": 1,
+    "moneyGuardExit": 0,
+    "bodyGuardExit": 0,
+    "inventoryVerifyExit": 0
+  },
+  "baselineExpectedRed": {
+    "file": "baseline-http.log",
+    "assertion": "authorized canonical account: case detail GET 200, assessment GET 401 instead of 200"
+  },
+  "fixtureDiagnostics": [
+    "pg-first.log: duplicate open case fixture rejected by existing constraint; use separate completed episodes.",
+    "pg-second.log and postgres-focused.log: invalid lineage insertion rejected by CHECK/trigger; final test expects that refusal and proves preserved head. No constraint or trigger disabled."
+  ],
+  "receiptSourceUnchanged": {
+    "lib/receipt-provenance-db.ts": "88d5a290b4297d803240c1e060cad8e9a3b7dd3bac1a5e6d078d0612dc1f5c10",
+    "lib/receipt-provenance.ts": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b"
+  },
+  "limits": [
+    "Read-only assessment contract; no source picker, image/file delivery, funding, bridge creation or writers.",
+    "History uses existing 5000 revisions/8 MiB limits; 128 unique external sources across all historical closures; excess refuses whole read.",
+    "All historical source permissions/ownership required because history reasons and copied values cannot be silently redacted.",
+    "No full PostgreSQL/HTTP suites locally; full final-head CI required.",
+    "Existing logout, slice28 idempotency/storage and waiting-room real-audio limitations unchanged."
+  ],
+  "finalHeadCI": "Confirm exact published head and all four terminal gates after push; see final delivery.",
+  "sources": [
+    {
+      "path": "app/api/ortho/[id]/assessment/route.ts",
+      "sha256": "aaf2bb8bd34935e8978bed4b796ab3bfda9dbfbf93c41b5db2ee850bb0a38493"
+    },
+    {
+      "path": "components/OrthoCaseAssessmentV2.tsx",
+      "sha256": "a8646df533bc50b54123c2d04d46e10bbe0748729c044a7e4e15f1cba8041030"
+    },
+    {
+      "path": "components/patient/CanonicalOrthoAssessment.tsx",
+      "sha256": "a5d33406925ed0f8d3babef842bf3cf6df1f1ad5e95bf414249eb5a3085d6d1c"
+    },
+    {
+      "path": "components/patient/CanonicalOrthoDetail.tsx",
+      "sha256": "74d6b46b08fbd4e62191ac2103d5976578477f355b8d5379b6de1652f1765439"
+    },
+    {
+      "path": "lib/canonical-ortho-assessment.ts",
+      "sha256": "a8717164ecd01ce833ef25db0f2d78c3ae61aad2f33d4ea1519b748cf10e7b35"
+    },
+    {
+      "path": "lib/canonical-record-reads.ts",
+      "sha256": "03f8c87475152a2f6b76be6db5253aaf7f149a22d6d2a31a58b8743fb31dfb42"
+    },
+    {
+      "path": "lib/ortho-assessment-store.ts",
+      "sha256": "dc13e538d0e3618df6713a5feb7643b4ed1483c1b7d3c2de8264943c6738b3fa"
+    },
+    {
+      "path": "lib/ortho-assessment-versioned-sources.ts",
+      "sha256": "f5f9dd9e5523e7a65aec0aa3f6f210054829802a9cae0329c2783e1a1a361ed8"
+    },
+    {
+      "path": "__tests__/fixtures/canonical-ortho-assessment.ts",
+      "sha256": "89aa917ce24dd83db15f3e5319597d2fb0f80dd02103a9b8a9c08c762cb2312b"
+    },
+    {
+      "path": "__tests__/postgres/ortho-canonical-assessment.test.ts",
+      "sha256": "75eb466490527645e7863269b8dfaba5ef4669641030aa7f3a3f96f89f1946d4"
+    },
+    {
+      "path": "__tests__/security-http/canonical-ortho-assessment-journey.test.ts",
+      "sha256": "0a93b2e24fdf6fe95fca0467de289c579b2e8a8d512d78e9cdea9d163bb6140c"
+    },
+    {
+      "path": "docs/security/staff-cutover/HANDOFF.md",
+      "sha256": "46bdc32626faff622e8595705afdf7b3e2d446c6cc80fe2cd935609149e5f30e"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "81909de85f31921cdda1a622290090645e51fded6a764878608885dfc49c8da2"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md",
+      "sha256": "9af47bf0a7df8890ae05400e507e225031f22bae0acba8b1107fc8dd6ad20ba8"
+    },
+    {
+      "path": "docs/security/staff-cutover/inventory.json",
+      "sha256": "99b6e77fad57420a0faa449851b1720519c7a28ab7d1f63698c7094a01f73f3e"
+    },
+    {
+      "path": "docs/review/work-ortho-assessment-slice31-20261031.md",
+      "sha256": "32fd748d0065c6f3618897008d7867e6d5e346743ab656637d0f89a50834b252"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "baseline-http.log",
+      "sha256": "05b2a23af3cd9e28b723652fcfae36a1dac49eea3f640e4711e2e3fc82c65f7e",
+      "bytes": 1696
+    },
+    {
+      "path": "postgres-final.log",
+      "sha256": "2366a7d9378587fdec107fabaa63aec60a293b31234366c31f2ce7efd08c5f90",
+      "bytes": 542
+    },
+    {
+      "path": "http-first.log",
+      "sha256": "9c8a929cac72c1b9dd8a252f489c6a4bb262755b85093080276f4080b4e73476",
+      "bytes": 631
+    },
+    {
+      "path": "unit-all.log",
+      "sha256": "6fb5894fb18773041ad6d604445bc15b9fb06460ec612b5713d43af1bf2b892d",
+      "bytes": 569
+    },
+    {
+      "path": "unit-focused.log",
+      "sha256": "9598241727098f28b6496dee85ec40d5d472c3d287816ef06882182033a00678",
+      "bytes": 430
+    },
+    {
+      "path": "typecheck-final.log",
+      "sha256": "45342ca54fc3787657ce6eb4dbe6d4510cbf68d24318d44416c0176ab31ebf4b",
+      "bytes": 208
+    },
+    {
+      "path": "lint-all.log",
+      "sha256": "5439d5273a7437367882df4d0a4cbc6235020d9df825a518e848f4d8757d6675",
+      "bytes": 58889
+    },
+    {
+      "path": "lint-focused.log",
+      "sha256": "2e1e2d77aab5b7b3e881890708244fee45913e6561423ed156fc7e87c4dad6f9",
+      "bytes": 487
+    },
+    {
+      "path": "lint-component-baseline.log",
+      "sha256": "249486ac12a4369dacfd96fe29becf1392595c38fac3368e1a4d3c9faa95514f",
+      "bytes": 487
+    },
+    {
+      "path": "build-final.log",
+      "sha256": "eaea04a2f2b424344b312255f83be06d6fe2ca9493dd1d86c845d6fec0ce244c",
+      "bytes": 13580
+    },
+    {
+      "path": "money-guard.log",
+      "sha256": "22f23b17dc7db132f17b8f5c1660da5cf0dd509c6b30e14079250c01f50aba49",
+      "bytes": 1843
+    },
+    {
+      "path": "body-guard.log",
+      "sha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "bytes": 197
+    },
+    {
+      "path": "inventory-verify.log",
+      "sha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "bytes": 329
+    },
+    {
+      "path": "legacy-body-proof.json",
+      "sha256": "3f858c056546c470dd889ea95c39e7688accfb42626aa03258a31f4c55ab6e25",
+      "bytes": 439
+    },
+    {
+      "path": "ortho-assessment-390.png",
+      "sha256": "540bfc615ba2411107e6c1cb3eab62fcd67653e55bfc198da18b54e94f277c82",
+      "bytes": 169159
+    },
+    {
+      "path": "pg-first.log",
+      "sha256": "3315d0f29bdb21fe7d98849df6f2bde716a87c6ba92e840c0a2a9a873d4afa70",
+      "bytes": 1148
+    },
+    {
+      "path": "pg-second.log",
+      "sha256": "eb807b0f49b662a1bdf605fd3f09891e04e9cf577ba2e959cc1a9c87352ca3ba",
+      "bytes": 1368
+    },
+    {
+      "path": "postgres-focused.log",
+      "sha256": "a28cfbe4a229460b2a144dd8182b3728692937ce5df5734a244280e380ecf56d",
+      "bytes": 1248
+    }
+  ]
+}

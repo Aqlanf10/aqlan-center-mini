@@ -1,3 +1,4 @@
+import {withLegacyStaffReadOnlySnapshot} from "./legacy-staff-readonly-snapshot";
 /** Atomic same-currency positive amendment of one explicitly approved, single-item plan.
  * Original clinical/financial identities are never updated. New debt is ONLY
  * the price difference, documented as a dated invoice and immutable event.
@@ -5,7 +6,7 @@
 import type { SessionPayload } from "./auth";
 import { ensureSchema, getPool, insertAuditRow, type DbClient } from "./db";
 import { readApprovedAgreement } from "./approved-agreements";
-import { debtRequestHash, DebtRepaymentError } from "./debt-installments-db";
+import { debtRequestHash, DebtRepaymentError, isCanonicalDebtActor, type DebtActorSource } from "./debt-installments-db";
 import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { lockDebtAccountForSchedule } from "./debt-account-position";
 import { documentNumberSql } from "./document-numbers";
@@ -32,7 +33,9 @@ const fail=(message:string,code:DebtRepaymentError["code"]="conflict"):never=>{t
 const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==="object"&&!Array.isArray(v);
 const amount=(n:number)=>Number.isSafeInteger(n)&&n>=0;
 const sameCurrency=(currency:string):Currency=>requireCurrency(currency,"اتفاق العلاج",0);
-async function authorize(client:DbClient,session:SessionPayload){
+async function authorize(client:DbClient,session:DebtActorSource){
+ // The canonical branded actor re-proves its live operation and grant (M2 slice 94d-2).
+ if(isCanonicalDebtActor(session)){if(!await session.recheck(client))fail("انتهت الجلسة أو سُحبت صلاحية إدارة الاتفاقات؛ سجّل الدخول من جديد.","unauthorized");return;}
  const active=await revalidateSessionInTransaction(session,client);
  if(!active||active.role!=="admin")fail("يتطلب تعديل اتفاق العلاج جلسة مدير سارية.","unauthorized");
 }
@@ -114,13 +117,16 @@ async function snapshot(client:DbClient,planId:number){
 }
 export async function readAgreementAmendment(planId:number,session:SessionPayload){
  if(!positive(planId))fail("معرف الخطة غير صالح.","invalid");
- await ensureSchema();const client=await getPool().connect();let destroy=false;
- try{await authorize(client,session);await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-  const result=await snapshot(client,planId);
-  const services=(await client.query<ServiceRow>("SELECT id,name,category,is_active FROM services WHERE is_active=TRUE ORDER BY name,id")).rows;
-  await client.query("COMMIT");
-  return {...result,services};
- }catch(e){try{await client.query("ROLLBACK");}catch{destroy=true;}throw e;}finally{client.release(destroy);}
+ return withLegacyStaffReadOnlySnapshot(session,{
+  allows:current=>current.role==="admin",
+  unauthorized:()=>new DebtRepaymentError("unauthorized","يتطلب تعديل اتفاق العلاج جلسة مدير سارية."),
+ },async client=>readAgreementAmendmentWith(client,planId));
+}
+/** The preview on a caller's read-only snapshot (the canonical read decides the scope first). */
+export async function readAgreementAmendmentWith(client:Pick<DbClient,"query">,planId:number){
+ const result=await snapshot(client as DbClient,planId);
+ const services=(await client.query<ServiceRow>("SELECT id,name,category,is_active FROM services WHERE is_active=TRUE ORDER BY name,id")).rows;
+ return {...result,services};
 }
 
 /** Canonical event-time doctor policy and case override. No client rates. */
@@ -173,55 +179,76 @@ export interface AgreementDeltaReceipt {
 async function lockAmendmentAttempt(client:DbClient,key:string){
  await client.query("SELECT pg_advisory_xact_lock(hashtextextended('aqlan:agreement-delta:' || $1::text, 0))",[key]);
 }
-const amendmentDigest=(planId:number,input:AmendmentWrite,session:SessionPayload)=>
+const amendmentDigest=(planId:number,input:AmendmentWrite,session:DebtActorSource)=>
  debtRequestHash({purpose:"agreement-delta-v1",planId,input,actor:session.userId});
 /** POST status only accepts the EXACT saved command; actor never comes from body. */
+const validAmendment=(planId:number,input:AmendmentWrite)=>positive(planId)&&record(input)&&!Object.keys(input).some(k=>!["idempotencyKey","expectedSourceHash","newServiceId","newUnitMinor","reason"].includes(k))
+ &&typeof input.idempotencyKey==="string"&&/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey)
+ &&typeof input.expectedSourceHash==="string"&&/^[a-f0-9]{64}$/.test(input.expectedSourceHash)
+ &&positive(input.newServiceId)&&amount(input.newUnitMinor)&&typeof input.reason==="string"
+ &&input.reason.trim().length>=3&&input.reason.trim().length<=300;
+/** POST status only accepts the EXACT saved command; actor never comes from body. */
 export async function readAgreementAmendmentAttemptStatus(planId:number,input:AmendmentWrite,session:SessionPayload){
- if(!positive(planId)||!record(input)||Object.keys(input).some(k=>!["idempotencyKey","expectedSourceHash","newServiceId","newUnitMinor","reason"].includes(k))
-   ||typeof input.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey)
-   ||typeof input.expectedSourceHash!=="string"||!/^[a-f0-9]{64}$/.test(input.expectedSourceHash)
-   ||!positive(input.newServiceId)||!amount(input.newUnitMinor)||typeof input.reason!=="string"
-   ||input.reason.trim().length<3||input.reason.trim().length>300)
-   fail("طلب الاستعلام عن المحاولة غير صالح.","invalid");
- const hash=amendmentDigest(planId,input,session);
+ if(!validAmendment(planId,input))fail("طلب الاستعلام عن المحاولة غير صالح.","invalid");
  await ensureSchema();const client=await getPool().connect();let destroy=false;
  try{
-  await client.query("BEGIN");await authorize(client,session);
-  await lockAmendmentAttempt(client,input.idempotencyKey);
-  const saved=(await client.query<{id:string;plan_id:number;actor_id:number;request_hash:string;receipt:Record<string,unknown>}>(
-   "SELECT id,plan_id,actor_id,request_hash,receipt FROM agreement_delta_amendments WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
-  if(saved){
-    if(saved.actor_id!==session.userId||saved.plan_id!==planId||saved.request_hash!==hash)
-       fail("هذا المفتاح يخص محاولة مختلفة.");
-    if(!record(saved.receipt)||saved.receipt.idempotencyKey!==input.idempotencyKey||
-      !positive(saved.receipt.deltaInvoiceId))fail("إقرار تعديل محفوظ غير متطابق.");
-    await authorize(client,session);await client.query("COMMIT");
-    return {state:"committed" as const,receipt:{...saved.receipt,eventId:safe(saved.id),replayed:true}};
-  }
-  const rejected=(await client.query<{actor_id:number;plan_id:number;request_hash:string;expected_source_hash:string;observed_source_hash:string;rejected_at:Date}>(
-    "SELECT actor_id,plan_id,request_hash,expected_source_hash,observed_source_hash,rejected_at FROM agreement_delta_attempt_rejections WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
-  if(rejected&&(rejected.actor_id!==session.userId||rejected.plan_id!==planId||
-    rejected.request_hash!==hash||rejected.expected_source_hash!==input.expectedSourceHash))
-    fail("بصمة المحاولة المرفوضة غير متطابقة.");
-  await authorize(client,session);await client.query("COMMIT");
-  if(rejected)return {state:"rejected_stale" as const,requestKey:input.idempotencyKey,
-    requestHash:hash,observedSourceHash:rejected.observed_source_hash,rejectedAt:rejected.rejected_at.toISOString()};
-  return {state:"unresolved" as const}; // delayed requests may still arrive; NEVER clear
+  await client.query("BEGIN");const status=await readAgreementAmendmentAttemptStatusOn(client,planId,input,session);
+  await client.query("COMMIT");return status;
  }catch(error){try{await client.query("ROLLBACK");}catch{destroy=true;}throw error;}
  finally{client.release(destroy);}
 }
-export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,session:SessionPayload){
- if(!positive(planId)||!record(input)||Object.keys(input).some(k=>!["idempotencyKey","expectedSourceHash","newServiceId","newUnitMinor","reason"].includes(k))
-  ||typeof input.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey)
-  ||typeof input.expectedSourceHash!=="string"||!/^[a-f0-9]{64}$/.test(input.expectedSourceHash)
-  ||!positive(input.newServiceId)||!amount(input.newUnitMinor)||typeof input.reason!=="string"
-  ||input.reason.trim().length<3||input.reason.trim().length>300)
-   fail("يرجى مراجعة الخدمة المحددة والسعر ومفتاح الطلب والسبب.","invalid");
+/** The status check on a caller's transaction. `beforeAttempt` decides the canonical scope
+ * after the attempt fence and before any saved attempt is read. Writes nothing. */
+export async function readAgreementAmendmentAttemptStatusOn(client:DbClient,planId:number,input:AmendmentWrite,session:DebtActorSource,beforeAttempt?:()=>Promise<void>){
+ if(!validAmendment(planId,input))fail("طلب الاستعلام عن المحاولة غير صالح.","invalid");
  const hash=amendmentDigest(planId,input,session);
+ await authorize(client,session);
+ await lockAmendmentAttempt(client,input.idempotencyKey);
+ if(beforeAttempt)await beforeAttempt();
+ const saved=(await client.query<{id:string;plan_id:number;actor_id:number;request_hash:string;receipt:Record<string,unknown>}>(
+  "SELECT id,plan_id,actor_id,request_hash,receipt FROM agreement_delta_amendments WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
+ if(saved){
+   if(saved.actor_id!==session.userId||saved.plan_id!==planId||saved.request_hash!==hash)
+      fail("هذا المفتاح يخص محاولة مختلفة.");
+   if(!record(saved.receipt)||saved.receipt.idempotencyKey!==input.idempotencyKey||
+     !positive(saved.receipt.deltaInvoiceId))fail("إقرار تعديل محفوظ غير متطابق.");
+   await authorize(client,session);
+   return {state:"committed" as const,receipt:{...saved.receipt,eventId:safe(saved.id),replayed:true}};
+ }
+ const rejected=(await client.query<{actor_id:number;plan_id:number;request_hash:string;expected_source_hash:string;observed_source_hash:string;rejected_at:Date}>(
+   "SELECT actor_id,plan_id,request_hash,expected_source_hash,observed_source_hash,rejected_at FROM agreement_delta_attempt_rejections WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
+ if(rejected&&(rejected.actor_id!==session.userId||rejected.plan_id!==planId||
+   rejected.request_hash!==hash||rejected.expected_source_hash!==input.expectedSourceHash))
+   fail("بصمة المحاولة المرفوضة غير متطابقة.");
+ await authorize(client,session);
+ if(rejected)return {state:"rejected_stale" as const,requestKey:input.idempotencyKey,
+   requestHash:hash,observedSourceHash:rejected.observed_source_hash,rejectedAt:rejected.rejected_at.toISOString()};
+ return {state:"unresolved" as const}; // delayed requests may still arrive; NEVER clear
+}
+export type AgreementAmendmentSaved=AgreementDeltaReceipt&{eventId:number;replayed:boolean};
+/** A stale source: the rejection proof is written; the caller commits it, then refuses. */
+export type AgreementAmendmentStale={stale:true;message:string};
+const INVALID_AMENDMENT="يرجى مراجعة الخدمة المحددة والسعر ومفتاح الطلب والسبب.";
+export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,session:SessionPayload){
+ if(!validAmendment(planId,input))fail(INVALID_AMENDMENT,"invalid");
  await ensureSchema();const client=await getPool().connect();let destroy=false;
  try{
-  await client.query("BEGIN");await authorize(client,session);
+  await client.query("BEGIN");
+  const outcome=await saveAgreementAmendmentOn(client,planId,input,session);
+  await client.query("COMMIT");
+  if("stale" in outcome)fail(outcome.message,"stale");
+  return outcome as AgreementAmendmentSaved;
+ }catch(e){try{await client.query("ROLLBACK");}catch{destroy=true;}throw e;}finally{client.release(destroy);}
+}
+/** The amendment on a caller's transaction. `afterLocks` decides the canonical scope right after
+ * the patient row lock; with it, the stale proof and the replay are read only after that. */
+export async function saveAgreementAmendmentOn(client:DbClient,planId:number,input:AmendmentWrite,session:DebtActorSource,
+ afterLocks?:(patientId:number)=>Promise<void>):Promise<AgreementAmendmentSaved|AgreementAmendmentStale>{
+ if(!validAmendment(planId,input))fail(INVALID_AMENDMENT,"invalid");
+ const hash=amendmentDigest(planId,input,session);
+  await authorize(client,session);
   await lockAmendmentAttempt(client,input.idempotencyKey);
+  const staleCheck=async()=>{
   const staleRejection=(await client.query<{request_hash:string;actor_id:number;plan_id:number}>(
     "SELECT request_hash,actor_id,plan_id FROM agreement_delta_attempt_rejections WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
   if(staleRejection){
@@ -229,6 +256,7 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
       fail("مفتاح المحاولة المرفوضة مستخدم لطلب مختلف.");
     fail("هذه المحاولة رُفضت بسبب تغيّر المصدر ولم تُحفظ؛ افحص حالتها قبل تحديث المعاينة.","stale");
   }
+  };
   const replay=async():Promise<(AgreementDeltaReceipt & {eventId:number;replayed:boolean})|null>=>{
    const row=(await client.query<{request_hash:string;actor_id:number;plan_id:number;receipt:Record<string,unknown>;id:string}>(
     "SELECT request_hash,actor_id,plan_id,receipt,id FROM agreement_delta_amendments WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
@@ -238,14 +266,15 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
      !positive(row.receipt.deltaInvoiceId))fail("إقرار المحاولة السابقة ناقص؛ تحقق من المصادر.");
    return {...row.receipt as unknown as AgreementDeltaReceipt,eventId:safe(row.id),replayed:true};
   };
-  const earlier=await replay();if(earlier){await client.query("COMMIT");return earlier;}
+  if(!afterLocks){await staleCheck();const earlier=await replay();if(earlier)return earlier;}
   const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM treatment_plans WHERE id=$1",[planId])).rows[0];
   if(!owner)fail("الخطة غير موجودة.","missing");
   // Single patient lock serializes repeated and competing source/settlement writers.
   await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[owner.patient_id]);
+  if(afterLocks){await afterLocks(owner.patient_id);await staleCheck();}
   await lockDebtAccountForSchedule(client,owner.patient_id,true);
   await client.query("SELECT id FROM plan_items WHERE plan_id=$1 ORDER BY id FOR UPDATE",[planId]);
-  const repeated=await replay();if(repeated){await authorize(client,session);await client.query("COMMIT");return repeated;}
+  const repeated=await replay();if(repeated){await authorize(client,session);return repeated;}
   const before=await snapshot(client,planId);
   if(before.sourceHash!==input.expectedSourceHash){
     // Positive rejection proof, committed BEFORE replying 409. Do not convert
@@ -254,8 +283,8 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
       (idempotency_key,request_hash,actor_id,plan_id,patient_id,expected_source_hash,observed_source_hash)
       VALUES($1,$2,$3,$4,$5,$6,$7)`,[input.idempotencyKey,hash,session.userId,planId,
       before.patientId,input.expectedSourceHash,before.sourceHash]);
-    await authorize(client,session);await client.query("COMMIT");
-    fail("تغيرت مصادر الاتفاق أو التسويات؛ تحقق من رفض المحاولة ثم حدّث المعاينة.","stale");
+    await authorize(client,session);
+    return {stale:true,message:"تغيرت مصادر الاتفاق أو التسويات؛ تحقق من رفض المحاولة ثم حدّث المعاينة."};
   }
   if(before.patientId!==owner.patient_id)fail("تغير مالك المصدر؛ أوقف التعديل.");
   const service=(await client.query<ServiceRow>("SELECT id,name,category,is_active FROM services WHERE id=$1",[input.newServiceId])).rows[0];
@@ -305,7 +334,6 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
     deltaMinor:quote.deltaMinor,sourceProofHash:before.sourceHash,reason:input.reason.trim(),
     fromServiceId:before.oldServiceId,toServiceId:input.newServiceId,refundsPreserved:true,
     originalInvoicesPreserved:true,cashMovementMinor:0,commission}});
-  await authorize(client,session);await client.query("COMMIT");
+  await authorize(client,session);
   return {...receipt,eventId:safe(row.id),replayed:false};
- }catch(e){try{await client.query("ROLLBACK");}catch{destroy=true;}throw e;}finally{client.release(destroy);}
 }

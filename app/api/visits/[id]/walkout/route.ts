@@ -4,6 +4,9 @@ import { clinicDateString } from "@/lib/schedule";
 import { readVisitCheckout } from "@/lib/checkout-db";
 import { authorizeVisit } from "@/lib/operational-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalVisitWalkout } from "@/lib/canonical-visit-money";
 import { canSeeWalkout } from "@/lib/walkout-access";
 import { canReadReceptionHandoff } from "@/lib/reception-handoff";
 import { readReceptionHandoff } from "@/lib/reception-handoff-db";
@@ -16,6 +19,13 @@ export const dynamic = "force-dynamic";
  * بالخطة)، وفاتورتها، وسندات يومها، والرصيد بكل عملة، والموعد القادم.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 89 (owner decisions G4-1, G4-4, G4-6): the groups by grant, one snapshot.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalVisitWalkout(selected.handle, (await context.params).id), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل ملخّص المغادرة."); }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

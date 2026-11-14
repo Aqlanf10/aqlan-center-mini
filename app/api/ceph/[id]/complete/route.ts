@@ -1,6 +1,9 @@
 import { parseCephSourceIdentity } from "@/lib/ceph-source-review";
 import { parseCephCompletionSnapshot } from "@/lib/ceph-completion-snapshot";
 import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
+import { CanonicalCephCompleteRefusal, commandCanonicalCephComplete } from "@/lib/canonical-ceph-complete-command";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { NextResponse } from "next/server";
 import { completeCephAnalysis, getCephStudy } from "@/lib/db";
@@ -23,6 +26,20 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const body: unknown = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalCephCompleteRefusal("invalid_ceph_complete", 400, "اعتماد الدراسة لا يقبل مرشحات إضافية.");
+      return NextResponse.json(await commandCanonicalCephComplete(selected.handle, (await context.params).id, body), { headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
+      if (error instanceof CanonicalCephCompleteRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد اعتماد الدراسة. تحقق من السجل الحالي قبل أي طلب جديد.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canWriteCephClinical(session.role)) return NextResponse.json({ message: "اعتماد التحليل متاح للطبيب والمدير فقط." }, { status: 403 });

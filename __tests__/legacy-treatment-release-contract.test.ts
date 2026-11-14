@@ -71,7 +71,9 @@ describe("legacy release composition contracts", () => {
   });
 
   it("locks void in deterministic patient, plans, items, agreements order", () => {
-    const queries = lockingSql(functionBody(legacy, "voidLegacyTreatment"));
+    // Slice 95b: the legacy entry delegates to the shared transaction form, where the locks live.
+    expect(functionBody(legacy, "voidLegacyTreatment")).toContain("voidLegacyTreatmentOn(client, input)");
+    const queries = lockingSql(functionBody(legacy, "voidLegacyTreatmentOn"));
     const patient = queries.findIndex((query) => /FROM patients\b/.test(query));
     const plans = queries.findIndex((query) => /FROM treatment_plans\b/.test(query));
     const items = queries.findIndex((query) => /FROM plan_items\b/.test(query));
@@ -85,7 +87,7 @@ describe("legacy release composition contracts", () => {
   });
 
   it("void preserves work records and review under the explicit two-level collection policy", () => {
-    const body = functionBody(legacy, "voidLegacyTreatment");
+    const body = functionBody(legacy, "voidLegacyTreatmentOn");
     expect(body).toMatch(/billing_status\s*=\s*'needs_financial_review'/);
     expect(body).not.toMatch(/billing_status\s*=\s*'unbilled'/);
     expect(body).not.toMatch(/UPDATE\s+treatment_plans\s+SET\s+status\s*=\s*'cancelled'/i);
@@ -93,7 +95,8 @@ describe("legacy release composition contracts", () => {
     expect(body).toContain("readLegacyVoidPreviewInTx");
     expect(body.indexOf("readLegacyVoidPreviewInTx")).toBeLessThan(body.indexOf('if (agreement.opening_effect !== "none")'));
     expect(body).toContain("preview_stale");
-    expect(body).toContain("isAdmin(input.actorRole)");
+    // The legacy entry keeps its label check; the canonical command checks its grants (slice 95b).
+    expect(functionBody(legacy, "voidLegacyTreatment")).toContain("isAdmin(input.actorRole)");
     const policy = readFileSync("lib/legacy-treatment-void.ts", "utf8");
     expect(policy).toMatch(/facts\.netCollectionsMinor > 0 \? "opening_collected"/);
     expect(policy).toMatch(/after < facts\.netCollectionsMinor \? "opening_settled"/);

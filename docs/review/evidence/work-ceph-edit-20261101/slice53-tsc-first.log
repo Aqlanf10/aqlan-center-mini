@@ -1,0 +1,22 @@
+__tests__/canonical-ceph-edit-command.test.ts(13,289): error TS2345: Argument of type '(points: { code: string; x: number; y: number; source: string; } | { code: string; x: number; y: number; source: string; } | { x: string; code: string; y: number; source: string; } | { source: string[]; code: string; x: number; y: number; } | { ...; }) => void' is not assignable to parameter of type '(...args: [{ code: string; x: number; y: number; source: string; }, { code: string; x: number; y: number; source: string; }] | [{ code: string; x: number; y: number; source: string; }] | [{ x: string; code: string; y: number; source: string; }] | [...] | [...] | [...]) => Awaitable<...>'.
+  Types of parameters 'points' and 'args' are incompatible.
+    Type '[{ code: string; x: number; y: number; source: string; }, { code: string; x: number; y: number; source: string; }] | [{ code: string; x: number; y: number; source: string; }] | [{ x: string; code: string; y: number; source: string; }] | [...] | [...] | [...]' is not assignable to type '[points: { code: string; x: number; y: number; source: string; } | { code: string; x: number; y: number; source: string; } | { x: string; code: string; y: number; source: string; } | { source: string[]; code: string; x: number; y: number; } | { ...; }]'.
+      Type '[{ code: string; x: number; y: number; source: string; }, { code: string; x: number; y: number; source: string; }]' is not assignable to type '[points: { code: string; x: number; y: number; source: string; } | { code: string; x: number; y: number; source: string; } | { x: string; code: string; y: number; source: string; } | { source: string[]; code: string; x: number; y: number; } | { ...; }]'.
+        Source has 2 element(s) but target allows only 1.
+lib/canonical-ceph-edit-command.ts(73,88): error TS2345: Argument of type 'DbClient' is not assignable to parameter of type 'PoolClient'.
+  Type 'DbClient' is missing the following properties from type 'PoolClient': port, host, ssl, pipeline, and 27 more.
+lib/canonical-ceph-edit-command.ts(77,63): error TS2345: Argument of type 'DbClient' is not assignable to parameter of type 'PoolClient'.
+  Type 'DbClient' is missing the following properties from type 'PoolClient': port, host, ssl, pipeline, and 27 more.
+lib/canonical-ceph-edit-command.ts(81,63): error TS2345: Argument of type 'DbClient' is not assignable to parameter of type 'PoolClient'.
+  Type 'DbClient' is missing the following properties from type 'PoolClient': port, host, ssl, pipeline, and 27 more.
+lib/db.ts(25315,61): error TS2345: Argument of type 'DbClient' is not assignable to parameter of type 'PoolClient'.
+  Type 'DbClient' is missing the following properties from type 'PoolClient': port, host, ssl, pipeline, and 27 more.
+lib/db.ts(25383,59): error TS2345: Argument of type 'DbClient' is not assignable to parameter of type 'PoolClient'.
+  Type 'DbClient' is missing the following properties from type 'PoolClient': port, host, ssl, pipeline, and 27 more.
+lib/db.ts(25456,59): error TS2345: Argument of type 'DbClient' is not assignable to parameter of type 'PoolClient'.
+  Type 'DbClient' is missing the following properties from type 'PoolClient': port, host, ssl, pipeline, and 27 more.
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

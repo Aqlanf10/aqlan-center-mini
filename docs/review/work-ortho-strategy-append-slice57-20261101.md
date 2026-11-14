@@ -1,0 +1,18 @@
+# Slice 57 — immutable orthodontic strategy command
+
+Local base 56 `177825e5`; published WORK remains `7f586db2`. This contract converts POST only. Default GET and the saved-strategy reference UI are unchanged; bounded editor admission and reuse of the existing draft owner are the following contract, not claimed complete here.
+
+| Requirement | Evidence |
+|---|---|
+| Real authority | Existing ortho-edit plus its view prerequisite and current patient scope. Own/all/owner positive; none, reader, unlinked and outside negative; outside equals missing. Canonical identity is supplied without a fabricated legacy session. |
+| Independent plan links | Existing plan view AND edit are required to add, retain or remove links. Replay of removal still checks the original predecessor. Read-only plan authority is insufficient; no new role shortcut. |
+| Native meaning | Shared fingerprint, immutable INSERT, binding engine, authored snapshots and actual-actor audit. Retrospective documentation never reopens closed treatment. Foreign live references contribute unavailable state, with no current foreign names or financial data replacing historical snapshots. |
+| Concurrency | Patient lock then fresh scope/session; NOWAIT secondary locks on plan parents, items, problems and case/bridge refuse inverse waits. Actual competing same-command waiters yield one insert and one receipt replay. Post-wait expiry/membership and revocation behind the identity fence refuse; audit/late-expiry failures roll back both records. |
+| Resource admission | Existing canonical reader limits remain 5000 revisions / 8 MiB and a 128-reference all-history union. The final INSERT cannot exceed the history budget. Actual 5000-revision and 128-reference boundary cases remain readable after refused appends. Legacy strategy resource policy is unchanged; oversized legacy history remains an explicit adoption constraint. |
+| Integrity and compatibility | Same owned connection; no implicit schema creation or pool query. Nonempty invoices/plans/items and patient/bridge identities remain unchanged. A detached historical bridge is not called an empty case. Actual legacy editor/recovery and the preceding canonical assessment writer pass built-browser regression. |
+
+The before witness returned 401 instead of 201 on a valid canonical command, using the actual previous 7f build and pinned unchanged strategy inputs. Focused PostgreSQL passed **70 tests in three files**, then the expanded command file **27 tests**, covering **71 distinct cases**. Focused unit/map tests passed **36 in two files**. Typecheck, build `1MgY7wIDuGln87vYnj4UN` and targeted lint passed; **25 HTTP/Chromium tests in four files** passed on that build. The original TypeScript narrowing error and its corrected run remain recorded. An old malformed denial witness was replaced with a valid native command and now requires exact 403, preserving its no-effect assertion.
+
+Full combined unit/PG/runtime, exact-head CI and independent review remain separate. Six bounded source checks preserve native clauses, the binding engine, default canonical reader and legacy POST body; they are not a proof of whole-system equivalence. The local map has **77 canonical-done / 267 existing** ordinary methods; the published map still has 75 / 269. This is route conversion only, not whole-program completion.
+
+No main merge, deployment, live data/settings, new migration or independent Rx change. Actual Docker remains blocked by the enforced Alpine destination denial. Inventory, schema convergence, remaining integration review and operational acceptance stay open. See [manifest and original evidence](evidence/work-ortho-strategy-append-20261101/manifest.json).

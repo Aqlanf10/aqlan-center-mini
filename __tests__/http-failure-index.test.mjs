@@ -69,10 +69,11 @@ it('collects valid report then deletes raw private metadata', () => {
 it('workflow keeps original test command status and only uploads exact sanitized paths', () => {
   const workflow = readFileSync(resolve('.github/workflows/ci.yml'), 'utf8');
   for (const mode of ['main', 'inventory']) {
-    const command = `npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-${mode}-raw.json"`;
+    // Integration: the normal suite is sharded across two runners; inventory runs whole in each.
+    const command = `npm run test:security-http -- --reporter=default --reporter=json --includeTaskLocation --outputFile.json="$RUNNER_TEMP/http-${mode}-raw.json"${mode === "main" ? " --shard=${{ matrix.shard }}/2" : ""}`;
     expect(workflow).toContain(`run: ${command}`);
     // Actual command body run with a shell-function double: arbitrary nonzero exit survives.
-    const result = spawnSync('bash', ['-c', `npm() { return 37; }; ${command}`], { env: { PATH: process.env.PATH, RUNNER_TEMP: root } });
+    const result = spawnSync('bash', ['-c', `npm() { return 37; }; ${command.replace('${{ matrix.shard }}', '1')}`], { env: { PATH: process.env.PATH, RUNNER_TEMP: root } });
     expect(result.status).toBe(37);
     expect(workflow).toContain(`path: .http-failure-index/${mode}.json\n          if-no-files-found: error`);
     expect(workflow).toContain(`if: always()\n        run: node scripts/dependency-security/http-failure-index.mjs ${mode}`);

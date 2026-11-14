@@ -3,6 +3,7 @@
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useState, useEffect, useRef } from "react";
+import { newRequestKey } from "@/lib/request-key";
 import {
   Activity,
   Heart,
@@ -47,6 +48,7 @@ export function VitalsModal({
   const [bloodGroup, setBloodGroup] = useState<string>("");
   const [recordedAt, setRecordedAt] = useState<string>("");
   const [medicalNote, setMedicalNote] = useState<string>("");
+  const requestKey = useRef(newRequestKey());
 
   const [saving, setSaving] = useState(false);
   const committed = useRef(false);
@@ -146,11 +148,11 @@ export function VitalsModal({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            bpSystolic: numSys, bpDiastolic: numDia, pulse: numPulse, glucose: numSugar,
+            requestKey: requestKey.current, bpSystolic: numSys, bpDiastolic: numDia, pulse: numPulse, glucose: numSugar,
             recordedAt: vitalsData.recordedAt, medicalAlert: serializedAlert,
           }),
         });
-        if (recorded.ok) committed.current = true;
+        if (recorded.ok) { committed.current = true; requestKey.current = newRequestKey(); }
         const data = await recorded.json().catch(() => null);
         if (!recorded.ok) {
           throw new Error(data?.message || "تعذّر حفظ القراءة.");
