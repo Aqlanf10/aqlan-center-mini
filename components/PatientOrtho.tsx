@@ -2092,7 +2092,8 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
   const [auxiliaries, setAuxiliaries] = form.field<OrthoAuxiliary[] | null>("auxiliaries", null);
   const [auxiliaryOther, setAuxiliaryOther] = form.field("auxiliaryOther", "");
   // Review #483 6871207083: a refusal is shown beside the save button, not only at the top of the page.
-  const [refusal, setRefusal] = useState<string | null>(null);
+  // It lives in the draft, like the typed values, so the history refresh that remounts the form keeps it.
+  const [refusal] = form.field<string | null>("refusal", null);
   const auxiliaryBody = auxiliaries === null ? {}
     : { auxiliaries: [...auxiliaries], ...(auxiliaries.includes("other") ? { auxiliaryOther } : {}) };
   const previousAdjustment = caseRow.adjustments[0] ?? null;
@@ -2197,7 +2198,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
     const operation = recovered ? form.beginRetry(allowed) : form.begin(allowed);
     if (!operation) return;
     const submittedPhotos = recovered ? [] : [...queue];
-    onError(null); setRefusal(null);
+    onError(null); form.commit("refusal", null);
     try {
       const command = commandState.command ?? createAdjustmentCommand(sessionStorage, commandScope, {
         doneOn, upperWire: removeUpperWire ? "" : upperWire, lowerWire: removeLowerWire ? "" : lowerWire,
@@ -2233,7 +2234,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError, on
           }
           // Settled outcome: the fields are editable again but nothing is marked saved.
           form.acknowledge(operation, {});
-          setRefusal(payload.message); onError(payload.message); onConflictRefresh?.(); return;
+          form.commit("refusal", payload.message); onError(payload.message); onConflictRefresh?.(); return;
         }
         // A receipt for another request is never success: only this key's own replay may say "existing".
         if (payload && typeof payload === "object" && (payload as { existing?: unknown }).existing === true
