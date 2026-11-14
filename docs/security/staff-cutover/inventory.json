@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "8732b83cc7b55a79c0cec961926d3e4003c064017421b15e5f297783bdaf6681",
+  "sourceDigest": "1faa67a741eaeea5d5eb15fa7857455b55b893b508138d4068f6f7e9461a3fa4",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -2275,15 +2275,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 13
         },
         {
           "symbol": "requireSession",
-          "line": 46
+          "line": 48
         },
         {
           "symbol": "requireSession",
-          "line": 91
+          "line": 93
         }
       ]
     },
@@ -9389,15 +9389,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 13
         },
         {
           "symbol": "requireSession",
-          "line": 46
+          "line": 48
         },
         {
           "symbol": "requireSession",
-          "line": 91
+          "line": 93
         }
       ]
     },
@@ -9417,15 +9417,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 13
         },
         {
           "symbol": "requireSession",
-          "line": 46
+          "line": 48
         },
         {
           "symbol": "requireSession",
-          "line": 91
+          "line": 93
         }
       ]
     },
