@@ -81,7 +81,7 @@ Lip Bumper, Lingual Holding Arch, Quad Helix, and "other" (free text).
 - Done (`ef54ef1e`, `ff9d6da6`): A1–A4 (wires, including "other") and B1 (self-ligating metal and
   ceramic, lingual, sapphire). Visits are first again. Covered by unit tests and a built-app journey at
   390px and 1280px.
-- Done on the integration branch (not yet pushed when this line was written): B2, the auxiliaries, with
+- Done on the integration branch (pushed at `907f5c4b`, report on #483 6869934435): B2, the auxiliaries, with
   migration `0132_ortho_adjustment_auxiliaries.sql` allocated by Dot (#483 6867852606).
   - Storage: `ortho_adjustments.auxiliaries TEXT[]` and `auxiliary_other TEXT`, both nullable, no default and no
     backfill. NULL means not recorded (every earlier session), `{}` is an explicit "none". A CHECK (through the
