@@ -93,8 +93,8 @@ describe("سياسة الكوكيز — SameSite=Lax بلا Partitioned (S4)", (
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: baseUrl },
       body: JSON.stringify({
-        phone: TEST_PATIENTS.patientA.phone,
-        patientNumber: TEST_PATIENTS.patientA.patientNumber,
+        username: TEST_PATIENTS.patientA.loginName,
+        password: TEST_PATIENTS.patientA.password,
       }),
     });
     expect(response.status).toBe(200);

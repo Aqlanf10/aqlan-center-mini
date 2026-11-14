@@ -10,6 +10,8 @@
  * عربية معقّمة: لا رمزٌ ولا جسمُ استجابةٍ خام يخرج منها.
  */
 
+import { assertSafeMessagingOutboundUrl, SAFE_FETCH_INIT } from "./safe-outbound-url";
+
 export interface WhatsAppCloudConfig {
   token: string;
   phoneNumberId: string;
@@ -18,6 +20,7 @@ export interface WhatsAppCloudConfig {
   provider?: "meta" | "bsp";
   apiBaseUrl?: string;
   authHeader?: string;
+  resolveDns?: (hostname: string) => Promise<string[]>;
 }
 
 /** عنوان الإرسال وترويساته — Meta مباشرةً أو المزوّد الشريك. دالة خالصة. */
@@ -117,9 +120,22 @@ async function postToGraph(
   timeoutMs: number,
 ): Promise<SendResult> {
   const { url, headers } = whatsAppEndpoint(config);
+  const safeUrl = await assertSafeMessagingOutboundUrl(url, {
+    resolveDns: config.resolveDns,
+    skipLiveDns: fetchImpl !== fetch,
+  });
+  if (!safeUrl.ok) {
+    return {
+      ok: false,
+      message: safeUrl.reason ?? "عنوان واجهة واتساب مرفوض أمنيًّا.",
+      retriable: false,
+      recipientOnly: false,
+    };
+  }
   let response: Response;
   try {
     response = await fetchImpl(url, {
+      ...SAFE_FETCH_INIT,
       method: "POST",
       headers,
       body: JSON.stringify(requestBody),
@@ -127,6 +143,14 @@ async function postToGraph(
     });
   } catch {
     return { ok: false, message: "تعذّر الاتصال بخدمة واتساب — يُعاد لاحقًا.", retriable: true, recipientOnly: false };
+  }
+  if (response.status >= 300 && response.status < 400) {
+    return {
+      ok: false,
+      message: "رفضنا تحويلًا خارجيًّا غير آمن من واجهة واتساب.",
+      retriable: false,
+      recipientOnly: false,
+    };
   }
   const payload = (await response.json().catch(() => null)) as
     | { messages?: { id?: unknown }[]; error?: { code?: unknown } }

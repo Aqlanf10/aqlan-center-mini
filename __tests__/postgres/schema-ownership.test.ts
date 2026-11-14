@@ -300,10 +300,10 @@ describe("PG18 schema ownership characterization", () => {
     expect(report.migrationProvenance.map((item) => item.version)).toEqual([
       "0001", "0002", "0003", "0004", "0005", "0006",
       "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043",
-      '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091', '0092', '0093', '0106', '0108', '0109', '0110', '0111', '0112', '0113', '0114', '0115', '0116', '0117', '0118', '0119', '0120', '0121', '0122', '0123', '0124', '0125',
+      '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091', '0092', '0093', '0106', '0108', '0109', '0110', '0111', '0112', '0113', '0114', '0115', '0116', '0117', '0118', '0119', '0120', '0121', '0122', '0123', '0124', '0125', '0127',
     ]);
     expect(report.migrationRegistry.present).toBe(true);
-    expect(report.migrationRegistry.rows).toHaveLength(89);
+    expect(report.migrationRegistry.rows).toHaveLength(90);
     expect(report.migrationRegistry.rows.every((row) => row.adopted === false)).toBe(true);
 
     const migrationApplicationTables = report.migrationCatalog.tables
@@ -311,8 +311,8 @@ describe("PG18 schema ownership characterization", () => {
     const runtimeApplicationTables = report.runtimeCatalog.tables
       .filter((entry) => entry.table !== "schema_migrations");
 
-    expect(migrationApplicationTables).toHaveLength(149);
-    expect(runtimeApplicationTables).toHaveLength(149);
+    expect(migrationApplicationTables).toHaveLength(152);
+    expect(runtimeApplicationTables).toHaveLength(152);
     for (const catalog of [migrationApplicationTables, runtimeApplicationTables]) {
       expect(catalog.some(entry => entry.table === "inventory_purchase_receipts")).toBe(true);
     }
@@ -325,7 +325,7 @@ describe("PG18 schema ownership characterization", () => {
       expect(runtimeApplicationTables.some(entry=>entry.table===table)).toBe(true);
     }
     expect(report.runtimeCatalog.registry.present).toBe(true);
-    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091', '0092', '0093', '0106', '0108', '0109', '0110', '0111', '0112', '0113', '0114', '0115', '0116', '0117', '0118', '0119', '0120', '0121', '0122', '0123', '0124', '0125'].includes(row.version)));
+    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091', '0092', '0093', '0106', '0108', '0109', '0110', '0111', '0112', '0113', '0114', '0115', '0116', '0117', '0118', '0119', '0120', '0121', '0122', '0123', '0124', '0125', '0127'].includes(row.version)));
 
     expect(report.comparison.characterizationOk).toBe(true);
     expect(report.comparison.applicationSchemaEqual).toBe(false);

@@ -7,6 +7,12 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.length > 59 && files.at(-1)?.version === "0127" && files.at(-1)?.filename === "0127_patient_portal_security.sql") {
+    if (!["0125_ortho_case_reopen.sql", "0109_ortho_adjustment_requests.sql"].includes(files.at(-2)?.filename ?? "")) {
+      throw new Error("Patient portal security requires the reviewed ortho baseline.");
+    }
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   if (files.at(-1)?.version === "0125" && files.at(-1)?.filename === "0125_ortho_case_reopen.sql") {
     if (files.at(-2)?.filename !== "0124_ceph_correction_lineage.sql") throw new Error("Reopening requires the exact reviewed correction lineage baseline.");
     return periodontalCandidateMigrationVersion(files.slice(0, -1));
@@ -102,8 +108,9 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
     "0078": "0078_agreement_reconciliation.sql",
     "0087": "0087_agreement_reminder_metadata.sql",
     "0089": "0089_lab_shade_specification.sql",
+    "0127": "0127_patient_portal_security.sql",
   };
-  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069", "0066,0068,0069,0078", "0066,0067,0068,0069,0078", "0066,0068,0069,0078,0087", "0066,0067,0068,0069,0078,0087", "0066,0068,0069,0078,0087,0089", "0066,0067,0068,0069,0078,0087,0089"];
+  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069", "0066,0068,0069,0078", "0066,0067,0068,0069,0078", "0066,0068,0069,0078,0087", "0066,0067,0068,0069,0078,0087", "0066,0068,0069,0078,0087,0089", "0066,0067,0068,0069,0078,0087,0089", "0066,0068,0069,0078,0087,0089,0127", "0066,0067,0068,0069,0078,0087,0089,0127"];
   if (files.length > 59 && reviewedTails.includes(files.slice(59).map(file => file.version).join(",")) &&
       files.slice(59).every(file => reviewedAdditions[file.version] === file.filename)) {
     return periodontalCandidateMigrationVersion(files.slice(0, 59));

@@ -4,6 +4,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getDocumentForDownload, recordAudit, removeDocument } from "@/lib/db";
 import { readFileByKey } from "@/lib/files";
+import { ALLOWED_TYPES } from "@/lib/storage";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -69,13 +70,17 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     }
 
     const download = new URL(request.url).searchParams.get("download") === "1";
+    const normalizedMime = (found.document.mimeType ?? "").trim().toLowerCase();
+    const isAllowedMime = Object.hasOwn(ALLOWED_TYPES, normalizedMime);
+    const safeMime = isAllowedMime ? normalizedMime : "application/octet-stream";
+    const forceAttachment = download || !isAllowedMime;
     const name = encodeURIComponent(found.document.title);
     return new NextResponse(new Uint8Array(bytes), {
       headers: {
-        "Content-Type": found.document.mimeType,
+        "Content-Type": safeMime,
         "Content-Length": String(bytes.length),
-        // `inline` ليُعرض في الشاشة، و`attachment` حين يُطلب التنزيل صراحةً.
-        "Content-Disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${name}`,
+        // `inline` للأنواع المعتمدة فقط، و`attachment` عند طلب التنزيل أو عند وجود نوع موروث خارج القائمة البيضاء.
+        "Content-Disposition": `${forceAttachment ? "attachment" : "inline"}; filename*=UTF-8''${name}`,
         // لا تخزين وسيط: بياناتٌ طبية لا تُترك في ذاكرة وسيطٍ مشترك.
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",

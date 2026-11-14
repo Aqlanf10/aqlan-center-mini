@@ -74,6 +74,9 @@ export const BOOK_RATE_LIMIT = {
   windowMinutes: envNumber("BOOK_RATE_WINDOW_MIN", 15),
 };
 
+/** سقف عام احتياطي للحجز عند غياب الوسيط الموثوق (`TRUST_PROXY!=true`) لمنع الإغراق بتدوير أرقام وهمية دون خنق المرضى. */
+export const BOOK_UNTRUSTED_GLOBAL_MAX = envNumber("BOOK_GLOBAL_RATE_MAX", 120);
+
 /** تسجيل الوصول الذاتي: هادئ بحكم طبيعته، والزحف عليه استطلاع. */
 export const CHECKIN_RATE_LIMIT = {
   maximum: envNumber("CHECKIN_RATE_MAX", 60),

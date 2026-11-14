@@ -48,6 +48,8 @@ export const RESET_WIPE_TABLES = [
   "patient_problems",
   "plan_item_dependencies",
   "patient_referrals",
+  "patient_portal_tokens",
+  "patient_portal_accounts",
   "patient_intake_forms",
   // (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية — تُمسح مع مرضاها
   "patient_medical_history",
@@ -227,6 +229,7 @@ export const RESET_KEEP_TABLES = [
   ...AGREEMENT_HISTORY_TABLES,
   ...COLLECTION_ATTEMPT_HISTORY_TABLES,
   "users",
+  "patient_portal_staff_grants",
   // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
   "hr_staff",
   "hr_staff_changes",

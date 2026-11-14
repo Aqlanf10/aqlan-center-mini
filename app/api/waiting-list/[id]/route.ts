@@ -181,6 +181,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         username: session.username,
         role: session.role,
         doctorPartyId: user?.partyId ?? null,
+        actorSession: session,
         /* صلاحيةُ التجاوز تُقرأ من المستخدم في الخادم — لا من الطلب. */
         canOverrideCapacity: user?.permissions?.canOverrideCapacity === true,
         channel: "ui",

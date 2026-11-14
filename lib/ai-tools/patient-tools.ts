@@ -43,13 +43,40 @@ export async function searchPatient(
   }
 
   try {
-    const doctorScopeId = !context.canViewAllPatients && context.role === "doctor" ? context.doctorPartyId : null;
+    const role = context.role || context.userRole;
+    const isRestrictedDoctor =
+      role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients;
+    if (isRestrictedDoctor && (typeof context.doctorPartyId !== "number" || context.doctorPartyId <= 0)) {
+      return {
+        success: false,
+        textSummary: "🔒 **تنبيه أمني:** حساب الطبيب غير مرتبط بجهة طبيب في المركز — لا يمكن البحث في ملفات المرضى قبل استكمال الربط.",
+        warnings: ["عزل الأطباء: حساب طبيب غير مرتبط بجهة طبيب"],
+      };
+    }
+
+    const doctorScopeId = isRestrictedDoctor ? context.doctorPartyId! : null;
+    const session: SessionPayload = {
+      userId: context.userId ?? 1,
+      username: context.username || "anonymous",
+      role: (role || "doctor") as string,
+      expiresAt: Date.now() + 3600_000,
+      partyId: context.doctorPartyId ?? undefined,
+    };
     let matches: PatientSummary[] = [];
 
-    // فحص رقمي صريح (رقم هوية أو ملف)
+    // فحص رقمي صريح (رقم هوية أو ملف): التحقق من الصلاحية قبل قراءة السجل
     if (/^\d+$/.test(term) && Number(term) > 0 && Number(term) < 100000) {
-      const file = await getPatientFile(Number(term)).catch(() => null);
-      if (file) {
+      const numericId = Number(term);
+      const canReadDirect = await canAccessPatient(session, numericId).catch(() => false);
+      if (!canReadDirect) {
+        return {
+          success: false,
+          textSummary: "🔒 **تنبيه أمني:** ليس لديك صلاحية للوصول إلى ملف هذا المريض (عزل الكادر السريري §39).",
+          warnings: ["محاولة وصول لملف مريض غير مسند للطبيب"],
+        };
+      }
+      const file = await getPatientFile(numericId).catch(() => null);
+      if (file?.patient) {
         matches = [{
           id: file.patient.id,
           patientNumber: file.patient.patientNumber,

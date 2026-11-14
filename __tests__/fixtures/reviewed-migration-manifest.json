@@ -532,5 +532,11 @@
     "name": "ortho_case_reopen",
     "filename": "0125_ortho_case_reopen.sql",
     "checksum": "6d9eb902c4c834f6d8b6be381c57b46a3a0e2992cdc40a05d688234bb9e3b8a3"
+  },
+  {
+    "version": "0127",
+    "name": "patient_portal_security",
+    "filename": "0127_patient_portal_security.sql",
+    "checksum": "f8771647e3a149536af80bc54439fef7cd6bb1bc750707a87c51f9d336de535f"
   }
 ]
