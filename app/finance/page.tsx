@@ -61,6 +61,10 @@ interface Feed {
   recent: ShiftData[];
   /** (P1-3) الدرج بالقاعدة الواحدة — نقدٌ فقط؛ التحويل لا يدخل المتوقَّع. */
   drawer?: { expected: Record<Currency, number> } | null;
+  /** 0129: pending opening differences in the clinic; absent in an older feed. */
+  pendingOpeningReviews?: number;
+  /** 0129: the server's answer to "may this session review them" (display only; the review re-proves it). */
+  canReviewOpening?: boolean;
 }
 
 interface PlansSummary {
@@ -393,24 +397,27 @@ export default function FinancePage() {
 
   // فتح الوردية
   const handleOpenShift = useCallback(
-    async (openingAmounts: Record<Currency, string>) => {
-      if (busy || !financeRequest.current.shiftReady) return;
+    async (openingAmounts: Record<Currency, string>, openingDifferenceNote: string) => {
+      if (busy || !financeRequest.current.shiftReady) return "failed" as const;
       setBusy(true);
       try {
         const res = await fetch("/api/shifts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ opening: openingAmounts }),
+          body: JSON.stringify({ opening: openingAmounts, openingDifferenceNote: openingDifferenceNote.trim() || undefined }),
         });
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
           setError(payload?.message ?? "تعذّر فتح الوردية.");
-          return;
+          // (0129) عدٌّ أعمى: الفرق مع الإقفال السابق يُكشف بعد العدّ، وتُطلب ملاحظة قبل الفتح.
+          return payload?.code === "opening_difference_note_required" ? "needs_note" as const : "failed" as const;
         }
         setError(null);
         await load();
+        return "opened" as const;
       } catch {
         setError("تعذّر الاتصال بالخادم.");
+        return "failed" as const;
       } finally {
         setBusy(false);
       }
@@ -724,6 +731,9 @@ export default function FinancePage() {
               isAdmin={admin}
               busy={busy}
               onOpenShift={handleOpenShift}
+              pendingOpeningReviews={feed?.pendingOpeningReviews ?? 0}
+              canReviewOpening={feed?.canReviewOpening === true}
+              onOpeningReviewed={() => void load()}
               onCloseShift={handleCloseShift}
               onCreateExpense={handleCreateExpense}
               canPayPrivately={session?.canonical === true && session?.isOwner === true}

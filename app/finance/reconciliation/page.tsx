@@ -68,6 +68,9 @@ export default function ReconciliationPage() {
   // Open shift form state
   const [openAmounts, setOpenAmounts] = useState<Record<Currency, string>>({ YER: "0", SAR: "0", USD: "0" });
   const [showOpenModal, setShowOpenModal] = useState(false);
+  // (0129) a difference with the previous close needs the opener's note before the shift opens.
+  const [openNote, setOpenNote] = useState("");
+  const [openNoteNeeded, setOpenNoteNeeded] = useState(false);
 
   const loadData = useCallback(async () => {
     const requestId = ++shiftRequest.current.id;
@@ -129,10 +132,16 @@ export default function ReconciliationPage() {
             SAR: Number(openAmounts.SAR || 0),
             USD: Number(openAmounts.USD || 0),
           },
+          openingDifferenceNote: openNoteNeeded && openNote.trim() ? openNote.trim() : undefined,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.message || "فشل فتح الوردية.");
+      if (!res.ok) {
+        if (data?.code === "opening_difference_note_required") setOpenNoteNeeded(true);
+        throw new Error(data?.message || "فشل فتح الوردية.");
+      }
+      setOpenNote("");
+      setOpenNoteNeeded(false);
       setShowOpenModal(false);
       await loadData();
     } catch (err) {
@@ -401,6 +410,20 @@ export default function ReconciliationPage() {
                   />
                 </div>
               ))}
+
+              {openNoteNeeded ? (
+                <label className="mt-3 block text-xs font-bold text-amber-900">
+                  العدّ لا يطابق إقفال الوردية السابقة. أعد العدّ، وإن صحّ فاكتب ما تعرفه عن الفرق (يُسجَّل للمراجعة):
+                  <textarea
+                    data-testid="opening-difference-note"
+                    value={openNote}
+                    onChange={(e) => setOpenNote(e.target.value)}
+                    maxLength={300}
+                    rows={2}
+                    className="mt-1 w-full rounded-xl border border-amber-300 px-3 py-2 text-sm font-medium"
+                  />
+                </label>
+              ) : null}
 
               <div className="mt-6 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
                 <button

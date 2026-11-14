@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
-    "tables": 164,
-    "columns": 2107,
-    "constraints": 2816,
-    "indexes": 531,
-    "triggers": 241
+    "tables": 165,
+    "columns": 2122,
+    "constraints": 2834,
+    "indexes": 535,
+    "triggers": 243
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -19692,6 +19692,150 @@
         }
       },
       "triggers": {}
+    },
+    "shift_opening_reviews": {
+      "columns": {
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "detected_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "detected_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "difference_minor": {
+          "type": "int8",
+          "nullable": true
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "opening_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "opening_note": {
+          "type": "text",
+          "nullable": true
+        },
+        "previous_counted_minor": {
+          "type": "int8",
+          "nullable": true
+        },
+        "previous_shift_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "review_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "review_settlement": {
+          "type": "text",
+          "nullable": true
+        },
+        "reviewed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "reviewed_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "reviewed_by_user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "shift_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "shift_id",
+          "currency"
+        ]
+      ],
+      "checks": [
+        "shift_opening_reviews_currency_check",
+        "shift_opening_reviews_detected_by_check",
+        "shift_opening_reviews_difference_valid",
+        "shift_opening_reviews_note_valid",
+        "shift_opening_reviews_opening_minor_check",
+        "shift_opening_reviews_previous_differs",
+        "shift_opening_reviews_review_valid"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "shift_id"
+          ],
+          "refTable": "cashier_shifts",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "reviewed_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "shift_opening_reviews_one_per_currency": {
+          "columns": [
+            "shift_id",
+            "currency"
+          ],
+          "unique": true
+        },
+        "shift_opening_reviews_pending_idx": {
+          "columns": [
+            "detected_at"
+          ],
+          "unique": false
+        },
+        "shift_opening_reviews_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "shift_opening_reviews_previous_idx": {
+          "columns": [
+            "previous_shift_id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {
+        "shift_opening_reviews_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "shift_opening_reviews_previous_closed": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        }
+      }
     },
     "staff_login_limits": {
       "columns": {

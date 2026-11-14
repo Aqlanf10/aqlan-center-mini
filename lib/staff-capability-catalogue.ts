@@ -45,6 +45,9 @@ export const STAFF_CAPABILITIES = Object.freeze([
   // Owner decision (Dot 6839071994): default doses in the medication catalog are edited by
   // whoever the owner grants (an administrator or a doctor). Patients' prescriptions are separate.
   "clinical.medication-catalog.manage",
+  // Owner decision #483 6831365228 item 1 (migration 0129): reviewing a shift's opening difference
+  // against the previous close. Granted to nobody by default; the protected owner reviews regardless.
+  "finance.shifts.review-opening",
 ] as const);
 export type StaffCapability = typeof STAFF_CAPABILITIES[number];
 
@@ -116,6 +119,7 @@ export const STAFF_CAPABILITY_PREREQUISITES: Readonly<Partial<Record<StaffCapabi
   "finance.payments.void": Object.freeze(["finance.payments.view"] as const),
   "finance.expenses.void": Object.freeze(["finance.expenses.view"] as const),
   "finance.shifts.operate": Object.freeze(["finance.shifts.view"] as const),
+  "finance.shifts.review-opening": Object.freeze(["finance.shifts.view"] as const),
   "finance.service-prices.edit": Object.freeze(["finance.service-prices.view"] as const),
   "finance.discounts.override": Object.freeze(["finance.discounts.apply"] as const),
   "staff.profile.edit": Object.freeze(["staff.view"] as const),

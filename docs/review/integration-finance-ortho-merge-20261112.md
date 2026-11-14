@@ -202,6 +202,14 @@ Collision check first: a tree-only fetch of all 336 remote branches found no `01
 and 0132 in the runtime registration; the reviewed-chain checks accept 0132 after 0128 and, for heads
 pushed before 0128 existed, after 0126. 0129–0131 are still unused.
 
+### 8c. 0129 in use (2026-11-14)
+
+`0129_shift_opening_reviews.sql` is now written on this branch (contract
+`docs/finance/SHIFT_OPENING_REVIEWS_0129.md`). Collision check first: a tree-only fetch of all 336 remote
+branches found no `0129_*`, `0130_*` or `0131_*` file. 0129 follows 0128 in the runtime registration and
+precedes 0132; the reviewed-chain checks accept 0129 only directly after 0128, and 0132 after 0126, 0128 or
+0129. 0130 and 0131 are still unused.
+
 ### 8a. 0132, session auxiliary appliances (#483 6867852606)
 
 | Version | File | Purpose | Owner | Depends on |

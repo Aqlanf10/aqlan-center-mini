@@ -106,7 +106,7 @@ const renderShift = (props: Partial<ComponentProps<typeof CashShiftTab>> = {}) =
     canMutate: false, shift, payments: [], expenses: [], recentShifts: [],
     expectedInBox: zeroAmounts(), baseCurrency: "YER", clinicTimeZone: CLINIC_ZONE_FALLBACK,
     parties: [], isAdmin: false, busy: false,
-    onOpenShift: async () => {}, onCloseShift: async () => "failed" as const, onCreateExpense: async () => {},
+    onOpenShift: async () => "failed" as const, onCloseShift: async () => "failed" as const, onCreateExpense: async () => {},
     onRemoveExpense: async () => {}, onOpenQuickCollect: noop, lastVoucherId: null,
     onClearLastVoucher: noop, lastReceiptId: null, onClearLastReceipt: noop,
     spending: false, setSpending: noop, closing: false, setClosing: noop, ...props,

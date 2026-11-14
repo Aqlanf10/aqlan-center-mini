@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { asPaymentLikes, CLINIC_TIME_ZONE, closeShift, findUserByUsername, getOpenShift, listShiftExpenses, listShiftPayments, listShifts, openShift, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
+import { asPaymentLikes, CLINIC_TIME_ZONE, closeShift, findUserByUsername, getOpenShift, listOpeningReviews, listShiftExpenses, listShiftPayments, listShifts, openShift, pendingOpeningReviewCount, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
+import { OpeningDifferenceNoteRequired, reviewText } from "@/lib/shift-opening-reviews";
 import { expenseTotals } from "@/lib/expenses";
 import { CURRENCIES, formatMoney, parseAmount, shiftTotals, type Currency } from "@/lib/money";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
@@ -9,7 +10,7 @@ import { requireSession } from "@/lib/session";
 import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canonicalErrorResponse, NO_STORE } from "@/lib/canonical-route";
-import { CanonicalShiftRefusal, commandCanonicalShiftClose, commandCanonicalShiftOpen, readCanonicalShifts } from "@/lib/canonical-shifts";
+import { CanonicalShiftRefusal, commandCanonicalShiftClose, commandCanonicalShiftOpen, openingAuditDetails, openingDifferenceNotices, readCanonicalShifts } from "@/lib/canonical-shifts";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,8 @@ async function canonicalShiftWrite(request: Request, action: "open" | "close") {
     return NextResponse.json(result, { status: action === "open" ? 201 : 200, headers: NO_STORE });
   } catch (error) {
     if (error instanceof CanonicalShiftRefusal) return NextResponse.json({ code: error.code, message: error.message,
-      ...(error.difference ? { difference: error.difference, expected: error.expected } : {}) }, { status: error.status, headers: NO_STORE });
+      ...(error.difference ? { difference: error.difference, expected: error.expected } : {}),
+      ...(error.differences ? { differences: error.differences } : {}) }, { status: error.status, headers: NO_STORE });
     return canonicalErrorResponse(error);
   }
 }
@@ -78,7 +80,10 @@ export async function GET() {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   try {
-    const open = await getOpenShift();
+    const shift = await getOpenShift();
+    // 0129: the open shift's opening differences, and the clinic's pending count (never hidden before the cutover).
+    const open = shift ? { ...shift, openingReviews: await listOpeningReviews({ shiftId: shift.id }) } : null;
+    const pendingOpeningReviews = await pendingOpeningReviewCount();
     const [payments, expenses, drawer] = open
       ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id), shiftDrawerBreakdown(open)])
       : [[], [], null];
@@ -97,6 +102,9 @@ export async function GET() {
       receiptProvenance,
       expenses,
       recent: await listShifts(15),
+      pendingOpeningReviews,
+      // The review is canonical only (docs/finance/SHIFT_OPENING_REVIEWS_0129.md §2.2).
+      canReviewOpening: false,
     });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الوردية." }, { status: 500 });
@@ -119,9 +127,21 @@ export async function POST(request: Request) {
   const source = (body ?? {}) as Record<string, unknown>;
   const opening = readAmounts(source, "opening");
   if (!opening) return NextResponse.json({ message: "مبلغ افتتاحي غير صحيح." }, { status: 400 });
+  const openingDifferenceNote = reviewText(source.openingDifferenceNote);
+  if (openingDifferenceNote === "invalid") return NextResponse.json({ code: "invalid_shift", message: "ملاحظة فرق الافتتاح بين 3 و300 حرف." }, { status: 400 });
 
   try {
-    const shift = await openShift({ openedBy: session.username, opening });
+    let shift;
+    try {
+      shift = await openShift({ openedBy: session.username, opening, openingDifferenceNote, requireOpeningDifferenceNote: true });
+    } catch (error) {
+      // 0129 §2.1: the same rule as the canonical opening; nothing was written.
+      if (error instanceof OpeningDifferenceNoteRequired) {
+        return NextResponse.json({ code: "opening_difference_note_required", message: error.message,
+          differences: openingDifferenceNotices(error.differences) }, { status: 409 });
+      }
+      throw error;
+    }
     if (!shift) {
       return NextResponse.json(
         { message: "هناك وردية مفتوحة بالفعل. أغلقها أولًا." },
@@ -130,7 +150,7 @@ export async function POST(request: Request) {
     }
     await recordAudit({
       action: "shift.open", entity: "shift", entityId: shift.id,
-      details: { الافتتاحي: shift.opening },
+      details: { الافتتاحي: shift.opening, ...openingAuditDetails(shift) },
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json(shift, { status: 201 });

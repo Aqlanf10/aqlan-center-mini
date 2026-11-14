@@ -7,6 +7,7 @@ import { CURRENCIES, formatMoney, parseAmount, type Currency } from "./money";
 import type { VerifiedDurableSession } from "./staff-durable-session";
 import { staffOperationIdentity, withStaffOperation } from "./staff-operation-runtime";
 import type { Amounts, DrawerBreakdown } from "./shift-close";
+import { CASHIER_SHIFT_LIFECYCLE_LOCK, listOpeningReviewsWith, OpeningDifferenceNoteRequired, pendingOpeningReviewCountWith, projectOpeningReview, reviewText, type OpeningDifference } from "./shift-opening-reviews";
 
 export const SHIFT_DETAIL_LIMIT = 1000;
 type ShiftSummary = Omit<CashierShift, "note" | "differenceReason"> & Partial<Pick<CashierShift, "note" | "differenceReason">>;
@@ -18,6 +19,9 @@ export interface CanonicalShiftFeed {
   drawer: DrawerBreakdown | null;
   recent: ShiftSummary[];
   canOperate: boolean;
+  /** 0129: pending opening differences in the whole clinic, and whether this session may review them. */
+  pendingOpeningReviews: number;
+  canReviewOpening: boolean;
   projection: { payments: boolean; expenses: boolean; notes: boolean; patientScope: "none" | "own" | "all" };
   payments?: ShiftPayment[];
   receiptProvenance?: Record<string, ReceiptProvenance>;
@@ -42,9 +46,13 @@ export async function readCanonicalShifts(session: VerifiedDurableSession): Prom
     const open = await getOpenShiftWith(query);
     const drawer = open ? await shiftDrawerBreakdown(open, query) : null;
     const recent = await listShiftsWith(query, 15);
+    const canReviewOpening = scope.granted("finance.shifts.review-opening");
+    const openingReviews = open ? (await listOpeningReviewsWith(query, { shiftId: open.id }))
+      .map(review => projectOpeningReview(review, notes || canReviewOpening)) : [];
     const out: CanonicalShiftFeed = { clinicTimeZone: CLINIC_TIME_ZONE,
-      open: open ? projectShift(open) : null, drawer, recent: recent.map(projectShift),
+      open: open ? { ...projectShift(open), openingReviews } : null, drawer, recent: recent.map(projectShift),
       canOperate: scope.granted("finance.shifts.operate"),
+      pendingOpeningReviews: await pendingOpeningReviewCountWith(query), canReviewOpening,
       projection: { payments, expenses, notes, patientScope: scope.patientScope.kind } };
     if (payments) {
       const rows = open ? await listShiftPaymentsWith(query, open.id, {
@@ -70,13 +78,18 @@ export async function readCanonicalShifts(session: VerifiedDurableSession): Prom
  * serializes canonical open/close commands even when no open row exists. It is
  * taken AFTER canonical authority, and BEFORE the same shift row lock used by
  * payment/expense writers. Their money writers and rules are unchanged. */
-const SHIFT_LIFECYCLE_LOCK = "aqlan.canonical.cashier-shift-lifecycle.v1";
+const SHIFT_LIFECYCLE_LOCK = CASHIER_SHIFT_LIFECYCLE_LOCK;
 const ACTION = "finance.shifts.operate" as const;
 
+/** 0129: what the opener is told about a difference. The previous count itself is never disclosed. */
+export interface OpeningDifferenceNotice { currency: OpeningDifference["currency"]; differenceMinor: number | null; previousCountKnown: boolean }
+export const openingDifferenceNotices = (differences: OpeningDifference[]): OpeningDifferenceNotice[] =>
+  differences.map(d => ({ currency: d.currency, differenceMinor: d.differenceMinor, previousCountKnown: d.previousCountedMinor !== null }));
+
 export class CanonicalShiftRefusal extends Error {
-  constructor(readonly code: "invalid_shift" | "shift_already_open" | "shift_not_open" | "difference_reason_required",
+  constructor(readonly code: "invalid_shift" | "shift_already_open" | "shift_not_open" | "difference_reason_required" | "opening_difference_note_required",
     readonly status: 400 | 409, message: string,
-    readonly difference?: Amounts, readonly expected?: Amounts) {
+    readonly difference?: Amounts, readonly expected?: Amounts, readonly differences?: OpeningDifferenceNotice[]) {
     super(message);
     this.name = "CanonicalShiftRefusal";
   }
@@ -105,17 +118,39 @@ function amounts(body: Record<string, unknown>, field: "opening" | "counted"): A
 }
 const optionalText = (value: unknown) => typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null;
 
+/** 0129: the opening's audit row names each difference, the previous close and the opener's note. */
+export function openingAuditDetails(shift: CashierShift): Record<string, unknown> {
+  const reviews = shift.openingReviews ?? [];
+  if (!reviews.length) return {};
+  return {
+    فروق_الافتتاح: reviews.map(r => ({ العملة: r.currency, الفرق: r.differenceMinor, المعدود_السابق: r.previousCountedMinor, المراجعة: r.id })),
+    الوردية_السابقة: reviews[0].previousShiftId,
+    ملاحظة_الافتتاح: reviews[0].openingNote,
+  };
+}
+
 export async function commandCanonicalShiftOpen(session: VerifiedDurableSession, body: Record<string, unknown>, pool = getPool()) {
   const opening = amounts(body, "opening");
+  const note = reviewText(body.openingDifferenceNote);
+  if (note === "invalid") throw new CanonicalShiftRefusal("invalid_shift", 400, "ملاحظة فرق الافتتاح بين 3 و300 حرف.");
   return withStaffOperation(pool, session, ACTION, async (client, handle) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [SHIFT_LIFECYCLE_LOCK]);
     const identity = await staffOperationIdentity(client, handle, ACTION);
-    const shift = await openShiftWith(client, { openedBy: identity.username, opening });
+    let shift: CashierShift | null;
+    try {
+      shift = await openShiftWith(client, { openedBy: identity.username, opening, openingDifferenceNote: note, requireOpeningDifferenceNote: true });
+    } catch (error) {
+      // 0129 §2.1: a difference with the previous close needs the opener's note; the opening rolls back.
+      if (error instanceof OpeningDifferenceNoteRequired) {
+        throw new CanonicalShiftRefusal("opening_difference_note_required", 409, error.message, undefined, undefined, openingDifferenceNotices(error.differences));
+      }
+      throw error;
+    }
     // INSERT may itself wait on a concurrently inserted unique open row.
     await staffOperationIdentity(client, handle, ACTION);
     if (!shift) throw new CanonicalShiftRefusal("shift_already_open", 409, "هناك وردية مفتوحة بالفعل. أغلقها أولًا.");
     await insertAuditRow(client, { action: "shift.open", entity: "shift", entityId: shift.id,
-      details: { الافتتاحي: shift.opening }, actor: identity.username, actorRole: identity.role });
+      details: { الافتتاحي: shift.opening, ...openingAuditDetails(shift) }, actor: identity.username, actorRole: identity.role });
     return shift;
   });
 }

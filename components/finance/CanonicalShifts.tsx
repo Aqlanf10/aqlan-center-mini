@@ -6,6 +6,7 @@ import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
 import { EXPENSE_CATEGORY_LABEL } from "@/lib/expenses";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import type { CanonicalShiftFeed } from "@/lib/canonical-shifts";
+import ShiftOpeningReviews from "./ShiftOpeningReviews";
 import type { ReceiptProvenance } from "@/lib/receipt-provenance";
 
 const empty = () => ({ YER: "", SAR: "", USD: "" });
@@ -44,6 +45,9 @@ export function CanonicalShifts({ username }: { username: string }) {
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [needsReason, setNeedsReason] = useState(false);
+  // 0129: blind opening count; a difference with the previous close is revealed by the server, then explained.
+  const [openingNote, setOpeningNote] = useState("");
+  const [needsOpeningNote, setNeedsOpeningNote] = useState(false);
   const sequence = useRef(0), inFlight = useRef(false);
   const previousShift = useRef<number | null | undefined>(undefined);
   // A tab-local reminder survives refresh/navigation; it is neither authority nor
@@ -70,7 +74,7 @@ export function CanonicalShifts({ username }: { username: string }) {
       const next = body as CanonicalShiftFeed;
       const id = next.open?.id ?? null;
       if (previousShift.current !== undefined && previousShift.current !== id) {
-        setOpening(empty()); setCounted(empty()); setNote(""); setReason(""); setNeedsReason(false);
+        setOpening(empty()); setCounted(empty()); setNote(""); setReason(""); setNeedsReason(false); setOpeningNote(""); setNeedsOpeningNote(false);
       }
       previousShift.current = id;
       setFeed(next);
@@ -99,16 +103,19 @@ export function CanonicalShifts({ username }: { username: string }) {
     markRecovery(true); // Also covers leaving this page while the request is pending.
     try {
       const response = await fetch("/api/shifts", { method: kind === "open" ? "POST" : "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(kind === "open" ? { opening } : { id: feed.open?.id, counted, note, differenceReason: reason }) });
+        body: JSON.stringify(kind === "open"
+          ? { opening, openingDifferenceNote: needsOpeningNote && openingNote.trim() ? openingNote.trim() : undefined }
+          : { id: feed.open?.id, counted, note, differenceReason: reason }) });
       const body = await response.json();
       if (response.status >= 500) throw new Error("uncertain");
       if (!response.ok) {
         markRecovery(false);
         if (body?.code === "difference_reason_required") setNeedsReason(true);
+        if (body?.code === "opening_difference_note_required") setNeedsOpeningNote(true);
         setMessage(typeof body?.message === "string" ? body.message : "رُفضت العملية. راجع بيانات الصندوق.");
       } else {
         if (!Number.isSafeInteger(body?.id) || !["open", "closed"].includes(body?.status)) throw new Error("uncertain");
-        markRecovery(false); setNeedsReason(false); setCounted(empty()); setOpening(empty()); setReason(""); setNote("");
+        markRecovery(false); setNeedsReason(false); setCounted(empty()); setOpening(empty()); setReason(""); setNote(""); setOpeningNote(""); setNeedsOpeningNote(false);
         setMessage(kind === "open" ? "فُتحت الوردية وسُجّلت العملية." : "أُقفلت الوردية وسُجّل الجرد.");
       }
     } catch {
@@ -153,6 +160,8 @@ export function CanonicalShifts({ username }: { username: string }) {
           </table></div><p className="text-xs text-slate-500">المبالغ غير النقدية لا تدخل المتوقّع في الدرج. إخفاء التفاصيل لا يغيّر هذه الإجماليات.</p>
         </> : null}
       </section>
+      <ShiftOpeningReviews openShiftReviews={feed.open?.openingReviews ?? []} pending={feed.pendingOpeningReviews ?? 0}
+        canReview={feed.canReviewOpening === true} onReviewed={() => void load()} />
       {feed.canOperate ? <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card" aria-label={feed.open ? "جرد وإقفال الوردية" : "فتح الوردية"}>
         <form className="space-y-4" onSubmit={event => void submit(event, feed.open ? "close" : "open")}>
           <h2 className="font-bold text-navy-900">{feed.open ? "جرد وإقفال الوردية" : "فتح وردية جديدة"}</h2>
@@ -161,7 +170,8 @@ export function CanonicalShifts({ username }: { username: string }) {
             {feed.open ? <>
               <label className="block text-xs font-semibold text-slate-600">ملاحظة الإقفال<input className={inputClass} maxLength={300} value={note} onChange={event => setNote(event.target.value)} /></label>
               {needsReason ? <label className="block text-xs font-semibold text-amber-900">سبب فرق الجرد<input required className={inputClass} maxLength={300} value={reason} onChange={event => setReason(event.target.value)} /></label> : null}
-            </> : null}
+            </> : needsOpeningNote ? <label className="block text-xs font-semibold text-amber-900">ملاحظة فرق الافتتاح (أعد العدّ أولًا؛ يُسجَّل الفرق للمراجعة ولا تُنشأ حركة نقدية)
+              <input required data-testid="opening-difference-note" className={inputClass} minLength={3} maxLength={300} value={openingNote} onChange={event => setOpeningNote(event.target.value)} /></label> : null}
             <ActionButton type="submit" disabled={disabled}>{busy ? "جارٍ تنفيذ العملية…" : feed.open ? "تأكيد الجرد والإقفال" : "تأكيد فتح وردية جديدة"}</ActionButton>
           </fieldset>
         </form>

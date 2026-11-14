@@ -576,6 +576,12 @@
     "checksum": "a95ea485b8e3bd1ca6e5854a251337e739de01566c64071ad3fad84483a0dd54"
   },
   {
+    "version": "0129",
+    "name": "shift_opening_reviews",
+    "filename": "0129_shift_opening_reviews.sql",
+    "checksum": "33c997a74f6a53308b6b6add408f7690374b3530903a56d43a4680fa59f8dd47"
+  },
+  {
     "version": "0132",
     "name": "ortho_adjustment_auxiliaries",
     "filename": "0132_ortho_adjustment_auxiliaries.sql",

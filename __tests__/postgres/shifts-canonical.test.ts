@@ -32,8 +32,10 @@ const moneySnapshot = async () => (await q(`SELECT
   (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM payments p) AS payments,
   (SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM expenses e) AS expenses`))[0];
 const counted = (a: CashierShift["expected"]) => ({ YER: toInputAmount(a.YER, "YER"), SAR: toInputAmount(a.SAR, "SAR"), USD: toInputAmount(a.USD, "USD") });
+const SYN_NOTE = "synthetic fixture opening note";
 const open = async (key: Key = "operator", opening = { YER: "1000", SAR: "0", USD: "0" }) =>
-  shifts.commandCanonicalShiftOpen(await fx.session(key), { opening, openedBy: "forged-actor" });
+  // 0129: these suites reopen after closes with other counts; the note is fixture data, ignored without a difference.
+  shifts.commandCanonicalShiftOpen(await fx.session(key), { opening, openedBy: "forged-actor", openingDifferenceNote: SYN_NOTE });
 const close = async (shift: CashierShift, key: Key = "operator") =>
   shifts.commandCanonicalShiftClose(await fx.session(key), { id: shift.id, counted: counted(shift.expected), closedBy: "forged-actor" });
 async function provenanceFixture(number: string) {
@@ -69,7 +71,7 @@ describe("canonical shift commands", () => {
 
   it("serializes double open and double close: one effect and one audit, other attempt conflicts", async () => {
     const session = await fx.session("operator"), before = await auditCount();
-    const opened = await Promise.allSettled([shifts.commandCanonicalShiftOpen(session, {}), shifts.commandCanonicalShiftOpen(session, {})]);
+    const opened = await Promise.allSettled([shifts.commandCanonicalShiftOpen(session, { openingDifferenceNote: SYN_NOTE }), shifts.commandCanonicalShiftOpen(session, { openingDifferenceNote: SYN_NOTE })]);
     expect(opened.filter(r => r.status === "fulfilled")).toHaveLength(1);
     expect(opened.find(r => r.status === "rejected")).toMatchObject({ reason: { code: "shift_already_open", status: 409 } });
     expect(await auditCount()).toBe(before + 1);

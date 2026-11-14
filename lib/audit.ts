@@ -22,7 +22,7 @@ export type AuditAction =
   /* (RC-1) تصحيح سند قبض خطأ: عكسٌ + سندٌ بديل (أو إبطالٌ وحده) — بسببٍ مكتوب. */
   | "payment.correct"
   | "expense.create"
-  | "shift.open" | "shift.close"
+  | "shift.open" | "shift.close" | "shift.opening_review"
   | "patient.create" | "patient.update" | "patient.number.change" | "patient.numbering.configure"
   /* (P2-7) دمج ملفٍّ مكرَّر في الملف الأصلي. */
   | "patient.merge"
@@ -203,6 +203,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "expense.create": "سند صرف",
   "shift.open": "فتح وردية",
   "shift.close": "إغلاق وردية وجرد",
+  "shift.opening_review": "مراجعة فرق افتتاح وردية",
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
   "patient.number.change": "تعديل رقم ملف المريض",

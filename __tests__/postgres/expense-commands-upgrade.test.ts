@@ -9,7 +9,7 @@ it("adds 0128 to a populated database that already has 0132, leaving existing vo
   const f = await openPeriodontalFixture(process.env, { pristine: true });
   try {
     const files = await loadMigrationFiles();
-    await migrate(f.pool, { apply: true, files: files.filter((file) => file.version !== "0128") });
+    await migrate(f.pool, { apply: true, files: files.filter((file) => !["0128", "0129"].includes(file.version)) });
     const [{ id: shift }] = (await f.pool.query(`INSERT INTO cashier_shifts(opened_by, opening_yer, opening_sar, opening_usd)
       VALUES('synthetic', 1000, 0, 0) RETURNING id`)).rows;
     await f.pool.query(`INSERT INTO expenses(voucher_number, category, payee_text, shift_id, amount_minor, currency, base_amount_minor, created_by)
@@ -22,7 +22,7 @@ it("adds 0128 to a populated database that already has 0132, leaving existing vo
     expect((await f.pool.query(`SELECT ${added.join(", ")} FROM expenses ORDER BY id`)).rows)
       .toEqual([0, 1].map(() => Object.fromEntries(added.map((column) => [column, null]))));
     expect((await f.pool.query("SELECT version FROM schema_migrations WHERE version BETWEEN '0126' AND '0139' ORDER BY version")).rows)
-      .toEqual([{ version: "0126" }, { version: "0128" }, { version: "0132" }]);
+      .toEqual([{ version: "0126" }, { version: "0128" }, { version: "0129" }, { version: "0132" }]);
     await migrate(f.pool, { apply: true, files });
     expect((await f.pool.query("SELECT count(*)::int AS n FROM schema_migrations WHERE version='0128'")).rows).toEqual([{ n: 1 }]);
     // An old voucher cannot be given a key or a source afterwards.

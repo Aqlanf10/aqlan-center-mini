@@ -265,8 +265,16 @@ it("browser: a lost committed open response followed by an external close cannot
     expect(posts).toBe(1); // Acknowledgement only rereads; it never writes.
     await view.getByRole("textbox", { name: "الافتتاحي YER", exact: true }).fill("77");
     await view.getByRole("button", { name: "تأكيد فتح وردية جديدة" }).click();
-    await view.getByRole("button", { name: "تأكيد الجرد والإقفال" }).waitFor();
+    // 0129: 77 differs from the 55 counted at the previous close; the blind count is refused once, nothing written.
+    await view.getByTestId("opening-difference-note").waitFor();
+    expect(await view.innerText()).toMatch(/لا يطابق ما عُدّ عند إقفال الوردية السابقة/);
     expect(posts).toBe(2);
+    expect(Number((await journey.db.query("SELECT count(*) FROM audit_log WHERE action='shift.open'")).rows[0].count)).toBe(before + 1);
+    await view.getByTestId("opening-difference-note").fill("زيادة تجريبية بعد إعادة العدّ");
+    await view.getByRole("button", { name: "تأكيد فتح وردية جديدة" }).click();
+    await view.getByRole("button", { name: "تأكيد الجرد والإقفال" }).waitFor();
+    expect(posts).toBe(3);
+    await view.getByTestId("opening-differences").getByText(/زيادة .*بانتظار المراجعة/).waitFor();
     await view.getByRole("textbox", { name: "المعدود YER", exact: true }).fill("76");
     await view.getByRole("button", { name: "تأكيد الجرد والإقفال" }).click();
     await view.getByRole("textbox", { name: "سبب فرق الجرد" }).fill("فرق جرد تجريبي");

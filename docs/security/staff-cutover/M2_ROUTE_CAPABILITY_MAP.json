@@ -6167,6 +6167,36 @@
   "note": "Slice 26: canonical open and atomic audit with lifecycle lock and authority re-proof. State guard is not durable idempotency: a delayed retry after closing could open another shift. UI never automatically retries."
  },
  {
+  "route": "/api/shifts/opening-reviews",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "finance.shifts.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "canonical-done",
+  "note": "0129 (owner #483 6831365228 item 1): canonical only; a legacy session is refused 403 here and sees the open shift's differences and the pending count on GET /api/shifts. Amounts and states for every shift viewer; the opener's note, reason and settlement only with the shift-note projection (payments.view AND expenses.view AND patientScope=all) or to a reviewer. At most 200 rows."
+ },
+ {
+  "route": "/api/shifts/opening-reviews",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.shifts.review-opening"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "canonical-done",
+  "note": "0129: one review per opening difference (reason and settlement text, no cash movement, no change to either shift), by the protected owner or the exact grant (granted to nobody by default; never implied by shifts.operate or reconciliation.manage). A non-owner may not review a shift they opened or whose previous close they made. Row lock, single conditional update, audit in the same transaction; a second review is 409. Canonical only."
+ },
+ {
   "route": "/api/tasks",
   "method": "GET",
   "legacyRoles": [

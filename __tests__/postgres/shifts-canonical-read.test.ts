@@ -35,7 +35,8 @@ beforeAll(async () => {
   outsidePatient = (await fx.pool.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-SR-OUT','SYN-OUTSIDE-PATIENT') RETURNING id")).rows[0].id;
   const history = await shifts.commandCanonicalShiftOpen(await fx.session("owner"), {});
   await shifts.commandCanonicalShiftClose(await fx.session("owner"), { id: history.id, counted: { YER: "1" }, note: "SYN-PRIVATE-SHIFT-NOTE", differenceReason: "SYN-PRIVATE-DIFFERENCE" });
-  shiftId = (await shifts.commandCanonicalShiftOpen(await fx.session("owner"), { opening: { YER: "100", SAR: "2", USD: "3" } })).id;
+  // 0129: this opening differs from the previous close by design; the note is part of the fixture.
+  shiftId = (await shifts.commandCanonicalShiftOpen(await fx.session("owner"), { opening: { YER: "100", SAR: "2", USD: "3" }, openingDifferenceNote: "SYN fixture opening" })).id;
   ownPayment = (await payment(ownPatient, 40)).id;
   outsidePayment = (await payment(outsidePatient, 70)).id;
   await payment(outsidePatient, 900, "transfer");
@@ -187,7 +188,7 @@ it("a changed patient scope invalidates the old token and suppresses details in 
 });
 
 it("bounds only visible detail rows, without publishing hidden counts or changing full drawer totals", async () => {
-  const shift = await shifts.commandCanonicalShiftOpen(await fx.session("owner"), {});
+  const shift = await shifts.commandCanonicalShiftOpen(await fx.session("owner"), { openingDifferenceNote: "SYN fixture opening" });
   // Synthetic bulk fixture, not a live financial writer or a policy change.
   await fx.pool.query(`INSERT INTO payments(receipt_number,patient_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,method,created_by)
     SELECT 'SYN-BOUND-OUT-'||n,$1,$2,'payment',1,'YER',1,1,'cash','synthetic' FROM generate_series(1,1002) n`, [outsidePatient, shift.id]);

@@ -836,6 +836,26 @@ Numbered and checksum-checked runtime SQL use identical bytes. The number was ve
 remote branches before the work started; 0127 belongs to the patient portal security line and is not
 filled here. Rollback of application code leaves the columns unused; it must not drop them or delete the
 registry row. Exact-head CI and Staging verification remain required before Production rollout.
+### 0129_shift_opening_reviews.sql
+
+Shift opening reviews (owner decision on #483, comment 6831365228, item 1; number allocated in
+6833690789; contract `docs/finance/SHIFT_OPENING_REVIEWS_0129.md`). Creates `shift_opening_reviews`: one row
+per currency in which a shift's opening differs from the cash counted at the previous close (or in which
+the previous close has no count and the opening is not zero). The row is written in the opening's own
+transaction with the previous shift id, the previous count, the opening, the signed difference, the
+opener and the opener's note; it is later reviewed once with a reason, a settlement text, the reviewer's
+user id and name, and a time. CHECKs keep the difference consistent, the texts trimmed (3–300) and the
+review all-or-nothing. A trigger makes the detected part immutable, the review settable only once and the
+row undeletable; a second trigger requires the referenced previous shift to exist and be closed, read
+without a row lock (a foreign key there would make an opening wait behind any writer still holding the
+previous shift's row). `shift_id` has a foreign key to `cashier_shifts`.
+
+Nothing is backfilled and no existing table is altered: shifts opened before 0129 are never compared
+retroactively, and the previous close is never changed. The review writes no voucher, payment, expense,
+deposit, withdrawal or journal entry. Numbered and checksum-checked runtime SQL use identical bytes. The
+number was verified free on all 336 remote branches on 2026-11-14 (no 0129–0131 file anywhere). Rollback
+of application code leaves the table unused; it must not drop it or delete the registry row. Exact-head CI
+and Staging verification remain required before Production rollout.
 ### 0132_ortho_adjustment_auxiliaries.sql
 
 Adds two nullable columns to `ortho_adjustments` for the auxiliary appliances documented in an adjustment

@@ -19,9 +19,9 @@ it("upgrades a populated 0126 database without backfilling or changing existing 
     expect((await f.pool.query("SELECT (to_jsonb(a)-'auxiliaries'-'auxiliary_other')::text AS row FROM ortho_adjustments a ORDER BY id")).rows).toEqual(before);
     expect((await f.pool.query("SELECT auxiliaries, auxiliary_other FROM ortho_adjustments ORDER BY id")).rows)
       .toEqual([{ auxiliaries: null, auxiliary_other: null }, { auxiliaries: null, auxiliary_other: null }]);
-    // 0128 (expense commands) applies on the way; 0127 and 0129–0131 stay empty: no placeholder version is recorded.
+    // 0128 (expense commands) and 0129 (shift opening reviews) apply on the way; 0127, 0130 and 0131 stay empty: no placeholder version is recorded.
     expect((await f.pool.query("SELECT version FROM schema_migrations WHERE version BETWEEN '0126' AND '0139' ORDER BY version")).rows)
-      .toEqual([{ version: "0126" }, { version: "0128" }, { version: "0132" }]);
+      .toEqual([{ version: "0126" }, { version: "0128" }, { version: "0129" }, { version: "0132" }]);
     await migrate(f.pool, { apply: true, files });
     expect((await f.pool.query("SELECT count(*)::int AS n FROM schema_migrations WHERE version='0132'")).rows).toEqual([{ n: 1 }]);
     // An existing session can take a recorded value afterwards only in the normalized shape.
