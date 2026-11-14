@@ -35,6 +35,8 @@ type BatchSuccess = Extract<BatchResult, { ok: true }>;
 type Refusal = "batch_requires_full_allocation" | "batch_link_invalid"
   | "batch_currency_mismatch" | "orders_already_paid" | "batch_busy" | "no_shift";
 const ACTOR = "synthetic-lab-full-allocation";
+/** 0128: every voucher needs drawer cash; the synthetic drawer opens funded in each currency. */
+const DRAWER_FLOAT = 100_000_000;
 const RATES = { YER: 1, SAR: 140, USD: 535 } as const;
 const PREPAYMENT_REASON = "Synthetic explicit prepayment must not bypass selection validation";
 
@@ -172,7 +174,7 @@ beforeEach(async () => {
   await dropPublicSchema(target.testUrl.toString());
   await db.ensureSchema();
   await q("DELETE FROM parties");
-  await q("INSERT INTO cashier_shifts (opened_by) VALUES ($1)", [ACTOR]);
+  await q("INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd) VALUES ($1, $2, $2, $2)", [ACTOR, DRAWER_FLOAT]);
 });
 
 afterAll(async () => { await db.resetPoolForTesting(); });
@@ -687,7 +689,8 @@ describe("successor: reciprocal identity, history and safe arithmetic", () => {
     const selected = await order(partyId);
     const shift = await db.getOpenShift();
     expect(shift).not.toBeNull();
-    expect((await db.closeShift({ id: shift!.id, closedBy: ACTOR, counted: { YER: 0, SAR: 0, USD: 0 }, note: null })).reason).toBeNull();
+    const counted = (await db.shiftDrawerBreakdown(shift!)).expected; // 0128: the drawer opens funded
+    expect((await db.closeShift({ id: shift!.id, closedBy: ACTOR, counted, note: null })).reason).toBeNull();
     await unchangedRefusal(partyId, () => batch(partyId, [selected.id], 10_000), "no_shift");
   });
 });
@@ -1007,9 +1010,9 @@ it("batch preheld shift SHARE is reusable by unchanged expense owner despite que
     batchHook.release.resolve();
     const paid = await bounded(finish(settling, "reuse own shift SHARE"), "no queued-close self wait", 2_000); success(paid);
     const closed = await finish(closing, "close includes committed batch");
-    expect(closed.reason).toBeNull(); expect(closed.breakdown?.expected.YER).toBe(-10_000);
+    expect(closed.reason).toBeNull(); expect(closed.breakdown?.expected.YER).toBe(DRAWER_FLOAT - 10_000);
     expect((await q<{ expected_yer: string; status: string }>("SELECT expected_yer, status FROM cashier_shifts WHERE id = $1", [shift!.id]))[0])
-      .toEqual({ expected_yer: "-10000", status: "closed" });
+      .toEqual({ expected_yer: String(DRAWER_FLOAT - 10_000), status: "closed" });
     expect(batchHook.statements.filter((item) => item.completed && EXPENSE_INSERT.test(item.sql))).toHaveLength(1);
     await fullAllocation(paid, [{ order: selected, remainder: 10_000 }]);
     expect(remaining(await canonical(partyId), selected)).toBe(0);
@@ -1092,7 +1095,7 @@ it("three-session legacy allocation reversal / queued close cannot trap batch be
     expect.soft(batchHook.statements.filter((item) => /FROM\s+cashier_shifts\b/i.test(item.sql))).toEqual([]);
     expect.soft(batchHook.statements.filter((item) => EXPENSE_INSERT.test(item.sql))).toEqual([]);
     expect.soft(reversed?.ok).toBe(true);
-    expect.soft(closed?.reason).toBeNull(); expect.soft(closed?.breakdown?.expected.YER).toBe(0);
+    expect.soft(closed?.reason).toBeNull(); expect.soft(closed?.breakdown?.expected.YER).toBe(DRAWER_FLOAT);
     expect.soft(after.expenses).toHaveLength(2); expect.soft(after.allocations).toHaveLength(2); expect.soft(after.tracking).toHaveLength(0);
     expect.soft(after.expenses.find((row) => row.id === oldExpense)).toMatchObject({ amount_minor: "6000", party_id: null, payable_id: null });
     expect.soft(after.expenses.find((row) => row.id === reversed?.voidedId)).toMatchObject({ amount_minor: "-6000", reversal_of_id: oldExpense });

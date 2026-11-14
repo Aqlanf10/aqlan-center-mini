@@ -48,6 +48,8 @@ interface Feed {
   expenseTotals: {
     byCategory: Record<ExpenseCategory, number>;
     byCurrency: Record<Currency, number>;
+    /** 0128: drawer parts only; absent in an older feed. */
+    drawerByCurrency?: Record<Currency, number>;
     baseTotalMinor: number;
     count: number;
   };
@@ -369,7 +371,7 @@ export default function FinancePage() {
   const expected = useMemo(() => {
     if (!feed?.open) return null;
     if (feed.drawer) return feed.drawer.expected;
-    return expectedInBox(feed.open.opening, feed.totals.byCurrency, feed.expenseTotals.byCurrency);
+    return expectedInBox(feed.open.opening, feed.totals.byCurrency, feed.expenseTotals.drawerByCurrency ?? feed.expenseTotals.byCurrency);
   }, [feed]);
 
   // إجمالي ديون المرضى — (P-01/D-1) داخل كل عملة على حدة، لا رقمٌ واحد يمزجها.

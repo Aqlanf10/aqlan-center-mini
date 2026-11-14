@@ -47,7 +47,7 @@ beforeEach(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await db.ensureSchema();
   await query("DELETE FROM parties");
-  await query("INSERT INTO cashier_shifts (opened_by) VALUES ('statement-acceptance')");
+  await query("INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd) VALUES ('statement-acceptance', 100000000, 100000000, 100000000)");
 });
 afterAll(async () => { await db.resetPoolForTesting(); });
 

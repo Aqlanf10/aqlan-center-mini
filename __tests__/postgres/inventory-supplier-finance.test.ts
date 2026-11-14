@@ -98,7 +98,8 @@ beforeAll(async () => {
     );
   await db.openShift({
     openedBy: admin.username,
-    opening: { YER: 0, SAR: 0, USD: 0 },
+    // 0128: supplier payments need drawer cash.
+    opening: { YER: 100_000_000, SAR: 100_000_000, USD: 100_000_000 },
   });
 });
 afterAll(async () => {

@@ -43,7 +43,7 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
 }
 
 async function openShiftNow(): Promise<number> {
-  const [row] = await q<{ id: number }>(`INSERT INTO cashier_shifts (opened_by) VALUES ('hr-int') RETURNING id`);
+  const [row] = await q<{ id: number }>(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd) VALUES ('hr-int', 100000000, 100000000, 100000000) RETURNING id`);
   shiftId = row.id;
   return row.id;
 }

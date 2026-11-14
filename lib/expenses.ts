@@ -88,11 +88,15 @@ export interface ExpenseLike {
   amountMinor: number;
   currency: Currency;
   baseAmountMinor: number;
+  /** 0128: the part that left the drawer; absent (older feeds) means the whole amount. */
+  drawerAmountMinor?: number;
 }
 
 export interface ExpenseTotals {
   byCategory: Record<ExpenseCategory, number>;
   byCurrency: Record<Currency, number>;
+  /** 0128: what left the drawer per currency. A part the owner paid from a private source is excluded. */
+  drawerByCurrency: Record<Currency, number>;
   baseTotalMinor: number;
   count: number;
 }
@@ -102,15 +106,17 @@ export function expenseTotals(expenses: ExpenseLike[]): ExpenseTotals {
     EXPENSE_CATEGORIES.map((category) => [category, 0]),
   ) as Record<ExpenseCategory, number>;
   const byCurrency: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
+  const drawerByCurrency: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
   let baseTotalMinor = 0;
 
   for (const expense of expenses) {
     const cat = expense.category || "other";
     byCategory[cat] = (byCategory[cat] ?? 0) + expense.baseAmountMinor;
     byCurrency[expense.currency] = (byCurrency[expense.currency] ?? 0) + expense.amountMinor;
+    drawerByCurrency[expense.currency] = (drawerByCurrency[expense.currency] ?? 0) + (expense.drawerAmountMinor ?? expense.amountMinor);
     baseTotalMinor += expense.baseAmountMinor;
   }
-  return { byCategory, byCurrency, baseTotalMinor, count: expenses.length };
+  return { byCategory, byCurrency, drawerByCurrency, baseTotalMinor, count: expenses.length };
 }
 
 /**

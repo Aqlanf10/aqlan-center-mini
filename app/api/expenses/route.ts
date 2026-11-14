@@ -89,7 +89,8 @@ export async function POST(request: Request) {
     });
     if (reason) {
       return NextResponse.json(
-        { message: refusalMessage(reason, quote), code: reason, quote },
+        { message: refusalMessage(reason, quote), code: reason, quote,
+          ...(reason === "exceeds_drawer_cash" ? { drawerAvailableMinor: quote?.drawer?.availableMinor ?? null } : {}) },
         { status: refusalStatus(reason) },
       );
     }

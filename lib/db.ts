@@ -10109,7 +10109,7 @@ function effectiveExpectedSql(currency: "yer" | "sar" | "usd"): string {
                   FROM payments p
                  WHERE p.shift_id = s.id AND p.currency = '${code}'
                    AND COALESCE(NULLIF(p.method, ''), 'cash') = 'cash'), 0)
-    - COALESCE((SELECT SUM(e.amount_minor) FROM expenses e
+    - COALESCE((SELECT SUM(COALESCE(e.drawer_amount_minor, e.amount_minor)) FROM expenses e
                  WHERE e.shift_id = s.id AND e.currency = '${code}'), 0))::text AS eff_expected_${currency}`;
 }
 
@@ -10201,7 +10201,8 @@ export async function shiftDrawerBreakdown(shift: CashierShift, client?: Pick<Db
     `SELECT kind, currency, amount_minor, method FROM payments WHERE shift_id = $1`, [shift.id],
   );
   const { rows: expenses } = await runner.query<{ currency: string; amount_minor: string }>(
-    `SELECT currency, amount_minor FROM expenses WHERE shift_id = $1`, [shift.id],
+    // 0128: only the drawer part of a voucher left the drawer (NULL = written before 0128 = all of it).
+    `SELECT currency, COALESCE(drawer_amount_minor, amount_minor) AS amount_minor FROM expenses WHERE shift_id = $1`, [shift.id],
   );
   return drawerBreakdown(
     shift.opening,
@@ -13627,6 +13628,13 @@ export interface Expense {
   payableSettledMinor: number | null;
   rateOverrideReason: string | null;
   reversalOfId: number | null;
+  /** 0128: where the money came from. A voucher written before 0128 reads as the drawer (its only source). */
+  paymentSource: "drawer" | "owner_private" | "drawer_and_owner_private";
+  /** The part that left the drawer, in the voucher currency (negative on a reversal). */
+  drawerAmountMinor: number;
+  /** The part the owner paid from a private source; never drawer cash. */
+  ownerPrivateAmountMinor: number;
+  ownerPrivateReason: string | null;
 }
 
 interface ExpenseRow {
@@ -13638,6 +13646,8 @@ interface ExpenseRow {
   payable_currency: string | null; payable_amount_minor: string | null;
   payable_exchange_rate: string | null; payable_settled_minor: string | null;
   rate_override_reason: string | null; reversal_of_id: number | null;
+  payment_source: string | null; drawer_amount_minor: string | null; owner_private_amount_minor: string | null;
+  owner_private_reason: string | null;
 }
 
 const toExpense = (row: ExpenseRow): Expense => ({
@@ -13666,14 +13676,29 @@ const toExpense = (row: ExpenseRow): Expense => ({
   payableSettledMinor: row.payable_settled_minor !== null ? toMinor(row.payable_settled_minor) : null,
   rateOverrideReason: row.rate_override_reason,
   reversalOfId: row.reversal_of_id,
+  ...expensePaymentParts(row),
 });
+
+/** 0128 parts of a voucher row; NULL (written before 0128) means the whole amount left the drawer. */
+function expensePaymentParts(row: Pick<ExpenseRow, "voucher_number" | "amount_minor" | "payment_source" | "drawer_amount_minor"
+  | "owner_private_amount_minor" | "owner_private_reason">): Pick<Expense, "paymentSource" | "drawerAmountMinor" | "ownerPrivateAmountMinor" | "ownerPrivateReason"> {
+  if (row.payment_source === null) {
+    return { paymentSource: "drawer", drawerAmountMinor: toMinor(row.amount_minor), ownerPrivateAmountMinor: 0, ownerPrivateReason: null };
+  }
+  if (row.payment_source !== "drawer" && row.payment_source !== "owner_private" && row.payment_source !== "drawer_and_owner_private") {
+    throw new Error(`مصدر دفع غير معروف في السند ${row.voucher_number}`);
+  }
+  return { paymentSource: row.payment_source, drawerAmountMinor: toMinor(row.drawer_amount_minor ?? "0"),
+    ownerPrivateAmountMinor: toMinor(row.owner_private_amount_minor ?? "0"), ownerPrivateReason: row.owner_private_reason };
+}
 
 const EXPENSE_SELECT = `
   SELECT e.id, e.voucher_number, e.category, e.party_id, t.name AS party_name, e.payee_text,
          e.shift_id, e.amount_minor, e.currency, e.exchange_rate, e.base_amount_minor,
          e.base_currency, e.payable_id, e.note, e.created_by, e.created_at,
          e.payable_currency, e.payable_amount_minor, e.payable_exchange_rate,
-         e.payable_settled_minor, e.rate_override_reason, e.reversal_of_id
+         e.payable_settled_minor, e.rate_override_reason, e.reversal_of_id,
+         e.payment_source, e.drawer_amount_minor, e.owner_private_amount_minor, e.owner_private_reason
     FROM expenses e LEFT JOIN parties t ON t.id = e.party_id`;
 
 export async function getExpense(id: number): Promise<Expense | null> {
@@ -13915,6 +13940,24 @@ export interface RecordExpenseInput {
    * neither. HTTP creates always carry them; internal settlements (payroll, lab batch) do not.
    */
   request?: { key: string; hash: string } | null;
+  /**
+   * 0128 (§2.2): how the amount was paid. Omitted = all from the drawer. A private part is accepted only
+   * from a caller that proved the protected owner inside this transaction; the writer re-checks the shape.
+   */
+  paymentSplit?: ExpensePaymentSplitInput | null;
+}
+
+export interface ExpensePaymentSplitInput {
+  drawerMinor: number;
+  ownerPrivateMinor: number;
+  ownerPrivateReason: string | null;
+  ownerUserId: number | null;
+}
+
+/** The voucher source implied by its two parts. */
+export function expensePaymentSource(split: Pick<ExpensePaymentSplitInput, "drawerMinor" | "ownerPrivateMinor">): Expense["paymentSource"] {
+  if (split.ownerPrivateMinor === 0) return "drawer";
+  return split.drawerMinor === 0 ? "owner_private" : "drawer_and_owner_private";
 }
 
 export interface ExpectedQuote {
@@ -13942,6 +13985,13 @@ export async function recordExpenseInTx(
   input: RecordExpenseInput,
   settingsRates: RateMap,
 ): Promise<{ id: number | null; reason: SupplierPaymentRefusal | null; quote: SettlementQuote | null }> {
+  const split: ExpensePaymentSplitInput = input.paymentSplit
+    ?? { drawerMinor: input.amountMinor, ownerPrivateMinor: 0, ownerPrivateReason: null, ownerUserId: null };
+  if (!Number.isSafeInteger(split.drawerMinor) || !Number.isSafeInteger(split.ownerPrivateMinor) || split.drawerMinor < 0
+    || split.ownerPrivateMinor < 0 || split.drawerMinor + split.ownerPrivateMinor !== input.amountMinor
+    || (split.ownerPrivateMinor > 0) !== (split.ownerUserId !== null && Boolean(split.ownerPrivateReason?.trim()))) {
+    throw new Error("Invalid expense payment split");
+  }
   const baseAmount = toBaseAmount(input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate);
   /* أسعار هذا السند: الإعدادات، ويعلوها سعر الدفع المقَرّ وسعر الفاتورة المقَرّ. */
   const rates: RateMap = { ...settingsRates, [input.currency]: input.exchangeRate };
@@ -14085,6 +14135,24 @@ export async function recordExpenseInTx(
     if (!fresh) return { id: null, reason: "stale_quote", quote };
   }
 
+  if (split.drawerMinor > 0) {
+    // 0128 (§2.2): drawer outflows of the clinic's single open drawer are serialized here, after the party
+    // and payable row locks (whose order the settlement writers rely on), so two vouchers cannot both pass
+    // against the same cash. A private-only voucher takes no drawer lock.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('aqlan.drawer-outflow.v1', 0))");
+    const code = input.currency.toLowerCase() as "yer" | "sar" | "usd";
+    const { rows: open } = await client.query<Record<string, string>>(
+      `SELECT ${effectiveExpectedSql(code)} FROM cashier_shifts s WHERE s.status = 'open' LIMIT 1 FOR SHARE OF s`);
+    // No open shift: the insert below refuses with no_shift, as before.
+    if (open[0]) {
+      const available = toMinor(open[0][`eff_expected_${code}`]);
+      if (split.drawerMinor > available) {
+        quote.drawer = { availableMinor: Math.max(0, available) };
+        return { id: null, reason: "exceeds_drawer_cash", quote };
+      }
+    }
+  }
+
   const note = quote.party?.prepayment
     ? `دفعة مقدمة: ${input.prepaymentReason!.trim().slice(0, 200)}${input.note ? ` — ${input.note}` : ""}`
     : input.note;
@@ -14093,11 +14161,13 @@ export async function recordExpenseInTx(
        voucher_number, category, party_id, payee_text, shift_id, amount_minor, currency,
        exchange_rate, base_amount_minor, base_currency, payable_id, note, created_by,
        payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
-       rate_override_reason, idempotency_key, idempotency_request_hash)
+       rate_override_reason, idempotency_key, idempotency_request_hash,
+       payment_source, drawer_amount_minor, owner_private_amount_minor, owner_private_reason, owner_private_user_id)
      SELECT
        ${documentNumberSql("voucher")},
        $1, $2::int, $3::text, s.id, $4, $5, $6, $7, $8, $9::int, $10::text, $11,
-       $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text, $17::text, $18::text
+       $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text, $17::text, $18::text,
+       $19::text, $20::bigint, $21::bigint, $22::text, $23::int
        FROM cashier_shifts s
       WHERE s.status = 'open'
       LIMIT 1
@@ -14110,6 +14180,9 @@ export async function recordExpenseInTx(
       snapshot?.currency ?? null, snapshot?.amountMinor ?? null, snapshot?.exchangeRate ?? null,
       snapshot?.settledMinor ?? null, input.rateOverrideReason?.trim() || null,
       input.request?.key ?? null, input.request?.hash ?? null,
+      expensePaymentSource(split), split.drawerMinor, split.ownerPrivateMinor,
+      split.ownerPrivateMinor > 0 ? split.ownerPrivateReason!.trim() : null,
+      split.ownerPrivateMinor > 0 ? split.ownerUserId : null,
     ],
   );
   if (!rows[0]) return { id: null, reason: "no_shift", quote };
@@ -14372,12 +14445,16 @@ export async function voidExpenseInTx(
       `INSERT INTO expenses (
          voucher_number, category, party_id, payee_text, shift_id, amount_minor, currency,
          exchange_rate, base_amount_minor, base_currency, note, created_by, reversal_of_id,
-         payable_id, payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor)
+         payable_id, payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
+         payment_source, drawer_amount_minor, owner_private_amount_minor, owner_private_reason, owner_private_user_id)
        SELECT
          ${documentNumberSql("reversal")},
          $1, $2::int, $3::text, $4, -$5::bigint, $6, $7::numeric, -$8::bigint, $9,
          $10::text, $11, $12::int,
-         $13::int, $14::text, $15::bigint, $16::numeric, -$17::bigint
+         $13::int, $14::text, $15::bigint, $16::numeric, -$17::bigint,
+         -- 0128: the reversal mirrors the source; the drawer part returns to the drawer, the private part to the owner.
+         o.payment_source, -o.drawer_amount_minor, -o.owner_private_amount_minor, o.owner_private_reason, o.owner_private_user_id
+         FROM expenses o WHERE o.id = $12::int
        RETURNING id, voucher_number`,
       [
         current.category, current.party_id, current.payee_text,
