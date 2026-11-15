@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from "playwright";
 import { Client } from "pg";
-import { baseUrl, harness } from "./_server";
+import { baseUrl, harness, TEST_USERS } from "./_server";
 
 /**
  * Owner's review #483 6882465665 on 0128: an expense whose outcome is unknown is never lost and never
@@ -287,6 +287,9 @@ describe("bill payment on the supplier page", () => {
       const paid = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM expenses WHERE payable_id = $1", [payableId]);
       expect(paid.rows[0]).toEqual({ n: 0 });
       expect((await db.query("SELECT count(*)::int AS n FROM audit_log WHERE action = 'expense.create' AND details::text LIKE $1", [`%${description}%`])).rows[0].n).toBe(0);
+      // The user's explicit «أنهِ» is audited once, under the request key; the late request adds nothing.
+      expect((await db.query("SELECT actor FROM audit_log WHERE action = 'expense.request_retire' AND entity_id = $1", [firstHeaders!["idempotency-key"]])).rows)
+        .toEqual([{ actor: TEST_USERS.admin.username }]);
     } finally { await context.close(); }
   });
 

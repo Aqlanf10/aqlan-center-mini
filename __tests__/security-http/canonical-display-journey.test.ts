@@ -36,6 +36,7 @@ it("public HTML does not serialize the staff settings context", async () => {
 });
 
 it("browser drops the current caller after a failed refresh", async () => {
+  await callToday(); // the seeded call must be on today's clinic day, whatever the run's clock
   const context = await journey.browser.newContext({ viewport: { width: 1280, height: 720 } });
   try {
     const page = await context.newPage();
@@ -48,6 +49,7 @@ it("browser drops the current caller after a failed refresh", async () => {
 });
 
 it("browser never speaks a patient call through a non-Arabic fallback voice", async () => {
+  await callToday(); // the seeded call must be on today's clinic day, whatever the run's clock
   const context = await journey.browser.newContext({ viewport: { width: 1280, height: 720 } });
   try {
     const page = await context.newPage();
@@ -76,7 +78,9 @@ const central = async (cookie: string, values: Record<string, string>) => {
   const snapshot = await (await journey.api("/api/settings", cookie)).json();
   return journey.api("/api/settings", cookie, { method: "PATCH", body: JSON.stringify({ ...values, __versions: Object.fromEntries(Object.keys(values).map(key => [key, snapshot.__versions[key] ?? null])) }) });
 };
-const freshCall = async (name: string) => journey.db.query("UPDATE visits SET patient_name=$1,called_at=clock_timestamp() WHERE status='called'", [name]);
+/** The called visit arrives and is called now, on today's clinic day (one timestamp for both). */
+const callToday = async () => journey.db.query("WITH t AS (SELECT clock_timestamp() AS ts) UPDATE visits SET arrived_at=t.ts, called_at=t.ts FROM t WHERE status='called'");
+const freshCall = async (name: string) => journey.db.query("WITH t AS (SELECT clock_timestamp() AS ts) UPDATE visits SET patient_name=$1,arrived_at=t.ts,called_at=t.ts FROM t WHERE status='called'", [name]);
 const refresh = (page: Page) => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
 
 it("anonymous and every staff scope receive the exact same minimum projection; URL parameters cannot expand it", async () => {
@@ -150,6 +154,7 @@ async function mockSpeech(page: Page, late = false) {
 const heard = (page: Page) => page.evaluate(() => (window as unknown as { __displaySpeech: { text: string; voice: string; rate: number }[] }).__displaySpeech);
 
 it("browser: delayed Arabic voices, different-device fallback, pauses and settings changes never replay polling or reconnect calls", async () => {
+  await callToday(); // the seeded call must be on today's clinic day, whatever the run's clock
   const context = await journey.browser.newContext({ viewport: { width: 1280, height: 720 } });
   try {
     const page = await context.newPage(); await mockSpeech(page, true); await page.goto(`${journey.baseUrl}/display`);
@@ -219,6 +224,11 @@ it("browser: staff retains internal queue summary and notice controls, while a s
 });
 
 it("browser clears a caller when a refresh never completes", async () => {
+  // Hosted run 43635803755 started this test at 00:00:01 clinic time, so the call seeded before midnight was
+  // on the previous clinic day and was correctly not shown. Prove that rule, then call the patient for today.
+  await journey.db.query("UPDATE visits SET arrived_at = arrived_at - INTERVAL '1 day', called_at = called_at - INTERVAL '1 day' WHERE status='called'");
+  expect((await (await journey.api("/api/display", "")).json()).called).toEqual([]);
+  await callToday();
   const context = await journey.browser.newContext();
   try {
     const page = await context.newPage(); await page.goto(`${journey.baseUrl}/display`); await page.getByTestId("current-call").waitFor();
