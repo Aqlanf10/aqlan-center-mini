@@ -125,7 +125,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "finance.locked_before": "",
   /* 0128 (#483 6831365228): the account credited when the owner pays part of an expense from a private
      source. Empty = not decided: no private part is accepted until the owner chooses (asked on #483). */
-  "finance.owner_private_funding_account": "",
+  // Owner decision #483 6888146935: owed to the owner by the clinic, to be repaid later (liability 2108).
+  "finance.owner_private_funding_account": "2108",
   /* خصم إهلاك المواد المقدَّر (نسب التخصصات) من العمولة — قرار المالك،
      والافتراض مغلق فلا يتغيّر رقمٌ قائم. "on" يفعّله بعد تحديد النسب. */
   "finance.commission_material_rate": "off",
@@ -504,7 +505,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "finance.rate.SAR", label: "سعر الريال السعودي", hint: "كم ريالًا يمنيًا يساوي ريالًا سعوديًا اليوم", kind: "number", group: "finance" },
   { key: "finance.rate.USD", label: "سعر الدولار", hint: "كم ريالًا يمنيًا يساوي دولارًا اليوم", kind: "number", group: "finance" },
   { key: "finance.locked_before", label: "قفل الدفاتر قبل تاريخ", hint: "لا يُقبل قيد أو تعديل قبل هذا التاريخ. اتركه فارغًا لإلغاء القفل.", kind: "date", group: "finance" },
-  { key: "finance.owner_private_funding_account", label: "حساب ما يدفعه المالك من مصدره الخاص", hint: "رقم حساب حقوق ملكية أو التزامات من الدليل. فارغ = لا يُقبل دفع من المصدر الخاص حتى يقرّر المالك.", kind: "text", group: "finance" },
+  { key: "finance.owner_private_funding_account", label: "حساب ما يدفعه المالك من مصدره الخاص", hint: "الافتراضي 2108: مستحق للمالك على العيادة يُعاد إليه لاحقًا (قرار المالك). يقبل حساب حقوق ملكية أو التزامات من الدليل؛ يغيّره المالك وحده بسبب مكتوب، ولا يغيّر السندات السابقة. فارغ = الافتراضي 2108.", kind: "text", group: "finance" },
   { key: "finance.commission_material_rate", label: "خصم إهلاك المواد من العمولة", hint: "on = خصم نسب التخصصات المحدَّدة في «نسب إهلاك المواد»؛ off = إبقاء الأرقام كما كانت.", kind: "text", group: "finance" },
 
   { key: "clinic.chairs", label: "عدد الكراسي", hint: "يحكم الحجز والانتظار وشاشة الصالة", kind: "number", group: "operations" },

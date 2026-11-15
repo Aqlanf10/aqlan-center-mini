@@ -80,7 +80,29 @@ parts with negative signs.
 - **Revocation.** The owner proof is read inside the write transaction. If ownership changes before
   the commit, the write is refused and nothing is written.
 
-### 2.3 Journal: the open accounting question
+### 2.3 Journal: the owner's decision (#483 6888146935, answering 6878857625)
+
+The owner's words: «يسجل المبلغ كمستحق لك على العيادة يُعاد إليك لاحقًا، مع إمكانية تغيير هذا من الإعدادات».
+
+- The private part is **owed to the owner by the clinic, to be repaid later**: a liability, not capital and not a
+  loan. It credits a new chart account, **2108 «مستحقات المالك (مدفوعات من ماله الخاص)»** (liability, under 21),
+  which is now the default of `finance.owner_private_funding_account`. No interest, no loan terms and no automatic
+  repayment or settlement are added; the decision sets the obligation only. The drawer part still credits cash and
+  never exceeds the drawer's cash; only the server-proven owner may record a private part.
+- **Changeable in the settings, by the owner only:** the setting stays in the `authority` class (canonical
+  protected owner only, a written reason required, one audit row per change). A legacy session, the legacy admin
+  included, is refused 403 on both change and reset, because the legacy runtime cannot prove the owner. An empty
+  stored value falls back to the default (2108); an unusable account (not an existing equity or liability account)
+  refuses new private parts with 409 `owner_private_account_unset`.
+- **Never retroactive:** each voucher keeps the account it was recorded with (`owner_private_account_code`), so a
+  later change of the setting applies to new vouchers only and never rewrites an earlier derived journal entry; the
+  create audit row names the account (`حساب_تمويل_المالك`).
+- Tests: the default records the owed amount once (one voucher, one entry crediting 2108, the drawer unchanged; a
+  repeat of the same request writes nothing more); only the owner changes it (a settings manager and a finance
+  manager are refused); the change is audited; the old voucher keeps 2108 while a new one credits the new account;
+  the legacy route refuses change and reset. PostgreSQL 3 red, then 22/22; legacy HTTP 2 red, then green.
+
+#### 2.3.1 Superseded: the open question (kept for the record)
 
 The derived journal today credits the cash account for the whole voucher. With the split, the drawer
 part credits cash. The private part needs a credit account, and the owner said not to assume one

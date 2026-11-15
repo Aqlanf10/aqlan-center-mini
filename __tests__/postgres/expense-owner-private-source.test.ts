@@ -3,8 +3,10 @@
  * part of an expense from a private source; only the drawer part leaves the drawer. Contract:
  * docs/finance/EXPENSE_COMMANDS_0128.md §2.2–2.3. Canonical runtime on an owned synthetic database.
  *
- * The funding account is set to "3101" here ONLY to exercise the posting path. That value is a synthetic
- * test choice, not the owner's accounting decision (asked on #483, 6878857625).
+ * Owner decision #483 6888146935 (answering 6878857625): the private part is recorded as owed to the owner by
+ * the clinic, to be repaid later (account 2108), and the treatment can be changed in the settings by the owner
+ * only; each voucher keeps the account it was recorded with. Where a test sets "3101" it only exercises the
+ * changed-setting path.
  */
 vi.mock("server-only", () => ({}));
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +20,8 @@ vi.stubEnv("SESSION_SECRET", "synthetic-expense-owner-private-20261114");
 const db = await import("../../lib/db");
 const shifts = await import("../../lib/canonical-shifts");
 const expenses = await import("../../lib/canonical-expense-create");
+const settings = await import("../../lib/canonical-settings");
+const { ACCOUNTS: CHART } = await import("../../lib/accounting");
 const ALL = { "finance.expenses.create": true, "finance.expenses.view": true, "finance.fx.manage": true,
   "finance.payables.record": true, "finance.shifts.operate": true, "finance.shifts.view": true };
 const ACCOUNTS = {
@@ -25,6 +29,8 @@ const ACCOUNTS = {
   manager: { username: "SYN-EXP-MANAGER", role: "admin", grants: ALL },
   cashier: { username: "SYN-EXP-CASHIER", role: "cashier", grants: { "finance.expenses.create": true } },
   reader: { username: "SYN-EXP-READER", role: "accountant", grants: { "finance.expenses.view": true } },
+  settingsManager: { username: "SYN-EXP-SETTINGS", role: "admin",
+    grants: { "settings.view": true, "settings.finance.edit": true, "settings.operational.edit": true } },
 } as const;
 type Key = keyof typeof ACCOUNTS;
 let fx: CanonicalInventoryDatabase<Key>;
@@ -120,13 +126,11 @@ describe("who may record a private part", () => {
     await expect(create("reader", { category: "other", payee: "SYN", amount: "1", currency: "YER" })).rejects.toThrow(/CAPABILITY_DENIED/);
   });
 
-  it("refuses the owner too while no funding account is set, and still allows a drawer voucher", async () => {
+  it("an empty stored value follows the owner's decision (owed to the owner, 2108); a drawer voucher is unaffected", async () => {
     await freshDrawer("1000");
-    const before = await footprint();
-    await expect(create("owner", { category: "other", payee: "SYN", amount: "100", currency: "YER", ownerPrivateAmount: "100", ownerPrivateReason: "SYN try" }))
-      .rejects.toMatchObject({ code: "owner_private_account_unset", status: 409 });
-    expect(await footprint()).toEqual(before);
-    await expect(create("owner", { category: "other", payee: "SYN", amount: "100", currency: "YER" })).resolves.toBeDefined();
+    const { expense } = await create("owner", { category: "other", payee: "SYN", amount: "100", currency: "YER", ownerPrivateAmount: "100", ownerPrivateReason: "SYN try" });
+    expect(await q("SELECT owner_private_account_code FROM expenses WHERE id=$1", [expense.id])).toEqual([{ owner_private_account_code: "2108" }]);
+    await expect(create("owner", { category: "other", payee: "SYN", amount: "100", currency: "YER" })).resolves.toMatchObject({ expense: { paymentSource: "drawer" } });
   });
 
   it.each([["a cash account", "1101"], ["an expense account", "5901"], ["an unknown account", "3999"]])(
@@ -172,11 +176,11 @@ describe("the request shape", () => {
     expect(await footprint()).toEqual(before);
   });
 
-  it("replays a saved private-part request even after the funding account setting was cleared", async () => {
+  it("replays a saved private-part request even after the funding account setting became unusable", async () => {
     await freshDrawer("1000"); await setAccount("3101");
     const body = { category: "other", payee: "SYN", amount: "300", currency: "YER", ownerPrivateAmount: "300", ownerPrivateReason: "SYN replay later" };
     const first = await create("owner", body, "syn-owner-src-replay-02");
-    await setAccount("");
+    await setAccount("1101"); // a cash account: refused for new private parts, irrelevant to a replay
     const before = await footprint();
     await expect(create("owner", body, "syn-owner-src-replay-02")).resolves.toMatchObject({ expense: { id: first.expense.id }, replayed: true });
     await expect(create("owner", { ...body, ownerPrivateAmount: "200" }, "syn-owner-src-replay-02")).rejects.toMatchObject({ code: "expense_request_conflict" });
@@ -190,3 +194,58 @@ describe("the request shape", () => {
     expect(expense.createdBy).toBe(ACCOUNTS.cashier.username);
   });
 });
+
+describe("owner decision 6888146935: the private part is owed to the owner, changeable in the settings", () => {
+  const KEY = "finance.owner_private_funding_account";
+  const clearStored = () => q("DELETE FROM settings WHERE key=$1", [KEY]);
+  const journalFor = async (voucher: string) => (await db.journalEntries("0001-01-01", "9999-12-31", fx.pool)).filter((e) => e.reference === voucher);
+  const writeSetting = async (k: Key, value: string) => {
+    const current = await settings.readCanonicalSettings(await fx.session("owner"));
+    return settings.commandCanonicalSettingsWrite(await fx.session(k),
+      settings.parseCanonicalSettingsUpdate({ [KEY]: value, __versions: { [KEY]: current.__versions[KEY] ?? null }, __reason: "SYN treatment change" }));
+  };
+
+  it("the chart holds the liability 2108 for what the owner pays from their own money", () => {
+    expect(CHART.find((a) => a.code === "2108")).toEqual({ code: "2108", name: "مستحقات المالك (مدفوعات من ماله الخاص)", kind: "liability", parent: "21" });
+  });
+
+  it("by default the owner's private part is recorded once as owed to the owner, outside the drawer, and a repeat writes nothing", async () => {
+    await freshDrawer("1000"); await clearStored();
+    const before = await drawer(), requestKey = `syn-owner-due-${++serial}`;
+    const body = { category: "other", payee: "SYN payee", amount: "300", currency: "YER", ownerPrivateAmount: "300", ownerPrivateReason: "SYN paid from the owner's own money" };
+    const first = await create("owner", body, requestKey);
+    expect(first.expense).toMatchObject({ paymentSource: "owner_private", drawerAmountMinor: 0, ownerPrivateAmountMinor: 300 });
+    expect(await q("SELECT owner_private_account_code FROM expenses WHERE id=$1", [first.expense.id])).toEqual([{ owner_private_account_code: "2108" }]);
+    expect(await drawer()).toEqual(before);
+    const entries = await journalFor(first.expense.voucherNumber);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].lines.filter((l) => l.side === "credit").map((l) => [l.accountCode, l.amountMinor])).toEqual([["2108", 300]]);
+    expect((await q<{ details: Record<string, unknown> }>("SELECT details FROM audit_log WHERE action='expense.create' AND entity_id=$1", [String(first.expense.id)]))
+      .map((r) => r.details["حساب_تمويل_المالك"])).toEqual(["2108"]);
+    const footprintAfter = await footprint();
+    const again = await create("owner", body, requestKey);
+    expect(again.expense.id).toBe(first.expense.id);
+    expect(await footprint()).toEqual(footprintAfter);
+    expect(await journalFor(first.expense.voucherNumber)).toHaveLength(1);
+    expect(await drawer()).toEqual(before);
+  });
+
+  it("only the owner changes the treatment; the change is audited, applies to new vouchers only, and old entries keep their account", async () => {
+    await freshDrawer("1000"); await clearStored();
+    const old = await create("owner", { category: "other", payee: "SYN payee", amount: "100", currency: "YER", ownerPrivateAmount: "100", ownerPrivateReason: "SYN before the change" });
+    for (const k of ["settingsManager", "manager"] as const) {
+      await expect(writeSetting(k, "3101")).rejects.toBeTruthy();
+    }
+    expect(await q("SELECT value FROM settings WHERE key=$1", [KEY])).toEqual([]);
+    await writeSetting("owner", "3101");
+    expect(await q<{ actor: string }>("SELECT actor FROM audit_log WHERE entity='clinic_setting' AND entity_id=$1", [KEY]))
+      .toEqual([{ actor: ACCOUNTS.owner.username }]);
+    const fresh = await create("owner", { category: "other", payee: "SYN payee", amount: "100", currency: "YER", ownerPrivateAmount: "100", ownerPrivateReason: "SYN after the change" });
+    const creditOf = async (voucher: string) => (await journalFor(voucher))[0].lines.filter((l) => l.side === "credit").map((l) => l.accountCode);
+    expect(await creditOf(fresh.expense.voucherNumber)).toEqual(["3101"]);
+    expect(await creditOf(old.expense.voucherNumber)).toEqual(["2108"]);
+    expect(await q("SELECT id, owner_private_account_code FROM expenses WHERE id = ANY($1::int[]) ORDER BY id", [[old.expense.id, fresh.expense.id]]))
+      .toEqual([{ id: old.expense.id, owner_private_account_code: "2108" }, { id: fresh.expense.id, owner_private_account_code: "3101" }]);
+  });
+});
+

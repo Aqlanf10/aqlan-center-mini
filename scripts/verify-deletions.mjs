@@ -59,6 +59,9 @@ const check = (label, ok, extra = "") => {
   if (!ok) failed = true;
 };
 
+/** نقدٌ افتتاحيّ اصطناعيّ للوردية: يتّسع لسندات الصرف 4000 و6000 و1500 مجتمعة. */
+const SYNTHETIC_DRAWER_YER = 100_000;
+
 const number = () => "DL-" + Date.now().toString().slice(-8) + Math.floor(Math.random() * 97);
 
 async function seed() {
@@ -67,11 +70,13 @@ async function seed() {
   const username = `synthetic-delete-${randomUUID()}`, credential = randomBytes(32).toString("hex");
   const { rows: [actor] } = await pool.query("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic delete verifier',$2,'admin') RETURNING id", [username, credential]);
   deletionSession = { userId: actor.id, username, role: "admin", partyId: null, expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion(credential) };
-  // وردية مفتوحة — القبض والصرف لا يمرّان بلاها.
+  // وردية مفتوحة — القبض والصرف لا يمرّان بلاها. وسقف الدرج (0128) لا يُخرج من الدرج
+  // أكثر مما فيه، فتُفتح بنقدٍ افتتاحيّ اصطناعيّ يكفي سندات الصرف في الفقرة السادسة.
   await pool.query(`UPDATE cashier_shifts SET status = 'closed', closed_at = NOW() WHERE status = 'open'`);
   await pool.query(
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
-     SELECT 'فحص', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`,
+     SELECT 'فحص', $1, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`,
+    [SYNTHETIC_DRAWER_YER],
   );
 }
 

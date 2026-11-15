@@ -14,6 +14,11 @@ import { staffAdmissionRefusal } from "@/lib/staff-capability-editor";
 import { CanonicalSettingsRefusal, commandCanonicalSettingsWrite, parseCanonicalSettingsReset, parseCanonicalSettingsUpdate, readCanonicalSettings } from "@/lib/canonical-settings";
 import type { VerifiedDurableSession } from "@/lib/staff-durable-session";
 
+/** Owner decision #483 6888146935: only the protected owner changes how their private payments are recorded,
+ * and only the canonical staff runtime proves the owner. A legacy session (the admin included) is refused. */
+const OWNER_ONLY_SETTING_KEYS: ReadonlySet<string> = new Set(["finance.owner_private_funding_account"]);
+const OWNER_ONLY_REFUSAL = "تغيير معالجة ما يدفعه المالك من ماله الخاص للمالك وحده عبر نظام صلاحيات الطاقم الجديد؛ لم يُحفظ شيء.";
+
 export const dynamic = "force-dynamic";
 
 const denied = () =>
@@ -142,6 +147,7 @@ export async function PATCH(request: Request) {
     }
     const definition = settingDefinition(key);
     if (!definition) return NextResponse.json({ message: "مفتاح غير معروف.", key }, { status: 400 });
+    if (OWNER_ONLY_SETTING_KEYS.has(key)) return NextResponse.json({ message: OWNER_ONLY_REFUSAL, key }, { status: 403 });
     // The medication catalog has its own grant (owner decision 6839071994): an administrator or a
     // granted doctor. This is a precheck; the writer re-proves it after the settings locks.
     if (key === MEDICATION_CATALOG_KEY
@@ -234,6 +240,7 @@ export async function POST(request: Request) {
   for (const key of keys) {
     const definition = settingDefinition(key);
     if (!definition) return NextResponse.json({ message: "مفتاح غير معروف.", key }, { status: 400 });
+    if (OWNER_ONLY_SETTING_KEYS.has(key)) return NextResponse.json({ message: OWNER_ONLY_REFUSAL, key }, { status: 403 });
     if (!canManageCategory(session.role, definition.category)) {
       return NextResponse.json({ message: denialMessage(definition.category), key }, { status: 403 });
     }
