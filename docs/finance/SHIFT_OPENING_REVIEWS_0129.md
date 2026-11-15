@@ -1,6 +1,8 @@
 # Shift opening reviews (migration 0129)
 
-Status: specification written before tests and code (2026-11-14).
+Status: specification written before tests and code (2026-11-14). **Revised 2026-11-15 by the owner's
+blind-count decision (#483 6886911163): §8 supersedes every rule below about the 409 refusal, the opener's
+note and who sees amounts.**
 Sources: owner decision on #483, comment 6831365228, item 1. Number and scope: allocation 6833690789
 (`0129_shift_opening_reviews.sql`: the opening difference per currency, with its reason, its settlement,
 the reviewer and a reference to the previous close, without changing that close). Finance queue row F1-1
@@ -212,3 +214,108 @@ pending notice, and the review by the owner.
   refusal hide the previous count, but the shift history and the shifts feed still show the last close's
   counted amount to every shift viewer, the opener included. Hiding it from openers until the next opening
   would change an existing screen and report, so it is an owner question, not done here.
+
+## 8. Blind count (owner decision #483 6886911163, 2026-11-15) — supersedes §2.1, §2.3, §4 and §7 where they differ
+
+The owner's words, in short: the employee counts the cash and records the real count before seeing the
+previous close's balance. The difference is recorded and sent to an authorized reviewer, with no automatic
+deposit or withdrawal. The owner and the authorized reviewer see the balance and the difference according to
+their grants. The protection is on the server, not only on the screen.
+
+### 8.1 Who is authorized
+
+- Canonical: the protected owner, or a holder of `finance.shifts.review-opening` (unchanged, granted to
+  nobody by default, never implied by a role label, `finance.shifts.operate` or `finance.reconciliation.manage`).
+- Legacy (before the cutover): the legacy admin only. The legacy admin is the account the owner uses on the
+  legacy runtime; it still cannot review or correct (those stay canonical only, §2.2, §8.4).
+- Everyone else who may view shifts is **unauthorized** for the amounts below, whatever their other grants.
+
+### 8.2 The count is fixed first
+
+- `POST /api/shifts` (both paths) opens the shift with the amounts entered. There is **no difference refusal and
+  no note step**: the server never answers a count with "it differs" before that count is committed, so a
+  rejected or repeated attempt cannot be used to probe the previous balance. `opening_difference_note_required`
+  is removed. The opener's note (`opening_note`, `openingDifferenceNote`) is removed: the opener cannot
+  explain a difference they are not shown; the explanation belongs to the review.
+- In the opening's own transaction (unchanged): one `shift_opening_reviews` row per differing currency, the
+  opening's audit row, no voucher, payment, expense, deposit, withdrawal or journal entry; the previous close
+  is not touched.
+- The 201 answer and every later read tell an unauthorized viewer only **that** a currency differs and that it
+  waits for review (`{ id, shiftId, currency, state }`), never the previous count, the signed difference or
+  the previous shift's id. An authorized viewer gets the full row.
+- Every other refusal of an opening (a shift already open, invalid amounts, a stale session, no grant) is
+  decided before any comparison and says nothing about the previous close.
+
+### 8.3 The previous close is sealed until the next count is fixed
+
+- The **sealed close** is the latest closed shift (by `closed_at`, then id) while no shift is open.
+- For an unauthorized viewer, every read withholds the sealed close's `counted`, `expected`, `difference`,
+  `differenceReason` and `note` (returned as `null`, with `sealed: true`):
+  - the canonical shift feed (`recent`);
+  - legacy `GET /api/shifts` (`shifts`);
+  - `GET /api/finance/reconciliation` (`shifts`);
+  - the shift print page `/print/shift/[id]` (the amounts are replaced by a sealed notice).
+- Once the next shift has opened (its count is fixed), that close is ordinary history again and shows as
+  before (the existing shift history is kept).
+- The close answer itself (`PATCH /api/shifts`) still returns the closer's own count to the closer.
+- `GET /api/shifts/opening-reviews` and the open shift's `openingReviews` follow §8.2 for every row.
+- The audit log is readable only by the legacy admin (`/api/audit`, unchanged), who is authorized; a canonical
+  session cannot read it.
+
+### 8.4 Correction of the opening count (authorized and audited)
+
+- Instead of letting the opener change the count after seeing a result: `POST /api/shifts/opening-corrections`
+  (canonical only), body `{ shiftId, opening: { YER?, SAR?, USD? }, reason }`, action
+  `finance.shifts.review-opening` (or the protected owner).
+- Only the **open** shift can be corrected. Under the shift lifecycle lock and the shift row lock (the same
+  row lock payment and expense writers take), the server writes one append-only `shift_opening_corrections` row
+  per currency whose amount changes (from, to, reason, who, when), updates that shift's opening amount, and
+  writes the audit row `shift.opening_correct`, all in one transaction. No cash movement is written.
+- Separation of duties as for the review: a non-owner may not correct a shift they opened or whose previous
+  close they made. The opener can never correct their own count.
+- Refused, with an Arabic message and nothing written: no change (400 `invalid_opening_correction`), shift not
+  open (409 `opening_correction_shift_not_open`), own shift (403 `opening_correction_own_shift`), a correction
+  that would make the drawer's expected cash negative in a currency (409 `opening_correction_negative_drawer`),
+  no grant or a legacy session (403).
+- The detected difference rows are history and never change; the review sees the corrections next to them.
+
+### 8.5 Storage (amended 0129, not yet merged or deployed anywhere)
+
+- `shift_opening_reviews.opening_note` and its CHECK are removed.
+- New `shift_opening_corrections` (id, shift_id → cashier_shifts RESTRICT, currency, from_minor ≥ 0,
+  to_minor ≥ 0, from ≠ to, reason trimmed 3–300, corrected_by_user_id → users RESTRICT, corrected_by
+  non-blank, corrected_at), append-only (no UPDATE or DELETE).
+- Both tables are wiped by the clinic reset before `cashier_shifts`.
+
+### 8.6 Tests (failure first, synthetic data)
+
+1. An opening that differs opens at once (201, no 409), writes the rows and the audit row, and writes no cash
+   movement; the unauthorized opener's answer has no previous count, difference or previous shift id.
+2. Repeated attempts: a second opening while one is open, invalid amounts and a stale session all refuse
+   without any comparison data; no answer before commit varies with the previous count.
+3. Sealed close: before the next opening, the unauthorized operator, reader and own-scope viewer get the
+   latest close with `counted`, `expected`, `difference`, `differenceReason` and `note` null on the canonical
+   feed, legacy `GET /api/shifts`, reconciliation and the print page; the owner, a reviewer and the legacy admin
+   see them; after the next opening the close shows again.
+4. Opening reviews read: unauthorized viewers get state only; authorized viewers get the amounts.
+5. Correction: allowed for the owner and a reviewer who is neither the opener nor the previous closer; refused
+   for the opener, the previous closer, an operator without the grant, a legacy session and a closed shift;
+   append-only; the drawer's expected cash follows the corrected opening; a negative drawer is refused; a
+   correction racing a close or a payment is serialized by the locks; the audit row is in the same transaction.
+6. The browser journey: the opener sees an empty form, opens in one step, sees only "recorded for review",
+   and never sees the previous close's count anywhere on the screen; the reviewer sees the amounts, corrects
+   and reviews.
+
+### 8.7 Implementation notes (2026-11-15)
+
+- One rule, three places: `projectOpeningReview` / `projectOpeningCorrection` (what a viewer may know about a
+  difference) and `sealShiftForViewer` with `sealedCloseIdWith` (the latest close while no shift is open), all in
+  `lib/shift-opening-reviews.ts`; the canonical feed, the legacy routes and the print page call them.
+- The canonical opening re-proves admission after the insert and asks for `finance.shifts.review-opening` on the
+  same transaction to decide what its answer shows.
+- A single shift's differences are listed in the order they were recorded (by id); the clinic's pending list stays
+  newest first.
+- Residual limit, stated: someone who may see every receipt and expense of the sealed shift could add up its
+  expected cash by hand (not its count). Hiding movements of a closed shift would change the receipt views and is not
+  part of this decision.
+

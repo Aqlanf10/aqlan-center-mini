@@ -5,12 +5,19 @@ import { readReceiptProvenanceInSnapshot } from "./receipt-provenance-db";
 import type { ReceiptProvenance } from "./receipt-provenance";
 import { CURRENCIES, formatMoney, parseAmount, type Currency } from "./money";
 import type { VerifiedDurableSession } from "./staff-durable-session";
-import { staffOperationIdentity, withStaffOperation } from "./staff-operation-runtime";
+import { staffOperationCapabilities, staffOperationIdentity, withStaffOperation } from "./staff-operation-runtime";
 import type { Amounts, DrawerBreakdown } from "./shift-close";
-import { CASHIER_SHIFT_LIFECYCLE_LOCK, listOpeningReviewsWith, OpeningDifferenceNoteRequired, pendingOpeningReviewCountWith, projectOpeningReview, reviewText, type OpeningDifference } from "./shift-opening-reviews";
+import {
+  CASHIER_SHIFT_LIFECYCLE_LOCK, listOpeningCorrectionsWith, listOpeningReviewsWith, pendingOpeningReviewCountWith,
+  projectOpeningCorrection, projectOpeningReview, sealedCloseIdWith, sealShiftForViewer,
+  type OpeningCorrectionView, type OpeningReviewView,
+} from "./shift-opening-reviews";
 
 export const SHIFT_DETAIL_LIMIT = 1000;
-type ShiftSummary = Omit<CashierShift, "note" | "differenceReason"> & Partial<Pick<CashierShift, "note" | "differenceReason">>;
+/** A shift as this viewer may see it (0129 §8.3: the latest close is sealed until the next count is fixed). */
+type ShiftSummary = Omit<CashierShift, "note" | "differenceReason" | "counted" | "expected" | "difference" | "openingReviews">
+  & { note?: string | null; differenceReason?: string | null; counted: CashierShift["counted"]; expected: CashierShift["expected"] | null;
+      difference: CashierShift["difference"]; sealed?: true; openingReviews?: OpeningReviewView[]; openingCorrections?: OpeningCorrectionView[] };
 type ShiftPayment = Pick<Payment, "id" | "receiptNumber" | "patientId" | "patientName" | "kind" | "amountMinor" | "currency" | "method" | "createdAt" | "note">;
 type ShiftExpense = Pick<Expense, "id" | "voucherNumber" | "category" | "partyName" | "payeeText" | "amountMinor" | "currency" | "createdAt" | "note">;
 export interface CanonicalShiftFeed {
@@ -19,7 +26,8 @@ export interface CanonicalShiftFeed {
   drawer: DrawerBreakdown | null;
   recent: ShiftSummary[];
   canOperate: boolean;
-  /** 0129: pending opening differences in the whole clinic, and whether this session may review them. */
+  /** 0129: pending opening differences in the whole clinic, and whether this session may review them (and so
+   * see their amounts, §8.1). */
   pendingOpeningReviews: number;
   canReviewOpening: boolean;
   projection: { payments: boolean; expenses: boolean; notes: boolean; patientScope: "none" | "own" | "all" };
@@ -41,16 +49,20 @@ export async function readCanonicalShifts(session: VerifiedDurableSession): Prom
     const payments = scope.granted("finance.payments.view") && scope.patientScope.kind !== "none";
     const expenses = scope.granted("finance.expenses.view");
     const notes = payments && expenses && scope.patientScope.kind === "all";
-    const projectShift = ({ note, differenceReason, ...summary }: CashierShift): ShiftSummary =>
+    // §8.1: the protected owner holds every capability, so this is "owner or reviewer".
+    const canReviewOpening = scope.granted("finance.shifts.review-opening");
+    const projectShift = ({ note, differenceReason, openingReviews: _reviews, ...summary }: CashierShift): ShiftSummary =>
       ({ ...summary, ...(notes ? { note, differenceReason } : {}) });
     const open = await getOpenShiftWith(query);
     const drawer = open ? await shiftDrawerBreakdown(open, query) : null;
-    const recent = await listShiftsWith(query, 15);
-    const canReviewOpening = scope.granted("finance.shifts.review-opening");
+    const sealed = canReviewOpening ? null : await sealedCloseIdWith(query);
+    const recent = (await listShiftsWith(query, 15)).map(shift => sealShiftForViewer(projectShift(shift), sealed, canReviewOpening) as ShiftSummary);
     const openingReviews = open ? (await listOpeningReviewsWith(query, { shiftId: open.id }))
-      .map(review => projectOpeningReview(review, notes || canReviewOpening)) : [];
+      .map(review => projectOpeningReview(review, canReviewOpening)) : [];
+    const openingCorrections = open ? (await listOpeningCorrectionsWith(query, open.id))
+      .map(correction => projectOpeningCorrection(correction, canReviewOpening)) : [];
     const out: CanonicalShiftFeed = { clinicTimeZone: CLINIC_TIME_ZONE,
-      open: open ? { ...projectShift(open), openingReviews } : null, drawer, recent: recent.map(projectShift),
+      open: open ? { ...projectShift(open), openingReviews, openingCorrections } : null, drawer, recent,
       canOperate: scope.granted("finance.shifts.operate"),
       pendingOpeningReviews: await pendingOpeningReviewCountWith(query), canReviewOpening,
       projection: { payments, expenses, notes, patientScope: scope.patientScope.kind } };
@@ -81,15 +93,10 @@ export async function readCanonicalShifts(session: VerifiedDurableSession): Prom
 const SHIFT_LIFECYCLE_LOCK = CASHIER_SHIFT_LIFECYCLE_LOCK;
 const ACTION = "finance.shifts.operate" as const;
 
-/** 0129: what the opener is told about a difference. The previous count itself is never disclosed. */
-export interface OpeningDifferenceNotice { currency: OpeningDifference["currency"]; differenceMinor: number | null; previousCountKnown: boolean }
-export const openingDifferenceNotices = (differences: OpeningDifference[]): OpeningDifferenceNotice[] =>
-  differences.map(d => ({ currency: d.currency, differenceMinor: d.differenceMinor, previousCountKnown: d.previousCountedMinor !== null }));
-
 export class CanonicalShiftRefusal extends Error {
-  constructor(readonly code: "invalid_shift" | "shift_already_open" | "shift_not_open" | "difference_reason_required" | "opening_difference_note_required",
+  constructor(readonly code: "invalid_shift" | "shift_already_open" | "shift_not_open" | "difference_reason_required",
     readonly status: 400 | 409, message: string,
-    readonly difference?: Amounts, readonly expected?: Amounts, readonly differences?: OpeningDifferenceNotice[]) {
+    readonly difference?: Amounts, readonly expected?: Amounts) {
     super(message);
     this.name = "CanonicalShiftRefusal";
   }
@@ -118,40 +125,34 @@ function amounts(body: Record<string, unknown>, field: "opening" | "counted"): A
 }
 const optionalText = (value: unknown) => typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null;
 
-/** 0129: the opening's audit row names each difference, the previous close and the opener's note. */
+/** 0129: the opening's audit row names each difference and the previous close (the audit log is read only by
+ * the legacy admin, §8.3). */
 export function openingAuditDetails(shift: CashierShift): Record<string, unknown> {
   const reviews = shift.openingReviews ?? [];
   if (!reviews.length) return {};
   return {
     فروق_الافتتاح: reviews.map(r => ({ العملة: r.currency, الفرق: r.differenceMinor, المعدود_السابق: r.previousCountedMinor, المراجعة: r.id })),
     الوردية_السابقة: reviews[0].previousShiftId,
-    ملاحظة_الافتتاح: reviews[0].openingNote,
   };
 }
 
+/**
+ * 0129 §8.2 (blind count): the opening is committed with the amounts entered; a difference never refuses it,
+ * so nothing answered before the commit depends on the previous close. The answer shows the difference rows to
+ * the owner or a reviewer, and to anyone else only which currency waits for review.
+ */
 export async function commandCanonicalShiftOpen(session: VerifiedDurableSession, body: Record<string, unknown>, pool = getPool()) {
   const opening = amounts(body, "opening");
-  const note = reviewText(body.openingDifferenceNote);
-  if (note === "invalid") throw new CanonicalShiftRefusal("invalid_shift", 400, "ملاحظة فرق الافتتاح بين 3 و300 حرف.");
   return withStaffOperation(pool, session, ACTION, async (client, handle) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [SHIFT_LIFECYCLE_LOCK]);
     const identity = await staffOperationIdentity(client, handle, ACTION);
-    let shift: CashierShift | null;
-    try {
-      shift = await openShiftWith(client, { openedBy: identity.username, opening, openingDifferenceNote: note, requireOpeningDifferenceNote: true });
-    } catch (error) {
-      // 0129 §2.1: a difference with the previous close needs the opener's note; the opening rolls back.
-      if (error instanceof OpeningDifferenceNoteRequired) {
-        throw new CanonicalShiftRefusal("opening_difference_note_required", 409, error.message, undefined, undefined, openingDifferenceNotices(error.differences));
-      }
-      throw error;
-    }
+    const shift = await openShiftWith(client, { openedBy: identity.username, opening });
     // INSERT may itself wait on a concurrently inserted unique open row.
-    await staffOperationIdentity(client, handle, ACTION);
+    const authorized = (await staffOperationCapabilities(client, handle, ACTION, ["finance.shifts.review-opening"] as const)).size > 0;
     if (!shift) throw new CanonicalShiftRefusal("shift_already_open", 409, "هناك وردية مفتوحة بالفعل. أغلقها أولًا.");
     await insertAuditRow(client, { action: "shift.open", entity: "shift", entityId: shift.id,
       details: { الافتتاحي: shift.opening, ...openingAuditDetails(shift) }, actor: identity.username, actorRole: identity.role });
-    return shift;
+    return { ...shift, openingReviews: (shift.openingReviews ?? []).map(review => projectOpeningReview(review, authorized)) };
   });
 }
 

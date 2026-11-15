@@ -21,7 +21,7 @@ vi.mock("@/lib/canonical-shift-opening-reviews", async () => {
 vi.mock("@/lib/db", () => ({}));
 const { GET, POST } = await import("../app/api/shifts/opening-reviews/route");
 const { CanonicalOpeningReviewRefusal } = await import("@/lib/canonical-shift-opening-reviews");
-const { openingDifferenceMessage, reviewText } = await import("../lib/shift-opening-reviews");
+const { projectOpeningReview, reviewText, sealShiftForViewer } = await import("../lib/shift-opening-reviews");
 const post = (body: unknown) => POST(new Request("https://synthetic.invalid/api/shifts/opening-reviews", {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 const get = (query = "") => GET(new Request(`https://synthetic.invalid/api/shifts/opening-reviews${query}`));
@@ -83,14 +83,20 @@ describe("opening difference text", () => {
     expect(reviewText("x".repeat(301))).toBe("invalid");
     expect(reviewText("  سبب واضح  ")).toBe("سبب واضح");
   });
-  it("names each currency's signed difference without the previous count", () => {
-    const message = openingDifferenceMessage([
-      { currency: "YER", previousShiftId: 1, previousCountedMinor: 1000, openingMinor: 950, differenceMinor: -50 },
-      { currency: "SAR", previousShiftId: 1, previousCountedMinor: null, openingMinor: 500, differenceMinor: null },
-    ]);
-    expect(message).toMatch(/نقص/);
-    expect(message).toMatch(/SAR: عدّ الإقفال السابق غير معروف/);
-    expect(message).toMatch(/لا تُنشأ أي حركة نقدية/);
-    expect(message).not.toMatch(/1000|1,000/);
+  it("an unauthorized viewer learns only which currency waits for review (blind count, §8.2)", () => {
+    const review = { id: 7, shiftId: 3, currency: "YER" as const, previousShiftId: 2, previousCountedMinor: 1000, openingMinor: 950,
+      differenceMinor: -50, state: "pending" as const, detectedBy: "SYN", detectedAt: "2026-11-15T00:00:00.000Z",
+      reviewReason: null, reviewSettlement: null, reviewedBy: null, reviewedAt: null };
+    expect(projectOpeningReview(review, false)).toEqual({ id: 7, shiftId: 3, currency: "YER", state: "pending" });
+    expect(projectOpeningReview(review, true)).toBe(review);
+  });
+  it("seals only the latest close, and only for an unauthorized viewer (§8.3)", () => {
+    const shift = { id: 9, counted: { YER: 990, SAR: 0, USD: 0 }, expected: { YER: 1000, SAR: 0, USD: 0 },
+      difference: { YER: -10, SAR: 0, USD: 0 }, note: "SYN", differenceReason: "SYN", openedBy: "SYN" };
+    expect(sealShiftForViewer(shift, 9, false)).toEqual({ id: 9, openedBy: "SYN", counted: null, expected: null, difference: null,
+      note: null, differenceReason: null, sealed: true });
+    expect(sealShiftForViewer(shift, 9, true)).toBe(shift);
+    expect(sealShiftForViewer(shift, 8, false)).toBe(shift);
+    expect(sealShiftForViewer(shift, null, false)).toBe(shift);
   });
 });

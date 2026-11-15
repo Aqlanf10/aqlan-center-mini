@@ -39,6 +39,8 @@ export interface ShiftData {
   expectedSource?: "stored" | "computed";
   /** 0129: the opening's differences against the previous close (absent in an older feed). */
   openingReviews?: OpeningReviewItem[];
+  /** 0129 §8.3: the latest close before the next opening, withheld from this viewer by the server. */
+  sealed?: boolean;
 }
 
 export interface PaymentItem {
@@ -95,8 +97,8 @@ interface CashShiftTabProps {
   /** 0128 (#483 6831365228): only the protected owner on a canonical session may pay part of an expense privately. */
   canPayPrivately?: boolean;
   busy: boolean;
-  /** 0129: "needs_note" when the opening differs from the previous close; the opener recounts or explains. */
-  onOpenShift: (opening: Record<Currency, string>, openingDifferenceNote: string) => Promise<"opened" | "needs_note" | "failed">;
+  /** 0129 §8 (blind count): one step; a difference is recorded for review by the server, never refused. */
+  onOpenShift: (opening: Record<Currency, string>) => Promise<"opened" | "failed">;
   /** 0129: pending opening differences in the clinic and whether the server lets this session review them. */
   pendingOpeningReviews?: number;
   canReviewOpening?: boolean;
@@ -174,8 +176,6 @@ export function CashShiftTab({
   const [opening, setOpening] = useState(emptyAmounts);
   /* (0129) عدٌّ أعمى عند الافتتاح أيضًا: لا يُعرض عدّ الإقفال السابق. إن خالفه الافتتاح أعاد الخادم
      الفرق وطُلبت ملاحظة؛ يُسجَّل الفرق للمراجعة ولا تُنشأ حركة نقدية. */
-  const [openingNote, setOpeningNote] = useState("");
-  const [openingNoteNeeded, setOpeningNoteNeeded] = useState(false);
   const [counted, setCounted] = useState(emptyAmounts);
   /* (P1-3) جردٌ أعمى: لا يُعرض المتوقَّع ولا الفرق أثناء العدّ. يرسل المحصّل ما عدّه،
      فإن خالف المتوقَّع أعاد الخادم الفرق وطُلب سببه — ولا يُقفَل بلا سبب. */
@@ -346,25 +346,13 @@ export function CashShiftTab({
             ))}
           </div>
 
-          {openingNoteNeeded ? (
-            <label className="mb-4 block rounded-2xl border border-amber-300 bg-amber-50 p-3.5 text-xs font-bold text-amber-900">
-              عدّ الافتتاح لا يطابق إقفال الوردية السابقة. أعد العدّ، وإن صحّ فاكتب ما تعرفه عن الفرق (يُسجَّل للمراجعة):
-              <textarea
-                data-testid="opening-difference-note"
-                value={openingNote}
-                onChange={(e) => setOpeningNote(e.target.value)}
-                maxLength={300}
-                rows={2}
-                className="mt-2 w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-navy-900"
-              />
-            </label>
-          ) : null}
+          <p className="mb-4 text-xs font-bold text-slate-500">
+            عُدّ النقد في الدرج وأدخله كما هو؛ يُسجَّل كما أُدخل، وأي فرق عن الإقفال السابق يُحال إلى المراجعة.
+          </p>
 
           <button
             type="button"
-            onClick={() => void onOpenShift(opening, openingNoteNeeded ? openingNote : "").then((result) => {
-              if (result === "needs_note") setOpeningNoteNeeded(true);
-            })}
+            onClick={() => void onOpenShift(opening)}
             disabled={busy}
             className="w-full rounded-2xl bg-brand-orange py-3 text-sm font-black text-white shadow-xs hover:brightness-105 disabled:opacity-50 transition-all"
           >

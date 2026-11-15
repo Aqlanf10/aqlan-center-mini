@@ -1,7 +1,8 @@
 -- Shift opening reviews: the opening difference per currency against the previous close, recorded
 -- in the opening's transaction and reviewed once by a person, without changing that close and
 -- without any cash movement. Owner decision #483 6831365228 (item 1); number allocated in #483
--- 6833690789. Contract: docs/finance/SHIFT_OPENING_REVIEWS_0129.md.
+-- 6833690789. Contract: docs/finance/SHIFT_OPENING_REVIEWS_0129.md. Blind count (owner #483 6886911163, §8):
+-- the count is fixed first, so the opener writes no note; corrections are separate, authorized and audited.
 -- Nothing is backfilled: shifts opened before 0129 are never compared retroactively.
 CREATE TABLE shift_opening_reviews (
  id BIGSERIAL PRIMARY KEY,
@@ -13,8 +14,6 @@ CREATE TABLE shift_opening_reviews (
  previous_counted_minor BIGINT,
  opening_minor BIGINT NOT NULL CHECK (opening_minor >= 0),
  difference_minor BIGINT,
- -- The opener's note. Required by both opening routes; NULL only for an internal opening path.
- opening_note TEXT,
  detected_by TEXT NOT NULL CHECK (btrim(detected_by) <> ''),
  detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  review_reason TEXT,
@@ -28,9 +27,6 @@ CREATE TABLE shift_opening_reviews (
   (previous_counted_minor IS NOT NULL AND difference_minor IS NOT NULL
    AND difference_minor = opening_minor - previous_counted_minor AND difference_minor <> 0)
   OR (previous_counted_minor IS NULL AND difference_minor IS NULL AND opening_minor <> 0)
- ),
- CONSTRAINT shift_opening_reviews_note_valid CHECK (
-  opening_note IS NULL OR (opening_note = btrim(opening_note) AND char_length(opening_note) BETWEEN 3 AND 300)
  ),
  CONSTRAINT shift_opening_reviews_review_valid CHECK (
   (review_reason IS NULL AND review_settlement IS NULL AND reviewed_by_user_id IS NULL
@@ -54,7 +50,7 @@ BEGIN
   OR NEW.currency IS DISTINCT FROM OLD.currency OR NEW.previous_shift_id IS DISTINCT FROM OLD.previous_shift_id
   OR NEW.previous_counted_minor IS DISTINCT FROM OLD.previous_counted_minor
   OR NEW.opening_minor IS DISTINCT FROM OLD.opening_minor OR NEW.difference_minor IS DISTINCT FROM OLD.difference_minor
-  OR NEW.opening_note IS DISTINCT FROM OLD.opening_note OR NEW.detected_by IS DISTINCT FROM OLD.detected_by
+  OR NEW.detected_by IS DISTINCT FROM OLD.detected_by
   OR NEW.detected_at IS DISTINCT FROM OLD.detected_at THEN
   RAISE EXCEPTION 'shift_opening_reviews الفرق المكتشف عند الافتتاح تاريخي (append-only): لا يُعدَّل.';
  END IF;
@@ -77,3 +73,26 @@ END;
 $$;
 CREATE TRIGGER shift_opening_reviews_previous_closed BEFORE INSERT ON shift_opening_reviews
  FOR EACH ROW EXECUTE FUNCTION aqlan_shift_opening_review_previous_guard();
+-- §8.4: an authorized, audited correction of an open shift's opening count (never by the opener). One row per
+-- currency that changes; the shift's opening amount is updated in the same transaction; append-only.
+CREATE TABLE shift_opening_corrections (
+ id BIGSERIAL PRIMARY KEY,
+ shift_id INTEGER NOT NULL REFERENCES cashier_shifts(id) ON DELETE RESTRICT,
+ currency TEXT NOT NULL CHECK (currency IN ('YER', 'SAR', 'USD')),
+ from_minor BIGINT NOT NULL CHECK (from_minor >= 0),
+ to_minor BIGINT NOT NULL CHECK (to_minor >= 0),
+ reason TEXT NOT NULL CHECK (reason = btrim(reason) AND char_length(reason) BETWEEN 3 AND 300),
+ corrected_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+ corrected_by TEXT NOT NULL CHECK (btrim(corrected_by) <> ''),
+ corrected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ CONSTRAINT shift_opening_corrections_changes CHECK (from_minor <> to_minor)
+);
+CREATE INDEX shift_opening_corrections_shift_idx ON shift_opening_corrections (shift_id, id);
+CREATE FUNCTION aqlan_shift_opening_correction_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ RAISE EXCEPTION 'shift_opening_corrections تصحيحات عدّ الافتتاح تاريخية (append-only): لا تُعدَّل ولا تُحذف.';
+END;
+$$;
+CREATE TRIGGER shift_opening_corrections_append_only BEFORE UPDATE OR DELETE ON shift_opening_corrections
+ FOR EACH ROW EXECUTE FUNCTION aqlan_shift_opening_correction_guard();

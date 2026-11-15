@@ -397,20 +397,20 @@ export default function FinancePage() {
 
   // فتح الوردية
   const handleOpenShift = useCallback(
-    async (openingAmounts: Record<Currency, string>, openingDifferenceNote: string) => {
+    async (openingAmounts: Record<Currency, string>) => {
       if (busy || !financeRequest.current.shiftReady) return "failed" as const;
       setBusy(true);
       try {
         const res = await fetch("/api/shifts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ opening: openingAmounts, openingDifferenceNote: openingDifferenceNote.trim() || undefined }),
+          // (0129 §8) عدٌّ أعمى: يُسجَّل العدّ كما أُدخل في خطوة واحدة، والفرق يُحال إلى المراجعة.
+          body: JSON.stringify({ opening: openingAmounts }),
         });
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
           setError(payload?.message ?? "تعذّر فتح الوردية.");
-          // (0129) عدٌّ أعمى: الفرق مع الإقفال السابق يُكشف بعد العدّ، وتُطلب ملاحظة قبل الفتح.
-          return payload?.code === "opening_difference_note_required" ? "needs_note" as const : "failed" as const;
+          return "failed" as const;
         }
         setError(null);
         await load();

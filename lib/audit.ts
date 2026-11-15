@@ -24,7 +24,7 @@ export type AuditAction =
   | "expense.create"
   /* (0133) المرسِل أنهى طلب صرف لم يُعرف مصيره نهائيًا: لا يكتب به سند بعد ذلك. */
   | "expense.request_retire"
-  | "shift.open" | "shift.close" | "shift.opening_review"
+  | "shift.open" | "shift.close" | "shift.opening_review" | "shift.opening_correct"
   | "patient.create" | "patient.update" | "patient.number.change" | "patient.numbering.configure"
   /* (P2-7) دمج ملفٍّ مكرَّر في الملف الأصلي. */
   | "patient.merge"
@@ -207,6 +207,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "shift.open": "فتح وردية",
   "shift.close": "إغلاق وردية وجرد",
   "shift.opening_review": "مراجعة فرق افتتاح وردية",
+  "shift.opening_correct": "تصحيح عدّ افتتاح وردية مفتوحة",
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
   "patient.number.change": "تعديل رقم ملف المريض",

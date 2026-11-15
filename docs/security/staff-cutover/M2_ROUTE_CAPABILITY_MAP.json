@@ -6196,7 +6196,7 @@
   "anyOf": [],
   "scope": null,
   "status": "canonical-done",
-  "note": "0129 (owner #483 6831365228 item 1): canonical only; a legacy session is refused 403 here and sees the open shift's differences and the pending count on GET /api/shifts. Amounts and states for every shift viewer; the opener's note, reason and settlement only with the shift-note projection (payments.view AND expenses.view AND patientScope=all) or to a reviewer. At most 200 rows."
+  "note": "0129 (owner #483 6831365228 item 1; blind count 6886911163): canonical only; a legacy session is refused 403 here and sees the open shift's differences (amounts for the legacy admin only) and the pending count on GET /api/shifts. The previous count, the difference, the previous shift and the review texts only for the owner or a reviewer; every other shift viewer sees which currency of which shift waits for review, and its state. At most 200 rows."
  },
  {
   "route": "/api/shifts/opening-reviews",
@@ -6211,6 +6211,21 @@
   "scope": null,
   "status": "canonical-done",
   "note": "0129: one review per opening difference (reason and settlement text, no cash movement, no change to either shift), by the protected owner or the exact grant (granted to nobody by default; never implied by shifts.operate or reconciliation.manage). A non-owner may not review a shift they opened or whose previous close they made. Row lock, single conditional update, audit in the same transaction; a second review is 409. Canonical only."
+ },
+ {
+  "route": "/api/shifts/opening-corrections",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.shifts.review-opening"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "canonical-done",
+  "note": "0129 §8.4 (owner #483 6886911163): correct the OPEN shift's opening count, by the protected owner or the exact grant, never by the opener or the previous closer. Shift lifecycle lock then the shift row lock; one append-only shift_opening_corrections row per changed currency, the new opening and the audit row (shift.opening_correct) in one transaction; no cash movement; a negative expected drawer is refused. Canonical only: every legacy session is refused 403 and nothing is written."
  },
  {
   "route": "/api/tasks",

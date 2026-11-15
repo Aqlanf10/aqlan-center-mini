@@ -78,16 +78,16 @@ it("HTTP: untrusted bodies, cross-origin writes, and stale sessions have no effe
 
 it("HTTP: complete aggregates survive projection; receipt scope, expenses and unattributed notes have separate gates", async () => {
   const owner = await journey.login("owner");
-  // 0129: the previous close counted 999 / 12.34 / 56.78; this opening differs, so it is refused once
-  // (nothing written) and opens with the opener's note.
-  const shiftsBefore = (await journey.db.query("SELECT count(*)::int AS n FROM cashier_shifts")).rows[0].n;
-  const refusedOpen = await request(owner.cookie, "POST", { opening: { YER: "100", SAR: "2", USD: "3" } });
-  expect(refusedOpen.status).toBe(409);
-  expect((await refusedOpen.json()).code).toBe("opening_difference_note_required");
-  expect((await journey.db.query("SELECT count(*)::int AS n FROM cashier_shifts")).rows[0].n).toBe(shiftsBefore);
-  const opened = await request(owner.cookie, "POST", { opening: { YER: "100", SAR: "2", USD: "3" }, openingDifferenceNote: "فرق تجريبي بعد إعادة العدّ" });
+  // 0129 §8 (blind count): the previous close counted 999 / 12.34 / 56.78; this opening differs and opens at once,
+  // its differences recorded for review. The protected owner is authorized and sees them in full.
+  const opened = await request(owner.cookie, "POST", { opening: { YER: "100", SAR: "2", USD: "3" } });
   expect(opened.status).toBe(201);
   const shift = await opened.json();
+  expect(shift.openingReviews).toEqual([
+    expect.objectContaining({ currency: "YER", previousCountedMinor: 999, differenceMinor: -899, state: "pending" }),
+    expect.objectContaining({ currency: "SAR", previousCountedMinor: 1234, differenceMinor: -1034 }),
+    expect.objectContaining({ currency: "USD", previousCountedMinor: 5678, differenceMinor: -5378 }),
+  ]);
   const rows = (await journey.db.query(`INSERT INTO payments(receipt_number,patient_id,shift_id,kind,amount_minor,currency,base_amount_minor,method,note)
     VALUES('SYN-OWN-RECEIPT',$1,$3,'payment',40,'YER',40,'cash','ملاحظة السند الظاهر'),
           ('SYN-HIDDEN-RECEIPT',$2,$3,'payment',70,'YER',70,'cash','SYN-HIDDEN-PAYMENT-NOTE'),
@@ -274,16 +274,13 @@ it("browser: a lost committed open response followed by an external close cannot
     expect(posts).toBe(1); // Acknowledgement only rereads; it never writes.
     await view.getByRole("textbox", { name: "الافتتاحي YER", exact: true }).fill("77");
     await view.getByRole("button", { name: "تأكيد فتح وردية جديدة" }).click();
-    // 0129: 77 differs from the 55 counted at the previous close; the blind count is refused once, nothing written.
-    await view.getByTestId("opening-difference-note").waitFor();
-    expect(await view.innerText()).toMatch(/لا يطابق ما عُدّ عند إقفال الوردية السابقة/);
-    expect(posts).toBe(2);
-    expect(Number((await journey.db.query("SELECT count(*) FROM audit_log WHERE action='shift.open'")).rows[0].count)).toBe(before + 1);
-    await view.getByTestId("opening-difference-note").fill("زيادة تجريبية بعد إعادة العدّ");
-    await view.getByRole("button", { name: "تأكيد فتح وردية جديدة" }).click();
+    // 0129 §8 (blind count): 77 differs from the 55 counted at the previous close; it opens in this one step and the
+    // operator (no review grant) is told only that a difference waits for review, never its amount.
     await view.getByRole("button", { name: "تأكيد الجرد والإقفال" }).waitFor();
-    expect(posts).toBe(3);
-    await view.getByTestId("opening-differences").getByText(/زيادة .*بانتظار المراجعة/).waitFor();
+    expect(posts).toBe(2);
+    expect(Number((await journey.db.query("SELECT count(*) FROM audit_log WHERE action='shift.open'")).rows[0].count)).toBe(before + 2);
+    await view.getByTestId("opening-differences").getByText(/سُجّل فرق في عدّ الافتتاح .*بانتظار المراجعة/).waitFor();
+    expect(await view.getByTestId("opening-differences").innerText()).not.toMatch(/زيادة|نقص|22/);
     await view.getByRole("textbox", { name: "المعدود YER", exact: true }).fill("76");
     await view.getByRole("button", { name: "تأكيد الجرد والإقفال" }).click();
     await view.getByRole("textbox", { name: "سبب فرق الجرد" }).fill("فرق جرد تجريبي");

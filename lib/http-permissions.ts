@@ -340,6 +340,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/shifts": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ["admin", "reception", "cashier"], PATCH: ["admin", "reception", "cashier"] },
   // (0129) مراجعات فرق افتتاح الوردية — المسار للجلسة الموحّدة وحدها؛ الجلسة القديمة تُرفض داخل المعالج (403).
   "/api/shifts/opening-reviews": { GET: ["admin", "reception", "doctor"], POST: ["admin"] },
+  "/api/shifts/opening-corrections": { POST: ["admin", "reception"] },
   "/api/users": { GET: ADMIN, POST: ADMIN },
   "/api/users/[id]": { PATCH: ADMIN },
   "/api/visits": { GET: ["admin", "reception", "doctor", "assistant"], POST: CLINIC },

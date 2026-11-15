@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { asPaymentLikes, CLINIC_TIME_ZONE, closeShift, findUserByUsername, getOpenShift, listOpeningReviews, listShiftExpenses, listShiftPayments, listShifts, openShift, pendingOpeningReviewCount, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
-import { OpeningDifferenceNoteRequired, reviewText } from "@/lib/shift-opening-reviews";
+import { asPaymentLikes, CLINIC_TIME_ZONE, closeShift, findUserByUsername, getOpenShift, listOpeningReviews, listShiftExpenses, listShiftPayments, listShiftsForViewer, openShift, pendingOpeningReviewCount, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
+import { projectOpeningReview } from "@/lib/shift-opening-reviews";
 import { expenseTotals } from "@/lib/expenses";
 import { CURRENCIES, formatMoney, parseAmount, shiftTotals, type Currency } from "@/lib/money";
-import { canHandleMoney, canViewMoney } from "@/lib/roles";
+import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canonicalErrorResponse, NO_STORE } from "@/lib/canonical-route";
-import { CanonicalShiftRefusal, commandCanonicalShiftClose, commandCanonicalShiftOpen, openingAuditDetails, openingDifferenceNotices, readCanonicalShifts } from "@/lib/canonical-shifts";
+import { CanonicalShiftRefusal, commandCanonicalShiftClose, commandCanonicalShiftOpen, openingAuditDetails, readCanonicalShifts } from "@/lib/canonical-shifts";
 
 export const dynamic = "force-dynamic";
 
@@ -37,8 +37,7 @@ async function canonicalShiftWrite(request: Request, action: "open" | "close") {
     return NextResponse.json(result, { status: action === "open" ? 201 : 200, headers: NO_STORE });
   } catch (error) {
     if (error instanceof CanonicalShiftRefusal) return NextResponse.json({ code: error.code, message: error.message,
-      ...(error.difference ? { difference: error.difference, expected: error.expected } : {}),
-      ...(error.differences ? { differences: error.differences } : {}) }, { status: error.status, headers: NO_STORE });
+      ...(error.difference ? { difference: error.difference, expected: error.expected } : {}) }, { status: error.status, headers: NO_STORE });
     return canonicalErrorResponse(error);
   }
 }
@@ -79,13 +78,15 @@ export async function GET() {
   } else if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
+  // 0129 §8.1: on the legacy runtime only the admin (the owner's account) sees opening amounts and the sealed close.
+  const authorized = isAdmin(session.role);
   try {
     const shift = await getOpenShift();
     // 0129: the open shift's opening differences, and the clinic's pending count (never hidden before the cutover).
-    const open = shift ? { ...shift, openingReviews: await listOpeningReviews({ shiftId: shift.id }) } : null;
+    const open = shift ? { ...shift, openingReviews: (await listOpeningReviews({ shiftId: shift.id })).map(review => projectOpeningReview(review, authorized)) } : null;
     const pendingOpeningReviews = await pendingOpeningReviewCount();
     const [payments, expenses, drawer] = open
-      ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id), shiftDrawerBreakdown(open)])
+      ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id), shiftDrawerBreakdown(shift!)])
       : [[], [], null];
     const receiptProvenance = await readReceiptProvenance(payments.map((payment) => payment.id));
     return NextResponse.json({
@@ -101,7 +102,8 @@ export async function GET() {
       payments,
       receiptProvenance,
       expenses,
-      recent: await listShifts(15),
+      // §8.3: the latest close is sealed for everyone but the admin until the next count is fixed.
+      recent: await listShiftsForViewer({ authorized }, 15),
       pendingOpeningReviews,
       // The review is canonical only (docs/finance/SHIFT_OPENING_REVIEWS_0129.md §2.2).
       canReviewOpening: false,
@@ -127,21 +129,10 @@ export async function POST(request: Request) {
   const source = (body ?? {}) as Record<string, unknown>;
   const opening = readAmounts(source, "opening");
   if (!opening) return NextResponse.json({ message: "مبلغ افتتاحي غير صحيح." }, { status: 400 });
-  const openingDifferenceNote = reviewText(source.openingDifferenceNote);
-  if (openingDifferenceNote === "invalid") return NextResponse.json({ code: "invalid_shift", message: "ملاحظة فرق الافتتاح بين 3 و300 حرف." }, { status: 400 });
 
   try {
-    let shift;
-    try {
-      shift = await openShift({ openedBy: session.username, opening, openingDifferenceNote, requireOpeningDifferenceNote: true });
-    } catch (error) {
-      // 0129 §2.1: the same rule as the canonical opening; nothing was written.
-      if (error instanceof OpeningDifferenceNoteRequired) {
-        return NextResponse.json({ code: "opening_difference_note_required", message: error.message,
-          differences: openingDifferenceNotices(error.differences) }, { status: 409 });
-      }
-      throw error;
-    }
+    // 0129 §8.2 (blind count): a difference never refuses the opening; it is recorded for review in its transaction.
+    const shift = await openShift({ openedBy: session.username, opening });
     if (!shift) {
       return NextResponse.json(
         { message: "هناك وردية مفتوحة بالفعل. أغلقها أولًا." },
@@ -153,7 +144,8 @@ export async function POST(request: Request) {
       details: { الافتتاحي: shift.opening, ...openingAuditDetails(shift) },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(shift, { status: 201 });
+    return NextResponse.json({ ...shift, openingReviews: (shift.openingReviews ?? []).map(review => projectOpeningReview(review, isAdmin(session.role))) },
+      { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح الوردية." }, { status: 500 });
   }

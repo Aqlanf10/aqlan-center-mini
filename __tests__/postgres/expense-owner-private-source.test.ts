@@ -39,8 +39,7 @@ const setAccount = (value: string) => q("INSERT INTO settings(key,value) VALUES(
 async function freshDrawer(yer: string) {
   const current = await db.getOpenShiftWith(fx.pool);
   if (current) await shifts.commandCanonicalShiftClose(await fx.session("owner"), { id: current.id, counted: counted(current.expected), differenceReason: "synthetic cleanup" });
-  // 0129: an exact float that differs from the previous count is part of the scenario; the note records it.
-  await shifts.commandCanonicalShiftOpen(await fx.session("owner"), { opening: { YER: yer, SAR: "0", USD: "0" }, openingDifferenceNote: "SYN fixture opening" });
+  await shifts.commandCanonicalShiftOpen(await fx.session("owner"), { opening: { YER: yer, SAR: "0", USD: "0" } });
 }
 async function supplierDebt(amountMinor: number) {
   const [{ id: partyId }] = await q<{ id: number }>("INSERT INTO parties(name,kind) VALUES($1,'supplier') RETURNING id", [`SYN supplier ${++serial}`]);

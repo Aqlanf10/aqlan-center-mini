@@ -45,9 +45,8 @@ export function CanonicalShifts({ username }: { username: string }) {
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [needsReason, setNeedsReason] = useState(false);
-  // 0129: the opening form is never prefilled from the previous close; a difference with the previous close is revealed by the server, then explained.
-  const [openingNote, setOpeningNote] = useState("");
-  const [needsOpeningNote, setNeedsOpeningNote] = useState(false);
+  // 0129 §8 (blind count): the opening form is never prefilled; the count is committed in one step and a
+  // difference is recorded for review by the server, which shows its amount only to the owner or a reviewer.
   const sequence = useRef(0), inFlight = useRef(false);
   const previousShift = useRef<number | null | undefined>(undefined);
   // A tab-local reminder survives refresh/navigation; it is neither authority nor
@@ -74,7 +73,7 @@ export function CanonicalShifts({ username }: { username: string }) {
       const next = body as CanonicalShiftFeed;
       const id = next.open?.id ?? null;
       if (previousShift.current !== undefined && previousShift.current !== id) {
-        setOpening(empty()); setCounted(empty()); setNote(""); setReason(""); setNeedsReason(false); setOpeningNote(""); setNeedsOpeningNote(false);
+        setOpening(empty()); setCounted(empty()); setNote(""); setReason(""); setNeedsReason(false);
       }
       previousShift.current = id;
       setFeed(next);
@@ -104,19 +103,22 @@ export function CanonicalShifts({ username }: { username: string }) {
     try {
       const response = await fetch("/api/shifts", { method: kind === "open" ? "POST" : "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(kind === "open"
-          ? { opening, openingDifferenceNote: needsOpeningNote && openingNote.trim() ? openingNote.trim() : undefined }
+          ? { opening }
           : { id: feed.open?.id, counted, note, differenceReason: reason }) });
       const body = await response.json();
       if (response.status >= 500) throw new Error("uncertain");
       if (!response.ok) {
         markRecovery(false);
         if (body?.code === "difference_reason_required") setNeedsReason(true);
-        if (body?.code === "opening_difference_note_required") setNeedsOpeningNote(true);
         setMessage(typeof body?.message === "string" ? body.message : "رُفضت العملية. راجع بيانات الصندوق.");
       } else {
         if (!Number.isSafeInteger(body?.id) || !["open", "closed"].includes(body?.status)) throw new Error("uncertain");
-        markRecovery(false); setNeedsReason(false); setCounted(empty()); setOpening(empty()); setReason(""); setNote(""); setOpeningNote(""); setNeedsOpeningNote(false);
-        setMessage(kind === "open" ? "فُتحت الوردية وسُجّلت العملية." : "أُقفلت الوردية وسُجّل الجرد.");
+        markRecovery(false); setNeedsReason(false); setCounted(empty()); setOpening(empty()); setReason(""); setNote("");
+        setMessage(kind === "open"
+          ? (Array.isArray(body?.openingReviews) && body.openingReviews.length
+            ? "فُتحت الوردية بالعدّ المُدخل. سُجّل فرق في عدّ الافتتاح وأُحيل إلى المراجعة؛ لم تُنشأ أي حركة نقدية."
+            : "فُتحت الوردية وسُجّلت العملية.")
+          : "أُقفلت الوردية وسُجّل الجرد.");
       }
     } catch {
       markRecovery(true);
@@ -160,7 +162,8 @@ export function CanonicalShifts({ username }: { username: string }) {
           </table></div><p className="text-xs text-slate-500">المبالغ غير النقدية لا تدخل المتوقّع في الدرج. إخفاء التفاصيل لا يغيّر هذه الإجماليات.</p>
         </> : null}
       </section>
-      <ShiftOpeningReviews openShiftReviews={feed.open?.openingReviews ?? []} pending={feed.pendingOpeningReviews ?? 0}
+      <ShiftOpeningReviews openShiftId={feed.open?.id ?? null} openShiftReviews={feed.open?.openingReviews ?? []}
+        openShiftCorrections={feed.open?.openingCorrections ?? []} pending={feed.pendingOpeningReviews ?? 0}
         canReview={feed.canReviewOpening === true} onReviewed={() => void load()} />
       {feed.canOperate ? <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card" aria-label={feed.open ? "جرد وإقفال الوردية" : "فتح الوردية"}>
         <form className="space-y-4" onSubmit={event => void submit(event, feed.open ? "close" : "open")}>
@@ -170,8 +173,7 @@ export function CanonicalShifts({ username }: { username: string }) {
             {feed.open ? <>
               <label className="block text-xs font-semibold text-slate-600">ملاحظة الإقفال<input className={inputClass} maxLength={300} value={note} onChange={event => setNote(event.target.value)} /></label>
               {needsReason ? <label className="block text-xs font-semibold text-amber-900">سبب فرق الجرد<input required className={inputClass} maxLength={300} value={reason} onChange={event => setReason(event.target.value)} /></label> : null}
-            </> : needsOpeningNote ? <label className="block text-xs font-semibold text-amber-900">ملاحظة فرق الافتتاح (أعد العدّ أولًا؛ يُسجَّل الفرق للمراجعة ولا تُنشأ حركة نقدية)
-              <input required data-testid="opening-difference-note" className={inputClass} minLength={3} maxLength={300} value={openingNote} onChange={event => setOpeningNote(event.target.value)} /></label> : null}
+            </> : <p className="text-xs text-slate-500">عُدّ النقد في الدرج وأدخله كما هو؛ يُسجَّل كما أُدخل، وأي فرق عن الإقفال السابق يُحال إلى المراجعة.</p>}
             <ActionButton type="submit" disabled={disabled}>{busy ? "جارٍ تنفيذ العملية…" : feed.open ? "تأكيد الجرد والإقفال" : "تأكيد فتح وردية جديدة"}</ActionButton>
           </fieldset>
         </form>
@@ -205,6 +207,7 @@ export function CanonicalShifts({ username }: { username: string }) {
         <ul className="divide-y divide-slate-100">{feed.recent.map(row => <li key={row.id} className="space-y-1 py-3 text-xs">
           <p className="font-bold text-navy-900">#{row.id} — {row.status === "open" ? "مفتوحة" : "مقفلة"} — {date(row.openedAt)}</p>
           <p>فتحها {row.openedBy}{row.closedBy ? `، أقفلها ${row.closedBy}` : ""}</p>
+          {row.sealed ? <p data-testid="shift-sealed" className="text-slate-500">المعدود مختوم حتى افتتاح الوردية التالية.</p> : null}
           {row.counted ? <div className="grid gap-1 sm:grid-cols-3">{CURRENCIES.map(c => <p key={c}>{c}: المعدود <bdi>{formatMoney(row.counted![c], c)}</bdi> · الفرق <bdi>{formatMoney(row.difference?.[c] ?? 0, c)}</bdi></p>)}</div> : null}
           {row.note ? <p className="break-words">{row.note}</p> : null}{row.differenceReason ? <p className="break-words">سبب الفرق: {row.differenceReason}</p> : null}
         </li>)}</ul>
