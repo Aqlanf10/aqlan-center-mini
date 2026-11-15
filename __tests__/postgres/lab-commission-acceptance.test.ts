@@ -130,3 +130,39 @@ describe("a shared crown case splits the lab cost with the work, once", () => {
   });
 });
 
+/** Item 4: payroll pays the commission in the month of collection, with the lab cost already taken from the base. */
+describe("payroll with a lab cost: month of collection, no rewrite of an earlier run", () => {
+  it("a September crown collected 500 in October and 500 in November pays 120 then 120; September pays nothing", async () => {
+    const payroll = await import("../../lib/hr-payroll"), hr = await import("../../lib/hr"), contracts = await import("../../lib/hr-contracts-attendance");
+    const f = await fixture();
+    const staff = await hr.createStaff({ fullName: "Synthetic lab payroll doctor", phone: null, department: "doctors", jobTitle: "SYN", hireDate: "2025-01-01",
+      workStatus: "active", endDate: null, contractKind: "commission", payTerms: null, note: null }, actor);
+    const contract = await contracts.createContract({ staffId: staff.id, templateKind: "doctor_percentage", title: "Synthetic commission agreement",
+      startDate: "2025-01-01", compensationKind: "commission", doctorPartyId: f.doctorId, commissionRatePercent: 30 }, actor);
+    await contracts.approveContract(contract.id, actor);
+    await contracts.transitionContractStatus(contract.id, "active", "Synthetic activation", actor);
+    await q("UPDATE invoices SET created_at='2026-09-20T07:00:00Z' WHERE id=$1", [f.invoice.id]);
+    const receipt = async (amount: number, at: string) => {
+      const result = await db.recordPayment({ patientId: f.patientId, invoiceId: f.invoice.id, kind: "payment", amountMinor: amount, currency: "YER", baseCurrency: "YER",
+        exchangeRate: 1, method: "cash", createdBy: actor.username, note: "Synthetic late collection", reversalOfId: null });
+      expect(result.reason).toBeNull();
+      await q("UPDATE payments SET created_at=$2::timestamptz WHERE id=$1", [result.payment!.id, at]);
+    };
+    const run = async (periodKey: string) => {
+      const period = await payroll.getOrCreatePayrollPeriod(periodKey, actor);
+      return payroll.calculatePayrollRun(period.id, "YER", actor);
+    };
+    const commission = async (runId: number) => (await payroll.listPayrollItems(runId)).find(item => item.staffId === staff.id)?.commissionsMinor ?? 0;
+    await receipt(500, "2026-10-10T07:00:00Z");
+    await receipt(500, "2026-11-05T07:00:00Z");
+    expect(await commission((await run("2026-09")).id)).toBe(0);
+    const october = await run("2026-10");
+    expect(await commission(october.id)).toBe(120);
+    // An approved run is a commitment: November then pays only its own collection and October is not rewritten.
+    await payroll.approvePayrollRun(october.id, actor);
+    expect(await commission((await run("2026-11")).id)).toBe(120);
+    expect(await commission(october.id)).toBe(120);
+    expect(await payables(f.orderId)).toEqual([{ amount: 200, currency: "YER" }]);
+  });
+});
+
