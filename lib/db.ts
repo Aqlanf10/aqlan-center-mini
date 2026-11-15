@@ -19410,6 +19410,7 @@ async function signClinicalVisitCore(input: {
       await client.query("ROLLBACK");
       return emptyResult("already_signed", { visit: existing });
     }
+    if (currentSigner) assertClinicalActorUnexpired(currentSigner);
 
     if (request && locked[0].patient_id !== request.patientId) {
       throw new ClinicalMutationAuthorityError(409, "تغيّر ملف مريض الزيارة؛ أعد تحميلها قبل التوقيع.");

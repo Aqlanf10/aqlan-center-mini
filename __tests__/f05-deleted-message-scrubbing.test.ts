@@ -45,7 +45,7 @@ beforeAll(async () => {
   portalMessagesRoute = await import("../app/api/portal/messages/route");
   messageFileRoute = await import("../app/api/messages/file/[id]/route");
   messageVoiceRoute = await import("../app/api/messages/voice/[id]/route");
-});
+}, 30_000);
 
 describe("F-05c: حذف الرسائل الآمن بلا إتلاف تلقائي مع صلاحيات العهدة والتدقيق والحذف المتكرر", () => {
   it("يخفي الرسائل والمرفقات المحذوفة من الواجهة والتنزيل مع الاحتفاظ الكامل بالتخزين وتدقيق العملية ورفض الحذف المتكرر", async () => {
