@@ -19,10 +19,13 @@ beforeAll(async () => {
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
   // Files share this database: close any open shift structurally, then make the latest close this file's own.
+  // Another file may already hold a close dated later than now (positive-print-routes-ui uses 2031), so this
+  // close is dated after the latest one, whatever the file order.
   await db.query(`UPDATE cashier_shifts SET status = 'closed', closed_at = NOW() WHERE status = 'open'`);
   sealedId = (await db.query<{ id: number }>(
     `INSERT INTO cashier_shifts (opened_by, status, closed_by, closed_at, opening_yer, counted_yer, counted_sar, counted_usd, note, difference_reason)
-     VALUES ('syn-blind-legacy', 'closed', 'syn-blind-legacy', NOW() + INTERVAL '1 second', 0, 4321, 0, 0, 'SYN-SEALED-NOTE', 'SYN-SEALED-REASON') RETURNING id`)).rows[0].id;
+     VALUES ('syn-blind-legacy', 'closed', 'syn-blind-legacy',
+             GREATEST(NOW(), (SELECT max(closed_at) FROM cashier_shifts)) + INTERVAL '1 second', 0, 4321, 0, 0, 'SYN-SEALED-NOTE', 'SYN-SEALED-REASON') RETURNING id`)).rows[0].id;
 }, 240_000);
 
 afterAll(async () => {
