@@ -149,8 +149,11 @@ describe("explicit retirement", () => {
   it("canonical retirement follows the create grant and the session; refusals write nothing", async () => {
     const note = `SYN-RET-AUTH-${++serial}`, requestKey = key(), body = canonicalBody(note, "10");
     await expect(create.commandCanonicalRetireExpenseRequest(await fx.session("reader"), { requestKey, source: body })).rejects.toThrow(/CAPABILITY_DENIED/);
-    const expiring = await fx.session("clerk", 1);
-    await new Promise(resolve => setTimeout(resolve, 20)); // the token's own expiry, not a race barrier
+    // A 1 ms token can already be expired when the fixture parses it on a slow runner (hosted run 43659458968).
+    // Mint with a margin, then wait until the clock is past the token's own expiry (not a race barrier).
+    const lifetimeMs = 1500, minted = Date.now();
+    const expiring = await fx.session("clerk", lifetimeMs);
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, minted + lifetimeMs + 100 - Date.now())));
     await expect(create.commandCanonicalRetireExpenseRequest(expiring, { requestKey, source: body })).rejects.toThrow(/SESSION|EXPIRED/);
     expect(await n("SELECT count(*) AS n FROM expense_request_retirements WHERE idempotency_key = $1", [requestKey])).toBe(0);
     expect(await retireAudits(requestKey)).toBe(0);

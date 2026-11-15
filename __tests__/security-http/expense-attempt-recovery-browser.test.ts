@@ -103,8 +103,10 @@ describe("petty expense on the cash screen", () => {
     const note = `SYN-REC-INFLIGHT-${++serial}-${Date.now()}`;
     const { context, page } = await open("admin");
     try {
-      const drawer = Number((await db.query(`SELECT opening_yer FROM cashier_shifts WHERE status = 'open'`)).rows[0].opening_yer);
-      const amount = String(drawer * 50 + 1_000_000); // more than the open drawer holds now
+      // More than the open drawer holds now. Files share this database and other files take cash into the
+      // same shift, so size it from the drawer's expected cash, not from its opening (hosted run 43659458968).
+      const shifts = await (await page.request.get(`${baseUrl}/api/shifts`)).json();
+      const amount = String(Number(shifts.drawer.expected.YER) + 1_000_000);
       await startExpense(page, note, amount);
       let firstHeaders: Record<string, string> | null = null, firstBody: string | null = null;
       let held = false;

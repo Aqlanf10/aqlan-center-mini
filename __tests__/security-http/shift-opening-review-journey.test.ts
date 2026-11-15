@@ -29,8 +29,9 @@ const STATE_ONLY = ["currency", "id", "shiftId", "state"];
 
 it("HTTP: one-step opening, a sealed previous close, state-only answers, and the exact grant for review and correction", async () => {
   const operator = await journey.login("operator");
-  const first = await (await shiftsApi(operator.cookie, "POST", { opening: { YER: "4321" } })).json();
-  expect((await shiftsApi(operator.cookie, "PATCH", { id: first.id, counted: { YER: "4321" } })).status).toBe(200);
+  // The first shift opens at 4000 and closes counting 4321 (a stated surplus): its count, not its opening, is sealed.
+  const first = await (await shiftsApi(operator.cookie, "POST", { opening: { YER: "4000" } })).json();
+  expect((await shiftsApi(operator.cookie, "PATCH", { id: first.id, counted: { YER: "4321" }, differenceReason: "زيادة تجريبية" })).status).toBe(200);
   // Before the next count is fixed: the operator's feed never carries the previous close's count.
   const before = await (await journey.api("/api/shifts", operator.cookie)).json();
   expect(before.open).toBeNull();
