@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -9,7 +9,6 @@ import type { LabWorkDraft } from "../../lib/lab-work-intent-contract";
 const target = validatePostgresTestTarget(process.env); stubPostgresEnv();
 const db = await import("../../lib/db");
 const invoiceWriter = await import("../../lib/invoice-linkage-db");
-const revision = await import("../../lib/invoice-revision-db");
 const q = async (sql: string, values: unknown[] = []) => (await db.getPool().query(sql, values)).rows;
 let actor: SessionPayload;
 beforeAll(async () => {
@@ -46,6 +45,11 @@ async function fixture(grouped = false, withCost = true, deductLabCost: boolean 
   if (withCost) await db.updateLabOrderAccounting(orderId, { costMinor: 200, costCurrency: "YER", exchangeRate: 1, actor: actor.username, actorRole: actor.role });
   return { patientId: patient.id as number, doctorId: doctor.id as number, invoice: result.invoice, orderId, intentId };
 }
+async function payment(f: Awaited<ReturnType<typeof fixture>>, amount: number) {
+  const shift = await db.getOpenShift();
+  await q(`INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by)
+    VALUES($1,$2,$3,$4,'payment',$5,'YER',1,$5,'YER','cash',$6)`, [`LCA-R-${randomUUID()}`, f.patientId, f.invoice.id, shift!.id, amount, actor.username]);
+}
 async function report(doctorId: number) { return (await db.commissionReport("2020-01-01", "2999-12-31")).find(row => row.doctorId === doctorId && row.currency === "YER")!; }
 const payables = (orderId: number) => q("SELECT amount_minor::int AS amount, currency FROM payables WHERE lab_order_id=$1", [orderId]);
 
@@ -70,3 +74,59 @@ describe("crown invoice → lab cost → doctor commission, with the lab-deducti
     expect(await report(f.doctorId)).toMatchObject({ accruedMinor: 240, labCostMinor: 200 });
   });
 });
+
+/** Items 2 and 4: the lab cost is one payable, separate from paying it; accrual is not collection. */
+describe("the lab debt and the doctor's commission are separate facts", () => {
+  const pay = async (f: Awaited<ReturnType<typeof fixture>>, amount: number, key: string) => {
+    const [payable] = await q("SELECT id, party_id FROM payables WHERE lab_order_id=$1", [f.orderId]);
+    return db.recordExpense({ category: "lab", partyId: payable.party_id, payeeText: null, amountMinor: amount, currency: "YER", baseCurrency: "YER",
+      exchangeRate: 1, payableId: payable.id, note: "Synthetic lab settlement", createdBy: actor.username, actorRole: actor.role, request: { key, hash: createHash("sha256").update(`synthetic-lab-settlement-${amount}`).digest("hex") } });
+  };
+  const settled = async (orderId: number) => Number((await q(
+    "SELECT COALESCE(SUM(e.payable_settled_minor),0)::int AS n FROM expenses e JOIN payables p ON p.id=e.payable_id WHERE p.lab_order_id=$1", [orderId]))[0].n);
+
+  it("paying the lab partly then fully settles the one payable; a replay adds nothing; the cost and the commission do not move", async () => {
+    const f = await fixture(false, true, true);
+    const key = `lab-accept-${randomUUID()}`;
+    const first = await pay(f, 80, key);
+    expect(first.reason).toBeNull();
+    const replay = await pay(f, 80, key);
+    expect(replay.expense?.id).toBe(first.expense!.id);
+    expect(await settled(f.orderId)).toBe(80);
+    expect((await pay(f, 120, `lab-accept-${randomUUID()}`)).reason).toBeNull();
+    expect(await settled(f.orderId)).toBe(200);
+    expect(await payables(f.orderId)).toEqual([{ amount: 200, currency: "YER" }]);
+    expect(await q("SELECT cost_minor::int AS cost, cost_currency FROM lab_orders WHERE id=$1", [f.orderId])).toEqual([{ cost: 200, cost_currency: "YER" }]);
+    expect(await report(f.doctorId)).toMatchObject({ accruedMinor: 240, labCostMinor: 200 });
+  });
+  it("accrual 240 stands before any collection; collecting 500 then the other 500 earns 120 then 240, never more", async () => {
+    const f = await fixture();
+    expect(await report(f.doctorId)).toMatchObject({ accruedMinor: 240, earnedMinor: 0 });
+    await payment(f, 500);
+    expect(await report(f.doctorId)).toMatchObject({ accruedMinor: 240, earnedMinor: 120 });
+    await payment(f, 500);
+    expect(await report(f.doctorId)).toMatchObject({ accruedMinor: 240, earnedMinor: 240, labCostMinor: 200 });
+  });
+});
+
+/** Item 6: a case shared by two doctors under an approved participation decision (centre decision, synthetic). */
+describe("a shared crown case splits the lab cost with the work, once", () => {
+  it("60/40 between a 30% and a 40% doctor: the 200 lab cost is carried 120/80, accruals 144 and 128, and the lab payable stays one row", async () => {
+    const participation = await import("../../lib/commission-participation-db");
+    const f = await fixture();
+    const [second] = await q("INSERT INTO parties(name,kind,commission_percent) VALUES('Synthetic second doctor','doctor',40) RETURNING id");
+    const [clinicalCase] = await q("INSERT INTO clinical_cases (patient_id, specialty, title, created_by) VALUES ($1, 'prostho', 'Synthetic shared crown', 'synthetic') RETURNING id", [f.patientId]);
+    await q("UPDATE plan_items SET case_id=$1 WHERE id=$2", [clinicalCase.id, f.invoice.items[0].planItemId]);
+    expect(await report(f.doctorId)).toMatchObject({ accruedMinor: 240, labCostMinor: 200 });
+    const decided = await participation.decideCaseParticipation({ caseId: clinicalCase.id, status: "approved",
+      participants: [{ doctorId: f.doctorId, shareBp: 6_000 }, { doctorId: second.id, shareBp: 4_000 }], source: "centre_decision",
+      reason: "Synthetic centre decision", expectedHeadId: null, actor: { userId: actor.userId ?? null, username: actor.username, role: actor.role } });
+    expect(decided.ok).toBe(true);
+    const [a, b] = [await report(f.doctorId), await report(second.id)];
+    // A: (600 − 120) × 30% = 144; B: (400 − 80) × 40% = 128. The cost is carried once in total, never whole on both.
+    expect([a.accruedMinor, b.accruedMinor]).toEqual([144, 128]);
+    expect(a.labCostMinor + b.labCostMinor).toBe(200);
+    expect(await payables(f.orderId)).toEqual([{ amount: 200, currency: "YER" }]);
+  });
+});
+
