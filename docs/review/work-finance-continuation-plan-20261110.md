@@ -88,6 +88,13 @@ Canonical conversion still open in finance (from the route map): shifts and day 
 
 - Policy points 1–9 of contract section 15 (recommended defaults are implemented; the owner may change them).
 - Correction price controls (93c). Financial responsibility for a case (G4-7).
+- Shared case with a lab cost (asked on #483 6902833150): the cost is split by the participation shares today (60/40 → 120/80). Whole cost on the doctor who did the crown instead?
+
+## 5a. Staging candidate (integration branch `feat/claude-integration-finance-ortho-20261112`, 2026-11-15)
+
+- Last fully green hosted head: `30f6e01a` (run 43760654756). Pushed after it: `00f1752d`, lab/commission acceptance tests only.
+- In the candidate: 0128, 0129 (blind count), 0132, 0133, owner funding account 2108. Deferred: 0130, 0131, ortho UI redesign, remaining M2 slices.
+- Upgrade and rollback rehearsal from the staging state (latest 0125): `staging-upgrade-rehearsal-20261115.md`. Local synthetic database only; no staging access from this lane.
 
 ## 6. How to resume
 
