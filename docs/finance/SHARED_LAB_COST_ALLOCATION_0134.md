@@ -25,7 +25,7 @@ Read as:
 | With no decision, the whole line and its lab cost stay on the invoice-line doctor; nothing is held | same suites |
 | An explicit `pending` decision holds the case's commission until it is approved or voided | `commission-case-participation-db` |
 
-Point 4 of the decision is already met: nothing is held unless administration explicitly records `pending`. This contract does not change the explicit `pending` state (see question Q2).
+Point 4 is met when no decision exists. It is **not** met for an explicit `pending` decision, which holds the case's commission today. The owner clarified (#483 6905003552) that an explicit pending decision must not hold either; section 4.6 designs that change.
 
 ## 3. What is missing
 
@@ -46,7 +46,7 @@ Resolution for a line of a shared case, in order:
 
 1. `admin_allocation` is on **and** the decision in force carries a lab-cost allocation → that allocation. Basis `admin_allocation`.
 2. `by_work_shares` is on → the work shares. Basis `work_shares`.
-3. Otherwise → the whole cost stays on the invoice-line doctor. Basis `line_doctor`.
+3. Otherwise → the whole cost stays on the invoice-line doctor. Basis `line_doctor`. **This third step is a proposal, not an owner decision** (6905003552); it is implemented only once the owner confirms it.
 
 A case with no approved decision is never shared: basis `line_doctor`, as today.
 
@@ -74,6 +74,18 @@ A setting change is not retroactive for payroll: it changes what later reports a
 
 The participation decision form gains an optional "توزيع تكلفة المعمل" row per participant, shown only when the setting is on. The commission detail shows the basis next to the lab cost.
 
+### 4.6 An explicit pending decision no longer holds the commission (owner clarification 6905003552)
+
+Today a `pending` head removes the case's lines from every doctor until it is approved or voided. Proposed behaviour:
+
+- `pending` becomes a visible review marker only. While the head is pending, the case's lines and lab cost are computed exactly as if no decision existed (basis `line_doctor`), and each line is flagged "قرار المشاركة قيد المراجعة" in the commission detail and statement.
+- Payroll calculates and may be approved with a pending head. Approval is never blocked by it.
+- When the decision is later approved, the split applies to later reports and runs. An approved run is not rewritten: the next run pays the participant who gains and carries the other, by the mechanism that already handles a decision made after an approved run.
+- The record stays append-only and audited; no new storage is needed for this part, so it does not depend on the migration.
+- Existing tests that assert the hold ("a pending case holds its commission") change deliberately, citing this decision; they are not deleted.
+
+Risk to state plainly: commission can be paid to the invoice-line doctor during the review and partly reversed against that doctor's later commission after approval. That is the consequence of not holding, and it uses the existing carry-forward (never taken from base salary).
+
 ## 5. Tests to write first (red before code; synthetic data)
 
 1. Defaults: 60/40 work shares → cost 120/80 (regression of today's figures).
@@ -82,6 +94,7 @@ The participation decision form gains an optional "توزيع تكلفة الم�
 4. Both off → whole cost on the invoice-line doctor.
 5. Writer refusals: allocation sent while the setting is off; partial allocation; sum ≠ 10000; unknown doctor. Nothing written, Arabic message.
 6. Database check refuses a malformed allocation inserted directly; update and delete still refused.
+6a. Pending: a pending head changes no figure; payroll calculates and approves; the lines carry the review flag; approving afterwards moves the split to the next run and leaves the approved run untouched.
 7. Supersede: a new decision changes the allocation; an earlier report period keeps the earlier one; an approved payroll run is not rewritten and the next run absorbs the difference.
 8. Concurrency: two decisions on the same head, one wins (existing lock-then-admit pattern).
 9. Settings: only the protected owner changes either key; the legacy route refuses; audited; a change affects later computation only.
@@ -93,8 +106,8 @@ The participation decision form gains an optional "توزيع تكلفة الم�
 - Replaces one SQL function (`aqlan_commission_participants_total_bp`) with a version that also accepts the optional key, and adds one check. No table rewrite, no data change.
 - Rollback before use: restore the pre-upgrade backup, as for the candidate.
 
-## 7. Questions before implementation
+## 7. Open points before implementation
 
-- **Q1.** Both settings off: is "whole cost on the invoice-line doctor" the intended meaning?
-- **Q2.** The explicit `pending` state still holds a case's commission by an administrator's deliberate choice. I read «لا تعلق اي شي» as "do not hold when no decision exists", which is already the behaviour. Should the explicit `pending` hold be removed as well?
-- **Q3.** Migration number 0134.
+- **Migration number.** 0134 is a proposal only. The coordinator is checking availability independently (6905003552); nothing is allocated until that is agreed.
+- **Both settings off.** "Whole cost on the invoice-line doctor, disclosed as such" is my proposal, not an owner decision.
+- **Decided:** an explicit pending decision does not hold the commission (6905003552); see 4.6.
