@@ -41,7 +41,7 @@ export type AuditAction =
   | "visit.price_override"
   /* (P1-4) الجهات والخدمات وأسعارها — كانت تتغيّر بلا أثر. */
   | "party.create" | "party.update"
-  | "service.create" | "service.update" | "service.prices.batch" | "service.prices.provisional"
+  | "service.create" | "service.update" | "service.lab_mapping" | "service.prices.batch" | "service.prices.provisional"
   | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent" | "plan.financial_approval" | "plan.agreement_reconciliation" | "plan.agreement_reconciliation_refused" | "plan.agreement_delta_amendment" | "plan.approved_collection" | "plan.proposal_contact"
   /* (FIA-1) الأرصدة الافتتاحية للمعامل والموردين: دَينٌ سابق وتصحيحه، ورصيدٌ مقدَّم وإلغاؤه. */
   | "party_opening.create" | "party_opening.adjust" | "party_advance.create" | "party_advance.void"
@@ -221,6 +221,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "party.update": "تعديل بيانات جهة",
   "service.create": "إضافة خدمة إلى الدليل",
   "service.update": "تعديل خدمة أو سعرها",
+  "service.lab_mapping": "ربط خدمة العيادة بخدمة المختبر",
   "service.prices.batch": "تسعير الدليل دفعةً واحدة",
   "service.prices.provisional": "إكمال أسعار تقديرية للدليل",
   "plan.create": "إنشاء خطة علاج",

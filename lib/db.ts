@@ -102,6 +102,7 @@ import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "./ortho-followup-coverage-schema";
+import { GROUPED_LAB_ORDER_SQL } from "./grouped-lab-order-schema";
 import { ENDODONTICS_SQL } from "./endodontics-schema";
 import { INVOICE_LINKAGE_SQL } from "./invoice-linkage-schema";
 import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
@@ -2137,6 +2138,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0126", name: "commission_case_participations", filename: "0126_commission_case_participations.sql", sql: COMMISSION_CASE_PARTICIPATIONS_SQL, checksum: checksumOf(COMMISSION_CASE_PARTICIPATIONS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0136", name: "grouped_lab_orders", filename: "0136_grouped_lab_orders.sql", sql: GROUPED_LAB_ORDER_SQL, checksum: checksumOf(GROUPED_LAB_ORDER_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -7824,6 +7826,11 @@ export async function updateLabOrderAccountingOn(
           payableAccountCode: payableAccCode, isPosted },
       },
     });
+    /* 0136 (owner 6932010630 item 2): a cost typed on the lab board replaces a grouped order's automatic or
+       pending price; the order says so instead of keeping a stale rule/pending state. Other orders keep NULL. */
+    if (hasPositiveMoneyUpdate) {
+      await client.query("UPDATE lab_orders SET pricing_state='manual' WHERE id=$1 AND pricing_state IS NOT NULL AND pricing_state<>'manual'", [orderId]);
+    }
 
     return "updated";
 }
@@ -9570,6 +9577,38 @@ export async function createService(input: {
     [input.name, input.category, input.priceMinor, input.priceMinor > 0, input.priceSarMinor ?? null, input.priceUsdMinor ?? null],
   );
   return toService(rows[0]);
+}
+
+/** 0136 (owner #483 6932010630 item 1): which lab service each clinic service is sent as. Read separately from
+ * SERVICE_COLUMNS so every existing service read keeps its exact shape. */
+export async function listServiceLabMappings(): Promise<Map<number, number | null>> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; lab_service_id: number | null }>("SELECT id, lab_service_id FROM services");
+  return new Map(rows.map((row) => [row.id, row.lab_service_id]));
+}
+
+/** Sets or clears one mapping. Only an active lab service may be chosen; clearing (null) is always allowed. */
+export async function setServiceLabService(serviceId: number, labServiceId: number | null):
+  Promise<{ ok: true; previous: number | null } | { ok: false; reason: "service_not_found" | "lab_service_invalid" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const service = (await client.query<{ lab_service_id: number | null }>("SELECT lab_service_id FROM services WHERE id=$1 FOR UPDATE", [serviceId])).rows[0];
+    if (!service) { await client.query("ROLLBACK"); return { ok: false, reason: "service_not_found" }; }
+    if (labServiceId !== null) {
+      const active = (await client.query("SELECT 1 FROM lab_services WHERE id=$1 AND is_active FOR SHARE", [labServiceId])).rows.length > 0;
+      if (!active) { await client.query("ROLLBACK"); return { ok: false, reason: "lab_service_invalid" }; }
+    }
+    await client.query("UPDATE services SET lab_service_id=$2 WHERE id=$1", [serviceId, labServiceId]);
+    await client.query("COMMIT");
+    return { ok: true, previous: service.lab_service_id };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateService(id: number, input: {
@@ -14476,6 +14515,25 @@ export interface CommissionRow {
  * وافقت الدلو وبمكافئها المسجَّل وإلا)، والمصروف للطبيب بعملته نفسها حصرًا. فلا
  * يُحوَّل عملٌ إلى يمني بصمت، ولا يُخلط دلوٌ بدلو.
  */
+/** 0136: one grouped order's cost split over its members' doctors by each tooth's price weight (equal weights
+ * when none is known), largest remainder first — the parts always add up to the order's cost exactly. Members
+ * without a doctor carry no share. */
+export function splitGroupedLabCost(costMinor: number, members: readonly { doctorId: number | null; weight: string | number }[]) {
+  const withDoctor = members.filter((member): member is { doctorId: number; weight: string | number } => member.doctorId !== null);
+  if (!withDoctor.length || costMinor <= 0) return [];
+  const weights = withDoctor.map((member) => Math.max(0, Number(member.weight) || 0));
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  const effective = total > 0 ? weights : weights.map(() => 1);
+  const effectiveTotal = effective.reduce((sum, weight) => sum + weight, 0);
+  const raw = effective.map((weight) => Math.floor((costMinor * weight) / effectiveTotal));
+  let remainder = costMinor - raw.reduce((sum, part) => sum + part, 0);
+  const order = effective.map((_, index) => index).sort((a, b) => effective[b] - effective[a] || a - b);
+  for (let i = 0; remainder > 0; i = (i + 1) % order.length) { raw[order[i]] += 1; remainder -= 1; }
+  const byDoctor = new Map<number, number>();
+  withDoctor.forEach((member, index) => byDoctor.set(member.doctorId, (byDoctor.get(member.doctorId) ?? 0) + raw[index]));
+  return [...byDoctor].map(([doctorId, part]) => ({ doctorId, costMinor: part })).filter((part) => part.costMinor > 0);
+}
+
 export async function commissionReport(
   from: string,
   to: string,
@@ -14866,10 +14924,19 @@ export async function commissionReport(
   if (invoiceById.size > 0) {
     const { rows: labRows } = await pool.query<{
       lab_order_id: number; invoice_ids: number[]; doctor_id: number | null; cost_minor: string; cost_currency: string | null;
+      member_split: { doctorId: number | null; weight: string | number }[] | null;
     }>(
       `SELECT l.id AS lab_order_id, COALESCE(aliases.invoice_ids, ARRAY[v.invoice_id]) AS invoice_ids,
-              COALESCE(l.doctor_id, v.doctor_id) AS doctor_id, l.cost_minor, l.cost_currency
+              COALESCE(l.doctor_id, v.doctor_id) AS doctor_id, l.cost_minor, l.cost_currency, members.split AS member_split
          FROM lab_orders l
+         LEFT JOIN LATERAL (
+           -- 0136: a grouped order spanning several doctors carries its members' doctors and price weights.
+           SELECT json_agg(json_build_object('doctorId', m.doctor_id, 'weight', COALESCE(mp.unit_cost_minor, 0)) ORDER BY m.tooth_code, m.id) AS split
+             FROM lab_work_intents wi
+             JOIN lab_work_members m ON m.intent_id = wi.id AND m.retired_revision IS NULL
+             LEFT JOIN lab_order_member_prices mp ON mp.lab_order_id = l.id AND mp.member_id = m.id
+            WHERE wi.id = l.lab_work_intent_id AND wi.group_kind = 'grouped'
+         ) members ON TRUE
          LEFT JOIN visits v ON v.id = l.visit_id AND v.patient_id = l.patient_id
          LEFT JOIN LATERAL (
            SELECT array_agg(DISTINCT inv.id ORDER BY inv.id) AS invoice_ids
@@ -14892,17 +14959,18 @@ export async function commissionReport(
       // correction preserves cancelled-original aliases. Never multiply cost by joins.
       const ids = row.invoice_ids.filter((id) => id !== null);
       if (ids.length > 1) throw new CommissionLabLineageError(row.lab_order_id);
-      if (row.doctor_id === null) continue;
+      const parts = row.doctor_id !== null ? [{ doctorId: row.doctor_id, costMinor: toMinor(row.cost_minor) }]
+        : splitGroupedLabCost(toMinor(row.cost_minor), row.member_split ?? []);
       const candidates = ids.map((id) => invoiceById.get(id)).filter((invoice): invoice is CommissionInvoice => Boolean(invoice));
-      for (const invoice of candidates) {
-        const hasShare = invoice.doctorShares.some((share) => share.doctorId === row.doctor_id);
+      for (const part of parts) for (const invoice of candidates) {
+        const hasShare = invoice.doctorShares.some((share) => share.doctorId === part.doctorId);
         if (!hasShare || row.cost_currency !== invoice.currency) {
-          const exceptionKey = `${row.doctor_id}:${invoice.currency}:${invoice.id}`;
+          const exceptionKey = `${part.doctorId}:${invoice.currency}:${invoice.id}`;
           labNotDeducted.set(exceptionKey, (labNotDeducted.get(exceptionKey) ?? 0) + 1);
           continue;
         }
-        const key = `${invoice.id}:${row.doctor_id}`;
-        labByInvoiceDoctor.set(key, (labByInvoiceDoctor.get(key) ?? 0) + toMinor(row.cost_minor));
+        const key = `${invoice.id}:${part.doctorId}`;
+        labByInvoiceDoctor.set(key, (labByInvoiceDoctor.get(key) ?? 0) + part.costMinor);
       }
     }
     /* التوزيع على بنود الطبيب نفسه في الفاتورة بالتناسب (والباقي للأكبر) — فمجموع

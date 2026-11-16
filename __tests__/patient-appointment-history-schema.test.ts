@@ -26,6 +26,7 @@ describe("patient appointment history index provenance", () => {
       "0087_agreement_reminder_metadata.sql",
       "0089_lab_shade_specification.sql",
       "0126_commission_case_participations.sql",
+      "0136_grouped_lab_orders.sql",
     ]);
   });
 

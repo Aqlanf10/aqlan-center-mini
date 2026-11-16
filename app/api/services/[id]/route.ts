@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getService, recordAudit, updateService } from "@/lib/db";
+import { getService, recordAudit, setServiceLabService, updateService } from "@/lib/db";
 import { SERVICE_AUDIT_FIELDS, auditChanges } from "@/lib/audit-diff";
 import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
@@ -64,8 +64,35 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!foreign.ok) return NextResponse.json({ message: foreign.message }, { status: 400 });
   Object.assign(patch, foreign.patch);
 
-  if (Object.keys(patch).length === 0) {
+  // 0136 (owner #483 6932010630 item 1): the lab service this clinic service is sent as; null clears it.
+  const hasLabMapping = Object.hasOwn(source, "labServiceId");
+  const labServiceId = source.labServiceId;
+  if (hasLabMapping && labServiceId !== null && !(Number.isSafeInteger(labServiceId) && Number(labServiceId) > 0)) {
+    return NextResponse.json({ message: "اختر خدمة مختبر صحيحة أو اترك الربط فارغًا." }, { status: 400 });
+  }
+
+  if (Object.keys(patch).length === 0 && !hasLabMapping) {
     return NextResponse.json({ message: "لا يوجد ما يُحدَّث." }, { status: 400 });
+  }
+  if (hasLabMapping) {
+    try {
+      const mapped = await setServiceLabService(id, labServiceId as number | null);
+      if (!mapped.ok) {
+        return mapped.reason === "service_not_found"
+          ? NextResponse.json({ message: "الخدمة غير موجودة." }, { status: 404 })
+          : NextResponse.json({ message: "خدمة المختبر غير موجودة أو معطّلة؛ اختر خدمة فعّالة." }, { status: 409 });
+      }
+      if (mapped.previous !== labServiceId) {
+        await recordAudit({ action: "service.lab_mapping", entity: "service", entityId: id,
+          details: { خدمة_المختبر_السابقة: mapped.previous, خدمة_المختبر: labServiceId }, actor: session.username, actorRole: session.role });
+      }
+    } catch {
+      return NextResponse.json({ message: "تعذّر حفظ ربط خدمة المختبر." }, { status: 500 });
+    }
+    if (Object.keys(patch).length === 0) {
+      const current = await getService(id);
+      return current ? NextResponse.json({ ...current, labServiceId }) : NextResponse.json({ message: "الخدمة غير موجودة." }, { status: 404 });
+    }
   }
 
   try {

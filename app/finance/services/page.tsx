@@ -26,7 +26,12 @@ interface Service {
   priceUsdMinor?: number | null;
   /** السعر الذي ستُسعَّر به في زيارةٍ بكل عملة (الخاص أو المحوَّل). */
   priceIn?: Partial<Record<Currency, { minor: number | null; source: "catalog" | "converted" | "none" }>>;
+  /** 0136: the lab service this clinic service is sent as (admins read it with ?labMapping=1). */
+  labServiceId?: number | null;
 }
+
+/** 0136 (owner #483 6932010630 item 1): crowns and veneers are mapped to a lab service here; prices stay per lab. */
+const LAB_MAPPED_CATEGORIES = new Set(["crown", "veneer"]);
 
 /* أسعار الدفعة: تُكتب هنا وتُرسل كلُّها مرةً واحدة — من مستودع الوكيل الآخر. */
 interface BatchPrice {
@@ -61,14 +66,18 @@ export default function ServicesPage() {
   const [batchMode, setBatchMode] = useState(false);
   const [batch, setBatch] = useState<BatchPrice[]>([]);
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [labServices, setLabServices] = useState<{ id: number; name: string }[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/services?all=1", { cache: "no-store" });
+      const response = await fetch("/api/services?all=1&labMapping=1", { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       setServices(payload as Service[]);
+      // The lab catalogue is optional here: without it the mapping select simply does not show.
+      const labs = await fetch("/api/lab/services", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+      setLabServices(Array.isArray(labs?.services) ? labs.services.map((one: { id: number; name: string }) => ({ id: one.id, name: one.name })) : []);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
@@ -510,6 +519,20 @@ export default function ServicesPage() {
                         >
                           تعديل السعر
                         </button> : null}
+                        {!readOnly && labServices.length > 0 && service.labServiceId !== undefined && LAB_MAPPED_CATEGORIES.has(service.category ?? "") ? (
+                          <label className="text-[10px] font-bold text-slate-500">
+                            يُرسل للمختبر كـ
+                            <select data-testid={`service-lab-mapping-${service.id}`} value={service.labServiceId ?? ""} disabled={busy}
+                              className="block rounded-xl border border-slate-300 px-2 py-1.5 text-xs font-bold"
+                              onChange={(event) => send(() => fetch(`/api/services/${service.id}`, {
+                                method: "PATCH", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ labServiceId: event.target.value ? Number(event.target.value) : null }),
+                              }))}>
+                              <option value="">غير مربوطة — التكلفة تبقى معلّقة</option>
+                              {labServices.map((lab) => <option key={lab.id} value={lab.id}>{lab.name}</option>)}
+                            </select>
+                          </label>
+                        ) : null}
                         {!readOnly ? <button
                           onClick={() =>
                             send(() =>

@@ -7,6 +7,11 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  // Exact grouped lab order suffix (0136, owner #483 6932010630) directly after case participation.
+  if (files.at(-1)?.version === "0136") {
+    if (files.at(-2)?.version !== "0126" || files.at(-1)?.filename !== "0136_grouped_lab_orders.sql") throw new Error("Unreviewed grouped lab order migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   // Exact case-participation suffix (finance, owner decision 2026-11-11) directly after the shade migration.
   if (files.at(-1)?.version === "0126") {
     if (files.at(-2)?.version !== "0089" || files.at(-1)?.filename !== "0126_commission_case_participations.sql") throw new Error("Unreviewed case participation migration suffix.");

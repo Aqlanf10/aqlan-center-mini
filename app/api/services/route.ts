@@ -3,7 +3,7 @@ import { invoicePricingSettings } from "@/lib/invoice-price-settings-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createService, findUserByUsername, getSettings, listServices, recordAudit } from "@/lib/db";
+import { createService, findUserByUsername, getSettings, listServiceLabMappings, listServices, recordAudit } from "@/lib/db";
 import { SERVICE_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
@@ -33,12 +33,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const includeInactive = new URL(request.url).searchParams.get("all") === "1";
+  // 0136: the settings screen asks for the clinic-service → lab-service mapping explicitly; admins only.
+  const withLabMapping = new URL(request.url).searchParams.get("labMapping") === "1" && isAdmin(session.role);
   try {
     const [services, settings, invoiceSettings] = await Promise.all([listServices(includeInactive), getSettings(), canHandleMoney(session.role) ? invoicePricingSettings() : Promise.resolve(null)]);
     // (DAY1) سعر كل خدمة بكل عملة كما ستُسعَّر في الزيارة — الخاص أو المحوَّل بسعر الصرف.
     const rates = foreignRatesFromSettings(settings);
+    const labMapping = withLabMapping ? await listServiceLabMappings() : null;
     return NextResponse.json(services.map((service) => ({
       ...service,
+      ...(labMapping ? { labServiceId: labMapping.get(service.id) ?? null } : {}),
       priceIn: catalogPricesByCurrency(service, rates),
       ...(invoiceSettings ? { invoiceQuotes: Object.fromEntries((["YER", "SAR", "USD"] as const).map(currency => [currency, invoicePriceQuote(service, currency, foreignRatesFromSettings(invoiceSettings))])) } : {}),
     })));

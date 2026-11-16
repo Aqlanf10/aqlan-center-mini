@@ -1,6 +1,6 @@
 "use client";
 
-import { LabWorkOrderLink, LabWorkDraftFields, appendLabRetirement, newLabWorkDraft, useLabWorkCapability } from "./LabWorkDraftFields";
+import { GROUPED_LAB_CATEGORIES, GroupedLabEntry, LabWorkOrderLink, LabWorkDraftFields, appendLabRetirement, groupedLabPricingWarning, newLabWorkDraft, useLabWorkCapability } from "./LabWorkDraftFields";
 import type { LabWorkDraft, LabWorkRetirement } from "@/lib/lab-work-intent-contract";
 import { hasExactLabOriginReceipt } from "@/lib/lab-origin-receipt";
 import { labWorkForCategory } from "@/lib/workflow";
@@ -484,6 +484,8 @@ function PatientLedgerContent({ orthoRecovery, reconciliationRecovery, patientId
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  /** 0136: a saved grouped lab order whose cost stays pending says so, in Arabic, after saving. */
+  const [labPricingNotice, setLabPricingNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -758,10 +760,11 @@ function PatientLedgerContent({ orthoRecovery, reconciliationRecovery, patientId
             }), (response, payload) => {
               outcome = invoiceCommandOutcome(response.status, payload, validateReceipt?.(payload) === true, response.redirected);
               return outcome === "saved";
-            }, true) as { clinical?: { links: { kind: string; planItemCreated: boolean; caseCreated: boolean; caseId: number | null }[] } } | null;
+            }, true) as { clinical?: { links: { kind: string; planItemCreated: boolean; caseCreated: boolean; caseId: number | null }[] }; labWork?: { pricing?: { state?: string } }[] } | null;
             if (readRef.current.active && created) {
               onClinicalChange?.();
               setMode("none");
+              setLabPricingNotice((created.labWork ?? []).map(work => groupedLabPricingWarning(work.pricing?.state)).find(Boolean) ?? null);
               /* (INV-LINK D) ما فعلته الفاتورة بالعلاج — يُقال صراحةً بعد الحفظ. */
               const clinical = created.clinical?.links.filter((link) => link.kind === "clinical") ?? [];
               setLinkNotice(clinical.length === 0 ? null
@@ -826,6 +829,11 @@ function PatientLedgerContent({ orthoRecovery, reconciliationRecovery, patientId
         </div>
       ) : null}
 
+      {labPricingNotice ? (
+        <p role="alert" data-testid="grouped-lab-pricing-warning" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs font-bold text-amber-900">
+          {labPricingNotice}
+        </p>
+      ) : null}
       {linkNotice ? (
         <p role="status" data-testid="invoice-clinical-notice" className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-2.5 text-xs font-bold text-sky-900">
           {linkNotice}
@@ -1874,6 +1882,16 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
             if(exactProof?.labWorkOrderId)return <LabWorkOrderLink key={`${member.key}:${exactProof.labWorkOrderId}`} orderId={exactProof.labWorkOrderId} patientId={patientId} disabled={busy||commandLocked} onChanged={()=>setPreviewRetry(value=>value+1)}/>;
             if(exactProof?.labWork&&!member.labWork)return <p key={member.key} role="status" className="text-xs">هذا العمل مرتبط بمسوّدة مختبر محفوظة؛ تُحفظ هويتها الأصلية مع الفاتورة.</p>;
             if(!member.labWork && (!labWorkSupported || !labWorkForCategory(category??null)))return null;
+            if(member.labWork?.groupKind==="grouped"){
+              const intentId=member.labWork.intentId;
+              const members=rows.filter(one=>one.labWork?.intentId===intentId);
+              if(members[0]?.key!==member.key)return <p key={member.key} role="status" className="mt-2 text-xs text-sky-900" data-testid={`grouped-lab-member-${member.toothCode}`}>ضمن طلب المختبر الواحد — سن {member.toothCode}</p>;
+              return <GroupedLabEntry key={member.key} value={member.labWork} teeth={members.map(one=>one.toothCode).filter((tooth):tooth is number=>tooth!==null)}
+                disabled={busy || commandLocked || !labWorkSupported}
+                onChange={next=>{ if(!canEditRows.current())return; setRows(current=>current.map(one=>one.labWork?.intentId!==intentId?one
+                  :{...one,labWork:{...one.labWork,prescription:next.prescription,...(next.instructions.trim()?{instructions:next.instructions}:{instructions:undefined})}})); }}
+                onDissolve={member.labWork.expectedRevision===0?()=>{ if(canEditRows.current())setRows(current=>current.map(one=>one.labWork?.intentId===intentId?{...one,labWork:undefined}:one)); }:undefined}/>;
+            }
             return member.labWork ? <LabWorkDraftFields key={member.key} value={member.labWork} workLabel={serviceOf(member.serviceId)?.name??"عمل المختبر"} sourceTooth={member.toothCode}
               disabled={busy || commandLocked || !labWorkSupported} onChange={next => changeLabWork(member.key,next)} onRetire={()=>retireLabMember(member)}
               bridgeChoices={rows.filter(other=>other.key!==member.key&&other.labWork?.groupKind==="bridge"&&other.labWork.expectedRevision===0&&other.labWork.intentId!==member.labWork?.intentId)
@@ -1976,6 +1994,21 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
         </div>;
       })}
 
+      {(() => {
+        // 0136 (owner #483 6930647956, 6931868779): any number of crown/veneer teeth, from either jaw → one lab order.
+        if (historical || !labWorkSupported || !(formSession?.role === "admin" || formSession?.role === "doctor")) return null;
+        const eligible = rows.filter(row => !row.labWork && row.toothCode !== null && (Number(row.quantity) || 1) === 1
+          && GROUPED_LAB_CATEGORIES.includes(serviceOf(row.serviceId)?.category ?? ""));
+        if (eligible.length < 2) return null;
+        return <button type="button" data-testid="grouped-lab-start" disabled={busy || commandLocked}
+          className="min-h-11 rounded-lg border border-sky-400 bg-sky-50 px-3 text-xs font-bold text-sky-900"
+          onClick={() => {
+            if (!canEditRows.current()) return;
+            const keys = new Set(eligible.map(row => row.key)), intentId = crypto.randomUUID(), prescription = newLabWorkDraft("single").prescription;
+            setRows(current => current.map(row => keys.has(row.key) && !row.labWork
+              ? { ...row, labWork: { intentId, memberId: crypto.randomUUID(), expectedRevision: 0, groupKind: "grouped", prescription } } : row));
+          }}>طلب مختبر واحد للأسنان المحددة ({eligible.length})</button>;
+      })()}
       <button type="button"
         onClick={() => { if (canEditRows.current()) setRows((current) => [...current, blankInvoiceRow(nextRowKey())]); }}
         className={workspace.addLine} aria-label="+ بند آخر">

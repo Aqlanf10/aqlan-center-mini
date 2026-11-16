@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
-    "tables": 147,
-    "columns": 1830,
-    "constraints": 2223,
-    "indexes": 454,
-    "triggers": 145
+    "tables": 148,
+    "columns": 1842,
+    "constraints": 2241,
+    "indexes": 455,
+    "triggers": 147
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -8928,6 +8928,114 @@
         }
       }
     },
+    "lab_order_member_prices": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "lab_order_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "lab_service_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "member_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "pricing_rule_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "state": {
+          "type": "text",
+          "nullable": false
+        },
+        "tooth_code": {
+          "type": "int4",
+          "nullable": false
+        },
+        "unit_cost_currency": {
+          "type": "text",
+          "nullable": true
+        },
+        "unit_cost_minor": {
+          "type": "int8",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "lab_order_id",
+        "member_id"
+      ],
+      "unique": [],
+      "checks": [
+        "lab_order_member_prices_check",
+        "lab_order_member_prices_check1",
+        "lab_order_member_prices_check2",
+        "lab_order_member_prices_state_check",
+        "lab_order_member_prices_unit_cost_minor_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "lab_order_id"
+          ],
+          "refTable": "lab_orders",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "pricing_rule_id"
+          ],
+          "refTable": "lab_pricing_rules",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "lab_service_id"
+          ],
+          "refTable": "lab_services",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "member_id"
+          ],
+          "refTable": "lab_work_members",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "lab_order_member_prices_pkey": {
+          "columns": [
+            "lab_order_id",
+            "member_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "lab_order_member_prices_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
     "lab_order_tracking": {
       "columns": {
         "action": {
@@ -9121,6 +9229,10 @@
           "type": "timestamptz",
           "nullable": true
         },
+        "pricing_state": {
+          "type": "text",
+          "nullable": true
+        },
         "priority": {
           "type": "text",
           "nullable": false
@@ -9199,6 +9311,7 @@
         ]
       ],
       "checks": [
+        "lab_orders_pricing_state_ok",
         "lab_orders_shade_specification_valid"
       ],
       "foreignKeys": [
@@ -9830,6 +9943,10 @@
           "type": "int4",
           "nullable": true
         },
+        "instructions": {
+          "type": "text",
+          "nullable": true
+        },
         "origin_invoice_id": {
           "type": "int4",
           "nullable": true
@@ -9880,6 +9997,7 @@
         "lab_work_intents_check1",
         "lab_work_intents_check2",
         "lab_work_intents_group_kind_check",
+        "lab_work_intents_instructions_ok",
         "lab_work_intents_origin_kind_check",
         "lab_work_intents_prescription_check",
         "lab_work_intents_revision_check",
@@ -9965,6 +10083,12 @@
           "timing": "BEFORE",
           "events": [
             "INSERT"
+          ]
+        },
+        "lab_intent_instructions_frozen": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
           ]
         },
         "lab_intent_patient": {
@@ -15910,6 +16034,10 @@
           "type": "bool",
           "nullable": false
         },
+        "lab_service_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "name": {
           "type": "text",
           "nullable": false
@@ -15946,7 +16074,17 @@
       "checks": [
         "services_foreign_prices_nonnegative"
       ],
-      "foreignKeys": [],
+      "foreignKeys": [
+        {
+          "columns": [
+            "lab_service_id"
+          ],
+          "refTable": "lab_services",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
       "indexes": {
         "services_active_idx": {
           "columns": [

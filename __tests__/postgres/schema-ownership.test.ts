@@ -328,7 +328,7 @@ describe("PG18 schema ownership characterization", () => {
       expect(runtimeApplicationTables.some(entry=>entry.table===table)).toBe(true);
     }
     expect(report.runtimeCatalog.registry.present).toBe(true);
-    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082', '0087', '0089', '0126'].includes(row.version)));
+    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082', '0087', '0089', '0126', '0136'].includes(row.version)));
 
     expect(report.comparison.characterizationOk).toBe(true);
     expect(report.comparison.applicationSchemaEqual).toBe(false);

@@ -103,3 +103,59 @@ export function LabWorkOrderLink({orderId,patientId,disabled,onChanged}:{orderId
   {order&&order.status!=="needed"&&<LabPrescriptionModal order={order} onClose={()=>setOrder(null)}/>}
  </div>;
 }
+
+/** 0136 (owner #483 6930647956, 6931868779): crowns and veneers that may be grouped into one lab order. */
+export const GROUPED_LAB_CATEGORIES: readonly string[] = ["crown", "veneer"];
+
+/** 0136: ONE short entry — laboratory, shade, optional instructions — for every selected crown/veneer tooth, from
+ * either jaw, in any number. Saving opens one lab order; each tooth stays its own member linked to its invoice line.
+ * The price comes from the settings mapping and the chosen lab's prices; a missing price or a foreign/mixed
+ * currency is reported after saving and the cost stays pending. The per-tooth lab form is unchanged. */
+export function GroupedLabEntry({value,teeth,disabled,onChange,onDissolve}:{
+ value:LabWorkDraft;teeth:readonly number[];disabled:boolean;
+ onChange:(next:{prescription:LabWorkDraft["prescription"];instructions:string})=>void;onDissolve?:()=>void;
+}){
+ const [labs,setLabs]=useState<Array<{id:number;name:string}>|null>(null);
+ const [error,setError]=useState("");
+ useEffect(()=>{const controller=new AbortController();
+  void fetch("/api/laboratories",{cache:"no-store",signal:controller.signal}).then(async response=>{
+   const body=await response.json();if(!response.ok||!Array.isArray(body.laboratories))throw Error();
+   if(!controller.signal.aborted)setLabs(body.laboratories.filter((lab:{isActive?:boolean})=>lab.isActive===true));
+  }).catch(()=>{if(!controller.signal.aborted)setError("تعذّر تحميل المختبرات؛ أعد المحاولة قبل الحفظ.");});
+  return()=>controller.abort();
+ },[]);
+ const instructions=value.instructions??"";
+ const patch=(next:Partial<LabWorkDraft["prescription"]>)=>onChange({prescription:{...value.prescription,...next},instructions});
+ const field="min-h-11 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs";
+ const sorted=[...teeth].sort((a,b)=>a-b);
+ return <fieldset disabled={disabled} data-testid="grouped-lab-entry" data-lab-intent={value.intentId}
+  className="mt-3 min-w-0 rounded-xl border border-sky-300 bg-sky-50/60 p-3">
+  <legend className="px-2 text-xs font-bold">طلب مختبر واحد — {sorted.length} أسنان</legend>
+  <p className="mb-3 text-xs text-slate-700" data-testid="grouped-lab-teeth">الأسنان: {sorted.join("، ")}. كل سن يبقى مرتبطًا ببند فاتورته.</p>
+  <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+   <label className="min-w-0 text-xs">المختبر<select data-testid="grouped-lab-party" className={field} value={value.prescription.partyId??""}
+    onChange={event=>patch({partyId:event.target.value?Number(event.target.value):null})}>
+    <option value="">{labs?"اختر المختبر":"جارٍ التحميل…"}</option>{(labs??[]).map(lab=><option key={lab.id} value={lab.id}>{lab.name}</option>)}
+   </select></label>
+   <label className="text-xs">لون السن<select data-testid="grouped-lab-shade" className={field} value={value.prescription.shade} onChange={event=>patch({shade:event.target.value})}>
+    <option value="">لم يُحدد بعد</option>{LAB_PRESCRIPTION_SHADES.map(shade=><option key={shade}>{shade}</option>)}
+   </select></label>
+  </div>
+  <label className="mt-3 block text-xs">تعليمات للمختبر (اختياري)<textarea data-testid="grouped-lab-instructions" className={field} maxLength={600} rows={2}
+   value={instructions} onChange={event=>onChange({prescription:value.prescription,instructions:event.target.value})}/></label>
+  <p className="mt-2 text-xs text-slate-600">التكلفة تُحسب تلقائيًا من ربط الخدمة وأسعار المختبر في الإعدادات. إن غاب السعر أو اختلفت العملة تبقى التكلفة معلّقة مع تحذير، ولا يُحوَّل شيء.</p>
+  {error&&<p role="status" className="my-2 text-xs text-amber-800">{error}</p>}
+  {onDissolve&&<button type="button" data-testid="grouped-lab-dissolve" className="mt-2 min-h-11 rounded-lg border border-slate-300 px-3 text-xs" onClick={onDissolve}>إلغاء التجميع</button>}
+ </fieldset>;
+}
+
+/** 0136 + owner 6932010630: the saved receipt's pricing state, as the warning the reception reads. */
+export function groupedLabPricingWarning(state: string | undefined): string | null {
+ switch (state) {
+  case "missing_rule": return "تحذير: لا يوجد سعر لخدمة المختبر عند هذا المختبر — تكلفة المعمل معلّقة حتى يُدخَل السعر من لوحة المختبر.";
+  case "missing_mapping": return "تحذير: في الطلب خدمة غير مربوطة بخدمة مختبر في الإعدادات — تكلفة المعمل معلّقة حتى الربط أو إدخال السعر.";
+  case "currency_mismatch": return "تحذير: سعر المختبر بعملة غير عملة الفاتورة — لم يُحوَّل؛ التكلفة معلّقة وتُعرض أسعار الأسنان بعملتها حتى تُحدَّد طريقة التحويل.";
+  case "mixed_currency": return "تحذير: أسعار أسنان الطلب بعملات مختلفة — لم تُجمع ولم تُحوَّل؛ التكلفة معلّقة حتى تُحدَّد طريقة التحويل.";
+  default: return null;
+ }
+}

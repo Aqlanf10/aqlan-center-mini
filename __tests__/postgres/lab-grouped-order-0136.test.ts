@@ -108,7 +108,7 @@ describe("0136 grouped lab order from one invoice entry", () => {
     const premiumCrown = await mappedService(premium.id);
     const priced = await save(w, grouped(w, TEETH, tooth => tooth < 20 ? premiumCrown : w.serviceId)); // 14,15 at 350; 24,25,26 at 200
     expect(await orders(w.patientId)).toEqual([expect.objectContaining({ cost: 1300, currency: "YER", pricing_state: "rule" })]);
-    expect(await q("SELECT tooth_code, unit_cost_minor::int AS unit, unit_cost_currency AS currency FROM lab_work_members WHERE intent_id=$1 ORDER BY tooth_code", [priced.labWork![0].intentId]))
+    expect(await q("SELECT tooth_code, unit_cost_minor::int AS unit, unit_cost_currency AS currency FROM lab_order_member_prices WHERE lab_order_id=$1 ORDER BY tooth_code", [priced.labWork![0].orderId]))
       .toEqual([{ tooth_code: 14, unit: 350, currency: "YER" }, { tooth_code: 15, unit: 350, currency: "YER" }, { tooth_code: 24, unit: 200, currency: "YER" }, { tooth_code: 25, unit: 200, currency: "YER" }, { tooth_code: 26, unit: 200, currency: "YER" }]);
 
     const mixed = await world({ unitMinor: 200, currency: "YER" });
@@ -121,7 +121,7 @@ describe("0136 grouped lab order from one invoice entry", () => {
     expect(await orders(mixed.patientId)).toEqual([expect.objectContaining({ cost: null, pricing_state: "mixed_currency", payable_id: null })]);
     expect(await payables(mixed.patientId)).toEqual([]);
     // Owner 6932010630 item 3: shown in their own currencies, never summed or converted.
-    expect(await q("SELECT tooth_code, unit_cost_minor::int AS unit, unit_cost_currency AS currency FROM lab_work_members WHERE intent_id=$1 ORDER BY tooth_code", [result.labWork![0].intentId]))
+    expect(await q("SELECT tooth_code, unit_cost_minor::int AS unit, unit_cost_currency AS currency FROM lab_order_member_prices WHERE lab_order_id=$1 ORDER BY tooth_code", [result.labWork![0].orderId]))
       .toEqual([{ tooth_code: 14, unit: 50, currency: "SAR" }, ...[15, 24, 25, 26].map(tooth_code => ({ tooth_code, unit: 200, currency: "YER" }))]);
   });
 
@@ -174,12 +174,14 @@ describe("0136 grouped lab order from one invoice entry", () => {
     expect(await payables(w.patientId)).toEqual([]);
   });
 
-  it("T6: a rule in another currency is stored as is — never converted — and the commission reports it as not deducted", async () => {
+  it("T6: a rule in another currency is never converted: the cost stays pending, each tooth keeps its price in that currency, no payable", async () => {
     const w = await world({ unitMinor: 50, currency: "SAR" });
     const result = await save(w, grouped(w));
     expect(result.labWork![0]).toMatchObject({ pricing: { state: "currency_mismatch" } });
-    expect(await orders(w.patientId)).toEqual([expect.objectContaining({ cost: 250, currency: "SAR", pricing_state: "currency_mismatch" })]);
-    expect(await payables(w.patientId)).toEqual([{ amount: 250, currency: "SAR" }]);
+    expect(await orders(w.patientId)).toEqual([expect.objectContaining({ cost: null, pricing_state: "currency_mismatch", payable_id: null })]);
+    expect(await payables(w.patientId)).toEqual([]);
+    expect(await q("SELECT DISTINCT unit_cost_minor::int AS unit, unit_cost_currency AS currency FROM lab_order_member_prices WHERE lab_order_id=$1", [result.labWork![0].orderId]))
+      .toEqual([{ unit: 50, currency: "SAR" }]);
     expect(await report(w.doctorIds[0])).toMatchObject({ accruedMinor: 1500, labCostMinor: 0 });
   });
 

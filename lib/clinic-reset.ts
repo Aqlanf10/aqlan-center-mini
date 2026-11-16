@@ -166,7 +166,7 @@ export class ProtectedOrthoFollowupHistoryError extends Error {
 }
 
 /** Durable lab source identity and terminal outcomes are never erased. */
-export const LAB_HISTORY_TABLES = ["lab_prescription_source_memberships", "lab_work_commands", "lab_work_members", "lab_work_intents"] as const;
+export const LAB_HISTORY_TABLES = ["lab_order_member_prices", "lab_prescription_source_memberships", "lab_work_commands", "lab_work_members", "lab_work_intents"] as const;
 export class ProtectedLabHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد حفظ هويات أعمال المختبر أو نتائج طلباتها. لم يُمسح شيء؛ يجب الاحتفاظ بالمصادر ومفاتيح إعادة المحاولة."); this.name = "ProtectedLabHistoryError"; }
 }

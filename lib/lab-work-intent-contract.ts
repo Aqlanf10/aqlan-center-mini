@@ -1,13 +1,16 @@
 import { ADULT_FDI_TEETH, PRIMARY_FDI_TEETH } from "./lab";
 import { validateLabPrescription, type LabPrescriptionInput } from "./lab-prescription-input";
 
-export type LabWorkGroupKind = "single" | "bridge";
+/** `grouped` (0136): any number of single-unit crowns/veneers, from either jaw, entered once on an invoice. */
+export type LabWorkGroupKind = "single" | "bridge" | "grouped";
 export interface LabWorkDraft {
   intentId: string;
   memberId: string;
   expectedRevision: number;
   groupKind: LabWorkGroupKind;
   prescription: LabPrescriptionInput;
+  /** Optional free-text instructions for the lab; only a `grouped` entry carries them. */
+  instructions?: string;
 }
 /** These source fields must be resolved/validated by the source writer, not trusted from lab JSON. */
 export interface LabWorkSourceRow {
@@ -33,6 +36,7 @@ export interface LabWorkGroup {
   expectedRevision: number;
   groupKind: LabWorkGroupKind;
   prescription: LabPrescriptionInput;
+  instructions: string | null;
   members: LabWorkMember[];
 }
 export interface LabWorkRetirement {
@@ -65,8 +69,17 @@ const keysOnly = (value: Record<string, unknown>, keys: string[]) => {
 export function parseLabWorkDraft(value: unknown): LabWorkDraft | null {
   if (value === undefined || value === null) return null;
   if (!record(value)) return fail();
-  keysOnly(value, ["intentId", "memberId", "expectedRevision", "groupKind", "prescription"]);
-  if (!revision(value.expectedRevision) || !["single", "bridge"].includes(String(value.groupKind))) return fail();
+  keysOnly(value, Object.hasOwn(value, "instructions")
+    ? ["intentId", "memberId", "expectedRevision", "groupKind", "prescription", "instructions"]
+    : ["intentId", "memberId", "expectedRevision", "groupKind", "prescription"]);
+  if (!revision(value.expectedRevision) || !["single", "bridge", "grouped"].includes(String(value.groupKind))) return fail();
+  let instructions: string | undefined;
+  if (Object.hasOwn(value, "instructions")) {
+    if (value.groupKind !== "grouped" || typeof value.instructions !== "string") return fail();
+    const trimmed = value.instructions.trim();
+    if (trimmed.length > 600) return fail();
+    if (trimmed) instructions = trimmed;
+  }
   let prescription: LabPrescriptionInput;
   try { prescription = validateLabPrescription(value.prescription, false); }
   catch { return fail(); }
@@ -77,7 +90,7 @@ export function parseLabWorkDraft(value: unknown): LabWorkDraft | null {
     impressionType: prescription.impressionType, priority: prescription.priority,
   };
   return { intentId: uuid(value.intentId), memberId: uuid(value.memberId), expectedRevision: value.expectedRevision,
-    groupKind: value.groupKind as LabWorkGroupKind, prescription };
+    groupKind: value.groupKind as LabWorkGroupKind, prescription, ...(instructions ? { instructions } : {}) };
 }
 
 /** Explicit retirements only. The writer must lock/revalidate their ownership and revision. */
@@ -114,6 +127,8 @@ export function normalizeLabWorkGroups(rows: readonly LabWorkSourceRow[], retire
     if (!["crown", "bridge", "veneer"].includes(row.category ?? "")) return fail("source_mismatch");
     if ((draft.groupKind === "bridge") !== (row.category === "bridge")) return fail("source_mismatch");
     if (draft.groupKind === "single" && row.quantity !== 1) return fail("unsupported_scope");
+    // A grouped entry is one unit per tooth: crowns and veneers only, never a bridge span.
+    if (draft.groupKind === "grouped" && (row.quantity !== 1 || row.category === "bridge")) return fail("unsupported_scope");
     if (seenMembers.has(draft.memberId)) return fail("duplicate_member");
     seenMembers.add(draft.memberId);
     const member: LabWorkMember = { memberId: draft.memberId, serviceId: row.serviceId, toothCode: row.toothCode,
@@ -121,10 +136,12 @@ export function normalizeLabWorkGroups(rows: readonly LabWorkSourceRow[], retire
     const existing = groups.get(draft.intentId);
     if (existing) {
       if (existing.expectedRevision !== draft.expectedRevision || existing.groupKind !== draft.groupKind
-        || JSON.stringify(existing.prescription) !== JSON.stringify(draft.prescription)) return fail("conflicting_group");
+        || JSON.stringify(existing.prescription) !== JSON.stringify(draft.prescription)
+        || existing.instructions !== (draft.instructions ?? null)) return fail("conflicting_group");
+      if (draft.groupKind === "grouped" && existing.members.some(other => other.toothCode === member.toothCode)) return fail("duplicate_member");
       existing.members.push(member);
     } else groups.set(draft.intentId, { intentId: draft.intentId, expectedRevision: draft.expectedRevision,
-      groupKind: draft.groupKind, prescription: draft.prescription, members: [member] });
+      groupKind: draft.groupKind, prescription: draft.prescription, instructions: draft.instructions ?? null, members: [member] });
   }
   const retirements = parseLabWorkRetirements(retirementInput);
   for (const retired of retirements) {
@@ -141,6 +158,7 @@ export function normalizeLabWorkGroups(rows: readonly LabWorkSourceRow[], retire
       const tokens = group.prescription.toothNumbers.split(",").map(token => token.trim());
       const selected = tokens.map(token => Number(token.slice(0, 2)));
       const allowedRoles = group.groupKind === "bridge" ? ["Abutment", "Pontic"]
+        : group.groupKind === "grouped" ? ["Crown", "Implant Crown", "Veneer"]
         : group.members[0].category === "veneer" ? ["Veneer"] : ["Crown", "Implant Crown"];
       if (tokens.some(token => !allowedRoles.includes(token.match(/\(([^)]+)\)/)?.[1] ?? ""))) return fail("source_mismatch");
       if (group.members.some(member => !selected.includes(member.toothCode))) return fail("source_mismatch");
