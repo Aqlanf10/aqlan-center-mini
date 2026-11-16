@@ -28,10 +28,15 @@ export function parseCaseParticipationRequest(body: unknown): { ok: true; value:
   for (const entry of raw) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return invalid("قائمة المشاركين غير صالحة.");
     const part = entry as Record<string, unknown>;
-    if (Object.keys(part).sort().join(",") !== "doctorId,shareBp" || !positive(part.doctorId) || !positive(part.shareBp)) {
+    const keys = Object.keys(part).sort().join(",");
+    if ((keys !== "doctorId,shareBp" && keys !== "doctorId,labCostBp,shareBp") || !positive(part.doctorId) || !positive(part.shareBp)) {
       return invalid("كل مشارك يحتاج طبيبًا ونسبة صحيحة موجبة بنقاط الأساس (100٪ = 10000).");
     }
-    participants.push({ doctorId: part.doctorId, shareBp: part.shareBp });
+    // 0134: an optional administrative share of the lab cost, 0–10000; the writer checks it is complete and allowed.
+    if (part.labCostBp !== undefined && !(typeof part.labCostBp === "number" && Number.isSafeInteger(part.labCostBp) && part.labCostBp >= 0 && part.labCostBp <= 10_000)) {
+      return invalid("نسبة تكلفة المعمل لكل مشارك عدد صحيح بين 0 و10000 بنقاط الأساس.");
+    }
+    participants.push({ doctorId: part.doctorId, shareBp: part.shareBp, ...(part.labCostBp === undefined ? {} : { labCostBp: part.labCostBp as number }) });
   }
   return { ok: true, value: { caseId: source.caseId, status: source.status, participants, source: source.source as CaseParticipationSource,
     reason: source.reason.trim().slice(0, 500), expectedHeadId: source.expectedHeadId as number | null } };

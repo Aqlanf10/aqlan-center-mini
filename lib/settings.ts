@@ -32,6 +32,8 @@ export type SettingKey =
   | "finance.locked_before"
   | "finance.owner_private_funding_account"
   | "finance.commission_material_rate"
+  | "commission.shared_lab_cost.by_work_shares"
+  | "commission.shared_lab_cost.admin_allocation"
   | "billing.max_discount_percent"
   | "documents.invoice_prefix"
   | "documents.receipt_prefix"
@@ -130,6 +132,10 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* خصم إهلاك المواد المقدَّر (نسب التخصصات) من العمولة — قرار المالك،
      والافتراض مغلق فلا يتغيّر رقمٌ قائم. "on" يفعّله بعد تحديد النسب. */
   "finance.commission_material_rate": "off",
+  /* 0134 (owner #483 6902952517, 6904933217): how a shared case's lab cost is allocated between its doctors.
+     Work shares on = today's behaviour. Administrative allocation off until the owner enables it. */
+  "commission.shared_lab_cost.by_work_shares": "on",
+  "commission.shared_lab_cost.admin_allocation": "off",
   /* (P1-6) أقصى خصمٍ يمنحه غير المدير على سعر الدليل بسببٍ مكتوب. صفرٌ = لا خصم إلا
      بالمدير — الافتراضيّ الآمن حتى يقرّر المالك نسبةً. */
   "billing.max_discount_percent": "0",
@@ -507,6 +513,8 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "finance.locked_before", label: "قفل الدفاتر قبل تاريخ", hint: "لا يُقبل قيد أو تعديل قبل هذا التاريخ. اتركه فارغًا لإلغاء القفل.", kind: "date", group: "finance" },
   { key: "finance.owner_private_funding_account", label: "حساب ما يدفعه المالك من مصدره الخاص", hint: "الافتراضي 2108: مستحق للمالك على العيادة يُعاد إليه لاحقًا (قرار المالك). يقبل حساب حقوق ملكية أو التزامات من الدليل؛ يغيّره المالك وحده بسبب مكتوب، ولا يغيّر السندات السابقة. فارغ = الافتراضي 2108.", kind: "text", group: "finance" },
   { key: "finance.commission_material_rate", label: "خصم إهلاك المواد من العمولة", hint: "on = خصم نسب التخصصات المحدَّدة في «نسب إهلاك المواد»؛ off = إبقاء الأرقام كما كانت.", kind: "text", group: "finance" },
+  { key: "commission.shared_lab_cost.by_work_shares", label: "توزيع تكلفة المعمل في الحالة المشتركة بنسب العمل", hint: "on = تُوزَّع تكلفة المعمل بين الأطباء المشاركين بنسب العمل المعتمدة في قرار المشاركة.", kind: "text", group: "finance" },
+  { key: "commission.shared_lab_cost.admin_allocation", label: "توزيع إداري لتكلفة المعمل في الحالة المشتركة", hint: "on = يجوز أن يحمل قرار المشاركة توزيعًا خاصًا لتكلفة المعمل، ويُعمل به إن وُجد؛ off = لا يُقبل ولا يُستعمل.", kind: "text", group: "finance" },
 
   { key: "clinic.chairs", label: "عدد الكراسي", hint: "يحكم الحجز والانتظار وشاشة الصالة", kind: "number", group: "operations" },
   { key: "clinic.day_start", label: "بداية الدوام", kind: "time", group: "operations" },

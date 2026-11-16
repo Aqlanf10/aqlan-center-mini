@@ -69,6 +69,7 @@ import { ORTHO_ADJUSTMENT_AUXILIARIES_SQL } from "./ortho-adjustment-auxiliaries
 import { EXPENSE_COMMANDS_SQL } from "./expense-commands-schema";
 import { SHIFT_OPENING_REVIEWS_SQL } from "./shift-opening-reviews-schema";
 import { EXPENSE_REQUEST_RETIREMENTS_SQL } from "./expense-request-retirements-schema";
+import { COMMISSION_LAB_COST_ALLOCATION_SQL } from "./commission-lab-cost-allocation-schema";
 import { CASHIER_SHIFT_LIFECYCLE_LOCK, detectOpeningDifferences, listOpeningReviewsWith, pendingOpeningReviewCountWith, recordOpeningDifferences, sealedCloseIdWith, sealShiftForViewer, type OpeningReview, type SealedFields } from "./shift-opening-reviews";
 import type { OrthoAuxiliary } from "./ortho-auxiliaries";
 import { recordedSessionMatchesRequest, type SessionRequestValues } from "./ortho-session-match";
@@ -2226,6 +2227,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0129", name: "shift_opening_reviews", filename: "0129_shift_opening_reviews.sql", sql: SHIFT_OPENING_REVIEWS_SQL, checksum: checksumOf(SHIFT_OPENING_REVIEWS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0132", name: "ortho_adjustment_auxiliaries", filename: "0132_ortho_adjustment_auxiliaries.sql", sql: ORTHO_ADJUSTMENT_AUXILIARIES_SQL, checksum: checksumOf(ORTHO_ADJUSTMENT_AUXILIARIES_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0133", name: "expense_request_retirements", filename: "0133_expense_request_retirements.sql", sql: EXPENSE_REQUEST_RETIREMENTS_SQL, checksum: checksumOf(EXPENSE_REQUEST_RETIREMENTS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0134", name: "commission_lab_cost_allocation", filename: "0134_commission_lab_cost_allocation.sql", sql: COMMISSION_LAB_COST_ALLOCATION_SQL, checksum: checksumOf(COMMISSION_LAB_COST_ALLOCATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -15353,7 +15355,11 @@ export async function commissionReport(
   /* Doctors sharing a case (owner decision 2026-11-11, point 3): the centre's decision in force at
      the end of the report range. An approved split pays each participant at his own rate on his
      part of the line; a shared case without an approved split is held and paid to nobody. */
-  const caseParticipations = await loadCaseParticipationsAt(to, pool as Parameters<typeof loadCaseParticipationsAt>[1], CLINIC_TIME_ZONE);
+  // 0134: the administrative lab-cost allocation of a decision counts only while the owner's setting is on.
+  const labCostSettings = await getSettings();
+  const adminLabCostAllocation = { byWorkShares: labCostSettings["commission.shared_lab_cost.by_work_shares"] !== "off",
+    adminAllocation: labCostSettings["commission.shared_lab_cost.admin_allocation"] === "on" };
+  const caseParticipations = await loadCaseParticipationsAt(to, pool as Parameters<typeof loadCaseParticipationsAt>[1], CLINIC_TIME_ZONE, adminLabCostAllocation);
   const participationAt = caseParticipations.size > 0 ? (caseId: number) => caseParticipations.get(caseId) : undefined;
 
   /* (P0-1) تكلفة المختبر — تُخصم من حصة الطبيب **في الفاتورة التي جاء منها عمله**،

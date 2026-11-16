@@ -36,6 +36,8 @@ export interface DoctorShareItem {
   serviceName?: string;
   category?: string;
   labCostMinor?: number;
+  /** 0134: how this share's lab cost was allocated; absent = the line doctor carries it. */
+  labCostBasis?: LabCostBasis;
   materialCostMinor?: number;
   /** (COMM-DETAIL-1) الحالة التخصصية للعمل — مشتقة: بند الفاتورة ← إجراء الزيارة ← بند الخطة. */
   caseId?: number;
@@ -486,12 +488,25 @@ export function discountGroupKey(group: { doctorId?: number | null; serviceId?: 
  * which doctor is recorded on the line. A `pending` decision is a review marker only (owner #483
  * 6905003552): the line is paid to its recorded doctor as with no decision, and listed as under review.
  */
-export interface CaseParticipant { doctorId: number; shareBp: number }
+/** 0134: `labCostBp` is the optional administrative allocation of the case's lab cost (all participants or none; 10,000 in total). */
+export interface CaseParticipant { doctorId: number; shareBp: number; labCostBp?: number }
+/** 0134: the basis a share's lab cost was allocated by. */
+export type LabCostBasis = "work_shares" | "admin_allocation" | "line_doctor";
+/** 0134: whether the participants carry a complete administrative lab-cost allocation. `null` = none carry one. */
+export function labCostAllocationProblem(participants: readonly CaseParticipant[]): "incomplete" | null {
+  const carrying = participants.filter(part => part.labCostBp !== undefined);
+  if (carrying.length === 0) return null;
+  if (carrying.length !== participants.length) return "incomplete";
+  if (carrying.some(part => !Number.isSafeInteger(part.labCostBp) || part.labCostBp! < 0 || part.labCostBp! > FULL_PARTICIPATION_BP)) return "incomplete";
+  return carrying.reduce((sum, part) => sum + part.labCostBp!, 0) === FULL_PARTICIPATION_BP ? null : "incomplete";
+}
 export interface CaseParticipation {
   caseId: number;
   status: "approved" | "pending";
   /** Empty while pending. */
   participants: readonly CaseParticipant[];
+  /** 0134: set by the reader from the owner's settings; absent = by work shares. */
+  labCostBasis?: LabCostBasis;
 }
 export type CaseParticipationResolver = (caseId: number, atIso: string) => CaseParticipation | undefined;
 export const FULL_PARTICIPATION_BP = 10_000;
@@ -533,10 +548,20 @@ export function splitShareByParticipation(share: DoctorShareItem, participation:
   }
   const weights = participation.participants.map(part => part.shareBp);
   const amounts = allocateByWeights(Math.max(0, share.amountMinor), weights);
-  const lab = share.labCostMinor ? allocateByWeights(share.labCostMinor, weights) : null;
+  // 0134: the administrative allocation is used only when the reader resolved that basis and it is complete.
+  const administrative = participation.labCostBasis === "admin_allocation" && participation.participants.every(part => part.labCostBp !== undefined)
+    && labCostAllocationProblem(participation.participants) === null;
+  // Work shares switched off and no administrative allocation: the whole cost stays with the invoice-line doctor
+  // (a proposal awaiting the owner's confirmation, #483 6905003552). If that doctor is not a participant the cost
+  // cannot stay with him, so the work shares apply.
+  const onLineDoctor = !administrative && participation.labCostBasis === "line_doctor" && participation.participants.some(part => part.doctorId === share.doctorId);
+  const labBasis: LabCostBasis = administrative ? "admin_allocation" : onLineDoctor ? "line_doctor" : "work_shares";
+  const labWeights = administrative ? participation.participants.map(part => part.labCostBp!)
+    : onLineDoctor ? participation.participants.map(part => (part.doctorId === share.doctorId ? 1 : 0)) : weights;
+  const lab = share.labCostMinor ? allocateByWeights(share.labCostMinor, labWeights) : null;
   const materials = share.materialCostMinor ? allocateByWeights(share.materialCostMinor, weights) : null;
   return participation.participants.map((part, index) => ({
-    ...share, doctorId: part.doctorId, amountMinor: amounts[index],
+    ...share, doctorId: part.doctorId, amountMinor: amounts[index], labCostBasis: labBasis,
     ...(lab ? { labCostMinor: lab[index] } : {}), ...(materials ? { materialCostMinor: materials[index] } : {}),
   }));
 }
@@ -614,6 +639,8 @@ export interface CommissionDetailLine {
   /** حصة الطبيب من البند قبل أي خصم. */
   amountMinor: number;
   labCostMinor: number;
+  /** 0134: how the lab cost reached this doctor. */
+  labCostBasis: LabCostBasis;
   materialCostMinor: number;
   labDeducted: boolean;
   materialDeducted: boolean;
@@ -760,6 +787,7 @@ export function commissionForPatientAtEventTime(
           planId: share.planId ?? null,
           amountMinor: share.amountMinor,
           labCostMinor: share.labCostMinor ?? 0,
+          labCostBasis: share.labCostBasis ?? "line_doctor",
           materialCostMinor: share.materialCostMinor ?? 0,
           labDeducted: atInvoice.deductLab && Boolean(share.labCostMinor),
           materialDeducted: atInvoice.deductMaterials && Boolean(share.materialCostMinor),

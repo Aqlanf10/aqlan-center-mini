@@ -6,7 +6,7 @@
   "counts": {
     "tables": 167,
     "columns": 2134,
-    "constraints": 2859,
+    "constraints": 2860,
     "indexes": 538,
     "triggers": 247
   },
@@ -3188,6 +3188,7 @@
       "unique": [],
       "checks": [
         "commission_case_participations_decided_by_check",
+        "commission_case_participations_lab_cost_check",
         "commission_case_participations_reason_check",
         "commission_case_participations_shares_check",
         "commission_case_participations_source_check",

@@ -82,6 +82,7 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   "finance.base_currency": k("finance"), "finance.rate.SAR": k("finance"), "finance.rate.USD": k("finance"),
   "finance.rate_max_age_days": k("finance"), "finance.locked_before": k("finance"),
   "finance.owner_private_funding_account": k("authority"),
+  "commission.shared_lab_cost.by_work_shares": k("authority"), "commission.shared_lab_cost.admin_allocation": k("authority"),
   "finance.commission_material_rate": k("finance"), "billing.max_discount_percent": k("finance"),
   "documents.invoice_prefix": k("finance"), "documents.receipt_prefix": k("finance"),
   "documents.voucher_prefix": k("finance"), "documents.reversal_prefix": k("finance"),
