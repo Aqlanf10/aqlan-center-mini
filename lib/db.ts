@@ -12724,13 +12724,14 @@ export async function loadCommissionPolicyTimelines(queryRunner?: DbClient | DbP
 }> {
   await ensureSchema();
   const pool = queryRunner ?? getPool();
-  const [{ rows: historyRows }, { rows: liveRows }] = await Promise.all([
-    pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date; effective_from_us: string }>(
+  // The caller may own one transaction client; never overlap queries on it.
+  const [{ rows: historyRows }, { rows: liveRows }] = [
+    await pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date; effective_from_us: string }>(
       `SELECT party_id, percent, config, effective_from, to_char(effective_from, 'US') AS effective_from_us
          FROM doctor_commission_history
         ORDER BY party_id, effective_from, id`,
     ),
-    pool.query<{ id: number; name: string; commission_percent: string; config: string | null }>(
+    await pool.query<{ id: number; name: string; commission_percent: string; config: string | null }>(
       `SELECT p.id, p.name, p.commission_percent,
               (SELECT u.commission_config FROM users u
                 WHERE u.party_id = p.id AND u.commission_config IS NOT NULL
@@ -12738,7 +12739,7 @@ export async function loadCommissionPolicyTimelines(queryRunner?: DbClient | DbP
                 ORDER BY u.id DESC LIMIT 1) AS config
          FROM parties p WHERE p.kind = 'doctor'`,
     ),
-  ]);
+  ] as const;
   const timelines = new Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>();
   for (const row of historyRows) {
     const list = timelines.get(row.party_id) ?? [];
@@ -14992,11 +14993,12 @@ export async function commissionReport(
   if(!queryRunner)return withFinancialReadSnapshot(getPool(),runner=>commissionReport(from,to,detail,runner),pgliteInstance!==null);
   const pool = queryRunner ?? getPool();
 
-  const [{ rows: doctorRows }, { rows: invoiceRows }, { rows: paidRows }] = await Promise.all([
-    pool.query<{ id: number; name: string; commission_percent: string }>(
+  // Includes payroll-owned clients, not just the serialized read-snapshot facade.
+  const [{ rows: doctorRows }, { rows: invoiceRows }, { rows: paidRows }] = [
+    await pool.query<{ id: number; name: string; commission_percent: string }>(
       `SELECT id, name, commission_percent FROM parties WHERE kind = 'doctor'`,
     ),
-    pool.query<{
+    await pool.query<{
       patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string; issued_at: Date; issued_at_us: string;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
@@ -15061,7 +15063,7 @@ export async function commissionReport(
     // (P-01 owner review — تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها (سجلُّ
     // الصرف يحمل عملته الكاملة) — لا بمكافئه الأساسي: المقارنة داخل العملة
     // الواحدة حصرًا، وما صُرف بعملةٍ أخرى لا يُطرح من دَين هذه العملة أبدًا.
-    pool.query<{ party_id: number; currency: string; paid: string }>(
+    await pool.query<{ party_id: number; currency: string; paid: string }>(
       `SELECT e.party_id, e.currency, COALESCE(SUM(e.amount_minor), 0) AS paid
          FROM expenses e
          LEFT JOIN hr_payroll_disbursement_parts hp ON hp.expense_id = COALESCE(e.reversal_of_id,e.id) AND hp.component='commission'
@@ -15074,7 +15076,7 @@ export async function commissionReport(
         GROUP BY e.party_id, e.currency`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-  ]);
+  ] as const;
 
   const nameByDoctor = new Map(doctorRows.map((row) => [row.id, row.name]));
 
@@ -15170,8 +15172,8 @@ export async function commissionReport(
    * دلو الأساس فيعبر الدلاء (ردٌّ سعودي لا يمسّ اليمني أبدًا). */
   const unlinkedRefundsByPatient = new Map<number, Record<Currency, number>>();
   if (patientIds.length > 0) {
-    const [paymentRows, planCurrencyRows, invoiceCurrencyRows] = await Promise.all([
-      pool.query<{
+    const [paymentRows, planCurrencyRows, invoiceCurrencyRows] = [
+      await pool.query<{
         patient_id: number; id: number; kind: string; invoice_id: number | null; plan_id: number | null;
         opening_currency: string | null;
         reversal_of_id: number | null; amount_minor: string; currency: string;
@@ -15187,14 +15189,14 @@ export async function commissionReport(
       ),
       // (TD-05 owner review — Finding 5) الدفعة على الحساب المقيَّدة على خطة
       // تسوّي دلو عملة الخطة — والخريطة هنا لأهداف تسوية العمولة نفسها.
-      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+      await pool.query<{ id: number; patient_id: number; base_currency: string }>(
         `SELECT id, patient_id, base_currency FROM treatment_plans WHERE patient_id = ANY($1::int[])`,
         [patientIds],
       ),
       /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة لعملة كل فاتورة —
        * الملغاة معها كما يفعل تقرير المديونية: الدفعة واقعة تاريخية، وهدفها
        * عملة فاتورتها وإن أُلغيت لاحقًا — لا سقوطٌ صامت إلى الأساس. */
-      pool.query<{ id: number; patient_id: number; base_currency: string; settlement_leaf_id:number|null; reclassified_at_cutoff:boolean }>(
+      await pool.query<{ id: number; patient_id: number; base_currency: string; settlement_leaf_id:number|null; reclassified_at_cutoff:boolean }>(
         `SELECT i.id, i.patient_id, i.base_currency,
           EXISTS(SELECT 1 FROM invoice_settlement_reclassifications d
             JOIN invoice_corrections c ON c.id=d.correction_id
@@ -15209,7 +15211,7 @@ export async function commissionReport(
          FROM invoices i WHERE i.patient_id = ANY($1::int[])`,
         [patientIds, CLINIC_TIME_ZONE, to],
       ),
-    ]);
+    ] as const;
     /* (المراجعة النهائية للمال ٢) المراجع يحمل مالكه: خرائط مجموعة مرضى قد تحلّ خطة/فاتورة مريضٍ آخر داخل
      * النطاق — فالملكية تُطابَق صراحةً لا يُستعار الهدف. */
     const planCurrencyById = new Map<number, DocumentCurrencyRef>();
@@ -17306,8 +17308,9 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
   if(!queryRunner)return withFinancialReadSnapshot(getPool(),runner=>journalEntries(from,to,runner),pgliteInstance!==null);
   const pool = queryRunner;
 
-  const [invoices, payments, expenses, allocations, payables, shifts, manual, openings, partyOpenings, partyAdvances] = await Promise.all([
-    pool.query<{
+  // A supplied snapshot/transaction is one connection: await each read in order.
+  const [invoices, payments, expenses, allocations, payables, shifts, manual, openings, partyOpenings, partyAdvances] = [
+    await pool.query<{
       invoice_number: string; created_at: Date; full_name: string; base_currency: string;
       total_minor: string; discount_minor: string; status: string; currency_corrected:boolean;
     }>(
@@ -17319,7 +17322,7 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
     /* (TD-REG-028) الدفعة ومعها هدف تسويتها — بالقاعدة نفسها التي يقرأ بها كشف المريض:
        عملة الفاتورة/الخطة (بشرط ملكيتها للمريض نفسه) أو عملة الرصيد الافتتاحي، وإلا قاعدة الهدف
        الافتراضي. فرجل الذمم في الدفتر = ما سوّته الدفعة في دلو المريض، رقمًا وعملة. */
-    pool.query<{
+    await pool.query<{
       id: number; receipt_number: string; created_at: Date; full_name: string; patient_id: number;
       currency: string; amount_minor: string; base_amount_minor: string; kind: string; method: string | null;
       invoice_id: number | null; invoice_currency: string | null; invoice_patient_id: number | null;
@@ -17339,7 +17342,7 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
     ),
     /* (TD-REG-028) السند ومعه ما سوّاه من التزامه المرتبط **بعملة الالتزام** — القراءة نفسها التي
        يقرأ بها كشف الجهة (settledOnPayableSql)؛ والتسوية المجمّعة من التوزيعات أدناه. */
-    pool.query<{
+    await pool.query<{
       category_match_count: number;
       id: number; voucher_number: string; created_at: Date; category: string; currency: string;
       amount_minor: string; party_id: number | null; party_kind: string | null;
@@ -17373,7 +17376,7 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
         WHERE (e.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{
+    await pool.query<{
       expense_id: number; payable_id: number; paid_minor: string | null; payable_currency: string; settled_minor: string | null;
       linked_payable_id: number | null; linked_party_id: number | null; linked_payable_currency: string | null;
       payable_account_code: string | null;
@@ -17388,7 +17391,7 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
         ORDER BY a.id`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{
+    await pool.query<{
       id: number; created_at: Date; category: string; currency: string; effective: string; party_name: string;
       expense_account_code: string | null; payable_account_code: string | null;
       auto_post_journal: boolean | null;
@@ -17405,13 +17408,13 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
           AND b.source_type = 'operational'`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<ShiftRow>(
+    await pool.query<ShiftRow>(
       `${SHIFT_SELECT}
         WHERE s.status = 'closed'
           AND (s.closed_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{
+    await pool.query<{
       id: number; entry_date: Date; description: string;
       account_code: string; currency: string; amount_minor: string; side: string;
     }>(
@@ -17422,7 +17425,7 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       [from, to],
     ),
     /* (F-06) الأرصدة الافتتاحية للمرضى **بكل عملاتها** — كلٌّ بعملته، بلا تحويل ولا إسقاط. */
-    pool.query<{ patient_id: number; full_name: string; currency: string; amount_minor: string; as_of_date: Date }>(
+    await pool.query<{ patient_id: number; full_name: string; currency: string; amount_minor: string; as_of_date: Date }>(
       `SELECT o.patient_id, p.full_name, o.currency, o.amount_minor, o.as_of_date
          FROM patient_opening_balances o JOIN patients p ON p.id = o.patient_id
         WHERE o.as_of_date BETWEEN $1::date AND $2::date`,
@@ -17430,20 +17433,20 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
     ),
     /* (FIA-1) ديون المعامل والموردين السابقة لبدء النظام — التزامٌ افتتاحي بتاريخ «حتى»، بعملته
        وبقيمته الفعلية (الأصل + التصحيحات الإلحاقية) كما يقرؤها كشف الجهة. */
-    pool.query<{ id: number; as_of_date: Date; party_name: string; currency: string; effective: string; payable_account_code: string | null }>(
+    await pool.query<{ id: number; as_of_date: Date; party_name: string; currency: string; effective: string; payable_account_code: string | null }>(
       `SELECT b.id, b.as_of_date, t.name AS party_name, b.currency, ${payableAmountSql("b")}::text AS effective,
               COALESCE(b.payable_account_code, t.payable_account_code) AS payable_account_code
          FROM payables b JOIN parties t ON t.id = b.party_id
         WHERE b.source_type = 'opening' AND b.as_of_date BETWEEN $1::date AND $2::date`,
       [from, to],
     ),
-    pool.query<{ id: number; as_of_date: Date; party_name: string; currency: string; amount_minor: string; payable_account_code: string | null }>(
+    await pool.query<{ id: number; as_of_date: Date; party_name: string; currency: string; amount_minor: string; payable_account_code: string | null }>(
       `SELECT o.id, o.as_of_date, t.name AS party_name, o.currency, o.amount_minor, t.payable_account_code
          FROM party_opening_advances o JOIN parties t ON t.id = o.party_id
         WHERE o.voided_at IS NULL AND o.as_of_date BETWEEN $1::date AND $2::date`,
       [from, to],
     ),
-  ]);
+  ] as const;
 
   const entries: (JournalEntry | null)[] = await currencyReclassificationJournal({query:pool.query.bind(pool),release(){}},from,to,CLINIC_TIME_ZONE);
 
