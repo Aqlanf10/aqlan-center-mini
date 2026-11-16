@@ -84,11 +84,14 @@ export type AuditAction =
   | "lab_pricing.create" | "lab_pricing.update" | "lab_pricing.delete"
   | "lab.accounting.update"
   | "portal.login" | "portal.login.legacy_blocked" | "portal.confirm" | "portal.intake" | "portal.message"
+  | "portal.settings.update"
   | "portal.staff_grant.update"
   | "portal.account.activate_issued" | "portal.account.activate_delivery_failed" | "portal.account.activated"
   | "portal.account.reset_issued" | "portal.account.in_person_reset_issued" | "portal.account.reset_delivery_failed" | "portal.account.password_reset"
+  | "portal.account.password_changed" | "portal.account.locked" | "portal.account.unlocked"
   | "portal.account.disabled" | "portal.account.enabled" | "portal.account.sessions_revoked" | "portal.account.patient_merged"
   | "portal.admin_preview.start" | "portal.admin_preview.exit"
+  | "portal.announcement.create" | "portal.announcement.update" | "portal.announcement.delete" | "portal.announcement.reorder"
   | "intake.staff"
   | "display.delay_notice"
   | "display.announcement.create" | "display.announcement.update" | "display.announcement.delete"
@@ -308,6 +311,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "portal.intake": "استمارة صحية من البوابة",
   "intake.staff": "استمارة صحية دوّنها الطاقم",
   "portal.message": "رسالة من بوابة المريض",
+  "portal.settings.update": "تحديث إعدادات وسياسات بوابة المريض",
   "portal.staff_grant.update": "تعديل صلاحيات موظف في بوابة المريض",
   "portal.account.activate_issued": "إصدار رابط تفعيل حساب بوابة مريض",
   "portal.account.activate_delivery_failed": "فشل إرسال رابط تفعيل بوابة مريض وإبطاله",
@@ -316,12 +320,19 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "portal.account.in_person_reset_issued": "إصدار رابط استعادة حضوري لبوابة مريض",
   "portal.account.reset_delivery_failed": "فشل إرسال رابط استعادة بوابة مريض وإبطاله",
   "portal.account.password_reset": "تعيين كلمة مرور جديدة لبوابة مريض وإبطال الجلسات",
+  "portal.account.password_changed": "تغيير كلمة مرور بوابة المريض من صاحب الحساب وإبطال الجلسات",
+  "portal.account.locked": "قفل مؤقت لحساب بوابة مريض بسبب تجاوز محاولات الدخول",
+  "portal.account.unlocked": "فكّ القفل المؤقت عن حساب بوابة مريض",
   "portal.account.disabled": "تعطيل حساب بوابة مريض وإبطال جلساته",
   "portal.account.enabled": "إعادة تمكين حساب بوابة مريض",
   "portal.account.sessions_revoked": "إبطال جلسات بوابة مريض",
   "portal.account.patient_merged": "تدوير وإبطال جلسات ورموز حساب البوابة عند دمج ملف مريض مكرر",
   "portal.admin_preview.start": "بدء عرض إداري لبوابة مريض (للقراءة فقط)",
   "portal.admin_preview.exit": "إنهاء العرض الإداري لبوابة مريض",
+  "portal.announcement.create": "إضافة إعلان لبوابة المريض",
+  "portal.announcement.update": "تعديل إعلان لبوابة المريض",
+  "portal.announcement.delete": "حذف إعلان من بوابة المريض",
+  "portal.announcement.reorder": "إعادة ترتيب إعلانات بوابة المريض",
   "message.delete": "إخفاء رسالة مرسلة من الطاقم مع الاحتفاظ الآمن بالسجل في التخزين",
   "portal.message.delete": "إخفاء رسالة مرسلة من المريض عبر البوابة مع الاحتفاظ الآمن بالسجل في التخزين",
   "message.retained.inspect": "معاينة سجل رسالة محذوفة محفوظة في العهدة الإدارية",
@@ -464,7 +475,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "commission.case_override.set", "commission.case_override.void",
   "backup.download", "export.download", "document.reprint",
   "visit.addendum", "visit.clearance_bypass", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
-  "portal.staff_grant.update", "portal.account.in_person_reset_issued", "portal.account.disabled",
+  "portal.settings.update", "portal.staff_grant.update", "portal.account.in_person_reset_issued", "portal.account.disabled", "portal.account.locked",
   "portal.admin_preview.start",
 ];
 

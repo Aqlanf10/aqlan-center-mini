@@ -4,6 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, portalConfirmAttendance, recordAudit } from "@/lib/db";
 import { isPortalAdminPreview } from "@/lib/portal";
 import { requirePortalSession } from "@/lib/portal-server";
+import { readPortalSettings } from "@/lib/portal-settings";
 import { clinicDateString } from "@/lib/schedule";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +43,13 @@ export async function POST(request: Request) {
   }
 
   try {
+    const settings = await readPortalSettings();
+    if (!settings.showAppointments || !settings.allowAppointmentConfirm) {
+      return NextResponse.json(
+        { message: "تأكيد حضور المواعيد من البوابة غير متاح حاليًا." },
+        { status: 403 },
+      );
+    }
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
     const result = await portalConfirmAttendance(id, session.patientId, today);
     if (!result.ok) {

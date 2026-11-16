@@ -4,6 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createIntakeForm, latestIntakeForm, recordAudit } from "@/lib/db";
 import { isPortalAdminPreview, validateIntake } from "@/lib/portal";
 import { requirePortalSession } from "@/lib/portal-server";
+import { readPortalSettings } from "@/lib/portal-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,13 @@ export async function GET() {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
   try {
+    const settings = await readPortalSettings();
+    if (!settings.showIntake) {
+      return NextResponse.json(
+        { message: "الاستمارة الصحية الرقمية غير متاحة حاليًا في إعدادات بوابة المريض." },
+        { status: 403 },
+      );
+    }
     const latest = await latestIntakeForm(session.patientId);
     return NextResponse.json({ latest });
   } catch {
@@ -38,7 +46,11 @@ export async function POST(request: Request) {
     );
   }
   let body: unknown;
-  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+  try {
+    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const validation = validateIntake(body);
@@ -46,6 +58,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: validation.message }, { status: 400 });
   }
   try {
+    const settings = await readPortalSettings();
+    if (!settings.showIntake) {
+      return NextResponse.json(
+        { message: "الاستمارة الصحية الرقمية غير متاحة حاليًا في إعدادات بوابة المريض." },
+        { status: 403 },
+      );
+    }
     const created = await createIntakeForm(session.patientId, validation.value);
     await recordAudit({
       action: "portal.intake",

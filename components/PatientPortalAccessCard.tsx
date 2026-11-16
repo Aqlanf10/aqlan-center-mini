@@ -15,12 +15,24 @@ interface AccountSummary {
   pendingTokenExpiresAt: string | null;
   hasSharedFamilyPhone?: boolean;
   sharedPhonePatientsCount?: number;
+  failedLoginAttempts?: number;
+  lockedUntil?: string | null;
+  isLocked?: boolean;
 }
 
 interface StaffPortalPermissions {
   isOwner: boolean;
+  canConfigurePortalSettings?: boolean;
   canManagePortal: boolean;
+  canIssueActivation?: boolean;
+  canIssueReset?: boolean;
+  canChangeRecoveryPhone?: boolean;
   canPreviewPortal: boolean;
+}
+
+interface PolicySummary {
+  operatingMode?: "disabled" | "sandbox_test" | "live_enabled";
+  activationEnabled: boolean;
 }
 
 const STATUS_BADGE: Record<AccountSummary["status"], { label: string; cls: string }> = {
@@ -43,10 +55,16 @@ export function PatientPortalAccessCard({
   patientPhone: string | null;
 }) {
   const [account, setAccount] = useState<AccountSummary | null>(null);
-  const [activationEnabled, setActivationEnabled] = useState(false);
+  const [policySummary, setPolicySummary] = useState<PolicySummary>({
+    operatingMode: "disabled",
+    activationEnabled: false,
+  });
   const [permissions, setPermissions] = useState<StaffPortalPermissions>({
     isOwner: false,
     canManagePortal: false,
+    canIssueActivation: false,
+    canIssueReset: false,
+    canChangeRecoveryPhone: false,
     canPreviewPortal: false,
   });
   const [loading, setLoading] = useState(true);
@@ -54,12 +72,15 @@ export function PatientPortalAccessCard({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [oneTimeUrl, setOneTimeUrl] = useState<string | null>(null);
+  const [sandboxSimulatedUrl, setSandboxSimulatedUrl] = useState<string | null>(null);
 
   const [loginName, setLoginName] = useState("");
   const [channel, setChannel] = useState<"whatsapp" | "sms" | "in_person">("whatsapp");
   const [verifiedPhone, setVerifiedPhone] = useState("");
   const [updatedPhone, setUpdatedPhone] = useState("");
-  const [inPersonDelivery, setInPersonDelivery] = useState<"in_person" | "whatsapp" | "sms">("in_person");
+  const [inPersonDelivery, setInPersonDelivery] = useState<"in_person" | "whatsapp" | "sms">(
+    "in_person",
+  );
   const [verificationNote, setVerificationNote] = useState("");
 
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -73,8 +94,23 @@ export function PatientPortalAccessCard({
       if (!response.ok) return;
       const data = await response.json();
       setAccount(data.account);
-      setActivationEnabled(Boolean(data.policyConfig?.activationEnabled));
-      setPermissions(data.permissions);
+      setPolicySummary({
+        operatingMode: data.policyConfig?.operatingMode ?? "disabled",
+        activationEnabled: Boolean(data.policyConfig?.activationEnabled),
+      });
+      setPermissions({
+        isOwner: Boolean(data.permissions?.isOwner),
+        canConfigurePortalSettings: Boolean(data.permissions?.canConfigurePortalSettings),
+        canManagePortal: Boolean(data.permissions?.canManagePortal),
+        canIssueActivation: Boolean(
+          data.permissions?.canIssueActivation ?? data.permissions?.canManagePortal,
+        ),
+        canIssueReset: Boolean(
+          data.permissions?.canIssueReset ?? data.permissions?.canManagePortal,
+        ),
+        canChangeRecoveryPhone: Boolean(data.permissions?.canChangeRecoveryPhone),
+        canPreviewPortal: Boolean(data.permissions?.canPreviewPortal),
+      });
       if (data.account?.loginName) {
         setLoginName(data.account.loginName);
       } else {
@@ -101,6 +137,7 @@ export function PatientPortalAccessCard({
     setError(null);
     setNotice(null);
     setOneTimeUrl(null);
+    setSandboxSimulatedUrl(null);
     try {
       const response = await fetch(`/api/patients/${patientId}/portal-account`, {
         method: "POST",
@@ -115,6 +152,9 @@ export function PatientPortalAccessCard({
       setNotice(payload?.message ?? "تمت العملية بنجاح.");
       if (typeof payload?.inPersonUrl === "string") {
         setOneTimeUrl(payload.inPersonUrl);
+      }
+      if (payload?.sandboxSimulated && typeof payload?.sandboxUrl === "string") {
+        setSandboxSimulatedUrl(payload.sandboxUrl);
       }
       setVerificationNote("");
       setVerifiedPhone("");
@@ -148,9 +188,16 @@ export function PatientPortalAccessCard({
   };
 
   if (loading || !account) return null;
-  if (!permissions.canManagePortal && !permissions.canPreviewPortal) return null;
+  const hasAnyOperationalGrant = Boolean(
+    permissions.canManagePortal ||
+      permissions.canIssueActivation ||
+      permissions.canIssueReset ||
+      permissions.canPreviewPortal,
+  );
+  if (!hasAnyOperationalGrant) return null;
 
   const badge = STATUS_BADGE[account.status];
+  const activationEnabled = policySummary.activationEnabled;
 
   return (
     <section
@@ -163,8 +210,21 @@ export function PatientPortalAccessCard({
           <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${badge.cls}`}>
             {badge.label}
           </span>
+          {account.isLocked && (
+            <span className="rounded-full border border-rose-300 bg-rose-50 px-2.5 py-0.5 text-[11px] font-black text-rose-900">
+              مقفَل مؤقتًا لمحاولات دخول فاشلة
+            </span>
+          )}
+          {policySummary.operatingMode === "sandbox_test" && (
+            <span className="rounded-full border border-sky-300 bg-sky-50 px-2.5 py-0.5 text-[11px] font-black text-sky-900">
+              وضع اختبار معزول (بلا إرسال خارجي)
+            </span>
+          )}
           {account.loginName && (
-            <span dir="ltr" className="rounded-lg bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">
+            <span
+              dir="ltr"
+              className="rounded-lg bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700"
+            >
               {account.loginName}
             </span>
           )}
@@ -183,9 +243,10 @@ export function PatientPortalAccessCard({
       </div>
 
       {showPreviewModal && permissions.canPreviewPortal && (
-        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50/70 p-3 space-y-2">
+        <div className="mt-3 space-y-2 rounded-xl border border-amber-300 bg-amber-50/70 p-3">
           <p className="text-xs font-bold text-amber-950">
-            دخول إداري للقراءة فقط باسمك وصلاحياتك — يُسجَّل اسم الموظف والوقت والسبب في سجل التدقيق.
+            دخول إداري للقراءة فقط باسمك وصلاحياتك — يُسجَّل اسم الموظف والوقت والسبب في سجل التدقيق
+            ولا ينفّذ أي إجراء باسم المريض.
           </p>
           <input
             type="text"
@@ -219,7 +280,9 @@ export function PatientPortalAccessCard({
           data-testid="patient-portal-card-disabled-banner"
           className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs font-bold text-amber-950"
         >
-          تفعيل الحسابات الجديدة وإصدار روابط التفعيل والاستعادة معطّل افتراضيًا حتى اعتماد سياسات التشغيل النهائية من المالك (يبقى التعطيل الطارئ وإبطال الجلسات متاحًا).
+          تفعيل الحسابات الجديدة وإصدار روابط التفعيل والاستعادة معطّل افتراضيًا حتى تفعيل وضع
+          الاختبار المعزول أو اعتماد سياسات التشغيل النهائية من المالك (يبقى التعطيل الطارئ وإبطال
+          الجلسات متاحًا).
         </p>
       )}
 
@@ -233,10 +296,11 @@ export function PatientPortalAccessCard({
           {notice}
         </p>
       )}
+
       {oneTimeUrl && (
-        <div className="mt-3 rounded-xl border border-sky-300 bg-sky-50 p-3 text-xs text-sky-950 space-y-1.5">
+        <div className="mt-3 space-y-1.5 rounded-xl border border-sky-300 bg-sky-50 p-3 text-xs text-sky-950">
           <p className="font-black">
-            رابط التحقق الحضوري أحادي الاستخدام (يُعرض الآن فقط ولا يُحفظ في السجلات):
+            رابط التحقق الحضوري أحادي الاستخدام (يُعرض الآن فقط ولا يُحفظ قابلًا للقراءة):
           </p>
           <div className="flex items-center gap-2">
             <input
@@ -258,75 +322,128 @@ export function PatientPortalAccessCard({
         </div>
       )}
 
-      {permissions.canManagePortal && (
+      {sandboxSimulatedUrl && (
+        <div
+          data-testid="portal-sandbox-simulated-link-box"
+          className="mt-3 space-y-1.5 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950"
+        >
+          <p className="font-black">
+            وضع الاختبار المعزول — لم يُرسل الرابط عبر واتساب أو SMS لأي هاتف خارجي (رابط المحاكاة
+            للفحص فقط):
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              dir="ltr"
+              value={sandboxSimulatedUrl}
+              className="flex-1 rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 font-mono text-[11px]"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(sandboxSimulatedUrl);
+              }}
+              className="rounded-lg bg-navy-800 px-2.5 py-1.5 text-[11px] font-bold text-white"
+            >
+              نسخ للاختبار
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(permissions.canManagePortal ||
+        permissions.canIssueActivation ||
+        permissions.canIssueReset) && (
         <div className="mt-3 space-y-3 border-t border-slate-100 pt-3">
           {account.hasSharedFamilyPhone && (
             <p className="rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-xs font-bold text-amber-950">
-              تنبيه هاتف عائلي مشترك ({account.sharedPhonePatientsCount ?? 2} ملفات تشترك في هذا الرقم): لا تعتمد على الهاتف وحده؛ تحقّق من اسم المريض ورقم ملفه ({patientNumber}) وهويته قبل التفعيل أو الاستعادة، ووثّق التحقق في الملاحظة (8 أحرف على الأقل).
+              تنبيه هاتف عائلي مشترك ({account.sharedPhonePatientsCount ?? 2} ملفات تشترك في هذا
+              الرقم): لا تعتمد على الهاتف وحده؛ تحقّق من اسم المريض ورقم ملفه ({patientNumber})
+              وهويته قبل التفعيل أو الاستعادة، ووثّق التحقق في الملاحظة (8 أحرف على الأقل).
             </p>
           )}
-          {(account.status === "not_activated" || account.status === "pending_activation") && (
-            <div className="grid gap-2 sm:grid-cols-3">
-              <label className="text-xs">
-                <span className="mb-1 block font-bold text-slate-600">اسم المستخدم للمريض</span>
-                <input
-                  type="text"
-                  dir="ltr"
-                  value={loginName}
-                  onChange={(e) => setLoginName(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-2.5 py-1.5 font-mono text-xs"
-                />
-              </label>
-              <label className="text-xs">
-                <span className="mb-1 block font-bold text-slate-600">وسيلة إرسال رابط التفعيل</span>
-                <select
-                  value={channel}
-                  onChange={(e) => setChannel(e.target.value as "whatsapp" | "sms" | "in_person")}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
-                >
-                  <option value="whatsapp">واتساب ({patientPhone ?? "بلا رقم"})</option>
-                  <option value="sms">رسالة نصية SMS ({patientPhone ?? "بلا رقم"})</option>
-                  <option value="in_person">تسليم حضوري مباشر في الاستقبال</option>
-                </select>
-              </label>
-              <label className="text-xs">
-                <span className="mb-1 block font-bold text-slate-600">ملاحظة التحقق</span>
-                <input
-                  type="text"
-                  value={verificationNote}
-                  onChange={(e) => setVerificationNote(e.target.value)}
-                  placeholder={
-                    channel === "in_person" ? "إلزامي: وثّق التحقق من الهوية حضوريًا" : "ملاحظة اختيارية"
-                  }
-                  className="w-full rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs"
-                />
-              </label>
-              <div className="sm:col-span-3">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    void runAction({
-                      action: "activate",
-                      loginName,
-                      deliveryChannel: channel,
-                      verificationNote,
-                    })
-                  }
-                  className="rounded-xl bg-navy-800 px-3.5 py-2 text-xs font-black text-white disabled:opacity-50"
-                >
-                  {account.status === "pending_activation"
-                    ? "إعادة إصدار رابط التفعيل المؤقت"
-                    : "تفعيل حساب البوابة وإرسال الرابط"}
-                </button>
-              </div>
+
+          {account.isLocked && permissions.canManagePortal && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50/70 p-2.5 text-xs">
+              <span className="font-bold text-rose-900">
+                الحساب مقفَل مؤقتًا بعد {account.failedLoginAttempts ?? 0} محاولات دخول فاشلة.
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void runAction({ action: "unlock" })}
+                className="rounded-lg bg-rose-800 px-3 py-1.5 font-black text-white hover:bg-rose-900 disabled:opacity-50"
+              >
+                رفع القفل المؤقت
+              </button>
             </div>
           )}
 
-          {account.status === "active" && (
+          {(account.status === "not_activated" || account.status === "pending_activation") &&
+            permissions.canIssueActivation && (
+              <div className="grid gap-2 sm:grid-cols-3">
+                <label className="text-xs">
+                  <span className="mb-1 block font-bold text-slate-600">اسم المستخدم للمريض</span>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={loginName}
+                    onChange={(e) => setLoginName(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-2.5 py-1.5 font-mono text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  <span className="mb-1 block font-bold text-slate-600">وسيلة إرسال رابط التفعيل</span>
+                  <select
+                    value={channel}
+                    onChange={(e) => setChannel(e.target.value as "whatsapp" | "sms" | "in_person")}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
+                  >
+                    <option value="whatsapp">واتساب ({patientPhone ?? "بلا رقم"})</option>
+                    <option value="sms">رسالة نصية SMS ({patientPhone ?? "بلا رقم"})</option>
+                    <option value="in_person">تسليم حضوري مباشر في الاستقبال</option>
+                  </select>
+                </label>
+                <label className="text-xs">
+                  <span className="mb-1 block font-bold text-slate-600">ملاحظة التحقق</span>
+                  <input
+                    type="text"
+                    value={verificationNote}
+                    onChange={(e) => setVerificationNote(e.target.value)}
+                    placeholder={
+                      channel === "in_person"
+                        ? "إلزامي: وثّق التحقق من الهوية حضوريًا"
+                        : "ملاحظة اختيارية"
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs"
+                  />
+                </label>
+                <div className="sm:col-span-3">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void runAction({
+                        action: "activate",
+                        loginName,
+                        deliveryChannel: channel,
+                        verificationNote,
+                      })
+                    }
+                    className="rounded-xl bg-navy-800 px-3.5 py-2 text-xs font-black text-white disabled:opacity-50"
+                  >
+                    {account.status === "pending_activation"
+                      ? "إعادة إصدار رابط التفعيل المؤقت"
+                      : "تفعيل حساب البوابة وإرسال الرابط"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+          {account.status === "active" && permissions.canIssueReset && (
             <div className="space-y-2">
               <p className="text-xs font-bold text-slate-700">
-                استعادة كلمة المرور (بعد تحقق الموظف من هوية المريض ورقمه أو التحقق الحضوري وتحديث وسيلة التواصل):
+                استعادة كلمة المرور (بعد تحقق الموظف من هوية المريض ورقمه أو التحقق الحضوري):
               </p>
               <div className="grid gap-2 sm:grid-cols-3">
                 <label className="text-xs">
@@ -343,7 +460,9 @@ export function PatientPortalAccessCard({
                 </label>
                 {channel !== "in_person" ? (
                   <label className="text-xs">
-                    <span className="mb-1 block font-bold text-slate-600">تأكيد رقم هاتف المريض المسجّل</span>
+                    <span className="mb-1 block font-bold text-slate-600">
+                      تأكيد رقم هاتف المريض المسجّل
+                    </span>
                     <input
                       type="tel"
                       dir="ltr"
@@ -356,26 +475,39 @@ export function PatientPortalAccessCard({
                 ) : (
                   <>
                     <label className="text-xs">
-                      <span className="mb-1 block font-bold text-slate-600">تحديث رقم الهاتف (عند فقدان القديم)</span>
+                      <span className="mb-1 block font-bold text-slate-600">
+                        تحديث رقم الهاتف (عند فقدان القديم)
+                      </span>
                       <input
                         type="tel"
                         dir="ltr"
+                        disabled={!permissions.canChangeRecoveryPhone}
                         value={updatedPhone}
                         onChange={(e) => setUpdatedPhone(e.target.value)}
-                        placeholder={patientPhone ? `الحالي: ${patientPhone}` : "أدخل الرقم الجديد…"}
-                        className="w-full rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs"
+                        placeholder={
+                          !permissions.canChangeRecoveryPhone
+                            ? "مقيّد بسياسة المركز"
+                            : patientPhone
+                              ? `الحالي: ${patientPhone}`
+                              : "أدخل الرقم الجديد…"
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs disabled:bg-slate-50"
                       />
                     </label>
                     <label className="text-xs">
-                      <span className="mb-1 block font-bold text-slate-600">تسليم الرابط المؤقت بعد التحقق</span>
+                      <span className="mb-1 block font-bold text-slate-600">
+                        تسليم الرابط المؤقت بعد التحقق
+                      </span>
                       <select
                         value={inPersonDelivery}
-                        onChange={(e) => setInPersonDelivery(e.target.value as "in_person" | "whatsapp" | "sms")}
+                        onChange={(e) =>
+                          setInPersonDelivery(e.target.value as "in_person" | "whatsapp" | "sms")
+                        }
                         className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
                       >
-                        <option value="in_person">عرض رابط مؤقت أحادي الاستخدام الآن (15 د)</option>
-                        <option value="whatsapp">إرسال عبر واتساب للرقم المحدّث/المسجّل (30 د)</option>
-                        <option value="sms">إرسال عبر SMS للرقم المحدّث/المسجّل (30 د)</option>
+                        <option value="in_person">عرض رابط مؤقت أحادي الاستخدام الآن</option>
+                        <option value="whatsapp">إرسال عبر واتساب للرقم المحدّث/المسجّل</option>
+                        <option value="sms">إرسال عبر SMS للرقم المحدّث/المسجّل</option>
                       </select>
                     </label>
                   </>
@@ -416,29 +548,33 @@ export function PatientPortalAccessCard({
                 >
                   إصدار رابط إعادة تعيين مؤقت أحادي الاستخدام
                 </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void runAction({ action: "revoke_sessions" })}
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
-                >
-                  إبطال الجلسات الحالية
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    void runAction({ action: "disable", reason: "تعطيل إداري من ملف المريض" })
-                  }
-                  className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-800"
-                >
-                  تعطيل الحساب
-                </button>
+                {permissions.canManagePortal && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void runAction({ action: "revoke_sessions" })}
+                      className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
+                    >
+                      إبطال الجلسات الحالية
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        void runAction({ action: "disable", reason: "تعطيل إداري من ملف المريض" })
+                      }
+                      className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-800"
+                    >
+                      تعطيل الحساب
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           )}
 
-          {account.status === "disabled" && (
+          {account.status === "disabled" && permissions.canManagePortal && (
             <button
               type="button"
               disabled={busy}

@@ -10,7 +10,7 @@ import {
   createPortalToken,
   validatePortalAccountLogin,
 } from "@/lib/portal";
-import { authenticatePortalAccount } from "@/lib/portal-security";
+import * as portalSecurity from "@/lib/portal-security";
 import { FORM_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 
 export const dynamic = "force-dynamic";
@@ -96,8 +96,34 @@ export async function POST(request: Request) {
       );
     }
 
-    const authenticated = await authenticatePortalAccount(username, password);
-    if (!authenticated) {
+    let outcome: portalSecurity.PortalAuthenticationOutcome;
+    if (typeof portalSecurity.authenticatePortalAccountWithPolicy === "function") {
+      outcome = await portalSecurity.authenticatePortalAccountWithPolicy(username, password);
+    } else {
+      const fallback = await portalSecurity.authenticatePortalAccount(username, password);
+      outcome = fallback
+        ? { ok: true, ...fallback, sessionDurationMs: PORTAL_DURATION_MS }
+        : { ok: false, reason: "invalid_credentials" };
+    }
+
+    if (!outcome.ok) {
+      if (outcome.reason === "account_locked") {
+        const retrySec = Math.max(1, outcome.retryAfterSeconds ?? 900);
+        await recordAudit({
+          action: "portal.login",
+          details: { ok: false, reason: "account_locked", login_fingerprint: userFingerprint },
+          actor: "بوابة المريض",
+        });
+        return NextResponse.json(
+          {
+            code: "account_locked",
+            lockedUntil: outcome.lockedUntil ?? null,
+            message: `تم إيقاف محاولات الدخول مؤقتًا لحماية حسابك بعد عدة محاولات غير صحيحة. حاول بعد ${Math.ceil(retrySec / 60)} دقيقة أو تواصل مع الاستقبال.`,
+          },
+          { status: 423, headers: { "Retry-After": String(retrySec) } },
+        );
+      }
+
       await recordAudit({
         action: "portal.login",
         details: { ok: false, login_fingerprint: userFingerprint },
@@ -112,33 +138,34 @@ export async function POST(request: Request) {
     await recordAudit({
       action: "portal.login",
       entity: "patient",
-      entityId: authenticated.patientId,
-      details: { ok: true, loginName: authenticated.loginName },
-      actor: `مريض: ${authenticated.fullName}`,
+      entityId: outcome.patientId,
+      details: { ok: true, method: "username_password", loginName: outcome.loginName },
+      actor: `مريض: ${outcome.fullName}`,
     });
 
+    const durationMs = outcome.sessionDurationMs || PORTAL_DURATION_MS;
     const issuedAt = Date.now();
     const token = createPortalToken({
-      patientId: authenticated.patientId,
-      patientNumber: authenticated.patientNumber,
-      fullName: authenticated.fullName,
-      expiresAt: issuedAt + PORTAL_DURATION_MS,
-      credentialVersion: authenticated.credentialVersion,
+      patientId: outcome.patientId,
+      patientNumber: outcome.patientNumber,
+      fullName: outcome.fullName,
+      expiresAt: issuedAt + durationMs,
+      credentialVersion: outcome.credentialVersion,
       issuedAt,
-      phoneFingerprint: authenticated.phoneFingerprint,
+      phoneFingerprint: outcome.phoneFingerprint,
     });
 
     const response = NextResponse.json({
-      patientNumber: authenticated.patientNumber,
-      fullName: authenticated.fullName,
-      loginName: authenticated.loginName,
+      patientNumber: outcome.patientNumber,
+      fullName: outcome.fullName,
+      loginName: outcome.loginName,
     });
     response.cookies.set(PORTAL_COOKIE, token, {
       httpOnly: true,
       secure: true,
       sameSite: "lax",
       path: "/",
-      maxAge: Math.floor(PORTAL_DURATION_MS / 1000),
+      maxAge: Math.floor(durationMs / 1000),
     });
     response.cookies.set(PORTAL_ADMIN_PREVIEW_COOKIE, "", {
       httpOnly: true,

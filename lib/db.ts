@@ -64,7 +64,7 @@ import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
 import { ORTHO_ADJUSTMENT_REQUESTS_SQL } from "./ortho-adjustment-requests-schema";
 import { prepareAdjustmentRequest, saveAdjustmentRequest, revalidateAdjustmentRequestAuthority, OrthoAdjustmentRequestError,
   type OrthoAdjustmentRequest } from "./ortho-adjustment-requests";
-import { PATIENT_PORTAL_SECURITY_SQL } from "./patient-portal-security-schema";
+import { PATIENT_PORTAL_POLICIES_SQL, PATIENT_PORTAL_SECURITY_SQL } from "./patient-portal-security-schema";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
@@ -2175,6 +2175,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_LINEAGE_MIGRATIONS);
     await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_ISSUANCE_MIGRATIONS);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0127", name: "patient_portal_security", filename: "0127_patient_portal_security.sql", sql: PATIENT_PORTAL_SECURITY_SQL, checksum: checksumOf(PATIENT_PORTAL_SECURITY_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0135", name: "patient_portal_policies_and_announcements", filename: "0135_patient_portal_policies_and_announcements.sql", sql: PATIENT_PORTAL_POLICIES_SQL, checksum: checksumOf(PATIENT_PORTAL_POLICIES_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -5984,6 +5985,8 @@ export async function mergeDuplicatePatient(
       ],
     );
     let targetPortalRefreshed = false;
+    let targetPortalSuspended = false;
+    let resolvedPostMergePolicy: "suspend_target" | "suspend_on_conflict_or_dual" | "keep_target_revoke_sessions" = "suspend_target";
     if (portalTablesPresent?.present) {
       const invalidatedTargetTokens = await client.query(
         `UPDATE patient_portal_tokens
@@ -5995,37 +5998,68 @@ export async function mergeDuplicatePatient(
       if (invalidatedTargetTokens.rowCount) {
         moved["patient_portal_tokens.invalidated_target"] = invalidatedTargetTokens.rowCount;
       }
-      const postMergeTargetPolicy =
-        process.env.PORTAL_POST_MERGE_TARGET_POLICY?.trim() === "keep_target_revoke_sessions"
-          ? "keep_target_revoke_sessions"
-          : "suspend_target";
-      const refreshedTargetAccount =
-        postMergeTargetPolicy === "suspend_target"
-          ? await client.query(
-              `UPDATE patient_portal_accounts
-                  SET status = 'disabled',
-                      disabled_at = COALESCE(disabled_at, NOW()),
-                      disabled_reason = COALESCE(disabled_reason, 'patient_merged_pending_identity_review'),
-                      credential_version = credential_version + 1,
-                      sessions_revoked_at = NOW(),
-                      phone_fingerprint = $2,
-                      updated_at = NOW()
-                WHERE patient_id = $1`,
-              [targetId, portalPhoneFingerprint(updated[0].phone)],
-            )
-          : await client.query(
-              `UPDATE patient_portal_accounts
-                  SET credential_version = credential_version + 1,
-                      sessions_revoked_at = NOW(),
-                      phone_fingerprint = $2,
-                      updated_at = NOW()
-                WHERE patient_id = $1`,
-              [targetId, portalPhoneFingerprint(updated[0].phone)],
-            );
+      const envMergePolicy = process.env.PORTAL_POST_MERGE_TARGET_POLICY?.trim();
+      if (
+        envMergePolicy === "keep_target_revoke_sessions" ||
+        envMergePolicy === "suspend_on_conflict_or_dual" ||
+        envMergePolicy === "suspend_target"
+      ) {
+        resolvedPostMergePolicy = envMergePolicy;
+      } else {
+        const { rows: [settingsTbl] } = await client.query<{ present: string | null }>(
+          `SELECT to_regclass('public.patient_portal_settings')::text AS present`,
+        );
+        if (settingsTbl?.present) {
+          const { rows: [settingsRow] } = await client.query<{ post_merge_target_policy: string }>(
+            `SELECT post_merge_target_policy FROM patient_portal_settings WHERE singleton = TRUE LIMIT 1`,
+          );
+          if (
+            settingsRow?.post_merge_target_policy === "keep_target_revoke_sessions" ||
+            settingsRow?.post_merge_target_policy === "suspend_on_conflict_or_dual" ||
+            settingsRow?.post_merge_target_policy === "suspend_target"
+          ) {
+            resolvedPostMergePolicy = settingsRow.post_merge_target_policy;
+          }
+        }
+      }
+      const sourcePhoneFp = portalPhoneFingerprint(source.phone);
+      const targetBeforePhoneFp = portalPhoneFingerprint(target.phone);
+      const targetAfterPhoneFp = portalPhoneFingerprint(updated[0].phone);
+      const hasPhoneConflictOrChange =
+        Boolean(sourcePhoneFp && targetBeforePhoneFp && sourcePhoneFp !== targetBeforePhoneFp) ||
+        targetBeforePhoneFp !== targetAfterPhoneFp;
+      const shouldSuspendTarget =
+        resolvedPostMergePolicy === "suspend_target" ||
+        (resolvedPostMergePolicy === "suspend_on_conflict_or_dual" &&
+          (sourcePortalLoginName !== null || hasPhoneConflictOrChange));
+
+      const refreshedTargetAccount = shouldSuspendTarget
+        ? await client.query(
+            `UPDATE patient_portal_accounts
+                SET status = 'disabled',
+                    disabled_at = COALESCE(disabled_at, NOW()),
+                    disabled_reason = COALESCE(disabled_reason, 'patient_merged_pending_identity_review'),
+                    credential_version = credential_version + 1,
+                    sessions_revoked_at = NOW(),
+                    phone_fingerprint = $2,
+                    updated_at = NOW()
+              WHERE patient_id = $1`,
+            [targetId, targetAfterPhoneFp],
+          )
+        : await client.query(
+            `UPDATE patient_portal_accounts
+                SET credential_version = credential_version + 1,
+                    sessions_revoked_at = NOW(),
+                    phone_fingerprint = $2,
+                    updated_at = NOW()
+              WHERE patient_id = $1`,
+            [targetId, targetAfterPhoneFp],
+          );
       if (refreshedTargetAccount.rowCount) {
         targetPortalRefreshed = true;
+        targetPortalSuspended = shouldSuspendTarget;
         moved["patient_portal_accounts.refreshed_target"] = refreshedTargetAccount.rowCount;
-        if (postMergeTargetPolicy === "suspend_target") {
+        if (shouldSuspendTarget) {
           moved["patient_portal_accounts.suspended_target"] = refreshedTargetAccount.rowCount;
         }
       }
@@ -6034,10 +6068,6 @@ export async function mergeDuplicatePatient(
     await client.query("COMMIT");
 
     if (sourcePortalLoginName !== null || targetPortalRefreshed) {
-      const appliedMergePolicy =
-        process.env.PORTAL_POST_MERGE_TARGET_POLICY?.trim() === "keep_target_revoke_sessions"
-          ? "keep_target_revoke_sessions"
-          : "suspend_target";
       await recordAudit({
         action: "portal.account.patient_merged",
         entity: "patient",
@@ -6048,8 +6078,8 @@ export async function mergeDuplicatePatient(
           sourcePortalRevoked: sourcePortalLoginName !== null,
           ...(sourcePortalLoginName ? { sourcePortalLoginName } : {}),
           targetSessionsRevoked: targetPortalRefreshed,
-          targetPortalSuspended: targetPortalRefreshed && appliedMergePolicy === "suspend_target",
-          postMergePolicyApplied: appliedMergePolicy,
+          targetPortalSuspended,
+          postMergePolicyApplied: resolvedPostMergePolicy,
         },
         actor: ctx.actor,
         actorRole: ctx.actorRole ?? null,

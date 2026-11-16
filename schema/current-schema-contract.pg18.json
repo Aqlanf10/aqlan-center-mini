@@ -4,10 +4,10 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 153,
-    "columns": 1997,
-    "constraints": 2587,
-    "indexes": 495,
+    "tables": 155,
+    "columns": 2056,
+    "constraints": 2660,
+    "indexes": 498,
     "triggers": 195
   },
   "tables": {
@@ -15607,7 +15607,23 @@
           "type": "text",
           "nullable": true
         },
+        "failed_login_attempts": {
+          "type": "int4",
+          "nullable": false
+        },
+        "first_failed_login_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
         "last_login_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "lock_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "locked_until": {
           "type": "timestamptz",
           "nullable": true
         },
@@ -15652,6 +15668,8 @@
         "patient_portal_accounts_active_requires_secret",
         "patient_portal_accounts_credential_version_check",
         "patient_portal_accounts_disabled_reason_check",
+        "patient_portal_accounts_failed_login_attempts_check",
+        "patient_portal_accounts_lock_reason_check",
         "patient_portal_accounts_login_name_check",
         "patient_portal_accounts_status_check"
       ],
@@ -15698,9 +15716,327 @@
       },
       "triggers": {}
     },
+    "patient_portal_announcements": {
+      "columns": {
+        "badge_label": {
+          "type": "text",
+          "nullable": true
+        },
+        "body_ar": {
+          "type": "text",
+          "nullable": false
+        },
+        "body_en": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by_user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "ends_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "is_active": {
+          "type": "bool",
+          "nullable": false
+        },
+        "is_sample": {
+          "type": "bool",
+          "nullable": false
+        },
+        "sort_order": {
+          "type": "int4",
+          "nullable": false
+        },
+        "starts_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "title_ar": {
+          "type": "text",
+          "nullable": false
+        },
+        "title_en": {
+          "type": "text",
+          "nullable": true
+        },
+        "tone": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "updated_by_user_id": {
+          "type": "int4",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_portal_announcements_badge_label_check",
+        "patient_portal_announcements_body_ar_check",
+        "patient_portal_announcements_body_en_check",
+        "patient_portal_announcements_title_ar_check",
+        "patient_portal_announcements_title_en_check",
+        "patient_portal_announcements_tone_check",
+        "patient_portal_announcements_window_valid"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "created_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "updated_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_portal_announcements_active_order_idx": {
+          "columns": [
+            "is_active",
+            "sort_order",
+            "id"
+          ],
+          "unique": false
+        },
+        "patient_portal_announcements_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "patient_portal_settings": {
+      "columns": {
+        "account_lockout_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "activation_ttl_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "admin_preview_ttl_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "allow_appointment_confirm": {
+          "type": "bool",
+          "nullable": false
+        },
+        "allow_in_person_channel": {
+          "type": "bool",
+          "nullable": false
+        },
+        "allow_message_attachments": {
+          "type": "bool",
+          "nullable": false
+        },
+        "allow_sms_channel": {
+          "type": "bool",
+          "nullable": false
+        },
+        "allow_voice_messages": {
+          "type": "bool",
+          "nullable": false
+        },
+        "allow_whatsapp_channel": {
+          "type": "bool",
+          "nullable": false
+        },
+        "deleted_message_retention_mode": {
+          "type": "text",
+          "nullable": false
+        },
+        "in_person_reset_ttl_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "login_failure_window_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "max_failed_login_attempts": {
+          "type": "int4",
+          "nullable": false
+        },
+        "max_token_attempts": {
+          "type": "int4",
+          "nullable": false
+        },
+        "operating_mode": {
+          "type": "text",
+          "nullable": false
+        },
+        "post_merge_target_policy": {
+          "type": "text",
+          "nullable": false
+        },
+        "recovery_phone_policy": {
+          "type": "text",
+          "nullable": false
+        },
+        "reset_ttl_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "session_ttl_hours": {
+          "type": "int4",
+          "nullable": false
+        },
+        "show_announcements": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_appointments": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_booking_link": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_documents": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_intake": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_messages": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_prescriptions": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_profile": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_statement": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_treatment_plans": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_visits": {
+          "type": "bool",
+          "nullable": false
+        },
+        "show_xray_documents": {
+          "type": "bool",
+          "nullable": false
+        },
+        "singleton": {
+          "type": "bool",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "updated_by_user_id": {
+          "type": "int4",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "singleton"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_portal_settings_account_lockout_minutes_check",
+        "patient_portal_settings_activation_ttl_minutes_check",
+        "patient_portal_settings_admin_preview_ttl_minutes_check",
+        "patient_portal_settings_deleted_message_retention_mode_check",
+        "patient_portal_settings_in_person_reset_ttl_minutes_check",
+        "patient_portal_settings_login_failure_window_minutes_check",
+        "patient_portal_settings_max_failed_login_attempts_check",
+        "patient_portal_settings_max_token_attempts_check",
+        "patient_portal_settings_operating_mode_check",
+        "patient_portal_settings_post_merge_target_policy_check",
+        "patient_portal_settings_recovery_phone_policy_check",
+        "patient_portal_settings_reset_ttl_minutes_check",
+        "patient_portal_settings_session_ttl_hours_check",
+        "patient_portal_settings_singleton_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "updated_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_portal_settings_pkey": {
+          "columns": [
+            "singleton"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
     "patient_portal_staff_grants": {
       "columns": {
+        "can_change_recovery_phone": {
+          "type": "bool",
+          "nullable": true
+        },
+        "can_configure_portal_settings": {
+          "type": "bool",
+          "nullable": false
+        },
+        "can_issue_activation": {
+          "type": "bool",
+          "nullable": true
+        },
+        "can_issue_reset": {
+          "type": "bool",
+          "nullable": true
+        },
         "can_manage_portal": {
+          "type": "bool",
+          "nullable": false
+        },
+        "can_manage_portal_announcements": {
           "type": "bool",
           "nullable": false
         },

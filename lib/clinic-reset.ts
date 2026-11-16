@@ -230,6 +230,8 @@ export const RESET_KEEP_TABLES = [
   ...COLLECTION_ATTEMPT_HISTORY_TABLES,
   "users",
   "patient_portal_staff_grants",
+  "patient_portal_settings",
+  "patient_portal_announcements",
   // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
   "hr_staff",
   "hr_staff_changes",

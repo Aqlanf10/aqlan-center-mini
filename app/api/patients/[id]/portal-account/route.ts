@@ -11,6 +11,7 @@ import {
   setPortalAccountStatusByStaff,
   type PortalDeliveryChannel,
 } from "@/lib/portal-security";
+import { readPortalSettings } from "@/lib/portal-settings";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { consumeSecurityLimit } from "@/lib/security-rate-limit";
 import { requireSession } from "@/lib/session";
@@ -60,18 +61,24 @@ export async function GET(
     return NextResponse.json({ message: "ملف المريض غير موجود." }, { status: 404 });
   }
 
-  const [account, access] = await Promise.all([
+  const [account, access, settings] = await Promise.all([
     getPatientPortalAccountSummary(patientId),
     getPortalStaffAccess(session.userId),
+    readPortalSettings(),
   ]);
 
   return NextResponse.json({
     account,
-    policyConfig: getPortalPolicyConfigurationSummary(),
+    policyConfig: getPortalPolicyConfigurationSummary(settings),
     permissions: {
       isOwner: Boolean(access?.isOwner),
+      canConfigurePortalSettings: Boolean(access?.canConfigurePortalSettings),
       canManagePortal: Boolean(access?.canManagePortal),
+      canIssueActivation: Boolean(access?.canIssueActivation),
+      canIssueReset: Boolean(access?.canIssueReset),
+      canChangeRecoveryPhone: Boolean(access?.canChangeRecoveryPhone),
       canPreviewPortal: Boolean(access?.canPreviewPortal),
+      canManagePortalAnnouncements: Boolean(access?.canManagePortalAnnouncements),
     },
   });
 }
@@ -94,7 +101,11 @@ export async function POST(
   if (!staffAccess || !staffAccess.isActive) {
     return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
   }
-  if (!staffAccess.canManagePortal) {
+  if (
+    !staffAccess.canManagePortal &&
+    !staffAccess.canIssueActivation &&
+    !staffAccess.canIssueReset
+  ) {
     return NextResponse.json(
       { message: "غير مصرّح لك بإدارة حسابات بوابة المرضى." },
       { status: 403 },
@@ -109,7 +120,7 @@ export async function POST(
   const staffLimit = await consumeSecurityLimit({
     scope: "portal-staff-manage",
     identifier: `${session.userId}:${patientId}`,
-    maximum: 10,
+    maximum: 15,
     windowMinutes: 15,
     headers: request.headers,
   });
@@ -141,11 +152,15 @@ export async function POST(
         patientId,
         loginName: typeof payload.loginName === "string" ? payload.loginName : "",
         deliveryChannel: channel,
-        verificationNote: typeof payload.verificationNote === "string" ? payload.verificationNote : null,
+        verificationNote:
+          typeof payload.verificationNote === "string" ? payload.verificationNote : null,
         baseOrigin,
       });
       const account = result.ok ? await getPatientPortalAccountSummary(patientId) : undefined;
-      return NextResponse.json({ ...result, ...(account ? { account } : {}) }, { status: result.status });
+      return NextResponse.json(
+        { ...result, ...(account ? { account } : {}) },
+        { status: result.status },
+      );
     }
 
     if (action === "send_reset") {
@@ -155,11 +170,15 @@ export async function POST(
         patientId,
         deliveryChannel: channel,
         verifiedPhone: typeof payload.verifiedPhone === "string" ? payload.verifiedPhone : null,
-        verificationNote: typeof payload.verificationNote === "string" ? payload.verificationNote : null,
+        verificationNote:
+          typeof payload.verificationNote === "string" ? payload.verificationNote : null,
         baseOrigin,
       });
       const account = result.ok ? await getPatientPortalAccountSummary(patientId) : undefined;
-      return NextResponse.json({ ...result, ...(account ? { account } : {}) }, { status: result.status });
+      return NextResponse.json(
+        { ...result, ...(account ? { account } : {}) },
+        { status: result.status },
+      );
     }
 
     if (action === "in_person_reset") {
@@ -173,14 +192,23 @@ export async function POST(
         deliveryChannel: postChannel,
         inPersonVerified: true,
         updatedPhone: typeof payload.updatedPhone === "string" ? payload.updatedPhone : null,
-        verificationNote: typeof payload.verificationNote === "string" ? payload.verificationNote : null,
+        verificationNote:
+          typeof payload.verificationNote === "string" ? payload.verificationNote : null,
         baseOrigin,
       });
       const account = result.ok ? await getPatientPortalAccountSummary(patientId) : undefined;
-      return NextResponse.json({ ...result, ...(account ? { account } : {}) }, { status: result.status });
+      return NextResponse.json(
+        { ...result, ...(account ? { account } : {}) },
+        { status: result.status },
+      );
     }
 
-    if (action === "disable" || action === "enable" || action === "revoke_sessions") {
+    if (
+      action === "disable" ||
+      action === "enable" ||
+      action === "revoke_sessions" ||
+      action === "unlock"
+    ) {
       const result = await setPortalAccountStatusByStaff({
         actorSession: session,
         patientId,
@@ -196,6 +224,9 @@ export async function POST(
 
     return NextResponse.json({ message: "نوع العملية غير معروف." }, { status: 400 });
   } catch {
-    return NextResponse.json({ message: "تعذّر تنفيذ العملية على حساب البوابة." }, { status: 500 });
+    return NextResponse.json(
+      { message: "تعذّر تنفيذ العملية على حساب البوابة." },
+      { status: 500 },
+    );
   }
 }

@@ -7,6 +7,7 @@ import {
   createPortalAdminPreviewToken,
 } from "@/lib/portal";
 import { getPortalStaffAccess } from "@/lib/portal-security";
+import { readPortalSettings } from "@/lib/portal-settings";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { requireSessionStrict } from "@/lib/session";
 
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
  * «عرض بوابة المريض» باسم الموظف وصلاحياته (قراءة فقط):
  * - محصور بالمالك وبالإدارة المخوّلة بصلاحية `can_preview_portal` المستقلة.
  * - يُلزم بتسجيل سبب واضح، ويسجّل الموظف والوقت والسبب في `audit_log`.
- * - يصدر كوكي معاينة إدارية منفصلًا (`aqlan_portal_preview`) صالحًا لـ 30 دقيقة، لا يسمح بأي كتابة باسم المريض.
+ * - يصدر كوكي معاينة إدارية منفصلًا (`aqlan_portal_preview`) صالحًا للمدة المحددة في إعدادات البوابة، ولا يسمح بأي كتابة باسم المريض.
  */
 export async function POST(
   request: Request,
@@ -50,9 +51,10 @@ export async function POST(
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const rawReason = typeof (body as Record<string, unknown>)?.reason === "string"
-    ? ((body as Record<string, unknown>).reason as string).trim()
-    : "";
+  const rawReason =
+    typeof (body as Record<string, unknown>)?.reason === "string"
+      ? ((body as Record<string, unknown>).reason as string).trim()
+      : "";
   if (rawReason.length < 5 || rawReason.length > 300) {
     return NextResponse.json(
       { message: "أدخل سببًا واضحًا لعرض بوابة المريض (من 5 إلى 300 حرف)." },
@@ -65,8 +67,13 @@ export async function POST(
     return NextResponse.json({ message: "ملف المريض غير موجود." }, { status: 404 });
   }
 
+  const settings = await readPortalSettings().catch(() => null);
+  const previewDurationMs = settings
+    ? settings.adminPreviewTtlMinutes * 60 * 1000
+    : PORTAL_ADMIN_PREVIEW_DURATION_MS;
+
   const startedAt = Date.now();
-  const expiresAt = startedAt + PORTAL_ADMIN_PREVIEW_DURATION_MS;
+  const expiresAt = startedAt + previewDurationMs;
   const token = createPortalAdminPreviewToken({
     patientId: patient.id,
     staffUserId: access.userId,
@@ -109,7 +116,7 @@ export async function POST(
     secure: true,
     sameSite: "lax",
     path: "/",
-    maxAge: Math.floor(PORTAL_ADMIN_PREVIEW_DURATION_MS / 1000),
+    maxAge: Math.floor(previewDurationMs / 1000),
   });
   return response;
 }

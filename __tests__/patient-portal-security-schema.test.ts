@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { PATIENT_PORTAL_SECURITY_SQL } from "../lib/patient-portal-security-schema";
+import { PATIENT_PORTAL_POLICIES_SQL, PATIENT_PORTAL_SECURITY_SQL } from "../lib/patient-portal-security-schema";
 import { RESET_KEEP_TABLES, RESET_WIPE_TABLES } from "../lib/clinic-reset";
 
 describe("patient portal security schema (0127)", () => {
@@ -42,6 +42,23 @@ describe("patient portal security schema (0127)", () => {
     expect(wipe.indexOf("patient_portal_tokens")).toBeLessThan(wipe.indexOf("patients"));
     expect(wipe.indexOf("patient_portal_accounts")).toBeLessThan(wipe.indexOf("patients"));
     expect(keep).toContain("patient_portal_staff_grants");
+    expect(keep).toContain("patient_portal_settings");
+    expect(keep).toContain("patient_portal_announcements");
     expect(wipe).not.toContain("patient_portal_staff_grants");
+    expect(wipe).not.toContain("patient_portal_settings");
+    expect(wipe).not.toContain("patient_portal_announcements");
+  });
+
+  it("the numbered migration 0135_patient_portal_policies_and_announcements.sql is byte-for-byte identical to PATIENT_PORTAL_POLICIES_SQL and registered at runtime", () => {
+    expect(
+      readFileSync(
+        new URL("../migrations/0135_patient_portal_policies_and_announcements.sql", import.meta.url),
+        "utf8",
+      ),
+    ).toBe(PATIENT_PORTAL_POLICIES_SQL);
+    const source = readFileSync(new URL("../lib/db.ts", import.meta.url), "utf8");
+    expect(source).toContain(
+      '{ version: "0135", name: "patient_portal_policies_and_announcements", filename: "0135_patient_portal_policies_and_announcements.sql", sql: PATIENT_PORTAL_POLICIES_SQL, checksum: checksumOf(PATIENT_PORTAL_POLICIES_SQL) }',
+    );
   });
 });

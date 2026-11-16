@@ -119,7 +119,7 @@ describe("PostgreSQL 18 — Upgrade Proof & Red->Green Security DB Proofs", () =
 
   it("upgrades populated pre-0127 database to 0127_patient_portal_security + ensureSchema() with zero data loss", async () => {
     const allFiles = await loadMigrationFiles();
-    const pre0127 = allFiles.filter((f) => f.version !== "0127");
+    const pre0127 = allFiles.filter((f) => f.version < "0127");
     const only0127 = allFiles.find((f) => f.version === "0127");
     expect(only0127?.filename).toBe("0127_patient_portal_security.sql");
 

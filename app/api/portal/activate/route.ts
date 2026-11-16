@@ -54,12 +54,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const issuedAt = Date.now();
+    const durationMs = result.sessionDurationMs || PORTAL_DURATION_MS;
+    const issuedAt = Math.max(Date.now(), result.issuedAtFloorMs ?? 0);
     const sessionToken = createPortalToken({
       patientId: result.patientId,
       patientNumber: result.patientNumber,
       fullName: result.fullName,
-      expiresAt: issuedAt + PORTAL_DURATION_MS,
+      expiresAt: issuedAt + durationMs,
       credentialVersion: result.credentialVersion,
       issuedAt,
       phoneFingerprint: result.phoneFingerprint,
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
       secure: true,
       sameSite: "lax",
       path: "/",
-      maxAge: Math.floor(PORTAL_DURATION_MS / 1000),
+      maxAge: Math.floor(durationMs / 1000),
     });
     response.cookies.set(PORTAL_ADMIN_PREVIEW_COOKIE, "", {
       httpOnly: true,
