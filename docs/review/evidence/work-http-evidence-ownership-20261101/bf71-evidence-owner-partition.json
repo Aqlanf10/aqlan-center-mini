@@ -1,0 +1,2175 @@
+[
+  {
+    "shard": 1,
+    "files": [
+      "accountant-readonly-ui-journey.test.ts",
+      "agreement-delta-upgrade-ui.test.ts",
+      "agreement-reconciliation-browser.test.ts",
+      "appointment-action-error-ui-journey.test.ts",
+      "appointment-availability-ui-journey.test.ts",
+      "appointment-filters-ui-journey.test.ts",
+      "appointment-reminder-compact-ui.test.ts",
+      "approved-agreement-principal-ui.test.ts",
+      "bodies.test.ts",
+      "canonical-booking-requests-journey.test.ts",
+      "canonical-case-status-journey.test.ts",
+      "canonical-ceph-comparison-journey.test.ts",
+      "canonical-ceph-copy-journey.test.ts",
+      "canonical-ceph-create-journey.test.ts",
+      "canonical-ceph-create-ui-journey.test.ts",
+      "canonical-ceph-discard-journey.test.ts",
+      "canonical-ceph-edit-journey.test.ts",
+      "canonical-ceph-list-journey.test.ts",
+      "canonical-ceph-reference-journey.test.ts",
+      "canonical-ceph-study-journey.test.ts",
+      "canonical-confirmation-journey.test.ts",
+      "canonical-display-journey.test.ts",
+      "canonical-entry-journey.test.ts",
+      "canonical-login-security-characterization.test.ts",
+      "canonical-ortho-assessment-command-journey.test.ts",
+      "canonical-ortho-assessment-journey.test.ts",
+      "canonical-ortho-coverage-journey.test.ts",
+      "canonical-ortho-coverage-status-journey.test.ts",
+      "canonical-ortho-decision-write-journey.test.ts",
+      "canonical-ortho-decisions-journey.test.ts",
+      "canonical-ortho-detail-journey.test.ts",
+      "canonical-ortho-followups-journey.test.ts",
+      "canonical-ortho-lifecycle-journey.test.ts",
+      "canonical-plan-case-command-journey.test.ts",
+      "canonical-plan-clinical-journey.test.ts",
+      "canonical-plan-template-catalog-journey.test.ts",
+      "canonical-proposal-contact-journey.test.ts",
+      "canonical-provider-blocks-journey.test.ts",
+      "canonical-settings-journey.test.ts",
+      "canonical-shifts-journey.test.ts",
+      "canonical-waiting-list-journey.test.ts",
+      "ceph-comparison-record-order-http.test.ts",
+      "ceph-page-authorization.test.ts",
+      "clinic-role-handoff-ui-journey.test.ts",
+      "clinical-assistant-http.test.ts",
+      "clinical-visit-owner-ui.test.ts",
+      "clinical-visit-pending-notes-ui.test.ts",
+      "clinical-visit-workspace-ui.test.ts",
+      "collection-idempotency-required-http.test.ts",
+      "collections-native-currency-ui.test.ts",
+      "commission-basic-intent-characterization.test.ts",
+      "consultation-followup-http.test.ts",
+      "csrf.test.ts",
+      "daily-clinic-invoice-linkage-ui.test.ts",
+      "daily-clinic-real-records-ui.test.ts",
+      "daily-clinic-report-ui.test.ts",
+      "day1-opening-reception-http.test.ts",
+      "debt-repayment-workspace-ui.test.ts",
+      "doctor-schedule-suggestions-ui.test.ts",
+      "document-associations-http.test.ts",
+      "endodontics-ui-journey.test.ts",
+      "expense-attachments-http.test.ts",
+      "expense-budget-export.test.ts",
+      "expense-catalogue-visibility-ui.test.ts",
+      "finance-controls-http.test.ts",
+      "forwarded-headers.test.ts",
+      "headers.test.ts",
+      "hr-contract-save-admission-real-react.test.ts",
+      "hr-contract-save-receipt-ui.test.ts",
+      "hr-history-owner-real-react.test.ts",
+      "hr-identity-preview.test.ts",
+      "hr-leave-reference-legacy-ui.test.ts",
+      "hr-payroll-journey.test.ts",
+      "hr-profile-read-lifetime.test.ts",
+      "hr-task-mutation-authority.test.ts",
+      "hr-ui-journey.test.ts",
+      "http-permission-matrix.test.ts",
+      "inactive-plan-collections-http.test.ts",
+      "inventory-overview-visual.test.ts",
+      "inventory-purchase-recovery-browser.test.ts",
+      "invoice-clinical-linkage-http.test.ts",
+      "invoice-correction-explanation-ui.test.ts",
+      "invoice-correction-http.test.ts",
+      "invoice-correction-ui-journey.test.ts",
+      "invoice-currency-recovery-ui.test.ts",
+      "invoice-debt-lifecycle-http.test.ts",
+      "invoice-explicit-selection-ui-journey.test.ts",
+      "invoice-grouped-entry-journey.test.ts",
+      "invoice-maintenance-http.test.ts",
+      "invoice-manual-line-ui.test.ts",
+      "invoice-premium-visual-review.test.ts",
+      "invoice-quote-statement-http.test.ts",
+      "invoice-reference-read-http.test.ts",
+      "invoice-signature-readiness-journey.test.ts",
+      "invoice-walkout-integration.test.ts",
+      "lab-accounting-saved-fx-ui.test.ts",
+      "lab-backlog-ui-journey.test.ts",
+      "leadership-hub-ui-journey.test.ts",
+      "leadership-operations-ui-journey.test.ts",
+      "legacy-balance-arrangement-http.test.ts",
+      "legacy-reconciliation-preview-built-page.test.ts",
+      "login-limit-reset-http.test.ts",
+      "login-photo-http.test.ts",
+      "medical-history-http.test.ts",
+      "messaging-channels-http.test.ts",
+      "money-attempt-real-react.test.ts",
+      "multi-currency-ledger-http.test.ts",
+      "multi-tooth-fillings-journey.test.ts",
+      "ortho-assessment-strategy-v2-browser.test.ts",
+      "ortho-baseline-http.test.ts",
+      "ortho-followup-booking-default-built-page.test.ts",
+      "ortho-followup-reminder-built-page.test.ts",
+      "ortho-package-read-state-ui.test.ts",
+      "ortho-patient-scope-http.test.ts",
+      "ortho-planned-case-followup-built-page.test.ts",
+      "ortho-records-case-ui.test.ts",
+      "outside-contract-decision-http.test.ts",
+      "p01-currency-api.test.ts",
+      "patient-ceph-post-built-page.test.ts",
+      "patient-cockpit-real-contract-ui.test.ts",
+      "patient-dossier-endo-print-ui.test.ts",
+      "patient-families-http.test.ts",
+      "patient-identity-http.test.ts",
+      "patient-invoice-recovery-labels-ui.test.ts",
+      "patient-lab-query-http.test.ts",
+      "patient-lab-status-refusal-ui.test.ts",
+      "patient-more-menu-ui.test.ts",
+      "patient-ortho-navigation-ui.test.ts",
+      "patient-ortho-read-safety-ui.test.ts",
+      "patient-source-http.test.ts",
+      "patient-statement-cutoff-ui.test.ts",
+      "patient-statement-historical-print-ui.test.ts",
+      "patient-statement-workflow-ui.test.ts",
+      "perio-recording-containment-ui.test.ts",
+      "plan-financial-read-http-ui.test.ts",
+      "plan-payment-visibility-http.test.ts",
+      "plan-template-http.test.ts",
+      "portal-statement-detail-ui.test.ts",
+      "positive-print-routes-ui.test.ts",
+      "prescription-diagnosis-ui.test.ts",
+      "price-authority-http.test.ts",
+      "recall-mutation-refusal-ui.test.ts",
+      "receipt-correction-ui-journey.test.ts",
+      "reception-exact-checkout-ui.test.ts",
+      "referral-arrival-http.test.ts",
+      "referrals-http.test.ts",
+      "report-page-ui.test.ts",
+      "reports-applied-filters-ui.test.ts",
+      "reports-center-ui-journey.test.ts",
+      "reports-intelligence-http.test.ts",
+      "return-booking-responsibility-browser.test.ts",
+      "saved-reports-http.test.ts",
+      "self-password-http.test.ts",
+      "session.test.ts",
+      "settings-write-contract.test.ts",
+      "similar-collection-warning-http.test.ts",
+      "td05-currency-safety-2.test.ts",
+      "td05-currency-safety-3.test.ts",
+      "today-readiness-built-page.test.ts",
+      "today-readiness-real-react.test.ts",
+      "treatment-financial-owner-react.test.ts",
+      "waiting-list-rbac.test.ts",
+      "waiting-list-ui-journey.test.ts",
+      "walkout-verified-balances-ui.test.ts"
+    ],
+    "artifacts": [
+      {
+        "name": "login-reference-ui",
+        "output": "evidence_login_reference_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "invoice-grouped-entry-ui",
+        "output": "evidence_invoice_grouped_entry_ui",
+        "producers": [
+          {
+            "test": "invoice-grouped-entry-journey.test.ts",
+            "witness": "invoice-grouped-entry",
+            "paths": [
+              ".settings-ui-artifacts/invoice-grouped-entry/grouped-1280.png",
+              ".settings-ui-artifacts/invoice-grouped-entry/grouped-1280.json",
+              ".settings-ui-artifacts/invoice-grouped-entry/grouped-390.png",
+              ".settings-ui-artifacts/invoice-grouped-entry/grouped-390.json",
+              ".settings-ui-artifacts/invoice-grouped-entry/split-1280.png",
+              ".settings-ui-artifacts/invoice-grouped-entry/split-1280.json",
+              ".settings-ui-artifacts/invoice-grouped-entry/split-390.png",
+              ".settings-ui-artifacts/invoice-grouped-entry/split-390.json",
+              ".settings-ui-artifacts/invoice-grouped-entry/split-tooth-390.png",
+              ".settings-ui-artifacts/invoice-grouped-entry/split-tooth-390.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/invoice-grouped-entry/grouped-1280.png",
+          ".settings-ui-artifacts/invoice-grouped-entry/grouped-1280.json",
+          ".settings-ui-artifacts/invoice-grouped-entry/grouped-390.png",
+          ".settings-ui-artifacts/invoice-grouped-entry/grouped-390.json",
+          ".settings-ui-artifacts/invoice-grouped-entry/split-1280.png",
+          ".settings-ui-artifacts/invoice-grouped-entry/split-1280.json",
+          ".settings-ui-artifacts/invoice-grouped-entry/split-390.png",
+          ".settings-ui-artifacts/invoice-grouped-entry/split-390.json",
+          ".settings-ui-artifacts/invoice-grouped-entry/split-tooth-390.png",
+          ".settings-ui-artifacts/invoice-grouped-entry/split-tooth-390.json"
+        ]
+      },
+      {
+        "name": "leadership-hub-ui",
+        "output": "evidence_leadership_hub_ui",
+        "producers": [
+          {
+            "test": "leadership-hub-ui-journey.test.ts",
+            "witness": "leadership-hub-",
+            "paths": [
+              "/tmp/leadership-hub-evidence/leadership-hub-populated-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-populated-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-day-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-day-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-lab-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-lab-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-tasks-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-tasks-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-empty-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-empty-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-error-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-error-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-finance-cash-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-finance-cash-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-finance-billing-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-finance-billing-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-finance-debts-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-finance-debts-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-finance-period-1440.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-finance-period-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-finance-period-zoom-390.png",
+              "/tmp/leadership-hub-evidence/leadership-hub-performance.json"
+            ]
+          }
+        ],
+        "paths": [
+          "/tmp/leadership-hub-evidence/leadership-hub-populated-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-populated-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-day-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-day-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-lab-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-lab-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-tasks-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-tasks-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-empty-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-empty-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-error-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-error-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-finance-cash-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-finance-cash-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-finance-billing-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-finance-billing-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-finance-debts-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-finance-debts-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-finance-period-1440.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-finance-period-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-finance-period-zoom-390.png",
+          "/tmp/leadership-hub-evidence/leadership-hub-performance.json"
+        ]
+      },
+      {
+        "name": "lab-open-backlog-ui",
+        "output": "evidence_lab_open_backlog_ui",
+        "producers": [
+          {
+            "test": "lab-backlog-ui-journey.test.ts",
+            "witness": "lab-backlog-summary",
+            "paths": [
+              "/tmp/lab-backlog-evidence/lab-backlog-summary-1280.png",
+              "/tmp/lab-backlog-evidence/lab-backlog-summary-390.png",
+              "/tmp/lab-backlog-evidence/lab-backlog-received-1280.png",
+              "/tmp/lab-backlog-evidence/lab-backlog-received-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          "/tmp/lab-backlog-evidence/lab-backlog-summary-1280.png",
+          "/tmp/lab-backlog-evidence/lab-backlog-summary-390.png",
+          "/tmp/lab-backlog-evidence/lab-backlog-received-1280.png",
+          "/tmp/lab-backlog-evidence/lab-backlog-received-390.png"
+        ]
+      },
+      {
+        "name": "hr-workflow-ui",
+        "output": "evidence_hr_workflow_ui",
+        "producers": [
+          {
+            "test": "hr-payroll-journey.test.ts",
+            "witness": "hr-workforce-",
+            "paths": [
+              "/tmp/hr-evidence/hr-workforce-390.png",
+              "/tmp/hr-evidence/hr-workforce-1280.png",
+              "/tmp/hr-evidence/hr-nextday-approved-390.png",
+              "/tmp/hr-evidence/hr-nextday-approved-1280.png",
+              "/tmp/hr-evidence/hr-payroll-multipage-390.pdf"
+            ]
+          },
+          {
+            "test": "hr-ui-journey.test.ts",
+            "witness": "hr-tasks-",
+            "paths": [
+              "/tmp/hr-evidence/hr-phone-390.png",
+              "/tmp/hr-evidence/hr-tasks-desktop-1280.png",
+              "/tmp/hr-evidence/hr-staff-report.pdf",
+              "/tmp/hr-evidence/hr-tasks-report.pdf"
+            ]
+          }
+        ],
+        "paths": [
+          "/tmp/hr-evidence/hr-workforce-390.png",
+          "/tmp/hr-evidence/hr-workforce-1280.png",
+          "/tmp/hr-evidence/hr-nextday-approved-390.png",
+          "/tmp/hr-evidence/hr-nextday-approved-1280.png",
+          "/tmp/hr-evidence/hr-payroll-multipage-390.pdf",
+          "/tmp/hr-evidence/hr-phone-390.png",
+          "/tmp/hr-evidence/hr-tasks-desktop-1280.png",
+          "/tmp/hr-evidence/hr-staff-report.pdf",
+          "/tmp/hr-evidence/hr-tasks-report.pdf"
+        ]
+      },
+      {
+        "name": "daily-report-selected-date-ui",
+        "output": "evidence_daily_report_selected_date_ui",
+        "producers": [
+          {
+            "test": "report-page-ui.test.ts",
+            "witness": "daily-report-selected",
+            "paths": [
+              ".settings-ui-artifacts/daily-report-selected-day-1280.png",
+              ".settings-ui-artifacts/daily-report-selected-day-390.png",
+              ".settings-ui-artifacts/daily-report-selected-day-print-1280.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/daily-report-selected-day-1280.png",
+          ".settings-ui-artifacts/daily-report-selected-day-390.png",
+          ".settings-ui-artifacts/daily-report-selected-day-print-1280.png"
+        ]
+      },
+      {
+        "name": "daily-report-design-ui",
+        "output": "evidence_daily_report_design_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-statement-cutoff-ui",
+        "output": "evidence_patient_statement_cutoff_ui",
+        "producers": [
+          {
+            "test": "patient-statement-cutoff-ui.test.ts",
+            "witness": "patient-statement-cutoff",
+            "paths": [
+              ".settings-ui-artifacts/patient-statement-cutoff-screen.png",
+              ".settings-ui-artifacts/patient-statement-cutoff-print.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-statement-cutoff-screen.png",
+          ".settings-ui-artifacts/patient-statement-cutoff-print.png"
+        ]
+      },
+      {
+        "name": "lab-pricing-ui-screenshots",
+        "output": "evidence_lab_pricing_ui_screenshots",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "quick-booking-frozen-ui-screenshots",
+        "output": "evidence_quick_booking_frozen_ui_screenshots",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "prescription-patient-context-ui",
+        "output": "evidence_prescription_patient_context_ui",
+        "producers": [
+          {
+            "test": "prescription-diagnosis-ui.test.ts",
+            "witness": "prescription-patient-context",
+            "paths": [
+              ".settings-ui-artifacts/prescription-patient-context-warning-1280.png",
+              ".settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json",
+              ".settings-ui-artifacts/prescription-patient-context-unavailable-1280.png",
+              ".settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json",
+              ".settings-ui-artifacts/prescription-patient-context-warning-390.png",
+              ".settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json",
+              ".settings-ui-artifacts/prescription-patient-context-unavailable-390.png",
+              ".settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/prescription-patient-context-warning-1280.png",
+          ".settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json",
+          ".settings-ui-artifacts/prescription-patient-context-unavailable-1280.png",
+          ".settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json",
+          ".settings-ui-artifacts/prescription-patient-context-warning-390.png",
+          ".settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json",
+          ".settings-ui-artifacts/prescription-patient-context-unavailable-390.png",
+          ".settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json"
+        ]
+      },
+      {
+        "name": "prescription-diagnosis-ui-screenshot",
+        "output": "evidence_prescription_diagnosis_ui_screenshot",
+        "producers": [
+          {
+            "test": "prescription-diagnosis-ui.test.ts",
+            "witness": "prescription-diagnosis-pinned",
+            "paths": [
+              ".settings-ui-artifacts/prescription-diagnosis-pinned.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/prescription-diagnosis-pinned.png"
+        ]
+      },
+      {
+        "name": "positive-print-routes-ui",
+        "output": "evidence_positive_print_routes_ui",
+        "producers": [
+          {
+            "test": "positive-print-routes-ui.test.ts",
+            "witness": "positive-print-routes",
+            "paths": [
+              ".settings-ui-artifacts/positive-print-routes/*.png",
+              ".settings-ui-artifacts/positive-print-routes/*.pdf",
+              ".settings-ui-artifacts/positive-print-routes/*.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/positive-print-routes/*.png",
+          ".settings-ui-artifacts/positive-print-routes/*.pdf",
+          ".settings-ui-artifacts/positive-print-routes/*.json"
+        ]
+      },
+      {
+        "name": "finance-report-visibility-ui-screenshots",
+        "output": "evidence_finance_report_visibility_ui_screenshots",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "finance-shift-read-ui-screenshots",
+        "output": "evidence_finance_shift_read_ui_screenshots",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "expense-catalogue-visibility-ui-screenshots",
+        "output": "evidence_expense_catalogue_visibility_ui_screenshots",
+        "producers": [
+          {
+            "test": "expense-catalogue-visibility-ui.test.ts",
+            "witness": "expense-catalogue-restricted",
+            "paths": [
+              ".settings-ui-artifacts/expense-catalogue-restricted-1280.png",
+              ".settings-ui-artifacts/expense-catalogue-restricted-390.png",
+              ".settings-ui-artifacts/expense-catalogue-revoked-open-report.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/expense-catalogue-restricted-1280.png",
+          ".settings-ui-artifacts/expense-catalogue-restricted-390.png",
+          ".settings-ui-artifacts/expense-catalogue-revoked-open-report.png"
+        ]
+      },
+      {
+        "name": "patient-dossier-endo-print-ui",
+        "output": "evidence_patient_dossier_endo_print_ui",
+        "producers": [
+          {
+            "test": "patient-dossier-endo-print-ui.test.ts",
+            "witness": "patient-dossier-endo",
+            "paths": [
+              ".settings-ui-artifacts/patient-dossier-endo-screen.png",
+              ".settings-ui-artifacts/patient-dossier-endo-mobile-390.png",
+              ".settings-ui-artifacts/patient-dossier-endo-print.png",
+              ".settings-ui-artifacts/patient-dossier-endo-a4.pdf"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-dossier-endo-screen.png",
+          ".settings-ui-artifacts/patient-dossier-endo-mobile-390.png",
+          ".settings-ui-artifacts/patient-dossier-endo-print.png",
+          ".settings-ui-artifacts/patient-dossier-endo-a4.pdf"
+        ]
+      },
+      {
+        "name": "patient-statement-current-print-ui",
+        "output": "evidence_patient_statement_current_print_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-statement-workflow-ui",
+        "output": "evidence_patient_statement_workflow_ui",
+        "producers": [
+          {
+            "test": "patient-statement-workflow-ui.test.ts",
+            "witness": "patient-statement-workflow",
+            "paths": [
+              ".settings-ui-artifacts/patient-statement-workflow/preview-*.png",
+              ".settings-ui-artifacts/patient-statement-workflow/statement-*.pdf",
+              ".settings-ui-artifacts/patient-statement-workflow/statement-*.png",
+              ".settings-ui-artifacts/patient-statement-workflow/fallback-reviewed.pdf"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-statement-workflow/preview-*.png",
+          ".settings-ui-artifacts/patient-statement-workflow/statement-*.pdf",
+          ".settings-ui-artifacts/patient-statement-workflow/statement-*.png",
+          ".settings-ui-artifacts/patient-statement-workflow/fallback-reviewed.pdf"
+        ]
+      },
+      {
+        "name": "portal-historical-details-evidence",
+        "output": "evidence_portal_historical_details_evidence",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "clinical-visit-pending-notes-ui",
+        "output": "evidence_clinical_visit_pending_notes_ui",
+        "producers": [
+          {
+            "test": "clinical-visit-pending-notes-ui.test.ts",
+            "witness": "clinical-visit-pending",
+            "paths": [
+              ".settings-ui-artifacts/clinical-visit-pending-notes.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/clinical-visit-pending-notes.png"
+        ]
+      },
+      {
+        "name": "clinical-visit-owner-ui",
+        "output": "evidence_clinical_visit_owner_ui",
+        "producers": [
+          {
+            "test": "clinical-visit-owner-ui.test.ts",
+            "witness": "clinical-visit-owner-pending-",
+            "paths": [
+              ".settings-ui-artifacts/clinical-visit-owner-pending-1280.png",
+              ".settings-ui-artifacts/clinical-visit-owner-pending-390.png",
+              ".settings-ui-artifacts/clinical-visit-owner-ready-1280.png",
+              ".settings-ui-artifacts/clinical-visit-owner-ready-390.png",
+              ".settings-ui-artifacts/clinical-visit-owner-stay-1280.png",
+              ".settings-ui-artifacts/clinical-visit-owner-stay-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/clinical-visit-owner-pending-1280.png",
+          ".settings-ui-artifacts/clinical-visit-owner-pending-390.png",
+          ".settings-ui-artifacts/clinical-visit-owner-ready-1280.png",
+          ".settings-ui-artifacts/clinical-visit-owner-ready-390.png",
+          ".settings-ui-artifacts/clinical-visit-owner-stay-1280.png",
+          ".settings-ui-artifacts/clinical-visit-owner-stay-390.png"
+        ]
+      },
+      {
+        "name": "ortho-adjustment-wire-defaults-ui",
+        "output": "evidence_ortho_adjustment_wire_defaults_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-regimen-defaults-ui",
+        "output": "evidence_ortho_regimen_defaults_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-alert-freshness-ui",
+        "output": "evidence_patient_alert_freshness_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "clinical-visit-diagnosis-reference-ui",
+        "output": "evidence_clinical_visit_diagnosis_reference_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "clinical-visit-ortho-entry-ui",
+        "output": "evidence_clinical_visit_ortho_entry_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "accounting-carry-forward-ui",
+        "output": "evidence_accounting_carry_forward_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "manual-cash-containment-ui",
+        "output": "evidence_manual_cash_containment_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-navigation-draft-ui",
+        "output": "evidence_patient_navigation_draft_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-compact-context-ui",
+        "output": "evidence_patient_compact_context_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "endodontics-cockpit-ui",
+        "output": "evidence_endodontics_cockpit_ui",
+        "producers": [
+          {
+            "test": "endodontics-ui-journey.test.ts",
+            "witness": "endodontics-cockpit-",
+            "paths": [
+              ".settings-ui-artifacts/endodontics-cockpit-1280.png",
+              ".settings-ui-artifacts/endodontics-cockpit-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/endodontics-cockpit-1280.png",
+          ".settings-ui-artifacts/endodontics-cockpit-390.png"
+        ]
+      },
+      {
+        "name": "endodontics-reference-read-safety-ui",
+        "output": "evidence_endodontics_reference_read_safety_ui",
+        "producers": [
+          {
+            "test": "endodontics-ui-journey.test.ts",
+            "witness": "endodontics-read-denied",
+            "paths": [
+              ".settings-ui-artifacts/endodontics-read-denied-1280.png",
+              ".settings-ui-artifacts/endodontics-read-denied-390.png",
+              ".settings-ui-artifacts/endodontics-read-denied-1280-bounds.json",
+              ".settings-ui-artifacts/endodontics-read-denied-390-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/endodontics-read-denied-1280.png",
+          ".settings-ui-artifacts/endodontics-read-denied-390.png",
+          ".settings-ui-artifacts/endodontics-read-denied-1280-bounds.json",
+          ".settings-ui-artifacts/endodontics-read-denied-390-bounds.json"
+        ]
+      },
+      {
+        "name": "patient-cockpit-readiness-ui",
+        "output": "evidence_patient_cockpit_readiness_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "legacy-patient-guidance-ui",
+        "output": "evidence_legacy_patient_guidance_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-diagnosis-case-ui",
+        "output": "evidence_ortho_diagnosis_case_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "legacy-archive-reader-screenshots",
+        "output": "evidence_legacy_archive_reader_screenshots",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-package-read-state-ui",
+        "output": "evidence_ortho_package_read_state_ui",
+        "producers": [
+          {
+            "test": "ortho-package-read-state-ui.test.ts",
+            "witness": "ortho-package-unavailable",
+            "paths": [
+              ".settings-ui-artifacts/ortho-package-unavailable-1280.png",
+              ".settings-ui-artifacts/ortho-package-unavailable-390.png",
+              ".settings-ui-artifacts/ortho-package-funded-1280.png",
+              ".settings-ui-artifacts/ortho-package-funded-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-package-unavailable-1280.png",
+          ".settings-ui-artifacts/ortho-package-unavailable-390.png",
+          ".settings-ui-artifacts/ortho-package-funded-1280.png",
+          ".settings-ui-artifacts/ortho-package-funded-390.png"
+        ]
+      },
+      {
+        "name": "plan-payment-visibility-ui",
+        "output": "evidence_plan_payment_visibility_ui",
+        "producers": [
+          {
+            "test": "plan-payment-visibility-http.test.ts",
+            "witness": "plan-payment-hidden",
+            "paths": [
+              ".settings-ui-artifacts/plan-payment-hidden-1280.png",
+              ".settings-ui-artifacts/plan-payment-hidden-390.png",
+              ".settings-ui-artifacts/plan-payment-denied-1280.png",
+              ".settings-ui-artifacts/plan-payment-denied-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/plan-payment-hidden-1280.png",
+          ".settings-ui-artifacts/plan-payment-hidden-390.png",
+          ".settings-ui-artifacts/plan-payment-denied-1280.png",
+          ".settings-ui-artifacts/plan-payment-denied-390.png"
+        ]
+      },
+      {
+        "name": "ortho-records-case-ui",
+        "output": "evidence_ortho_records_case_ui",
+        "producers": [
+          {
+            "test": "ortho-records-case-ui.test.ts",
+            "witness": "ortho-records-case",
+            "paths": [
+              ".settings-ui-artifacts/ortho-records-case-1280.png",
+              ".settings-ui-artifacts/ortho-records-references-1280.png",
+              ".settings-ui-artifacts/ortho-records-case-390.png",
+              ".settings-ui-artifacts/ortho-records-profile-390.png",
+              ".settings-ui-artifacts/ortho-records-references-390.png",
+              ".settings-ui-artifacts/ortho-records-unavailable-390.png",
+              ".settings-ui-artifacts/ortho-records-ceph-summary-1280.png",
+              ".settings-ui-artifacts/ortho-records-ceph-summary-390.png",
+              ".settings-ui-artifacts/ortho-records-capture-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-records-case-1280.png",
+          ".settings-ui-artifacts/ortho-records-references-1280.png",
+          ".settings-ui-artifacts/ortho-records-case-390.png",
+          ".settings-ui-artifacts/ortho-records-profile-390.png",
+          ".settings-ui-artifacts/ortho-records-references-390.png",
+          ".settings-ui-artifacts/ortho-records-unavailable-390.png",
+          ".settings-ui-artifacts/ortho-records-ceph-summary-1280.png",
+          ".settings-ui-artifacts/ortho-records-ceph-summary-390.png",
+          ".settings-ui-artifacts/ortho-records-capture-bounds.json"
+        ]
+      },
+      {
+        "name": "legacy-checklist-refresh-ui",
+        "output": "evidence_legacy_checklist_refresh_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "commission-category-editor-ui",
+        "output": "evidence_commission_category_editor_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "phone-doctor-filter-ui",
+        "output": "evidence_phone_doctor_filter_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "appointment-reminder-compact-ui",
+        "output": "evidence_appointment_reminder_compact_ui",
+        "producers": [
+          {
+            "test": "appointment-reminder-compact-ui.test.ts",
+            "witness": "appointment-reminder-compact",
+            "paths": [
+              ".settings-ui-artifacts/appointment-reminder-compact-1280.png",
+              ".settings-ui-artifacts/appointment-reminder-compact-390.png",
+              ".settings-ui-artifacts/appointment-reminder-compact-320.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/appointment-reminder-compact-1280.png",
+          ".settings-ui-artifacts/appointment-reminder-compact-390.png",
+          ".settings-ui-artifacts/appointment-reminder-compact-320.png"
+        ]
+      },
+      {
+        "name": "patient-invoice-recovery-labels-ui",
+        "output": "evidence_patient_invoice_recovery_labels_ui",
+        "producers": [
+          {
+            "test": "patient-invoice-recovery-labels-ui.test.ts",
+            "witness": "invoice-recovery-partial",
+            "paths": [
+              ".settings-ui-artifacts/invoice-recovery-partial-1280.png",
+              ".settings-ui-artifacts/invoice-recovery-credit-1280.png",
+              ".settings-ui-artifacts/invoice-recovery-partial-390.png",
+              ".settings-ui-artifacts/invoice-recovery-credit-390.png",
+              ".settings-ui-artifacts/invoice-recovery-1280-bounds.json",
+              ".settings-ui-artifacts/invoice-recovery-390-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/invoice-recovery-partial-1280.png",
+          ".settings-ui-artifacts/invoice-recovery-credit-1280.png",
+          ".settings-ui-artifacts/invoice-recovery-partial-390.png",
+          ".settings-ui-artifacts/invoice-recovery-credit-390.png",
+          ".settings-ui-artifacts/invoice-recovery-1280-bounds.json",
+          ".settings-ui-artifacts/invoice-recovery-390-bounds.json"
+        ]
+      },
+      {
+        "name": "patient-ortho-parent-read-safety-ui",
+        "output": "evidence_patient_ortho_parent_read_safety_ui",
+        "producers": [
+          {
+            "test": "patient-ortho-read-safety-ui.test.ts",
+            "witness": "patient-ortho-parent",
+            "paths": [
+              ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png",
+              ".settings-ui-artifacts/patient-ortho-parent-read-safety-390.png",
+              ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json",
+              ".settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png",
+          ".settings-ui-artifacts/patient-ortho-parent-read-safety-390.png",
+          ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json",
+          ".settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json"
+        ]
+      },
+      {
+        "name": "patient-ceph-post-uncertainty-ui",
+        "output": "evidence_patient_ceph_post_uncertainty_ui",
+        "producers": [
+          {
+            "test": "patient-ceph-post-built-page.test.ts",
+            "witness": "patient-ceph-post-uncertain-",
+            "paths": [
+              ".settings-ui-artifacts/patient-ceph-post-uncertain-1280.png",
+              ".settings-ui-artifacts/patient-ceph-post-uncertain-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-ceph-post-uncertain-1280.png",
+          ".settings-ui-artifacts/patient-ceph-post-uncertain-390.png"
+        ]
+      },
+      {
+        "name": "ortho-photo-completeness-ui",
+        "output": "evidence_ortho_photo_completeness_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-unbooked-followup-ui",
+        "output": "evidence_ortho_unbooked_followup_ui",
+        "producers": [
+          {
+            "test": "ortho-followup-reminder-built-page.test.ts",
+            "witness": "ortho-unbooked-followup",
+            "paths": [
+              ".settings-ui-artifacts/ortho-unbooked-followup-390.png",
+              ".settings-ui-artifacts/ortho-unbooked-followup-1280.png",
+              ".settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json",
+              ".settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-unbooked-followup-390.png",
+          ".settings-ui-artifacts/ortho-unbooked-followup-1280.png",
+          ".settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json",
+          ".settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json"
+        ]
+      },
+      {
+        "name": "ortho-planned-case-followup-ui",
+        "output": "evidence_ortho_planned_case_followup_ui",
+        "producers": [
+          {
+            "test": "ortho-planned-case-followup-built-page.test.ts",
+            "witness": "ortho-planned-followup",
+            "paths": [
+              ".settings-ui-artifacts/ortho-planned-followup-exact-390.png",
+              ".settings-ui-artifacts/ortho-planned-followup-exact-1280.png",
+              ".settings-ui-artifacts/ortho-planned-followup-review-390.png",
+              ".settings-ui-artifacts/ortho-planned-followup-review-1280.png",
+              ".settings-ui-artifacts/ortho-planned-followup-conflict-390.png",
+              ".settings-ui-artifacts/ortho-planned-followup-conflict-1280.png",
+              ".settings-ui-artifacts/ortho-planned-followup-exact-390.json",
+              ".settings-ui-artifacts/ortho-planned-followup-exact-1280.json",
+              ".settings-ui-artifacts/ortho-planned-followup-review-390.json",
+              ".settings-ui-artifacts/ortho-planned-followup-review-1280.json",
+              ".settings-ui-artifacts/ortho-planned-followup-conflict-390.json",
+              ".settings-ui-artifacts/ortho-planned-followup-conflict-1280.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-planned-followup-exact-390.png",
+          ".settings-ui-artifacts/ortho-planned-followup-exact-1280.png",
+          ".settings-ui-artifacts/ortho-planned-followup-review-390.png",
+          ".settings-ui-artifacts/ortho-planned-followup-review-1280.png",
+          ".settings-ui-artifacts/ortho-planned-followup-conflict-390.png",
+          ".settings-ui-artifacts/ortho-planned-followup-conflict-1280.png",
+          ".settings-ui-artifacts/ortho-planned-followup-exact-390.json",
+          ".settings-ui-artifacts/ortho-planned-followup-exact-1280.json",
+          ".settings-ui-artifacts/ortho-planned-followup-review-390.json",
+          ".settings-ui-artifacts/ortho-planned-followup-review-1280.json",
+          ".settings-ui-artifacts/ortho-planned-followup-conflict-390.json",
+          ".settings-ui-artifacts/ortho-planned-followup-conflict-1280.json"
+        ]
+      },
+      {
+        "name": "display-public-synthetic-ui",
+        "output": "evidence_display_public_synthetic_ui",
+        "producers": [
+          {
+            "test": "canonical-display-journey.test.ts",
+            "witness": "display-public-1440",
+            "paths": [
+              ".settings-ui-artifacts/display-public-1440.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/display-public-1440.png"
+        ]
+      },
+      {
+        "name": "today-readiness-read-lifetime-ui",
+        "output": "evidence_today_readiness_read_lifetime_ui",
+        "producers": [
+          {
+            "test": "today-readiness-built-page.test.ts",
+            "witness": "today-readiness-",
+            "paths": [
+              ".settings-ui-artifacts/today-readiness-1280.png",
+              ".settings-ui-artifacts/today-readiness-390.png",
+              ".settings-ui-artifacts/today-readiness-1280-bounds.json",
+              ".settings-ui-artifacts/today-readiness-390-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/today-readiness-1280.png",
+          ".settings-ui-artifacts/today-readiness-390.png",
+          ".settings-ui-artifacts/today-readiness-1280-bounds.json",
+          ".settings-ui-artifacts/today-readiness-390-bounds.json"
+        ]
+      },
+      {
+        "name": "service-raw-category-display-ui",
+        "output": "evidence_service_raw_category_display_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "legacy-reconciliation-preview-ui",
+        "output": "evidence_legacy_reconciliation_preview_ui",
+        "producers": [
+          {
+            "test": "legacy-reconciliation-preview-built-page.test.ts",
+            "witness": "legacy-reconciliation-preview",
+            "paths": [
+              ".settings-ui-artifacts/legacy-reconciliation-preview-390.png",
+              ".settings-ui-artifacts/legacy-reconciliation-preview-1280.png",
+              ".settings-ui-artifacts/legacy-reconciliation-preview-390-bounds.json",
+              ".settings-ui-artifacts/legacy-reconciliation-preview-1280-bounds.json",
+              ".settings-ui-artifacts/legacy-reconciliation-preview-390-upper-viewport.png",
+              ".settings-ui-artifacts/legacy-reconciliation-preview-390-lower-viewport.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/legacy-reconciliation-preview-390.png",
+          ".settings-ui-artifacts/legacy-reconciliation-preview-1280.png",
+          ".settings-ui-artifacts/legacy-reconciliation-preview-390-bounds.json",
+          ".settings-ui-artifacts/legacy-reconciliation-preview-1280-bounds.json",
+          ".settings-ui-artifacts/legacy-reconciliation-preview-390-upper-viewport.png",
+          ".settings-ui-artifacts/legacy-reconciliation-preview-390-lower-viewport.png"
+        ]
+      },
+      {
+        "name": "patient-cases-navigation-ui",
+        "output": "evidence_patient_cases_navigation_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "dental-chart-read-retry-ui",
+        "output": "evidence_dental_chart_read_retry_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-prescription-truth-ui",
+        "output": "evidence_ortho_prescription_truth_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-booking-default-ui",
+        "output": "evidence_ortho_booking_default_ui",
+        "producers": [
+          {
+            "test": "ortho-followup-booking-default-built-page.test.ts",
+            "witness": "ortho-booking-service",
+            "paths": [
+              ".settings-ui-artifacts/ortho-booking-service-390.png",
+              ".settings-ui-artifacts/ortho-booking-service-1280.png",
+              ".settings-ui-artifacts/ortho-booking-duration-390.png",
+              ".settings-ui-artifacts/ortho-booking-duration-1280.png",
+              ".settings-ui-artifacts/ortho-booking-390-bounds.json",
+              ".settings-ui-artifacts/ortho-booking-1280-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-booking-service-390.png",
+          ".settings-ui-artifacts/ortho-booking-service-1280.png",
+          ".settings-ui-artifacts/ortho-booking-duration-390.png",
+          ".settings-ui-artifacts/ortho-booking-duration-1280.png",
+          ".settings-ui-artifacts/ortho-booking-390-bounds.json",
+          ".settings-ui-artifacts/ortho-booking-1280-bounds.json"
+        ]
+      },
+      {
+        "name": "recall-mutation-refusal-ui",
+        "output": "evidence_recall_mutation_refusal_ui",
+        "producers": [
+          {
+            "test": "recall-mutation-refusal-ui.test.ts",
+            "witness": "recall-refusal-",
+            "paths": [
+              ".settings-ui-artifacts/recall-refusal-390.png",
+              ".settings-ui-artifacts/recall-refusal-1280.png",
+              ".settings-ui-artifacts/recall-retry-390.png",
+              ".settings-ui-artifacts/recall-retry-1280.png",
+              ".settings-ui-artifacts/recall-refusal-390-bounds.json",
+              ".settings-ui-artifacts/recall-refusal-1280-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/recall-refusal-390.png",
+          ".settings-ui-artifacts/recall-refusal-1280.png",
+          ".settings-ui-artifacts/recall-retry-390.png",
+          ".settings-ui-artifacts/recall-retry-1280.png",
+          ".settings-ui-artifacts/recall-refusal-390-bounds.json",
+          ".settings-ui-artifacts/recall-refusal-1280-bounds.json"
+        ]
+      },
+      {
+        "name": "patient-lab-status-refusal-ui",
+        "output": "evidence_patient_lab_status_refusal_ui",
+        "producers": [
+          {
+            "test": "patient-lab-status-refusal-ui.test.ts",
+            "witness": "lab-status-refusal",
+            "paths": [
+              ".settings-ui-artifacts/lab-status-refusal-390.png",
+              ".settings-ui-artifacts/lab-status-refusal-1280.png",
+              ".settings-ui-artifacts/lab-status-retry-390.png",
+              ".settings-ui-artifacts/lab-status-retry-1280.png",
+              ".settings-ui-artifacts/lab-status-refusal-390-bounds.json",
+              ".settings-ui-artifacts/lab-status-refusal-1280-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/lab-status-refusal-390.png",
+          ".settings-ui-artifacts/lab-status-refusal-1280.png",
+          ".settings-ui-artifacts/lab-status-retry-390.png",
+          ".settings-ui-artifacts/lab-status-retry-1280.png",
+          ".settings-ui-artifacts/lab-status-refusal-390-bounds.json",
+          ".settings-ui-artifacts/lab-status-refusal-1280-bounds.json"
+        ]
+      }
+    ]
+  },
+  {
+    "shard": 2,
+    "files": [
+      "accounting-carry-forward-ui.test.ts",
+      "agreement-amendment-19-crowns-journey.test.ts",
+      "agreement-unlinked-signing-http.test.ts",
+      "ai-fallback.test.ts",
+      "amended-service-billing-guard-http.test.ts",
+      "appointment-availability-http.test.ts",
+      "appointment-reschedule-scenario-isolation-http.test.ts",
+      "appointment-reschedule-ui-journey.test.ts",
+      "arrival-panel-http.test.ts",
+      "audit-coverage-http.test.ts",
+      "auto-reminders-http.test.ts",
+      "canonical-account-editor-journey.test.ts",
+      "canonical-appointments-journey.test.ts",
+      "canonical-ceph-commit-window.test.ts",
+      "canonical-ceph-complete-journey.test.ts",
+      "canonical-next-session-journey.test.ts",
+      "canonical-ortho-cases-journey.test.ts",
+      "canonical-ortho-strategy-command-journey.test.ts",
+      "canonical-ortho-strategy-editor-journey.test.ts",
+      "canonical-ortho-strategy-journey.test.ts",
+      "canonical-patient-cases-journey.test.ts",
+      "canonical-patient-writes-journey.test.ts",
+      "canonical-patients-journey.test.ts",
+      "canonical-plan-dependency-journey.test.ts",
+      "canonical-planned-visits-journey.test.ts",
+      "canonical-problem-create-journey.test.ts",
+      "canonical-problem-status-journey.test.ts",
+      "canonical-proposals-journey.test.ts",
+      "canonical-recall-journey.test.ts",
+      "canonical-restore-hold-journey.test.ts",
+      "canonical-today-queue-journey.test.ts",
+      "chair-readiness-http.test.ts",
+      "charted-visit-relink-http.test.ts",
+      "clinic-reset-http.test.ts",
+      "clinical-visit-ortho-entry-ui.test.ts",
+      "commission-category-ui-journey.test.ts",
+      "commission-config-http.test.ts",
+      "commission-detail-http.test.ts",
+      "commission-raw-category-http.test.ts",
+      "commission-statement-print-ui.test.ts",
+      "consent-reprint-integrity.test.ts",
+      "daily-clinic-report-identity-ui.test.ts",
+      "dental-chart-built-page.test.ts",
+      "dental-chart-real-react.test.ts",
+      "document-prefixes-http.test.ts",
+      "endodontics-http.test.ts",
+      "finance-report-visibility-ui.test.ts",
+      "finance-shift-read-state-ui.test.ts",
+      "financial-command-journal-browser.test.ts",
+      "fx-rate-readiness-http.test.ts",
+      "historical-correction-recovery-ui.test.ts",
+      "historical-document-workspace-ui.test.ts",
+      "hr-contract-effective-pay-ui.test.ts",
+      "hr-history-refusal-retention.test.ts",
+      "hr-leave-read-lifetime.test.ts",
+      "hr-operational-integrity-ui.test.ts",
+      "hr-payroll-attendance-disclosure.test.ts",
+      "hr-person-identity.test.ts",
+      "hr-profile-navigation.test.ts",
+      "hr-status-rollover-native.test.ts",
+      "hr-task-create-replay.test.ts",
+      "hr-task-deadline-validation-ui.test.ts",
+      "hr-task-owner-read.test.ts",
+      "hr-temporal-history-ui.test.ts",
+      "installment-plan-collect-http.test.ts",
+      "internal-referrals-http.test.ts",
+      "inventory-disabled-http-ui.test.ts",
+      "inventory-foundation-http-ui.test.ts",
+      "invoice-account-live-refresh.test.ts",
+      "invoice-clinic-continuity-journey.test.ts",
+      "invoice-currency-transition-ui.test.ts",
+      "invoice-explicit-visit-http.test.ts",
+      "invoice-first-ui-journey.test.ts",
+      "invoice-identity-correction-ui.test.ts",
+      "invoice-monthly-schedule-ui.test.ts",
+      "invoice-preview-state-journey.test.ts",
+      "invoice-quote-contract-ui.test.ts",
+      "invoice-revision-recovery-ui.test.ts",
+      "invoice-tooth-chart-journey.test.ts",
+      "invoice-visual-evidence-journey.test.ts",
+      "invoice-workspace-acceptance-ui.test.ts",
+      "lab-backlog-http.test.ts",
+      "lab-dispatch-privacy-ui.test.ts",
+      "lab-pricing-scope-ui.test.ts",
+      "lab-readiness-http.test.ts",
+      "lab-readiness-ui-journey.test.ts",
+      "lab-work-capability-http.test.ts",
+      "legacy-archive-access-http.test.ts",
+      "legacy-import-http.test.ts",
+      "legacy-onboarding-checklist-ui.test.ts",
+      "legacy-patient-context-ui.test.ts",
+      "legacy-treatment-http.test.ts",
+      "legacy-treatment-ui-journey.test.ts",
+      "login-photo-ui-browser.test.ts",
+      "login-reference-ui.test.ts",
+      "manual-cash-containment-ui.test.ts",
+      "manual-invoice-discount-http.test.ts",
+      "money-durable-recovery-ui.test.ts",
+      "opening-balance-currency-http.test.ts",
+      "operational-resource-rbac.test.ts",
+      "origin-policy.test.ts",
+      "ortho-adjustment-wire-defaults-ui.test.ts",
+      "ortho-compatibility-reference-http.test.ts",
+      "ortho-package-http.test.ts",
+      "ortho-photo-completeness-built-page.test.ts",
+      "ortho-prescription-truth-built-page.test.ts",
+      "ortho-return-booking-source-http.test.ts",
+      "party-native-balances-ui.test.ts",
+      "party-statement-print-http.test.ts",
+      "patient-cases-navigation-ui.test.ts",
+      "patient-ceph-post-real-react.test.ts",
+      "patient-cockpit-readiness-ui.test.ts",
+      "patient-diagnosis-integrity-http.test.ts",
+      "patient-diagnosis-ui.test.ts",
+      "patient-import-http.test.ts",
+      "patient-lab-read-state-ui.test.ts",
+      "patient-list-http.test.ts",
+      "patient-merge-http.test.ts",
+      "patient-navigation-ui-journey.test.ts",
+      "patient-ortho-real-react.test.ts",
+      "patient-overlap-http.test.ts",
+      "patient-statement-current-print-ui.test.ts",
+      "patient-visit-plan-ux-http.test.ts",
+      "patient-workflow-clinical-draft-ui.test.ts",
+      "patient-workflow-endo-draft-ui.test.ts",
+      "payment-idempotency-ui-journey.test.ts",
+      "performer-commission-http.test.ts",
+      "phone-width-ui-journey.test.ts",
+      "plan-creation-entry-http.test.ts",
+      "plan-installment-idempotency-ui.test.ts",
+      "plan-price-authority-http.test.ts",
+      "plan-status-http.test.ts",
+      "plan-templates-settings-http.test.ts",
+      "planned-visit-rebooking-browser.test.ts",
+      "planned-visit-rebooking-http.test.ts",
+      "portal-statement-historical-ui.test.ts",
+      "print-toolbar-media-ui.test.ts",
+      "production-backup.test.ts",
+      "quick-appointment-patient-search-ui.test.ts",
+      "quick-appointment-submission-ui.test.ts",
+      "rbac.test.ts",
+      "receipt-correction-http.test.ts",
+      "receipt-provenance-ui.test.ts",
+      "reception-signature-handoff-ui.test.ts",
+      "reconciled-reminders-http.test.ts",
+      "referrals-ui-journey.test.ts",
+      "report-page-design-ui.test.ts",
+      "reversed-installment-recovery-http.test.ts",
+      "roles-cashier-accountant-http.test.ts",
+      "screens-render.test.ts",
+      "service-raw-category-display.test.ts",
+      "settings-authorization.test.ts",
+      "settings-ui-journey.test.ts",
+      "shift-close-http.test.ts",
+      "similar-collection-warning-browser.test.ts",
+      "specialty-cases-http.test.ts",
+      "split-allocation-correction-ui.test.ts",
+      "supplier-payments-http.test.ts",
+      "td05-currency-safety.test.ts",
+      "tomorrow-card-ui-journey.test.ts",
+      "tooth-chart-visit-integrity-http.test.ts",
+      "use-durable-money-acknowledgment.test.ts",
+      "visit-actor-http.test.ts"
+    ],
+    "artifacts": [
+      {
+        "name": "login-reference-ui",
+        "output": "evidence_login_reference_ui",
+        "producers": [
+          {
+            "test": "login-reference-ui.test.ts",
+            "witness": "login-${width}",
+            "paths": [
+              ".settings-ui-artifacts/login-reference/login-1280.png",
+              ".settings-ui-artifacts/login-reference/login-390.png"
+            ]
+          },
+          {
+            "test": "login-photo-ui-browser.test.ts",
+            "witness": "login-photo-${width}",
+            "paths": [
+              ".settings-ui-artifacts/login-reference/login-photo-1280.png",
+              ".settings-ui-artifacts/login-reference/login-photo-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/login-reference/login-1280.png",
+          ".settings-ui-artifacts/login-reference/login-390.png",
+          ".settings-ui-artifacts/login-reference/login-photo-1280.png",
+          ".settings-ui-artifacts/login-reference/login-photo-390.png"
+        ]
+      },
+      {
+        "name": "invoice-grouped-entry-ui",
+        "output": "evidence_invoice_grouped_entry_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "leadership-hub-ui",
+        "output": "evidence_leadership_hub_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "lab-open-backlog-ui",
+        "output": "evidence_lab_open_backlog_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "hr-workflow-ui",
+        "output": "evidence_hr_workflow_ui",
+        "producers": [
+          {
+            "test": "hr-profile-navigation.test.ts",
+            "witness": "hr-profile-",
+            "paths": [
+              "/tmp/hr-evidence/hr-profile-390.png",
+              "/tmp/hr-evidence/hr-profile-1280.png",
+              "/tmp/hr-evidence/hr-profile-attendance-390.png",
+              "/tmp/hr-evidence/hr-profile-attendance-1280.png",
+              "/tmp/hr-evidence/hr-profile-result-390.json",
+              "/tmp/hr-evidence/hr-profile-result-1280.json",
+              "/tmp/hr-evidence/hr-profile-wage-sources.pdf"
+            ]
+          },
+          {
+            "test": "hr-contract-effective-pay-ui.test.ts",
+            "witness": "future-approved-",
+            "paths": [
+              "/tmp/hr-evidence/future-approved-390.png",
+              "/tmp/hr-evidence/future-approved-1280.png",
+              "/tmp/hr-evidence/terminal-blocked-390.png",
+              "/tmp/hr-evidence/terminal-blocked-1280.png"
+            ]
+          }
+        ],
+        "paths": [
+          "/tmp/hr-evidence/hr-profile-390.png",
+          "/tmp/hr-evidence/hr-profile-1280.png",
+          "/tmp/hr-evidence/hr-profile-attendance-390.png",
+          "/tmp/hr-evidence/hr-profile-attendance-1280.png",
+          "/tmp/hr-evidence/hr-profile-result-390.json",
+          "/tmp/hr-evidence/hr-profile-result-1280.json",
+          "/tmp/hr-evidence/hr-profile-wage-sources.pdf",
+          "/tmp/hr-evidence/future-approved-390.png",
+          "/tmp/hr-evidence/future-approved-1280.png",
+          "/tmp/hr-evidence/terminal-blocked-390.png",
+          "/tmp/hr-evidence/terminal-blocked-1280.png"
+        ]
+      },
+      {
+        "name": "daily-report-selected-date-ui",
+        "output": "evidence_daily_report_selected_date_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "daily-report-design-ui",
+        "output": "evidence_daily_report_design_ui",
+        "producers": [
+          {
+            "test": "report-page-design-ui.test.ts",
+            "witness": "daily-report-design",
+            "paths": [
+              ".settings-ui-artifacts/daily-report-design-1280.png",
+              ".settings-ui-artifacts/daily-report-design-390.png",
+              ".settings-ui-artifacts/daily-report-design-320.png",
+              ".settings-ui-artifacts/daily-report-loading-390.png",
+              ".settings-ui-artifacts/daily-report-error-390.png",
+              ".settings-ui-artifacts/daily-report-empty-day-390.png",
+              ".settings-ui-artifacts/daily-report-invalid-date-390.png",
+              ".settings-ui-artifacts/daily-report-print-a4.pdf",
+              ".settings-ui-artifacts/daily-report-high-occupancy-320.png",
+              ".settings-ui-artifacts/daily-report-design-proof.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/daily-report-design-1280.png",
+          ".settings-ui-artifacts/daily-report-design-390.png",
+          ".settings-ui-artifacts/daily-report-design-320.png",
+          ".settings-ui-artifacts/daily-report-loading-390.png",
+          ".settings-ui-artifacts/daily-report-error-390.png",
+          ".settings-ui-artifacts/daily-report-empty-day-390.png",
+          ".settings-ui-artifacts/daily-report-invalid-date-390.png",
+          ".settings-ui-artifacts/daily-report-print-a4.pdf",
+          ".settings-ui-artifacts/daily-report-high-occupancy-320.png",
+          ".settings-ui-artifacts/daily-report-design-proof.json"
+        ]
+      },
+      {
+        "name": "patient-statement-cutoff-ui",
+        "output": "evidence_patient_statement_cutoff_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "lab-pricing-ui-screenshots",
+        "output": "evidence_lab_pricing_ui_screenshots",
+        "producers": [
+          {
+            "test": "lab-pricing-scope-ui.test.ts",
+            "witness": "lab-pricing-scope",
+            "paths": [
+              ".settings-ui-artifacts/lab-pricing-scope.png",
+              ".settings-ui-artifacts/lab-pricing-scope-mobile.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/lab-pricing-scope.png",
+          ".settings-ui-artifacts/lab-pricing-scope-mobile.png"
+        ]
+      },
+      {
+        "name": "quick-booking-frozen-ui-screenshots",
+        "output": "evidence_quick_booking_frozen_ui_screenshots",
+        "producers": [
+          {
+            "test": "quick-appointment-submission-ui.test.ts",
+            "witness": "quick-booking-frozen",
+            "paths": [
+              ".settings-ui-artifacts/quick-booking-frozen-desktop.png",
+              ".settings-ui-artifacts/quick-booking-frozen-mobile.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/quick-booking-frozen-desktop.png",
+          ".settings-ui-artifacts/quick-booking-frozen-mobile.png"
+        ]
+      },
+      {
+        "name": "prescription-patient-context-ui",
+        "output": "evidence_prescription_patient_context_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "prescription-diagnosis-ui-screenshot",
+        "output": "evidence_prescription_diagnosis_ui_screenshot",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "positive-print-routes-ui",
+        "output": "evidence_positive_print_routes_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "finance-report-visibility-ui-screenshots",
+        "output": "evidence_finance_report_visibility_ui_screenshots",
+        "producers": [
+          {
+            "test": "finance-report-visibility-ui.test.ts",
+            "witness": "finance-report-revenue",
+            "paths": [
+              ".settings-ui-artifacts/finance-report-revenue-only-1280.png",
+              ".settings-ui-artifacts/finance-report-revenue-only-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/finance-report-revenue-only-1280.png",
+          ".settings-ui-artifacts/finance-report-revenue-only-390.png"
+        ]
+      },
+      {
+        "name": "finance-shift-read-ui-screenshots",
+        "output": "evidence_finance_shift_read_ui_screenshots",
+        "producers": [
+          {
+            "test": "finance-shift-read-state-ui.test.ts",
+            "witness": "finance-shift-unavailable",
+            "paths": [
+              ".settings-ui-artifacts/finance-shift-unavailable.png",
+              ".settings-ui-artifacts/finance-shift-draft-restored.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/finance-shift-unavailable.png",
+          ".settings-ui-artifacts/finance-shift-draft-restored.png"
+        ]
+      },
+      {
+        "name": "expense-catalogue-visibility-ui-screenshots",
+        "output": "evidence_expense_catalogue_visibility_ui_screenshots",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-dossier-endo-print-ui",
+        "output": "evidence_patient_dossier_endo_print_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-statement-current-print-ui",
+        "output": "evidence_patient_statement_current_print_ui",
+        "producers": [
+          {
+            "test": "patient-statement-current-print-ui.test.ts",
+            "witness": "patient-statement-current",
+            "paths": [
+              ".settings-ui-artifacts/patient-statement-current/screen.png",
+              ".settings-ui-artifacts/patient-statement-current/print.png",
+              ".settings-ui-artifacts/patient-statement-current/statement-a4.pdf",
+              ".settings-ui-artifacts/patient-statement-current/layout.json",
+              ".settings-ui-artifacts/patient-statement-current/pdf-layout.json",
+              ".settings-ui-artifacts/patient-statement-current/page-*.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-statement-current/screen.png",
+          ".settings-ui-artifacts/patient-statement-current/print.png",
+          ".settings-ui-artifacts/patient-statement-current/statement-a4.pdf",
+          ".settings-ui-artifacts/patient-statement-current/layout.json",
+          ".settings-ui-artifacts/patient-statement-current/pdf-layout.json",
+          ".settings-ui-artifacts/patient-statement-current/page-*.png"
+        ]
+      },
+      {
+        "name": "patient-statement-workflow-ui",
+        "output": "evidence_patient_statement_workflow_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "portal-historical-details-evidence",
+        "output": "evidence_portal_historical_details_evidence",
+        "producers": [
+          {
+            "test": "portal-statement-historical-ui.test.ts",
+            "witness": "corrupt-history",
+            "paths": [
+              ".settings-ui-artifacts/portal-historical-evidence/corrupt-history-390.png",
+              ".settings-ui-artifacts/portal-historical-evidence/corrupt-history-1280.png",
+              ".settings-ui-artifacts/portal-historical-evidence/database-error-response.json",
+              ".settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4.pdf",
+              ".settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4.txt",
+              ".settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4-rendered.png",
+              ".settings-ui-artifacts/portal-historical-evidence/sar-pdf-evidence.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/portal-historical-evidence/corrupt-history-390.png",
+          ".settings-ui-artifacts/portal-historical-evidence/corrupt-history-1280.png",
+          ".settings-ui-artifacts/portal-historical-evidence/database-error-response.json",
+          ".settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4.pdf",
+          ".settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4.txt",
+          ".settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4-rendered.png",
+          ".settings-ui-artifacts/portal-historical-evidence/sar-pdf-evidence.json"
+        ]
+      },
+      {
+        "name": "clinical-visit-pending-notes-ui",
+        "output": "evidence_clinical_visit_pending_notes_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "clinical-visit-owner-ui",
+        "output": "evidence_clinical_visit_owner_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-adjustment-wire-defaults-ui",
+        "output": "evidence_ortho_adjustment_wire_defaults_ui",
+        "producers": [
+          {
+            "test": "ortho-adjustment-wire-defaults-ui.test.ts",
+            "witness": "ortho-adjustment-current",
+            "paths": [
+              ".settings-ui-artifacts/ortho-adjustment-current-wires-1280.png",
+              ".settings-ui-artifacts/ortho-adjustment-current-wires-390.png",
+              ".settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json",
+              ".settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-adjustment-current-wires-1280.png",
+          ".settings-ui-artifacts/ortho-adjustment-current-wires-390.png",
+          ".settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json",
+          ".settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json"
+        ]
+      },
+      {
+        "name": "ortho-regimen-defaults-ui",
+        "output": "evidence_ortho_regimen_defaults_ui",
+        "producers": [
+          {
+            "test": "ortho-adjustment-wire-defaults-ui.test.ts",
+            "witness": "ortho-regimen-",
+            "paths": [
+              ".settings-ui-artifacts/ortho-regimen-ongoing-1280.png",
+              ".settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json",
+              ".settings-ui-artifacts/ortho-regimen-ongoing-390.png",
+              ".settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json",
+              ".settings-ui-artifacts/ortho-regimen-baseline-1280.png",
+              ".settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json",
+              ".settings-ui-artifacts/ortho-regimen-baseline-390.png",
+              ".settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json",
+              ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png",
+              ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json",
+              ".settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png",
+              ".settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json",
+              ".settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png",
+              ".settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json",
+              ".settings-ui-artifacts/clinical-visit-regimen-baseline-390.png",
+              ".settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-regimen-ongoing-1280.png",
+          ".settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json",
+          ".settings-ui-artifacts/ortho-regimen-ongoing-390.png",
+          ".settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json",
+          ".settings-ui-artifacts/ortho-regimen-baseline-1280.png",
+          ".settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json",
+          ".settings-ui-artifacts/ortho-regimen-baseline-390.png",
+          ".settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json",
+          ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png",
+          ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json",
+          ".settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png",
+          ".settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json",
+          ".settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png",
+          ".settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json",
+          ".settings-ui-artifacts/clinical-visit-regimen-baseline-390.png",
+          ".settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json"
+        ]
+      },
+      {
+        "name": "patient-alert-freshness-ui",
+        "output": "evidence_patient_alert_freshness_ui",
+        "producers": [
+          {
+            "test": "patient-navigation-ui-journey.test.ts",
+            "witness": "patient-alert-freshness",
+            "paths": [
+              ".settings-ui-artifacts/patient-alert-freshness-1280.png",
+              ".settings-ui-artifacts/patient-alert-freshness-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-alert-freshness-1280.png",
+          ".settings-ui-artifacts/patient-alert-freshness-390.png"
+        ]
+      },
+      {
+        "name": "clinical-visit-diagnosis-reference-ui",
+        "output": "evidence_clinical_visit_diagnosis_reference_ui",
+        "producers": [
+          {
+            "test": "clinical-visit-ortho-entry-ui.test.ts",
+            "witness": "clinical-visit-diagnosis",
+            "paths": [
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390.png",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390-bounds.json",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280.png",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280-bounds.json",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390.png",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390-bounds.json",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280.png",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280-bounds.json",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390.png",
+              ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390.png",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390-bounds.json",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280.png",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280-bounds.json",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390.png",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390-bounds.json",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280.png",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280-bounds.json",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390.png",
+          ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390-bounds.json"
+        ]
+      },
+      {
+        "name": "clinical-visit-ortho-entry-ui",
+        "output": "evidence_clinical_visit_ortho_entry_ui",
+        "producers": [
+          {
+            "test": "clinical-visit-ortho-entry-ui.test.ts",
+            "witness": "clinical-visit-ortho",
+            "paths": [
+              ".settings-ui-artifacts/clinical-visit-ortho-entry-1280.png",
+              ".settings-ui-artifacts/clinical-visit-ortho-entry-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/clinical-visit-ortho-entry-1280.png",
+          ".settings-ui-artifacts/clinical-visit-ortho-entry-390.png"
+        ]
+      },
+      {
+        "name": "accounting-carry-forward-ui",
+        "output": "evidence_accounting_carry_forward_ui",
+        "producers": [
+          {
+            "test": "accounting-carry-forward-ui.test.ts",
+            "witness": "accounting-carry-forward",
+            "paths": [
+              ".settings-ui-artifacts/accounting-carry-forward.png",
+              ".settings-ui-artifacts/accounting-carry-forward-mobile.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/accounting-carry-forward.png",
+          ".settings-ui-artifacts/accounting-carry-forward-mobile.png"
+        ]
+      },
+      {
+        "name": "manual-cash-containment-ui",
+        "output": "evidence_manual_cash_containment_ui",
+        "producers": [
+          {
+            "test": "manual-cash-containment-ui.test.ts",
+            "witness": "manual_cash_requires_linked_movement",
+            "paths": [
+              ".settings-ui-artifacts/manual_cash_requires_linked_movement.png",
+              ".settings-ui-artifacts/manual_cash_shift_busy.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/manual_cash_requires_linked_movement.png",
+          ".settings-ui-artifacts/manual_cash_shift_busy.png"
+        ]
+      },
+      {
+        "name": "patient-navigation-draft-ui",
+        "output": "evidence_patient_navigation_draft_ui",
+        "producers": [
+          {
+            "test": "patient-navigation-ui-journey.test.ts",
+            "witness": "patient-navigation-draft",
+            "paths": [
+              ".settings-ui-artifacts/patient-navigation-draft-1280.png",
+              ".settings-ui-artifacts/patient-navigation-draft-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-navigation-draft-1280.png",
+          ".settings-ui-artifacts/patient-navigation-draft-390.png"
+        ]
+      },
+      {
+        "name": "patient-compact-context-ui",
+        "output": "evidence_patient_compact_context_ui",
+        "producers": [
+          {
+            "test": "patient-navigation-ui-journey.test.ts",
+            "witness": "patient-compact-today",
+            "paths": [
+              ".settings-ui-artifacts/patient-compact-today-ordinary-1280.png",
+              ".settings-ui-artifacts/patient-compact-today-ordinary-390.png",
+              ".settings-ui-artifacts/patient-compact-today-long-1280.png",
+              ".settings-ui-artifacts/patient-compact-today-long-390.png",
+              ".settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png",
+              ".settings-ui-artifacts/patient-compact-treatment-ordinary-390.png",
+              ".settings-ui-artifacts/patient-compact-treatment-long-1280.png",
+              ".settings-ui-artifacts/patient-compact-treatment-long-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-compact-today-ordinary-1280.png",
+          ".settings-ui-artifacts/patient-compact-today-ordinary-390.png",
+          ".settings-ui-artifacts/patient-compact-today-long-1280.png",
+          ".settings-ui-artifacts/patient-compact-today-long-390.png",
+          ".settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png",
+          ".settings-ui-artifacts/patient-compact-treatment-ordinary-390.png",
+          ".settings-ui-artifacts/patient-compact-treatment-long-1280.png",
+          ".settings-ui-artifacts/patient-compact-treatment-long-390.png"
+        ]
+      },
+      {
+        "name": "endodontics-cockpit-ui",
+        "output": "evidence_endodontics_cockpit_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "endodontics-reference-read-safety-ui",
+        "output": "evidence_endodontics_reference_read_safety_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-cockpit-readiness-ui",
+        "output": "evidence_patient_cockpit_readiness_ui",
+        "producers": [
+          {
+            "test": "patient-cockpit-readiness-ui.test.ts",
+            "witness": "patient-cockpit-readiness-",
+            "paths": [
+              ".settings-ui-artifacts/patient-cockpit-readiness-1280.png",
+              ".settings-ui-artifacts/patient-cockpit-readiness-390.png",
+              ".settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png",
+              ".settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-cockpit-readiness-1280.png",
+          ".settings-ui-artifacts/patient-cockpit-readiness-390.png",
+          ".settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png",
+          ".settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png"
+        ]
+      },
+      {
+        "name": "legacy-patient-guidance-ui",
+        "output": "evidence_legacy_patient_guidance_ui",
+        "producers": [
+          {
+            "test": "legacy-patient-context-ui.test.ts",
+            "witness": "legacy-patient-plan",
+            "paths": [
+              ".settings-ui-artifacts/legacy-patient-plan-1280.png",
+              ".settings-ui-artifacts/legacy-patient-plan-390.png",
+              ".settings-ui-artifacts/legacy-opening-guidance-1280.png",
+              ".settings-ui-artifacts/legacy-opening-guidance-390.png",
+              ".settings-ui-artifacts/legacy-current-collection-1280.png",
+              ".settings-ui-artifacts/legacy-current-collection-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/legacy-patient-plan-1280.png",
+          ".settings-ui-artifacts/legacy-patient-plan-390.png",
+          ".settings-ui-artifacts/legacy-opening-guidance-1280.png",
+          ".settings-ui-artifacts/legacy-opening-guidance-390.png",
+          ".settings-ui-artifacts/legacy-current-collection-1280.png",
+          ".settings-ui-artifacts/legacy-current-collection-390.png"
+        ]
+      },
+      {
+        "name": "ortho-diagnosis-case-ui",
+        "output": "evidence_ortho_diagnosis_case_ui",
+        "producers": [
+          {
+            "test": "patient-diagnosis-ui.test.ts",
+            "witness": "ortho-diagnosis-case",
+            "paths": [
+              ".settings-ui-artifacts/ortho-diagnosis-case-1280.png",
+              ".settings-ui-artifacts/ortho-diagnosis-case-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-diagnosis-case-1280.png",
+          ".settings-ui-artifacts/ortho-diagnosis-case-390.png"
+        ]
+      },
+      {
+        "name": "legacy-archive-reader-screenshots",
+        "output": "evidence_legacy_archive_reader_screenshots",
+        "producers": [
+          {
+            "test": "legacy-archive-access-http.test.ts",
+            "witness": "legacy-archive-reader",
+            "paths": [
+              ".settings-ui-artifacts/legacy-archive-reader-1280.png",
+              ".settings-ui-artifacts/legacy-archive-reader-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/legacy-archive-reader-1280.png",
+          ".settings-ui-artifacts/legacy-archive-reader-390.png"
+        ]
+      },
+      {
+        "name": "ortho-package-read-state-ui",
+        "output": "evidence_ortho_package_read_state_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "plan-payment-visibility-ui",
+        "output": "evidence_plan_payment_visibility_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-records-case-ui",
+        "output": "evidence_ortho_records_case_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "legacy-checklist-refresh-ui",
+        "output": "evidence_legacy_checklist_refresh_ui",
+        "producers": [
+          {
+            "test": "legacy-onboarding-checklist-ui.test.ts",
+            "witness": "legacy-checklist-independent",
+            "paths": [
+              ".settings-ui-artifacts/legacy-checklist-independent-1280.png",
+              ".settings-ui-artifacts/legacy-checklist-independent-390.png",
+              ".settings-ui-artifacts/legacy-checklist-unavailable-1280.png",
+              ".settings-ui-artifacts/legacy-checklist-unavailable-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/legacy-checklist-independent-1280.png",
+          ".settings-ui-artifacts/legacy-checklist-independent-390.png",
+          ".settings-ui-artifacts/legacy-checklist-unavailable-1280.png",
+          ".settings-ui-artifacts/legacy-checklist-unavailable-390.png"
+        ]
+      },
+      {
+        "name": "commission-category-editor-ui",
+        "output": "evidence_commission_category_editor_ui",
+        "producers": [
+          {
+            "test": "commission-category-ui-journey.test.ts",
+            "witness": "commission-category-editor",
+            "paths": [
+              ".settings-ui-artifacts/commission-category-editor-1280.png",
+              ".settings-ui-artifacts/commission-category-editor-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/commission-category-editor-1280.png",
+          ".settings-ui-artifacts/commission-category-editor-390.png"
+        ]
+      },
+      {
+        "name": "phone-doctor-filter-ui",
+        "output": "evidence_phone_doctor_filter_ui",
+        "producers": [
+          {
+            "test": "phone-width-ui-journey.test.ts",
+            "witness": "phone-doctor-filter",
+            "paths": [
+              ".settings-ui-artifacts/phone-doctor-filter-home-390.png",
+              ".settings-ui-artifacts/phone-doctor-filter-appointments-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/phone-doctor-filter-home-390.png",
+          ".settings-ui-artifacts/phone-doctor-filter-appointments-390.png"
+        ]
+      },
+      {
+        "name": "appointment-reminder-compact-ui",
+        "output": "evidence_appointment_reminder_compact_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-invoice-recovery-labels-ui",
+        "output": "evidence_patient_invoice_recovery_labels_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-ortho-parent-read-safety-ui",
+        "output": "evidence_patient_ortho_parent_read_safety_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-ceph-post-uncertainty-ui",
+        "output": "evidence_patient_ceph_post_uncertainty_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-photo-completeness-ui",
+        "output": "evidence_ortho_photo_completeness_ui",
+        "producers": [
+          {
+            "test": "ortho-photo-completeness-built-page.test.ts",
+            "witness": "ortho-photo-completeness",
+            "paths": [
+              ".settings-ui-artifacts/ortho-photo-completeness-1280.png",
+              ".settings-ui-artifacts/ortho-photo-completeness-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-photo-completeness-1280.png",
+          ".settings-ui-artifacts/ortho-photo-completeness-390.png"
+        ]
+      },
+      {
+        "name": "ortho-unbooked-followup-ui",
+        "output": "evidence_ortho_unbooked_followup_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "ortho-planned-case-followup-ui",
+        "output": "evidence_ortho_planned_case_followup_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "display-public-synthetic-ui",
+        "output": "evidence_display_public_synthetic_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "today-readiness-read-lifetime-ui",
+        "output": "evidence_today_readiness_read_lifetime_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "service-raw-category-display-ui",
+        "output": "evidence_service_raw_category_display_ui",
+        "producers": [
+          {
+            "test": "service-raw-category-display.test.ts",
+            "witness": "service-raw-category",
+            "paths": [
+              ".settings-ui-artifacts/service-raw-category-1280.png",
+              ".settings-ui-artifacts/service-raw-category-390.png"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/service-raw-category-1280.png",
+          ".settings-ui-artifacts/service-raw-category-390.png"
+        ]
+      },
+      {
+        "name": "legacy-reconciliation-preview-ui",
+        "output": "evidence_legacy_reconciliation_preview_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-cases-navigation-ui",
+        "output": "evidence_patient_cases_navigation_ui",
+        "producers": [
+          {
+            "test": "patient-cases-navigation-ui.test.ts",
+            "witness": "patient-cases-navigation",
+            "paths": [
+              ".settings-ui-artifacts/patient-cases-navigation-1280.png",
+              ".settings-ui-artifacts/patient-cases-navigation-390.png",
+              ".settings-ui-artifacts/patient-cases-navigation-1280-bounds.json",
+              ".settings-ui-artifacts/patient-cases-navigation-390-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/patient-cases-navigation-1280.png",
+          ".settings-ui-artifacts/patient-cases-navigation-390.png",
+          ".settings-ui-artifacts/patient-cases-navigation-1280-bounds.json",
+          ".settings-ui-artifacts/patient-cases-navigation-390-bounds.json"
+        ]
+      },
+      {
+        "name": "dental-chart-read-retry-ui",
+        "output": "evidence_dental_chart_read_retry_ui",
+        "producers": [
+          {
+            "test": "dental-chart-built-page.test.ts",
+            "witness": "dental-chart-${state}",
+            "paths": [
+              ".settings-ui-artifacts/dental-chart-ready-390.png",
+              ".settings-ui-artifacts/dental-chart-ready-1280.png",
+              ".settings-ui-artifacts/dental-chart-ready-390-bounds.json",
+              ".settings-ui-artifacts/dental-chart-ready-1280-bounds.json",
+              ".settings-ui-artifacts/dental-chart-error-390.png",
+              ".settings-ui-artifacts/dental-chart-error-1280.png",
+              ".settings-ui-artifacts/dental-chart-error-390-bounds.json",
+              ".settings-ui-artifacts/dental-chart-error-1280-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/dental-chart-ready-390.png",
+          ".settings-ui-artifacts/dental-chart-ready-1280.png",
+          ".settings-ui-artifacts/dental-chart-ready-390-bounds.json",
+          ".settings-ui-artifacts/dental-chart-ready-1280-bounds.json",
+          ".settings-ui-artifacts/dental-chart-error-390.png",
+          ".settings-ui-artifacts/dental-chart-error-1280.png",
+          ".settings-ui-artifacts/dental-chart-error-390-bounds.json",
+          ".settings-ui-artifacts/dental-chart-error-1280-bounds.json"
+        ]
+      },
+      {
+        "name": "ortho-prescription-truth-ui",
+        "output": "evidence_ortho_prescription_truth_ui",
+        "producers": [
+          {
+            "test": "ortho-prescription-truth-built-page.test.ts",
+            "witness": "ortho-prescription-${kind}",
+            "paths": [
+              ".settings-ui-artifacts/ortho-prescription-unrecorded-390.png",
+              ".settings-ui-artifacts/ortho-prescription-unrecorded-1280.png",
+              ".settings-ui-artifacts/ortho-prescription-closed-custom-390.png",
+              ".settings-ui-artifacts/ortho-prescription-closed-custom-1280.png",
+              ".settings-ui-artifacts/ortho-prescription-390-bounds.json",
+              ".settings-ui-artifacts/ortho-prescription-1280-bounds.json"
+            ]
+          }
+        ],
+        "paths": [
+          ".settings-ui-artifacts/ortho-prescription-unrecorded-390.png",
+          ".settings-ui-artifacts/ortho-prescription-unrecorded-1280.png",
+          ".settings-ui-artifacts/ortho-prescription-closed-custom-390.png",
+          ".settings-ui-artifacts/ortho-prescription-closed-custom-1280.png",
+          ".settings-ui-artifacts/ortho-prescription-390-bounds.json",
+          ".settings-ui-artifacts/ortho-prescription-1280-bounds.json"
+        ]
+      },
+      {
+        "name": "ortho-booking-default-ui",
+        "output": "evidence_ortho_booking_default_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "recall-mutation-refusal-ui",
+        "output": "evidence_recall_mutation_refusal_ui",
+        "producers": [],
+        "paths": []
+      },
+      {
+        "name": "patient-lab-status-refusal-ui",
+        "output": "evidence_patient_lab_status_refusal_ui",
+        "producers": [],
+        "paths": []
+      }
+    ]
+  }
+]

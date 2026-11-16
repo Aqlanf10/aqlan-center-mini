@@ -1,3 +1,5 @@
+import { labWorkIntentSupported, readLabWorkForPlanItems } from "@/lib/lab-work-intent-db";
+import { hasInvoiceLabWork } from "@/lib/invoice-template";
 import { invoicePricingSettings } from "@/lib/invoice-price-settings-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -10,17 +12,32 @@ import { checkInvoiceAuthority } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalInvoiceCreateRefusal, readCanonicalInvoicePreview } from "@/lib/canonical-invoice-create";
 
 export const dynamic = "force-dynamic";
 
 /** Read-only linkage preview uses the exact save parser and price-authority engine. */
 export async function POST(request: Request) {
+  // M2 slice 93b (G4-1): read:invoices.preview (finance.invoices.create) inside the patient scope.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalInvoicePreview(selected.handle, await readJsonBody(request, JSON_BODY_LIMIT_BYTES)), { headers: NO_STORE }); }
+    catch (error) {
+      const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      if (error instanceof CanonicalInvoiceCreateRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّرت معاينة الربط السريري.");
+    }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canHandleMoney(session.role)) return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   let body: Record<string, unknown>;
   try { body = (await readJsonBody(request, JSON_BODY_LIMIT_BYTES) ?? {}) as Record<string, unknown>; }
   catch (error) { return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }); }
+  if (hasInvoiceLabWork(body) && session.role !== "admin" && session.role !== "doctor") return NextResponse.json({message:"وصفة المختبر السريرية للطبيب والإدارة فقط."},{status:403});
   try {
     const services = new Map((await listServices(true)).map((service) => [service.id, service]));
     const doctors = new Set((await listParties("doctor")).map((party) => party.id));
@@ -36,7 +53,10 @@ export async function POST(request: Request) {
     if (!authority.ok) return NextResponse.json({ message: authority.message }, { status: 400 });
     const lines = await previewInvoiceLinkage({ patientId: parsed.patientId, baseCurrency: parsed.baseCurrency, existingPlanId: parsed.existingPlanId, items: parsed.items });
     const planChoices = await invoicePlanChoices(getPool(), parsed.patientId, parsed.baseCurrency);
-    return NextResponse.json({ template: parsed.template, existingPlanId: parsed.existingPlanId, planChoices, lines: lines.map((line) => ({ ...line,
+    const supported = await labWorkIntentSupported(getPool());
+    const labByPlan = supported ? await readLabWorkForPlanItems(getPool(),parsed.patientId,parsed.items.flatMap(item=>item.planItemId ? [item.planItemId] : [])) : new Map();
+    return NextResponse.json({ labWorkIntentSupported:supported, template: parsed.template, existingPlanId: parsed.existingPlanId, planChoices, lines: lines.map((line,index) => ({ ...line,
+      ...(parsed.items[index]?.planItemId && !line.refusal && line.item?.mode === "existing" && line.item.id === parsed.items[index].planItemId ? labByPlan.get(parsed.items[index].planItemId!) ?? {} : {}),
       refusalMessage: line.refusal ? INVOICE_LINKAGE_MESSAGE[line.refusal] : null,
     })) }, { headers: { "Cache-Control": "no-store" } });
   } catch { return NextResponse.json({ message: "تعذّرت معاينة الربط السريري." }, { status: 500 }); }

@@ -1,0 +1,29 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-canonical-assessment.test.ts (32 tests | 1 failed) 3617ms
+   × rejects corrupted hashes, unsupported historical schema and broken lineage without repairing them 53ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-assessment.test.ts > rejects corrupted hashes, unsupported historical schema and broken lineage without repairing them
+error: new row for relation "ortho_assessment_revisions" violates check constraint "ortho_assessment_first_revision"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ Module.seedCanonicalAssessment __tests__/fixtures/canonical-ortho-assessment.ts:17:16
+
+ ❯ __tests__/postgres/ortho-canonical-assessment.test.ts:76:36
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 31 passed (32)
+   Start at  00:44:19
+   Duration  6.02s (transform 1.55s, setup 0ms, import 1.94s, tests 3.62s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

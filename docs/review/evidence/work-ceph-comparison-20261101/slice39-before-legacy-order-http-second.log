@@ -1,0 +1,46 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ceph-comparison-record-order-http.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ceph-comparison-record-order-http.test.ts (2 tests | 2 failed) 1009ms
+   × legacy compare orders actual stored imaging dates before contrary registration dates 55ms
+   × legacy superimpose orders actual stored imaging dates before contrary registration dates 34ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ceph-comparison-record-order-http.test.ts > legacy compare orders actual stored imaging dates before contrary registration dates
+ FAIL  __tests__/security-http/ceph-comparison-record-order-http.test.ts > legacy superimpose orders actual stored imaging dates before contrary registration dates
+AssertionError: expected '2' to be 1 // Object.is equality
+
+- Expected:
+1
+
++ Received:
+"2"
+
+ ❯ __tests__/security-http/ceph-comparison-record-order-http.test.ts:20:28
+     18|     const response = await authedGet(`/api/ceph/${endpoint}?first=${fi…
+     19|     expect(response.status).toBe(200); const body = await response.jso…
+     20|     expect(body.before.id).toBe(ids.before); expect(body.after.id).toB…
+       |                            ^
+     21|     expect(body.before.xrayDate).toBe("2024-01-15"); expect(body.after…
+     22|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  03:30:30
+   Duration  5.52s (transform 27ms, setup 0ms, import 66ms, tests 1.01s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

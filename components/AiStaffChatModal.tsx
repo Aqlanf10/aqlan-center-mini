@@ -352,14 +352,12 @@ export default function AiStaffChatModal({
     }
   }, [input, busy, messages, currentPatientId]);
 
-  if (!isOpen) return null;
-
   /**
    * تنفيذ إجراء مؤكد (P0.17): POST وحده، الرمز في جسم الطلب لا في روابط،
    * والزر معطّل أثناء التنفيذ منعًا للنقر المزدوج — والرمز لا يُخزَّن في
    * localStorage ولا يُسجَّل في أي مكان.
    */
-  const confirmToolExecution = async (messageId: string, token: string) => {
+  const confirmToolExecution = useCallback(async (messageId: string, token: string) => {
     setMessages((prev) => prev.map((msg) =>
       msg.id === messageId ? { ...msg, confirmationState: "executing" } : msg));
     setBusy(true);
@@ -370,10 +368,9 @@ export default function AiStaffChatModal({
         body: JSON.stringify({ token }),
       });
       const payload = (await response.json().catch(() => null)) as ConfirmationResponsePayload | null;
-      setMessages((prev) => applyConfirmationResult(prev, messageId, {
-        responseOk: response.ok, payload, id: `a_conf_${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString("ar-YE", { hour: "2-digit", minute: "2-digit" }),
-      }));
+      const result = { responseOk: response.ok, payload, id: `a_conf_${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString("ar-YE", { hour: "2-digit", minute: "2-digit" }) };
+      setMessages((prev) => applyConfirmationResult(prev, messageId, result));
     } catch {
       setMessages((prev) => prev.map((msg) =>
         msg.id === messageId ? { ...msg, confirmationState: "pending" } : msg));
@@ -381,7 +378,9 @@ export default function AiStaffChatModal({
     } finally {
       setBusy(false);
     }
-  };
+  }, []);
+
+  if (!isOpen) return null;
 
   const copyText = (id: string, text: string) => {
     navigator.clipboard.writeText(text).catch(() => {});

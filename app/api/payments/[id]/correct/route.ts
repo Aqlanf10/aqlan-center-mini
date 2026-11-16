@@ -6,6 +6,9 @@ import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalCorrectionOutcome, CanonicalPaymentRefusal, commandCanonicalPaymentCorrection, type CanonicalCorrectionCommand } from "@/lib/canonical-payment-writes";
 
 export const dynamic = "force-dynamic";
 
@@ -38,11 +41,48 @@ const MESSAGES: Record<CorrectPaymentRefusal, { status: number; message: string 
   installment_recovery_review_required: { status: 409, message: "تاريخ القسط المعكوس يحتاج مراجعة المدير قبل التصحيح؛ لم يثبت أي سند." },
 };
 
+/** The replacement's rate exactly as before: the rate saved on this key's receipt when the
+ * same actor replays the same currency, else the configured rate; plus the optional
+ * acknowledgment witness (never admission or pricing). Shared by both runtimes. */
+async function correctionRates(paymentId: number, idempotencyKey: string | null, currency: Parameters<typeof rateFromSettings>[1], actor: string) {
+  const saved=idempotencyKey?await getPaymentByIdempotencyKey(idempotencyKey):null;
+  const original=saved?await getPayment(paymentId):null;
+  const usesSavedRate = saved&&saved.patientId===original?.patientId&&saved.createdBy===actor&&saved.currency===currency;
+  const exchangeRate = usesSavedRate
+    ?saved.exchangeRate:rateFromSettings(await getSettings(), currency, CLINIC_BASE_CURRENCY);
+  // This genuine observation may prove an old raw-FX calculation after the
+  // unchanged correction matcher succeeds. It never chooses admission/pricing.
+  let acknowledgmentRate: number | null = exchangeRate;
+  if (usesSavedRate) {
+    try { acknowledgmentRate = rateFromSettings(await getSettings(), currency, CLINIC_BASE_CURRENCY); }
+    catch { acknowledgmentRate = null; } // Optional witness failure cannot change saved-key admission.
+  }
+  return { exchangeRate, acknowledgmentRate };
+}
+
+function correctionFailure(error: unknown) {
+  if (error instanceof CanonicalCorrectionOutcome) {
+    const refusal = MESSAGES[error.reason];
+    return NextResponse.json({ code: error.reason, message: refusal.message }, { status: refusal.status, headers: NO_STORE });
+  }
+  if (error instanceof CanonicalPaymentRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  if (error instanceof DebtRepaymentError) {
+    return NextResponse.json({ message: error.message, code: error.code },
+      { status: error.code === "unauthorized" ? 403 : error.code === "invalid" ? 400 : 409, headers: NO_STORE });
+  }
+  return canonicalPatientReadFailure(error, "تعذّر تصحيح السند. أعد المحاولة.");
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const session = await requireSession();
-  if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
-  if (session.role !== "admin") {
-    return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
+  // M2 slice 91: finance.payments.void (+ finance.payments.collect for a replacement) and an open shift.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  const session = selected.kind === "canonical" ? null : await requireSession();
+  if (selected.kind !== "canonical") {
+    if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+    if (session.role !== "admin") {
+      return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
+    }
   }
   const { id: rawId } = await context.params;
   const paymentId = Number(rawId);
@@ -65,6 +105,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ? idempotencyKeyRaw.trim() : null;
 
   let replacement: Parameters<typeof correctPayment>[0]["replacement"] = null;
+  let draft: CanonicalCorrectionCommand["replacement"] = null;
   let acknowledgmentRate: number | null = null;
   if (mode === "correct") {
     const currency = source.currency;
@@ -72,21 +113,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const amountMinor = parseAmount(String(source.amount ?? ""), currency);
     if (amountMinor === null || amountMinor <= 0) {
       return NextResponse.json({ message: "اكتب مبلغ السند الصحيح أكبر من صفر." }, { status: 400 });
-    }
-    const saved=idempotencyKey?await getPaymentByIdempotencyKey(idempotencyKey):null;
-    const original=saved?await getPayment(paymentId):null;
-    const usesSavedRate = saved&&saved.patientId===original?.patientId&&saved.createdBy===session.username&&saved.currency===currency;
-    const exchangeRate = usesSavedRate
-      ?saved.exchangeRate:rateFromSettings(await getSettings(), currency, CLINIC_BASE_CURRENCY);
-    // This genuine observation may prove an old raw-FX calculation after the
-    // unchanged correction matcher succeeds. It never chooses admission/pricing.
-    acknowledgmentRate = exchangeRate;
-    if (usesSavedRate) {
-      try { acknowledgmentRate = rateFromSettings(await getSettings(), currency, CLINIC_BASE_CURRENCY); }
-      catch { acknowledgmentRate = null; } // Optional witness failure cannot change saved-key admission.
-    }
-    if (exchangeRate === null) {
-      return NextResponse.json({ message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." }, { status: 409 });
     }
     let target: CorrectionTarget;
     if (source.target === "original") {
@@ -101,8 +127,30 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         openingCurrency: isCurrency(source.openingCurrency) ? source.openingCurrency : null,
       };
     }
-    replacement = { amountMinor, currency, exchangeRate, method: source.method === "transfer" ? "transfer" : "cash", target };
+    draft = { amountMinor, currency, method: source.method === "transfer" ? "transfer" : "cash", target };
+    if (session) {
+      const rates = await correctionRates(paymentId, idempotencyKey, currency, session.username);
+      acknowledgmentRate = rates.acknowledgmentRate;
+      if (rates.exchangeRate === null) {
+        return NextResponse.json({ message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." }, { status: 409 });
+      }
+      replacement = { ...draft, exchangeRate: rates.exchangeRate };
+    }
   }
+
+  if (selected.kind === "canonical") {
+    try {
+      const result = await commandCanonicalPaymentCorrection(selected.handle, { paymentId, reason, idempotencyKey, replacement: draft },
+        actor => draft ? correctionRates(paymentId, idempotencyKey, draft.currency, actor) : Promise.resolve({ exchangeRate: null, acknowledgmentRate: null }));
+      if (result.reason !== null) return correctionFailure(new CanonicalCorrectionOutcome(result.reason));
+      return NextResponse.json(
+        { original: result.original, reversal: result.reversal, replacement: result.replacement, replayed: result.replayed, idempotencyKey,
+          ...(result.acknowledgmentEvidence ? { acknowledgmentEvidence: result.acknowledgmentEvidence } : {}) },
+        { status: result.replayed ? 200 : 201, headers: NO_STORE },
+      );
+    } catch (error) { return correctionFailure(error); }
+  }
+  if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
   try {
     // التدقيق يُكتب داخل معاملة التصحيح نفسها (لا تصحيح بلا أثره).

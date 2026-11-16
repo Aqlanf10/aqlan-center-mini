@@ -1,0 +1,220 @@
+
+ RUN  v4.1.12 <checkout>
+
+ ❯ __tests__/dental-ai-engine.test.ts (15 tests | 2 failed) 596ms
+     × يتعرف على الاستعلام عن رصيد وحساب مريض محدد (Patient Query) 16ms
+     × يتعرف على الاستعلام عن ملف وبيانات مريض محدد (Patient Query) 10ms
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs (6 tests | 2 failed) 2275ms
+   × checked-in exhaustive source inventory has no drift or API export mismatch 175ms
+   × CLI drift success and explicit NOT_READY failure are intentional, not exceptions 2079ms
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs (6 tests | 2 failed) 2419ms
+   × checked-in exhaustive source inventory has no drift or API export mismatch 170ms
+   × CLI drift success and explicit NOT_READY failure are intentional, not exceptions 2229ms
+ ❯ __tests__/clinic-zone.test.ts (5 tests | 1 failed) 88ms
+     × الاسم مكتوبٌ في مصدره وحده — لا في شيفرة الإنتاج 72ms
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/clinic-zone.test.ts > توقيت العيادة > الاسم مكتوبٌ في مصدره وحده — لا في شيفرة الإنتاج
+AssertionError: التوقيت مكتوبٌ خارج مصدره في: components/finance/CanonicalShifts.tsx: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "components/finance/CanonicalShifts.tsx",
++ ]
+
+ ❯ __tests__/clinic-zone.test.ts:50:80
+     48|       }
+     49|     }
+     50|     expect(offenders, `التوقيت مكتوبٌ خارج مصدره في: ${offenders.join(…
+       |                                                                                ^
+     51|   });
+     52|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  __tests__/dental-ai-engine.test.ts > محرك الذكاء الاصطناعي السريري المتخصص لطب الأسنان (Dental AI Engine) > يتعرف على الاستعلام عن رصيد وحساب مريض محدد (Patient Query)
+AssertionError: expected 'general_clinical' to be 'patient_query' // Object.is equality
+
+Expected: "patient_query"
+Received: "general_clinical"
+
+ ❯ __tests__/dental-ai-engine.test.ts:147:29
+    145|     ]);
+    146|
+    147|     expect(result.category).toBe("patient_query");
+       |                             ^
+    148|     expect(result.reply).toContain("سالم أحمد");
+    149|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  __tests__/dental-ai-engine.test.ts > محرك الذكاء الاصطناعي السريري المتخصص لطب الأسنان (Dental AI Engine) > يتعرف على الاستعلام عن ملف وبيانات مريض محدد (Patient Query)
+AssertionError: expected 'general_clinical' to be 'patient_query' // Object.is equality
+
+Expected: "patient_query"
+Received: "general_clinical"
+
+ ❯ __tests__/dental-ai-engine.test.ts:156:29
+    154|     ]);
+    155|
+    156|     expect(result.category).toBe("patient_query");
+       |                             ^
+    157|     expect(result.reply).toContain("محمد علي");
+    158|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  scripts/audits/staff-cutover-readiness.test.mjs > checked-in exhaustive source inventory has no drift or API export mismatch
+AssertionError: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    baseCommit: '74b82cea27d407626fb3c5e691bf68e6defb4598',
+    canonicalDirectReferences: [],
+    formatVersion: 2,
+    layouts: [
+...
+    scope: 'All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.',
++   sourceDigest: '40aa2aeb18fec324774cd4f5aa47dd4230d11f33ddceaf99725913b7b4ee9251',
+-   sourceDigest: 'd68f87bc62251ce11058a82cde892be6ed42b07833bc8fd8f0f018cf50263d26',
+    sourceEntries: [
+      'app/account/page.tsx',
+      'app/api/accounting/route.ts',
+      'app/api/ai/chat/route.ts',
+      'app/api/ai/confirmation/route.ts',
+
+
+- Expected
++ Received
+
+@@ -15845,11 +15845,11 @@
+      "appointments.schedule.manage",
+      "finance.shifts.view",
+      "finance.shifts.operate",
+    ],
+    "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
+-   "sourceDigest": "d68f87bc62251ce11058a82cde892be6ed42b07833bc8fd8f0f018cf50263d26",
++   "sourceDigest": "40aa2aeb18fec324774cd4f5aa47dd4230d11f33ddceaf99725913b7b4ee9251",
+    "sourceEntries": [
+      "app/account/page.tsx",
+      "app/api/accounting/route.ts",
+      "app/api/ai/chat/route.ts",
+      "app/api/ai/confirmation/route.ts",
+
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs:7:9
+      5| const report=buildInventory();
+      6| test('checked-in exhaustive source inventory has no drift or API expor…
+      7|  assert.deepEqual(report,JSON.parse(readFileSync(new URL('../../docs/s…
+       |         ^
+      8|  assert.deepEqual(report.matrixExportMismatches,[]);
+      9|  assert.equal(new Set(report.routes.map(r=>`${r.method} ${r.route}`)).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  scripts/audits/staff-cutover-readiness.test.mjs > CLI drift success and explicit NOT_READY failure are intentional, not exceptions
+AssertionError: Inventory drift: regenerate and review with --write.
+
+
+1 !== 0
+
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs:87:10
+     85|  for(const [args,status] of [[[],0],[['--require-ready'],1]]) {
+     86|   const result=spawnSync(process.execPath,[fileURLToPath(script),...ar…
+     87|   assert.equal(result.status,status,result.stderr);
+       |          ^
+     88|   assert.equal(result.stderr,'');
+     89|   assert.equal(JSON.parse(result.stdout).readiness,'NOT_READY');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > checked-in exhaustive source inventory has no drift or API export mismatch
+AssertionError: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    baseCommit: '74b82cea27d407626fb3c5e691bf68e6defb4598',
+    canonicalDirectReferences: [],
+    formatVersion: 2,
+    layouts: [
+...
+    scope: 'All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.',
++   sourceDigest: '56383b4ad609b64f5dd2de652d1c62614c959b76c10ddcca617b91893b031e1f',
+-   sourceDigest: 'd68f87bc62251ce11058a82cde892be6ed42b07833bc8fd8f0f018cf50263d26',
+    sourceEntries: [
+      'app/account/page.tsx',
+      'app/api/accounting/route.ts',
+      'app/api/ai/chat/route.ts',
+      'app/api/ai/confirmation/route.ts',
+
+
+- Expected
++ Received
+
+@@ -15845,11 +15845,11 @@
+      "appointments.schedule.manage",
+      "finance.shifts.view",
+      "finance.shifts.operate",
+    ],
+    "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
+-   "sourceDigest": "d68f87bc62251ce11058a82cde892be6ed42b07833bc8fd8f0f018cf50263d26",
++   "sourceDigest": "56383b4ad609b64f5dd2de652d1c62614c959b76c10ddcca617b91893b031e1f",
+    "sourceEntries": [
+      "app/account/page.tsx",
+      "app/api/accounting/route.ts",
+      "app/api/ai/chat/route.ts",
+      "app/api/ai/confirmation/route.ts",
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:7:9
+      5| const report=buildInventory();
+      6| test('checked-in exhaustive source inventory has no drift or API expor…
+      7|  assert.deepEqual(report,JSON.parse(readFileSync(new URL('../../docs/s…
+       |         ^
+      8|  assert.deepEqual(report.matrixExportMismatches,[]);
+      9|  assert.equal(new Set(report.routes.map(r=>`${r.method} ${r.route}`)).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > CLI drift success and explicit NOT_READY failure are intentional, not exceptions
+AssertionError: Inventory drift: regenerate and review with --write.
+
+
+1 !== 0
+
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:87:10
+     85|  for(const [args,status] of [[[],0],[['--require-ready'],1]]) {
+     86|   const result=spawnSync(process.execPath,[fileURLToPath(script),...ar…
+     87|   assert.equal(result.status,status,result.stderr);
+       |          ^
+     88|   assert.equal(result.stderr,'');
+     89|   assert.equal(JSON.parse(result.stdout).readiness,'NOT_READY');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  4 failed | 795 passed (799)
+      Tests  7 failed | 13374 passed (13381)
+   Start at  15:27:39
+   Duration  446.94s (transform 19.02s, setup 0ms, import 91.98s, tests 255.32s, environment 76ms)

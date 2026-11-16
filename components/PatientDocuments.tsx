@@ -13,6 +13,7 @@ import { isAdmin } from "@/lib/roles";
 import { ConsentModal } from "./ConsentModal";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { newRequestKey } from "@/lib/request-key";
 
 /**
  * الأشعة والمستندات.
@@ -67,7 +68,8 @@ function PatientDocumentsForPatient({
   onPhotoChange,
 }: PatientDocumentsProps) {
   const session = useSession();
-  const admin = isAdmin(session?.role);
+  // Canonical sessions: the explicit hide grant (the server enforces it either way).
+  const admin = isAdmin(session?.role) || session?.isOwner === true || (session?.capabilities ?? []).includes("patients.documents.delete");
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   const [documents, setDocuments] = useState<PatientDocument[]>([]);
@@ -87,6 +89,8 @@ function PatientDocumentsForPatient({
     onPhotoChange?.(payload as Patient);
   };
   const [busy, setBusy] = useState(false);
+  // One key per upload: a double press or a retry after a lost response keeps one document (canonical receipt; legacy ignores it).
+  const uploadKey = useRef(newRequestKey());
   const [viewing, setViewing] = useState<PatientDocument | null>(null);
 
   const [showConsentModal, setShowConsentModal] = useState(false);
@@ -136,6 +140,7 @@ function PatientDocumentsForPatient({
       form.set("kind", kind);
       form.set("title", title.trim() || file.name);
       form.set("takenOn", takenOn);
+      form.set("requestKey", uploadKey.current);
       if (kind === "photo") {
         form.set("photoStage", photoStage);
         if (photoView) form.set("photoView", photoView);
@@ -143,6 +148,7 @@ function PatientDocumentsForPatient({
       const response = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body: form });
       const payload = await response.json().catch(() => null);
       if (!response.ok) { setError(payload?.message ?? "تعذّر الرفع."); return; }
+      uploadKey.current = newRequestKey();
       setTitle("");
       setPicked(null);
       setPhotoView("");

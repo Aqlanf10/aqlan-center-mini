@@ -1,0 +1,23 @@
+{
+  "baseRevision": "f864e07c629c51ad411c50dc3f3554ec935f6878",
+  "checks": {
+    "legacy_proposal_and_contact_and_db_tail": true,
+    "db_before_bounded_reader": true,
+    "legacy_get_and_post_unchanged": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/staff-capability-catalogue.ts": true,
+    "lib/canonical-read-snapshot.ts": true,
+    "lib/canonical-patient-reads.ts": true,
+    "lib/ortho-followup-coverage-db.ts": true,
+    "lib/consultation-followup.ts": true,
+    "lib/commission.ts": true,
+    "lib/fullBackup.ts": true,
+    "lib/restore/staging.ts": true,
+    "__tests__/postgres/consultation-followup.test.ts": true,
+    "__tests__/security-http/consultation-followup-http.test.ts": true,
+    "__tests__/reports-generated-time-route.test.ts": true,
+    "immutable_migrations": true
+  },
+  "passed": 16,
+  "historicalSourceHashes": 611
+}

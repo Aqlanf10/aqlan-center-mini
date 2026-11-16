@@ -1,3 +1,5 @@
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalTimeline } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
 import { patientTimeline } from "@/lib/db";
 import { canHandleMoney } from "@/lib/roles";
@@ -20,6 +22,9 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
  * الفواتير والدفعات (§٣٦): الأثر في الخادم لا في الشاشة.
  */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 3): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await context.params).id, (handle, id) => readCanonicalTimeline(handle, id, Number(new URL(request.url).searchParams.get("limit") ?? 60)), "تعذّر تحميل الخط الزمني.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

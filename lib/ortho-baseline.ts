@@ -178,8 +178,25 @@ export function checkBaselineDraft(
 
 /* ─────────────────── جلسة التقويم داخل توقيع الزيارة ─────────────────── */
 
+export function resolveOrthoWire(current: string | null, wire: string | null, action?: "remove"): string | null {
+  return action === "remove" ? null : wire?.trim() || current;
+}
+
+/** A wire is either recorded or explicitly removed, never both; the only action is "remove". */
+export function orthoWireActionError(source: Record<string, unknown>): string | null {
+  for (const arch of ["upper", "lower"] as const) {
+    const action = source[`${arch}WireAction`];
+    if (action !== undefined && action !== "remove") return "إجراء السلك غير صالح.";
+    const wire = source[`${arch}Wire`];
+    if (action === "remove" && typeof wire === "string" && wire.trim()) return "اختر إزالة السلك أو تسجيل سلك، لا كليهما.";
+  }
+  return null;
+}
+
 export interface OrthoSessionDraft {
   caseId: number;
+  upperWireAction?: "remove";
+  lowerWireAction?: "remove";
   phase: OrthoPhase | null;
   upperWire: string | null;
   lowerWire: string | null;
@@ -226,16 +243,23 @@ export function checkOrthoSessionDraft(
   }
   const phase = (source.phase ?? null) as OrthoPhase | null;
   const elastics = (source.elastics ?? "none") as ElasticClass;
+  // A wire is either recorded or explicitly removed, never both. Documentation of what was
+  // done stays optional: the staging entry contract starts every field unrecorded.
+  const done = text(source.done, 400);
+  const wireError = orthoWireActionError(source);
+  if (wireError) return { ok: false, message: wireError };
   return {
     ok: true,
     value: {
       caseId,
+      ...(source.upperWireAction === "remove" ? { upperWireAction: "remove" as const } : {}),
+      ...(source.lowerWireAction === "remove" ? { lowerWireAction: "remove" as const } : {}),
       phase,
       upperWire: text(source.upperWire, 40),
       lowerWire: text(source.lowerWire, 40),
       elastics,
       elasticNote: text(source.elasticNote, 120),
-      done: text(source.done, 400),
+      done,
       nextWeeks,
       note: text(source.note, 300),
     },

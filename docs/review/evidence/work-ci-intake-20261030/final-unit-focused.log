@@ -1,0 +1,35 @@
+
+ RUN  v4.1.12 /tmp/aqlan-work-intake-20261030
+
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs (6 tests | 1 failed) 8092ms
+   × CLI drift success and explicit NOT_READY failure are intentional, not exceptions 8043ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/audits/staff-cutover-readiness.test.mjs > CLI drift success and explicit NOT_READY failure are intentional, not exceptions
+AssertionError: Expected values to be strictly equal:
+
+null !== 0
+
+
+- Expected:
+0
+
++ Received:
+null
+
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs:87:10
+     85|  for(const [args,status] of [[[],0],[['--require-ready'],1]]) {
+     86|   const result=spawnSync(process.execPath,[fileURLToPath(script),...ar…
+     87|   assert.equal(result.status,status,result.stderr);
+       |          ^
+     88|   assert.equal(result.stderr,'');
+     89|   assert.equal(JSON.parse(result.stdout).readiness,'NOT_READY');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  1 failed | 103 passed (104)
+   Start at  00:45:04
+   Duration  17.08s (transform 778ms, setup 0ms, import 6.39s, tests 8.40s, environment 1ms)

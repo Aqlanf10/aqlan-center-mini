@@ -11,6 +11,8 @@ import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
+import { canonicalLabRoute } from "@/lib/canonical-lab-http";
+import { commandCanonicalLabPricingDelete, commandCanonicalLabPricingUpdate } from "@/lib/canonical-lab-pricing";
 export const dynamic = "force-dynamic";
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -22,6 +24,11 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  {
+    const rawId = (await params).id;
+    const canonical = await canonicalLabRoute(request, (handle, body) => commandCanonicalLabPricingUpdate(handle, rawId, body), "تعذّر حفظ قاعدة التسعير.");
+    if (canonical) return canonical;
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {
@@ -117,6 +124,11 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  {
+    const rawId = (await params).id;
+    const canonical = await canonicalLabRoute(null, handle => commandCanonicalLabPricingDelete(handle, rawId), "تعذّر حذف قاعدة التسعير.");
+    if (canonical) return canonical;
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

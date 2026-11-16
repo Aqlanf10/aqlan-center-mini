@@ -1,0 +1,9 @@
+{
+  "base": "ddc6a2124eacfabcd9fecaee5f3945a72149cbea",
+  "checks": {
+    "original_writer_body_modulo_indent": true,
+    "original_db_tail": true,
+    "legacy_http_branch": true,
+    "migrations_immutable": true
+  }
+}

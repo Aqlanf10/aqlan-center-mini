@@ -650,7 +650,7 @@ export async function listTasks(session: SessionPayload, filters: TaskListFilter
 export async function getTaskForSession(
   session: SessionPayload,
   taskId: number,
-  client?: QueryRunner,
+  client?: DbClient,
 ): Promise<{
   task: HrTaskView;
   checklist: { id: number; label: string; done: boolean; doneBy: string | null; doneAt: string | null }[];
@@ -659,7 +659,8 @@ export async function getTaskForSession(
   links: { id: number; kind: TaskLinkKind; linkId: number; label: string; readable: boolean }[];
   permissions: { canManage: boolean; canWork: boolean };
 } | null> {
-  const runner = client ?? getPool();
+  if (!client) return withTransaction(getPool(), held => getTaskForSession(session, taskId, held));
+  const runner = client;
   const result = await runner.query(`SELECT * FROM hr_tasks WHERE id = $1`, [taskId]);
   if (!result.rowCount || result.rowCount === 0) return null;
   const row = taskRowMapper(result.rows[0]);
@@ -749,11 +750,12 @@ export async function linkReadableForSession(
   session: SessionPayload,
   kind: TaskLinkKind,
   linkId: number,
-  client?: QueryRunner,
+  client?: DbClient,
 ): Promise<boolean> {
-  const runner = client ?? getPool();
+  if (!client) return withTransaction(getPool(), held => linkReadableForSession(session, kind, linkId, held));
+  const runner = client;
   if (kind === "patient") {
-    return canAccessPatient(session, linkId, undefined, client as DbClient | undefined);
+    return canAccessPatient(session, linkId, undefined, client);
   }
   if (kind === "lab_order") {
     const exists = await runner.query(`SELECT 1 FROM lab_orders WHERE id = $1`, [linkId]);

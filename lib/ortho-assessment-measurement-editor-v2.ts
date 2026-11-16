@@ -83,6 +83,16 @@ export function changeMeasurementDecimalV2(draft: MeasurementEditorDraftV2, deci
     ...raw, numberText: parseClinicalNumberV2(raw.numberText, draft.decimal).state === "valid" ? raw.numberText.replace(draft.decimal, decimal) : raw.numberText,
   }])) };
 }
+/** Direct numeric entry removes the extra "measured" click but invents neither
+ * a value nor its provenance. Blank untouched inputs remain unrecorded; an
+ * erased/incomplete entry stays measured and is rejected by the save validator. */
+export function editMeasurementNumberV2(draft: MeasurementEditorDraftV2, id: string, input: string): MeasurementEditorDraftV2 | null {
+  const row = draft.payload.observations.observations.find(item => item.id === id), value = draft.values[id];
+  if (!row || row.unit !== "mm" || !value || value.state !== "not_recorded" && value.state !== "measured") return null;
+  return { ...draft, values: { ...draft.values, [id]: { ...value, numberText: input,
+    state: value.state === "not_recorded" && !input.trim() ? "not_recorded" : "measured",
+  } } };
+}
 export function toggleMeasurementAnalysisV2(draft: MeasurementEditorDraftV2, selection: DraftAnalysisSelectionV2): MeasurementEditorDraftV2 {
   return { ...draft, payload: { ...draft.payload, analyses: draft.payload.analyses.some(a => a.id === selection.id)
     ? draft.payload.analyses.filter(a => a.id !== selection.id) : [...draft.payload.analyses, selection] } };

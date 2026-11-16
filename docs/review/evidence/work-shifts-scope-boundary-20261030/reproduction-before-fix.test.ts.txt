@@ -1,0 +1,46 @@
+/** Synthetic cross-capability reproduction: appointment authority must not mint
+ * access to another patient's receipts. No real accounts or financial data. */
+vi.mock("server-only", () => ({}));
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
+import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
+assertRealPostgresUrl(); stubPostgresEnv();
+vi.stubEnv("SESSION_SECRET", "synthetic-shift-booking-scope-20261030");
+const db = await import("../../lib/db");
+const shifts = await import("../../lib/canonical-shifts");
+const appointments = await import("../../lib/canonical-appointments");
+const GRANTS = { "appointments.create": true, "finance.shifts.view": true, "finance.payments.view": true };
+const ACCOUNTS = {
+  owner: { username: "SYN-SCOPE-OWNER", role: "admin" },
+  hybrid: { username: "SYN-SCOPE-HYBRID", role: "doctor", doctor: true, patientScope: "own", appointmentScope: "all", grants: GRANTS },
+  scheduler: { username: "SYN-SCOPE-SCHEDULER", role: "reception", appointmentScope: "all", grants: { "appointments.create": true } },
+  other: { username: "SYN-SCOPE-OTHER", role: "doctor", doctor: true, patientScope: "own", appointmentScope: "own", grants: GRANTS },
+} as const;
+type Key = keyof typeof ACCOUNTS;
+let fx: CanonicalInventoryDatabase<Key>, outside: number, receiptId: number;
+beforeAll(async () => {
+  fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner");
+  outside = (await fx.pool.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-SCOPE-OUT','SYN-OUTSIDE-RECEIPT-PATIENT') RETURNING id")).rows[0].id;
+  for (const [key, value] of [["clinic.chairs", "2"], ["clinic.day_start", "08:00"], ["clinic.day_end", "20:00"]])
+    await fx.pool.query("INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", [key,value]);
+  await shifts.commandCanonicalShiftOpen(await fx.session("owner"), { opening: { YER: "100" } });
+  const paid = await db.recordPayment({ patientId: outside, invoiceId: null, kind: "payment", amountMinor: 75, currency: "YER", exchangeRate: 1, baseCurrency: "YER", method: "cash", note: "SYN-OUTSIDE-RECEIPT-NOTE", createdBy: "synthetic-scope-fixture" });
+  expect(paid.reason).toBeNull(); receiptId = paid.payment!.id;
+}, 180_000);
+afterAll(async () => { await fx?.close(); });
+
+it("reproduces own-patient/all-appointment self-booking expansion on the unmodified 78758658 production source", async () => {
+  const session = await fx.session("hybrid");
+  const before = await shifts.readCanonicalShifts(session);
+  expect(before.payments).toEqual([]);
+  expect(await db.patientInDoctorScopeWith(fx.pool, fx.parties.hybrid!, outside)).toBe(false);
+  const booked = await appointments.commandCanonicalBooking(session, appointments.parseCanonicalBooking({
+    patientId: outside, doctorId: fx.parties.hybrid, date: "2027-03-03", time: "09:00", durationMinutes: 30,
+  }));
+  expect(booked.appointment.doctorId).toBe(fx.parties.hybrid);
+  const after = await shifts.readCanonicalShifts(session);
+  expect(after.payments?.map(row => row.id)).toEqual([receiptId]);
+  expect(after.drawer).toEqual(before.drawer);
+  console.log("SYNTHETIC_SHIFT_SCOPE_REPRODUCTION", JSON.stringify({ sourceHead: "78758658e475a40ff1d3c186177c73ad32017a25", synthetic: true,
+    patientScope: "own", appointmentScope: "all", outsideReceiptVisibleBefore: false, bookingAccepted: true, outsideReceiptVisibleAfter: true, drawerUnchanged: true }));
+});

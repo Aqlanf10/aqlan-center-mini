@@ -1,0 +1,80 @@
+{
+  "format": "work-problem-create-evidence-v1",
+  "baseRevision": "db16763d61a58289f62ffce54f44b35300afdbf1",
+  "sourceRevision": "2b4e5f4bad08297212870c7c318380377567e73e",
+  "buildId": "DyLznC2ConMfswaBdRqwY",
+  "results": {
+    "focusedPostgres": {
+      "passed": 94,
+      "files": 4,
+      "newTests": 19
+    },
+    "focusedUnitAndGuards": {
+      "passed": 58,
+      "files": 5,
+      "unit": 48,
+      "mapGuards": 10,
+      "newUnitTests": 24
+    },
+    "finalHttpBrowser": {
+      "passed": 74,
+      "files": 6,
+      "newCreateReadTests": 12,
+      "newDependencyTypeTests": 2
+    },
+    "build": "passed",
+    "typecheck": "passed",
+    "fullLint": {
+      "errors": 0,
+      "warnings": 345
+    },
+    "sourceChecks": 22,
+    "historicalSourceHashes": 539,
+    "fullUnit": "running; earlier attempt14393 passed/1 timeout retained, unchanged diagnostic5 passed",
+    "fullPostgres": "not run for final45 source yet; historical43\u201344 results do not cover45",
+    "exactHeadCI": "not published",
+    "independentReview": "pending",
+    "actualDocker": "blocked by enforced Alpine destination refusal"
+  },
+  "sourceSha256": {
+    "lib/canonical-problem-create-command.ts": "12371d30fb03354291194fcea14d05038e935619d704563dda3743c4669d6e52",
+    "lib/canonical-patient-reads.ts": "33548602692362557af627afc52a107f1e5dd524a5168b0aba1863a49db0d51f",
+    "lib/db.ts": "94b144150d99d5e78277558ebe63919591ae9d32a5f5e67147c93dd72b30f0be",
+    "app/api/patients/[id]/problems/route.ts": "3d57d81097b4c90f5d89a4887a388fcb0153477c9e361456b61ff7fa7996c020",
+    "components/patient/CanonicalProblemCreateEditor.tsx": "26a913f2dee062e341bfb25cb9b25f3f470db646ec81db7f6418e7ebd14f8408",
+    "components/patient/CanonicalPatientCases.tsx": "8cedc43e6f4b22b4d06f349f9a4d107e3d6372074fd0573bdb41f5a5a2bfbc2f",
+    "__tests__/canonical-problem-create-command.test.ts": "c960ebf47609ecd1060a5c7b29d0d8d4bc6c1154a764b8a64d828cf0e7a78508",
+    "__tests__/postgres/problem-create-canonical-command.test.ts": "fbf44ee658e30c6d000a3e44758edc431a2dcfdb8dce222c39d46465efff8b25",
+    "__tests__/security-http/canonical-problem-create-journey.test.ts": "99f4971c8d3915e68ff6a1acec09d582eceebba0933fd114d41d5b947f8e00aa",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "aaada1d23dfa80bdb4398daec1cfa8dc59319df6a71ef5a2f719f4001c2eac95",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "f2062d4b8a2832c5fbae022c8f65232d871ec869795816c97b2200f40e6eb276",
+    "docs/security/staff-cutover/inventory.json": "450ba4822c79264e60c208276fc58ed6c2727627961a176cccf0adbca130647e",
+    "docs/security/staff-cutover/HANDOFF.md": "74a67f7574dfd8ee5e1cd95a9f1b37a8a587ba36bd5cc14f1e22c8129beeb10c",
+    "docs/review/work-problem-create-slice45-20261101.md": "70bc7c3e4dc072e1e2dfae970d25c1e9f7c870eef98d2943568f1219e46c894a",
+    "docs/review/work-remaining-plan-20261101.md": "8cde2b7aa008df0c12a49cbf903fed82580ae9aa0fa97be508f40eb614946453"
+  },
+  "artifacts": {
+    "batch43-45-build-final.log": "7c3de60fcd7d5c116c7d99bd6a3f63ffba82d6058942d8c4805a7fccf1cee286",
+    "batch43-45-http-final.log": "7a8dde3325cf5fa629a34b9db5fb29af01161f2ad4905a340e5472fd1c80bc37",
+    "batch43-45-lint-final.log": "e1a0d597ad0ae88ec64808de7d4fd59d090df5fb1c70baaeecdc10ee7c60d89a",
+    "batch43-45-tracing-diagnostic.log": "f58b467d6592403ceb3b91c7430175fa62725ab6e03d4c876ee0bc7dc1402991",
+    "batch43-45-types-final.log": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+    "batch43-45-unit-full.log": "82000f2060a43ece0be383fa82dff2ba824fd75561a309088e0b6efb7aae9ec9",
+    "problem-create-editor-390.png": "eb1633b75422903a30f3fe84255b655478dc117e1ec1ca9cd0f732a8817ebcfb",
+    "slice45-before-http.log": "7ae5f68986dd8dbf75d982ca752caef370cafd12cf3dda202ad5907fadbc0b41",
+    "slice45-http-create-final.log": "213239b3a80b84c2d5cc3016a44cae2115f7f826c5b186006d003001a328acd7",
+    "slice45-http-final.log": "ac77cb41de290ffbb8567c560bc0670039229df76ab9fb7df66f297e12499015",
+    "slice45-http-first.log": "6595b4888ee4dab2f1d3b3ed9b5ef8ee36bde53cae4bf6e8dee92d796f92abc0",
+    "slice45-inventory-final-reviewed.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "slice45-inventory-reviewed.log": "5ec45daad9d8ad547017e4f56fe5302ab0741bb0e0a236cb7b1961c8e0ed4891",
+    "slice45-pg-final.log": "93b4f68f749f15276f7cb8d365a43056bc0a9d2ad47b9e6a0e7f249d4f7bcf91",
+    "slice45-pg-first.log": "62b743b5b93498a0162da51969f011e44876cf964b79fe26bc3e6d66a157a2a8",
+    "slice45-pg-fixed.log": "d0aa11d7323964aea33563fb9842dda73052139362d80bfdae5ef987a8606cba",
+    "slice45-pg-projection.log": "c2b6407bbdc95ff0e3197a9c9457051339c6f8b8d78aacad8fdf259563234fd6",
+    "slice45-projection-before-http.log": "1174b79636c2b72d69671af6920fe229a77328222f145a0b838141d821f82c5e",
+    "slice45-source-proof.json": "74c8cf7d15d9c623adfd5f6be5bd0f5ecc3af659c0230ee33cb498786c6f7ef8",
+    "slice45-unit-guards.log": "c3662f2cb53b2b7010f07bb65704f6d5d1faade2b11069ac1f8b72aec74db992",
+    "slice45-unit.log": "7d5bc0849cd97f6e90680f97eb5bfd4dde58a8954f7a97af156114e3facdce3e",
+    "verify-slice45.py": "dbfe692199b0115190176a608a354f6e48be130239e2d850563475db01b6154b"
+  }
+}

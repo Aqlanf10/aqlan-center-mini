@@ -16,9 +16,10 @@ const patientPath = `/api/patients/${patientId}`;
 const workflowPath = `${patientPath}/workflow`;
 const clinicalPath = `/api/visits/${visitId}/clinical`;
 const FOREIGN_TITLE = "عنوان حالة مريض آخر يجب ألا يظهر";
+// This patient has a previous visit: the contextual editor documents only today's changes.
 const fields = [
-  ["chiefComplaint", "① الشكوى الرئيسية"], ["examination", "② الفحص"],
-  ["diagnosis", "② التشخيص"], ["treatmentDone", "③ ما نُفّذ"], ["nextPlan", "الخطة القادمة"],
+  ["chiefComplaint", "شكوى جديدة أو تغيّر اليوم (إن وجد)"], ["examination", "فحص اليوم (إن أُجري)"],
+  ["diagnosis", "تشخيص جديد أو محدّث (إن وجد)"], ["treatmentDone", "ما نُفّذ اليوم"], ["nextPlan", "الخطوة القادمة"],
 ] as const;
 type Notes = Record<typeof fields[number][0], string>;
 const notes = (prefix: string): Notes => ({ chiefComplaint: `${prefix} complaint`, examination: `${prefix} examination`,
@@ -98,6 +99,8 @@ async function fixture() {
     else if (path === "/api/visits") await json(route, []);
     else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId });
     else if (path === `${patientPath}/prescriptions`) await json(route, { prescriptions: [], suggestions: [] });
+    // ClinicalVisit probes this read-only capability even when no lab draft exists.
+    else if (method === "GET" && path === "/api/lab/work-intents/capability" && !url.search) await json(route, { supported: true });
     else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties" && url.search === "?kind=doctor") await json(route, [{ id: doctorId, name: "طبيب اصطناعي" }]);
     else if (path === "/api/booking-requests") await json(route, []);
@@ -126,7 +129,7 @@ async function fixture() {
       try {
         await page.goto(`${baseUrl}/patients/${patientId}?tab=today`, { waitUntil: "domcontentloaded" });
         await page.locator("#visit-notes").waitFor();
-        await expect.poll(() => noteField(page, "② التشخيص").inputValue()).toBe(notes("Synthetic saved").diagnosis);
+        await expect.poll(() => noteField(page, "تشخيص جديد أو محدّث (إن وجد)").inputValue()).toBe(notes("Synthetic saved").diagnosis);
         await page.getByTestId("patient-primary-action").waitFor();
         // The real parent and loaded child share exactly one visible reference.
         await expect.poll(() => page.getByText(previousVisit.treatmentDone, { exact: true }).count()).toBe(1);
@@ -145,7 +148,7 @@ describe("shared workflow refresh preserves a real ClinicalVisit draft", () => {
       const draft = notes(`Unsaved ${fault}`);
       await fillNotes(page, draft);
       const editor = await page.locator("#visit-notes").elementHandle();
-      const input = await noteField(page, "② التشخيص").elementHandle();
+      const input = await noteField(page, "تشخيص جديد أو محدّث (إن وجد)").elementHandle();
       expect(editor).not.toBeNull(); expect(input).not.toBeNull();
       const startUrl = page.url();
       const release = f.holdNext(fault);
@@ -169,9 +172,9 @@ describe("shared workflow refresh preserves a real ClinicalVisit draft", () => {
       expect(await page.locator("body").innerText()).not.toContain(FOREIGN_TITLE);
       // Clinical documentation keeps its separate accepted read authority; a
       // workflow failure cannot silently reset or destroy unsaved clinical care.
-      expect(await noteField(page, "② التشخيص").isEditable()).toBe(true);
+      expect(await noteField(page, "تشخيص جديد أو محدّث (إن وجد)").isEditable()).toBe(true);
       const edited = { ...draft, diagnosis: `${draft.diagnosis} retained edit` };
-      await noteField(page, "② التشخيص").fill(edited.diagnosis);
+      await noteField(page, "تشخيص جديد أو محدّث (إن وجد)").fill(edited.diagnosis);
       const dialog = page.waitForEvent("dialog");
       const leave = page.getByTestId("patient-tab-summary").click();
       const confirmation = await dialog;

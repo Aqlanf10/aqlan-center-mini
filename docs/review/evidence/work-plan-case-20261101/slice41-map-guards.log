@@ -1,0 +1,57 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs (6 tests | 1 failed) 5003ms
+   × baseline has no canonical route readiness; finite domain actions are not route acceptance 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/audits/staff-cutover-readiness.test.mjs > baseline has no canonical route readiness; finite domain actions are not route acceptance
+AssertionError: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  [
+    'staff.view',
+    'staff.permissions.edit',
+    'inventory.references.view',
+    'inventory.items.create',
+...
+    'clinical.plans.view',
++   'clinical.plans.edit'
+  ]
+
+
+- Expected
++ Received
+
+@@ -36,6 +36,7 @@
+    "appointments.schedule.manage",
+    "finance.shifts.view",
+    "finance.shifts.operate",
+    "clinical.xrays.view",
+    "clinical.plans.view",
++   "clinical.plans.edit",
+  ]
+
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs:22:9
+     20|  assert.equal(report.summary.pageClassifications['canonical-ready'],0);
+     21|  assert.deepEqual(report.canonicalDirectReferences,[]);
+     22|  assert.deepEqual(report.runtimeActions,['staff.view','staff.permissio…
+       |         ^
+     23|   'inventory.approval-policy.manage','inventory.requests.view','invent…
+     24|   'inventory.orders.view','inventory.orders.manage','inventory.receipt…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 9 passed (10)
+   Start at  06:05:51
+   Duration  8.55s (transform 156ms, setup 0ms, import 2.89s, tests 5.04s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

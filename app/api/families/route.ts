@@ -3,6 +3,7 @@ import { createPatientFamily, findFamiliesByPhone, searchPatientFamilies } from 
 import { json, readBody } from "@/lib/case-route";
 import { familyFailure, familyResponse, familyWriter } from "@/lib/family-route";
 import { validateFamilyDraft } from "@/lib/patient-families";
+import { canonicalFamilyRoute, commandCanonicalFamilyCreate, readCanonicalFamilySearch } from "@/lib/canonical-families";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,9 @@ export const dynamic = "force-dynamic";
  * (`?phone=`) — للاستقبال والإدارة (من يربط).
  */
 export async function GET(request: Request) {
+  /* M2 slice 72: patients.edit inside the patient scope; one owning snapshot. */
+  const canonical = await canonicalFamilyRoute(null, handle => readCanonicalFamilySearch(handle, new URL(request.url).searchParams), "تعذّر البحث عن العائلات.");
+  if (canonical) return canonical;
   const guard = await familyWriter();
   if (!guard.ok) return guard.response;
   const url = new URL(request.url);
@@ -27,6 +31,9 @@ export async function GET(request: Request) {
 
 /** إنشاء عائلة باسمها وضامنها الاختياري وأفرادها الأوّلين. */
 export async function POST(request: Request) {
+  /* M2 slice 72: one admitted patients.edit transaction, idempotent by requestKey. */
+  const canonical = await canonicalFamilyRoute(request, (handle, body) => commandCanonicalFamilyCreate(handle, body), "تعذّر إنشاء العائلة. أعد المحاولة.", 201);
+  if (canonical) return canonical;
   const guard = await familyWriter();
   if (!guard.ok) return guard.response;
   const read = await readBody(request);

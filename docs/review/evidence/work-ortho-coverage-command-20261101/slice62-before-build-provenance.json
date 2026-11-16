@@ -1,0 +1,8 @@
+{
+  "buildId": "8rud9Vg2t4DBvpQ76A7Qo",
+  "productRevision": "520f00cabfbe7cef15748fcc5e6ad86d49d51331",
+  "slice62Base": "0210975f394b89e40d3ccf94a5eff17885000424",
+  "legacyPostBodyIdentical": true,
+  "actualBefore": "GET200 POST401vs201",
+  "qualification": "First fixture used completed case; corrected to active for positive after. Canonical POST was wholly unadmitted before regardless of status. No before success claimed."
+}

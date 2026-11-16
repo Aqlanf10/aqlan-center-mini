@@ -232,9 +232,13 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
     for (const scenario of ["patient-number", "flag", "combined"] as const) {
       it(`/patients preserves long ${scenario} and native filters at ${width}px`, async () => {
         const longNumber = scenario !== "flag", longFlag = scenario !== "patient-number";
-        const number = longNumber ? LONG_PATIENT_NUMBER : SHORT_PATIENT_NUMBER;
-        await db.query("UPDATE patients SET patient_number = $1, flags = $2::text[] WHERE id = $3",
-          [number, longFlag ? [LONG_PATIENT_FLAG] : [], fixturePatientId]);
+        // A patient number is a durable identity: renumbering retires the old
+        // value permanently. Each scenario owns a new patient, never reuses it.
+        const number = `${longNumber ? LONG_PATIENT_NUMBER : SHORT_PATIENT_NUMBER}-${width}-${scenario}`;
+        const scenarioPatientId = (await db.query<{ id: number }>(
+          "INSERT INTO patients (patient_number, full_name, flags) VALUES ($1, $2, $3::text[]) RETURNING id",
+          [number, "مريض اصطناعي لاختبار عرض القائمة", longFlag ? [LONG_PATIENT_FLAG] : []],
+        )).rows[0].id;
         // Own the options even when the previous setting has no effective flags.
         // The exact previous value is restored in finally.
         const expectedFlags = longFlag ? [FIXTURE_PATIENT_FLAG, LONG_PATIENT_FLAG] : [FIXTURE_PATIENT_FLAG];
@@ -256,7 +260,7 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
             return page.getByRole("combobox", { name: "علَم", exact: true }).locator("option")
               .evaluateAll(options => options.map(option => (option as HTMLOptionElement).value));
           }, { timeout: 10_000 }).toEqual(["", ...expectedFlags]);
-          const card = page.locator(`a[href="/patients/${fixturePatientId}"]`);
+          const card = page.locator(`a[href="/patients/${scenarioPatientId}"]`);
           await card.waitFor();
           await page.evaluate(() => document.fonts.ready);
           expect(await card.innerText()).toContain(number);
@@ -292,8 +296,8 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
           const recentResponse = await recent;
           expect(recentResponse.ok()).toBe(true);
           const latest = await recentResponse.json();
-          expect(latest.rows.map((patient: { id: number }) => patient.id)).toContain(fixturePatientId);
-          console.info("[phone-width-sort-pages]", JSON.stringify({ scenario, width, patientId: fixturePatientId,
+          expect(latest.rows.map((patient: { id: number }) => patient.id)).toContain(scenarioPatientId);
+          console.info("[phone-width-sort-pages]", JSON.stringify({ scenario, width, patientId: scenarioPatientId,
             namePageIds: named.rows.map((patient: { id: number }) => patient.id),
             recentPageIds: latest.rows.map((patient: { id: number }) => patient.id) }));
           if (longFlag) {
@@ -306,18 +310,18 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
             expect(await flags.locator("option:checked").textContent()).toBe(`🏷️ ${LONG_PATIENT_FLAG}`);
             const response = await filtered;
             expect(response.ok()).toBe(true);
-            expect((await response.json()).rows.map((patient: { id: number }) => patient.id)).toEqual([fixturePatientId]);
+            expect((await response.json()).rows.map((patient: { id: number }) => patient.id)).toEqual([scenarioPatientId]);
             await expect.poll(() => page.locator("main ul > li > a").count()).toBe(1);
           }
           await card.waitFor();
           const selected = await captureOverflow(page, `${scenario}-${width}-selected`);
           expect(selected.excess, JSON.stringify(selected)).toBeLessThanOrEqual(1);
           await card.click();
-          await expect.poll(() => new URL(page.url()).pathname).toBe(`/patients/${fixturePatientId}`);
+          await expect.poll(() => new URL(page.url()).pathname).toBe(`/patients/${scenarioPatientId}`);
           expect(writes).toEqual([]); expect(errors).toEqual([]);
         } finally {
           await view.close();
-          await db.query("UPDATE patients SET patient_number = $1, flags = '{}'::text[] WHERE id = $2", [LONG_PATIENT_NUMBER, fixturePatientId]);
+          await db.query("DELETE FROM patients WHERE id = $1", [scenarioPatientId]);
           await restoreFlags();
         }
       }, 60_000);

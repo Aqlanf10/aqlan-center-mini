@@ -6,17 +6,32 @@ import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { isCurrency } from "@/lib/money";
 import { DebtRepaymentError, debtRepaymentWorkspace, saveDebtRepayment } from "@/lib/debt-installments-db";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalDebtRepaymentWorkspace } from "@/lib/canonical-patient-account";
+import { CanonicalPaymentRefusal, commandCanonicalDebtRepayment } from "@/lib/canonical-payment-writes";
 export const dynamic="force-dynamic";
 type Context={params:Promise<{id:string}>};
 const denial=(status:number)=>NextResponse.json({message:status===401?"سجّل الدخول من جديد.":"إدارة ترتيب السداد للإدارة والاستقبال."},{status});
 export async function GET(_request:Request,context:Context){
+  // M2 slice 88: finance.patient-ledger.view inside the patient scope, one snapshot (read only).
+  const selected=await selectRequestStaffEnvelope();
+  if(selected.kind==="denied")return NextResponse.json({message:"سجّل الدخول من جديد."},{status:401,headers:NO_STORE});
+  if(selected.kind==="canonical"){
+    try{return NextResponse.json(await readCanonicalDebtRepaymentWorkspace(selected.handle,Number((await context.params).id)),{headers:NO_STORE});}
+    catch(error){return canonicalPatientReadFailure(error,"تعذّر قراءة ترتيب السداد؛ حدّث الحساب.");}
+  }
   const session=await requireSession();if(!session)return denial(401);if(!["admin","reception"].includes(session.role))return denial(403);
   const patientId=Number((await context.params).id);if(!Number.isSafeInteger(patientId)||patientId<=0)return NextResponse.json({message:"رقم المريض غير صالح."},{status:400});
   try{return NextResponse.json(await debtRepaymentWorkspace(patientId,clinicDateString(new Date(),CLINIC_TIME_ZONE)),{headers:{"Cache-Control":"no-store"}});}
   catch{return NextResponse.json({message:"تعذّر قراءة ترتيب السداد؛ حدّث الحساب."},{status:500});}
 }
 export async function POST(request:Request,context:Context){
-  const session=await requireSession();if(!session)return denial(401);if(!["admin","reception"].includes(session.role))return denial(403);
+  // M2 slice 91: finance.payments.collect inside the patient scope; the legacy writer on the operation's transaction.
+  const selected=await selectRequestStaffEnvelope();
+  if(selected.kind==="denied")return NextResponse.json({message:"سجّل الدخول من جديد."},{status:401,headers:NO_STORE});
+  const session=selected.kind==="canonical"?null:await requireSession();
+  if(selected.kind!=="canonical"){if(!session)return denial(401);if(!["admin","reception"].includes(session.role))return denial(403);}
   const patientId=Number((await context.params).id);
   try{
     const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);
@@ -28,12 +43,15 @@ export async function POST(request:Request,context:Context){
       ||typeof source.reason!=="string"||typeof source.idempotencyKey!=="string"||source.cancel!==undefined&&typeof source.cancel!=="boolean"
       ||source.invoiceId!==null&&!(typeof source.invoiceId==="number"&&Number.isSafeInteger(source.invoiceId)&&source.invoiceId>0)
       ||source.openingCurrency!==null&&!isCurrency(source.openingCurrency))throw new DebtRepaymentError("invalid","راجع بيانات ترتيب السداد والنسخة الحالية.");
-    const result=await saveDebtRepayment({target:{patientId,currency:source.currency,invoiceId:source.invoiceId as number|null,openingCurrency:source.openingCurrency},
+    const write={target:{patientId,currency:source.currency,invoiceId:source.invoiceId as number|null,openingCurrency:source.openingCurrency},
       terms:source.terms,expectedVersion:source.expectedVersion,expectedRemainingMinor:source.expectedRemainingMinor,expectedSourceHash:source.expectedSourceHash,
-      reason:source.reason,idempotencyKey:source.idempotencyKey,cancel:source.cancel as boolean|undefined,session});
-    return NextResponse.json(result,{status:result.replayed?200:201});
+      reason:source.reason,idempotencyKey:source.idempotencyKey,cancel:source.cancel as boolean|undefined};
+    const result=selected.kind==="canonical"?await commandCanonicalDebtRepayment(selected.handle,write):await saveDebtRepayment({...write,session:session!});
+    return NextResponse.json(result,{status:result.replayed?200:201,headers:NO_STORE});
   }catch(error){
     const bounded=bodyErrorResponse(error);if(bounded)return bounded;
+    if(error instanceof CanonicalPaymentRefusal)return NextResponse.json({code:error.code,message:error.message},{status:error.status,headers:NO_STORE});
+    if(selected.kind==="canonical"&&!(error instanceof DebtRepaymentError))return canonicalPatientReadFailure(error,"تعذّر حفظ الترتيب؛ أعد الطلب نفسه بالمفتاح نفسه.");
     if(error instanceof DebtRepaymentError)return NextResponse.json({code:error.code,message:error.message},{status:error.code==="unauthorized"?401:error.code==="invalid"?400:409});
     return NextResponse.json({message:"تعذّر حفظ الترتيب؛ أعد الطلب نفسه بالمفتاح نفسه."},{status:500});
   }

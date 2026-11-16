@@ -10,8 +10,7 @@ import type { ToolConfirmationOffer } from "../lib/ai-tools/types";
  * the original card's evidence, show the server's qualified wording and the safe /finance navigation,
  * and never bring back a retry confirmation. Generic confirmation handling for other tools is unchanged.
  */
-const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0,
-  callbacks: new Map<number, { deps: readonly unknown[]; callback: unknown }>() }));
+const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, replay: false, replayResults: [] as [unknown, unknown][] }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   const slot = (initial: unknown) => { const index = hooks.cursor++; if (!(index in hooks.values)) hooks.values[index] = initial; return index; };
@@ -19,16 +18,23 @@ vi.mock("react", async (original) => {
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? (initial as () => unknown)() : initial);
       return [hooks.values[index], (value: unknown) => {
-        hooks.values[index] = typeof value === "function" ? (value as (prev: unknown) => unknown)(hooks.values[index]) : value;
+        if (typeof value === "function") {
+          const before = hooks.values[index];
+          const next = (value as (prev: unknown) => unknown)(before);
+          if (hooks.replay) hooks.replayResults.push([next, (value as (prev: unknown) => unknown)(before)]);
+          hooks.values[index] = next;
+        } else hooks.values[index] = value;
       }];
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
     useEffect: () => {},
     useMemo: (factory: () => unknown) => factory(),
-    useCallback: (callback: unknown, deps: readonly unknown[]) => {
-      const index = slot(undefined), previous = hooks.callbacks.get(index);
-      if (previous && previous.deps.length === deps.length && deps.every((value, i) => Object.is(value, previous.deps[i]))) return previous.callback;
-      hooks.callbacks.set(index, { deps, callback }); return callback;
+    useCallback: (callback: unknown, deps: unknown[]) => {
+      const index = slot(undefined), previous = hooks.values[index] as { callback: unknown; deps: unknown[] } | undefined;
+      if (!previous || previous.deps.length !== deps.length || deps.some((value, i) => !Object.is(value, previous.deps[i]))) {
+        hooks.values[index] = { callback, deps };
+      }
+      return (hooks.values[index] as { callback: unknown }).callback;
     },
   };
 });
@@ -106,7 +112,7 @@ describe("the chat window, confirming a historical payment card", () => {
   const props = { isOpen: true, onClose: () => {}, currentUserRole: "admin", currentUserName: "مدير اصطناعي" } as Parameters<typeof AiStaffChatModal>[0];
   const render = () => { hooks.cursor = 0; return nodes(AiStaffChatModal(props) as ReactNode); };
   beforeEach(() => {
-    hooks.values = []; hooks.cursor = 0; hooks.callbacks.clear();
+    hooks.values = []; hooks.cursor = 0; hooks.replay = false; hooks.replayResults = [];
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset().mockResolvedValue({ ok: true, json: async () => containedPayload() });
     render();
@@ -154,6 +160,19 @@ describe("the chat window, confirming a historical payment card", () => {
     expect(sent.at(-2).content).toBe("Synthetic existing chat reply");
     expect(sent.at(-1).content).toBe("Second synthetic draft");
     clock.mockRestore();
+  });
+
+  it("allocates confirmation identity once outside replayable state updaters", async () => {
+    hooks.replay = true;
+    let clock = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => ++clock);
+    const confirm = render().find((node) => node.type === "button" && text(node).includes("تأكيد التنفيذ"));
+    (confirm!.props.onClick as () => void)();
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(hooks.values[0]).toHaveLength(2);
+    expect(hooks.replayResults.length).toBeGreaterThanOrEqual(2);
+    for (const [first, replay] of hooks.replayResults) expect(replay).toEqual(first);
   });
 
 });

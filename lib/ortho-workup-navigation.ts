@@ -1,8 +1,9 @@
 export type WorkupAssessmentSection = "interview" | "extraoral" | "intraoral" | "measurements" | "records" | "ceph" | "diagnosis";
+export type OrthoWorkupPillar = "diagnostics" | "prescription" | "wires" | "retention" | "presentation";
 /** Navigation of existing record owners; a visited step is never clinical approval. */
 export const ORTHO_WORKUP_STEPS: readonly {
   id: string; title: string; hint: string;
-  pillar: "diagnostics" | "prescription" | "wires" | "retention" | "presentation";
+  pillar: OrthoWorkupPillar;
   section?: WorkupAssessmentSection; focus?: "identity" | "financial";
 }[] = [
   { id: "identity", title: "الوصول وبيانات الحالة", pillar: "diagnostics", focus: "identity", hint: "راجع هوية المريض والحالة وسياق الزيارة المتاح قبل بدء المقابلة." },
@@ -19,6 +20,40 @@ export const ORTHO_WORKUP_STEPS: readonly {
   { id: "retention", title: "النتيجة والإنهاء والتثبيت", pillar: "retention", hint: "راجع قرار إنهاء العلاج ومتابعة التثبيت لكل فك، دون افتراض تواريخ أو أجهزة غير مسجلة." },
   { id: "presentation", title: "دراسة الحالة المحفوظة", pillar: "presentation", hint: "احفظ دراسة الحالة وراجع مصادرها وصلاحية مراجعتها؛ التصدير خطوة اختيارية مستقلة." },
 ];
+/**
+ * Clinical lifecycle order (6838132093): case summary → examination and records → analysis and problem
+ * list → plan → follow-up/adjustment visits → retention and closure, then the saved case study.
+ * Step indices are unchanged, so saved bookmarks keep working, and every record keeps its command owner.
+ * Groups are direct destinations, not a wizard: the routine visit opens on its own group (see
+ * orthoWorkupEntryStep) without passing through the diagnostic screens.
+ */
+export const ORTHO_WORKUP_GROUPS = [
+  { id: "summary", pillar: "diagnostics", title: "ملخص الحالة", icon: "🗂️", entry: 0, steps: [0] },
+  { id: "exam", pillar: "diagnostics", title: "الفحص والسجلات", icon: "🔎", entry: 1, steps: [1, 2, 3, 4, 5, 6] },
+  { id: "analysis", pillar: "diagnostics", title: "التحليل وقائمة المشكلات", icon: "📐", entry: 7, steps: [7] },
+  { id: "plan", pillar: "prescription", title: "خطة العلاج والميكانيكا", icon: "⚙️", entry: 8, steps: [8, 9] },
+  { id: "visits", pillar: "wires", title: "زيارات المتابعة والشدّ", icon: "⚡", entry: 10, steps: [10] },
+  { id: "retention", pillar: "retention", title: "التثبيت والإقفال", icon: "🛡️", entry: 11, steps: [11] },
+  { id: "presentation", pillar: "presentation", title: "دراسة الحالة المحفوظة", icon: "📋", entry: 12, steps: [12] },
+] as const satisfies readonly { id: string; pillar: OrthoWorkupPillar; title: string; icon: string; entry: number; steps: readonly number[] }[];
+/** The case view's sections: follow-up visits first, as the clinic works daily (owner, #483 2026-11-13),
+ * then staging's order, with clear names. The workup groups keep the treatment-path order (6838132093). */
+export const ORTHO_CASE_PILLARS: readonly { id: OrthoWorkupPillar; title: string; icon: string }[] = [
+  { id: "wires", title: "زيارات المتابعة والشدّ", icon: "⚡" },
+  { id: "diagnostics", title: "السجلات والتشخيص", icon: "📐" },
+  { id: "prescription", title: "خطة العلاج والميكانيكا", icon: "⚙️" },
+  { id: "retention", title: "التثبيت والإقفال", icon: "🛡️" },
+  { id: "presentation", title: "دراسة الحالة المحفوظة", icon: "📋" },
+];
+/** Bookmark-free default entry: the case summary. */
+export const ORTHO_WORKUP_ENTRY_STEP = ORTHO_WORKUP_GROUPS[0].entry;
+/** Where opening the workup lands: a case under assessment starts at its summary, a case in retention
+ * at retention, and any other case in treatment at its follow-up/adjustment visits, so the routine visit
+ * needs no detour through the diagnostic screens. */
+export function orthoWorkupEntryStep(phase: string | null | undefined): number {
+  if (phase === "assessment" || phase == null) return ORTHO_WORKUP_ENTRY_STEP;
+  return phase === "retention" ? ORTHO_WORKUP_GROUPS[5].entry : ORTHO_WORKUP_GROUPS[4].entry;
+}
 const id = (value: number) => Number.isSafeInteger(value) && value > 0 && value <= 2147483647;
 export function workupBookmark(patientId: number, caseId: number, step: number) {
   if (!id(patientId) || !id(caseId) || !Number.isInteger(step) || !ORTHO_WORKUP_STEPS[step]) throw Error("invalid_workup_bookmark");

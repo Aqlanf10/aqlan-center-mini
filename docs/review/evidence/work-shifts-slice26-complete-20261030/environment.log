@@ -1,0 +1,11 @@
+
+> aqlan-center@0.1.0 verify:environment
+> node --import tsx scripts/verify-environment.mjs
+
+عقد البيئة: Node v22.23.3 · npm 11.9.0 · التوقيت المحلول Asia/Aden · سياق محلي
+✓ عقد البيئة مستوفى (Node >=22 <23 · npm >=10.9 <12 · توقيت العيادة Asia/Aden).
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

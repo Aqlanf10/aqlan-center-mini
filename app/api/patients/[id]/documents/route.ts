@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { ClinicalMutationAuthorityError } from "@/lib/clinical-mutation-authority";
 import { isDocumentAcquisitionDate } from "@/lib/document-acquisition-date";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { SIGNATURE_MISMATCH_MESSAGE as CANONICAL_SIGNATURE_MESSAGE, canonicalDocumentFailure, commandCanonicalDocumentUpload, parseCanonicalDocumentUpload, readCanonicalPatientDocuments } from "@/lib/canonical-documents";
 import {
   DocumentAssociationError, getSettings, listPatientDocuments, recordAudit, recordAuthorizedDocument,
   validateDocumentAssociations,
@@ -39,6 +42,15 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 75: clinical.xrays.view inside the patient scope; hidden ones only with patients.documents.delete. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const canonicalId = await patientIdFrom(context);
+    if (!canonicalId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400, headers: NO_STORE });
+    try { return NextResponse.json(await readCanonicalPatientDocuments(selected.handle, canonicalId), { headers: NO_STORE }); }
+    catch (error) { return canonicalDocumentFailure(error, "تعذّر تحميل المستندات."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -64,6 +76,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 75: one admitted clinical.xrays.upload transaction; admission before any disk write. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let canonicalForm: FormData;
+    try { canonicalForm = await readBoundedFormData(request, UPLOAD_BODY_LIMIT_BYTES); } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const result = await commandCanonicalDocumentUpload(selected.handle, (await context.params).id, parseCanonicalDocumentUpload(canonicalForm));
+      if (result.kind === "rejected_signature") return NextResponse.json({ message: CANONICAL_SIGNATURE_MESSAGE }, { status: 400, headers: NO_STORE });
+      return NextResponse.json(result.document, { status: 201, headers: NO_STORE });
+    } catch (error) { return canonicalDocumentFailure(error, "تعذّر حفظ الملف. أعد المحاولة."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);

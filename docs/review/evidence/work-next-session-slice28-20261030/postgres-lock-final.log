@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  6 passed (6)
+      Tests  79 passed (79)
+   Start at  20:52:57
+   Duration  21.90s (transform 1.97s, setup 0ms, import 4.05s, tests 16.81s, environment 1ms)

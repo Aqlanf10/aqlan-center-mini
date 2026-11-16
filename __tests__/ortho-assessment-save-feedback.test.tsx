@@ -132,6 +132,22 @@ beforeEach(() => {
 afterEach(() => { retireView(); owner.retire(); vi.unstubAllGlobals(); });
 
 describe("assessment save feedback across workup sections", () => {
+  it("exposes a single explicit save before the fields in every assessment view without submitting on open or navigation", async () => {
+    await startDraft();
+    for (const view of ["interview", "extraoral", "intraoral", "measurements", "radiographs"] as const) {
+      section = view; render(); await flush();
+      const tree = nodes(render(), true);
+      const controls = tree.find(node => node.props["aria-label"] === "حفظ مسودة التقييم")!;
+      expect(textOf(controls)).toContain("بما فيه الأقسام غير المعروضة حاليًا");
+      expect(textOf(controls)).toContain("مسودة مفتوحة؛ لم تُحفظ مراجعة جديدة");
+      expect(tree.filter(node => node.type === "button" && textOf(node) === saveLabel)).toHaveLength(1);
+      const fields = tree.findIndex(node => node.type === "findings-editor" || node.type === "measurement-editor" || node.type === "details");
+      expect(tree.indexOf(controls)).toBeLessThan(fields);
+      expect(posts()).toHaveLength(0);
+    }
+    reason("Synthetic change");
+    expect(textOf(nodes(render(), true).find(node => node.props["aria-label"] === "حفظ مسودة التقييم"))).toContain("تعديلات غير محفوظة");
+  });
   it("places correction before saved details and reuses the saved complaint without another question or write", async () => {
     await startDraft(); reason("Synthetic first review");
     findings(draft => Object.assign(draft.values.clinical_chiefComplaint,{state:"recorded",text:"Exact saved complaint",dateState:"unknown",dateReason:"Synthetic unknown date",method:"direct_examination",methodDescription:"Synthetic interview"}));

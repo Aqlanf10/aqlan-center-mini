@@ -1,0 +1,17 @@
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+
+ Test Files  808 passed (808)
+      Tests  13599 passed (13599)
+   Start at  02:40:29
+   Duration  425.92s (transform 18.40s, setup 0ms, import 87.27s, tests 244.92s, environment 76ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

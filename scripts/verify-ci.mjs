@@ -41,7 +41,9 @@ function runJourney(journey) {
   return new Promise((resolve) => {
     const started = Date.now();
     console.log(`\n▶ START ${journey.name} — ${journey.script}`);
-    const child = spawn("npx", ["tsx", journey.script], {
+    // Use the installed Node loader directly. The CLI's optional IPC supervisor
+    // is not needed for one isolated journey; scripts still execute for real.
+    const child = spawn(process.execPath, ["--import", "tsx", journey.script], {
       stdio: "inherit",
       env: process.env,
       cwd: fileURLToPath(new URL("..", import.meta.url)),

@@ -4,13 +4,20 @@ import { canWriteCephClinical } from "./ceph-access";
 import { currentClinicalActor, ClinicalMutationAuthorityError } from "./clinical-mutation-authority";
 import { canAccessPatient } from "./patient-access";
 
-export interface CephDraftWriteRequest {
+/**
+ * Canonical (staff-cutover) admission: called inside the writer's transaction right after the
+ * patient row lock, in place of the legacy session re-proof. It proves the operation's capability,
+ * current patient scope and identity, and returns the actor whose expiry the writer re-checks.
+ * It never widens access: a refusal throws ClinicalMutationAuthorityError.
+ */
+export type CephCanonicalAdmit = (client: DbClient, patientId: number) => Promise<SessionPayload>;
+export type CephDraftWriteRequest = {
   patientId: number;
   documentId: number;
-  session: SessionPayload;
-}
+} & ({ session: SessionPayload; admit?: undefined } | { admit: CephCanonicalAdmit; session?: undefined });
 export function assertCephDraftRequest(request: CephDraftWriteRequest): void {
-  if (!request?.session || !Number.isSafeInteger(request.patientId) || request.patientId <= 0
+  if (!request || (!request.session && typeof request.admit !== "function") || (request.session && request.admit)
+    || !Number.isSafeInteger(request.patientId) || request.patientId <= 0
     || !Number.isSafeInteger(request.documentId) || request.documentId <= 0) {
     throw new ClinicalMutationAuthorityError(401, "هوية طلب تعديل الدراسة غير صالحة.");
   }
@@ -19,7 +26,11 @@ export function assertCephDraftRequest(request: CephDraftWriteRequest): void {
 export async function authorizeCephDraft(client: DbClient, request: CephDraftWriteRequest): Promise<SessionPayload> {
   assertCephDraftRequest(request);
   const { rows } = await client.query("SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE", [request.patientId]);
-  const current = await currentClinicalActor(request.session, client);
+  if (request.admit) {
+    if (!rows.length) throw new ClinicalMutationAuthorityError(403, "غير مصرّح لك بتعديل دراسة هذا المريض.");
+    return request.admit(client, request.patientId);
+  }
+  const current = await currentClinicalActor(request.session!, client);
   if (!rows.length || !canWriteCephClinical(current.role)
     || !await canAccessPatient(current, request.patientId, "canUploadXrays", client, "nowait")) {
     throw new ClinicalMutationAuthorityError(403, "غير مصرّح لك بتعديل دراسة هذا المريض.");

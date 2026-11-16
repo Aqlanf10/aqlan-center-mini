@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+let responsibilityFixtureSequence = 0;
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -28,7 +30,8 @@ const reception = { username: "synthetic-reception", role: "reception" as const,
 // Supply only the request-session boundary. Resource authorization, request
 // parsing and every application/SQL writer remain real. This is an ordinary
 // authorized reception flow, not an authentication or access-control probe.
-vi.mock("../../lib/session", () => ({
+vi.mock("../../lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/session")>()),
   requireSession: async () => ({ userId: 1, username: "synthetic-reception", role: "reception", expiresAt: 4_000_000_000 }),
 }));
 
@@ -117,7 +120,7 @@ async function fixture(options: { linked?: boolean; today?: boolean; time?: stri
             ((NOW() AT TIME ZONE $1)::date + $2::int + 1)::text AS next_date`,
     [db.CLINIC_TIME_ZONE, options.today ? 0 : seq * 3],
   );
-  const clinicalCase = await db.createClinicalCase({
+  const clinicalCase = await db.createClinicalCase({ admittedSession: await responsibilityAdminFixture("referral-reschedule-consistency-responsibility-" + (++responsibilityFixtureSequence)),
     patientId: patient.id, specialty: "endodontics", title: "Synthetic referral case",
     site: "21", problem: null, responsiblePartyId: receivingDoctor, orthoCaseId: null,
     actor: "synthetic-referrer",
@@ -144,11 +147,57 @@ async function fixture(options: { linked?: boolean; today?: boolean; time?: stri
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
-async function patchReschedule(f: Fixture, doctor: "omitted" | "unchanged" | "other" | "none") {
+type TransferIntent = Pick<import("../../lib/book-appointment").RescheduleInput,
+  "transferToCurrentResponsibleDoctor" | "returnBookingSource" | "returnBookingFingerprint">;
+
+/** Administrative responsibility changes and appointment transfers are separate
+ * commands. Use the real settings boundary; never rewrite historical doctors. */
+async function transferIntent(f: Fixture): Promise<TransferIntent> {
+  const { patientResponsibilitySettings } = await import("../../lib/patient-responsibility-settings");
+  const { readReturnBookingContext } = await import("../../lib/return-booking-context");
+  const admin = await responsibilityAdminFixture(`referral-transfer-admin-${++responsibilityFixtureSequence}`);
+  const target = { patientId: f.patientId, kind: "clinical" as const, sourceId: f.caseId };
+  const before = await patientResponsibilitySettings(target, admin);
+  await patientResponsibilitySettings(target, admin, { expectedSourceFingerprint: before.sourceFingerprint,
+    doctorId: otherDoctor, reason: "Synthetic administrative care handover" });
+  const source = { kind: "clinical_case" as const, id: f.caseId };
+  const preview = await readReturnBookingContext(db.getPool(), f.patientId, source);
+  if (!preview.ok) throw new Error(preview.message);
+  return { transferToCurrentResponsibleDoctor: true, returnBookingSource: source, returnBookingFingerprint: preview.fingerprint };
+}
+
+/** Null-doctor legacy mutations are no longer public booking commands. Keep
+ * testing the SQL referral invariant below that policy boundary, on the real
+ * transaction/day/move writer, without weakening the public refusal. */
+async function legacyMove(f: Fixture, doctorId: number | null): Promise<import("../../lib/book-appointment").RescheduleResult> {
+  const result = await db.writeAppointmentAcrossDays({
+    fromDate: f.date, toDate: f.nextDate, judge: () => ({ ok: true as const }),
+    commit: client => db.moveAppointmentOnClient(client, {
+      id: f.appointmentId, fromDate: f.date, fromTime: f.time, toDate: f.nextDate, toTime: "11:00",
+      durationMinutes: 30, serviceId: null, appointmentType: null,
+      bufferBeforeMinutes: 0, bufferAfterMinutes: 0, occupiesChair: true, chairNo: null, doctorId,
+    }),
+  });
+  if (!result.ok || !result.value) return { ok: false, status: 409, message: "Synthetic lower-level referral refusal" };
+  return { ok: true, appointment: result.value, overridden: false, warning: null,
+    verdict: { state: "AVAILABLE", occupiedChairs: 0, chairs: 4, dayPercent: 0, outsideHours: false, message: "Synthetic", reasons: [] } };
+}
+
+async function explicitMove(f: Fixture, transfer: TransferIntent, date = f.nextDate, time = "11:00") {
+  const input = { appointmentId: f.appointmentId, date, time, doctorId: otherDoctor,
+    reason: "Synthetic explicit responsible-doctor transfer", ...transfer };
+  const result = await booking.rescheduleAppointment(input, reception);
+  if (!result.ok && result.conflict?.kind === "nearby_patient_appointments") {
+    return booking.rescheduleAppointment({ ...input, nearbyAppointmentConfirmation: result.conflict.confirmationToken }, reception);
+  }
+  return result;
+}
+
+async function patchReschedule(f: Fixture, doctor: "omitted" | "unchanged" | "other" | "none", transfer: TransferIntent = {}) {
   return appointmentRoute.PATCH(new Request(`http://localhost/api/appointments/${f.appointmentId}`, {
     method: "PATCH", headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      action: "reschedule", date: f.nextDate, time: "11:00", reason: "Synthetic reception request",
+      action: "reschedule", date: f.nextDate, time: "11:00", reason: "Synthetic reception request", ...transfer,
       ...(doctor === "omitted" ? {} : { doctorId: doctor === "unchanged" ? receivingDoctor : doctor === "other" ? otherDoctor : null }),
     }),
   }), { params: Promise.resolve({ id: String(f.appointmentId) }) });
@@ -189,6 +238,9 @@ async function waitForBlockedWriter(blockerPid: number, queryFragment: string): 
 }
 
 async function concurrentLinkAndMove(f: Fixture, doctorId: number | null, first: "link" | "move") {
+  const transfer = doctorId === otherDoctor ? await transferIntent(f) : {};
+  if (doctorId === null) expect(await booking.rescheduleAppointment({ appointmentId: f.appointmentId,
+    date: f.nextDate, time: "11:00", doctorId: null, reason: "Synthetic forbidden public clearing" }, reception)).toMatchObject({ ok: false, status: 400, code: "return_booking_context_required" });
   const gate = new Client({ connectionString: process.env.DATABASE_URL, ssl: false });
   let linking: ReturnType<typeof step> | undefined;
   let moving: ReturnType<typeof booking.rescheduleAppointment> | undefined;
@@ -197,9 +249,9 @@ async function concurrentLinkAndMove(f: Fixture, doctorId: number | null, first:
     void linking.catch(() => {}); // Both outcomes are awaited after releasing the gate.
   };
   const startMove = () => {
-    moving = booking.rescheduleAppointment({
+    moving = doctorId === null ? legacyMove(f, null) : booking.rescheduleAppointment({
       appointmentId: f.appointmentId, date: f.nextDate, time: "11:00", doctorId,
-      reason: "Synthetic concurrent doctor reassignment",
+      reason: "Synthetic concurrent doctor reassignment", ...transfer,
     }, reception);
     void moving.catch(() => {});
   };
@@ -264,25 +316,28 @@ describe("internal-referral rescheduling consistency", () => {
     expect(await db.getReferral(f.referralId)).toMatchObject({ workflowState: "scheduled", appointmentId: f.appointmentId });
   });
 
-  it.each(["other", "none"] as const)("unlinked appointments may be reassigned to %s", async (doctor) => {
+  it.each(["other", "none"] as const)("unlinked %s changes require verified transfer or lower-level legacy compatibility", async (doctor) => {
     const f = await fixture({ linked: false });
     const doctorId = doctor === "other" ? otherDoctor : null;
     expect(await booking.rescheduleAppointment({
-      appointmentId: f.appointmentId, date: f.nextDate, time: "11:00", doctorId, reason: "Synthetic reassignment",
-    }, reception)).toMatchObject({ ok: true, appointment: { doctorId } });
+      appointmentId: f.appointmentId, date: f.nextDate, time: "11:00", doctorId, reason: "Synthetic unverified reassignment",
+    }, reception)).toMatchObject({ ok: false, status: 400, code: "return_booking_context_required" });
+    const moved = doctor === "other" ? await explicitMove(f, await transferIntent(f)) : await legacyMove(f, null);
+    expect(moved).toMatchObject({ ok: true, appointment: { doctorId } });
     expect(await q("SELECT referral_id FROM appointments WHERE id = $1", [f.appointmentId])).toEqual([{ referral_id: null }]);
   });
 
   it.each(["other", "none"] as const)("rejects linked appointment reassignment to %s and preserves every row", async (doctor) => {
     const f = await fixture();
     expect(await db.markReminderSent(f.appointmentId)).toBe(true);
+    const transfer = doctor === "other" ? await transferIntent(f) : {};
     const before = await snapshot(f);
     const result = await booking.rescheduleAppointment({
       appointmentId: f.appointmentId, date: f.nextDate, time: "11:00",
-      doctorId: doctor === "other" ? otherDoctor : null, reason: "Synthetic reassignment",
+      doctorId: doctor === "other" ? otherDoctor : null, reason: "Synthetic reassignment", ...transfer,
     }, reception);
     expect.soft(result, "The same receiver rule used at initial linking must hold during rescheduling")
-      .toMatchObject({ ok: false, status: 409 });
+      .toMatchObject({ ok: false, status: doctor === "other" ? 409 : 400 });
     expect(await snapshot(f), "Refusal must preserve appointment, referral, visits and audit rows").toEqual(before);
   });
 
@@ -297,9 +352,10 @@ describe("internal-referral rescheduling consistency", () => {
   it.each(["other", "none"] as const)("ordinary reception PATCH rejects linked doctor reassignment to %s atomically", async (doctor) => {
     const f = await fixture();
     expect(await db.markReminderSent(f.appointmentId)).toBe(true);
+    const transfer = doctor === "other" ? await transferIntent(f) : {};
     const before = await snapshot(f);
-    const response = await patchReschedule(f, doctor);
-    expect.soft(response.status).toBe(409);
+    const response = await patchReschedule(f, doctor, transfer);
+    expect.soft(response.status).toBe(doctor === "other" ? 409 : 400);
     expect(await snapshot(f)).toEqual(before);
   });
 
@@ -321,9 +377,10 @@ describe("internal-referral rescheduling consistency", () => {
 
   it("arrival after a refused doctor change retains the receiving doctor and the referral case", async () => {
     const f = await fixture({ today: true, time: "09:00" });
+    const transfer = await transferIntent(f);
     const result = await booking.rescheduleAppointment({
       appointmentId: f.appointmentId, date: f.date, time: "10:00",
-      doctorId: otherDoctor, reason: "Synthetic reassignment before arrival",
+      doctorId: otherDoctor, reason: "Synthetic reassignment before arrival", ...transfer,
     }, reception);
     expect.soft(result).toMatchObject({ ok: false, status: 409 });
     expect(await db.arriveAppointment(f.appointmentId, { actor: reception.username, actorRole: reception.role })).toBe(true);
@@ -346,10 +403,7 @@ describe("internal-referral rescheduling consistency", () => {
     const f = await fixture();
     const replacement = await book(f.patientId, f.nextDate, "11:00", receivingDoctor);
     expect(await step(f.referralId, "schedule", replacement)).toMatchObject({ ok: true });
-    expect(await booking.rescheduleAppointment({
-      appointmentId: f.appointmentId, date: f.date, time: "12:00", doctorId: otherDoctor,
-      reason: "Synthetic old appointment reassignment",
-    }, reception)).toMatchObject({ ok: true });
+    expect(await explicitMove(f, await transferIntent(f), f.date, "12:00")).toMatchObject({ ok: true });
     expect(await q("SELECT referral_id FROM appointments WHERE id = $1", [f.appointmentId])).toEqual([{ referral_id: null }]);
     expect(await db.getReferral(f.referralId)).toMatchObject({ workflowState: "scheduled", appointmentId: replacement });
   });
@@ -400,6 +454,9 @@ describe("internal-referral rescheduling consistency", () => {
   it.each(["other", "none"] as const)("sees a newly committed referral after waiting before a %s doctor move", async (doctor) => {
     const f = await fixture({ linked: false });
     await q("UPDATE appointments SET reminder_sent_at = NOW(), patient_confirmed_at = NOW() WHERE id = $1", [f.appointmentId]);
+    const transfer = doctor === "other" ? await transferIntent(f) : {};
+    if (doctor === "none") expect(await booking.rescheduleAppointment({ appointmentId: f.appointmentId,
+      date: f.nextDate, time: "11:00", doctorId: null, reason: "Synthetic public null refusal" }, reception)).toMatchObject({ ok: false, status: 400, code: "return_booking_context_required" });
     const before = await snapshot(f);
     const gate = new Client({ connectionString: process.env.DATABASE_URL, ssl: false });
     let moving: ReturnType<typeof booking.rescheduleAppointment> | undefined;
@@ -409,10 +466,9 @@ describe("internal-referral rescheduling consistency", () => {
       await gate.query("BEGIN");
       const { rows: [backend] } = await gate.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
       await gate.query("SELECT id FROM appointments WHERE id = $1 FOR UPDATE", [f.appointmentId]);
-      moving = booking.rescheduleAppointment({
-        appointmentId: f.appointmentId, date: f.nextDate, time: "11:00",
-        doctorId: doctor === "other" ? otherDoctor : null,
-        reason: "Synthetic fresh-snapshot reassignment",
+      moving = doctor === "none" ? legacyMove(f, null) : booking.rescheduleAppointment({
+        appointmentId: f.appointmentId, date: f.nextDate, time: "11:00", doctorId: otherDoctor,
+        reason: "Synthetic fresh-snapshot reassignment", ...transfer,
       }, reception);
       void moving.catch(() => {});
       await waitForBlockedWriter(backend.pid, "appointments");
@@ -455,7 +511,7 @@ describe("internal-referral rescheduling consistency", () => {
 });
 
 describe("referral move backward-compatibility controls", () => {
-  it.each(["other", "none"] as const)("an external-referral legacy link still permits reassignment to %s", async (doctor) => {
+  it.each(["other", "none"] as const)("external-referral %s compatibility cannot bypass the public transfer policy", async (doctor) => {
     const f = await fixture({ linked: false });
     const external = await db.createReferral({
       patientId: f.patientId, doctorPartyId: referringDoctor, actor: "synthetic-referrer",
@@ -469,8 +525,10 @@ describe("referral move backward-compatibility controls", () => {
     const doctorId = doctor === "other" ? otherDoctor : null;
     expect(await booking.rescheduleAppointment({
       appointmentId: f.appointmentId, date: f.nextDate, time: "11:00", doctorId,
-      reason: "Synthetic legacy external appointment reassignment",
-    }, reception)).toMatchObject({ ok: true, appointment: { doctorId } });
+      reason: "Synthetic unverified external appointment reassignment",
+    }, reception)).toMatchObject({ ok: false, status: 400, code: "return_booking_context_required" });
+    const moved = doctor === "other" ? await explicitMove(f, await transferIntent(f)) : await legacyMove(f, null);
+    expect(moved).toMatchObject({ ok: true, appointment: { doctorId } });
     expect(await q("SELECT referral_id FROM appointments WHERE id = $1", [f.appointmentId]))
       .toEqual([{ referral_id: external.id }]);
     expect(await db.getReferral(external.id)).toMatchObject({ kind: "external", workflowState: null });

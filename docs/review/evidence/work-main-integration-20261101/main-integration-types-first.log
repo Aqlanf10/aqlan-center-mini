@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 typecheck
+> tsc --noEmit
+
+schema/current-schema-contract.pg18.json(7,1): error TS1185: Merge conflict marker encountered.
+schema/current-schema-contract.pg18.json(13,1): error TS1185: Merge conflict marker encountered.
+schema/current-schema-contract.pg18.json(19,1): error TS1185: Merge conflict marker encountered.
+schema/current-schema-contract.pg18.json(9083,1): error TS1185: Merge conflict marker encountered.
+schema/current-schema-contract.pg18.json(9090,1): error TS1185: Merge conflict marker encountered.
+schema/current-schema-contract.pg18.json(9095,1): error TS1185: Merge conflict marker encountered.
+schema/preflight-disclosure.pg18.json(5828,1): error TS1185: Merge conflict marker encountered.
+schema/preflight-disclosure.pg18.json(5830,1): error TS1185: Merge conflict marker encountered.
+schema/preflight-disclosure.pg18.json(5832,1): error TS1185: Merge conflict marker encountered.
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

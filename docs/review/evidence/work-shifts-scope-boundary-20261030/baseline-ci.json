@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "baselineOnly": true,
+  "head": "78758658e475a40ff1d3c186177c73ad32017a25",
+  "runId": 41083515049,
+  "url": "https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/41083515049",
+  "completedAtUTC": "2026-10-30T16:40:06Z",
+  "completedAtSource": "parent independently verified",
+  "jobs": [
+    {
+      "id": 124158547631,
+      "name": "Typecheck, Lint, Unit, Audit, Build",
+      "conclusion": "success"
+    },
+    {
+      "id": 124158549483,
+      "name": "PostgreSQL 18 integration, schema and operational journeys",
+      "conclusion": "success"
+    },
+    {
+      "id": 124166529899,
+      "name": "Built-app HTTP security and hosted browser",
+      "conclusion": "success"
+    },
+    {
+      "id": 124187802168,
+      "name": "Required CI gates (fail closed)",
+      "conclusion": "success"
+    }
+  ],
+  "units": {
+    "files": 797,
+    "tests": 13371
+  },
+  "postgres": {
+    "files": 371,
+    "tests": 4569
+  },
+  "meaning": "All four jobs succeeded on the preceding read/UI head. This does not validate the subsequent assignment-boundary patch."
+}

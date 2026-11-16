@@ -1,0 +1,59 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ceph-comparison-record-order.test.ts --exclude .next/**
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+ ❯ __tests__/ceph-comparison-record-order.test.ts (2 tests | 2 failed) 10ms
+   × orders the persisted xrayDate before registration time ({"id":7,"xrayDate":"2024-01-15","createdAt":"2025-01-01T12:00:00Z"} then {"id":8,"xrayDate":"2025-01-15","createdAt":"2024-01-01T12:00:00Z"}) 8ms
+   × orders the persisted xrayDate before registration time ({"id":8,"xrayDate":"2025-01-15","createdAt":"2024-01-01T12:00:00Z"} then {"id":7,"xrayDate":"2024-01-15","createdAt":"2025-01-01T12:00:00Z"}) 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ceph-comparison-record-order.test.ts > orders the persisted xrayDate before registration time ({"id":7,"xrayDate":"2024-01-15","createdAt":"2025-01-01T12:00:00Z"} then {"id":8,"xrayDate":"2025-01-15","createdAt":"2024-01-01T12:00:00Z"})
+ FAIL  __tests__/ceph-comparison-record-order.test.ts > orders the persisted xrayDate before registration time ({"id":8,"xrayDate":"2025-01-15","createdAt":"2024-01-01T12:00:00Z"} then {"id":7,"xrayDate":"2024-01-15","createdAt":"2025-01-01T12:00:00Z"})
+AssertionError: expected [ { id: 8, …(2) }, { id: 7, …(2) } ] to deeply equal [ { id: 7, …(2) }, { id: 8, …(2) } ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "createdAt": "2025-01-01T12:00:00Z",
+-     "id": 7,
+-     "xrayDate": "2024-01-15",
+-   },
+-   {
+      "createdAt": "2024-01-01T12:00:00Z",
+      "id": 8,
+      "xrayDate": "2025-01-15",
++   },
++   {
++     "createdAt": "2025-01-01T12:00:00Z",
++     "id": 7,
++     "xrayDate": "2024-01-15",
+    },
+  ]
+
+ ❯ __tests__/ceph-comparison-record-order.test.ts:9:45
+      7| const laterImage = { id: 8, xrayDate: "2025-01-15", createdAt: "2024-0…
+      8| it.each([[earlierImage, laterImage], [laterImage, earlierImage]])("ord…
+      9|   expect(chronologicalOrder(first, second)).toEqual([earlierImage, lat…
+       |                                             ^
+     10| });
+     11|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  03:28:23
+   Duration  357ms (transform 28ms, setup 0ms, import 39ms, tests 10ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

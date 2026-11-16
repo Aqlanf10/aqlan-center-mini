@@ -1,3 +1,4 @@
+import { LabFinancialBoundaryError } from "@/lib/lab-financial-boundary";
 import { labClinicalEditProblem, parseLabClinicalSnapshot } from "@/lib/lab-clinical-edit";
 import { parseLabShadeSpecification } from "@/lib/lab-shades";
 import { NextResponse } from "next/server";
@@ -22,6 +23,20 @@ import { rateFromSettings } from "@/lib/settings";
 import type { LabOrderStatus } from "@/lib/lab";
 import { isLabAccountingRate } from "@/lib/lab-accounting-edit";
 
+import { completeLabPrescription, LabPrescriptionError } from "@/lib/lab-prescription-write";
+import { validateLabPrescription } from "@/lib/lab-prescription-input";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import {
+  CanonicalLabOrderRefusal, canonicalLabActionNotMigrated, commandCanonicalLabDelete, commandCanonicalLabDueDate,
+  commandCanonicalLabStatus, readCanonicalLabEvents,
+} from "@/lib/canonical-lab-orders";
+import type { VerifiedDurableSession } from "@/lib/staff-durable-session";
+import {
+  CanonicalLabCorrectionRefusal, commandCanonicalLabClinical, commandCanonicalLabPrescription, commandCanonicalLabShade,
+} from "@/lib/canonical-lab-corrections";
+import { CanonicalLabAccountingRefusal, commandCanonicalLabAccounting } from "@/lib/canonical-lab-accounting";
+
 export const dynamic = "force-dynamic";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -30,8 +45,48 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const STATUSES: LabOrderStatus[] = [
   "needed", "sent", "in_progress", "received", "delivered", "remake", "cancelled",
 ];
+const SESSION_ENDED = "انتهت الجلسة. سجّل الدخول من جديد.";
+
+/** One HTTP mapping for the canonical lab-order branch (M2 slice 67): bounded codes,
+ * Arabic messages, no driver text, never cached. */
+function canonicalLabFailure(error: unknown, fallback: string): NextResponse {
+  if (error instanceof CanonicalLabOrderRefusal || error instanceof CanonicalLabCorrectionRefusal || error instanceof CanonicalLabAccountingRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  if (error instanceof LabFinancialBoundaryError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  if ((error as { code?: string } | null)?.code === "55P03") return NextResponse.json({ code: "lab_status_busy", message: "يوجد تحديث جارٍ؛ حدّث الإرسالية وأعد المحاولة." }, { status: 409, headers: NO_STORE });
+  return canonicalPatientReadFailure(error, fallback);
+}
+
+/** M2 slices 67, 69 and 71: status, due date, events, the clinical corrections
+ * (prescription, clinical, shade) and accounting/posting on the canonical runtime; any
+ * other action is refused explicitly; never the legacy session. */
+async function canonicalPatch(request: Request, handle: VerifiedDurableSession, rawId: string): Promise<NextResponse> {
+  let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+  }
+  const source = (body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+  try {
+    if (source.action === "events") return NextResponse.json(await readCanonicalLabEvents(handle, rawId), { headers: NO_STORE });
+    // M2 slice 69: the clinical corrections under clinical.visits.document.
+    if (source.action === "complete_prescription") return NextResponse.json(await commandCanonicalLabPrescription(handle, rawId, source), { headers: NO_STORE });
+    if (source.action === "update_clinical") return NextResponse.json(await commandCanonicalLabClinical(handle, rawId, source), { headers: NO_STORE });
+    if (source.action === "update_shade") return NextResponse.json(await commandCanonicalLabShade(handle, rawId, source), { headers: NO_STORE });
+    // M2 slice 71: accounting and posting under finance.payables.record.
+    if (source.action === "update_accounting" || source.action === "post" || source.action === "unpost") {
+      return NextResponse.json(await commandCanonicalLabAccounting(handle, rawId, source), { headers: NO_STORE });
+    }
+    if (source.action !== undefined) canonicalLabActionNotMigrated();
+    if (source.dueDate !== undefined) return NextResponse.json(await commandCanonicalLabDueDate(handle, rawId, source), { headers: NO_STORE });
+    return NextResponse.json(await commandCanonicalLabStatus(handle, rawId, source), { headers: NO_STORE });
+  } catch (error) {
+    return canonicalLabFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+  }
+}
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: SESSION_ENDED }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return canonicalPatch(request, selected.handle, (await context.params).id);
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -49,6 +104,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const source = (body ?? {}) as Record<string, unknown>;
 
   try {
+    if (source.action === "complete_prescription") {
+      if (typeof source.expected !== "string" || typeof source.dispatch !== "boolean") {
+        return NextResponse.json({ message: "بيانات مراجعة الطلب غير صالحة." }, { status: 400 });
+      }
+      let prescription;
+      try { prescription = validateLabPrescription(source.prescription, source.dispatch); }
+      catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "بيانات غير صالحة." }, { status: 400 }); }
+      const result = await completeLabPrescription(id, prescription, source.expected, source.dispatch, session);
+      return NextResponse.json(result);
+    }
     if (source.action === "update_clinical") {
       if (!["admin", "doctor", "reception"].includes(session.role)) return NextResponse.json({ message: "غير مصرح بتصحيح الإرسالية." }, { status: 403 });
       const clinical = parseLabClinicalSnapshot(source.clinical);
@@ -122,8 +187,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       let costCurrency: Currency | undefined = undefined;
       let exchangeRate: number | undefined = undefined;
       if (source.cost !== undefined && String(source.cost).trim() !== "") {
-        const curr = typeof source.costCurrency === "string" ? source.costCurrency : "YER";
-        costCurrency = isCurrency(curr) ? curr : "YER";
+        if (!isCurrency(source.costCurrency)) {
+          return NextResponse.json({ code: "lab_accounting_currency_required", message: "اختر عملة التكلفة الفعلية؛ لا تُفترض عملة تلقائيًا." }, { status: 400 });
+        }
+        costCurrency = source.costCurrency;
         costMinor = parseAmount(String(source.cost), costCurrency);
         if (costMinor === null || costMinor < 0) {
           return NextResponse.json({ message: "اكتب تكلفة صحيحة أو اتركها فارغة." }, { status: 400 });
@@ -144,11 +211,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
             return NextResponse.json({ code: "lab_accounting_rate_changed", message: "تغيّر سعر الصرف أو تعذّر التحقق منه. حدّث المعاينة وراجعها قبل الحفظ." }, { status: 409 });
           }
         }
+        if (!isLabAccountingRate(exchangeRate)) {
+          return NextResponse.json({ code: "lab_accounting_rate_invalid", message: "سعر صرف عملة التكلفة غير صالح؛ راجع الإعدادات قبل الحفظ." }, { status: 409 });
+        }
       } else if (source.cost === null || source.cost === "") {
         costMinor = null;
       }
 
       const updated = await updateLabOrderAccounting(id, {
+        session,
         expenseCategoryId,
         expenseAccountCode,
         payableAccountCode,
@@ -196,7 +267,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         );
       }
     }
+    if (status === "sent") {
+      const existing = await getLabOrderById(id);
+      if (existing?.status === "needed") {
+        return NextResponse.json({ message: "استكمل بيانات الإرسالية وراجعها من زر استكمال الإرسالية أولًا." }, { status: 409 });
+      }
+    }
     const updated = await setLabOrderStatus(id, status as LabOrderStatus, {
+      session,
       actor: session.username,
       actorRole: session.role,
       notes: typeof source.note === "string" && source.note.trim() ? source.note.trim().slice(0, 300) : null,
@@ -227,6 +305,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     return NextResponse.json(updated);
   } catch (error) {
+    if ((error as { code?: string }).code === "55P03") return NextResponse.json({ code: "lab_status_busy", message: "يوجد تحديث جارٍ؛ حدّث الإرسالية وأعد المحاولة." }, { status: 409 });
+    if (error instanceof LabFinancialBoundaryError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.status });
+    if (error instanceof LabPrescriptionError) return NextResponse.json({ message: error.message }, { status: error.status });
     const code = error instanceof Error ? error.message : "";
     if (code === "lab_order_accounting_price_invalid") return NextResponse.json({ code, message: "التكلفة المعدّلة يجب أن تكون مبلغًا موجبًا؛ لا يمكن مسح الالتزام المالي من هذا الإجراء." }, { status: 400 });
     const accountingConflicts: Record<string, string> = {
@@ -243,6 +324,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 /* حذف أمر مختبر نهائيًا — المدير وحده، والالتزام المسدَّد يمنعه (يُلغى سريريًا
  * بدله). الإلغاء للموقف الطبيعي، والحذف للسجل الخاطئ الذي لا مكان له أصلًا. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 67: clinical.lab.cancel inside the patient scope; the audit row commits
+     with the delete. Never the legacy session. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: SESSION_ENDED }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let reason: unknown = null;
+    try {
+      const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      reason = (body as Record<string, unknown> | null)?.reason ?? null;
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; }
+    try {
+      await commandCanonicalLabDelete(selected.handle, (await context.params).id, reason);
+      return NextResponse.json({ message: "حُذف أمر المختبر وسُجِّل في التدقيق." }, { headers: NO_STORE });
+    } catch (error) {
+      return canonicalLabFailure(error, "تعذّر حذف أمر المختبر. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -280,6 +378,9 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     if (!result.ok) {
       if (result.reason === "reason_required") {
         return NextResponse.json({ message: "اكتب سبب الحذف النهائي — يُسجَّل في التدقيق." }, { status: 400 });
+      }
+      if (result.reason === "source_linked") {
+        return NextResponse.json({ code: "lab_source_linked", message: "الإرسالية مرتبطة بمصدر علاجي أو فاتورة؛ لا يمكن حذف هويتها. استخدم الإلغاء المسموح مع حفظ الأثر." }, { status: 409 });
       }
       if (result.reason === "settled") {
         return NextResponse.json(

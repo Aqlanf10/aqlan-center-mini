@@ -1,0 +1,223 @@
+{
+  "base": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+  "status": "all declared local gates passed; publication, exact-head CI and independent review pending",
+  "buildId": "FhaJ0Z54U5boIgHX0_cjA",
+  "scope": "GET plan-template/service catalogue; clinical.plans.view with independent finance.service-prices.view; readonly UI, no patient scope expansion or writes/migrations/live settings",
+  "results": {
+    "baselineHttp": {
+      "failed": 1,
+      "actualStatus": 401,
+      "expectedStatus": 200
+    },
+    "postgres": {
+      "passed": 46,
+      "files": 2,
+      "new": 24,
+      "runtimeRegression": 22
+    },
+    "httpBrowser": {
+      "passed": 26,
+      "files": 4,
+      "new": 9,
+      "regression": 17,
+      "ddl": 0
+    },
+    "focusedUnit": {
+      "passed": 21,
+      "files": 2
+    },
+    "mapInventoryGuards": {
+      "passed": 10,
+      "files": 2
+    },
+    "fullUnit": {
+      "passed": 13610,
+      "files": 809
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 346
+    },
+    "types": "passed",
+    "build": "passed",
+    "preflight": "passed",
+    "moneyGuard": "passed",
+    "bodyGuard": "passed",
+    "sourceWitnesses": 23,
+    "historicalSourceHashes": 165,
+    "runtime": {
+      "bracesTraceCount": 370,
+      "lintToolingTraceCount": 737,
+      "manifestCount": 86,
+      "availableSourceMapCount": 367,
+      "mapCoverage": "Only available validated maps are inspected. Empty indexed maps give zero source attribution. Unmapped/minified arbitrary bundled code is not proven absent."
+    }
+  },
+  "failedAttempts": [
+    {
+      "stage": "complete-tree lint",
+      "errors": 3,
+      "reason": "new slice37 proof artifact used CommonJS require imports; converted to ESM without disabling rules or changing assertions; final complete-tree lint passed"
+    },
+    {
+      "stage": "first runtime verifier",
+      "reason": "old build trace referenced renamed slice37 proof artifact; rebuilt and verified final artifacts, no guard bypass"
+    }
+  ],
+  "filteredScreenshotRun": {
+    "passed": 1,
+    "skippedByNameFilter": 8,
+    "note": "not counted as full suite; final build reran all 26 with screenshot"
+  },
+  "notRun": [
+    "actual WORK Docker image: enforced destination policy refuses Alpine index CONNECT HTTP403",
+    "deployment or live accounts/data/settings",
+    "next comparison contract implementation"
+  ],
+  "pending": [
+    "normal publication after e718 terminal CI",
+    "full exact-head CI",
+    "independent source review",
+    "conservative main reconciliation after e718 CI"
+  ],
+  "sourceSha256": {
+    "__tests__/canonical-plan-template-projection.test.ts": "229000ea4f508278fd0e8de4482b50e33635909d06f82db651e7fe9e51114c6b",
+    "__tests__/fixtures/canonical-plan-template-catalog.ts": "b3ac7f49eb6a2b8653e2891c3fde89c2f592383e5ab58386cf2b75fe2cd07c30",
+    "__tests__/postgres/plans-canonical-template-catalog.test.ts": "7eab3db30d109314e401e97c339324bf17ba54a96a052e5204b5aa8a4d7c4612",
+    "__tests__/security-http/canonical-plan-template-catalog-journey.test.ts": "9dc210f4a572a6d22a383c823bc6df1379b6b11b19f988bbfdb78c35027fdec8",
+    "app/api/plan-templates/route.ts": "d9c73e708401f22d11514b69a9c667fa4a834638b54d932c67c0ac41af830643",
+    "components/patient/CanonicalClinicalPlans.tsx": "7d3b295cd4e3bc100806cef1815782ab7d6d581c2e936247666f7afd01572e7d",
+    "components/patient/CanonicalPlanTemplateCatalog.tsx": "d84d5badfb0f35b6748173bdfe0d50da0530a9655f97b4d1052c2c4b433b5cf2",
+    "docs/security/staff-cutover/M2_PROJECTION_INVENTORY.json": "5cb4cfde1cf9a1f389f12e2bd9e076b4cffb1062f6b3497a4b16e82783b07524",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "56e61597741fb062c9fcfa96fb060e35aeb1e9b945f145b69835feda0a7a0ee5",
+    "docs/security/staff-cutover/inventory.json": "6ee42bab1c8f1f32046e53bfa27263d9c9499e6e1f33a0ac3aa2c9dc5026fc02",
+    "lib/canonical-plan-template-projection.ts": "a7c9161c20634295905457a12ce3394427f1258ef245c76c44cce06cbad688cf",
+    "lib/canonical-plan-templates.ts": "7beff1cd8dc487c334806d2d7221ba1654b955ef48a765d77bb55bcc04d056ad",
+    "lib/staff-operation-runtime.ts": "3061a0632468afc6b5495ca7581f4c4e351e5d21b47bf7f516632436f108144d",
+    "scripts/audits/staff-cutover-readiness.test.mjs": "7a6cdcd67a9c066120a83e15c34eed70c2fb71f9e97caffe17d5a3ac547e82ce"
+  },
+  "evidence": {
+    "lint-tooling-runtime-proof.json": {
+      "sha256": "4fc7189feb58e69d5e67bde57ffd23c8040a14fb4b250f1c501afd1155f2259f",
+      "bytes": 1432875
+    },
+    "plan-template-catalog-390.png": {
+      "sha256": "66d7051cd063a576dbdfb7d1370de3a53da045cdea68d5d0dd7ba3f1bcb761f7",
+      "bytes": 135411
+    },
+    "runtime-proof.json": {
+      "sha256": "28303230def2ec087032d50a1f4685c61370f3a589ca98cbba43b1000df499bb",
+      "bytes": 1609523
+    },
+    "slice38-before-http.log": {
+      "sha256": "4f519c2b5b819548e14fe09407a21bd38a760d2242180de86efd6f0aef006a78",
+      "bytes": 2063
+    },
+    "slice38-body-guard.log": {
+      "sha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "bytes": 197
+    },
+    "slice38-browser-evidence.log": {
+      "sha256": "d9c1b0ed72b239a260e720ff6210ae9889ff8ec2131d4fe73c8d7327a0dd15f0",
+      "bytes": 813
+    },
+    "slice38-build-final.log": {
+      "sha256": "44c2010acdc1012cfc34c1dd783ca0daf67a4a9593c3fd4d96572f29bf11bb09",
+      "bytes": 13585
+    },
+    "slice38-build.log": {
+      "sha256": "6c2ce2165281162f6d5b55fcb49317ab3b40e26c59875238a33e88eff2aa53c9",
+      "bytes": 13585
+    },
+    "slice38-full-unit.log": {
+      "sha256": "4a9b725814a0dab0e1364867a1e5493ad621c37ff8ea3d8fbd64ff13dd4f1520",
+      "bytes": 628
+    },
+    "slice38-historical-source-verification.json": {
+      "sha256": "9728bab3373702d6e043be195fac8589d2fd06caeb94d06b6259e7f90d3f0b19",
+      "bytes": 52937
+    },
+    "slice38-http-final.log": {
+      "sha256": "6cacec72df436003fed79c05c633322139fed5a097eeb6e0e2447044349b83b3",
+      "bytes": 967
+    },
+    "slice38-http-first.log": {
+      "sha256": "424be9ade79b336ad477ce67c50f89722b95ec2766f38e5d317848581c9922f7",
+      "bytes": 967
+    },
+    "slice38-inventory.log": {
+      "sha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "bytes": 329
+    },
+    "slice38-legacy-proof.json": {
+      "sha256": "b60e7c1494ea6b68eb738866e369396cf088443925edc89719266db033980380",
+      "bytes": 4272
+    },
+    "slice38-lint-final.log": {
+      "sha256": "537bd81f49fad0d2ce87e541c4873ab5cf358a4c4dff09e8b2d972d04b89398b",
+      "bytes": 271572
+    },
+    "slice38-lint.log": {
+      "sha256": "5b22e9a53cb2c94490fe67e4febc1429dfa138cd734320d838466e6ad12aa460",
+      "bytes": 271965
+    },
+    "slice38-map-guards.log": {
+      "sha256": "22724a1b07c4c2405023731b9b484753235be5015ad9c1328e09550e4de68b84",
+      "bytes": 586
+    },
+    "slice38-money-guard.log": {
+      "sha256": "5ac6c51e62042fa6da39d12c34f71eeefadf241e1981a459bd4727e5f6f19a15",
+      "bytes": 1844
+    },
+    "slice38-network-policy-diagnosis.json": {
+      "sha256": "186921a0b8126e0e45285abe52435693de13c21c7d59900c9443864f5674d9f3",
+      "bytes": 416
+    },
+    "slice38-pg-final.log": {
+      "sha256": "65245b0b0240a3d80682161dae4f7a8a648cad1ca2cc28f8073ecc2c3c4f2986",
+      "bytes": 762
+    },
+    "slice38-pg-first.log": {
+      "sha256": "6055e5a32914dc50f3215cf9784f4e8b49af1096810f532fee8aca64402cc15e",
+      "bytes": 564
+    },
+    "slice38-preflight.log": {
+      "sha256": "570c1c01cf116b4beadbf1bed9ae5807b85cd00f6922a7375db69c88d57d3fba",
+      "bytes": 1144
+    },
+    "slice38-projection-scan.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "slice38-runtime-braces-final.log": {
+      "sha256": "391baa7ea2c33df89c691eebc462910c74351e19d8189ae555fb02d1139a00ac",
+      "bytes": 108
+    },
+    "slice38-runtime-braces.log": {
+      "sha256": "a4026dd5cd86456ce143166b9de4f2c242068c0e37663184c4c14cdeb1f9a7ce",
+      "bytes": 153
+    },
+    "slice38-runtime-lint-final.log": {
+      "sha256": "ef9de0c7c59e6e96a9311f932149e1f42f50f3c3cb117cbd87bd8294f2487ef2",
+      "bytes": 137
+    },
+    "slice38-slice37-witness-rerun.json": {
+      "sha256": "96809c424fb418feeb334aaaa1aa9dcfcf8df2e4411cd8a8bec06d9ca85ed265",
+      "bytes": 4678
+    },
+    "slice38-types-final.log": {
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "slice38-units-focused.log": {
+      "sha256": "4e43240f080e07d8e542005b8260d28fbaaf8684f37f6da4393c1ece3919119f",
+      "bytes": 428
+    }
+  },
+  "publishedEvidenceNormalization": "CRLF to LF and line-ending whitespace only. Raw originals retained locally; no result, assertion or error removed.",
+  "rawEvidenceSha256": {
+    "slice38-build.log": "49fffaa5730e9038ab1a9e13289b0624b06fec00d62a108266d7ec0c83a91cdb",
+    "slice38-build-final.log": "dcf35a25554f965f7e4e77e01a3a506bc70179002bf26416f1f5e0df52a14a51"
+  },
+  "sourceRevision": "f931585a92f81794b34954da66627dd2d1023a9a"
+}

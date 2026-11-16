@@ -184,3 +184,18 @@ describe("existing explicitly linked Ortho episodes in the main/HR/finance union
     expect(await append).toMatchObject({ ok: false, code: "patient_access_denied" });
   });
 });
+
+it("legacy assessment append also refuses a revision that would strand the reader beyond its actual history budget", async () => {
+  const { seedCanonicalAssessment } = await import("../fixtures/canonical-ortho-assessment");
+  const { ASSESSMENT_HISTORY_MAX_BYTES, ASSESSMENT_HISTORY_MAX_REVISIONS } = await import("../../lib/ortho-assessment-limits");
+  const owner = await scope(), input = { patientId: owner.patientId, caseId: owner.orthoCaseId, bridgeId: owner.clinicalCaseId, actorId: owner.session.userId! };
+  let head = await seedCanonicalAssessment(fixture.pool,input);
+  const bytes = Number((await fixture.pool.query("SELECT octet_length(content::text) bytes FROM ortho_assessment_revisions WHERE id=$1",[head.id])).rows[0].bytes);
+  const admitted = Math.min(Math.floor(ASSESSMENT_HISTORY_MAX_BYTES/bytes), ASSESSMENT_HISTORY_MAX_REVISIONS);
+  for (let version=2;version<=admitted;version++) head = await seedCanonicalAssessment(fixture.pool,{...input,version,previous:head.id});
+  expect(await getOrthoAssessment({...owner,acceptedSchemas:[2]})).toMatchObject({ok:true,state:"ready"});
+  const before = (await fixture.pool.query("SELECT count(*)::int count,sum(octet_length(content::text))::text bytes,max(id) head FROM ortho_assessment_revisions WHERE ortho_case_id=$1",[owner.orthoCaseId])).rows;
+  expect(await appendOrthoAssessment({...owner,command:{...assessment(),expectedRevisionId:head.id}})).toMatchObject({ok:false,code:"history_resource_limit",status:409});
+  expect((await fixture.pool.query("SELECT count(*)::int count,sum(octet_length(content::text))::text bytes,max(id) head FROM ortho_assessment_revisions WHERE ortho_case_id=$1",[owner.orthoCaseId])).rows).toEqual(before);
+  expect(await getOrthoAssessment({...owner,acceptedSchemas:[2]})).toMatchObject({ok:true,state:"ready"});
+});

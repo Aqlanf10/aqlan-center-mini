@@ -20,6 +20,7 @@ const plain = (text: string) => text.normalize("NFKC").replace(/[‎‏‪-‮�
 const TEETH = [11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 35, 36, 37, 38];
 let savedDocument: { id: number; lines: { discountMinor: number; netMinor: number }[] };
 let receipt: { id: number; receiptNumber: string };
+let refund: { id: number; receiptNumber: string };
 let rct = 0, patientId = 0, otherPatientId = 0, documentId = 0, otherDocumentId = 0, serial = 0;
 const serviceMarker = `HISTORICAL-RCT-${stamp}`;
 /** A long Arabic treatment description (the saved line description), led by a Latin marker for row counting. */
@@ -71,7 +72,7 @@ beforeAll(async () => {
   await db.query(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
     SELECT 'synthetic-historical-statement', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`);
   receipt = await collect({ kind: "payment", amount: "40000", openingCurrency: "YER" });
-  await collect({ kind: "refund", amount: "10000", reversalOfId: receipt.id });
+  refund = await collect({ kind: "refund", amount: "10000", reversalOfId: receipt.id });
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 afterAll(async () => { try { await browser?.close(); } finally { await db?.end(); } });
@@ -147,10 +148,14 @@ describe("patient-facing current statement with historical treatment (synthetic 
       expect(await total("المبلغ المتفق عليه")).toContain(formatMoney(1_180_000, "YER"));
       expect(await total("المدفوع من قبل")).toContain(formatMoney(180_000, "YER"));
       expect(await total("المبلغ المتبقي")).toContain(formatMoney(1_000_000, "YER"));
-      // Current movements: one payment and its genuine reversal, each once, with receipt numbers.
+      // Genuine cash refund remains visible once, without exposing internal reversal narration.
       expect(printed.receipts).toHaveLength(2);
-      expect(printed.receipts.join(" | ")).toContain(`عكس سند ${receipt.receiptNumber}`);
-      expect(printed.receipts.filter((row) => row.includes(receipt.receiptNumber))).toHaveLength(2);
+      const paymentRows = printed.receipts.filter(row => row.includes(receipt.receiptNumber));
+      const refundRows = printed.receipts.filter(row => row.includes(refund.receiptNumber));
+      expect(paymentRows).toHaveLength(1); expect(refundRows).toHaveLength(1);
+      expect(paymentRows[0]).toContain("دفعة"); expect(paymentRows[0]).toContain(formatMoney(40_000, "YER"));
+      expect(refundRows[0]).toContain("استرداد"); expect(refundRows[0]).toContain(formatMoney(10_000, "YER"));
+      expect(printed.text).not.toContain("عكس سند");
       // One reconciled final balance: 1,000,000 carried − 40,000 + 10,000 = 970,000, equal to the canonical ledger.
       expect(printed.ledger.balances.YER).toMatchObject({ billedMinor: 0, collectedMinor: 30_000, dueMinor: 970_000 });
       const finals = (await sheet.locator(".line-strong").filter({ hasText: "الرصيد الحالي" }).allTextContents()).map(plain);

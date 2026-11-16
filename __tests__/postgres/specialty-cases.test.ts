@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+import type { SessionPayload } from "../../lib/auth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
@@ -12,6 +14,7 @@ assertRealPostgresUrl();
 stubPostgresEnv();
 
 const db = await import("../../lib/db");
+let responsibilityAdmin: SessionPayload;
 const {
   ensureSchema, getPool, resetPoolForTesting, createPlanV2, listPatientCases, createClinicalCase,
   changeClinicalCaseStatus, createPatientProblem, changePatientProblemStatus, listPatientProblems,
@@ -32,6 +35,7 @@ const items: Record<"ortho" | "endo" | "crown", number> = { ortho: 0, endo: 0, c
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  responsibilityAdmin = await responsibilityAdminFixture("synthetic-specialty-cases-admin");
   const doctor = async (name: string) => (await q<{ id: number }>(
     `INSERT INTO parties (kind, name) VALUES ('doctor', $1) RETURNING id`, [name]))[0].id;
   orthodontist = await doctor("د. عقلان");
@@ -75,7 +79,7 @@ describe("(CASE-MODEL-1) one patient, one record, many specialty cases", () => {
   });
 
   it("opens an endodontic case with its responsible doctor — audited in the same transaction", async () => {
-    const created = await createClinicalCase({
+    const created = await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId, specialty: "endodontics", title: "علاج عصب — سن ٢١", site: "21", problem: "التهاب لب غير عكوس",
       responsiblePartyId: endodontist, orthoCaseId: null, actor: "dr-mohammed", actorRole: "doctor",
     });
@@ -83,23 +87,24 @@ describe("(CASE-MODEL-1) one patient, one record, many specialty cases", () => {
     expect(created.case).toMatchObject({ kind: "specialty", specialty: "endodontics", status: "active", responsibleName: "د. محمد" });
     const [audit] = await q<{ action: string; actor: string }>(
       `SELECT action, actor FROM audit_log WHERE action = 'case.create' ORDER BY id DESC LIMIT 1`);
-    expect(audit).toEqual({ action: "case.create", actor: "dr-mohammed" });
+    // Attribution comes from the admitted session, never the caller-supplied actor label.
+    expect(audit).toEqual({ action: "case.create", actor: responsibilityAdmin.username });
   });
 
   it("refuses a non-doctor responsible party and another patient's orthodontic case", async () => {
     const [lab] = await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('lab', 'معمل') RETURNING id`);
-    expect(await createClinicalCase({
+    expect(await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId, specialty: "prosthodontics", title: "تاج", site: null, problem: null,
       responsiblePartyId: lab.id, orthoCaseId: null, actor: "x",
     })).toEqual({ ok: false, reason: "bad_responsible" });
-    expect(await createClinicalCase({
+    expect(await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId: otherPatientId, specialty: "orthodontics", title: "تقويم", site: null, problem: null,
       responsiblePartyId: null, orthoCaseId, actor: "x",
     })).toEqual({ ok: false, reason: "bad_ortho" });
   });
 
   it("bridging the orthodontic case replaces its read-model row — once only", async () => {
-    const bridged = await createClinicalCase({
+    const bridged = await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId, specialty: "general", title: "تقويم الأسنان — د. عقلان", site: null, problem: null,
       responsiblePartyId: orthodontist, orthoCaseId, actor: "admin",
     });
@@ -108,7 +113,7 @@ describe("(CASE-MODEL-1) one patient, one record, many specialty cases", () => {
     const cases = await listPatientCases(patientId);
     expect(cases.filter((item) => item.kind === "ortho")).toEqual([]);
     expect(cases.filter((item) => item.orthoCaseId === orthoCaseId)).toHaveLength(1);
-    expect(await createClinicalCase({
+    expect(await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId, specialty: "orthodontics", title: "مكرر", site: null, problem: null,
       responsiblePartyId: null, orthoCaseId, actor: "admin",
     })).toEqual({ ok: false, reason: "already_bridged" });
@@ -121,7 +126,7 @@ describe("(CASE-MODEL-1) one patient, one record, many specialty cases", () => {
     expect(await setPlanItemCase({ itemId: items.endo, caseId: endoCase.id, priority: 1, actor: "dr-mohammed" })).toEqual({ ok: true });
     expect(await setPlanItemCase({ itemId: items.ortho, caseId: orthoCase.id, priority: 2, actor: "admin" })).toEqual({ ok: true });
     // حالةُ مريضٍ آخر لا تُربط.
-    const other = await createClinicalCase({
+    const other = await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId: otherPatientId, specialty: "periodontics", title: "لثة", site: null, problem: null,
       responsiblePartyId: null, orthoCaseId: null, actor: "admin",
     });
@@ -206,7 +211,7 @@ describe("(CASE-MODEL-1) one patient, one record, many specialty cases", () => {
     const [finished] = await q<{ id: number }>(
       `INSERT INTO ortho_cases (patient_id, status, closed_at, closed_by, closed_note, created_by)
        VALUES ($1, 'completed', NOW(), 'admin', 'انتهى بمثبّت', 'admin') RETURNING id`, [otherPatientId]);
-    const bridged = await createClinicalCase({
+    const bridged = await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId: otherPatientId, specialty: "orthodontics", title: "تقويم سابق", site: null, problem: null,
       responsiblePartyId: null, orthoCaseId: finished.id, actor: "admin",
     });

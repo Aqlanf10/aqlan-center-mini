@@ -1,0 +1,17 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-lifecycle
+
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+
+ Test Files  865 passed (865)
+      Tests  14655 passed (14655)
+   Start at  13:29:27
+   Duration  440.55s (transform 19.47s, setup 0ms, import 95.15s, tests 246.85s, environment 75ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,258 @@
+{
+  "base": "f931585a92f81794b34954da66627dd2d1023a9a",
+  "status": "declared local gates passed; publication, exact-head CI and independent review pending",
+  "buildId": "8Z534ng7vU5uYW1I6OSj-",
+  "scope": "GET paired saved-ceph comparison/superimposition and readonly UI; each study patient-scoped; no historical rewrite, images, money, migrations or live changes",
+  "boundedSharedFixes": [
+    "chronologicalOrder uses persisted xrayDate and precise numeric PostgreSQL BIGINT tie order",
+    "completed empty measurements remain empty instead of current computed replacement"
+  ],
+  "results": {
+    "before": {
+      "canonicalHttp401": 2,
+      "legacyOrderUnit": 3,
+      "legacyOrderHttp": 2,
+      "legacyApprovedEmptyHttp": 1
+    },
+    "postgres": {
+      "passed": 68,
+      "files": 2
+    },
+    "httpBrowser": {
+      "passed": 46,
+      "files": 5,
+      "canonicalPair": 10,
+      "legacyPair": 3,
+      "existingRegression": 33,
+      "ddl": 0
+    },
+    "focusedUnit": {
+      "passed": 37,
+      "files": 4
+    },
+    "fullUnit": {
+      "passed": 13631,
+      "files": 811
+    },
+    "mapGuards": {
+      "passed": 10,
+      "files": 2
+    },
+    "types": "passed",
+    "lint": {
+      "errors": 0,
+      "warnings": 346
+    },
+    "build": "passed",
+    "preflight": "passed",
+    "moneyGuard": "passed",
+    "bodyGuard": "passed",
+    "sourceWitnesses": 25,
+    "historicalSourceHashes": 181,
+    "runtime": {
+      "bracesTraceCount": 370,
+      "lintToolingTraceCount": 737,
+      "manifestCount": 86,
+      "availableSourceMapCount": 367,
+      "mapCoverage": "Only available validated maps are inspected. Empty indexed maps give zero source attribution. Unmapped/minified arbitrary bundled code is not proven absent."
+    }
+  },
+  "failedAttempts": [
+    {
+      "stage": "first legacy-order HTTP reproduction",
+      "reason": "fixture calibration parameter SQL type conflict; distinct parameter fixed it; not product defect evidence"
+    },
+    {
+      "stage": "second legacy-order HTTP reproduction",
+      "reason": "PostgreSQL id wire string required explicit numeric comparison in assertion; later clean baseline retained exact identity/date failure"
+    },
+    {
+      "stage": "first final HTTP/browser run",
+      "passed": 42,
+      "failed": 4,
+      "reason": "accessible select name included option text; explicit htmlFor/id fixed without relaxing locator or assertions; rebuilt and reran all46"
+    }
+  ],
+  "notRun": [
+    "WORK Docker image: Alpine destination denied by enforced restricted network policy, no bypass/retry",
+    "independent clinical human signoff",
+    "deployments and live data/settings/accounts"
+  ],
+  "pending": [
+    "normal same-WORK publication; e718 CI now success",
+    "full exact-head CI",
+    "independent source review",
+    "conservative main reconciliation"
+  ],
+  "sourceSha256": {
+    "__tests__/canonical-ceph-pair-projection.test.ts": "35afaa90a89ac55c3a356b717164bed6f0df1a2b76527135c40627a79668d3a6",
+    "__tests__/ceph-comparison-record-order.test.ts": "bb47e1500a1c13fddf960f4b39ec1aef07798dd941863c55acf9aa4621710928",
+    "__tests__/fixtures/canonical-ceph-comparison.ts": "3b84572af1a72a6f077c7fb11c7602bd67c3bcb23030d770c7057e5e3a241050",
+    "__tests__/postgres/ceph-canonical-pair.test.ts": "465844dd51396e5de8a8b8772ba795ffdcb77213a90f2db4cfec0c7e24c22bcf",
+    "__tests__/security-http/canonical-ceph-comparison-journey.test.ts": "12f21fbfb11376961d12a8e5223d8c1d68a2c13154f5a5aebbe700a7257a53eb",
+    "__tests__/security-http/ceph-comparison-record-order-http.test.ts": "3daafc2b49f90bd8b2ca9723fbbea3df85150b3aa0fd8aa9ddcffa9d9c78eb54",
+    "app/api/ceph/compare/route.ts": "2fb76041e224c6dbc9db7de1b756537a4a8d6b2fac52939ae4a2ca56702b2129",
+    "app/api/ceph/superimpose/route.ts": "bafcb9d95903973436a7d12fa5d4b176d2d20b4874df1cb9b5d6fb7625c82835",
+    "components/patient/CanonicalCephComparison.tsx": "b9fc2c13086afcbbf00f5fcfab963d83b4abb08e1e66a618f22ebc06abf25fb8",
+    "components/patient/CanonicalCephStudies.tsx": "54466f0e18b50de7f2bd3909f17143d90adec75f4ad9e0c933e87b194369e908",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "146753c6f96687f31302492c00e0e435afbc8538f580b72d010939b71c30b35c",
+    "docs/security/staff-cutover/inventory.json": "725eb5e6444fa54cd94275e98ef19cc147fc4b966980c86fc6d4c6b70fd09bbf",
+    "lib/canonical-ceph-pair-projection.ts": "e33ebf13f44d302ac07de5863b04b09b6c016643df48395a1477b4f38420506a",
+    "lib/canonical-ceph-pair-reads.ts": "13da8a45b774cfd7363d332b986452c7a0bf644928d3fa4b8ba57f38b8004dbd",
+    "lib/canonical-record-reads.ts": "22464a29a5ca4364fd3a3e47f1c7552ef31f46382f076a4202d2f68c4c9d90c2",
+    "lib/cephCompare.ts": "55af10db33b822fd1a91c206f79332cb0708109ce8db551d49e149f76b8bb6ba",
+    "lib/db.ts": "0a91a81f24a2400493f160c9cb868357d382695a4175f45e36e5bcbcc6f3a2c8"
+  },
+  "evidence": {
+    "ceph-saved-comparison-390.png": {
+      "sha256": "90c1c5be65401eb8d39876449531df9555a11294b9e09070c405a4b2c712a9d7",
+      "bytes": 198435
+    },
+    "ceph-saved-superimposition-390.png": {
+      "sha256": "54c8b197695cf72adb07eddec66de97c224c0d15b32090fee00add1bdc0d632d",
+      "bytes": 191627
+    },
+    "e718-ci-final.json": {
+      "sha256": "9fc15cac39cf3c7ba6bf75079bf434ff7763fa7a19318044ed80004ab6522fec",
+      "bytes": 23121
+    },
+    "lint-tooling-runtime-proof.json": {
+      "sha256": "cee0f9a1f5946241266e5a773bb2bbcca3e0702e691f69e1665e4def59f0e8fb",
+      "bytes": 1438640
+    },
+    "runtime-proof.json": {
+      "sha256": "9f1944063d7e6a2599bcb0917f5a301b85d3f12dfc40d2e79facc6f5da021945",
+      "bytes": 1615288
+    },
+    "slice39-before-http.log": {
+      "sha256": "90af6739999f19f1c7c37a27f2937da4d0b744000072814f68aca7db42398a3e",
+      "bytes": 1980
+    },
+    "slice39-before-legacy-empty-http.log": {
+      "sha256": "bdd7fad678b1197371a569797cdee2cf7b8a7ad072d333d5c0157a176214bccc",
+      "bytes": 2092
+    },
+    "slice39-before-legacy-order-http-final.log": {
+      "sha256": "45066b5a4fa83661ca6a7f1ef6a85b4c46d45cc863365e459cb1482c44e88518",
+      "bytes": 2099
+    },
+    "slice39-before-legacy-order-http-second.log": {
+      "sha256": "aeb2804a833c582c15eb670c239301e9b793cdd22ff808914f6f75ee43c0c55a",
+      "bytes": 2094
+    },
+    "slice39-before-legacy-order-http.log": {
+      "sha256": "c5b294f2fa721f9caece41b950b2e14ea782b38199655d4c5c131ea48d6e563b",
+      "bytes": 1419
+    },
+    "slice39-before-record-order-final.log": {
+      "sha256": "e9c8a137a14143d592d5f513460308f45daf169b85a7d8e001b9afa1f73511d9",
+      "bytes": 3436
+    },
+    "slice39-before-record-order.log": {
+      "sha256": "1561af2e60311e9a04fd342b300f9e857c8714d114439a8412527365eb455075",
+      "bytes": 2525
+    },
+    "slice39-body-guard.log": {
+      "sha256": "3a2fa87159ff5d986ce95f21f25a6f07bd47d36f8ad937f0c6d7fa51a2b311a8",
+      "bytes": 406
+    },
+    "slice39-build-first.log": {
+      "sha256": "c206ed501a4b47bb5d1caf52497daca0494b9b8d570a2d2cc935b7d87e22809d",
+      "bytes": 13586
+    },
+    "slice39-build-second.log": {
+      "sha256": "42da3c77e78e9758d16dce4c0ed7bce53182eeec9e7a0d05e56ea2a85b5962b2",
+      "bytes": 13583
+    },
+    "slice39-comparison-unit.log": {
+      "sha256": "6913fd611d11707b178389af637d77e7401d5ba59b35f7222400ed0def12bb83",
+      "bytes": 601
+    },
+    "slice39-full-unit.log": {
+      "sha256": "e828437769b5040e468821edcea3a9d98358cc14c366a28b6dd14ef0b1c67a8a",
+      "bytes": 628
+    },
+    "slice39-historical-source-verification.json": {
+      "sha256": "08799654075e44a9bbbeda5319e86c64ac22b97b24c8dc8d56af9e3a15b15243",
+      "bytes": 58331
+    },
+    "slice39-http-final.log": {
+      "sha256": "dd26d491b543ddeda97e33f84dce91c14613f80599241181780228e51769be66",
+      "bytes": 1028
+    },
+    "slice39-http-first.log": {
+      "sha256": "531475cb8873627d378a440d9f8cf6fb73c760601660f1184677747506e58dbe",
+      "bytes": 6234
+    },
+    "slice39-inventory.log": {
+      "sha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "bytes": 329
+    },
+    "slice39-lint.log": {
+      "sha256": "537bd81f49fad0d2ce87e541c4873ab5cf358a4c4dff09e8b2d972d04b89398b",
+      "bytes": 271572
+    },
+    "slice39-map-guards.log": {
+      "sha256": "e1c2988af5fbdebfb8ad82eb9a8af96fa149c0159d5c88ea1556c97726802f85",
+      "bytes": 585
+    },
+    "slice39-money-guard.log": {
+      "sha256": "5ac6c51e62042fa6da39d12c34f71eeefadf241e1981a459bd4727e5f6f19a15",
+      "bytes": 1844
+    },
+    "slice39-pg-final.log": {
+      "sha256": "6bea016f304829726ac76c66d5bff6588725e4584b293af930cda3370d093dd6",
+      "bytes": 747
+    },
+    "slice39-pg-first.log": {
+      "sha256": "f46525a5aa9d02641271af37d6adb76e7290dc3686581700928271771a519ae5",
+      "bytes": 746
+    },
+    "slice39-preflight.log": {
+      "sha256": "570c1c01cf116b4beadbf1bed9ae5807b85cd00f6922a7375db69c88d57d3fba",
+      "bytes": 1144
+    },
+    "slice39-projection-scan.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "slice39-runtime-braces.log": {
+      "sha256": "c4283955a743ad2b49f595d2b06c1138cd79e4a73b6e3df15277a3a082831fbd",
+      "bytes": 108
+    },
+    "slice39-runtime-lint.log": {
+      "sha256": "9bf9b7ddba0200f49a461f98d2e6560b53bde84ea7cf73956660f00e708a362f",
+      "bytes": 137
+    },
+    "slice39-source-proof.json": {
+      "sha256": "855939887b1879011c6528117f42cdeb7a30a396a52300ca96b5b4481213dbfd",
+      "bytes": 5047
+    },
+    "slice39-types-final.log": {
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "slice39-types-first.log": {
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "slice39-types-second.log": {
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "slice39-types-third.log": {
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "slice39-units-focused.log": {
+      "sha256": "3e2f79bca04bc80fd330ba52ce61da04e1043d397e16175f8c63f6060a2cfdd1",
+      "bytes": 650
+    }
+  },
+  "publishedEvidenceNormalization": "CRLF to LF and line-ending whitespace only; raw evidence remains local; no failure, assertion or result removed",
+  "rawEvidenceSha256": {
+    "slice39-build-first.log": "2621c01ec59d87c22087665e59a96a95572a0a32bff0fdb7c4bf54211e4b8329",
+    "slice39-build-second.log": "f9b624d0613d3f3a9624f5522c7743fdc82c5a79d286453ce5a234c361327cdc"
+  },
+  "sourceRevision": "93b54b12069e927afa2e9969adc717b0d9c8ff00"
+}

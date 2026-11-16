@@ -1,7 +1,10 @@
+import { parseLabWorkDraft, type LabWorkDraft } from "@/lib/lab-work-intent-contract";
 import { CLINIC_BASE_CURRENCY, parseAmount, type Currency } from "@/lib/money";
 
 /** Preview evidence belongs to one exact request and to stable invoice row IDs. */
 export interface LinePreview {
+  labWork?: LabWorkDraft;
+  labWorkOrderId?: number | null;
   line: number; kind: "financial" | "clinical"; specialtyLabel: string | null;
   item: { mode: "existing" | "new"; id: number | null } | null;
   case: { mode: "existing" | "new" | "bridge" | "choose" | "none"; id: number | null; title: string | null; options: { id: number; title: string }[] } | null;
@@ -48,6 +51,9 @@ export function readPreviewLines(payload: unknown, rows: readonly { key: string;
       if (!object(item) || !object(clinicalCase) || (item.mode === "existing" && item.id === null)
         || (item.mode === "new" && item.id !== null)
         || (clinicalCase.mode === "existing" && clinicalCase.id === null)) return null;
+    }
+    if(Object.hasOwn(line,"labWork") || Object.hasOwn(line,"labWorkOrderId")){
+      try { if(!parseLabWorkDraft(line.labWork) || !Object.hasOwn(line,"labWorkOrderId") || !idOrNull(line.labWorkOrderId)) return null; } catch { return null; }
     }
     byRow.set(row.key, line as unknown as LinePreview);
   }

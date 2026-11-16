@@ -7,7 +7,7 @@ import { hasStaffCapability, type ResolvedStaffAccess } from "../lib/staff-capab
 import { ROLES } from "../lib/roles";
 
 const secret = "synthetic-credential-source-never-in-dto";
-const canonical = JSON.stringify({ schemaVersion: 1, revision: 7, patientScope: "all", appointmentScope: "all",
+const canonical = JSON.stringify({ schemaVersion: 2, confirmation: "owner", revision: 7, patientScope: "all", appointmentScope: "all",
   grants: Object.fromEntries(STAFF_CAPABILITIES.map((key) => [key, true])) });
 function row(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { id: 71, role: "doctor", is_active: true, permissions: null, password_hash: secret, party_id: null,

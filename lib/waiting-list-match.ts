@@ -19,7 +19,7 @@ import {
   listAppointmentsByDate, listWaitingContactEventsFor, listWaitingEntries,
 } from "./db";
 import { CLINIC_TIME_ZONE } from "./db";
-import { clinicDateString } from "./schedule";
+import { clinicDateString, type Appointment } from "./schedule";
 import { loadCapacityContext } from "./capacity-context";
 import {
   explainMatch, describeMatch, isExpired, rankCandidates,
@@ -110,6 +110,18 @@ export function markStale(
  * الموعد الملغى نفسه — لا تُخمَّن ولا تُترك فارغة إن كانت معروفة.
  */
 export async function resolveFreedSlot(request: FreedSlotRequest): Promise<FreedSlot | null> {
+  return resolveFreedSlotFrom(request, {
+    appointment: id => getAppointment(id).catch(() => null),
+    day: date => listAppointmentsByDate(date).catch(() => []),
+  });
+}
+
+/** The slot's facts from the given readers: the legacy pool, or a canonical snapshot
+ * whose readers only see appointments inside the actor's appointment scope. */
+export async function resolveFreedSlotFrom(
+  request: FreedSlotRequest,
+  read: { appointment(id: number): Promise<Appointment | null>; day(date: string): Promise<Appointment[]> },
+): Promise<FreedSlot | null> {
   const date = String(request.date ?? "").trim();
   const time = String(request.time ?? "").trim();
   if (!DATE_PATTERN.test(date) || !TIME_PATTERN.test(time)) return null;
@@ -123,7 +135,7 @@ export async function resolveFreedSlot(request: FreedSlotRequest): Promise<Freed
 
   const appointmentId = Number(request.appointmentId);
   if (Number.isInteger(appointmentId) && appointmentId > 0) {
-    const source = await getAppointment(appointmentId).catch(() => null);
+    const source = await read.appointment(appointmentId);
     if (source && source.scheduledDate === date) {
       if (serviceId === null) serviceId = source.serviceId ?? null;
       if (doctorId === null) doctorId = source.doctorId ?? null;
@@ -136,7 +148,7 @@ export async function resolveFreedSlot(request: FreedSlotRequest): Promise<Freed
      أيضًا: كانت الشاشة ترسل المدّة بلا خدمة، فيُرشَّح لمكانٍ خدمتُه معروفة من
      ينتظر خدمةً أخرى لمجرّد أنّ الدقائق اتّسعت. */
   if (serviceId === null || doctorId === null || !durationMinutes) {
-    const sameDay = await listAppointmentsByDate(date).catch(() => []);
+    const sameDay = await read.day(date);
     const head = time.padStart(5, "0");
     const source = sameDay.find(
       (appointment) => appointment.scheduledTime.slice(0, 5) === head,
@@ -184,9 +196,16 @@ export async function findWaitingCandidatesForSlot(
     .catch(() => new Map<number, ContactEvent[]>());
   const historyOf = (entry: WaitingEntry) => history.get(entry.id) ?? [];
 
-  const matchContext: MatchContext = { shifts: context.shifts, clinicToday: today };
-  const ranked = rankCandidates(entries, slot, matchContext, historyOf);
+  return rankFreedSlot(slot, entries, context.shifts, today, historyOf);
+}
 
+/** Ranking and explanations — pure, shared by the legacy and canonical doors. */
+export function rankFreedSlot(
+  slot: FreedSlot, entries: WaitingEntry[], shifts: MatchContext["shifts"], today: string,
+  historyOf: (entry: WaitingEntry) => ContactEvent[],
+): WaitingCandidatesResult {
+  const matchContext: MatchContext = { shifts, clinicToday: today };
+  const ranked = rankCandidates(entries, slot, matchContext, historyOf);
   return {
     slot,
     examined: entries.length,

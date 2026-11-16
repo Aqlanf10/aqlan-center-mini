@@ -134,19 +134,21 @@ async function waitForVisitLock(holder: DbClient, holderPid: number) {
 }
 
 describe("orthodontic visit history is scoped to recorded work, not today's open case", () => {
+  // Merged main-line classification: a new orthodontic case without a funded plan is REVIEW_REQUIRED
+  // (an explicit billing decision is pending), not OUTSIDE_CONTRACT, which is kept for per-session legacy cases.
   it.each(["completed", "discontinued"] as const)("retains case A after it is %s and signs adjustment-only work without an invoice", async status => {
     const { caseA, visitId, adjustmentId } = await historicalVisit();
     await closeCase(caseA, status);
     const beforeRead = await footprint();
     expect(await db.getClinicalVisit(visitId)).toMatchObject({ status: "open", diagnosis: null,
       treatmentDone: null, procedures: [], ortho: { caseId: caseA, visitAdjustmentId: adjustmentId,
-        adjustmentBillingClass: "OUTSIDE_CONTRACT" } });
-    expect(await db.previewVisitBilling(visitId)).toMatchObject({ orthoAdjustment: "OUTSIDE_CONTRACT" });
+        adjustmentBillingClass: "REVIEW_REQUIRED" } });
+    expect(await db.previewVisitBilling(visitId)).toMatchObject({ orthoAdjustment: "REVIEW_REQUIRED" });
     expect(await footprint()).toEqual(beforeRead);
 
     const moneyBefore = await snapshot(financeTables);
     expect(await sign(visitId)).toMatchObject({ reason: null, invoiceId: null, duesMinor: 0,
-      orthoBillingClass: "OUTSIDE_CONTRACT", visit: { status: "signed",
+      orthoBillingClass: "REVIEW_REQUIRED", visit: { status: "signed",
         ortho: { caseId: caseA, visitAdjustmentId: adjustmentId } } });
     expect(await snapshot(financeTables)).toEqual(moneyBefore);
     expect(await q("SELECT id FROM ortho_adjustments WHERE visit_id=$1 ORDER BY id", [visitId]))
@@ -159,7 +161,7 @@ describe("orthodontic visit history is scoped to recorded work, not today's open
       ? { outsideContractDecision: { decision: "no_charge" as const, reason: "Synthetic documented no-charge decision" } }
       : {};
     expect(await sign(visitId, extra)).toMatchObject({ reason: null, invoiceId: null,
-      orthoBillingClass: "OUTSIDE_CONTRACT", orthoBillingDecision: decision });
+      orthoBillingClass: "REVIEW_REQUIRED", orthoBillingDecision: decision });
     const frozen = await q("SELECT * FROM ortho_adjustments WHERE id=$1", [adjustmentId]);
     await closeCase(caseA);
     const caseB = await openCase(owner.id, true);
@@ -167,7 +169,7 @@ describe("orthodontic visit history is scoped to recorded work, not today's open
     expect(await db.orthoAdjustmentBillingClass(db.getPool(), caseB, owner.id)).toBe("INCLUDED");
 
     const before = await footprint();
-    const expected = decision === "no_charge" ? "NO_CHARGE" : "OUTSIDE_CONTRACT";
+    const expected = decision === "no_charge" ? "NO_CHARGE" : "REVIEW_REQUIRED";
     expect(await db.getClinicalVisit(visitId)).toMatchObject({ status: "signed", ortho: {
       caseId: caseA, visitAdjustmentId: adjustmentId, adjustmentBillingClass: expected } });
     expect(await db.previewVisitBilling(visitId)).toMatchObject({ orthoAdjustment: expected });

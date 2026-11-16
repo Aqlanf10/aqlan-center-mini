@@ -1,5 +1,8 @@
 "use client";
 
+import { useReturnBookingContext } from "@/components/useReturnBookingContext";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrivalPanel } from "@/components/ArrivalPanel";
 import { AppointmentReminder } from "@/components/AppointmentReminder";
@@ -99,6 +102,7 @@ function isAppointmentDeleteSuccess(payload: unknown): boolean {
 }
 
 export default function AppointmentsPage() {
+
   const session = useSession();
   const admin = isAdmin(session?.role);
   const CHAIRS = useChairCount();
@@ -106,17 +110,18 @@ export default function AppointmentsPage() {
      حمله نصف حقيقته لأنّ الحساب يفترض يومًا من ١٢ ساعة لم يُهيِّئه أحد. */
   const dayStart = useSetting("clinic.day_start");
   const dayEnd = useSetting("clinic.day_end");
-  const [today] = useState(() => todayLocal());
+  const today = useMemo(() => todayLocal(), []);
   /* رابطٌ مباشر إلى يومٍ وفلتر: «غدًا · لم يُذكَّر» من بطاقة الشاشة الرئيسية يفتح
      القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
   const [date, setDate] = useState(today);
   /* اليوم المعروض الآن — يقرؤه الإجراء بعد انتهاء طلبه ليعرف هل انتقل المستخدم
      إلى يومٍ آخر أثناء الانتظار. */
+  const dayOwner = useMemo(() => ({ date }), [date]);
+  const committedDayOwner = useRef(dayOwner);
   const dateRef = useRef(today);
   const dateRevisionRef = useRef(0);
-  const [dayFence, setDayFence] = useState({ revision: 0, request: 0 });
   const [dayList, setDayList] = useState<{
-    date: string; revision: number; request: number;
+    owner: typeof dayOwner; date: string; revision: number; request: number;
     status: "loading" | "ready" | "error"; items: Appointment[]; error: string | null;
     clinicTimeZone?: string;
   } | null>(null);
@@ -135,10 +140,8 @@ export default function AppointmentsPage() {
   const latestLoadRequestRef = useRef(0);
   const mountedRef = useRef(false);
   const readyRequestRef = useRef<number | null>(null);
-  // Render uses an immutable fence snapshot; callbacks keep synchronous ref fences.
-  // A different date is hidden immediately, before its layout effect commits.
-  const ownsDayList = dayList?.date === date && dayList.revision === dayFence.revision
-    && dayList.request === dayFence.request;
+  // Ownership is checked during render, before the new date's effects run.
+  const ownsDayList = dayList?.owner === dayOwner;
   const ready = ownsDayList && dayList.status === "ready";
   const loading = !ownsDayList || dayList.status === "loading";
   const error = ownsDayList ? dayList.error : null;
@@ -179,15 +182,18 @@ export default function AppointmentsPage() {
   >(null);
   const [candidateBusy, setCandidateBusy] = useState<number | null>(null);
   const [candidateNote, setCandidateNote] = useState<string | null>(null);
+  const [returnCandidateId, setReturnCandidateId] = useState<number | null>(null);
+  const returnCandidate = freed?.candidates.find(candidate => candidate.id === returnCandidateId);
+  const returnContext = useReturnBookingContext({ patientId: returnCandidate?.patientId, enabled: !!returnCandidate, locked: candidateBusy !== null });
   const candidateRequestRef = useRef(0);
   const candidateInFlight = useRef(false);
   // A slot belongs to one displayed-day lifetime, including leaving and returning.
   useLayoutEffect(() => {
     mountedRef.current = true;
+    committedDayOwner.current = dayOwner;
     // Commit the date fence before browser events can use the previous panel.
     if (dateRef.current !== date) dateRevisionRef.current += 1;
     dateRef.current = date;
-    setDayFence({ revision: dateRevisionRef.current, request: latestLoadRequestRef.current });
     candidateRequestRef.current += 1;
     setFreed(null);
     setCandidateNote(null);
@@ -197,13 +203,16 @@ export default function AppointmentsPage() {
       latestLoadRequestRef.current += 1;
       candidateRequestRef.current += 1;
     };
-  }, [date]);
+  }, [date, dayOwner]);
   /* نقلُ موعد — يفتح لوحةً صغيرة على الصفّ نفسه. وقبل هذا لم يكن في النظام نقل:
      كان يُلغى الموعد ويُحجز غيره، فيُحتسب المريض «ملغيًا» وهو لم يُلغِ. */
   const [moving, setMoving] = useState<
-    { id: number; date: string; time: string; reason: string } | null
+    { id: number; date: string; time: string; reason: string; transferToCurrentResponsibleDoctor?: boolean } | null
   >(null);
 
+  const moveContext = useReturnBookingContext({ patientId: items.find(item => item.id === moving?.id)?.patientId,
+    enabled: moving?.transferToCurrentResponsibleDoctor === true, locked: busy });
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([date, moving, freed?.slot, session?.username, returnContext.fingerprint, moveContext.fingerprint]));
   const findCandidates = useCallback(async (item: Appointment) => {
     const request = ++candidateRequestRef.current;
     const revision = dateRevisionRef.current;
@@ -251,19 +260,23 @@ export default function AppointmentsPage() {
   ) => {
     if (context.request !== candidateRequestRef.current || context.dateRevision !== dateRevisionRef.current
       || context.slot.date !== dateRef.current || candidateInFlight.current) return false;
+    if (body.action === "book" && returnCandidateId === id && (!returnContext.ready || !returnContext.isCurrent())) return false;
     candidateInFlight.current = true;
     const request = candidateRequestRef.current;
     const revision = dateRevisionRef.current;
     const isCurrent = () => request === candidateRequestRef.current && revision === dateRevisionRef.current;
     setCandidateBusy(id);
     try {
-      const res = await fetch(`/api/waiting-list/${id}`, {
+      const res = await bookingFetch(`/api/waiting-list/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+        body: JSON.stringify(body.action === "book" && returnCandidateId === id ? { ...body, ...returnContext.payload, doctorId: undefined } : body),
+      }, () => isCurrent() && (returnCandidateId !== id || returnContext.isCurrent()));
       const data = await res.json().catch(() => null);
       if (!res.ok) {
+        if (isCurrent() && body.action === "book" && typeof data?.code === "string" && (data.code.startsWith("return_") || data.code.startsWith("responsibility_"))) {
+          setReturnCandidateId(id); returnContext.handleRejection(data);
+        }
         if (isCurrent()) setCandidateNote(data?.message ?? "تعذّر تنفيذ الإجراء.");
         return false;
       }
@@ -281,7 +294,7 @@ export default function AppointmentsPage() {
       candidateInFlight.current = false;
       setCandidateBusy(null);
     }
-  }, []);
+  }, [bookingFetch, returnCandidateId, returnContext]);
 
   useEffect(() => {
     void (async () => {
@@ -308,8 +321,7 @@ export default function AppointmentsPage() {
     if (!mountedRef.current || target !== dateRef.current) return;
     const requestId = ++latestLoadRequestRef.current;
     const revision = dateRevisionRef.current;
-    const context = { date: target, revision, request: requestId };
-    setDayFence({ revision, request: requestId });
+    const context = { owner: committedDayOwner.current, date: target, revision, request: requestId };
     const isCurrent = () => mountedRef.current && requestId === latestLoadRequestRef.current
       && target === dateRef.current && revision === dateRevisionRef.current;
     readyRequestRef.current = null;
@@ -421,10 +433,11 @@ export default function AppointmentsPage() {
   const submitMove = async (item: Appointment) => {
     if (!moving || moving.id !== item.id) return;
     const target = { date: moving.date, time: moving.time, reason: moving.reason.trim() };
-    if (target.reason.length < 3 || !target.date || !target.time) return;
+    if (target.reason.length < 3 || !target.date || !target.time
+      || (moving.transferToCurrentResponsibleDoctor && (!moveContext.ready || !moveContext.isCurrent()))) return;
     await act(
-      () =>
-        fetch(`/api/appointments/${item.id}`, {
+      async () => {
+        const response = await bookingFetch(`/api/appointments/${item.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -432,8 +445,12 @@ export default function AppointmentsPage() {
             date: target.date,
             time: target.time,
             reason: target.reason,
+            ...(moving.transferToCurrentResponsibleDoctor ? { transferToCurrentResponsibleDoctor: true, ...moveContext.payload } : {}),
           }),
-        }),
+        }, () => !moving.transferToCurrentResponsibleDoctor || moveContext.isCurrent());
+        if (!response.ok && moving.transferToCurrentResponsibleDoctor) moveContext.handleRejection(await response.clone().json().catch(() => null));
+        return response;
+      },
       ({ current }) => {
         setMoving(null);
         /* نُقل الموعد، لكنّ المستخدم انتقل أثناء الطلب إلى يومٍ آخر: لا نسحبه منه. */
@@ -493,6 +510,7 @@ export default function AppointmentsPage() {
 
   return (
     <main className="mx-auto max-w-5xl p-4 pb-24">
+      {nearbyBookingDialog}
       <PageHeader
         title="جدول المواعيد والعيادات"
         subtitle="حجز وإدارة المواعيد مع التحويل الفوري لقائمة الانتظار وكراسي العلاج"
@@ -708,11 +726,12 @@ export default function AppointmentsPage() {
                   </p>
                 )}
 
+                {returnCandidateId === candidate.id ? returnContext.view : null}
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <button
                     type="button"
                     data-action="book-candidate"
-                    disabled={candidateBusy !== null}
+                    disabled={candidateBusy !== null || (returnCandidateId === candidate.id && !returnContext.ready)}
                     onClick={() => void (async () => {
                       const booked = await candidateAction(candidate.id, {
                         action: "book",
@@ -1092,6 +1111,13 @@ export default function AppointmentsPage() {
                       </label>
                     </div>
 
+                    <label className="mt-3 flex items-center gap-2 text-xs font-bold text-slate-700">
+                      <input type="checkbox" aria-label="نقل إلى الطبيب المسؤول الحالي" checked={moving.transferToCurrentResponsibleDoctor === true} disabled={busy}
+                        onChange={event => setMoving(previous => previous ? { ...previous, transferToCurrentResponsibleDoctor: event.target.checked } : previous)} />
+                      نقل إلى الطبيب المسؤول الحالي (اختياري)
+                    </label>
+                    <p className="mt-1 text-[11px] text-slate-600">نقل التاريخ أو الوقت وحده يُبقي الطبيب المسجّل في الموعد دون تغيير.</p>
+                    {moving.transferToCurrentResponsibleDoctor ? moveContext.view : null}
                     <label className="mt-2 block">
                       <span className="text-[11px] font-bold text-slate-600">
                         سبب النقل (إلزامي — يُحفظ في سجلّ التدقيق)
@@ -1112,7 +1138,7 @@ export default function AppointmentsPage() {
                       <button
                         data-action="reschedule-submit"
                         onClick={() => void submitMove(item)}
-                        disabled={busy || moving.reason.trim().length < 3 || !moving.date || !moving.time}
+                        disabled={busy || moving.reason.trim().length < 3 || !moving.date || !moving.time || (moving.transferToCurrentResponsibleDoctor === true && !moveContext.ready)}
                         className="rounded-xl bg-sky-700 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-sky-800 disabled:opacity-40"
                       >
                         تأكيد النقل

@@ -21,7 +21,7 @@ vi.mock("@/lib/db", async (importOriginal) => ({ ...await importOriginal<typeof 
   patientPlanCurrencies: mocks.patientPlanCurrencies, listPatientPlans: mocks.listPatientPlans,
   // The portal reads the same three sources in one snapshot; here it composes the same mocks.
   patientStatementSnapshot: async (patientId: number, today: string) => ({ ledger: await mocks.patientLedger(patientId),
-    planCurrencies: await mocks.patientPlanCurrencies(patientId), plans: await mocks.listPatientPlans(patientId, today), historicalAgreements: [] }) }));
+    planCurrencies: await mocks.patientPlanCurrencies(patientId), plans: await mocks.listPatientPlans(patientId, today), historicalAgreements: [], statementEvidence: { invoiceCorrections: [], invoiceCancellations: [], paymentCorrections: [], openingHistory: [], allocationEffectiveAt: {} } }) }));
 vi.mock("@/components/PrintHeader", () => ({ PrintHeader: ({ title }: { title: string }) => createElement("h1", null, title), PrintFooter: () => null }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
 
@@ -31,6 +31,7 @@ import type { Invoice, OpeningBalance, Payment, TreatmentPlan } from "../lib/db"
 import { ledgerBalancesByCurrency } from "../lib/db";
 import { formatMoney } from "../lib/money";
 import { portalStatementView } from "../lib/portal-statement";
+import { emptyStatementEvidence, projectPatientStatement } from "../lib/patient-statement-projection";
 import { historicalOpeningBuckets, type HistoricalStatementAgreement } from "../lib/statement-historical-details";
 import { statementPaymentLabel as printLabel } from "../app/print/statement/[id]/presentation";
 
@@ -112,7 +113,7 @@ describe("portal statement is the printed statement, without internal data", () 
     const feed = await (await GET()).json();
     expect(feed.payments.map((row: { receiptNumber: string; label: string }) => [row.receiptNumber, row.label])).toEqual(
       source.payments.map((row) => [row.receiptNumber, printLabel(row, source.payments)]));
-    expect(feed.payments.map((row: { label: string }) => row.label)).toEqual(["دفعة", "دفعة", "عكس سند SYN-REC-1", "استرداد"]);
+    expect(feed.payments.map((row: { label: string }) => row.label)).toEqual(["دفعة", "دفعة", "استرداد", "استرداد"]);
     expect(feed.balances).toEqual(JSON.parse(JSON.stringify(ledgerBalancesByCurrency(17, source, new Map()))));
     expect(feed.openings).toEqual([{ currency: "YER", amountMinor: 2500, asOfDate: "2026-01-01" }]);
     expect(feed.baseCurrency).toBe("YER");
@@ -209,7 +210,7 @@ describe("portal statement is the printed statement, without internal data", () 
     const balances = ledgerBalancesByCurrency(17, source, new Map());
     const agreements = plans();
     const plansBefore = structuredClone(agreements);
-    portalStatementView(source, balances, "YER", agreements, []);
+    portalStatementView(source, balances, "YER", agreements, [], projectPatientStatement({ patientId: 17, ledger: source, planCurrencies: new Map(), evidence: emptyStatementEvidence() }));
     expect(agreements).toEqual(plansBefore);
     expect(source).toEqual(before);
   });
@@ -240,7 +241,7 @@ it.each([true, false])("keeps current amended agreement tuple identical in porta
   const balances = ledgerBalancesByCurrency(17, source, new Map());
   const before = structuredClone({ source, p, historical, balances });
   for (const buckets of [historicalOpeningBuckets([historical], source.openings, source.payments), null]) {
-    const combined = portalStatementView(source, balances, "YER", [p], buckets);
+    const combined = portalStatementView(source, balances, "YER", [p], buckets, projectPatientStatement({ patientId: 17, ledger: source, planCurrencies: new Map(), evidence: emptyStatementEvidence() }));
     expect(combined.agreements).toEqual(feed.agreements);
     expect(combined.agreementsRequireReview).toBe(available ? undefined : true);
     expect(combined.balances).toEqual(balances);

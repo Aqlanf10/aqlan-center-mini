@@ -37,6 +37,7 @@ function sourceFor(value?: string) {
   const source = { query: async (sql: string, values?: unknown[]) => {
     calls.push(sql);
     if (sql.includes("to_regclass('public.ortho_study_export_artifacts')")) return { rows: [{ present: false }] };
+    if (sql.startsWith("SELECT c.relname::text AS name FROM pg_catalog.pg_class") && sql.includes("c.relname = ANY($1::text[])")) return { rows: [] }; // explicit legacy, marker-free source
     if (sql.startsWith("SELECT to_regclass")) return { rows: [{ present: true }] };
     if (sql.startsWith("SELECT 'doc-'")) return { rows: [] };
     if (sql === "SELECT value FROM settings WHERE key = $1") {

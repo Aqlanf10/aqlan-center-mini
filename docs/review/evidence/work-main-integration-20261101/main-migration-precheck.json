@@ -1,0 +1,23 @@
+{
+  "heads": {
+    "work": "f931585a92f81794b34954da66627dd2d1023a9a",
+    "main": "6a6bdc0cc705874fd4ff6d0f0ddc3fdcd314e9e6"
+  },
+  "commonImmutableFiles": 64,
+  "commonBytesIdentical": true,
+  "workOnly": {
+    "migrations/0074_lab_work_intents.sql": "d4e3839ca32d053827a67f0b60b3efaddc69850f4c1d062577c541031b93195c",
+    "migrations/0079_ortho_followup_coverage.sql": "5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99",
+    "migrations/0080_patient_numbering.sql": "b2bee7694f0781775bbddeea3715cb16ab701f4ee3fd748785ef1016c0f2e10a",
+    "migrations/0081_invoice_archive.sql": "e03d14bb7500c98c806116e251a3b3bbd29db06da53717a074cce93290a430aa",
+    "migrations/0082_invoice_service_additions.sql": "df2e093757385a3260012d03271f7abb0d5e6e682644bddce5409ec12dcee214",
+    "migrations/proposals/invoice-archive.sql": "434ed832c2f3e199643d2d213736cb8bcb935e14c4b373ca170b910a920ba43c",
+    "migrations/proposals/invoice-service-additions.sql": "6a4681990c93fe63a2263f3ceb9617698a39dc310112aecd2d9f4af0cae60413"
+  },
+  "mainOnly": {
+    "migrations/0087_agreement_reminder_metadata.sql": "6b1464da6aa1d6969e19afcefe20389e1bac5fe09b803c57c60397915f753644",
+    "migrations/0089_lab_shade_specification.sql": "2dcd996f0ffb13a8e79dc98a807845f10e0f1b0447c805c2ed6afaace4f7e5fc"
+  },
+  "reservedVersionsPresent": [],
+  "note": "Read-only tree comparison; actual registration and proposal status require source/schema checks; no migration allocated or applied."
+}

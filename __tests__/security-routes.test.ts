@@ -1,3 +1,5 @@
+vi.mock("@/lib/staff-entry-mode", () => ({ currentStaffEntryMode: async () => "legacy" as const }));
+vi.mock("@/lib/staff-authenticated-identity", () => ({ readStaffIdentityClaims: vi.fn().mockResolvedValue(undefined) }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({

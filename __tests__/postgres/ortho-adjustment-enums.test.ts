@@ -2,6 +2,7 @@
 // Only the framework marker is stubbed; transactional authority and storage stay real.
 vi.mock("server-only", () => ({}));
 
+import { createHash } from "node:crypto";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, createIsolatedDatabase, stubPostgresEnv } from "./_setup";
 import { createAdjustmentCommand } from "../../lib/ortho-adjustment-command";
@@ -80,7 +81,16 @@ it("retains assessment's existing new-session writer refusal",async()=>{
 async function seedLegacy(f:Awaited<ReturnType<typeof fixture>>,elastics="none"){
  const input={caseId:f.scope.caseId,visitId:null,doneOn:"2026-10-02",phase:null,upperWire:"016 NiTi",lowerWire:null,elastics:elastics as "none",elasticNote:null,done:"Synthetic HTTP adjustment",nextWeeks:4,note:null,
  recordedBy:"synthetic-http-replay",actorRole:"admin",request:{key:f.command.key,patientId:f.scope.patientId,session:auth.readSessionToken(context.token)!}};
- return db.recordAdjustment(input);
+ if(elastics==="none")return db.recordAdjustment(input);
+ // Historical row from before writer-level enum validation: the merged writer now refuses
+ // a non-enum value itself, so the old row and its exact v1 receipt are seeded directly.
+ const {request,...legacy}=input,written=await db.recordAdjustment({...legacy,elastics:"none"});if(!written.ok)return written;
+ const hash=createHash("sha256").update(JSON.stringify({version:1,actorId:request.session.userId,patientId:request.patientId,caseId:input.caseId,visitId:input.visitId,doneOn:input.doneOn,phase:input.phase,
+  upperWire:input.upperWire,lowerWire:input.lowerWire,elastics,elasticNote:input.elasticNote,done:input.done,nextWeeks:input.nextWeeks,note:input.note})).digest("hex");
+ await db.getPool().query("UPDATE ortho_adjustments SET elastics=$2 WHERE id=$1",[written.id,elastics]);
+ await db.getPool().query(`INSERT INTO ortho_adjustment_requests(actor_user_id,request_key,request_hash,patient_id,case_id,adjustment_id,visit_id,attached_to_today)
+  VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[request.session.userId,request.key,hash,request.patientId,input.caseId,written.id,written.visitId,written.attachedToToday]);
+ return written;
 }
 it.each([{phase:"unknown_phase"},{phase:"constructor"},{elastics:"unknown_elastics"},{elastics:"constructor"}])("replays old normalized enum receipt %j without a new write",async fields=>{
  const f=await fixture();expect((await seedLegacy(f,fields.elastics==="constructor"?"constructor":"none")).ok).toBe(true);

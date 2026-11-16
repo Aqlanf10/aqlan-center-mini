@@ -1,0 +1,11 @@
+# Proposed next bounded contract — ortho case / plan link
+
+Design only; no64 implementation or acceptance yet. Keep the63 draft regression and exact-head CI correction separate.
+
+Candidate completes only the held `planId` branch of PATCH /api/ortho/[id]. Existing clinical phase/retainer/close branches and their source-version protocol remain unchanged. Use the native linkOrthoCasePlan domain core on the existing admitted transaction, preserving active/retention, same-patient/not-cancelled plan semantics, unchanged-case no-op and awaited audit. Do not invoice, reclassify signed history, allocate migrations, mutate prices or return the native funding boolean through a clinical endpoint.
+
+Admission follows existing policy: clinical.ortho.edit, patient scope and independent clinical.plans.view/edit for link, unlink, and same-link replay. No role inference. A known native case version must match after patient then case locks. Before taking any new/old plan lock, prove the referenced plan belongs to this patient; acquire sorted positive locks with NOWAIT and recheck current authority and membership. Explicit none must refuse. A stale response is never an instruction to create a new intent.
+
+The proposed command is not a durable receipt. A successful changed link advances the case version; a delayed replay refuses against the old version. Missing response requires a fresh read and explicit new intent; same-value no-op follows the native rule and produces no duplicate audit. The minimal existing case read omits plan/funding information. A dedicated independently admitted link context and UI are a later bounded contract, not an excuse to widen that read.
+
+Acceptance must include strict IDs/body and one branch only; owner/own/all positive, none/outside/no independent plan grants negative, old/new foreign plan and cancelled source, valid unlink, existing terminal case, scope/session/grant changes while waiting, inverse locks and concurrent reassignment, audit failure rollback, actual nonempty finance and signed history equality, no legacy fallback, actual HTTP before/after, and existing55 lifecycle/native link regressions. Source proof must retain native rules and audit bytes when extracting caller-owned core; no mapper count until the complete PATCH method is admitted and tested.

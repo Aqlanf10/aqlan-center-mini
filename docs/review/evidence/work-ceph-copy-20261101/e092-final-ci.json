@@ -1,0 +1,140 @@
+{
+  "observedAt": "2026-11-01 09:13:23 UTC",
+  "note": "Job timestamps are recorded verbatim; some reported completion times exceed the environment clock. Terminal status and exact head are confirmed; no duration is derived from the inconsistent clocks.",
+  "runs": [
+    {
+      "id": 41283788092,
+      "conclusion": "success",
+      "headSha": "e09263fa79bd627cf88b47ae0dbf59ea7b335499",
+      "jobs": [
+        {
+          "completedAt": "2026-11-01T07:12:46Z",
+          "conclusion": "success",
+          "name": "Synthetic contract print and watermark",
+          "startedAt": "2026-11-01T07:11:33Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T07:36:58Z",
+          "conclusion": "success",
+          "name": "Typecheck, Lint, Unit, Audit, Build",
+          "startedAt": "2026-11-01T07:11:33Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T09:09:30Z",
+          "conclusion": "success",
+          "name": "PostgreSQL 18 integration, schema and operational journeys",
+          "startedAt": "2026-11-01T07:11:34Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T09:44:29Z",
+          "conclusion": "success",
+          "name": "Built-app HTTP security and hosted browser",
+          "startedAt": "2026-11-01T07:36:59Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T09:44:34Z",
+          "conclusion": "success",
+          "name": "Required CI gates (fail closed)",
+          "startedAt": "2026-11-01T09:44:31Z",
+          "status": "completed"
+        }
+      ],
+      "status": "completed",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/41283788092"
+    },
+    {
+      "id": 41283783217,
+      "conclusion": "success",
+      "headSha": "e09263fa79bd627cf88b47ae0dbf59ea7b335499",
+      "jobs": [
+        {
+          "completedAt": "2026-11-01T07:31:50Z",
+          "conclusion": "success",
+          "name": "Typecheck, Lint, Unit, Audit, Build",
+          "startedAt": "2026-11-01T07:11:29Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T07:12:47Z",
+          "conclusion": "success",
+          "name": "Synthetic contract print and watermark",
+          "startedAt": "2026-11-01T07:11:29Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T07:53:00Z",
+          "conclusion": "success",
+          "name": "PostgreSQL 18 integration, schema and operational journeys",
+          "startedAt": "2026-11-01T07:11:29Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T09:20:29Z",
+          "conclusion": "success",
+          "name": "Built-app HTTP security and hosted browser",
+          "startedAt": "2026-11-01T07:31:52Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T09:20:36Z",
+          "conclusion": "success",
+          "name": "Required CI gates (fail closed)",
+          "startedAt": "2026-11-01T09:20:32Z",
+          "status": "completed"
+        }
+      ],
+      "status": "completed",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/41283783217"
+    },
+    {
+      "id": 41283788019,
+      "conclusion": "success",
+      "headSha": "e09263fa79bd627cf88b47ae0dbf59ea7b335499",
+      "jobs": [
+        {
+          "completedAt": "2026-11-01T07:13:56Z",
+          "conclusion": "success",
+          "name": "payroll-journal-regressions (America/New_York)",
+          "startedAt": "2026-11-01T07:11:33Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T07:13:56Z",
+          "conclusion": "success",
+          "name": "payroll-journal-regressions (UTC)",
+          "startedAt": "2026-11-01T07:11:34Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-01T07:14:00Z",
+          "conclusion": "success",
+          "name": "payroll-journal-regressions (Asia/Aden)",
+          "startedAt": "2026-11-01T07:11:33Z",
+          "status": "completed"
+        }
+      ],
+      "status": "completed",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/41283788019"
+    },
+    {
+      "id": 41283788076,
+      "conclusion": "success",
+      "headSha": "e09263fa79bd627cf88b47ae0dbf59ea7b335499",
+      "jobs": [
+        {
+          "completedAt": "2026-11-01T07:12:39Z",
+          "conclusion": "success",
+          "name": "invoice-currency-regressions",
+          "startedAt": "2026-11-01T07:11:34Z",
+          "status": "completed"
+        }
+      ],
+      "status": "completed",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/41283788076"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+import {expect,it,vi} from "vitest";
+vi.mock("server-only",()=>({}));
+import {isCanonicalCoverageEditor} from "../lib/canonical-ortho-coverage-editor-projection";
+import {canonicalCoverageReadQuery} from "../lib/canonical-ortho-coverage-editor";
+import {canonicalCoverageQuery} from "../lib/canonical-ortho-coverage";
+const context=()=>({projection:"ortho-followup-coverage-editor",patientId:1,orthoCaseId:2,enabled:true,canEdit:true,current:null,applicable:false,sources:[{patientId:1,orthoCaseId:2,clinicalCaseId:3,planId:4,planItemId:5,invoiceId:6,fingerprint:"a".repeat(64),invoiceNumber:"SYN-6",serviceName:"خدمة تجريبية"}]});
+it("explicit edit read does not broaden the command/status query contract",()=>{expect(canonicalCoverageReadQuery("2",new URLSearchParams("patientId=1&edit=1"))).toEqual({caseId:2,patientId:1,edit:true});expect(canonicalCoverageReadQuery("2",new URLSearchParams("patientId=1"))).toEqual({caseId:2,patientId:1,edit:false});expect(()=>canonicalCoverageQuery("2",new URLSearchParams("patientId=1&edit=1"))).toThrow();});
+it.each(["patientId=1&edit=0","patientId=1&edit=1&edit=1","patientId=1&force=1","patientId=1&patientId=2&edit=1","edit=1"])("refuses ambiguous or unapproved query %s",query=>{expect(()=>canonicalCoverageReadQuery("2",new URLSearchParams(query))).toThrow();});
+it("only the explicit complete bounded projection is accepted",()=>{expect(isCanonicalCoverageEditor(context(),1,2)).toBe(true);expect(isCanonicalCoverageEditor(context(),2,2)).toBe(false);expect(isCanonicalCoverageEditor({...context(),sources:[]},1,2)).toBe(true);});
+it.each([{amountMinor:3},{source_snapshot:{}},{current:{id:"1",version:1,decision:["included"],reason:"SYN",createdAt:"2026-11-01T00:00:00Z",createdBy:"SYN"}},{enabled:false},{applicable:true},{sources:Array(257).fill(context().sources[0])},{sources:[...context().sources,...context().sources]}])("refuses extra, incoherent, malformed or partial fields %j",patch=>{expect(isCanonicalCoverageEditor({...context(),...patch},1,2)).toBe(false);});
+it.each([{patientId:2},{planId:"4"},{source_snapshot:{}},{fingerprint:"bad"},{serviceName:"x".repeat(8001)}])("refuses unowned or unbounded source fields %j",patch=>{expect(isCanonicalCoverageEditor({...context(),sources:[{...context().sources[0],...patch}]},1,2)).toBe(false);});

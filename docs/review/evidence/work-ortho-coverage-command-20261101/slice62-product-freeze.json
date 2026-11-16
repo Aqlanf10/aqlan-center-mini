@@ -1,0 +1,10 @@
+{
+  "base": "0210975f394b89e40d3ccf94a5eff17885000424",
+  "frozenAt": "2026-11-01T17:47:20.667208+00:00",
+  "buildId": "esszK6q6txM6y6yRFkI1x",
+  "files": {
+    "app/api/ortho/[id]/followup-coverage/route.ts": "9f20e8226b6169ab29531b7cae33020fbbfc16a68ff010e310c333a98d3a3445",
+    "lib/canonical-ortho-coverage-command.ts": "c911b5feb4fb1f98e091eab0424aed29cfd392dd2aa9bc2a834b958b2d509fcc",
+    "lib/ortho-followup-coverage-db.ts": "857d3332889e8f046a298060a12d7151f59da06db5cf7d4f0a6cb9e39c8f310e"
+  }
+}

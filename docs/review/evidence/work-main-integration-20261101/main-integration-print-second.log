@@ -1,0 +1,37 @@
+
+> aqlan-center@0.1.0 test:contract-print
+> vitest run --config vitest.config.print-visual.mts
+
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ __tests__/print-visual/compact-print-regressions.test.tsx (5 tests | 1 failed) 15557ms
+     × preserves lab paper and field integrity 3411ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/print-visual/compact-print-regressions.test.tsx > native compact print regression witnesses > preserves lab paper and field integrity
+Error: PDF field lines overlap or are not an adjacent wrapped field
+ ❯ visibleLines __tests__/helpers/lab-dispatch-pdf-fields.ts:41:13
+     39|     const lineHeight = Math.max(...lines[index - 1].map(word => word.y…
+     40|     if (nextTop < previousBottom - 0.01 || nextTop - previousBottom > …
+     41|       throw new Error("PDF field lines overlap or are not an adjacent …
+       |             ^
+     42|     }
+     43|   }
+ ❯ Module.assertLabDispatchPdfFields __tests__/helpers/lab-dispatch-pdf-fields.ts:88:20
+ ❯ __tests__/print-visual/compact-print-regressions.test.tsx:94:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  1 failed | 22 passed (23)
+   Start at  04:30:42
+   Duration  88.60s (transform 4.19s, setup 0ms, import 9.45s, tests 77.84s, environment 3ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

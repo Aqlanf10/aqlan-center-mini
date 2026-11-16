@@ -1,7 +1,10 @@
 import { PHASE_LABEL, nextAdjustmentDate } from './ortho';
+import { auxiliariesText } from './ortho-auxiliaries';
 export interface OrthoSessionDetail {
   id: number; doneOn: string; phase: string | null; note: string | null;
   visitId: number | null; visitSigned: boolean | null; nextWeeks: number; recordedBy: string;
+  /** 0132; absent or null reads as not recorded, [] as an explicit "none". */
+  auxiliaries?: readonly string[] | null; auxiliaryOther?: string | null;
 }
 export interface OrthoSessionField { label: string; value: string; ltr?: boolean }
 /** An interval expectation from this entry, never evidence of a booking or attendance. */
@@ -24,6 +27,7 @@ export function sessionDetailFields(entry: OrthoSessionDetail): OrthoSessionFiel
     { label: 'حالة توقيع الزيارة', value: signature },
     { label: 'مسجل الجلسة', value: entry.recordedBy || 'غير مسجل' },
     { label: 'ملاحظة الجلسة المسجلة', value: entry.note === null || entry.note === '' ? 'غير مسجلة' : entry.note },
+    { label: 'الأجهزة المساعدة المسجلة', value: auxiliariesText(entry.auxiliaries, entry.auxiliaryOther) },
   ];
 }
 export const SESSION_FOLLOWUP_DISCLAIMER = 'تاريخ متوقع محسوب من فترة المتابعة المسجلة، وليس موعداً محجوزاً أو دليلاً على الحضور أو إتمام العلاج.';

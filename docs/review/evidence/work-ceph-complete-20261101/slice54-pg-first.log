@@ -1,0 +1,71 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ceph-complete-canonical-command.test.ts (33 tests | 1 failed) 9538ms
+   × own, all and protected owner seal precisely the existing engine outputs and one atomic audit 254ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ceph-complete-canonical-command.test.ts > own, all and protected owner seal precisely the existing engine outputs and one atomic audit
+AssertionError: expected [ …(36) ] to deeply equal [ …(36) ]
+
+- Expected
++ Received
+
+@@ -7,11 +7,11 @@
+      "code": "AB_MAND",
+      "value": 50,
+    },
+    {
+      "code": "AB_PLANE",
+-     "value": -0,
++     "value": 0,
+    },
+    {
+      "code": "ANB",
+      "value": 0,
+    },
+@@ -23,11 +23,11 @@
+      "code": "CF",
+      "value": 236,
+    },
+    {
+      "code": "CONV",
+-     "value": -0,
++     "value": 0,
+    },
+    {
+      "code": "CONV_ANGLE",
+      "value": 0,
+    },
+@@ -91,11 +91,11 @@
+      "code": "OVERJET",
+      "value": -48.5,
+    },
+    {
+      "code": "POG_NB_D",
+-     "value": -0,
++     "value": 0,
+    },
+    {
+      "code": "POG_NPERP",
+      "value": -161.6,
+    },
+
+ ❯ __tests__/postgres/ceph-complete-canonical-command.test.ts:48:18
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 34 passed (35)
+   Start at  12:19:33
+   Duration  13.62s (transform 1.98s, setup 0ms, import 2.70s, tests 10.47s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

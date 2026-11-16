@@ -10,18 +10,26 @@ vi.mock("react", async original => {
   const react = await original<typeof import("react")>();
   const slot = () => { const f = runtime.frame!; const i = f.cursor++; return f.slots[i] ?? (f.slots[i] = {}); };
   const effect = (fn: () => void | (() => void), deps?: unknown[]) => { const s = slot();
-      if (!s.deps || !deps || deps.some((v, i) => !Object.is(v, s.deps![i]))) {
-        runtime.frame!.effects.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; s.deps = deps; }); } };
+    if (!s.deps || !deps || deps.some((v, i) => !Object.is(v, s.deps![i]))) { s.deps = deps;
+      runtime.frame!.effects.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; }); } };
+  const memo = (fn: () => unknown, deps?: unknown[]) => { const s = slot();
+    if (!("value" in s) || !s.deps || !deps || deps.length !== s.deps.length || deps.some((v, i) => !Object.is(v, s.deps![i]))) { s.value = fn(); s.deps = deps; }
+    return s.value; };
   return { ...react,
     useState: (initial: unknown) => { const s = slot(); if (!("value" in s)) s.value = typeof initial === "function" ? initial() : initial;
       return [s.value, (next: unknown) => { s.value = typeof next === "function" ? next(s.value) : next; }]; },
     useRef: (initial: unknown) => { const s = slot(); if (!s.value) s.value = { current: initial }; return s.value; },
-    useMemo: (fn: () => unknown, deps: unknown[]) => { const s = slot();
-      if (!s.deps || deps.some((v, i) => !Object.is(v, s.deps![i]))) { s.value = fn(); s.deps = deps; }
-      return s.value; },
-    useEffect: effect, useLayoutEffect: effect,
+    useMemo: memo, useCallback: (fn: unknown, deps?: unknown[]) => memo(() => fn, deps),
+    useEffect: effect,
+    useLayoutEffect: effect,
   };
 });
+// The shared context reader/selector has its own real hook tests. This suite
+// isolates rebooking idempotency after an already-verified clinical context.
+vi.mock("../components/useReturnBookingContext", () => ({ useReturnBookingContext: ({ source }: { source: unknown }) => ({
+  ready: true, verified: { doctorId: 9, doctorName: "Synthetic current owner" }, fingerprint: "b".repeat(64), view: null,
+  intrinsicPayload: { returnBookingSource: source, returnBookingFingerprint: "b".repeat(64) }, isCurrent: () => true, handleRejection: () => {},
+}) }));
 vi.mock("../components/CollectPaymentModal", () => ({ CollectPaymentModal: () => null }));
 vi.mock("../components/ReceiptCorrectionLauncher", () => ({ ReceiptCorrectionLauncher: () => null }));
 vi.mock("../components/PortalInviteRow", () => ({ PortalInviteRow: () => null }));
@@ -38,7 +46,7 @@ function words(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   return node && typeof node === "object" && "props" in node ? words((node as Element).props.children as ReactNode) : "";
 }
-const reply = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body });
+const reply = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, clone: () => ({ json: async () => body }) });
 const turns = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 const summary = (): WorkflowSummary => ({ today: "2026-10-22", timeZone: "Asia/Aden",
   openVisit: null, lastVisit: null, nextAppointment: null, activePlans: [], financial: null, canSeeFinancial: false, alerts: [],
@@ -132,7 +140,7 @@ describe("explicit planned-session rebooking UI", () => {
     expect(f.find("button", "إلغاء").props.disabled).toBe(true);
     const [url, request] = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/planned-visits/71/rebook");
-    expect(JSON.parse(request.body as string)).toMatchObject({ expectedAppointmentId: 101, expectedGeneration: "a".repeat(32), date: "2026-10-24", time: "16:00", reason: "طلب المريض", requestId: expect.any(String) });
+    expect(JSON.parse(request.body as string)).toMatchObject({ expectedAppointmentId: 101, expectedGeneration: "a".repeat(32), date: "2026-10-24", time: "16:00", reason: "طلب المريض", requestId: expect.any(String), returnBookingSource: { kind: "planned_visit", id: 71 }, returnBookingFingerprint: "b".repeat(64) });
     resolve(reply({ appointmentId: 102, title: "جلسة اختبار", replayed: false }, 201)); await turns();
     expect(f.props.onChanged).toHaveBeenCalledTimes(1); expect(f.props.onVisitStarted).not.toHaveBeenCalled();
     expect(words(f.render())).toContain("تمت إعادة حجز الجلسة"); expect(f.find("form")).toBeUndefined();
@@ -200,5 +208,18 @@ describe("explicit planned-session rebooking UI", () => {
     const f = mount(); f.change("reason", "طلب المريض"); f.props.workflowIsCurrent = () => false; f.submit(); expect(fetch).not.toHaveBeenCalled();
     f.props.workflowIsCurrent = () => true; f.submit(); f.unmount(); resolve(reply({ appointmentId: 102 })); await turns();
     expect(f.props.onChanged).not.toHaveBeenCalled();
+  });
+  it("retires the committed patient owner across A to B to A before a late response", async () => {
+    let resolve!: (value: unknown) => void;
+    const fetch = vi.fn(() => new Promise(done => { resolve = done; })); vi.stubGlobal("fetch", fetch);
+    const f = mount(); f.change("reason", "طلب المريض"); f.submit();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    f.props.patientId = 8; f.render();
+    f.props.patientId = 7; f.render();
+    resolve(reply({ appointmentId: 102, title: "جلسة اختبار", replayed: false }, 201)); await turns();
+    expect(f.props.onChanged).not.toHaveBeenCalled();
+    expect(f.props.onVisitStarted).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    f.unmount();
   });
 });

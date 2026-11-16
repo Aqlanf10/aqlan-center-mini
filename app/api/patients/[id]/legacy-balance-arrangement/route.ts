@@ -7,12 +7,17 @@ import {
   createLegacyBalanceArrangement,
   listLegacyBalanceArrangements,
 } from "@/lib/legacy-balance-arrangements-db";
-import { isLegacyArrangementCadence } from "@/lib/legacy-balance-arrangements";
-import { isCurrency, parseAmount } from "@/lib/money";
+import { isLegacyArrangementCadence, type LegacyArrangementCadence } from "@/lib/legacy-balance-arrangements";
+import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { canAccessPatient } from "@/lib/patient-access";
 import { canViewMoney } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalLegacyBalanceArrangements } from "@/lib/canonical-patient-account";
+import { CanonicalLegacyArchiveRefusal } from "@/lib/canonical-legacy-reads";
+import { CanonicalLegacyArrangementRefusal, commandCanonicalLegacyArrangement, commandCanonicalLegacyArrangementCancel } from "@/lib/canonical-legacy-arrangements";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +40,97 @@ async function mayView(session: Awaited<ReturnType<typeof requireSession>>, pati
   return canViewMoney(session.role);
 }
 
+const CREATE_REFUSAL = {
+  patient_not_found: "المريض غير موجود.",
+  no_opening_balance: "لا يوجد رصيد سابق بهذه العملة.",
+  opening_settled: "الرصيد السابق بهذه العملة مسدّد بالفعل.",
+  already_active: "يوجد ترتيب تحصيل نشط لهذه العملة. ألغِه أولًا إذا أردت تغييره.",
+  installment_exceeds_remaining: "قيمة القسط أكبر من المتبقي من الرصيد السابق.",
+} as const;
+
+/** Canonical refusals with the legacy messages and statuses (M2 slice 95d); never cached. */
+function canonicalArrangementFailure(error: unknown, fallback: string): NextResponse {
+  if (error instanceof CanonicalLegacyArchiveRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: 403, headers: NO_STORE });
+  if (error instanceof CanonicalLegacyArrangementRefusal) {
+    const reason = error.reason;
+    if (reason === "not_found" || reason === "already_cancelled") {
+      return NextResponse.json({ code: reason, message: reason === "already_cancelled" ? "هذا الترتيب ملغى مسبقًا." : "ترتيب الرصيد غير موجود." }, { status: 404, headers: NO_STORE });
+    }
+    return NextResponse.json({ code: reason, message: CREATE_REFUSAL[reason] },
+      { status: reason === "patient_not_found" || reason === "no_opening_balance" ? 404 : 409, headers: NO_STORE });
+  }
+  return canonicalPatientReadFailure(error, fallback);
+}
+
+/** The create request, validated as the legacy route always did (shared by both session kinds). */
+type Read<T> = { refused: NextResponse } | { value: T };
+async function readCreate(request: Request): Promise<Read<{ currency: Currency; cadence: LegacyArrangementCadence; installmentMinor: number; firstDueDate: string | null; note: string | null; today: string }>> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return { refused: bounded };
+    return { refused: NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }) };
+  }
+  const source = (body ?? {}) as Record<string, unknown>;
+  if (!isCurrency(source.currency)) {
+    return { refused: NextResponse.json({ message: "اختر عملة الرصيد السابق." }, { status: 400 }) };
+  }
+  if (!isLegacyArrangementCadence(source.cadence)) {
+    return { refused: NextResponse.json({ message: "اختر طريقة القسط: مع كل زيارة أو شهري." }, { status: 400 }) };
+  }
+  const installmentMinor = parseAmount(String(source.installmentAmount ?? ""), source.currency);
+  if (installmentMinor === null || installmentMinor <= 0) {
+    return { refused: NextResponse.json({ message: "اكتب قيمة القسط المقترح." }, { status: 400 }) };
+  }
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  let firstDueDate: string | null = null;
+  if (source.cadence === "monthly") {
+    firstDueDate = typeof source.firstDueDate === "string" && DATE_PATTERN.test(source.firstDueDate)
+      ? source.firstDueDate
+      : today;
+    if (firstDueDate < today) {
+      return { refused: NextResponse.json({ message: "بداية الترتيب الشهري لا تكون قبل اليوم؛ هذا ترتيب تحصيل جديد لا إعادة كتابة للتاريخ." }, { status: 400 }) };
+    }
+  }
+  const note = typeof source.note === "string" && source.note.trim()
+    ? source.note.trim().slice(0, 300)
+    : null;
+
+  return { value: { currency: source.currency, cadence: source.cadence, installmentMinor, firstDueDate, note, today } };
+}
+
+/** The cancel request, validated as the legacy route always did. */
+async function readCancel(request: Request): Promise<Read<{ arrangementId: number; reason: string }>> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return { refused: bounded };
+    return { refused: NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }) };
+  }
+  const source = (body ?? {}) as Record<string, unknown>;
+  const arrangementId = Number(source.arrangementId);
+  if (!Number.isInteger(arrangementId) || arrangementId <= 0) {
+    return { refused: NextResponse.json({ message: "ترتيب الرصيد غير صالح." }, { status: 400 }) };
+  }
+  const reason = typeof source.reason === "string" ? source.reason.trim().slice(0, 300) : "";
+  if (reason.length < 3) {
+    return { refused: NextResponse.json({ message: "اكتب سبب إلغاء أو تغيير ترتيب القسط." }, { status: 400 }) };
+  }
+  return { value: { arrangementId, reason } };
+}
+
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // M2 slice 88: finance.patient-ledger.view inside the patient scope; the manage control by grant.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalLegacyBalanceArrangements(selected.handle, Number((await params).id)), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل ترتيب الرصيد السابق."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const patientId = idOf((await params).id);
@@ -55,6 +150,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // M2 slice 95d (G4-1, G4-6; contract section 15 point 9): finance.legacy.record with the ledger view.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const canonicalPatient = idOf((await params).id);
+    if (!canonicalPatient) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400, headers: NO_STORE });
+    const read = await readCreate(request);
+    if ("refused" in read) { read.refused.headers.set("Cache-Control", "private, no-store"); return read.refused; }
+    try { return NextResponse.json(await commandCanonicalLegacyArrangement(selected.handle, canonicalPatient, read.value), { status: 201, headers: NO_STORE }); }
+    catch (error) { return canonicalArrangementFailure(error, "تعذّر إنشاء ترتيب تحصيل الرصيد السابق."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canManage(session.role)) {
@@ -63,44 +169,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const patientId = idOf((await params).id);
   if (!patientId) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
 
-  let body: unknown;
-  try {
-    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
-  } catch (error) {
-    const bounded = bodyErrorResponse(error);
-    if (bounded) return bounded;
-    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
-  }
-  const source = (body ?? {}) as Record<string, unknown>;
-  if (!isCurrency(source.currency)) {
-    return NextResponse.json({ message: "اختر عملة الرصيد السابق." }, { status: 400 });
-  }
-  if (!isLegacyArrangementCadence(source.cadence)) {
-    return NextResponse.json({ message: "اختر طريقة القسط: مع كل زيارة أو شهري." }, { status: 400 });
-  }
-  const installmentMinor = parseAmount(String(source.installmentAmount ?? ""), source.currency);
-  if (installmentMinor === null || installmentMinor <= 0) {
-    return NextResponse.json({ message: "اكتب قيمة القسط المقترح." }, { status: 400 });
-  }
-  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  let firstDueDate: string | null = null;
-  if (source.cadence === "monthly") {
-    firstDueDate = typeof source.firstDueDate === "string" && DATE_PATTERN.test(source.firstDueDate)
-      ? source.firstDueDate
-      : today;
-    if (firstDueDate < today) {
-      return NextResponse.json({ message: "بداية الترتيب الشهري لا تكون قبل اليوم؛ هذا ترتيب تحصيل جديد لا إعادة كتابة للتاريخ." }, { status: 400 });
-    }
-  }
-  const note = typeof source.note === "string" && source.note.trim()
-    ? source.note.trim().slice(0, 300)
-    : null;
+  const read = await readCreate(request);
+  if ("refused" in read) return read.refused;
+  const { currency, cadence, installmentMinor, firstDueDate, note, today } = read.value;
 
   try {
     const result = await createLegacyBalanceArrangement({
       patientId,
-      currency: source.currency,
-      cadence: source.cadence,
+      currency,
+      cadence,
       installmentMinor,
       firstDueDate,
       note,
@@ -108,13 +185,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       today,
     });
     if (!result.ok) {
-      const messages = {
-        patient_not_found: "المريض غير موجود.",
-        no_opening_balance: "لا يوجد رصيد سابق بهذه العملة.",
-        opening_settled: "الرصيد السابق بهذه العملة مسدّد بالفعل.",
-        already_active: "يوجد ترتيب تحصيل نشط لهذه العملة. ألغِه أولًا إذا أردت تغييره.",
-        installment_exceeds_remaining: "قيمة القسط أكبر من المتبقي من الرصيد السابق.",
-      } as const;
+      const messages = CREATE_REFUSAL;
       const status = result.reason === "patient_not_found" || result.reason === "no_opening_balance" ? 404 : 409;
       return NextResponse.json({ message: messages[result.reason] }, { status });
     }
@@ -140,6 +211,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // M2 slice 95d: the same grants; the patient row lock and the audit inside the operation.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const canonicalPatient = idOf((await params).id);
+    if (!canonicalPatient) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400, headers: NO_STORE });
+    const read = await readCancel(request);
+    if ("refused" in read) { read.refused.headers.set("Cache-Control", "private, no-store"); return read.refused; }
+    try { return NextResponse.json(await commandCanonicalLegacyArrangementCancel(selected.handle, canonicalPatient, read.value), { headers: NO_STORE }); }
+    catch (error) { return canonicalArrangementFailure(error, "تعذّر إلغاء ترتيب الرصيد السابق."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canManage(session.role)) {
@@ -148,23 +230,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const patientId = idOf((await params).id);
   if (!patientId) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
 
-  let body: unknown;
-  try {
-    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
-  } catch (error) {
-    const bounded = bodyErrorResponse(error);
-    if (bounded) return bounded;
-    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
-  }
-  const source = (body ?? {}) as Record<string, unknown>;
-  const arrangementId = Number(source.arrangementId);
-  if (!Number.isInteger(arrangementId) || arrangementId <= 0) {
-    return NextResponse.json({ message: "ترتيب الرصيد غير صالح." }, { status: 400 });
-  }
-  const reason = typeof source.reason === "string" ? source.reason.trim().slice(0, 300) : "";
-  if (reason.length < 3) {
-    return NextResponse.json({ message: "اكتب سبب إلغاء أو تغيير ترتيب القسط." }, { status: 400 });
-  }
+  const read = await readCancel(request);
+  if ("refused" in read) return read.refused;
+  const { arrangementId, reason } = read.value;
   try {
     const result = await cancelLegacyBalanceArrangement({
       patientId, arrangementId, actor: session.username, reason,

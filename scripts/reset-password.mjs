@@ -26,6 +26,7 @@
  *  5. كلمة المرور لا تقل عن 8 أحرف — القاعدة نفسها في واجهة الإنشاء.
  */
 import "./load-env.mjs";
+import { resetLegacyPassword } from "./security/legacy-password-reset.mjs";
 import { Client } from "pg";
 import { randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
@@ -137,70 +138,33 @@ if (!rawUrl.trim()) {
   process.exit(1);
 }
 
-const { url, redirected } = resolveDatabaseUrl(rawUrl.trim());
+let resolved;
+try { resolved = resolveDatabaseUrl(rawUrl.trim()); } catch {
+  console.error("رابط قاعدة البيانات غير صالح.");
+  process.exit(1);
+}
+const { url, redirected } = resolved;
 if (redirected) {
   console.log(`ℹ التوجيه إلى قاعدة الإنتاج «${MINI_DB}» — كما يفعل التطبيق داخل Railway.`);
 }
 
-const client = new Client({ connectionString: url, ssl: sslFor(url) });
-
+let client;
 try {
+  client = new Client({ connectionString: url, ssl: sslFor(url) });
   await client.connect();
 } catch (error) {
-  console.error("خطأ في الاتصال بالقاعدة:", error?.message ?? error);
+  console.error("خطأ في الاتصال بالقاعدة.");
   console.error("تأكد من الرابط العام (Public Networking) وصلاحيته.");
   process.exit(1);
 }
 
 try {
-  const found = await client.query(
-    "SELECT id, username, display_name, role, is_active FROM users WHERE username = $1",
-    [username],
-  );
-  if (found.rowCount === 0) {
-    console.error(`خطأ: لا يوجد مستخدم باسم «${username}» في هذه القاعدة.`);
-    const list = await client.query(
-      "SELECT username, role, is_active FROM users ORDER BY id LIMIT 30",
-    );
-    if (list.rows.length > 0) {
-      console.error("\nالمستخدمون الموجودون:");
-      for (const row of list.rows) {
-        console.error(`  - ${row.username} (${row.role})${row.is_active ? "" : " [موقوف]"}`);
-      }
-    }
-    process.exit(1);
-  }
-
-  const target = found.rows[0];
-  if (target.role !== "admin") {
-    console.error(
-      `تنبيه: «${username}» دوره «${target.role}» لا مدير — ستُغيَّر كلمة مروره كما طلبت.`,
-    );
-  }
-
-  const newHash = await hashPassword(password);
-  const updated = await client.query(
-    "UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING id, username",
-    [newHash, target.id],
-  );
-  if (updated.rowCount === 0) {
-    console.error("خطأ: لم يُحدَّث أي صف — جرِّب من جديد.");
-    process.exit(1);
-  }
-
-  // تحقق قراءة-رجوع: كلمة المرور الجديدة تعمل فعلًا ضد التجزئة المخزَّنة.
-  const stored = await client.query("SELECT password_hash FROM users WHERE id = $1", [target.id]);
-  const ok = await verifyPassword(password, stored.rows[0].password_hash);
-  if (!ok) {
-    console.error("خطأ: التحقق بعد الكتابة فشل — لم تُحفظ كلمة المرور بشكل صحيح.");
-    process.exit(1);
-  }
-
-  console.log(`✓ أُعيدت كلمة مرور «${username}» بنجاح وتم التحقق منها في القاعدة.`);
-  console.log("سجّل الدخول الآن من شاشة الدخول، ثم غيّرها من الإعدادات ← المستخدمون إن أردت.");
-} catch (error) {
-  console.error("خطأ أثناء التنفيذ:", error?.message ?? error);
-  process.exit(1);
+  await resetLegacyPassword(client, { username, password, hashPassword, verifyPassword });
+  console.log("✓ أُعيدت كلمة المرور وتم التحقق منها وحفظ المعاملة بنجاح.");
+} catch {
+  // Database/driver errors may contain sensitive connection or query details.
+  console.error("تعذّر تغيير كلمة المرور. قد يكون الهدف محجوزاً لترقية الصلاحيات أو غير صالح. لم يُؤكَّد نجاح العملية.");
+  process.exitCode = 1;
 } finally {
   await client.end().catch(() => {});
 }

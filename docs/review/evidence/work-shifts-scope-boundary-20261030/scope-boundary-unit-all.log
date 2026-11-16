@@ -1,0 +1,11 @@
+
+ RUN  v4.1.12 <checkout>
+
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+
+ Test Files  797 passed (797)
+      Tests  13371 passed (13371)
+   Start at  16:53:40
+   Duration  462.59s (transform 20.12s, setup 0ms, import 93.82s, tests 267.25s, environment 75ms)

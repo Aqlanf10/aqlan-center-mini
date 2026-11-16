@@ -86,7 +86,7 @@ async function footprint() {
 
 async function read(status = 200) {
   const before = await footprint();
-  const response = await GET();
+  const response = await GET(new Request("http://localhost/api/ortho/followups"));
   const payload = await response.json();
   expect(response.status).toBe(status);
   expect(response.headers.get("Cache-Control")).toBe("private, no-store");

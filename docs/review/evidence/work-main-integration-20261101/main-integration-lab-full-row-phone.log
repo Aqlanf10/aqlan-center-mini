@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test:contract-print
+> vitest run --config vitest.config.print-visual.mts __tests__/print-visual/compact-print-regressions.test.tsx -t preserves lab paper
+
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 4 skipped (5)
+   Start at  04:41:19
+   Duration  5.18s (transform 522ms, setup 0ms, import 1.19s, tests 3.74s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -2,12 +2,27 @@ import { NextResponse } from "next/server";
 import { patientLegacyOnboarding } from "@/lib/legacy-onboarding-db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalLegacyOnboarding } from "@/lib/canonical-legacy-reads";
 import { doctorOwnsPatient, findUserByUsername } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 /** (P1-A) قائمة تهيئة مريض التقويم السابق — قراءةٌ فقط، بلا مبالغ. */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 95a (G4-2): the record read inside the scope; plan sources with clinical.plans.view.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const requested = new URL(request.url).searchParams.get("caseId");
+    const canonicalCase = requested === null ? undefined : Number(requested);
+    if (canonicalCase !== undefined && (!Number.isSafeInteger(canonicalCase) || canonicalCase <= 0)) {
+      return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try { return NextResponse.json(await readCanonicalLegacyOnboarding(selected.handle, Number((await context.params).id), canonicalCase), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل تهيئة الحالة السابقة."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const patientId = Number((await context.params).id);

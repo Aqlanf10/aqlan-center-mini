@@ -1,0 +1,96 @@
+{
+  "format": "work-ortho-coverage-command-v1",
+  "preparedAt": "2026-11-01T18:39:34.978303+00:00",
+  "base": "0210975f394b89e40d3ccf94a5eff17885000424",
+  "buildId": "esszK6q6txM6y6yRFkI1x",
+  "acceptance": {
+    "PG": {
+      "passed": 94,
+      "files": 6,
+      "canonicalCommandCases": 34
+    },
+    "unitGuards": {
+      "passed": 83,
+      "files": 8
+    },
+    "HTTPChromium": {
+      "passed": 30,
+      "files": 3,
+      "seconds": 62.91
+    },
+    "typeBuildLint": "passed;lint0errors0warnings; first expanded typecheck caught observer query result declaration, corrected",
+    "fullUnit": {
+      "passed": 14783,
+      "files": 872,
+      "skipped": 0,
+      "seconds": 601.83
+    },
+    "fullPG": {
+      "passed": 5515,
+      "files": 416,
+      "skipped": 0,
+      "seconds": 2975.15
+    },
+    "runtime": {
+      "allQualityGates": "passed",
+      "buildId": "esszK6q6txM6y6yRFkI1x",
+      "lint": "0 errors, 345 existing warnings",
+      "toolingSeconds": 1547.3,
+      "scope": "Local exact built artifact, not Docker or hosted CI acceptance"
+    },
+    "CI": "not published",
+    "independentReview": "pending"
+  },
+  "before": {
+    "admission": "Scoped GET200 POST401vs201 on byte-identical frozen POST; initial completed fixture corrected to active for successful after, old route refused before status",
+    "sourceOwnershipRace": "One targeted failed case: plan moved after prevalidation; actual coverage_command_conflict from foreign child lock versus expected source_changed. Fixed strict parent ownership; full94 pass, no skipped tests."
+  },
+  "limits": [
+    "No editor/source picker in this server contract.",
+    "Native immutable terminal outcome retained; exact actor/payload required; unresolved never a refusal or new intent.",
+    "No money, old signed proof, assignment, migration or live activation changes.",
+    "NOT_READY, Docker destination denial, schema convergence and remaining integration/operational review remain.",
+    "PR506 description mutation separately denied; no retry/workaround."
+  ],
+  "sourceSha256": {
+    "app/api/ortho/[id]/followup-coverage/route.ts": "9f20e8226b6169ab29531b7cae33020fbbfc16a68ff010e310c333a98d3a3445",
+    "lib/canonical-ortho-coverage-command.ts": "c911b5feb4fb1f98e091eab0424aed29cfd392dd2aa9bc2a834b958b2d509fcc",
+    "lib/ortho-followup-coverage-db.ts": "857d3332889e8f046a298060a12d7151f59da06db5cf7d4f0a6cb9e39c8f310e",
+    "__tests__/postgres/ortho-coverage-canonical-command.test.ts": "19b4897a7bcd5fd755738bd49aa5b1e534659b6927fd3e036e337c8e920b9c99",
+    "__tests__/security-http/canonical-ortho-coverage-command-journey.test.ts": "ee045ff5b92989275192051099dd91f316945c5cb8e45b0fa8af75ecc3984d45",
+    "__tests__/security-http/canonical-ortho-coverage-status-journey.test.ts": "f2795db5b6fff0fe72c00db94b1a4126518b0fc03adac6c573be9f46eec65ba2",
+    "__tests__/security-http/canonical-ortho-coverage-journey.test.ts": "30b62ae1dca904384ec6d65d58dff9f763b0b79d27d4f765014f987b1241fb1a"
+  },
+  "evidenceSha256": {
+    "slice62-before-build-provenance.json": "4a318cef4102071b10fbbbf9e344b134e1f37365ace6d36d09792a2431be9ce8",
+    "slice62-body-full.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice62-build-first.log": "1d8f92a3002f1657bd69e46c65e9685303b3e0d148e1d5ba585a21d572676088",
+    "slice62-design.md": "762c608301dbed71422c10bf6927416bf1490e14b0c4193cd2b0386dbfefc788",
+    "slice62-environment-full.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice62-http-before.log": "99707fe32c3934d3a9cb22051e020ecbdc2462d751a26bab6c09d2ebf6f16b55",
+    "slice62-http-first.log": "31b56d0eb4e4364eb9a88475ba6133abcec46ae0e07f639f452737b56a23b5c7",
+    "slice62-inventory-first.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice62-lint-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice62-lint-full.log": "7c6ed892a961f242cd2dcfb85cf664791dc0bec57ac2d7b3bdb9cdd39d9c5d22",
+    "slice62-money-full.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice62-pg-expanded.log": "b57ed848b81eed949fc71440ea888efa54a08f292b69e1f5e25af28a362c38f4",
+    "slice62-pg-first.log": "3410ee5290ed37894c78a68344fc356891e4e6422c82fcbcb6e3f784203a3e9c",
+    "slice62-pg-full.log": "7087834304ba3c1d721b7c382a0b19d9c3858bfb340a763c5ceb955c611e6929",
+    "slice62-pg-lock-final.log": "8de3812081b836a6727d2d5cef128759ec3a36b6ce3a4b0241831ef82694cb57",
+    "slice62-preflight-full.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "slice62-product-freeze.json": "1dfe3ca65106dae71c7682d9f9617badb2de9f136774c08e18b864b79e4ebf7a",
+    "slice62-quality-results.json": "ee58d843220270164e3b881031210c6526a36aa0947a12f4906bb329cd631989",
+    "slice62-runtime-braces-full.log": "a2d5e046fca6827673a1e569638657c75e094264029295bec3bcfc3a155890b5",
+    "slice62-runtime-braces-proof.json": "92db5d2169fd564e5fc96dfdeafe5554dc00c3e9015716954ae91f6d5aefe669",
+    "slice62-runtime-tooling-full.log": "e1f99ad2fb1335233565f3cc787e10e4b0489c44917fcab86c311129af20a288",
+    "slice62-runtime-tooling-proof.json": "5313c78760b1a219d5cb5874a5ad89631c5cf037924ea1e417ad7919d02ecfd3",
+    "slice62-source-lock-before.log": "96cb2bb6555e5c0cc71a240e8dadfc8b135c92157dfb61d2ef80909cb37483ae",
+    "slice62-source-proof.json": "26e018a5e41557bd9238b8054cb63c379c190c11310b7b6d24a6be878c21ee9c",
+    "slice62-type-expanded.log": "1123009b7c76881c075bd4b043ec07c39651f573c65c1bb4402447245082f7b7",
+    "slice62-type-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice62-type-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice62-unit-first.log": "87159712f1cfa8f2ae080a7d35548ed588944dda72b0f871eb9e5ff72c051af2",
+    "slice62-unit-full.log": "7ded628df922502638b73ea19df8f79e983ab06aa7d9cd5aedf98aa82761ac6f",
+    "slice62-unit-guards-final.log": "c9bfe2195fda89a7d98eff05d3323fdc180613a20682d59346380694f636cb93"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "baseRevision": "9503c9428b6e43a75640b1e01ba8b383caa20868",
+  "headRevision": "86c0bf366b2108d1b5950529a657ab18f3b117e5",
+  "changedFiles": [
+    "__tests__/security-http/canonical-ortho-followups-journey.test.ts"
+  ],
+  "productBuildAndPostgresInputsUnchanged": true,
+  "typecheckAfterFix": "passed",
+  "meaning": "Copied-array sort preserves exactly the same two-GET allowlist. No compiler-target change; original35HTTP pass belongs to9503 and finalCI will rerun this compatibility-only test change."
+}

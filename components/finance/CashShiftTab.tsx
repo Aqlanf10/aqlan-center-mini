@@ -10,6 +10,7 @@ import {
   type Currency,
 } from "@/lib/money";
 import { ShiftCloseStatus } from "./ShiftCloseStatus";
+import ShiftOpeningReviews, { type OpeningReviewItem } from "./ShiftOpeningReviews";
 import { ReceiptCorrectionLauncher } from "../ReceiptCorrectionLauncher";
 import { ReceiptProvenance } from "../ReceiptProvenance";
 import { receiptDocumentTitle, receiptProvenanceFor } from "@/lib/receipt-provenance";
@@ -36,6 +37,10 @@ export interface ShiftData {
   difference?: Record<Currency, number> | null;
   differenceReason?: string | null;
   expectedSource?: "stored" | "computed";
+  /** 0129: the opening's differences against the previous close (absent in an older feed). */
+  openingReviews?: OpeningReviewItem[];
+  /** 0129 §8.3: the latest close before the next opening, withheld from this viewer by the server. */
+  sealed?: boolean;
 }
 
 export interface PaymentItem {
@@ -89,8 +94,15 @@ interface CashShiftTabProps {
   clinicTimeZone?: string;
   parties: PartyItem[];
   isAdmin: boolean;
+  /** 0128 (#483 6831365228): only the protected owner on a canonical session may pay part of an expense privately. */
+  canPayPrivately?: boolean;
   busy: boolean;
-  onOpenShift: (opening: Record<Currency, string>) => Promise<void>;
+  /** 0129 §8 (blind count): one step; a difference is recorded for review by the server, never refused. */
+  onOpenShift: (opening: Record<Currency, string>) => Promise<"opened" | "failed">;
+  /** 0129: pending opening differences in the clinic and whether the server lets this session review them. */
+  pendingOpeningReviews?: number;
+  canReviewOpening?: boolean;
+  onOpeningReviewed?: () => void;
   onCloseShift: (
     counted: Record<Currency, string>, note: string, differenceReason: string,
   ) => Promise<"closed" | "needs_reason" | "failed">;
@@ -104,6 +116,9 @@ interface CashShiftTabProps {
     /** (P0-2) دفعة مقدمة فوق رصيد المورد/المختبر — المدير وحده بسبب. */
     prepayment?: boolean;
     prepaymentReason?: string;
+    /** 0128: the part the owner paid from a private source (the rest leaves the drawer) and why. */
+    ownerPrivateAmount?: string;
+    ownerPrivateReason?: string;
   }) => Promise<number | void>;
   onRemoveExpense: (voucherId: number, voucherNumber: string) => Promise<void>;
   onOpenQuickCollect: () => void;
@@ -137,6 +152,7 @@ export function CashShiftTab({
   clinicTimeZone = CLINIC_ZONE_FALLBACK,
   parties,
   isAdmin,
+  canPayPrivately = false,
   busy,
   onOpenShift,
   onCloseShift,
@@ -152,9 +168,14 @@ export function CashShiftTab({
   setSpending,
   closing,
   setClosing,
+  pendingOpeningReviews = 0,
+  canReviewOpening = false,
+  onOpeningReviewed,
 }: CashShiftTabProps) {
   // نماذج الإدخال
   const [opening, setOpening] = useState(emptyAmounts);
+  /* (0129) عدٌّ أعمى عند الافتتاح أيضًا: لا يُعرض عدّ الإقفال السابق. إن خالفه الافتتاح أعاد الخادم
+     الفرق وطُلبت ملاحظة؛ يُسجَّل الفرق للمراجعة ولا تُنشأ حركة نقدية. */
   const [counted, setCounted] = useState(emptyAmounts);
   /* (P1-3) جردٌ أعمى: لا يُعرض المتوقَّع ولا الفرق أثناء العدّ. يرسل المحصّل ما عدّه،
      فإن خالف المتوقَّع أعاد الخادم الفرق وطُلب سببه — ولا يُقفَل بلا سبب. */
@@ -171,6 +192,8 @@ export function CashShiftTab({
     note: "",
     prepayment: false,
     prepaymentReason: "",
+    ownerPrivateAmount: "",
+    ownerPrivateReason: "",
   });
 
   // تصفية حركات الصندوق
@@ -263,6 +286,14 @@ export function CashShiftTab({
         </div>
       ) : null}
 
+      {/* (0129) فروق الافتتاح مع الإقفال السابق — ظاهرة حتى تُراجَع، ولا تعطّل العمل. */}
+      <ShiftOpeningReviews
+        openShiftReviews={shift?.openingReviews ?? []}
+        pending={pendingOpeningReviews}
+        canReview={canReviewOpening}
+        onReviewed={() => onOpeningReviewed?.()}
+      />
+
       {/* إذا كان الصندوق مغلقاً: نموذج فتح الوردية */}
       {!shift && !canShift ? (
         <section className="rounded-3xl border border-slate-200 bg-white p-6 text-sm font-bold text-slate-600">
@@ -314,6 +345,10 @@ export function CashShiftTab({
               </label>
             ))}
           </div>
+
+          <p className="mb-4 text-xs font-bold text-slate-500">
+            عُدّ النقد في الدرج وأدخله كما هو؛ يُسجَّل كما أُدخل، وأي فرق عن الإقفال السابق يُحال إلى المراجعة.
+          </p>
 
           <button
             type="button"
@@ -530,12 +565,39 @@ export function CashShiftTab({
                 </div>
               ) : null}
 
+              {/* 0128 (#483 6831365228): المالك وحده يسجّل جزءًا دفعه من مصدره الخاص؛ الباقي وحده يخرج من الدرج. */}
+              {canPayPrivately ? (
+                <div className="mt-2.5 rounded-xl border border-indigo-200 bg-indigo-50/60 p-2" data-testid="owner-private-source">
+                  <p className="text-[11px] font-bold text-indigo-900">دفعتُ جزءًا من مالي الخاص (لا يخرج من الدرج)</p>
+                  <input
+                    value={expenseForm.ownerPrivateAmount}
+                    onChange={(e) => setExpenseForm((curr) => ({ ...curr, ownerPrivateAmount: e.target.value }))}
+                    placeholder="المبلغ من المصدر الخاص (اتركه فارغًا إن خرج كله من الدرج)"
+                    aria-label="المبلغ المدفوع من المصدر الخاص"
+                    inputMode="decimal" dir="ltr"
+                    className="mt-1.5 w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs"
+                  />
+                  {expenseForm.ownerPrivateAmount.trim() ? (
+                    <input
+                      value={expenseForm.ownerPrivateReason}
+                      onChange={(e) => setExpenseForm((curr) => ({ ...curr, ownerPrivateReason: e.target.value }))}
+                      placeholder="سبب الدفع من المصدر الخاص (إلزامي)"
+                      aria-label="سبب الدفع من المصدر الخاص"
+                      className="mt-1.5 w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs"
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
                   onClick={async () => {
                     // يُفرَّغ النموذج بعد النجاح فقط — الرفض (مثل تجاوز الرصيد) يُبقي ما كُتب.
-                    const created = await onCreateExpense(expenseForm);
+                    const { ownerPrivateAmount, ownerPrivateReason, ...rest } = expenseForm;
+                    const created = await onCreateExpense(canPayPrivately && ownerPrivateAmount.trim()
+                      ? { ...rest, ownerPrivateAmount: ownerPrivateAmount.trim(), ownerPrivateReason }
+                      : rest);
                     if (created === undefined) return;
                     setExpenseForm({
                       category: "lab",
@@ -546,6 +608,8 @@ export function CashShiftTab({
                       note: "",
                       prepayment: false,
                       prepaymentReason: "",
+                      ownerPrivateAmount: "",
+                      ownerPrivateReason: "",
                     });
                   }}
                   disabled={busy || !expenseForm.amount.trim()}

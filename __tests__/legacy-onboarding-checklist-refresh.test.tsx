@@ -87,8 +87,8 @@ vi.mock("react", async (original) => {
 type Element = ReactElement<Record<string, unknown>>;
 type Case = ComponentProps<typeof AdjustmentForm>["caseRow"];
 type Component = (props: Record<string, unknown>) => ReactNode;
-const INCLUDED = "الشدّة اليوم مشمولة باتفاق الأقساط — بلا فاتورة مستقلة.";
-const OUTSIDE = "الشدّة اليوم تحتاج قرار فوترة (خارج العقد أو تُفوتر كل جلسة).";
+const INCLUDED = "الشدّة اليوم مشمولة بالاتفاق — بلا فاتورة مستقلة.";
+const REVIEW = "شمول الشدّة ضمن الاتفاق غير محدد؛ راجع نطاق المتابعات دون فاتورة بديلة.";
 const CHECKLIST_LABEL = "تهيئة الحالة السابقة";
 const PACKAGE_LABEL = "اتفاق التقويم";
 const response = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
@@ -278,7 +278,7 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     }) } });
     await mount();
     expect(text(checklist())).toContain("✓ مرجع مالي موثّق لهذه الحالة");
-    expect(text(checklist())).toContain("فاتورة #81"); expect(text(checklist())).toContain(OUTSIDE);
+    expect(text(checklist())).toContain("فاتورة #81"); expect(text(checklist())).toContain("الشدّة اليوم تحتاج قرار فوترة (خارج العقد أو تُفوتر كل جلسة).");
     expect(text(render())).not.toContain("لا اتفاق مالي مربوط بالحالة");
     // Initial linking is supported, but is optional and cannot determine the
     // independent invoice source or create any financial artifact.
@@ -320,7 +320,7 @@ describe("actual orthodontic parent, checklist and package composition", () => {
 
   it.each([51, null])("refreshes the same case after a real %s agreement transition", async (initialPlan) => {
     caseRow = fixture({ planId: initialPlan }); await mount();
-    expect(text(checklist())).toContain(initialPlan === null ? OUTSIDE : INCLUDED);
+    expect(text(checklist())).toContain(initialPlan === null ? REVIEW : INCLUDED);
     const pending = deferred<MockResponse>(); classifierRead = () => pending.promise;
     const next = initialPlan === null ? 51 : null;
     changeAgreement(next); await flush();
@@ -329,8 +329,8 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ planId: next, expectedVersion: "a".repeat(64) }) }]]);
     pending.resolve(response(classification(next !== null))); await flush();
-    expect(text(checklist())).toContain(next === null ? OUTSIDE : INCLUDED);
-    expect(text(checklist())).not.toContain(next === null ? INCLUDED : OUTSIDE);
+    expect(text(checklist())).toContain(next === null ? REVIEW : INCLUDED);
+    expect(text(checklist())).not.toContain(next === null ? INCLUDED : REVIEW);
     expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لم تُربط خطة علاج بهذه الحالة" : "✓ رابط اتفاق أقساط قديم");
   });
 
@@ -353,8 +353,8 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     expect(after.refreshRevision).toBe(Number(before.refreshRevision) + 1);
     expect(classifierCalls()).toHaveLength(2);
     classifierPending.resolve(response(classification(next !== null))); await flush();
-    expect(text(checklist())).toContain(next === null ? OUTSIDE : INCLUDED);
-    expect(text(checklist())).not.toContain(next === null ? INCLUDED : OUTSIDE);
+    expect(text(checklist())).toContain(next === null ? REVIEW : INCLUDED);
+    expect(text(checklist())).not.toContain(next === null ? INCLUDED : REVIEW);
     expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لم تُربط خطة علاج بهذه الحالة" : "✓ رابط اتفاق أقساط قديم");
     expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ planId: next, expectedVersion: "a".repeat(64) }) }]]);
@@ -414,7 +414,7 @@ describe("classifier failures and bounded retry", () => {
       const pending = deferred<MockResponse>(); classifierRead = () => pending.promise;
       retryChecklist(); unknown(); await flush(); unknown();
       expect(classifierCalls()).toHaveLength(count + 1);
-      pending.resolve(response(classification(false))); await flush(); expect(text(checklist())).toContain(OUTSIDE);
+      pending.resolve(response(classification(false))); await flush(); expect(text(checklist())).toContain(REVIEW);
     } else expect(elements(checklist()).filter((node) => node.type === "button")).toEqual([]);
     expect(writes()).toHaveLength(1);
   });
@@ -429,7 +429,7 @@ describe("classifier failures and bounded retry", () => {
     classifierRead = async () => response(classification(false)); retryChecklist(); await flush();
     expect(fetchMock.mock.calls.slice(before).map(([url, init]) => [url, init?.method ?? "GET"]))
       .toEqual([["/api/patients/19/legacy-onboarding?caseId=41", "GET"]]);
-    expect(text(checklist())).toContain(OUTSIDE); expect(writes()).toHaveLength(1);
+    expect(text(checklist())).toContain(REVIEW); expect(writes()).toHaveLength(1);
   });
 
   it.each([42, undefined])("rejects a successful classifier read whose case identity is %s", async (caseId) => {
@@ -457,7 +457,7 @@ describe("classifier failures and bounded retry", () => {
     expect(signal.aborted).toBe(true);
     classifierRead = async () => response(classification(true)); retryChecklist(); await flush();
     request.resolve(response(classification(false))); body.resolve(classification(false)); await flush();
-    expect(text(checklist())).toContain(INCLUDED); expect(text(checklist())).not.toContain(OUTSIDE);
+    expect(text(checklist())).toContain(INCLUDED); expect(text(checklist())).not.toContain(REVIEW);
     expect(vi.getTimerCount()).toBe(0); expect(writes()).toEqual([]);
   });
 });
@@ -468,10 +468,10 @@ describe("classifier scope and stale completion retirement", () => {
     classifierRead = stage === "headers" ? () => request.promise : async () => ({ ...response(null), json });
     await mount(); const oldSignal = classifierCalls()[0][1]?.signal as AbortSignal;
     unknown(); classifierRead = async () => response(classification(false));
-    changeAgreement(null); await flush(); expect(text(checklist())).toContain(OUTSIDE);
+    changeAgreement(null); await flush(); expect(text(checklist())).toContain(REVIEW);
     expect(oldSignal.aborted).toBe(true);
     request.resolve({ ...response(null), json }); body.resolve(classification(true)); await flush();
-    expect(text(checklist())).toContain(OUTSIDE); expect(text(checklist())).not.toContain(INCLUDED);
+    expect(text(checklist())).toContain(REVIEW); expect(text(checklist())).not.toContain(INCLUDED);
     expect(json).toHaveBeenCalledTimes(stage === "headers" ? 0 : 1); expect(hooks.retiredWrites).toBe(0);
     expect(writes()).toHaveLength(1);
   });
@@ -533,7 +533,7 @@ describe("classifier scope and stale completion retirement", () => {
     hooks.session = original; render(); unknown();
     pending.resolve(response(classification(true))); await flush(); unknown();
     latest.resolve(response(classification(false))); await flush();
-    expect(text(checklist())).toContain(OUTSIDE); expect(text(checklist())).not.toContain(INCLUDED);
+    expect(text(checklist())).toContain(REVIEW); expect(text(checklist())).not.toContain(INCLUDED);
     expect(hooks.retiredWrites).toBe(0); expect(writes()).toEqual([]);
   });
 

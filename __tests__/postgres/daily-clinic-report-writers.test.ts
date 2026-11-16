@@ -47,7 +47,7 @@ beforeAll(async () => {
   expect(empty.attendees).toEqual([]);
   expect(empty.expenses.movements).toEqual([]);
   await db.ensureSchema();
-  await db.openShift({ openedBy: "synthetic-report-cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
+  await db.openShift({ openedBy: "synthetic-report-cashier", opening: { YER: 100000000, SAR: 100000000, USD: 100000000 } }); // 0128: vouchers need drawer cash
 }, 180_000);
 afterAll(async () => {
   try {

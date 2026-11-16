@@ -1,0 +1,13 @@
+{
+  "base": "0210975f394b89e40d3ccf94a5eff17885000424",
+  "checks": {
+    "GET body unchanged": true,
+    "PUT body unchanged": true,
+    "legacy POST body unchanged": true,
+    "commercial SQL and fingerprint unchanged": true,
+    "native status wrapper unchanged": true,
+    "sign-time/historical proof unchanged": true,
+    "no migrations changed": true
+  },
+  "qualification": "Native append body extracted into caller-owned core; success and durable-rejection commits now controlled by the legacy wrapper or canonical owner. Canonical-only bounded reads, fresh-authority hooks and strict parent ownership checks added; default legacy source-lock SQL remains. Native concurrency/restore/migration evidence separately required."
+}

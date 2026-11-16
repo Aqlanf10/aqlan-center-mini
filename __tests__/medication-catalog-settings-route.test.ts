@@ -1,7 +1,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 const mock=vi.hoisted(()=>({session:{username:'current-admin',role:'admin'} as {username:string;role:string}|null,write:vi.fn()}));
 vi.mock('../lib/session',()=>({requireSession:async()=>mock.session}));
-vi.mock('../lib/db',()=>({getSettings:async()=>({}),readStoredSettings:async()=>new Map(),saveSettingsAudited:mock.write}));
+// The catalog precheck reads the current account (owner decision 6839071994): an active administrator here.
+vi.mock('../lib/db',()=>({getSettings:async()=>({}),readStoredSettings:async()=>new Map(),saveSettingsAudited:mock.write,
+ findUserByUsername:async(username:string)=>mock.session&&username===mock.session.username?{id:1,username,role:mock.session.role,isActive:true,permissions:{}}:null}));
 import { PATCH, POST } from '../app/api/settings/route';
 import { MEDICATION_CATALOG_KEY as KEY, EMPTY_MEDICATION_CATALOG } from '../lib/medication-catalog';
 const req=(body:unknown)=>new Request('https://synthetic.test/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

@@ -1,0 +1,25 @@
+{
+  "baseRevision": "f7ef90b790c1957296061ef6206d7a4586baab90",
+  "checks": {
+    "lib/canonical-case-reads.ts_all_SQL_templates_unchanged": true,
+    "lib/canonical-case-reads.ts_all_query_strings_unchanged": true,
+    "lib/canonical-plan-reads.ts_all_SQL_templates_unchanged": true,
+    "lib/canonical-plan-reads.ts_all_query_strings_unchanged": true,
+    "lib/canonical-ceph-reads.ts_all_SQL_templates_unchanged": true,
+    "lib/canonical-ceph-reads.ts_all_query_strings_unchanged": true,
+    "lib/canonical-ortho-reads.ts_all_SQL_templates_unchanged": true,
+    "lib/canonical-ortho-reads.ts_all_query_strings_unchanged": true,
+    "lib/db.ts_unchanged": true,
+    "lib/staff-operation-runtime.ts_unchanged": true,
+    "lib/clinic-clock.ts_unchanged": true,
+    "lib/clinicZone.ts_unchanged": true,
+    "lib/canonical-ceph-pair-reads.ts_unchanged": true,
+    "lib/canonical-ceph-pair-projection.ts_unchanged": true,
+    "lib/canonical-ortho-lifecycle-command.ts_unchanged": true,
+    "lib/canonical-ceph-complete-command.ts_unchanged": true,
+    "lib/canonical-ceph-edit-command.ts_unchanged": true,
+    "migrations_unchanged": true
+  },
+  "passed": 18,
+  "scope": "Display instants using server-resolved clinic zone only. No query, storage, authorization, write path, engine or business-date semantics changed. Comparison uses its current list zone; pair response and saved ordering unchanged."
+}

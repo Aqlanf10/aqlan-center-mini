@@ -9,7 +9,7 @@ import { getStudyLongitudinalEligibility } from "../../lib/ortho-study-longitudi
 import { getOrthoStudyPanelReview } from "../../lib/ortho-case-study-review-store";
 import { getOrthoStudySourceChoices } from "../../lib/ortho-case-study-inventory";
 import { ORTHO_CASE_STUDY_SQL } from "../../lib/ortho-case-study-schema";
-import { ProtectedOrthoStudyHistoryError, RESET_KEEP_TABLES, RESET_WIPE_TABLES } from "../../lib/clinic-reset";
+import { ProtectedOrthoStudyHistoryError, ProtectedPatientNumberHistoryError, RESET_KEEP_TABLES, RESET_WIPE_TABLES } from "../../lib/clinic-reset";
 import { syntheticStudyCommand as study } from "../fixtures/ortho-case-study";
 
 const request = vi.hoisted(() => ({ token: "" }));
@@ -43,12 +43,20 @@ it("registers the exact additive migration, keeps excluded modules absent and al
   for (const table of ["ortho_decision_revisions", "ortho_study_image_transforms", "ortho_space_analysis_revisions"])
     expect((await f.pool.query("SELECT to_regclass($1)::text name", [table])).rows[0].name).toBeNull();
   expect(RESET_KEEP_TABLES).toContain("ortho_case_study_revisions"); expect(RESET_WIPE_TABLES).not.toContain("ortho_case_study_revisions");
-  const owner = await scope(); let backed = false;
-  const result = await f.db.resetClinicData({ actor: session.username, actorRole: session.role }, async client => {
-    backed = true; expect((await client.query("SELECT id FROM patients WHERE id=$1", [owner.patientId])).rows).toHaveLength(1);
-    return { ok: true, backupId: "synthetic-empty-study-reset" };
+  // Empty study history passes the study fence; the clinic has no patient files yet, so reset is allowed.
+  let backed = false;
+  const result = await f.db.resetClinicData({ actor: session.username, actorRole: session.role }, async () => {
+    backed = true; return { ok: true, backupId: "synthetic-empty-study-reset" };
   });
-  expect(backed).toBe(true); expect(result).toMatchObject({ ok: true, counts: { patients: 1 } });
+  expect(backed).toBe(true); expect(result).toMatchObject({ ok: true, counts: { patients: 0 } });
+  // Integration with the patient-number protection: once a patient file exists the reset is refused
+  // before backup, and the (still empty) study history is neither wiped nor written.
+  const owner = await scope(); let reached = false;
+  await expect(f.db.resetClinicData({ actor: session.username, actorRole: session.role }, async () => {
+    reached = true; return { ok: true, backupId: "must-not-reach" };
+  })).rejects.toBeInstanceOf(ProtectedPatientNumberHistoryError);
+  expect(reached).toBe(false);
+  expect((await f.pool.query("SELECT id FROM patients WHERE id=$1", [owner.patientId])).rows).toHaveLength(1);
   expect((await f.pool.query("SELECT * FROM ortho_case_study_revisions")).rows).toEqual([]);
 });
 it("saves, reads and documents the exact draft without changing missing facts or money", async () => {

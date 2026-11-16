@@ -54,7 +54,8 @@ it("restarts on arbitrary TEXT identifiers, retains rows and forward-only positi
     const numberSql = [PATIENT_NUMBER_SQL, documentNumberSql("invoice"), documentNumberSql("receipt"), documentNumberSql("voucher")][index];
     const values = (await db.getPool().query(`SELECT ${numberSql} AS n FROM generate_series(1,2)`)).rows.map(row => row.n);
     const prefix = ["P", "INV", "R", "V"][index];
-    expect(values).toEqual([`${prefix}-00501`, `${prefix}-00502`]);
+    // Patient numbering has a separate 7000 floor; other document counters retain their position.
+    expect(values).toEqual(index === 0 ? ["P-07000", "P-07001"] : [`${prefix}-00501`, `${prefix}-00502`]);
     expect((await db.getPool().query(`SELECT 1 FROM ${table} WHERE ${column} = ANY($1::text[])`, [values])).rows).toEqual([]);
   }
 });

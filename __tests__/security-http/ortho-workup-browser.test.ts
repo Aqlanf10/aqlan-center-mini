@@ -4,6 +4,7 @@ import { Client } from "pg";
 import { chromium, type Browser, type Page } from "playwright";
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import { baseUrl, harness, authedMutation } from "./_server";
+import { ORTHO_CASE_PILLARS, ORTHO_WORKUP_ENTRY_STEP, ORTHO_WORKUP_GROUPS, ORTHO_WORKUP_STEPS } from "../../lib/ortho-workup-navigation";
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser;
 beforeAll(async () => { h = await harness(); expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http"); db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect(); browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined }); await mkdir(".settings-ui-artifacts", { recursive: true }); });
 afterAll(async () => { await browser?.close(); await db?.end(); });
@@ -24,16 +25,42 @@ describe("one workup path over the existing record owners", () => {
     const page = await context.newPage(), errors: string[] = [], writes: string[] = []; page.setDefaultTimeout(20000); page.on("pageerror", error => errors.push(error.message)); page.on("request", request => { if (request.method() !== "GET" && request.method() !== "HEAD") writes.push(request.url()); });
     try {
       await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=ortho&orthoCaseId=${orthoCaseId}&pillar=diagnostics`);
-      await page.getByRole("button", { name: "إعداد ملف التقويم خطوة بخطوة", exact: true }).click();
-      await page.getByRole("region", { name: "هوية حالة التقويم", exact: true }).waitFor();
-      const selector = page.getByLabel("خطوة إعداد ملف التقويم", { exact: true }); expect(await selector.locator("option").count()).toBe(13);
-      await page.getByRole("button", { name: "الخطوة التالية دون حفظ", exact: true }).click(); expect(await selector.inputValue()).toBe("1");
+      const caseTabs = page.getByRole("navigation", { name: "أقسام حالة التقويم", exact: true });
+      await caseTabs.waitFor({ state: "visible" });
+      expect(await caseTabs.getByRole("button").allTextContents()).toEqual(ORTHO_CASE_PILLARS.map(item => `${item.icon}${item.title}`));
+      await page.getByRole("button", { name: "فتح مساحة عمل التقويم", exact: true }).click();
+      const guide = page.getByRole("region", { name: "مساحة عمل ملف التقويم", exact: true });
+      const groups = guide.getByRole("navigation", { name: "مجموعات ملف التقويم", exact: true });
+      await groups.waitFor({ state: "visible" });
+      expect(await groups.getByRole("button").count()).toBe(7);
+      expect(await groups.getByRole("button").allTextContents()).toEqual(ORTHO_WORKUP_GROUPS.map(group => group.title));
+      const currentSection = () => String(Number(new URL(page.url()).hash.split("/").at(-1)) - 1);
+      expect(currentSection()).toBe(String(ORTHO_WORKUP_ENTRY_STEP));
+      // A case under assessment opens on its summary (lifecycle order), not on the visits.
+      expect(await groups.getByRole("button", { name: "ملخص الحالة", exact: true }).getAttribute("aria-pressed")).toBe("true");
+      expect(writes).toEqual([]);
+      const openSection = async (index: number) => {
+        const group = ORTHO_WORKUP_GROUPS.find(item => item.steps.some(step => step === index))!;
+        await groups.getByRole("button", { name: group.title, exact: true }).click();
+        await guide.getByRole("navigation", { name: `أقسام ${group.title}`, exact: true })
+          .getByRole("button", { name: ORTHO_WORKUP_STEPS[index].title, exact: true }).click();
+        await expect.poll(currentSection).toBe(String(index));
+      };
+      await openSection(1);
+      await page.getByRole("button", { name: "بدء تقييم غير معبأ", exact: true }).waitFor();
+      await guide.getByRole("button", { name: "المقابلة والشكوى", exact: true }).focus();
+      await page.keyboard.press("Enter"); expect(currentSection()).toBe("1");
       expect(await page.getByTestId("ortho-financial-context").evaluate(element => element.tagName)).toBe("DETAILS");
       expect(await page.getByTestId("ortho-financial-context").getAttribute("open")).toBeNull();
-      expect(await page.getByRole("button", { name: "مسار الأسلاك والشدّات", exact: true }).count()).toBe(0);
-      await page.getByRole("button", { name: "فتح التقييم السريري والقياسات", exact: true }).click();
+      expect(await caseTabs.count()).toBe(0);
       await page.getByRole("button", { name: "بدء تقييم غير معبأ", exact: true }).click();
-      await page.getByRole("combobox", { name: "حالة الشكوى الرئيسية", exact: true }).selectOption("recorded");
+      const saveRegion = page.getByRole("region", { name: "حفظ مسودة التقييم", exact: true });
+      expect(await saveRegion.getByRole("button", { name: "حفظ مراجعة تقييم جديدة", exact: true }).isVisible()).toBe(true);
+      expect(await saveRegion.innerText()).toContain("بما فيه الأقسام غير المعروضة حاليًا");
+      const complaintHandle = await page.getByLabel("الشكوى الرئيسية — اختيار قابل للبحث أو نص حر", { exact: true }).elementHandle();
+      const saveBeforeFields = await saveRegion.evaluate((element, field) =>
+        !!field && !!(element.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING), complaintHandle);
+      expect(saveBeforeFields).toBe(true);
       await page.getByLabel("الشكوى الرئيسية — اختيار قابل للبحث أو نص حر", { exact: true }).fill("شكوى اصطناعية محفوظة مرة واحدة");
       // A quick entry with incomplete provenance stays local and names what to fix,
       // even while the source/date editor is collapsed. Untouched fields stay optional.
@@ -48,7 +75,7 @@ describe("one workup path over the existing record owners", () => {
       await source(page); await page.getByLabel("سبب إنشاء هذه المراجعة", { exact: true }).fill("توثيق مقابلة اصطناعية");
       await expect.poll(() => feedback.count()).toBe(0);
       // Same draft survives section and pillar changes; navigation never sends a write.
-      await selector.selectOption("2"); await selector.selectOption("8"); await selector.selectOption("1");
+      await openSection(2); await openSection(8); await openSection(1);
       await expect.poll(() => page.getByLabel("الشكوى الرئيسية — اختيار قابل للبحث أو نص حر", { exact: true }).inputValue()).toBe("شكوى اصطناعية محفوظة مرة واحدة");
       expect(writes).toEqual([]);
       const assessmentPath = `${baseUrl}/api/ortho/${orthoCaseId}/assessment`;
@@ -60,28 +87,28 @@ describe("one workup path over the existing record owners", () => {
       await page.getByRole("button", { name: "حفظ مراجعة تقييم جديدة", exact: true }).click();
       const retry = page.getByRole("button", { name: "التحقق بإعادة نفس طلب الحفظ", exact: true });
       await retry.waitFor();
-      await selector.selectOption("8"); expect(await selector.inputValue()).toBe("1");
-      await page.getByRole("button", { name: "العودة لأقسام الحالة", exact: true }).click(); expect(await selector.isVisible()).toBe(true);
+      await groups.getByRole("button", { name: "خطة العلاج والميكانيكا", exact: true }).click(); expect(currentSection()).toBe("1");
+      await page.getByRole("button", { name: "العودة لأقسام الحالة", exact: true }).click(); expect(await guide.isVisible()).toBe(true);
       await page.evaluate(hash => { window.location.hash = hash; }, `#ortho-workup/${patientId}/${orthoCaseId}/9`);
       await expect.poll(() => new URL(page.url()).hash).toBe(`#ortho-workup/${patientId}/${orthoCaseId}/2`);
       expect(await retry.isVisible()).toBe(true);
       await page.unroute(assessmentPath);
       await retry.click();
       await page.getByText("حُفظت مراجعة موثقة؛ جارٍ إعادة قراءة القيم والنتائج المحفوظة.", { exact: true }).waitFor();
-      await page.getByRole("button", { name: "الخطوة التالية دون حفظ", exact: true }).click(); await expect.poll(() => selector.inputValue()).toBe("2");
+      await openSection(2);
       expect(new URL(page.url()).hash).toBe(`#ortho-workup/${patientId}/${orthoCaseId}/3`);
       expect(await page.getByText("أكمل التحقق من طلب الحفظ المعلّق قبل الانتقال بين خطوات الحالة.", { exact: true }).isVisible()).toBe(false);
       const mutations = [...writes]; expect(mutations).toHaveLength(2); expect(mutations[0]).toContain(`/api/ortho/${orthoCaseId}/assessment`);
-      for (const step of [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) { await selector.selectOption(String(step)); expect(await selector.inputValue()).toBe(String(step)); }
-      await selector.selectOption("7");
+      for (const step of [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) { await openSection(step); expect(currentSection()).toBe(String(step)); }
+      await openSection(7);
       await page.getByRole("button", { name: "+ سجّل تشخيص هذه الحالة", exact: true }).click();
       await page.getByLabel("ملاحظات التشخيص", { exact: true }).fill("مسودة تشخيص اصطناعية محفوظة أثناء التنقل");
-      await selector.selectOption("8"); await selector.selectOption("0"); await selector.selectOption("7");
+      await openSection(8); await openSection(0); await openSection(7);
       expect(await page.getByLabel("ملاحظات التشخيص", { exact: true }).inputValue()).toBe("مسودة تشخيص اصطناعية محفوظة أثناء التنقل");
       await page.getByRole("button", { name: "إلغاء", exact: true }).click();
-      await selector.selectOption("9"); expect(await page.getByTestId("ortho-financial-context").isVisible()).toBe(true); expect(await page.getByTestId("ortho-financial-context").evaluate(element => element.tagName)).toBe("DIV");
-      await page.reload(); await expect.poll(() => selector.inputValue()).toBe("9");
-      await selector.selectOption("1"); await page.getByRole("button", { name: "فتح التقييم السريري والقياسات", exact: true }).click(); await page.getByRole("combobox", { name: "نسخة التقييم", exact: true }).waitFor();
+      await openSection(9); expect(await page.getByTestId("ortho-financial-context").isVisible()).toBe(true); expect(await page.getByTestId("ortho-financial-context").evaluate(element => element.tagName)).toBe("DIV");
+      await page.reload(); await expect.poll(currentSection).toBe("9");
+      await openSection(1); await page.getByRole("combobox", { name: "نسخة التقييم", exact: true }).waitFor();
       await expect.poll(() => page.getByTestId("ortho-case-assessment-v2").innerText()).toContain("شكوى اصطناعية محفوظة مرة واحدة");
       // Saved documentation remains concise without losing the complaint or its exact source facts.
       const savedFindings = page.getByRole("region", { name: "نتائج المقابلة والفحص المحفوظة", exact: true });
@@ -121,7 +148,7 @@ describe("one workup path over the existing record owners", () => {
       expect(writes).toEqual(mutations);
       expect((await db.query("SELECT (SELECT count(*)::int FROM ortho_cases WHERE patient_id=$1) cases,(SELECT count(*)::int FROM invoices WHERE patient_id=$1) invoices,(SELECT count(*)::int FROM visits WHERE patient_id=$1) visits,(SELECT count(*)::int FROM ortho_retention_entries WHERE patient_id=$1) retention,(SELECT count(*)::int FROM ortho_case_study_revisions WHERE patient_id=$1) study", [patientId])).rows[0]).toEqual({ cases: 1, invoices: 0, visits: 0, retention: 0, study: 0 });
       expect(errors).toEqual([]); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      const guide = page.getByRole("region", { name: "إعداد ملف التقويم خطوة بخطوة", exact: true }); await guide.scrollIntoViewIfNeeded(); await guide.screenshot({ path: `.settings-ui-artifacts/ortho-workup-${width}.png` });
+      await guide.scrollIntoViewIfNeeded(); await guide.screenshot({ path: `.settings-ui-artifacts/ortho-workup-${width}.png` });
       await page.getByRole("button", { name: "العودة لأقسام الحالة", exact: true }).click(); expect(await guide.count()).toBe(0); await page.getByRole("navigation", { name: "الانتقال بين أقسام التشخيص" }).waitFor();
       expect(new URL(page.url()).searchParams.get("orthoCaseId")).toBe(String(orthoCaseId));
       expect(new URL(page.url()).hash).toBe("");

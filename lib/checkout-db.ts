@@ -43,18 +43,24 @@ export async function readVisitCheckout(visitId: number) {
   let destroy = false;
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const today = (await client.query<{ today: string }>(`SELECT ${clinicTodaySql("$1")}::text AS today`, [CLINIC_TIME_ZONE])).rows[0]?.today;
-    if (typeof today !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error("Missing checkout clinic date");
-    const walkout = await visitWalkout(visitId, client);
-    if (!walkout) { await client.query("COMMIT"); return null; }
-    const summary = await visitCheckoutSummary(walkout, client, today);
-    const dueRecommendation = walkout.patientId === null ? null : await readCheckoutDueRecommendationInSnapshot(client, {
-      patientId: walkout.patientId, visitInvoiceId: walkout.invoice?.id ?? null, today,
-    });
+    const result = await readVisitCheckoutInSnapshot(client, visitId);
     await client.query("COMMIT");
-    return { walkout, summary, dueRecommendation, today };
+    return result;
   } catch (error) {
     try { await client.query("ROLLBACK"); } catch { destroy = true; }
     throw error;
   } finally { client.release(destroy); }
+}
+
+/** The checkout on a caller-owned read-only snapshot (the canonical walkout, M2 slice 89). */
+export async function readVisitCheckoutInSnapshot(client: DbClient, visitId: number) {
+  const today = (await client.query<{ today: string }>(`SELECT ${clinicTodaySql("$1")}::text AS today`, [CLINIC_TIME_ZONE])).rows[0]?.today;
+  if (typeof today !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error("Missing checkout clinic date");
+  const walkout = await visitWalkout(visitId, client);
+  if (!walkout) return null;
+  const summary = await visitCheckoutSummary(walkout, client, today);
+  const dueRecommendation = walkout.patientId === null ? null : await readCheckoutDueRecommendationInSnapshot(client, {
+    patientId: walkout.patientId, visitInvoiceId: walkout.invoice?.id ?? null, today,
+  });
+  return { walkout, summary, dueRecommendation, today };
 }

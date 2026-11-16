@@ -105,11 +105,12 @@ describe("current patient statement built-app A4 acceptance", () => {
       for (const [label, amount] of [["الإجمالي قبل الخصم",400000], ["الخصم المسجل",5000], ["صافي الفاتورة بعد الخصم",395000]] as const) {
         expect(await treatment.locator("tr").filter({ hasText: label }).innerText()).toContain(formatMoney(amount, "SAR"));
       }
-      for (const [label, amount] of [["إجمالي المفوتر",415000], ["صافي المحصّل بعد الاستردادات وعكس السندات",100000], ["الرصيد الحالي",315000]] as const) {
+      for (const [label, amount] of [["إجمالي المفوتر",415000], ["صافي المدفوع",100000], ["الرصيد الحالي",315000]] as const) {
         expect((await sheet.locator(".line").filter({ hasText: label }).allTextContents()).join(" ")).toContain(formatMoney(amount,"SAR"));
       }
       for (let index=0; index<3; index++) expect(text).toContain(`CUR-RECEIPT-${stamp}-${index}`);
-      expect(text).toContain(`عكس سند CUR-RECEIPT-${stamp}-0`);
+      expect(text).toContain("استرداد");
+      expect(text).not.toContain("عكس سند");
       expect(text).toContain(formatMoney(wideMinor, "YER"));
       await mkdir(directory, { recursive: true });
       await page.screenshot({ path: `${directory}/screen.png`, fullPage: true });
@@ -260,7 +261,7 @@ describe("current patient statement PDF with an active agreement and real on-acc
         gross: plain(await sheet.locator(`[data-invoice-id="${agreementInvoiceId}"] tr`).filter({ hasText: "الإجمالي قبل الخصم" }).innerText()),
         discount: plain(await sheet.locator(`[data-invoice-id="${agreementInvoiceId}"] tr`).filter({ hasText: "الخصم المسجل" }).innerText()),
         net: plain(await sheet.locator(`[data-invoice-id="${agreementInvoiceId}"] tr`).filter({ hasText: "صافي الفاتورة بعد الخصم" }).innerText()),
-        billed: await line("إجمالي المفوتر"), collected: await line("صافي المحصّل بعد الاستردادات وعكس السندات"),
+        billed: await line("إجمالي المفوتر"), collected: await line("صافي المدفوع"),
         due: await line("الرصيد الحالي"), total: await line("إجمالي الاتفاق"), paid: await line("المسدّد من الاتفاق"), remaining: await line("المتبقي من الاتفاق"),
       };
       const text = plain(await sheet.innerText());
@@ -306,7 +307,7 @@ describe("current patient statement PDF with an active agreement and real on-acc
     expect(printed.lines.due).not.toContain(formatMoney(Math.abs(due + remaining), "SAR"));
     // The actual PDF carries the same amounts, each on its own labelled line.
     for (const [label, amount] of [["الإجمالي قبل الخصم", 50_000], ["الخصم المسجل", 2_000], ["صافي الفاتورة بعد الخصم", 48_000],
-      ["إجمالي المفوتر", 48_000], ["صافي المحصّل بعد الاستردادات وعكس السندات", expected.collected],
+      ["إجمالي المفوتر", 48_000], ["صافي المدفوع", expected.collected],
       ["إجمالي الاتفاق", 300_000], ["المسدّد من الاتفاق", expected.paid], ["المتبقي من الاتفاق", remaining]] as const) {
       expect(pdfLine(printed.pdfText, label), `PDF line ${label}`).toContain(formatAmount(amount, "SAR"));
     }

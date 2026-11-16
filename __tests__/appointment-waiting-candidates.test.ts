@@ -20,7 +20,12 @@ vi.mock("react", async (original) => {
       }];
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
-    useMemo: (fn: () => unknown) => fn(),
+    useMemo: (fn: () => unknown, deps: unknown[]) => {
+      const index = slot(undefined);
+      const previous = hooks.values[index] as { value: unknown; deps: unknown[] } | undefined;
+      if (!previous || deps.some((value, i) => !Object.is(value, previous.deps[i]))) hooks.values[index] = { value: fn(), deps };
+      return (hooks.values[index] as { value: unknown }).value;
+    },
     useCallback: (fn: unknown, deps: unknown[]) => {
       const index = slot(undefined);
       const previous = hooks.values[index] as { fn: unknown; deps: unknown[] } | undefined;

@@ -59,6 +59,9 @@ const check = (label, ok, extra = "") => {
   if (!ok) failed = true;
 };
 
+/** نقدٌ افتتاحيّ اصطناعيّ للوردية: يتّسع لسندات الصرف 4000 و6000 و1500 مجتمعة. */
+const SYNTHETIC_DRAWER_YER = 100_000;
+
 const number = () => "DL-" + Date.now().toString().slice(-8) + Math.floor(Math.random() * 97);
 
 async function seed() {
@@ -67,11 +70,13 @@ async function seed() {
   const username = `synthetic-delete-${randomUUID()}`, credential = randomBytes(32).toString("hex");
   const { rows: [actor] } = await pool.query("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic delete verifier',$2,'admin') RETURNING id", [username, credential]);
   deletionSession = { userId: actor.id, username, role: "admin", partyId: null, expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion(credential) };
-  // وردية مفتوحة — القبض والصرف لا يمرّان بلاها.
+  // وردية مفتوحة — القبض والصرف لا يمرّان بلاها. وسقف الدرج (0128) لا يُخرج من الدرج
+  // أكثر مما فيه، فتُفتح بنقدٍ افتتاحيّ اصطناعيّ يكفي سندات الصرف في الفقرة السادسة.
   await pool.query(`UPDATE cashier_shifts SET status = 'closed', closed_at = NOW() WHERE status = 'open'`);
   await pool.query(
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
-     SELECT 'فحص', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`,
+     SELECT 'فحص', $1, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`,
+    [SYNTHETIC_DRAWER_YER],
   );
 }
 
@@ -191,6 +196,8 @@ async function journeyCancelSubmission() {
   );
   check("الالتزام وُلد مع الإرسالية", Boolean(payableId.rows[0]?.payable_id));
 
+  /* قرار المالك 2026-11-11 (البند 4): طلبٌ أُرسل للمختبر يبقى دينه بعد الإلغاء ولو بلا سند صرف —
+     غياب السند لا يعني أن المختبر لا يستحق شيئًا. لا «معفاة» ولا «مسدَّد» بلا سداد صافٍ كامل. */
   const cancelled = await setLabOrderStatus(order.id, "cancelled", {
     actor: "المدير", actorRole: "admin", notes: "إلغاء اختباري",
   });
@@ -199,17 +206,60 @@ async function journeyCancelSubmission() {
     `SELECT payable_id, financial_status FROM lab_orders WHERE id = $1`, [order.id],
   );
   check(
-    "الالتزام غير المسدَّد محي مع الإلغاء",
-    after.rows[0]?.payable_id === null,
+    "التزام الطلب المُرسَل بقي بعد الإلغاء",
+    after.rows[0]?.payable_id === payableId.rows[0]?.payable_id,
     `payable_id=${after.rows[0]?.payable_id}`,
   );
-  check("الحالة المالية «معفاة»", after.rows[0]?.financial_status === "exempt");
+  check("حالته المالية «التزام قائم» لا «معفاة» ولا «مسدَّد»", after.rows[0]?.financial_status === "payable_created");
+  const payableKept = await pool.query(
+    `SELECT amount_minor::text AS amount FROM payables WHERE id = $1`, [payableId.rows[0]?.payable_id ?? 0],
+  );
+  check("صف الالتزام باقٍ بمبلغه كاملًا", payableKept.rows.length === 1 && Number(payableKept.rows[0].amount) === 5000);
 
+  /* طلبٌ لم يُرسَل قط ولا سند عليه: لا عمل كُلِّف به المختبر، فيُمحى التزامه مع الإلغاء. */
+  const draftPatient = await createPatient({
+    fullName: "مريض غير المرسل " + number(), phone: "77" + number(),
+    altPhone: null, gender: "female", birthYear: 1990,
+    address: null, medicalAlert: null, note: null,
+  });
+  const draftOrder = await createLabOrder({
+    patientId: draftPatient.id,
+    labName: "مختبر غير المرسل " + number(),
+    labPhone: null,
+    workType: "تاج",
+    details: null,
+    sentDate: TODAY,
+    dueDate: TODAY,
+    note: null,
+    partyId: null,
+    costMinor: 4000,
+    costCurrency: "YER",
+    baseCurrency: BASE,
+    exchangeRate: 1,
+    createdBy: "فحص",
+    actorRole: "admin",
+  });
+  await pool.query(`UPDATE lab_orders SET status = 'needed' WHERE id = $1`, [draftOrder.id]);
+  const draftPayable = await pool.query(`SELECT payable_id FROM lab_orders WHERE id = $1`, [draftOrder.id]);
+  check("التزام غير المُرسَل وُلد مع الأمر", Boolean(draftPayable.rows[0]?.payable_id));
+  const draftCancelled = await setLabOrderStatus(draftOrder.id, "cancelled", {
+    actor: "المدير", actorRole: "admin", notes: "إلغاء قبل الإرسال",
+  });
+  check("غير المُرسَل يُلغى", draftCancelled?.status === "cancelled");
+  const draftAfter = await pool.query(
+    `SELECT payable_id, financial_status FROM lab_orders WHERE id = $1`, [draftOrder.id],
+  );
+  check(
+    "التزام غير المُرسَل وغير المسدَّد محي مع الإلغاء",
+    draftAfter.rows[0]?.payable_id === null,
+    `payable_id=${draftAfter.rows[0]?.payable_id}`,
+  );
+  check("حالته المالية «معفاة»", draftAfter.rows[0]?.financial_status === "exempt");
   const payableGone = await countRows(
     `SELECT COUNT(*)::text AS count FROM payables WHERE id = $1`,
-    [payableId.rows[0]?.payable_id ?? 0],
+    [draftPayable.rows[0]?.payable_id ?? 0],
   );
-  check("صف الالتزام نفسه اختفى من الجدول", payableGone === 0);
+  check("صف التزامه نفسه اختفى من الجدول", payableGone === 0);
 
   /* المسدَّد لا يُمحى: سند صرف يشير إلى الالتزام يحميه. */
   const paidPatient = await createPatient({

@@ -1,0 +1,9 @@
+{
+  "base": "2174bf7710c0bbbcd3f3bd7c08317507d369d3d1",
+  "file": "app/api/ortho/[id]/route.ts",
+  "unchangedSha256": {
+    "POST": "84274fb1302c99ca23ed7367ace4e6a68baac5eb5df839a7eb069d186de00958",
+    "PATCH": "792b9b28e665cd165479ad1413a02765a054c7f257139cc4c5d39fdec4bf558d",
+    "legacyGET": "55dca7413c570bf4425152622907af25b0b5c1f18f905f0635e5cebb7eef01d4"
+  }
+}

@@ -1,0 +1,35 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-problem-create-journey.test.ts (12 tests | 1 failed) 29082ms
+   × HTTP: corrupt retained case reference fails without exposing foreign case content 282ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-problem-create-journey.test.ts > HTTP: corrupt retained case reference fails without exposing foreign case content
+AssertionError: expected 503 to be 500 // Object.is equality
+
+- Expected
++ Received
+
+- 500
++ 503
+
+ ❯ __tests__/security-http/canonical-problem-create-journey.test.ts:60:453
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  1 failed | 71 passed (72)
+   Start at  07:32:33
+   Duration  185.10s (transform 454ms, setup 0ms, import 1.04s, tests 179.43s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

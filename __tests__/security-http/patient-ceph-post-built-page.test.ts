@@ -171,14 +171,14 @@ describe("PatientCeph delayed writes on the real built patient page", () => {
           await f.card.getByRole("button", { name: NEW, exact: true }).waitFor();
         } else {
           // Presentation navigation cannot discard an in-flight owned write.
-          await f.card.getByRole("button", { name: /مسار/ }).click();
+          await f.card.getByRole("button", { name: "زيارات المتابعة والشدّ", exact: true }).click();
           expect(await f.card.getByRole("button", { name: "جارٍ فتح كابينة الرسم…", exact: true }).isDisabled()).toBe(true);
           expect(await f.card.getByRole("button", { name: "إلغاء", exact: true }).isVisible()).toBe(true);
           expect(f.posts).toHaveLength(1);
           expect(f.navigationAttempts).toEqual([]);
           await f.card.getByRole("button", { name: "إلغاء", exact: true }).click();
           await f.card.getByRole("button", { name: NEW, exact: true }).waitFor();
-          await f.card.getByRole("button", { name: /مسار/ }).click();
+          await f.card.getByRole("button", { name: "زيارات المتابعة والشدّ", exact: true }).click();
           await expect.poll(() => f.card.getByRole("button", { name: NEW, exact: true }).count()).toBe(0);
         }
         await f.release();

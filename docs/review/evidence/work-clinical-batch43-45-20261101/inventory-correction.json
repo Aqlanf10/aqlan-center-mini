@@ -1,0 +1,11 @@
+{
+  "sourceRevisionBeforeCorrection": "2b4e5f4bad08297212870c7c318380377567e73e",
+  "changedFields": [
+    "sourceDigest"
+  ],
+  "before": "0b88c55d7847321f8208a77acf6da5e5b75ccb721a6d508d205cefb1e5e00029",
+  "after": "f6df68bd32567c784f55effb2a3815675b8e8117d5bc4d9b842968fafd211e4b",
+  "summaryUnchanged": true,
+  "readiness": "NOT_READY",
+  "guardTestsPassed": 10
+}

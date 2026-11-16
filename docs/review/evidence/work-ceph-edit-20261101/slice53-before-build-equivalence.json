@@ -1,0 +1,13 @@
+{
+  "beforeBuildId": "4YY9u7JFxC_tH8NUCp8FX",
+  "buildSource": "9503c9428b6e43a75640b1e01ba8b383caa20868",
+  "preEditCheckout": "a3812c1127e41ab60a57754c0e3912f8dbff9316",
+  "checks": {
+    "app/api/ceph/[id]/route.ts": true,
+    "lib/canonical-ceph-reads.ts": true,
+    "lib/canonical-ceph-draft-version.ts": true,
+    "lib/ceph.ts": true
+  },
+  "witness": "Authenticated scoped analysis PATCH expected200, actual401; baseline runtime still held canonical command",
+  "notClaimed": "This is not a production incident or a final53 gate"
+}

@@ -1,3 +1,4 @@
+import { parseReturnBookingSource, type ReturnBookingSource } from "./return-booking-source";
 /** Read-only eligibility shared by summary projection and locked rebooking.
  * Aliases: v = planned_visits, a = its current appointment, t = its plan,
  * r = appointment referral. ended_at is intentionally NOT attendance evidence:
@@ -59,11 +60,14 @@ export interface PlannedRebookIntent {
   time: string;
   reason: string;
   requestId: string;
+  nearbyAppointmentConfirmation?: string;
+  returnBookingSource?: ReturnBookingSource;
+  returnBookingFingerprint?: string;
 }
 export function parsePlannedRebookIntent(plannedVisitId: number, source: unknown): PlannedRebookIntent | null {
   if (!Number.isSafeInteger(plannedVisitId) || plannedVisitId <= 0 || plannedVisitId > 2147483647 || !source || typeof source !== "object" || Array.isArray(source)) return null;
   const input = source as Record<string, unknown>;
-  if (Object.keys(input).some(key => !["expectedAppointmentId", "expectedGeneration", "date", "time", "reason", "requestId"].includes(key))) return null;
+  if (Object.keys(input).some(key => !["expectedAppointmentId", "expectedGeneration", "date", "time", "reason", "requestId", "nearbyAppointmentConfirmation", "returnBookingSource", "returnBookingFingerprint"].includes(key))) return null;
   const { expectedAppointmentId, expectedGeneration, date, time, reason, requestId } = input;
   if (typeof expectedAppointmentId !== "number" || !Number.isSafeInteger(expectedAppointmentId) || expectedAppointmentId <= 0 || expectedAppointmentId > 2147483647
     || typeof expectedGeneration !== "string" || !/^[a-f0-9]{32}$/.test(expectedGeneration)
@@ -71,7 +75,15 @@ export function parsePlannedRebookIntent(plannedVisitId: number, source: unknown
     || typeof time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)
     || typeof reason !== "string" || reason.trim().length < 3 || reason.trim().length > 500
     || typeof requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/.test(requestId)) return null;
+  if (input.nearbyAppointmentConfirmation !== undefined && (typeof input.nearbyAppointmentConfirmation !== "string"
+    || input.nearbyAppointmentConfirmation.length === 0 || input.nearbyAppointmentConfirmation.length > 4096)) return null;
+  const returnBookingSource = input.returnBookingSource === undefined ? undefined : parseReturnBookingSource(input.returnBookingSource);
+  if (returnBookingSource === null) return null;
+  if (input.returnBookingFingerprint !== undefined && (typeof input.returnBookingFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(input.returnBookingFingerprint))) return null;
   const parsed = new Date(`${date}T00:00:00Z`);
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return null;
-  return { plannedVisitId, expectedAppointmentId, expectedGeneration, date, time, reason: reason.trim(), requestId };
+  return { plannedVisitId, expectedAppointmentId, expectedGeneration, date, time, reason: reason.trim(), requestId,
+    ...(input.nearbyAppointmentConfirmation === undefined ? {} : { nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation as string }),
+    ...(returnBookingSource === undefined ? {} : { returnBookingSource }),
+    ...(input.returnBookingFingerprint === undefined ? {} : { returnBookingFingerprint: input.returnBookingFingerprint as string }) };
 }

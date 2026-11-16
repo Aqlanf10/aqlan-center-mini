@@ -1,0 +1,14 @@
+{
+  "docs/security/staff-cutover/HANDOFF.md": {
+    "preservedSource": "520a895b57ae3f66baab1e3d588c6cddbb7268a8",
+    "restoredSha256": "da0e536da71607538e3ca10106a812e59fba3864990f877634a7da7bdcde3517",
+    "lineCount": 577,
+    "sectionHeadingsIdentical": true
+  },
+  "docs/review/work-remaining-plan-20261101.md": {
+    "preservedSource": "520a895b57ae3f66baab1e3d588c6cddbb7268a8",
+    "restoredSha256": "8c75595734e27fce1af23d9843378b151835ca0cec0d04deccc912f34a5237b1",
+    "lineCount": 43,
+    "sectionHeadingsIdentical": true
+  }
+}

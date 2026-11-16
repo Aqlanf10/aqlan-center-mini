@@ -1,0 +1,216 @@
+{
+  "base": "55aca0078c2fa5517fc8b752820f961214da833b",
+  "status": "implemented and local verification passed; final exact-head CI and independent review pending",
+  "buildId": "CWHqDRPKDlYArK-XQq9f_",
+  "scope": "Clinical read only: no money, plan/consent writer, clinical recomputation, migration or live activation",
+  "results": {
+    "baselineHttp": {
+      "expectedFailed": 1,
+      "actualStatus": 401,
+      "expectedStatus": 200
+    },
+    "postgresBatch": {
+      "passed": 45,
+      "files": 4,
+      "new": 25
+    },
+    "httpBrowserBatch": {
+      "passed": 24,
+      "files": 3,
+      "new": 8,
+      "legacyRegression": 16,
+      "ddl": 0
+    },
+    "focusedUnit": {
+      "passed": 91,
+      "files": 3,
+      "new": 24
+    },
+    "mapInventory": {
+      "passed": 10,
+      "files": 2
+    },
+    "fullLint": {
+      "errors": 0,
+      "warnings": 346
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "preflight": "passed",
+    "moneyGuard": "passed",
+    "bodyGuard": "passed",
+    "legacyWitnesses": {
+      "unchanged": 17,
+      "exactRegistryAddition": 1
+    },
+    "fullUnit": {
+      "passed": 13586,
+      "files": 807,
+      "excluded": "generated .next/** only"
+    },
+    "runtime": {
+      "passed": true,
+      "buildId": "CWHqDRPKDlYArK-XQq9f_",
+      "traces": 737,
+      "manifests": 86,
+      "sourceMaps": 367,
+      "limits": "Only available validated maps are inspected. Empty indexed maps give zero source attribution. Unmapped/minified arbitrary bundled code is not proven absent."
+    }
+  },
+  "failedAttempts": [
+    {
+      "log": "slice36-pg-first.log",
+      "failed": 1,
+      "passed": 21,
+      "reason": "synthetic clinical-case fixture used open instead of allowed active; schema constraint preserved"
+    },
+    {
+      "logs": [
+        "slice36-money.log",
+        "slice36-body.log"
+      ],
+      "reason": "nonexistent npm script names; no check executed; actual package scripts passed in verified logs"
+    },
+    {
+      "reason": "first standalone source-proof wrapper exceeded default git-output maxBuffer on lib/db.ts; only proof wrapper buffer increased to 8 MiB, then all witnesses matched"
+    }
+  ],
+  "pending": [
+    "final exact-head CI",
+    "independent parent review"
+  ],
+  "notRun": [
+    "full PostgreSQL suite locally",
+    "full HTTP suite locally",
+    "WORK Docker image: previously documented Alpine HTTP 403 blocker"
+  ],
+  "sourceSha256": {
+    "lib/canonical-plan-projection.ts": "ff4eb0ca0b71c2ed6f7136bf60a274530bc6a4d29cb8a038837dca56fae0af10",
+    "lib/canonical-plan-reads.ts": "70e6e07575180eb55a785ef19b021f7cfc6b73d597da0ff4faa96ad04f22f0b9",
+    "lib/canonical-record-reads.ts": "cec9ae3d00174e9e3e64ca06b40bbf299eedb2185c51b317db08740d4fe46527",
+    "app/api/patients/[id]/plans/route.ts": "0639c95464d8c24bdd5c14b85a8832c9529fb7c3f05e95cb90020b3ac5f6a786",
+    "components/patient/CanonicalClinicalPlans.tsx": "315ffedcd92507f6b063226fd1131e4a36ed57517c48b55edf6c297d688d1319",
+    "components/patient/CanonicalPatientProfile.tsx": "273c97147776093dcc9f1a3a42bafe17eb936d2a65f136b7b5c3cb72aedace36",
+    "__tests__/canonical-plan-projection.test.ts": "5e647680a21fba2595e925c9ccbff3ff21ea6e369b873da26d2e25e9b90b5888",
+    "__tests__/fixtures/canonical-clinical-plans.ts": "395e0dcf2d2643bdb05ce39090260804002e9241f3424bea665768572518e4fa",
+    "__tests__/postgres/plans-canonical-clinical.test.ts": "ddf477a6eb066ac7ccbd635de8eaa6808824500cc964f93f2578b7dac8729654",
+    "__tests__/security-http/canonical-plan-clinical-journey.test.ts": "e4535f242e3657b419f8fc62f33022e223572f4390f92b43f29a5bbc5a4cbd7f",
+    "__tests__/plan-payment-visibility.test.ts": "b1bd0c18d19acf42018bedf977bbf36938434253cf55de1cb68500d642eb00a8",
+    "__tests__/security-access-scoping.test.ts": "c157480578761ece7ad199b19fd8bd2448b4369cae2ea35e369dd2d2744f9935",
+    "__tests__/postgres/amended-plan-summary-parity.test.ts": "c64ea7b90d95b6a15f989892f0782e85c92b2fa8003484dda2a9ccf2740de5ad",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "de40d6553347739c4effe7a742118e75fe9a959ddfe2b1357198839b6497413d",
+    "docs/security/staff-cutover/inventory.json": "477bc197a8260abd0e0a84d065143e1da85c760cb238f6a99d9aa81bcc248c6e"
+  },
+  "evidence": {
+    "slice36-baseline-http.log": {
+      "rawSha256": "b441b893f938963b18ba6b53b46eb0cb87bdf39ab3b6793207515d2524ef6e39",
+      "publishedSha256": "b441b893f938963b18ba6b53b46eb0cb87bdf39ab3b6793207515d2524ef6e39",
+      "bytes": 1816
+    },
+    "slice36-pg-first.log": {
+      "rawSha256": "804e05d0f0b1d7a72ceffb6d3a56e214c7e6b8f4ed861314e2798096e308ee8a",
+      "publishedSha256": "804e05d0f0b1d7a72ceffb6d3a56e214c7e6b8f4ed861314e2798096e308ee8a",
+      "bytes": 1196
+    },
+    "slice36-pg-final.log": {
+      "rawSha256": "c67ac44ba48e7c4c2a9c1aa7964a1d424ccd99ed3010a22b50fab66dbe58d28d",
+      "publishedSha256": "c67ac44ba48e7c4c2a9c1aa7964a1d424ccd99ed3010a22b50fab66dbe58d28d",
+      "bytes": 566
+    },
+    "slice36-http-first.log": {
+      "rawSha256": "d1099f123e15ea8a0255d7e83190ac8881f2799f8c9d3fc78cd2a3b1919445c5",
+      "publishedSha256": "d1099f123e15ea8a0255d7e83190ac8881f2799f8c9d3fc78cd2a3b1919445c5",
+      "bytes": 903
+    },
+    "slice36-unit-compat.log": {
+      "rawSha256": "75b2a069303868285cb44bb4dae098a2b22181d09781639ddfd77005be0fe143",
+      "publishedSha256": "75b2a069303868285cb44bb4dae098a2b22181d09781639ddfd77005be0fe143",
+      "bytes": 429
+    },
+    "slice36-map.log": {
+      "rawSha256": "09a23fd1dd14c996578496bbc68d6fc825f4fa4f0d5c761685dfaac5915dec0b",
+      "publishedSha256": "09a23fd1dd14c996578496bbc68d6fc825f4fa4f0d5c761685dfaac5915dec0b",
+      "bytes": 429
+    },
+    "slice36-build-first.log": {
+      "rawSha256": "8136963cdb67bbbc62a522790dafde2256cfda94e965ba45effe18b1958ddd81",
+      "publishedSha256": "e821b2c4c0f932453b579e11e5c3af32b42cc0e185068d63f36a07f959882632",
+      "bytes": 13359
+    },
+    "slice36-typecheck-final.log": {
+      "rawSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "publishedSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "slice36-lint-focused.log": {
+      "rawSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "publishedSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "bytes": 209
+    },
+    "slice36-lint-full.log": {
+      "rawSha256": "0436980a95b60da6cb69412151b9d707e908238083a31792e27b1caf216fa5e4",
+      "publishedSha256": "0436980a95b60da6cb69412151b9d707e908238083a31792e27b1caf216fa5e4",
+      "bytes": 271572
+    },
+    "slice36-preflight.log": {
+      "rawSha256": "570c1c01cf116b4beadbf1bed9ae5807b85cd00f6922a7375db69c88d57d3fba",
+      "publishedSha256": "570c1c01cf116b4beadbf1bed9ae5807b85cd00f6922a7375db69c88d57d3fba",
+      "bytes": 1144
+    },
+    "slice36-money.log": {
+      "rawSha256": "4ff52717099723c7e4f2138eac05225999e115055b4c56811b1eefa4a36a45fc",
+      "publishedSha256": "4ff52717099723c7e4f2138eac05225999e115055b4c56811b1eefa4a36a45fc",
+      "bytes": 320
+    },
+    "slice36-body.log": {
+      "rawSha256": "0e912d3190fa1adbe9b7f8a8569981b7c0204931403628406e942c7e77a0feb1",
+      "publishedSha256": "0e912d3190fa1adbe9b7f8a8569981b7c0204931403628406e942c7e77a0feb1",
+      "bytes": 311
+    },
+    "slice36-money-verified.log": {
+      "rawSha256": "5ac6c51e62042fa6da39d12c34f71eeefadf241e1981a459bd4727e5f6f19a15",
+      "publishedSha256": "5ac6c51e62042fa6da39d12c34f71eeefadf241e1981a459bd4727e5f6f19a15",
+      "bytes": 1844
+    },
+    "slice36-body-verified.log": {
+      "rawSha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "publishedSha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "bytes": 197
+    },
+    "slice36-inventory.log": {
+      "rawSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "publishedSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "bytes": 329
+    },
+    "slice36-legacy-proof.json": {
+      "rawSha256": "7f0a99ece1b6e5773dc623e27c2b6800290c2f2512bc12f8a59e28adeb930032",
+      "publishedSha256": "7f0a99ece1b6e5773dc623e27c2b6800290c2f2512bc12f8a59e28adeb930032",
+      "bytes": 3291
+    },
+    "historical-source-verification.json": {
+      "rawSha256": "3b0c267e572769caf21dedd500a4d6e81a0e14b0a244eacd39cb0f151beb4d10",
+      "publishedSha256": "3b0c267e572769caf21dedd500a4d6e81a0e14b0a244eacd39cb0f151beb4d10",
+      "bytes": 678
+    },
+    "clinical-plans-390.png": {
+      "sha256": "a6d50baa68340281548d90148d9ea4f4eb2cf5c644b63fb22ae1322f88ae31a4",
+      "synthetic": true,
+      "visuallyInspected": true
+    },
+    "slice36-unit-full.log": {
+      "rawSha256": "294b7fb49138ccfc48179ec47ea39838ccf557cad17aac3998879197165cd36b",
+      "publishedSha256": "294b7fb49138ccfc48179ec47ea39838ccf557cad17aac3998879197165cd36b",
+      "bytes": 628
+    },
+    "runtime-proof.json": {
+      "sha256": "c53608657a0e01bd52edd5b0c2070783d466acae5e5fb8afbd4ce65861dbe6df",
+      "bytes": 1422772
+    },
+    "slice36-runtime.log": {
+      "sha256": "8dd4f78258d24cc00d8b27e253711527ef19d02d3a703f0d3adcb75f5d7281c9",
+      "bytes": 137
+    }
+  },
+  "sourceRevision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+  "sourceScope": "Historical source hashes refer to sourceRevision, not later WORK integrations."
+}

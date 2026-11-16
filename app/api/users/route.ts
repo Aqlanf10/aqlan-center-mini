@@ -1,3 +1,4 @@
+import { legacySessionEvidence } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -79,11 +80,13 @@ export async function POST(request: Request) {
     if (await findUserByUsername(username)) {
       return NextResponse.json({ message: "اسم الدخول مستخدم بالفعل." }, { status: 409 });
     }
+    const evidence=legacySessionEvidence(session);
+    if(!evidence)return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401});
     const created = await createStaffUser({
       username, displayName, role: source.role,
       passwordHash: await hashPassword(password),
       specialty, branch, permissions, commissionConfig,
-    }, { actor: session.username, actorRole: session.role, reason: "إنشاء مستخدم" });
+    }, { actor: session.username, actorRole: session.role, reason: "إنشاء مستخدم" }, {evidence});
     await recordAudit({
       action: "user.create", entity: "user", entityId: created.id,
       entityLabel: created.username,

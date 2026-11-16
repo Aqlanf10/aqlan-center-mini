@@ -14,6 +14,7 @@ let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let browser: Browser;
 let doctorId: number;
+let otherDoctorId: number;
 let timeZone: string;
 let sequence = 0;
 const prefix = `SYN-REBOOK-BROWSER-${randomUUID()}`;
@@ -22,11 +23,15 @@ const pollOptions = { timeout: 15_000 };
 const success = "تمت إعادة حجز الجلسة. بقي الموعد السابق وحالته محفوظين في السجل.";
 const untouchedTables = ["invoices", "invoice_items", "payments", "cashier_shifts", "journal_manual", "journal_manual_lines",
   "patient_opening_balances", "expenses", "payables", "treatment_plans", "plan_items", "treatment_sessions",
-  "visits", "visit_procedures", "plan_installments"] as const;
+  "visits", "visit_procedures", "plan_installments", "clinical_cases"] as const;
 type Role = "admin" | "reception";
 type Result = { appointmentId: number; title: string; replayed: boolean };
-type Intent = { expectedAppointmentId: number; expectedGeneration: string; date: string; time: string; reason: string; requestId: string };
-type Write = { raw: string; body: Intent; status?: number; result?: Result; delivered: boolean };
+type ReturnSource = { kind: "planned_visit"; id: number };
+type ReturnContext = { ok: true; patientId: number; clinicalCaseId: number; source: ReturnSource;
+  doctorId: number; doctorName: string; fingerprint: string };
+type Intent = { expectedAppointmentId: number; expectedGeneration: string; date: string; time: string; reason: string; requestId: string;
+  returnBookingSource: ReturnSource; returnBookingFingerprint: string };
+type Write = { raw: string; body: Intent; status?: number; result?: Result; rejection?: { code: string; message: string }; delivered: boolean };
 
 beforeAll(async () => {
   h = await harness();
@@ -37,6 +42,7 @@ beforeAll(async () => {
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
   doctorId = (await db.query<{ party_id: number }>("SELECT party_id FROM users WHERE username = 'secdoctora'")).rows[0].party_id;
+  otherDoctorId = (await db.query<{ party_id: number }>("SELECT party_id FROM users WHERE username = 'secdoctorb'")).rows[0].party_id;
   const response = await authedGet(`/api/patients/${h.seeded.patientAId}/workflow`, h.sessions.admin);
   expect(response.status).toBe(200);
   timeZone = (await response.json() as { timeZone: string }).timeZone;
@@ -56,10 +62,15 @@ async function fixture(status: "no_show" | "cancelled") {
   const title = `جلسة إعادة حجز اصطناعية ${serial}`;
   const patient = (await db.query<{ id: number }>(`INSERT INTO patients
     (patient_number, full_name, primary_doctor_id) VALUES ($1, $2, $3) RETURNING id`, [unique, name, doctorId])).rows[0].id;
+  // Exact clinical provenance: planned visit -> session -> item -> active case.
+  const clinicalCase = (await db.query<{ id: number }>(`INSERT INTO clinical_cases
+    (patient_id, specialty, title, responsible_party_id, created_by)
+    VALUES ($1, 'general', 'حالة إعادة حجز اصطناعية', $2, 'synthetic-rebook-browser') RETURNING id`,
+  [patient, doctorId])).rows[0].id;
   const plan = (await db.query<{ id: number }>(`INSERT INTO treatment_plans
     (patient_id, title, total_minor, status) VALUES ($1, 'خطة إعادة حجز اصطناعية', 1200, 'active') RETURNING id`, [patient])).rows[0].id;
   const item = (await db.query<{ id: number }>(`INSERT INTO plan_items
-    (plan_id, service_name, unit_price_minor) VALUES ($1, 'بند علاجي اصطناعي محفوظ', 1200) RETURNING id`, [plan])).rows[0].id;
+    (plan_id, service_name, unit_price_minor, case_id) VALUES ($1, 'بند علاجي اصطناعي محفوظ', 1200, $2) RETURNING id`, [plan, clinicalCase])).rows[0].id;
   const old = (await db.query<{ id: number }>(`INSERT INTO appointments
     (patient_id, scheduled_date, scheduled_time, duration_minutes, status, ended_at, cancel_reason, doctor_id)
     VALUES ($1, $2::date - 1, '10:00', 30, $3, NOW(), 'سبب تاريخي اصطناعي محفوظ', $4) RETURNING id`,
@@ -88,8 +99,20 @@ async function fixture(status: "no_show" | "cancelled") {
   const projected = workflow.plannedVisits.find(row => row.id === planned)!;
   expect(projected.canRebook).toBe(true);
   expect(projected.rebookGeneration).toMatch(/^[a-f0-9]{32}$/);
-  return { patient, name, number: unique, title, old, planned, status, date: addDays(today, 950 + serial), time: "10:00",
+  const returnContext = await returnContextFor(patient, planned);
+  expect(returnContext).toMatchObject({ patientId: patient, clinicalCaseId: clinicalCase, doctorId,
+    source: { kind: "planned_visit", id: planned } });
+  return { patient, clinicalCase, returnContext, name, number: unique, title, old, planned, status, date: addDays(today, 950 + serial), time: "10:00",
     generation: projected.rebookGeneration };
+}
+async function returnContextFor(patient: number, planned: number) {
+  const response = await authedGet(`/api/patients/${patient}/return-booking-context?kind=planned_visit&sourceId=${planned}`, h.sessions.admin);
+  expect(response.status).toBe(200);
+  const context = await response.json() as ReturnContext;
+  expect(context.ok).toBe(true);
+  expect(context.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  expect(context.doctorName.trim()).not.toBe("");
+  return context;
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -125,7 +148,7 @@ async function verifySaved(f: Fixture, write: Write, role: Role) {
     .toEqual({ appointment_id: saved.appointmentId, status: "scheduled" });
   expect((await db.query(`SELECT patient_id, scheduled_date::text AS date, to_char(scheduled_time, 'HH24:MI') AS time,
     doctor_id, arrived_at, ended_at FROM appointments WHERE id = $1`, [saved.appointmentId])).rows[0])
-    .toEqual({ patient_id: f.patient, date: f.date, time: f.time, doctor_id: doctorId, arrived_at: null, ended_at: null });
+    .toEqual({ patient_id: f.patient, date: f.date, time: f.time, doctor_id: f.returnContext.doctorId, arrived_at: null, ended_at: null });
   const actor = role === "admin" ? "secadmin" : "secreception";
   const actorId = (await db.query<{ id: number }>("SELECT id FROM users WHERE username = $1", [actor])).rows[0].id;
   const audit = (await db.query(`SELECT actor, actor_role, details FROM audit_log
@@ -135,7 +158,8 @@ async function verifySaved(f: Fixture, write: Write, role: Role) {
     actorUserId: actorId, patientId: f.patient, requestId: write.body.requestId,
     oldAppointmentId: f.old, newAppointmentId: saved.appointmentId,
     intent: { plannedVisitId: f.planned, expectedAppointmentId: f.old, expectedGeneration: f.generation,
-      date: f.date, time: f.time, reason },
+      date: f.date, time: f.time, reason,
+      returnBookingSource: JSON.stringify(f.returnContext.source), returnBookingFingerprint: f.returnContext.fingerprint },
     response: { appointmentId: saved.appointmentId, title: f.title },
     oldAppointment: { id: f.old, status: f.status, planned_visit_id: f.planned },
     newAppointment: { id: saved.appointmentId, patient_id: f.patient, status: "booked", planned_visit_id: f.planned },
@@ -160,7 +184,7 @@ async function connected(f: Fixture, session: Session, width: number) {
     if (request.isNavigationRequest() && request.resourceType() === "document") documents++;
   });
   const gates: ReturnType<typeof deferred>[] = [];
-  let armed: { mode: "drop" | "deliver"; gate: ReturnType<typeof deferred> } | null = null;
+  let armed: { mode: "drop" | "deliver" | "reject-source"; gate: ReturnType<typeof deferred> } | null = null;
   const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
     const request = route.request(), url = new URL(request.url()), method = request.method();
     if (url.origin !== baseUrl) {
@@ -175,8 +199,9 @@ async function connected(f: Fixture, session: Session, width: number) {
       armed = null; // One deliberate click admits exactly one real mutation.
       const raw = request.postData()!;
       const body = request.postDataJSON() as Intent;
-      expect(Object.keys(body).sort()).toEqual(["date", "expectedAppointmentId", "expectedGeneration", "reason", "requestId", "time"]);
-      expect(body).toMatchObject({ expectedAppointmentId: f.old, expectedGeneration: f.generation, date: f.date, time: f.time, reason });
+      expect(Object.keys(body).sort()).toEqual(["date", "expectedAppointmentId", "expectedGeneration", "reason", "requestId", "returnBookingFingerprint", "returnBookingSource", "time"]);
+      expect(body).toMatchObject({ expectedAppointmentId: f.old, expectedGeneration: f.generation, date: f.date, time: f.time, reason,
+        returnBookingSource: f.returnContext.source, returnBookingFingerprint: f.returnContext.fingerprint });
       expect(body.requestId).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
       if (writes.length) expect(raw).toBe(writes[0].raw);
       const write: Write = { raw, body, delivered: false };
@@ -184,6 +209,18 @@ async function connected(f: Fixture, session: Session, width: number) {
       // No retries/redirects hidden inside interception. The actual auth, CSRF,
       // proxy, transaction, immutable audit and idempotency writer execute here.
       const response = await route.fetch({ maxRetries: 0, maxRedirects: 0 });
+      if (admission.mode === "reject-source") {
+        write.rejection = await response.json() as { code: string; message: string };
+        write.status = response.status();
+        expect(write.status).toBe(409);
+        expect(write.rejection.code).toBe("return_booking_source_changed");
+        expect(write.rejection.message).toMatch(/[\u0600-\u06ff]/);
+        expect(writes).toHaveLength(1);
+        await admission.gate.promise;
+        await route.fulfill({ response }); // Real rejection, not a mocked commit/conflict.
+        write.delivered = true;
+        return;
+      }
       write.result = await response.json() as Result;
       write.status = response.status();
       expect(write.status).toBe(writes.length === 1 ? 201 : 200);
@@ -204,7 +241,7 @@ async function connected(f: Fixture, session: Session, width: number) {
   page.on("download", () => unexpected.push("unexpected download"));
   page.on("dialog", dialog => { unexpected.push(`unexpected ${dialog.type()} dialog`); void dialog.dismiss(); });
   return { page, writes, workflowReads, documentCount: () => documents,
-    arm(mode: "drop" | "deliver") {
+    arm(mode: "drop" | "deliver" | "reject-source") {
       expect(armed).toBeNull(); const gate = deferred(); gates.push(gate); armed = { mode, gate }; return gate.resolve;
     },
     async run(body: () => Promise<void>) {
@@ -248,6 +285,8 @@ async function fillForm(page: Page, f: Fixture) {
   await form.getByLabel("التاريخ", { exact: true }).fill(f.date);
   await form.getByLabel("الوقت", { exact: true }).fill(f.time);
   await form.getByRole("textbox", { name: /^سبب إعادة الحجز/ }).fill(reason);
+  await expect.poll(() => form.getByRole("button", { name: "تأكيد إعادة الحجز", exact: true }).isEnabled(), pollOptions).toBe(true);
+  expect(await form.locator('section[aria-label="الطبيب المسؤول عن موعد المراجعة"]').innerText()).toContain(f.returnContext.doctorName);
   return form;
 }
 async function locked(form: Locator) {
@@ -338,6 +377,34 @@ describe("planned-session rebooking through the real patient Summary", () => {
       await refreshedHistory(page, f, ui.writes[0].result!.appointmentId);
       await verifySaved(f, ui.writes[1], role);
       expect(await history(f)).toEqual(before); expect(await untouchedFingerprint()).toEqual(untouched);
+    });
+  });
+
+  it("rejects a displayed proposal after its actual case responsibility changes without creating a replacement", async () => {
+    const f = await fixture("no_show");
+    const ui = await connected(f, h.sessions.reception, 390);
+    await ui.run(async () => {
+      await openPatient(ui.page, f);
+      const form = await fillForm(ui.page, f);
+      // Change only this synthetic case after the browser verified the original
+      // source; do not forge the submitted fingerprint or select an arbitrary doctor.
+      await db.query("UPDATE clinical_cases SET responsible_party_id = $2 WHERE id = $1", [f.clinicalCase, otherDoctorId]);
+      const current = await returnContextFor(f.patient, f.planned);
+      expect(current.doctorId).toBe(otherDoctorId);
+      expect(current.fingerprint).not.toBe(f.returnContext.fingerprint);
+      const before = await history(f), untouched = await untouchedFingerprint();
+      const deliver = ui.arm("reject-source"); deliver();
+      await form.getByRole("button", { name: "تأكيد إعادة الحجز", exact: true }).click();
+      await expect.poll(() => ui.writes[0]?.delivered, pollOptions).toBe(true);
+      await expect.poll(() => form.getByRole("alert").innerText(), pollOptions).toContain("تغيّر الطبيب المسؤول");
+      expect(ui.writes).toHaveLength(1);
+      expect(ui.writes[0].result).toBeUndefined();
+      expect(await ui.page.getByText(success, { exact: true }).count()).toBe(0);
+      expect((await db.query("SELECT id FROM appointments WHERE patient_id = $1", [f.patient])).rows).toEqual([{ id: f.old }]);
+      expect((await db.query("SELECT appointment_id FROM planned_visits WHERE id = $1", [f.planned])).rows[0].appointment_id).toBe(f.old);
+      expect((await db.query("SELECT id FROM audit_log WHERE action = 'planned_visit.rebook' AND entity_id = $1", [String(f.planned)])).rows).toEqual([]);
+      expect(await history(f)).toEqual(before);
+      expect(await untouchedFingerprint()).toEqual(untouched);
     });
   });
 

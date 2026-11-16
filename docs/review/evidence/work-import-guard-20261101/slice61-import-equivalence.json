@@ -1,0 +1,12 @@
+{
+  "files": 1379,
+  "imports": 6879,
+  "orderedSourceAndImportsSha256": "fbad0403d15f1905b85e153d2a50746d5ffc56a4e984bfca2805930f3cbafa63",
+  "allModulesIdentical": true,
+  "setParentNodesTimingsMs": {
+    "true": 2810.228542,
+    "false": 1559.0239180000003
+  },
+  "timeoutChanged": false,
+  "filesOrImportKindsExcluded": false
+}

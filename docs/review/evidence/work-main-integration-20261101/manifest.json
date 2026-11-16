@@ -1,0 +1,675 @@
+{
+  "format": "work-main-integration-evidence-v1",
+  "workParent": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+  "mainParent": "6a6bdc0cc705874fd4ff6d0f0ddc3fdcd314e9e6",
+  "sourceRevision": "ed830332558afab1c2209616f390d5391b1960a4",
+  "sourceRevisionNote": "The merge revision is pinned by the following separable CI-test repair commit; no self-referential commit hash is invented.",
+  "buildId": "YP9u-00rw4lJsJL_jgeQF",
+  "environment": {
+    "node": "22.23.3",
+    "npm": "11.21.1",
+    "postgres": "18.6",
+    "nativeChromium": "151.0.7922.173",
+    "clinicTimeZone": "Asia/Aden",
+    "liveData": false
+  },
+  "results": {
+    "unit": {
+      "passed": 14269,
+      "files": 847,
+      "frozenProductSource": true
+    },
+    "postgres": {
+      "passed": 4965,
+      "files": 390,
+      "setupSkipped": 0
+    },
+    "focusedIntegrationUnit": {
+      "passed": 147,
+      "files": 10
+    },
+    "finalMapPdfPrivacyGuards": {
+      "passed": 45,
+      "files": 4
+    },
+    "combinedPhotoIdentityBackupPG": {
+      "passed": 4,
+      "files": 1
+    },
+    "canonicalSettingsPG": {
+      "passed": 15,
+      "files": 1
+    },
+    "selectedHttp": {
+      "passed": 51,
+      "passedFiles": 9,
+      "hostedOnlySetupRefused": 1,
+      "commandExit": 1,
+      "note": "Actual GitHub Actions-only privacy case remains for exact-head CI; no spoofed environment."
+    },
+    "inventoryHttp": {
+      "passed": 29,
+      "files": 3
+    },
+    "incomingHttpBrowser": {
+      "passed": 38,
+      "files": 6,
+      "firstRunPassed": 37,
+      "correctedLaunchTestPassed": 1
+    },
+    "nativePrint": {
+      "passed": 23,
+      "files": 6
+    },
+    "operationalJourneys": {
+      "passed": 20,
+      "total": 20,
+      "skipped": 0
+    },
+    "typecheck": "pass",
+    "lint": {
+      "errors": 0,
+      "warnings": 345
+    },
+    "environment": "pass",
+    "moneyGuard": "pass",
+    "bodyGuard": "pass",
+    "build": "pass",
+    "preflight": "pass",
+    "audit": {
+      "fullVulnerabilities": 0,
+      "productionVulnerabilities": 0,
+      "officialEvidenceVerified": true
+    },
+    "runtimeBraces": {
+      "traces": 372,
+      "manifests": 86,
+      "maps": 369
+    },
+    "runtimeLintTooling": {
+      "traces": 741,
+      "manifests": 86,
+      "maps": 369
+    },
+    "sourceChecks": 120,
+    "immutableTopLevelMigrations": 71,
+    "sharedMigrations": 64,
+    "historicalSourceHashes": 198
+  },
+  "mapCounts": {
+    "canonical-done": 59,
+    "entry": 4,
+    "excluded": 12,
+    "existing": 285,
+    "owner-only": 23,
+    "self": 3
+  },
+  "sourceSha256": {
+    ".github/workflows/ci.yml": "b4e9de03302601aef7c26543c22eb4a9508b82fb87ff3afd9e6cfb4fbdeb8748",
+    "DESIGN.md": "0b689491ba38a9799ef8d8df35d1d7e0a9255800a6ae2bd5f6fd68a0234ab271",
+    "__tests__/agreement-reminder-guard-schema.test.ts": "c781100d7a0834abd8d3cd29b389ada6c41d5086a551d04ac5ff3aafc7e6d84b",
+    "__tests__/automatic-lab-pricing-route.test.ts": "c10da23641b0d609ab5c56a1e97ba7b08cf978003ba5f37e4eed33a32122e9b5",
+    "__tests__/ci-required-completion.test.ts": "1ca6c05a0b0765cbb15965010be8e5f962ecdd8f2162b9f0fe1d4756625d5b9e",
+    "__tests__/clinic-clock.test.ts": "e9153c362477d95005562dac6076d03017b2fb62d8742949ed8c14b6dc7d8093",
+    "__tests__/collections-print-metadata.test.tsx": "dab6e28112f7c9d14bf5d9f2b53861c8ee43737e97672f85bc71b672cc37d918",
+    "__tests__/debt-repayment-generation-pending.test.tsx": "b352e558d125a150216d8ef1a29f182e1ee783984a3e766f2d35ca8c1fb34e1a",
+    "__tests__/dental-chart-anatomical-layout.test.tsx": "b76b43af4ddc0a8b6675652538fcc6c35b7aeec520d2fb4c129f7cafe4da7ed4",
+    "__tests__/environment-parity.test.ts": "39ff26219b5ef0ac16a79491e8f40e968cb471e2adb4e2341f4b88ddecd3f618",
+    "__tests__/expense-budget-modal-export.test.tsx": "c3c7953bd53447c62f4b9991a63d289d9b6fdb875b87bf2dc5ebc22803ead2d7",
+    "__tests__/fixtures/unified-print-export-cell-golden.json": "dfc046d356a1edbe8478aa0e4d7e72cd44db4f2c60d0f6de8dd882fff8ef05ab",
+    "__tests__/helpers/hr-native-print-pdf.ts": "b1f2373dac62f082adba80e228431eea319eac23da56c15ee53eef8ad424f784",
+    "__tests__/helpers/lab-dispatch-pdf-fields.ts": "8a0f5a78a2db52b1ac5db4bb1e7a3606061a4843531bcb714274e83e009afe5d",
+    "__tests__/hr-leave-balance-year.test.ts": "75ecdf1edf86f1125c1f49d4054d09dda2eae39f4f496ff98619b5955b01d1fb",
+    "__tests__/hr-native-print-css.test.ts": "efd3d08f40b1df11f5562eada0e88d270831201d47815432fde445a033679e62",
+    "__tests__/hr-native-print-pdf.test.ts": "c84f0c6d1ee299d2eb2ae97438abb92263411964fde377dfbf3be9ed5d1c5835",
+    "__tests__/hr-payroll-print-route.test.tsx": "5838d41094e98b69b568b67f369d90037475720c2a7b00945551f52b9fcf4ad8",
+    "__tests__/invoice-print-veracity.test.tsx": "1703098ff0ba6b992d3da505b04cefc213ec4f2b0366da2d937969a2ca1d2e40",
+    "__tests__/lab-accounting-fx-snapshot.test.ts": "a3cbeb4a486d4ad732199743a313f2904db666197b9b02a753b771c43194dfc3",
+    "__tests__/lab-accounting-monetary-intent-route.test.ts": "577d7e280633bd0db360aa8949916beb20f792b9458f2fae9f05f48b141d57a6",
+    "__tests__/lab-accounting-safety.test.ts": "a18a2a1d18f6a9a749d9d948a1328565d3a4eb3e57dc9667804995eb1ac64eb3",
+    "__tests__/lab-bridge-anatomy.test.ts": "85c423a4f5fa5fbae53deb9466bb030f9e3e870c93e06cc3fe7cdab3d1d6e4b4",
+    "__tests__/lab-chart-bridge-interaction.test.tsx": "868a8455b43efb02e833e2a2265f99dcc652f66f5b1ed66ad42eee93c2c2907a",
+    "__tests__/lab-clinical-edit-route.test.ts": "f35a1a397042e912ace0836f7635eb73766e40c577891eff94520f2c288407a6",
+    "__tests__/lab-clinical-edit.test.ts": "cff4e886ef3546aabbef359144ffbd0511f3e60608034651ee3dda67214a8b1c",
+    "__tests__/lab-clinical-editor.test.tsx": "dd79627ba9b79cdbea0ddb51b57ede726bdb991ea05e0285421270006b5a9a1d",
+    "__tests__/lab-clinical-persistence.test.ts": "865bd876f4a25da4dc57bf85e0f3d747da4f13244012d52796b669876bc8e216",
+    "__tests__/lab-dispatch-pdf-fields.test.ts": "e5d32cdd24a2f1670cc70cd6381d1e2e115d76d1935b6505f2a28cad377afff2",
+    "__tests__/lab-dispatch-print-privacy.test.tsx": "1626d2aed986da0a97ca335b5ef0c63cc7ffe3e69d022de57acc57267b184782",
+    "__tests__/lab-dispatch-privacy.test.ts": "f202f588da9cedbb144b0aba2f83af8cfa4b318e538d2510bbe717ceb1a64eb8",
+    "__tests__/lab-patient-identity-setting.test.ts": "a30f1c3ee8af36840155a24a4f4114f2e144ab1e7b5462407a244a62e2e42544",
+    "__tests__/lab-shade-editor.test.tsx": "feba64a539604ba158f8bc2040b3bb8e02dd0e9e87db02458b84c31ed4f8dffe",
+    "__tests__/lab-shade-route.test.ts": "e47d3db64010408abe3b56fb16627b6c1f69ef8004204b6a14533974a4d3e348",
+    "__tests__/lab-shade-schema.test.ts": "4820b4bf903d11b5aa9b0211f3a8128d2c1bd08219c49d908efd764f0dba336d",
+    "__tests__/lab-shade-selector.test.tsx": "25b9cc3501bc1acb92673dac10864b8a8f280fa81b2aab2680e264a6779be9f6",
+    "__tests__/lab-shades.test.ts": "f0ebeac7e3209e54a994723a4da356501090e197481715c17b4bd7241156a95d",
+    "__tests__/layout-clinic-timezone.test.ts": "d7ba1ff84cbb356870394885dee1db30cf43c6bdee7f08587e86a7d9e57b63a6",
+    "__tests__/legacy-plan-print-markup.test.tsx": "2e6ef3ea9bfd0e7fee47ca666586b6988bfc2366cfb58be17ba18812e75ea7be",
+    "__tests__/login-page-ui.test.tsx": "f31eb80a415d1ee28fc2aea843b4f2eb68696b17ae359f26de6fbd09b72e821e",
+    "__tests__/login-photo-backup.test.ts": "f6ee17b33022a86dae25c625b971cff31cc3e69cc876016f3cc9ed18df76eb3a",
+    "__tests__/login-photo-layout-freshness.test.tsx": "02bd7dae07b5f2d491bba268683cd0cba343db68e35f92c41a56e23a3102a7de",
+    "__tests__/login-photo-restore-staging.test.ts": "746959fdb5c910ca050efd7b0942b5d7a56292b306cb0c3b5ac00a56f4ea2918",
+    "__tests__/login-photo-security.test.ts": "4d59ada156b6fb1cd0ebc30aa4ab6db1a2f30befa8a1c1b5f7fc01c43f7d8148",
+    "__tests__/login-photo-ui.test.tsx": "eedaf69126dab87fd9a9183b3a5f4d00d704d7ee80396322b96092a30938be98",
+    "__tests__/migrations.test.ts": "30b10e11af3b8df73c4f6e6d21cf825b2d985cd82f0de72eaa64d07d06757e66",
+    "__tests__/official-installment-contract.test.tsx": "9f8505ce7ae7af54961b5fd2432db18c7af6141974af2f32852ee4d43e5549c5",
+    "__tests__/ortho-followup-coverage-schema.test.ts": "0a28a815a3ae38d65f7b44817596b82225df330c182a1dabc4db347c32c2cfee",
+    "__tests__/patient-appointment-history-schema.test.ts": "44d8ae623d82d408a37007f469f00da2ab95f8e3ea67f3b8dd4b386a33e71038",
+    "__tests__/patient-card-print-layout.test.tsx": "b6b32a8a4dadc4efb3fadc9f5f4b62794e899d1f9762c929912cc42a4e20819d",
+    "__tests__/patient-lab-read-state.test.tsx": "8425be27190da9a72a7c9b20e6e4cbd03f534927dfcf58e43a3a9b2de08c69d8",
+    "__tests__/patient-lab-status-refusal.test.tsx": "229a4e2ff8283c07758f536a3c755bc8800cef02e3ff85d9601f971baf4bb65c",
+    "__tests__/patient-ledger-write-feedback.test.tsx": "2c9fcb810de3419557c7caa39356ced41184363aba7b7743c4073d4a8ef4ca0a",
+    "__tests__/patient-numbering-schema.test.ts": "134dcce34a802c5acec584fe2071263103df9b858935e5f03209b9906ed2a3df",
+    "__tests__/patient-plans-visibility-lifecycle.test.tsx": "5ee9d3529be7fb33a106fa79a7e8c3b4c486622bc3fe368b60436dc709901146",
+    "__tests__/patient-statement-print.test.tsx": "3c6e02ca3aca36b92cbbbb3f6bf1953787c7040ec9c61b6190370c3469a30048",
+    "__tests__/periodontal-candidate-chain.test.ts": "a28e5b61833d829cdc05b708d0cb37eca50bd21b64d2d13d4aee4f9a459b338c",
+    "__tests__/periodontal-schema.test.ts": "1b59a12bbaf3207dfff42a51199f19225b433dad05cab38b56e1aa2ac5b74e13",
+    "__tests__/postgres/_periodontal-fixture.ts": "3a72d698ba62d6e0455acc51fef6273035634d3afce091cb9cd52056d843a5a3",
+    "__tests__/postgres/approved-agreement-principal.test.ts": "232ef4bf1b7aa650238fe4051b504227f67d0df2a8412e3aec5ac4c3950289ec",
+    "__tests__/postgres/backup-date-only-roundtrip.test.ts": "09f9f4dbf8745934f7795a96a6d92cb93fe3bf98ed869f89b724a1fbfe32cd05",
+    "__tests__/postgres/backup-timestamp-precision.test.ts": "6b132fd773490c414de92a46a10c56586f88ad8651aaa6a3b8bd96d9ef7d69e4",
+    "__tests__/postgres/canonical-login-photo-backup.test.ts": "f8d727a3debb2015c2850ff69876fc2936108a3f63a3889b05e5e8d997374e47",
+    "__tests__/postgres/debt-installments-storage.test.ts": "8556cff5f6b87b37b8f6c30ded22ae71e5504b84cc3c39364b392f14c34a148d",
+    "__tests__/postgres/hr-composed-backup.test.ts": "0fba0f9b4a653074d7a51956490e74a35ee6343bb2bffa5f6a5a43b00169e342",
+    "__tests__/postgres/hr-payroll-financial.test.ts": "12a3fda70948cf606e4e16a3c2682d0c018210ba7cb1964ba0730783f388ca11",
+    "__tests__/postgres/hr-runtime-registration.test.ts": "28ffbdc48a0797faefa6fa60f24d2c7c23e2e045d72b90e5678c2640db2afeb2",
+    "__tests__/postgres/lab-accounting-fx-snapshot.test.ts": "a3f5e7333207f93717284a2aeb4dd5b6d47bf3832e63444779c930b9f3e6a072",
+    "__tests__/postgres/lab-shade-persistence.test.ts": "8e0dc11eba2c36f18f3d324a046e153f578dcbaac2a9cc5c61e2a432654e6b42",
+    "__tests__/postgres/lab-work-restore-contract.test.ts": "d68457734edb821b76ade9f549879687a680d0e869eedf02346d3e1e787d6326",
+    "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts": "ae67ebfb176d61143898c54e1770548e8b492841cd41440943c05df6bd121fbb",
+    "__tests__/postgres/login-photo-settings.test.ts": "e63a42b45b43957810db72d744ff581e3bf42b5707f117fe94b7f20443c0fd14",
+    "__tests__/postgres/patient-appointment-history-index.test.ts": "1553aaa9bf556e21333ff62d1d9b03a5b6f5125b6812f7edab8d883f99e66250",
+    "__tests__/postgres/periodontal-restore.test.ts": "da5d0a913661427a2e2bb3c48a62774c5acebb667ced2f3285fa2db909a430c1",
+    "__tests__/postgres/reconciled-reminders.test.ts": "5ec639098e6dfaa7782b7d26098cdb0262a691f3e87ac6458e085256da3567da",
+    "__tests__/postgres/schema-ownership.test.ts": "e0a26d31b1c5c3458a14742af89bb2a0fe835e0a86347018364e268c24784fa7",
+    "__tests__/postgres/settings-canonical.test.ts": "0be54aee4240753cd01eac4d385ea3eb1aef16c2f4646d0d0c24dfccde05f771",
+    "__tests__/prescription-visit-diagnosis-audit.test.ts": "a1a5b6a14c45aa6f38ce6de84ddece6f5765f95fc88460c9b63ab41f123da950",
+    "__tests__/print-modal-identity.test.tsx": "e1a89bdedc5faf8809a295ed455bfd4a51fc790725187d4ebeec3250286281a9",
+    "__tests__/print-visual/compact-print-regressions.test.tsx": "3dd563d665f6385e5c0402c03e6c15de5f955b81e81878b3a04fd89f5394002d",
+    "__tests__/print-visual/financial-clinic-date.test.tsx": "0f139c2ea1c8c7d9116007513fb1e4796f226b20947690aa34ecea92aefa00de",
+    "__tests__/print-visual/hr-native-print.test.tsx": "b4525351d4fdefdeef37691fe88f388557a198abf73b88cc43782a89ba21991c",
+    "__tests__/print-visual/official-installment-contract.test.tsx": "5bda8c86756af3c62521f974675ad084566968c2a7815376a0682b73849f7c20",
+    "__tests__/print-visual/unified-print-document.test.tsx": "91391f9c3fd4a8af3fe2d5e604353d7a94f95665c1cecd99ccd28eb1be0ad67a",
+    "__tests__/print-visual/unified-print-watermark-safety.test.tsx": "976062405bc15d23df03d63471155a83eeb44411f011edb81f796cc435b0c371",
+    "__tests__/print-watermark-coverage.test.tsx": "ef4b9a436eef825858d5b71c774ab2cbb145736088dcc95755048ef9a2a3e29c",
+    "__tests__/report-generated-time.test.ts": "5fff4876e388edd9b51ad7fb45d8e88c65d7dd11d8e476c33bd80256bb883b06",
+    "__tests__/reversed-installment-recovery-routes.test.ts": "120eba5c25ec19639521185fc4c41281c57287cf79cee62876c493aa9a581bf0",
+    "__tests__/schema-preflight-cli.test.ts": "f5edcf4ce7ce0b9fbddf1149d26bc274a327e43e51dbfd0ca13b54073d73e199",
+    "__tests__/security-http/ceph-page-authorization.test.ts": "db6c1d91bfe83e3f1c8312a99ae0eeb218fe5137ec059c0b1ce6751daf3b00ea",
+    "__tests__/security-http/expense-catalogue-visibility-ui.test.ts": "7c25adbc87423e953c62045da3c5078817476b6bf046daf4b3a8967564c9219c",
+    "__tests__/security-http/hr-leave-read-lifetime.test.ts": "9518f33f62770ac2a442f98650fc0cbdbe719256bc1245162dde92a988b61b18",
+    "__tests__/security-http/hr-payroll-attendance-disclosure.test.ts": "6b6c5c050800876b75f1b13122023e0dc209741908d192dbd645534bbf786cd9",
+    "__tests__/security-http/hr-temporal-history-ui.test.ts": "f86290ab703daa79dfdea055f2a93a828962208a3018d84afb9423fd4d688f0c",
+    "__tests__/security-http/invoice-monthly-schedule-ui.test.ts": "953687c1b03536c10743a0cda34e8ef604ec51aa9074a44c9ffbecae32ece9da",
+    "__tests__/security-http/lab-accounting-saved-fx-ui.test.ts": "9e57b4e859cecc626ecb4bf135cd7c3b874a7587d86e003eadd6a993c6d701e5",
+    "__tests__/security-http/lab-pricing-scope-ui.test.ts": "09c70b13a221bb2b581487c5f617c0ad763c6c4a6af8b7022977d491792b0f4c",
+    "__tests__/security-http/login-photo-http.test.ts": "63a147c44b435766b743a5575f2fece56d5d1b6f32a4759a4768fdb42fbfe5b5",
+    "__tests__/security-http/login-photo-ui-browser.test.ts": "94c1ed4344e94f1b3283ffc166865b447457ce342e4115e11479f9b1f0852c68",
+    "__tests__/security-http/login-reference-ui.test.ts": "5b4ba92fbe197664d316df522ac78c50a59afa05fc224382df2b3c39c9f2be4e",
+    "__tests__/security-http/positive-print-routes-ui.test.ts": "ca5d41f3fda75a6f7f0787bc23ab532e16f84cb1963ff786d68259f636d84b27",
+    "__tests__/security-http/reconciled-reminders-http.test.ts": "3d938e131a50d0a2b1d8edc73981dc7e3af3ee0f6e55675cac100115e3d5a627",
+    "__tests__/security-http/report-page-design-ui.test.ts": "5f4279aa89e2dd5b147efd953c5927effbc69553c2f4ce2a7616e3e6b99a5c4d",
+    "__tests__/settings-capabilities.test.ts": "0d30bae016210047208ba0b9c10e39940ccfaca341e825266380e4616013c619",
+    "__tests__/treatment-financial-context.test.ts": "09cc14ae8ebeeb32abcd45f192c70276f958566413f5b845b7b963bd8c0f59c5",
+    "__tests__/unified-print-export-styles.test.ts": "c2f913c0fb9b736b7ceacab8e8d49936cbe3c673956345f9250f2e9c91f20f76",
+    "__tests__/unified-print-non-table.test.tsx": "df50d04da7a63e249b81dd87350a17c776788515231892b6cadf41b3dfee1842",
+    "__tests__/unified-print-presentation.test.tsx": "eef8ff1311112c64ba9f987930d515f727e3c390e30ed69df35045b2768d1699",
+    "__tests__/unified-print-reports.test.tsx": "afae58247764df937e226629f03108eeeb1114d9511b088a7a5e9911a5e2e11f",
+    "__tests__/unified-print-watermark-reports.test.tsx": "c3d891a7781f23250ba96b7c429db0e2cb9619bde69e6258aee5b3d66d7f67cb",
+    "app/api/branding/login-photo/route.ts": "0c2779617ce4e65e386535e7b4cfe58ba5ee98848bdc4e3e54d8bf0eff93f6c2",
+    "app/api/hr/leaves/balances/route.ts": "320b606341f8d3616fc6e1800e1b91f6918a2cca104976f86e974f4656bfc388",
+    "app/api/lab/[id]/route.ts": "8e65e31680981e379b60d325fba5d792b91ec8c4a65cc61de05272cffc2bdfc4",
+    "app/api/lab/route.ts": "4c65db1fca0a7f552609c2e89972b2a41e61b673f4f8d65530e2f08cab0252e5",
+    "app/api/patients/[id]/ledger/route.ts": "5fb7fc77b9a470c0d6feca9a33ab84647fee69b272c6dbcdc57e78fb7273e323",
+    "app/api/plans/reminders/route.ts": "fe3083c73c5de774c5ad677b8b0fbf84af8bc34fcfd581b38d9decded98c458c",
+    "app/api/settings/login-photo/route.ts": "ef5e0534274bc14b88fabcf9d275a72831ca884e5e899938bbc790cf39772290",
+    "app/finance/reports/page.tsx": "7828b47477aa8e9e6f92096adb628e2f2a01c16398e2be9f0d940e3e0c6150de",
+    "app/lab/page.tsx": "228c7f13dd2456b487ab9de4b83759ae1d78da923d1bd933650744cf9933a80e",
+    "app/layout.tsx": "e034b1de305bd1d7e8f620ccc39b472922c793005ff7077c347403e9ba81070d",
+    "app/login/page.tsx": "9cf4f893bca0a8ac1c452cd2649ec689dd90baa45b38e3a83cfe6c516379c6ee",
+    "app/print/card/[id]/page.tsx": "a2e6dfff88190ae53da10a45d8e1208dd6eb90445b3b7c3cdd30f0bb17bc689b",
+    "app/print/ceph-compare/page.tsx": "123fb418dba672d612eb84afcc2a2e2d5c20b38cdc332b94b830490b474b9bfc",
+    "app/print/ceph/[id]/page.tsx": "08b3d0570bd7c7f0f5345359d22b090cc7574f6992a3b660b05b3e0f4d615fa7",
+    "app/print/commission-statement/[id]/page.tsx": "f0447760fe25b403dc13fbb6320454dee19661b53181065d54943e3d065c3048",
+    "app/print/consent/[id]/page.tsx": "0275f9f56268cdaa3238db8cf0042ec5abd6a2065957e213f0fa13b75932d5d5",
+    "app/print/dossier/[id]/page.tsx": "51ce7ffa6f035b2c8ecf322f051df15555db62602e204f538eb07a1811af04f9",
+    "app/print/family-statement/[id]/page.tsx": "ef71fa3f0b4efa206ceda0b865c88851bf2b3095a10ce760d414aff3bcac0980",
+    "app/print/hr/contracts/[id]/page.tsx": "d7866946403bd1141c226c589634083ab1a5e8d200d3f60532ca55ee71536854",
+    "app/print/hr/payroll/[id]/page.tsx": "b0c38a24f09cf82132e93bbe21ceeccbf72a8a9272509f2915fb7eb807274176",
+    "app/print/hr/staff/page.tsx": "735069ca2bb6822a95e33fc6133ba94296a5e9697f1c47a005ccfb84063e09e8",
+    "app/print/hr/tasks/page.tsx": "145b7dfbd84104801f0fdb0461711153a07dc393f163a70174deaae47a92cb54",
+    "app/print/invoice/[id]/page.tsx": "b5b9946bb47e2360ae2f17cb828f891a81bd47602d1310e2523d4b1d870fd57c",
+    "app/print/lab/[id]/lab-dispatch.module.css": "df477780c4942409d6ab180109fdd1b503615ae1d2b8687c0bae929ac3494a8e",
+    "app/print/lab/[id]/page.tsx": "8e6b09f32d449c4e9e98eb6b2f3e2b9a0598ec7854de12f4f4ef0852db854114",
+    "app/print/party/[id]/page.tsx": "1b1c11bcff8603cd8fab9a40ffecd7d540b60175f54e3e1f0da4479d194fe759",
+    "app/print/patient-card/[id]/page.tsx": "4822dff1c2be92fa8babb2f6f35c1165c9884d84cf2166296128cbf995010d73",
+    "app/print/plan/[id]/page.tsx": "c0b3c8901bd6a6f2805a5db0678d4242f31adbdae9705c1a3b6661a3b80f523f",
+    "app/print/post-op/[id]/page.tsx": "2d62f4cbe80dfdface8686a9e43a7b12ea27ed73ad6f983ce5233e6df0c7bf38",
+    "app/print/prescription/[id]/page.tsx": "2259f1c2257cc5bbaf389e09c0a0fd447d1c71d57c145100d742a2611b9dd04d",
+    "app/print/print.css": "c22c5fffaa12bf4700f253b00d76f11ea8f2b06f6982b4e4ed2740a166741e40",
+    "app/print/receipt/[id]/page.tsx": "421204bf0e9a4c41316b00e981b1aac2f6f09a8307141dbc0a49e43d75bf7815",
+    "app/print/referral/[id]/page.tsx": "aeb27eba1c477aa398386d42598c03fb1ab5b0cdaadb5aefa7ad6ac3d5c6fb0e",
+    "app/print/shift/[id]/page.tsx": "a0068dfb2088967290f2ae764d7271a2a6dda5c30c740570bd0f203e88752fe1",
+    "app/print/statement/[id]/page.tsx": "7d49f786a32f1e5e22433d843010d8f09eaed1c66d1c32623f0f27fe7170d645",
+    "app/print/statement/[id]/presentation.tsx": "a400d84cd41bcf735b9666dec0ed692215283c3e28f199a2a73f8cbf143cf1b4",
+    "app/print/voucher/[id]/page.tsx": "c11e846de6aebd509e81165ccbba82606400516955b602fc21cba580354f8c5b",
+    "app/print/walkout/[id]/page.tsx": "d3075759874596717baa8213726973c6a5aa2a0ebce14345981467c26d736faa",
+    "app/report/page.tsx": "9ba151b585986d1dc6450a6ac13f15b1013220b2f15f49ac568951a5ac64dc3b",
+    "app/report/report.module.css": "d8df603d431b0a0c413966d34e7427be03e42f4fbf0e419bf5c3048c5baf386b",
+    "app/reports/daily-clinic/DailyClinicReportView.tsx": "d2710d306d7bbfff23c5daaf395674690c0a64cd7879d3f1e879f22c945773f2",
+    "app/reports/daily-clinic/daily-clinic-report.module.css": "ad1e31a852ee8c348aa0065306a42ec1fe04109b9ee7589ace44e54c60c647ae",
+    "app/settings/page.tsx": "d7f1c3629db3ec96d89ba5b68729b63da2bdf81f9b8f3dbd651c69c235dc5456",
+    "components/DebtRepaymentAgreementPrint.tsx": "3546449697d820c89989d50ccb67849597e00d262a2f718a257483b7e672d841",
+    "components/DebtRepaymentEditor.tsx": "c87942280569d9514a9711b38d919f5cff295c0e3e63aceebae6f73c35a185d1",
+    "components/DentalChart.tsx": "28766f7f22e7d14234e7cb95b601b245086b781cf6881d6408f03b7df65446d2",
+    "components/ExpenseBudgetReportModal.tsx": "773a04ceac7ab96baa9bd34475518f43a9687f14f723a669e5abd461972a674b",
+    "components/InstallmentAgreementPresentation.tsx": "6c94d3222a80dbe30a2898c86b2414f00a4c64401e9de864d05f78e5241f8a17",
+    "components/LabAccountingAuditReportModal.tsx": "1bee56a721b957e6092b29894b50f50bc9c4b5bb5e850b146f82b03e377cad03",
+    "components/LabDentalChart.tsx": "2c16237b8017f62e34d49a5d755ed31ab3f8e450b142e1980e2083f8a461cfc9",
+    "components/LabOrderClinicalEditor.tsx": "364eef7a1c0394bbe753f6390c9afbb53b4d6aebd9e7532d43b0e0ebf8cbb0b4",
+    "components/LabOrderShadeEditor.tsx": "ad1238d425bd952e22ea81ffd0d53f891d9ba9df6c6fd7b93a6f956229b5f633",
+    "components/LabPrescriptionModal.tsx": "a8f0616d6422bccefdb8922d379b1f1ab7c182908101712e6ba6b5c072bca848",
+    "components/LabPricingReportModal.tsx": "4a7c92914e7d202d6de80e81f8f1391c3db12c6d4a623d32befb823c94ad2a44",
+    "components/LabShadeSelector.tsx": "143b5932bab229a7e73de5986ce99983143c07f992b1d475810e44241af2f217",
+    "components/LegacyPlanPrintSummary.tsx": "970661e7e61f91aed2646b7eefcd20233468b736722e836b3651d2670efd7501",
+    "components/LoginPhoto.tsx": "562e72667a0a03878ba23393f0d50fc050a80ab415fef130a23866d3ada2c24b",
+    "components/PatientLabOrders.tsx": "3459ad6c798bb2b28969f3d43152c096f363c843d49cbc702a5b029c94111e04",
+    "components/PatientLedger.tsx": "30cc54601a92d9d7a613ec9eec6719226bda65daa013205296fec673b53c23c0",
+    "components/PatientPlans.tsx": "5d7b37cc41e60564c73c5e6a5e651f0623e9c7cb0a8825244848290957c5d8d3",
+    "components/PrescriptionModal.tsx": "9b072aa3eb30ac520a5b7bdfbbb952ed70f46ff63a5cf0f42e86932278c92483",
+    "components/PrintDocument.tsx": "25ce56eef21d257a3e48d6f9a96215eeae95e3077339c301798a3890da34d390",
+    "components/PrintDocumentWatermark.tsx": "6c2eddd4bc4bad60f8e766bdc6018f1eaa780067d3e50f44e5e7ae640c415c40",
+    "components/PrintHeader.tsx": "a4d5041f1f262bd4a3fde1f72878b27c48b1879da0119045da9ed188db0eb83a",
+    "components/PrintReportModal.module.css": "d6a05eea5f8bdbad3129026f91c8b6615be05c8ff0e1be5b749e0d91b7fedcfe",
+    "components/ReportPrintHeader.tsx": "6d881d7bc3a3fcd4c87b521af6675d3e158b301803f420875ee696bcac50d2c8",
+    "components/ToothPicker.tsx": "401a4219ae1f72ac0f34d47d905702a35c9e9bf00dafacb521d2562ecca707e6",
+    "components/TreatmentFinancialContext.tsx": "9a06b5ed0b00d54a3b288f43fa3fd21990a1974cc79f6dc4240b9f3a37db6c3a",
+    "components/dental/DentalArchRow.tsx": "2491fdfd6465643c836f900c4e07b5d2fe4e8ce664b90e39075a6caa11705a21",
+    "components/dental/Odontogram.tsx": "d295cab13d014aeecf30ac22f65c950070b8ff0116bdbfa6cbf5dcec754d1727",
+    "components/hr/LeavesPanel.tsx": "1ef070259a4bac4ce818cf61a4191d001576db07784a32c4334e29d93b1d4a45",
+    "components/hr/PayrollPanel.tsx": "20c9e79f890561cb39aa044cea7a768f2b9e7e5b6983490f79e1a682f68430a5",
+    "components/inventory/DoctorCustody.tsx": "1b772e30a6c40d10190b5a8ba3266d9e4b3c6a2067ad2f5b6da2bb67bd049045",
+    "components/inventory/InventoryValuationReview.tsx": "087e6aac017f2eb6d5cf21af2c624988dadcee5472b7c3a181e293e49a1e94a4",
+    "components/inventory/ProcurementAdministration.tsx": "89c1da217ce7901bfbe9f5fabc6af0d4f9c31eb68ec01cb64840db70fcc911da",
+    "components/inventory/ProcurementOperations.tsx": "5ea5a865d7b0af9e33f06e2fe8ee59410c563b844f7eb40479a3696cead16f8d",
+    "components/inventory/inventory.module.css": "7a959f33aa4e15af8788c76919a5a4e0befa7140705cbc76275c9414198e2a11",
+    "components/print-document.css": "18333a68dc1bdaf176a51ec296e6cbbe92b3347b0ac7e196b29a76bf6ffc5c51",
+    "components/reports/PrintableReportDocument.tsx": "8313d82f4d1132812af3476b5a8c60273f7d0397033dfe13774ef1d899ef70e6",
+    "components/reports/ReportView.tsx": "ab9af347408b9e46a1807d8192d284f4a94ee4596d4cc90041bcb0bb0377438a",
+    "components/reports/shared.tsx": "368869622a6b7b97972cadaf1c391130e200c53514a0f45b1431dd203c41546a",
+    "components/settings/LoginPhotoEditor.tsx": "f5ec082749f577863b0572e8712e616efa864b2c3f582caf670b875f9ff286cf",
+    "docs/DATABASE_MIGRATIONS.md": "73e6166e7ff06def7f169d9620b3e7a512a220a09bb975dfd9ab4a197813994f",
+    "docs/UNIFIED_PRINT_IDENTITY.md": "ed1c30390fbc625ae17a0e5ca431c137bd7ef2ba72decd45196a8ac0523f036d",
+    "docs/qa/dental-chart-unification-20261028.md": "f229359f67d71cef62688e823d0e0835472e161e61adb2204377919e10efb3b1",
+    "docs/qa/hr-leave-review-20261030.md": "dec56d5a08076f3fbb85da317b5f2c3070587edf3b866d40c526d85346964086",
+    "docs/qa/hr-payroll-attendance-review-20261030.md": "3552853f6a84b392ca54d6e21a6441d2c5aac84a633f0e0d8e7a0fb5dcde6066",
+    "docs/review/pr480-reminder-repair-2026-10-27.md": "da2813203629dc868a1e43f9dc11672f41c8d72a379bde3ec2bb3b167b9d0c16",
+    "docs/review/work-main-integration-20261101.md": "dddc87c2677f4bfba00a222da8eb5cc0207348375ebd32592a5d99f4443d013c",
+    "docs/review/work-main-reconciliation-20261101.md": "66c4757ae4fe4c9fb7556924f7813236331b1949f2c18c151393e051dd36e7d1",
+    "docs/review/work-remaining-plan-20261101.md": "5a8453d271c02475b323e3f205ff150f46e64cc14f93e968e0a45a0a8ba65446",
+    "docs/security/staff-cutover/HANDOFF.md": "6391046dda69af4d7fd2b344dc68f21615fb88bbce5d829d2fab80a7f68bafb5",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "9cdf3500c0555e544a28ea3455b68d0f150905a8184c66787e1445f6d852bbb9",
+    "docs/security/staff-cutover/inventory.json": "04a8dd157b5e9c81acd56b8bce4f23d2b9a0f009c41d25442a0147f73ce017a8",
+    "lib/agreement-reminder-guard-schema.ts": "fba81b5f4db953271d597dbc67ede68a16101bdad980357c6cfdfafe24c7a1df",
+    "lib/audit.ts": "c50ee8d40b041a7e7cf90ce08274a96609971bd6d4858a3ca9a9eec59b3a362c",
+    "lib/clinic-clock.ts": "e83509bc4a07d54b28a480d7048ce419437dbe5aec6f27335eb32d960f304f6a",
+    "lib/db.ts": "a09ebf9c0c08d500970d9ad0444eacc5a679b93756505fad215ba435fdd3df69",
+    "lib/env-contract.ts": "1a155265baa927c4be48223b26c0d86fb5e6569b990862a1ed24a55d695c9c76",
+    "lib/expenseBudgetExport.ts": "fe69e4edd477579c9a940a03433b2addb035fa086dc6dc46bcda7ebc90f8d87c",
+    "lib/fullBackup.ts": "458a0fbcb1df38299b20c29bc71376336dde5dee7dbbb9da075c6452aaf4e826",
+    "lib/http-permissions.ts": "447d0e2e91c6f7530d99efb4d791c9cc739db9c8951197ba39a89160a32d490c",
+    "lib/lab-clinical-edit.ts": "21fa7d0ed7c9842285624fbb4f20e89ea3848b152298ca11e0cae6c67b2aea35",
+    "lib/lab-shade-schema.ts": "cb5518356fa21d866cbd037d35f771c72121569081c1d85ccee8a4aff4a0926d",
+    "lib/lab-shades.ts": "8d66ff9693fdacc9dfbe01d53e0b423432e96507ed2ee00595bcab9cd74dc82b",
+    "lib/lab.ts": "0e94ee2b7603b2427b01f4bd8d753260d9c2dca37c7bbb40dc769829b40f7e41",
+    "lib/labAccountingExport.ts": "c8a60d7cc94edf5dfdb52e2aa7ff576de8933b75a77d5125fc7be62e410f2c33",
+    "lib/login-photo-server.ts": "4cdeee81b92b4a8da6f9563ab158bca8fedc1cc3cae0b284eca01483e898a596",
+    "lib/login-photo.ts": "629230c7c9025d2ebe64b6082adb626d48ce18a1259f3853cf17697668ccb957",
+    "lib/restore/login-photo.ts": "82d91d8508662016fde94caccb5d91c1e2eeb3cb38e41d396a2954310497d303",
+    "lib/restore/staging.ts": "3a55b317cd9a1ed718c5e530cc863d67fd4110c08852eb6350d466c7abbc3780",
+    "lib/settings-capabilities.ts": "6b039357c079998605aa887b5ba8674843637e64b6a083ac679cbb7b611da3a7",
+    "lib/settings-definitions.ts": "045ff32915fe3b408887396b715360d80857f5198bf3a1920663ff8d0dd00c81",
+    "lib/settings-ui.ts": "9eacf29885e75be2626ef724a9e366b51af4c67d00c6c02ff498c1c7f2b55158",
+    "lib/settings.ts": "866847385333edc56b053233fac8b9cd2c40181f709c5f51024dc972cce16c4f",
+    "migrations/0087_agreement_reminder_metadata.sql": "6b1464da6aa1d6969e19afcefe20389e1bac5fe09b803c57c60397915f753644",
+    "migrations/0089_lab_shade_specification.sql": "2dcd996f0ffb13a8e79dc98a807845f10e0f1b0447c805c2ed6afaace4f7e5fc",
+    "package.json": "47f0949c69781cb41dc0849e4eceba5b6e7969a7e8e0862542c227910ba175ba",
+    "proxy.ts": "87c08c4055984d0222ab4819580fb32c74bbfa75929040373aec5b99d1deead2",
+    "schema/current-schema-contract.pg18.json": "e1573c94a19d5c443b2fbf1eee922d57108e5e30d70b7a43b79d779ae1ae2182",
+    "schema/preflight-disclosure.pg18.json": "14b1d2fc209d09f4f375f5dc4a8886d6e88d20149f4b22eb8a1e94c8ccd6a461",
+    "scripts/verify-full.mjs": "a05e3141985f228960f08bde6613e4355cb3495ccaa3b4951238dcb8e2f875b8",
+    "scripts/verify-schema-ownership.ts": "4a5d717d47860019ecca3313058257a923af74ed2748e557a441e1c428c2c461",
+    "vitest.config.mts": "a90250b4e49baa4f5a9c0170a1771b60cba249a52e578d5b8236082db4880a03",
+    "vitest.config.print-visual.mts": "763d29cd8f3d5abcc0d0c04f91751c99ffddb1816700815c79f645cdc95e8102"
+  },
+  "artifacts": {
+    "93b-ci-failure-checkpoint.json": {
+      "sha256": "e52c7cbb7b18d015a76b7503b191b3cd3d930e440a3bd976b7a899b4e0da398c",
+      "bytes": 13198
+    },
+    "93b-pg-check-annotations.json": {
+      "sha256": "bc158eb6167e6a379be71715ddd728175e4ee11a70f49cddce0778a2982ae3bf",
+      "bytes": 2471
+    },
+    "93b-pg-job-metadata.json": {
+      "sha256": "6486cc312151fc4fe4ef2717549d5f9197dbc2582a53ac26484590fa1f4583d3",
+      "bytes": 4614
+    },
+    "exception-proof.json": {
+      "sha256": "63cf46ece51bab0e2b814baadd6e8585cbd88aa4044db9b2a86ae930283107fc",
+      "bytes": 5054
+    },
+    "full-attempt-1.json": {
+      "sha256": "764fd0c545816f54b4cb4d80d4e7598dd16a4b85d4619657ee8362400be2f95c",
+      "bytes": 364
+    },
+    "full-attempt-1.process.json": {
+      "sha256": "84f525a8ac4092d54f92b6fd17e861e626ac582d1f299a867db3b79c17828830",
+      "bytes": 138
+    },
+    "full-attempt-1.stderr.txt": {
+      "sha256": "3887ac186f67231f4587ebb49f776e2caff26453f88d6e39847a2f1d4e1b6e86",
+      "bytes": 388
+    },
+    "lab-compact.pdf": {
+      "sha256": "397ad5f5f4548666ac4a7a6959a85be2e3ad5e87f5c5d5897cf00c19a423ca07",
+      "bytes": 349655
+    },
+    "lab-compact.png": {
+      "sha256": "fd7cd0eedf0ad46ec430c28b018542f8bd110dba362934706898226f3ae43e87",
+      "bytes": 140488
+    },
+    "lint-tooling-runtime-proof.json.gz": {
+      "sha256": "1fc6abb597d927c83e1ed4aa23d8aec8171386ad9ee1bc83f241af71d1482c14",
+      "bytes": 438390
+    },
+    "main-integration-audit-final.log": {
+      "sha256": "be9eecea064106e0f2ce06673d16ad412b74ae3641ec3549d59ff154bb85afc4",
+      "bytes": 1588
+    },
+    "main-integration-audit-network-diagnosis.log": {
+      "sha256": "18fc2c5bfedb7aae8ac20ebbbab0df085a110a9d23a40e6390457a9002cb75f8",
+      "bytes": 244
+    },
+    "main-integration-audit-proxy-final.log": {
+      "sha256": "2974d808c6c62a52479feb6f1a87c27a1db8d14ad8f54ddc7d94f3f95c7826ec",
+      "bytes": 2608
+    },
+    "main-integration-body-guard.log": {
+      "sha256": "388be5d350541a20fc819dfa3ea0e5ad3d85744008c0be0fb09aa5493a7c5163",
+      "bytes": 406
+    },
+    "main-integration-braces-runtime.log": {
+      "sha256": "b846356e18ad80a4a6ec8805800218760a8d1e878902ff459204e503ed9b6908",
+      "bytes": 108
+    },
+    "main-integration-build-final.log": {
+      "sha256": "79d5de78f4556f69be5bb75782d5ee82428a9e0386ff91afaf41ecc90954ec8b",
+      "bytes": 13658
+    },
+    "main-integration-build-first.log": {
+      "sha256": "2e8278f46b0f856d3b6b98bc8d2e2f015b9c8fe09dd6022ec801dd5b7badc4ed",
+      "bytes": 13655
+    },
+    "main-integration-conflicts.txt": {
+      "sha256": "039a23c23795abb1511e78a0af08d72ba0f87702eaee8e8c46d553f1148271c1",
+      "bytes": 1305
+    },
+    "main-integration-environment.log": {
+      "sha256": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+      "bytes": 530
+    },
+    "main-integration-focused-first.log": {
+      "sha256": "b022f9a39b7d1a003d222c823d16761065a04608424baabc09e8bb05431aa6e4",
+      "bytes": 27143
+    },
+    "main-integration-focused-second.log": {
+      "sha256": "2bc9796ff0abaff11856d8cccf9c5df89da363f73ae07652edfc58c5c302cf37",
+      "bytes": 55587
+    },
+    "main-integration-focused-third.log": {
+      "sha256": "aa3a428580d92b9f6a1c0e8fcd38157beae87df5e1165f8ae89cf8acfdfedb2e",
+      "bytes": 946
+    },
+    "main-integration-full-pg-final.log": {
+      "sha256": "1da7e42870543692fe2231cf5d49ac6e84e8e5700c4c94bda02c5ae4ad72172c",
+      "bytes": 21909
+    },
+    "main-integration-full-pg-first.log": {
+      "sha256": "c5a9181895b057b543637aec6a65293d79f1966105d3024bc8c90c110e14ec2d",
+      "bytes": 30601
+    },
+    "main-integration-full-unit-first.log": {
+      "sha256": "9390d24cea79532643a140f9c31003669a428e9e5cf61a4a92412cf22ef5055e",
+      "bytes": 13783
+    },
+    "main-integration-guards-clean.log": {
+      "sha256": "f7072ac76fe830125c6bca2403bfb821159f89d2188de3d643697142adfe1fbe",
+      "bytes": 428
+    },
+    "main-integration-guards-final.log": {
+      "sha256": "a518b0a36e609f7d03d49976d6b44fa012d27a98722020662a8b301cde11dd0a",
+      "bytes": 1353
+    },
+    "main-integration-http-first.log": {
+      "sha256": "cad05e51b86b43717a47cb3f3a14a3b9f9fd37432ed546fe1aa377b3581b06cd",
+      "bytes": 2124
+    },
+    "main-integration-incoming-http.log": {
+      "sha256": "b409c0d3ff7528d4b449d2868897133067d1f12e90ec7b82a6bd84c43d609263",
+      "bytes": 3388
+    },
+    "main-integration-inventory-http.log": {
+      "sha256": "137bbf3e3d72c6918cf852753ac433e9051935d62ff168ec502206c9e9009487",
+      "bytes": 717
+    },
+    "main-integration-inventory.log": {
+      "sha256": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+      "bytes": 329
+    },
+    "main-integration-lab-font-metrics.log": {
+      "sha256": "43eab2f9af86ac7434b1d5e496c3a7b62d429b0070a0f567378b2a46a88af177",
+      "bytes": 1786
+    },
+    "main-integration-lab-full-row-phone.log": {
+      "sha256": "dbc0eec31bd619e680180afec5e838a599fd827ffafd51f1b52879b58256ae4b",
+      "bytes": 614
+    },
+    "main-integration-lab-full-row.log": {
+      "sha256": "a7996415458e9edfaf4109d4e729ee1cd002ded5cf293f924b8e69eafb7e61a8",
+      "bytes": 1786
+    },
+    "main-integration-lab-line-spacing-final.log": {
+      "sha256": "c388286d445c8f9f9abc5cf8095c1c173ebda7801f761c2d2f71666aa8bcd9d1",
+      "bytes": 1786
+    },
+    "main-integration-lab-spacing-probe-second.log": {
+      "sha256": "7aea8556174ba67d908de9e51f0f624ba0c1512dab65054269387da7ab654820",
+      "bytes": 214
+    },
+    "main-integration-lab-spacing-probe.log": {
+      "sha256": "1c6ccb491f3e28162500446c76db5fe1b6b9e58c60c1ed605c6ea374b9815bdf",
+      "bytes": 413
+    },
+    "main-integration-lint-final.log": {
+      "sha256": "e1a0d597ad0ae88ec64808de7d4fd59d090df5fb1c70baaeecdc10ee7c60d89a",
+      "bytes": 271163
+    },
+    "main-integration-lint-first.log": {
+      "sha256": "e1a0d597ad0ae88ec64808de7d4fd59d090df5fb1c70baaeecdc10ee7c60d89a",
+      "bytes": 271163
+    },
+    "main-integration-lint-payroll-tail.log": {
+      "sha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "bytes": 209
+    },
+    "main-integration-lint-runtime.log": {
+      "sha256": "fbc2e6ea578133afe348733c2bcc7d83cf1fbbf5f6b10d37bbd78c6d8eb06ec8",
+      "bytes": 137
+    },
+    "main-integration-lint-tail-final.log": {
+      "sha256": "fb031e32a45612091f63e919a084793d8efca2b0ab94cfb94643a4532ef493d8",
+      "bytes": 489
+    },
+    "main-integration-merge-intake.log": {
+      "sha256": "5ce314c134cab16263eb7dc22c04ee1cc920d79765d13da16593f5b910dc201a",
+      "bytes": 5244
+    },
+    "main-integration-money-guard.log": {
+      "sha256": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+      "bytes": 1844
+    },
+    "main-integration-new-failures-fixed.log": {
+      "sha256": "a862945ee037aff5d13cd9a19974f2edf3c89f6e2eda65ba2cee3ec3a3e2faf1",
+      "bytes": 427
+    },
+    "main-integration-new-failures-witness.log": {
+      "sha256": "167108adbc199a4f6cad5e2b711a632cd7af93387410fb03be37929b0d8ffc42",
+      "bytes": 11067
+    },
+    "main-integration-operational.log": {
+      "sha256": "14288a624fa97f3f299128d50f2a3fd55655aa73b19638b7fb46330e55572714",
+      "bytes": 53394
+    },
+    "main-integration-payroll-browser-final.log": {
+      "sha256": "b9a7578252a727e7fa3deae2511d57f1ff97620fdf41a6aa2b601a29f172ff81",
+      "bytes": 777
+    },
+    "main-integration-photo-identity-final.log": {
+      "sha256": "1c7f49faf17042f58876b3dd069ae330cb56f485dfaec9c20b9a052f7c8fabbe",
+      "bytes": 703
+    },
+    "main-integration-photo-identity-first.log": {
+      "sha256": "e8678d161051c342e7fee89532986f58db83b6d5446875bdfe55667404c8c637",
+      "bytes": 2065
+    },
+    "main-integration-preflight-final.log": {
+      "sha256": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+      "bytes": 1144
+    },
+    "main-integration-print-colon-after.log": {
+      "sha256": "de5e525323f9c0f42b61e50e9c50c0df99343c4f7bd4e6477dce5949678a4df8",
+      "bytes": 426
+    },
+    "main-integration-print-colon-before.log": {
+      "sha256": "7e89273b489e81e17266586db24e79bba834242e27cddc5143da7dc141811a50",
+      "bytes": 1581
+    },
+    "main-integration-print-complete.log": {
+      "sha256": "af3087d22b2e3a5ddc2c6bb98ebbaf15da1009a2290be276d2a06db445fd8d61",
+      "bytes": 525
+    },
+    "main-integration-print-final.log": {
+      "sha256": "81103590787754c52067961b210d6e14de58bb21dfd502139a72ccb4bdc9ea77",
+      "bytes": 1707
+    },
+    "main-integration-print-first.log": {
+      "sha256": "dd04be22a8f44122ddec433a5fc1b55992e9aa5cc983f4a57f771fbdb9fa6f28",
+      "bytes": 11390
+    },
+    "main-integration-print-second.log": {
+      "sha256": "ff87437437b99dc7cbd5c834ca9e34f41d04e25cc3be4ab0c8c94f4bd8591ba4",
+      "bytes": 1584
+    },
+    "main-integration-projection-scan.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "main-integration-projections-current.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "main-integration-schema-generation.log": {
+      "sha256": "4e37f62f0cc4736f0cb079e30f216b84701900e1cb7b98a5e0dc0a41a56d086c",
+      "bytes": 482
+    },
+    "main-integration-settings-final.log": {
+      "sha256": "181b0ccb9970da936a5976a90aae38c2f0adddf0b556d754ab39572eed7143b3",
+      "bytes": 694
+    },
+    "main-integration-source-proof.json": {
+      "sha256": "4c5fb24b4baf2ac7bd43fe729af5c1c031ce5ad6d36f00c9279b6301ee8e5cc0",
+      "bytes": 97936
+    },
+    "main-integration-types-final.log": {
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "main-integration-types-first.log": {
+      "sha256": "067b48f6260fe98343444938dc782c7941dd9e5d0c87985907a3a83ca07cb74d",
+      "bytes": 1132
+    },
+    "main-integration-types-second.log": {
+      "sha256": "645aa24b3dc934e17b6d4f1218527e1acc84613d4efa876f0b05e901d7e0f6e7",
+      "bytes": 1596
+    },
+    "main-integration-types-tail.log": {
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "main-integration-types-third.log": {
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "main-integration-unit-final-frozen.log": {
+      "sha256": "987c35b876079276fbc215170353c57b66005c37afc913dcb2337ceb14c65e25",
+      "bytes": 627
+    },
+    "main-integration-unit-second.log": {
+      "sha256": "40b50dcb155f9b5d601eda3f446d902eb46fe43103775cc1913e11aaedfbdf9a",
+      "bytes": 627
+    },
+    "main-integration-unit-tail-final.log": {
+      "sha256": "ccabfe48816f0e0360bbc061bc5a4cea199e0d915dc7c457aa1b17a03d6a3991",
+      "bytes": 427
+    },
+    "main-integration-unit-tail-fixed.log": {
+      "sha256": "32ee4fb985cdfd8aa2c639970a78c7467abc941ee12abd410f3797b0425be784",
+      "bytes": 3011
+    },
+    "main-migration-precheck.json": {
+      "sha256": "ccf51f96aad3425ab0e2907bc1a875c0ff3b569fbe5f9471dc85400a64c15812",
+      "bytes": 1472
+    },
+    "main-reconciliation-path-inventory.json": {
+      "sha256": "c3910006582804a5a9d03fc1c910fa410cdccabb0cf5596ef234447b6b205732",
+      "bytes": 85566
+    },
+    "main-schema-test-resolution-log.json": {
+      "sha256": "14340efce9c1cf1beb28ac77564d675bc3acff49dc24174fa5a39ce54c9f20f3",
+      "bytes": 1548
+    },
+    "main-source-resolution-log.json": {
+      "sha256": "ed527b276889b595b667df90bdbd73524c24f40e2fbd8081607c96f57126750c",
+      "bytes": 3569
+    },
+    "production-attempt-1.json": {
+      "sha256": "764fd0c545816f54b4cb4d80d4e7598dd16a4b85d4619657ee8362400be2f95c",
+      "bytes": 364
+    },
+    "production-attempt-1.process.json": {
+      "sha256": "51eacbaf9dad6f8eedebbf05ef0f44c006aecdcde52389744474141c8afec9ca",
+      "bytes": 138
+    },
+    "production-attempt-1.stderr.txt": {
+      "sha256": "7d6b28455d264364823a08ef74fe474f6c5c372619ef9eb10eb17762fb68347f",
+      "bytes": 388
+    },
+    "runtime-proof.json.gz": {
+      "sha256": "42c0f80aa9d05c5d18756e55095e8b21324742e159d24be5babb9024c9877a14",
+      "bytes": 461395
+    },
+    "verify-source.py": {
+      "sha256": "b2ff12ef9d23556122f8c5cf0f2a3babd5f7ce7aed79f86b63beb174fa54046d",
+      "bytes": 4841
+    }
+  },
+  "limits": [
+    "Local integration evidence, not deployment, canonical activation, full-plan completion or independent acceptance.",
+    "The published 93b PG race-test failure is addressed in a separate tests-only follow-up; it is not silently relabeled as a passing CI run.",
+    "Full final-head hosted CI and independent review remain required.",
+    "Runtime maps cover only available validated attribution, not arbitrary opaque code.",
+    "WORK Docker denied by enforced Alpine CONNECT 403; no image, retry or network bypass.",
+    "93b PG raw job log download denied HTTP 403; check annotations were available. No raw-log retry or alternate route.",
+    "No new migration allocation; 0090–0093 remain reserved for coordinated Rx work."
+  ]
+}

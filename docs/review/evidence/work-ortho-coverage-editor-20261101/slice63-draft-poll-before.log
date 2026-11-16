@@ -1,0 +1,39 @@
+
+ RUN  v4.1.12 /workspace/aqlan-coverage-ui
+
+[security-http] الخادم جاهز على http://127.0.0.1:14917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts (13 tests | 1 failed | 12 skipped) 38020ms
+   × browser: a periodic list refresh preserves the unsent draft only after a fresh source check 32294ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts > browser: a periodic list refresh preserves the unsent draft only after a fresh source check
+AssertionError: expected '' to be 'مسودة تجريبية عبر التحديث الدوري' // Object.is equality
+
+- Expected
++ Received
+
+- مسودة تجريبية عبر التحديث الدوري
+
+ ❯ __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts:115:37
+    113|   await region(page).getByRole("button", { name: /^نطاق المتابعات الرو…
+    114|   const reason = region(page).getByLabel("سبب اعتماد نطاق المتابعات", …
+    115|   expect(await reason.inputValue()).toBe("مسودة تجريبية عبر التحديث ال…
+       |                                     ^
+    116|   expect(await region(page).getByLabel("مصدر تغطية المتابعات", { exact…
+    117|   expect(await region(page).getByLabel("قرار نطاق المتابعات", { exact:…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  18:16:40
+   Duration  45.41s (transform 1.86s, setup 0ms, import 2.70s, tests 38.02s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

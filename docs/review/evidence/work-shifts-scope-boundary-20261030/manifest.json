@@ -1,0 +1,221 @@
+{
+  "schema": 1,
+  "synthetic": true,
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "branch": "feat/work-recovery-followup-20261027",
+  "baseCommit": "78758658e475a40ff1d3c186177c73ad32017a25",
+  "readiness": "NOT_READY",
+  "inventorySourceDigest": "e5c92a0f6d1a74d4c2b890a8d1aceb329ef2ab7fa6d2ca9bf097f5b9a9ff9551",
+  "environment": {
+    "node": "22.23.3",
+    "postgres": "18.4",
+    "browser": "system Chromium 151.0.7922.173",
+    "database": "owned synthetic loopback databases only"
+  },
+  "results": {
+    "reproductionBeforeFix": {
+      "files": 1,
+      "tests": 1,
+      "exposureConfirmed": true,
+      "drawerUnchanged": true
+    },
+    "postgres": {
+      "files": 10,
+      "passed": 99,
+      "newBoundaryTests": 6
+    },
+    "httpBrowser": {
+      "files": 4,
+      "passed": 25,
+      "shiftsJourneyTests": 10
+    },
+    "unit": {
+      "files": 797,
+      "passed": 13371,
+      "generatedBuildTestsExcluded": ".next/**"
+    },
+    "mapInventoryFinal": {
+      "files": 2,
+      "passed": 10
+    },
+    "typecheckExit": 0,
+    "buildExit": 0,
+    "eslintExit": 0,
+    "moneyGuardExit": 0,
+    "bodyGuardExit": 0,
+    "inventoryCheckExit": 0
+  },
+  "sources": [
+    {
+      "path": "lib/canonical-appointment-assignment.ts",
+      "bytes": 1117,
+      "sha256": "8c3c04a32763b3186879b39908e73238cc4b8401c637f5b282537df91feac527"
+    },
+    {
+      "path": "lib/book-appointment.ts",
+      "bytes": 40641,
+      "sha256": "a5667dd60bdc194fde1f6ae57be1bd9d141717ce01498eac303130cc8e74fbb2"
+    },
+    {
+      "path": "lib/canonical-appointments.ts",
+      "bytes": 39140,
+      "sha256": "b60ed530479f43b25d61b8e796b689ac62b7690dbb6d40487ee57ec21972c7d8"
+    },
+    {
+      "path": "lib/canonical-shifts.ts",
+      "bytes": 10081,
+      "sha256": "e6214eda0e61fd4992ca8b4ea79f1e8152d4c28584d83f87c83ad84bc206bc08"
+    },
+    {
+      "path": "lib/db.ts",
+      "bytes": 1655159,
+      "sha256": "56242b757fddcba9d5240dd0ef9ee8f8735e41eed93ec8cd62aebe7771a214bd"
+    },
+    {
+      "path": "lib/receipt-provenance-db.ts",
+      "bytes": 7319,
+      "sha256": "88d5a290b4297d803240c1e060cad8e9a3b7dd3bac1a5e6d078d0612dc1f5c10"
+    },
+    {
+      "path": "lib/receipt-provenance.ts",
+      "bytes": 18802,
+      "sha256": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b"
+    },
+    {
+      "path": "__tests__/postgres/shifts-booking-scope-boundary.test.ts",
+      "bytes": 8739,
+      "sha256": "8e9a071e94a614e2514f0eb63fd1abcf85d9e524e108c869e40ef2a8209c0c56"
+    },
+    {
+      "path": "__tests__/security-http/canonical-shifts-journey.test.ts",
+      "bytes": 20975,
+      "sha256": "d8d5a894f39b8d601408d76bb4d263fdca86577002690f3b1bb9e2370f2770ec"
+    },
+    {
+      "path": "docs/security/staff-cutover/inventory.json",
+      "bytes": 421471,
+      "sha256": "70a25f9330030fd8464b7b9278e15527dec1fcde55d8577ea856bca79a3645a4"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "bytes": 126341,
+      "sha256": "216e9803c14658a9b331f3cfa3f04ca1299a369ac0b630aea3724296e8b01f8e"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md",
+      "bytes": 67830,
+      "sha256": "9be571270460edfe98c6bb4542ebd2afad477e847d3571ef314dcee2b1df30dd"
+    },
+    {
+      "path": "docs/security/staff-cutover/HANDOFF.md",
+      "bytes": 35125,
+      "sha256": "da5b519101dab50c67b9ffb6f81736f33f076f0986bdd90139d775209c75180e"
+    },
+    {
+      "path": "docs/review/work-shifts-scope-boundary-20261030.md",
+      "bytes": 8065,
+      "sha256": "d3d56b7c64e3efec46f21470358f2853950681b0e88bd996195c7d0e6ede3cf9"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/baseline-ci.json",
+      "bytes": 1081,
+      "sha256": "201e3809eca5d2e006bb8dbd13528d742448b86666e0551d7f904b79ff15c3a0"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/reproduction-before-fix.json",
+      "bytes": 270,
+      "sha256": "7fd9bc1bd132f6749975f622f2fb70cb48cbbaeb54c92cb267974d12cd2d68c7"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/reproduction-before-fix.log",
+      "bytes": 576,
+      "sha256": "65c58460af68119f72850efee741bb25c107be1e3ee9d7f8064400aec680177b"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/reproduction-before-fix.test.ts.txt",
+      "bytes": 3568,
+      "sha256": "14c1b27ebf20075e37e7141b80824a5560bb2ce11000d5fa922eb9d12daedbcd"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-body-guard.log",
+      "bytes": 197,
+      "sha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-build.log",
+      "bytes": 13593,
+      "sha256": "fb4f6096977bbb62caf3066c9a7f80b6659b3b287767d5058f523b30f9d7f37e"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-http.log",
+      "bytes": 396,
+      "sha256": "71e99b4e668c8c878111fff8233d97c1c53e9aa57ee27f44960e05066745f653"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-inventory-check.log",
+      "bytes": 329,
+      "sha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-lint.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-map-final-source.log",
+      "bytes": 196,
+      "sha256": "6f3d0f1618ce3564167b8d827a83416875f46432aa256786d2cc4a662336c19f"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-map-final.log",
+      "bytes": 3888,
+      "sha256": "c938187e4d0a0809b663f6982ab8060459b6b4696d0db4beac276ce5e1a24601"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-money-guard.log",
+      "bytes": 1843,
+      "sha256": "cebd912187059bc27d98a9ba4c258d9ec10fab9f81bf2f561cc636bbd3a0ef8f"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-postgres-aborted-fixture.log",
+      "bytes": 137,
+      "sha256": "870e7085f1c830a6563db0f010ed694ec47fbaec135f9b5e8eb221423288f898"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-postgres-final-correct-env.log",
+      "bytes": 310,
+      "sha256": "7f7b3156c471763ff36b0868f4d04829398ca1ee713d3225250210f9480c0c3f"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-postgres-final.log",
+      "bytes": 7112,
+      "sha256": "b1aec6c7dea473522bfb6256f02688980c3c935d96e5cab41794401182538a40"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-typecheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/review/evidence/work-shifts-scope-boundary-20261030/scope-boundary-unit-all.log",
+      "bytes": 335,
+      "sha256": "51504a5de3466b6cd3b51a9a7e1aae84fdcacc97e2ed2100f9bf6a6192a39f9f"
+    }
+  ],
+  "baselineCI": {
+    "runId": 41083515049,
+    "head": "78758658e475a40ff1d3c186177c73ad32017a25",
+    "allFourJobs": "success",
+    "meaning": "Historical read/UI head only; follow-up final-head CI will be reported after normal push."
+  },
+  "limitations": [
+    "No production incident inference or retrospective relationship cleanup.",
+    "Central patient predicate and financial semantics unchanged.",
+    "Receipt performance not remeasured because reader and projection byte-identical to prior evidence.",
+    "Local Chromium 151; prior browser download domain rejection was not retried.",
+    "Canonical activation remains blocked pending parent review and final-head CI."
+  ],
+  "logNormalization": "Checkout path replaced with <checkout>; trailing whitespace and extra blank EOF lines removed; no result lines rewritten."
+}

@@ -1,0 +1,139 @@
+{
+  "base": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+  "status": "implemented and locally verified; final CI and independent review pending",
+  "buildId": "N0NtjQDnEE5iGtTmP1mZC",
+  "results": {
+    "baselineHttp": {
+      "expectedFailed": 1,
+      "actualStatus": 401,
+      "expectedStatus": 200
+    },
+    "postgres": {
+      "passed": 47,
+      "files": 2,
+      "new": 31
+    },
+    "focusedUnit": {
+      "passed": 156,
+      "files": 7
+    },
+    "mapInventory": {
+      "passed": 10,
+      "files": 2
+    },
+    "httpBrowser": {
+      "passed": 14,
+      "files": 2,
+      "new": 8,
+      "legacy": 6,
+      "ddl": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "legacyProof": {
+      "unchanged": 7
+    }
+  },
+  "failedOrCancelledAttempts": {
+    "slice33-http-first.log": "cancelled after overlapping global synthetic database use; no pass claimed",
+    "slice33-http-serial.log": "diagnostic BIGINT mismatch, then cancelled; regression fixed in final build"
+  },
+  "notRun": [
+    "full unit suite locally for slice33",
+    "full PostgreSQL suite locally for slice33",
+    "full HTTP suite locally for slice33",
+    "WORK Docker image remains blocked by Alpine HTTP 403"
+  ],
+  "sourceSha256": {
+    "lib/canonical-ceph-reads.ts": "a19dbc12ed58e8e8e22baefb682cf55af802990527f00fc218ab9c98664a7c93",
+    "lib/canonical-ceph-projection.ts": "711321ce6d8940deb72ea8f13b1a6355fc65f8bc8093025a0404fd0ad2da172b",
+    "lib/canonical-record-reads.ts": "ad4983b9b93b2c80c8d37a1d4d8b358606c537c3a6451c97cd2ce0b45825f834",
+    "app/api/patients/[id]/ceph/route.ts": "6caef6b896ab99fc491bd5ee36087415f3b28fcddcca3289e5b480b8f07e6500",
+    "components/patient/CanonicalCephStudies.tsx": "2d63c43c1790c57eef8ad86cc1695a6eb70452148dea44fc40fea56e6fdf6b8a",
+    "components/patient/CanonicalPatientProfile.tsx": "ac093fc804cb7e7b07ea405eede466aef590705b17a985ad1ff493ba72485ffa",
+    "__tests__/canonical-ceph-projection.test.ts": "0455203fd5ab061591f187912b969fcba7406fe8c6397dbc50c009b32ac175c0",
+    "__tests__/fixtures/canonical-ceph.ts": "7391c36fa2dd1ebaefce6167c7d592f6ca1dd6557cbe68c5485c83ea5b40cd5d",
+    "__tests__/postgres/ceph-canonical-list.test.ts": "ba57242c3e1c102b35c54161f6f5da5aaa0811719b41209dc529f24d72d882fc",
+    "__tests__/security-http/canonical-ceph-list-journey.test.ts": "3bc761bf3dffbe7a75c68a707551b3e05b74297396773baf5da8fbd742417544",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "431eff7425295caa4e65e62ce474d265f2e9c821181c494ffd512b80749fdda8",
+    "docs/security/staff-cutover/inventory.json": "85d42d8d629d5d52420bb0b467e9b68a1cd3dd38a40713e2db7e1540d33bb2cb"
+  },
+  "evidence": {
+    "slice33-baseline-http.log": {
+      "rawSha256": "fb955783c25fda3a6bf34d4e5034f3b75b5442620af1e3ccbb1863fbba19039e",
+      "publishedSha256": "fb955783c25fda3a6bf34d4e5034f3b75b5442620af1e3ccbb1863fbba19039e",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-pg-final.log": {
+      "rawSha256": "497d0d0f24c23c8667e36b80a7b9e4a94c3385f35874d9d87911eeb903ba20ca",
+      "publishedSha256": "497d0d0f24c23c8667e36b80a7b9e4a94c3385f35874d9d87911eeb903ba20ca",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-unit-first.log": {
+      "rawSha256": "8117dc7caf240b6005a0b906c65bca1161d42926b7ce92f6db3088034f50ca90",
+      "publishedSha256": "8117dc7caf240b6005a0b906c65bca1161d42926b7ce92f6db3088034f50ca90",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-map-tests.log": {
+      "rawSha256": "b166cac88119f0fea8fa71dc91253f83a2908ce90f675cc5c1bc33745f445754",
+      "publishedSha256": "b166cac88119f0fea8fa71dc91253f83a2908ce90f675cc5c1bc33745f445754",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-http-first.log": {
+      "rawSha256": "56435afd5765059d1f40edfe9448cde96ad9db5a2343c37917c52d2bfaec63fb",
+      "publishedSha256": "56435afd5765059d1f40edfe9448cde96ad9db5a2343c37917c52d2bfaec63fb",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-http-serial.log": {
+      "rawSha256": "41da28b5c3684f72fdf8cd4a5af3051cf34cd90cf8ee067e593c3ab0f57dc4d6",
+      "publishedSha256": "41da28b5c3684f72fdf8cd4a5af3051cf34cd90cf8ee067e593c3ab0f57dc4d6",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-http-final.log": {
+      "rawSha256": "13d51096f8a648ad1bdb6ff3612a33c433c00b158d3601d6635156a2bd19c08b",
+      "publishedSha256": "13d51096f8a648ad1bdb6ff3612a33c433c00b158d3601d6635156a2bd19c08b",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-http-legacy.log": {
+      "rawSha256": "055ab67e950fe1d9470aa3d15b4b102cabf0fd5e3ad494306ed6a3f32868c667",
+      "publishedSha256": "055ab67e950fe1d9470aa3d15b4b102cabf0fd5e3ad494306ed6a3f32868c667",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-build-final.log": {
+      "rawSha256": "22740ba2d55d127c7f5ee2b73f32c7c1ad8c935b8ea57adf076e6163b00ae639",
+      "publishedSha256": "612f1bb40e2c7390042870aa5ef696c3630e6db5e11db993d607791c53144ac2",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-typecheck-final.log": {
+      "rawSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "publishedSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-lint-final.log": {
+      "rawSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "publishedSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-inventory-final.log": {
+      "rawSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "publishedSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice33-legacy-proof.json": {
+      "rawSha256": "44bf5b81b043810f94c0638e45ba41affb917e7ae8d5a16eb8dfc96e33adc024",
+      "publishedSha256": "44bf5b81b043810f94c0638e45ba41affb917e7ae8d5a16eb8dfc96e33adc024",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "ceph-list-390.png": {
+      "sha256": "5e068dc1a9dd9b2fa56bb4d4c87ff991e168212ced86c50685f007e5b2d76e9b",
+      "synthetic": true,
+      "visuallyInspected": true
+    }
+  },
+  "sourceRevision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+  "sourceWitnessScope": "Historical delivery at sourceRevision; later slices can change these files and have their own evidence."
+}

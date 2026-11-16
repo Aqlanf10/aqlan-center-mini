@@ -3,13 +3,13 @@ import {
   appointmentCapabilityConstraint, canPerformOwnerOperation, hasStaffCapability,
   ownerContextFromTrustedBinding, parseStaffCapabilityDocument, patientCapabilityConstraint,
   resolveStaffCapabilities, staffAuthorizationFingerprint, validateStaffCapabilityChange,
-  validateStaffMaintenance, type ResolvedStaffAccess, type StaffSubject, type TrustedOwnerContext,
+  validateStaffAccountChange, validateStaffMaintenance, type ResolvedStaffAccess, type StaffSubject, type TrustedOwnerContext,
 } from "../lib/staff-capabilities";
 import { STAFF_CAPABILITIES, OWNER_ONLY_OPERATIONS, type StaffCapabilityDocument } from "../lib/staff-capability-catalogue";
 import { reviewLegacyStaffCapabilities } from "../lib/staff-capabilities-legacy";
 
 const document = (overrides: Partial<StaffCapabilityDocument> = {}): StaffCapabilityDocument => ({
-  schemaVersion: 1, revision: 1, patientScope: "none", appointmentScope: "none", grants: {}, ...overrides,
+  schemaVersion: 2, confirmation: "owner", revision: 1, patientScope: "none", appointmentScope: "none", grants: {}, ...overrides,
 });
 const subject = (overrides: Partial<StaffSubject> = {}): StaffSubject => ({
   userId: 10, role: "admin", isActive: true, clinicianPartyId: null, ...overrides,
@@ -31,7 +31,8 @@ describe("strict, inert scoped staff capability documents", () => {
 
   it.each([
     null, undefined, false, 1, [], "{", "null", "[]", {},
-    { ...document(), schemaVersion: 0 }, { ...document(), schemaVersion: 2 }, { ...document(), schemaVersion: "1" },
+    { ...document(), schemaVersion: 0 }, { ...document(), schemaVersion: 1 }, { ...document(), schemaVersion: "2" },
+    { ...document(), confirmation: "confirmed" }, { ...document(), confirmation: null },
     { ...document(), revision: 0 }, { ...document(), revision: -1 }, { ...document(), revision: 1.5 },
     { ...document(), revision: Number.MAX_SAFE_INTEGER + 1 }, { ...document(), revision: "1" },
     { ...document(), patientScope: "everyone" }, { ...document(), appointmentScope: "today" },
@@ -50,7 +51,7 @@ describe("strict, inert scoped staff capability documents", () => {
   });
 
   it("rejects missing fields, inherited grants, accessors, hidden and symbol keys", () => {
-    for (const key of ["schemaVersion", "revision", "patientScope", "appointmentScope", "grants"]) {
+    for (const key of ["schemaVersion", "revision", "confirmation", "patientScope", "appointmentScope", "grants"]) {
       const raw = { ...document() } as Record<string, unknown>;
       delete raw[key];
       expect(parseStaffCapabilityDocument(raw).ok).toBe(false);
@@ -61,7 +62,7 @@ describe("strict, inert scoped staff capability documents", () => {
       expect(parseStaffCapabilityDocument({ ...document(), grants }).ok).toBe(false);
     }
     expect(parseStaffCapabilityDocument(" ".repeat(16_385)).ok).toBe(false);
-    expect(parseStaffCapabilityDocument(JSON.parse('{"schemaVersion":1,"revision":1,"patientScope":"none","appointmentScope":"none","grants":{"__proto__":true}}')).ok).toBe(false);
+    expect(parseStaffCapabilityDocument(JSON.parse('{"schemaVersion":2,"confirmation":"owner","revision":1,"patientScope":"none","appointmentScope":"none","grants":{"__proto__":true}}')).ok).toBe(false);
   });
 
   it("detaches and freezes parsed grants; explicit false and absence both deny", () => {
@@ -138,7 +139,7 @@ describe("trusted owner identity and clinician separation", () => {
     expect(canPerformOwnerOperation(access, "staff.role.change")).toBe(true);
     expect(canPerformOwnerOperation(access, "owner.transfer")).toBe(false);
     expect(hasStaffCapability(access, "staff.permissions.edit")).toBe(true);
-    expect(resolve({ ...document(), schemaVersion: 2 }, subject({ userId: 99 }), owner).status).toBe("denied");
+    expect(resolve({ ...document(), schemaVersion: 1 }, subject({ userId: 99 }), owner).status).toBe("denied");
     expect(resolve(document(), subject({ userId: 99, role: "owner" }), owner).status).toBe("denied");
     expect(resolve(document(), subject({ userId: 99, isActive: false }), owner).status).toBe("denied");
   });
@@ -193,6 +194,24 @@ describe("safe scoped delegation and maintenance preflight", () => {
     expect(validate(document({ revision: 2, grants: { "staff.view": true, "staff.permissions.edit": true } }))).toEqual({ ok: false, reason: "outside-delegable-authority" });
     expect(validate(document({ revision: 2 }), manager, target, 0)).toEqual({ ok: false, reason: "stale-revision" });
     for (const revision of [1, 3]) expect(validate(document({ revision })).ok).toBe(false);
+  });
+  it("initial grants are the owner's: a pending document grants nothing, a delegate can neither edit nor confirm it", () => {
+    const pending = resolve(document({ confirmation: "pending", patientScope: "all", appointmentScope: "all", grants: { "finance.payments.view": true } }), subject({ userId: 21 }), ownerContext);
+    expect(pending.status).toBe("allowed");
+    expect(hasStaffCapability(pending, "finance.payments.view")).toBe(false);
+    expect(patientCapabilityConstraint(pending)).toEqual({ kind: "none" });
+    expect(validate(document({ revision: 2, grants: { "finance.payments.view": true } }), manager, pending)).toEqual({ ok: false, reason: "initial-owner-confirmation-required" });
+    // A revocation-only save by a delegate is refused too: only the owner decides a pending account.
+    expect(validate(document({ revision: 2 }), manager, pending)).toEqual({ ok: false, reason: "initial-owner-confirmation-required" });
+    expect(validate(document({ revision: 2, grants: { "finance.payments.view": true } }), owner, pending)).toEqual({ ok: true });
+    // Every save produces a confirmed document; nobody saves one back to pending.
+    expect(validate(document({ revision: 2, confirmation: "pending" }), owner, pending)).toEqual({ ok: false, reason: "invalid-confirmation" });
+    expect(validate(document({ revision: 2, confirmation: "pending" }))).toEqual({ ok: false, reason: "invalid-confirmation" });
+    // Later delegated maintenance of a confirmed account stays within the delegate's own authority.
+    expect(validate(document({ revision: 2, grants: { "finance.payments.view": true } }))).toEqual({ ok: true });
+    expect(validate(document({ revision: 2, grants: { "finance.payments.collect": true } }))).toEqual({ ok: false, reason: "outside-delegable-authority" });
+    // Confirmation is part of the revocation material.
+    expect(staffAuthorizationFingerprint(pending)).not.toBe(staffAuthorizationFingerprint(resolve(document({ patientScope: "all", appointmentScope: "all", grants: { "finance.payments.view": true } }), subject({ userId: 21 }), ownerContext)));
   });
   it("denies self-escalation, owner edits, higher-authority targets and mixed owner contexts", () => {
     expect(validate(document({ revision: 2 }), manager, manager)).toEqual({ ok: false, reason: "self-permission-change" });
@@ -257,11 +276,47 @@ describe("safe scoped delegation and maintenance preflight", () => {
   });
 });
 
+describe("account changes against an administrative target (review 6507696166 item 2)", () => {
+  const ownerContext = ownerContextFromTrustedBinding({ ownerUserId: 99, bindingVersion: "test-1" });
+  const owner = resolve(document(), subject({ userId: 99 }), ownerContext);
+  const manager = resolve(document({ patientScope: "all", appointmentScope: "all", grants: {
+    "staff.view": true, "staff.profile.edit": true, "staff.accounts.disable": true, "appointments.create": true } }), subject({ userId: 10, role: "reception" }), ownerContext);
+  const target = (overrides: Partial<{ userId: number; ownerUserId: number; isOwner: boolean; document: StaffCapabilityDocument }> = {}) =>
+    ({ userId: 20, ownerUserId: 99, isOwner: false, document: document({ grants: { "appointments.create": true } }), ...overrides });
+  it("needs every operation in the batch; owner operations stay the owner's", () => {
+    expect(validateStaffAccountChange(manager, target(), ["profile.edit", "accounts.disable"])).toEqual({ ok: true });
+    for (const operation of ["staff.role.change", "staff.clinician-link.change", "staff.credentials.reset"] as const) {
+      expect(validateStaffAccountChange(manager, target(), ["accounts.disable", operation])).toEqual({ ok: false, reason: "owner-operation-required" });
+      expect(validateStaffAccountChange(owner, target(), [operation])).toEqual({ ok: true });
+    }
+    expect(validateStaffAccountChange(manager, target(), [])).toEqual({ ok: false, reason: "no-account-change" });
+  });
+  it("never targets the owner or the actor itself, and keeps a delegate within its authority", () => {
+    expect(validateStaffAccountChange(manager, target({ userId: 99, isOwner: true }), ["accounts.disable"])).toEqual({ ok: false, reason: "protected-owner" });
+    // The owner flag is not the only witness: the actor's own binding names the owner.
+    expect(validateStaffAccountChange(manager, target({ userId: 99 }), ["accounts.disable"])).toEqual({ ok: false, reason: "protected-owner" });
+    expect(validateStaffAccountChange(manager, target({ userId: 10 }), ["accounts.disable"])).toEqual({ ok: false, reason: "self-staff-maintenance" });
+    expect(validateStaffAccountChange(owner, target({ userId: 99, isOwner: true }), ["profile.edit"])).toEqual({ ok: false, reason: "self-staff-maintenance" });
+    expect(validateStaffAccountChange(manager, target({ document: document({ grants: { "finance.invoices.view": true } }) }), ["accounts.disable"]))
+      .toEqual({ ok: false, reason: "outside-delegable-authority" });
+    expect(validateStaffAccountChange(manager, target({ document: document({ grants: { "staff.view": true, "staff.permissions.edit": true } }) }), ["profile.edit"]))
+      .toEqual({ ok: false, reason: "outside-delegable-authority" });
+  });
+  it("refuses without a trusted owner binding or with a different owner", () => {
+    const unbound = resolve(document({ grants: { "staff.view": true, "staff.accounts.disable": true } }), subject({ userId: 10 }));
+    expect(validateStaffAccountChange(unbound, target(), ["accounts.disable"])).toEqual({ ok: false, reason: "owner-context-missing" });
+    expect(validateStaffAccountChange(manager, target({ ownerUserId: 98 }), ["accounts.disable"])).toEqual({ ok: false, reason: "owner-context-mismatch" });
+    const viewer = resolve(document({ grants: { "staff.view": true } }), subject({ userId: 11 }), ownerContext);
+    expect(validateStaffAccountChange(viewer, target(), ["profile.edit"])).toEqual({ ok: false, reason: "maintenance-denied" });
+    expect(validateStaffAccountChange({ ...manager }, target(), ["profile.edit"])).toEqual({ ok: false, reason: "invalid-access" });
+  });
+});
+
 describe("future revocation fingerprint", () => {
   const fp = (profile: unknown = document(), identity = subject(), owner: TrustedOwnerContext | null = null) => staffAuthorizationFingerprint(resolve(profile, identity, owner));
   it("is canonical across JSON key order/explicit false, but changes for every authority dimension", () => {
     expect(fp(document({ grants: { "audit.view": false, "staff.view": true } })))
-      .toBe(fp(JSON.stringify({ grants: { "staff.view": true }, appointmentScope: "none", patientScope: "none", revision: 1, schemaVersion: 1 })));
+      .toBe(fp(JSON.stringify({ grants: { "staff.view": true }, appointmentScope: "none", patientScope: "none", revision: 1, confirmation: "owner", schemaVersion: 2 })));
     const original = fp();
     expect(original).toMatch(/^staff-v1:[a-f0-9]{64}$/);
     for (const updated of [document({ revision: 2 }), document({ patientScope: "all" }), document({ appointmentScope: "all" }), document({ grants: { "audit.view": true } })]) {
@@ -328,4 +383,13 @@ describe("explicit legacy review adapter, never an authorization fallback", () =
     const assistant = reviewLegacyStaffCapabilities("assistant", null);
     expect(assistant.ok && assistant.value.patientRead).toBe("today");
   });
+});
+
+it.each(["admin","reception","doctor","cashier","accountant","assistant"])("inventory reference capability is an independent explicit grant for active %s", role=>{
+ const identity=subject({role});
+ const granted=resolve(document({grants:{"inventory.references.view":true}}),identity);
+ expect(granted.status).toBe("allowed");expect(hasStaffCapability(granted,"inventory.references.view")).toBe(true);
+ expect(hasStaffCapability(granted,"staff.view")).toBe(false);
+ expect(hasStaffCapability(resolve(document(),identity),"inventory.references.view")).toBe(false);
+ expect(hasStaffCapability(resolve(document({grants:{"inventory.references.view":true}}),subject({role,isActive:false})),"inventory.references.view")).toBe(false);
 });

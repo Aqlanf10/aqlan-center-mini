@@ -1,0 +1,19 @@
+{
+  "base": "8e12f9591ebd0aafc578587b4d6c3e5e657eee6f",
+  "preservationChecks": {
+    "legacyPostUnchanged": true,
+    "legacyReadTailUnchanged": true,
+    "lib/db.ts": true,
+    "lib/cases.ts": true,
+    "lib/case-route.ts": true,
+    "lib/canonical-patient-reads.ts": true,
+    "lib/canonical-read-snapshot.ts": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/patient-access.ts": true,
+    "components/PatientCases.tsx": true,
+    "app/api/plan-items/[id]/case/route.ts": true,
+    "app/api/plan-items/[id]/dependencies/route.ts": true,
+    "package-lock.json": true
+  },
+  "historicalSourceHashesVerified": 436
+}

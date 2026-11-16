@@ -1,0 +1,24 @@
+{
+  "baseRevision": "985352177f0d3a552bd1c6df4ec478cd8ea5c015",
+  "checks": {
+    "legacy_queue_and_decision_and_db_tail": true,
+    "db_prefix_before_bounded_reader": true,
+    "legacy_route_body_unchanged": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/staff-capability-catalogue.ts": true,
+    "lib/canonical-read-snapshot.ts": true,
+    "lib/canonical-ortho-followups.ts": true,
+    "components/CanonicalOrthoFollowups.tsx": true,
+    "components/OrthoPendingDecisions.tsx": true,
+    "lib/canonical-proposals.ts": true,
+    "lib/canonical-proposal-contact-command.ts": true,
+    "lib/ortho-followup-coverage-db.ts": true,
+    "lib/commission.ts": true,
+    "lib/fullBackup.ts": true,
+    "lib/restore/staging.ts": true,
+    "app/api/ortho/adjustments/[id]/billing-decision/route.ts": true,
+    "immutable_migrations": true
+  },
+  "passed": 17,
+  "historicalSourceHashes": 645
+}

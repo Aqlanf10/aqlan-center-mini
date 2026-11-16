@@ -46,7 +46,28 @@ describe('writer backup SQL boundaries', () => {
     expect(result.sqlRowsStatementLines).toBe(0);
   });
 
+  it('keeps lab capability target-owned and removes only the supported historical writer row', () => {
+    const marker = insertStatement('lab_work_intent_schema', ['singleton', 'version'], { singleton: true, version: 1 });
+    const application = insertStatement('lab_work_commands', ['request_key'], { request_key: 'synthetic-command' });
+    const prepared = prepareBackupSql(`BEGIN;\n${marker}\n${application}\nCOMMIT;`);
+    expect(prepared.sql).not.toContain(marker);
+    expect(prepared.sql).toContain(application);
+    expect(prepared.skippedMigrationRecordLines).toBe(1);
+    expect(prepared.sqlRowsStatementLines).toBe(1);
+    for (const version of [0, 2]) expect(() => prepareBackupSql(`BEGIN;${insertStatement('lab_work_intent_schema', ['singleton', 'version'], { singleton: true, version })}COMMIT;`)).toThrow('Unsupported lab schema capability');
+    expect(() => prepareBackupSql('BEGIN; INSERT INTO lab_work_intent_schema VALUES (TRUE, 1); COMMIT;')).toThrow('Unsupported lab schema capability');
+  });
+
+  it('retains canonical READ COMMITTED framing while isolating only data statements', () => {
+    const sql = "BEGIN;\nINSERT INTO example (id) VALUES (1);\nCOMMIT;";
+    expect(prepareBackupSql(sql)).toEqual({ sql, dataSql: "\nINSERT INTO example (id) VALUES (1);\n", skippedMigrationRecordLines: 0, sqlRowsStatementLines: 1 });
+  });
+
   it.each([
+    "BEGIN ISOLATION LEVEL READ COMMITTED; COMMIT;",
+    "BEGIN ISOLATION LEVEL REPEATABLE READ; COMMIT;",
+    "BEGIN ISOLATION LEVEL REPEATABLE READ READ WRITE; COMMIT;",
+    "BEGIN ISOLATION LEVEL REPEATABLE READ; SET TRANSACTION ISOLATION LEVEL READ COMMITTED; COMMIT;",
     "BEGIN; INSERT INTO hr_staff (note) VALUES ('missing quote); COMMIT;",
     "BEGIN; /* missing comment close COMMIT;",
     "BEGIN; INSERT INTO hr_staff (note) VALUES ('COMMIT;');",

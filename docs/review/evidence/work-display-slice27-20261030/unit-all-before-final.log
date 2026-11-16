@@ -1,0 +1,361 @@
+> aqlan-center@0.1.0 test
+> vitest run --exclude .next/**
+
+
+ RUN  v4.1.12 <repo>
+
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs (6 tests | 2 failed) 2683ms
+   × checked-in exhaustive source inventory has no drift or API export mismatch 223ms
+   × CLI drift success and explicit NOT_READY failure are intentional, not exceptions 2440ms
+ ❯ __tests__/development-runtime-tracing.test.ts (5 tests | 1 failed) 6035ms
+     × does not let runtime app, component or library imports depend on excluded development tooling 5940ms
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+ ❯ __tests__/display-speech.test.ts (26 tests | 1 failed) 35ms
+     × removes tatweel inside a name without splitting its letters 6ms
+ ❯ __tests__/layout-clinic-timezone.test.ts (1 test | 1 failed) 6ms
+   × passes the canonical resolved server zone through the existing root layout 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/development-runtime-tracing.test.ts > temporary development-only runtime tracing boundary > does not let runtime app, component or library imports depend on excluded development tooling
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/development-runtime-tracing.test.ts:135:3
+    133|   });
+    134|
+    135|   it("does not let runtime app, component or library imports depend on…
+       |   ^
+    136|     expect(runtimeSources.length).toBeGreaterThan(600);
+    137|     const violations: string[] = [];
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  __tests__/display-speech.test.ts > local Arabic device voices > removes tatweel inside a name without splitting its letters
+AssertionError: expected 'أح مد' to be 'أحمد' // Object.is equality
+
+Expected: "أحمد"
+Received: "أح مد"
+
+ ❯ __tests__/display-speech.test.ts:19:112
+     17|   });
+     18|   it("preserves Arabic letters/diacritics, conservatively removes cont…
+     19|   it("removes tatweel inside a name without splitting its letters", ()…
+       |                                                                                                                ^
+     20|   it("separates the public name from the destination, with Arabic digi…
+     21|     expect(displayCallPhrases(" أحمد ", 12)).toEqual(["أحمد", "يرجى ال…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  __tests__/layout-clinic-timezone.test.ts > passes the canonical resolved server zone through the existing root layout
+Error: `headers` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+ ❯ throwForMissingRequestStore node_modules/next/src/server/app-render/work-unit-async-storage.external.ts:464:8
+ ❯ callingExpression node_modules/next/src/server/request/headers.ts:157:30
+ ❯ RootLayout app/layout.tsx:64:32
+     62|
+     63| export default async function RootLayout({ children }: { children: Rea…
+     64|   const publicDisplay = (await headers()).get("x-aqlan-public-display"…
+       |                                ^
+     65|   /* قاعدة اختيار واحدة: كوكي موحّدة تُقبل بإثبات القاعدة الحالي ولا ت…
+     66|      القديم؛ غيرها يبقى على requireSession كما كان. */
+ ❯ __tests__/layout-clinic-timezone.test.ts:22:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  scripts/audits/staff-cutover-readiness.test.mjs > checked-in exhaustive source inventory has no drift or API export mismatch
+AssertionError: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    baseCommit: '74b82cea27d407626fb3c5e691bf68e6defb4598',
+    canonicalDirectReferences: [],
+    formatVersion: 2,
+    layouts: [
+...
+          {
++           line: 9,
+-           line: 8,
+            symbol: 'requireSession'
+          },
+          {
++           line: 66,
+-           line: 64,
+            symbol: 'requireSession'
+          },
+          {
++           line: 72,
+-           line: 70,
+            symbol: 'requireSession'
+          },
+          {
++           line: 5,
+-           line: 4,
+            symbol: 'findUserByUsername'
+          },
+          {
++           line: 78,
+-           line: 76,
+            symbol: 'findUserByUsername'
+          }
+        ],
+        file: 'app/layout.tsx'
+      },
+...
+          {
++           line: 44,
+-           line: 20,
+            symbol: 'requireSession'
+          },
+          {
++           line: 80,
+-           line: 50,
+            symbol: 'requireSession'
+          }
+        ],
+        file: 'app/api/display/notice/route.ts'
+      },
+...
+          {
++           line: 9,
+-           line: 8,
+            symbol: 'requireSession'
+          },
+          {
++           line: 66,
+-           line: 64,
+            symbol: 'requireSession'
+          },
+          {
++           line: 72,
+-           line: 70,
+            symbol: 'requireSession'
+          },
+          {
++           line: 5,
+-           line: 4,
+            symbol: 'findUserByUsername'
+          },
+          {
++           line: 78,
+-           line: 76,
+            symbol: 'findUserByUsername'
+          }
+        ],
+        file: 'app/layout.tsx'
+      },
+...
+          {
++           line: 44,
+-           line: 20,
+            symbol: 'requireSession'
+          },
+          {
++           line: 80,
+-           line: 50,
+            symbol: 'requireSession'
+          }
+        ],
+        file: 'app/api/display/notice/route.ts',
+        httpAccess: [
+...
+          {
++           line: 44,
+-           line: 20,
+            symbol: 'requireSession'
+          },
+          {
++           line: 80,
+-           line: 50,
+            symbol: 'requireSession'
+          }
+        ],
+        file: 'app/api/display/notice/route.ts',
+        httpAccess: [
+...
+    scope: 'All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.',
++   sourceDigest: '9bad0b09fd696ab9aff74fdfd017fba50bb6218b8df54059982e210e96e9ccae',
+-   sourceDigest: 'e5c92a0f6d1a74d4c2b890a8d1aceb329ef2ab7fa6d2ca9bf097f5b9a9ff9551',
+    sourceEntries: [
+      'app/account/page.tsx',
+      'app/api/accounting/route.ts',
+      'app/api/ai/chat/route.ts',
+      'app/api/ai/confirmation/route.ts',
+
+
+- Expected
++ Received
+
+@@ -20,27 +20,27 @@
+        "file": "app/finance/layout.tsx",
+      },
+      {
+        "directHelperEvidence": [
+          {
+-           "line": 8,
++           "line": 9,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 64,
++           "line": 66,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 70,
++           "line": 72,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 4,
++           "line": 5,
+            "symbol": "findUserByUsername",
+          },
+          {
+-           "line": 76,
++           "line": 78,
+            "symbol": "findUserByUsername",
+          },
+        ],
+        "file": "app/layout.tsx",
+      },
+@@ -454,15 +454,15 @@
+          {
+            "line": 5,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 20,
++           "line": 44,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 50,
++           "line": 80,
+            "symbol": "requireSession",
+          },
+        ],
+        "file": "app/api/display/notice/route.ts",
+      },
+@@ -3736,27 +3736,27 @@
+        "file": "app/ceph/compare/page.tsx",
+      },
+      {
+        "evidence": [
+          {
+-           "line": 8,
++           "line": 9,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 64,
++           "line": 66,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 70,
++           "line": 72,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 4,
++           "line": 5,
+            "symbol": "findUserByUsername",
+          },
+          {
+-           "line": 76,
++           "line": 78,
+            "symbol": "findUserByUsername",
+          },
+        ],
+        "file": "app/layout.tsx",
+      },
+@@ -6026,15 +6026,15 @@
+          {
+            "line": 5,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 20,
++           "line": 44,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 50,
++           "line": 80,
+            "symbol": "requireSession",
+          },
+        ],
+        "file": "app/api/display/notice/route.ts",
+        "httpAccess": [
+@@ -6054,15 +6054,15 @@
+          {
+            "line": 5,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 20,
++           "line": 44,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 50,
++           "line": 80,
+            "symbol": "requireSession",
+          },
+        ],
+        "file": "app/api/display/notice/route.ts",
+        "httpAccess": [
+@@ -15845,11 +15845,11 @@
+      "appointments.schedule.manage",
+      "finance.shifts.view",
+      "finance.shifts.operate",
+    ],
+    "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
+-   "sourceDigest": "e5c92a0f6d1a74d4c2b890a8d1aceb329ef2ab7fa6d2ca9bf097f5b9a9ff9551",
++   "sourceDigest": "9bad0b09fd696ab9aff74fdfd017fba50bb6218b8df54059982e210e96e9ccae",
+    "sourceEntries": [
+      "app/account/page.tsx",
+      "app/api/accounting/route.ts",
+      "app/api/ai/chat/route.ts",
+      "app/api/ai/confirmation/route.ts",
+
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs:7:9
+      5| const report=buildInventory();
+      6| test('checked-in exhaustive source inventory has no drift or API expor…
+      7|  assert.deepEqual(report,JSON.parse(readFileSync(new URL('../../docs/s…
+       |         ^
+      8|  assert.deepEqual(report.matrixExportMismatches,[]);
+      9|  assert.equal(new Set(report.routes.map(r=>`${r.method} ${r.route}`)).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  scripts/audits/staff-cutover-readiness.test.mjs > CLI drift success and explicit NOT_READY failure are intentional, not exceptions
+AssertionError: Inventory drift: regenerate and review with --write.
+
+
+1 !== 0
+
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ scripts/audits/staff-cutover-readiness.test.mjs:87:10
+     85|  for(const [args,status] of [[[],0],[['--require-ready'],1]]) {
+     86|   const result=spawnSync(process.execPath,[fileURLToPath(script),...ar…
+     87|   assert.equal(result.status,status,result.stderr);
+       |          ^
+     88|   assert.equal(result.stderr,'');
+     89|   assert.equal(JSON.parse(result.stdout).readiness,'NOT_READY');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  4 failed | 794 passed (798)
+      Tests  5 failed | 13392 passed (13397)
+   Start at  18:48:01
+   Duration  496.24s (transform 24.14s, setup 0ms, import 108.13s, tests 273.40s, environment 80ms)

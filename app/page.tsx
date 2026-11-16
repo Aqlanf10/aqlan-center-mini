@@ -1,5 +1,8 @@
 "use client";
 
+import { useReturnBookingContext } from "@/components/useReturnBookingContext";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   calledVisits,
@@ -90,6 +93,7 @@ const LEVEL_BADGE: Record<WaitLevel, string> = {
 };
 
 export default function FlowBoard() {
+
   const session = useSession();
   const admin = isAdmin(session?.role);
   const CHAIR_COUNT = useChairCount();
@@ -123,6 +127,8 @@ export default function FlowBoard() {
   const [nextTime, setNextTime] = useState("10:00");
   const [nextDuration, setNextDuration] = useState(30);
   const [nextPhone, setNextPhone] = useState("");
+  const returnContext = useReturnBookingContext({ patientId: justFinished?.patientId, source: justFinished ? { kind: "visit", id: justFinished.id } : null, enabled: !!justFinished, locked: busy });
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([justFinished?.id, nextDate, nextTime, nextDuration, nextPhone, returnContext.fingerprint]));
   const [nextBooked, setNextBooked] = useState<{ link: string | null; whenText: string } | null>(null);
   /*
    * التنبيهات الصوتية للعيادة — نغمات مولّدة عبر Web Audio API بلا ملفات صوت.
@@ -481,19 +487,20 @@ export default function FlowBoard() {
   }, [act]);
 
   const bookNextSession = useCallback(async () => {
-    if (!justFinished || inFlight.current) return;
+    if (!justFinished || inFlight.current || !returnContext.ready || !returnContext.isCurrent()) return;
     inFlight.current = true;
     setBusy(true);
     try {
-      const response = await fetch(`/api/visits/${justFinished.id}/next`, {
+      const response = await bookingFetch(`/api/visits/${justFinished.id}/next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          date: nextDate, time: nextTime, durationMinutes: nextDuration, phone: nextPhone,
+          date: nextDate, time: nextTime, durationMinutes: nextDuration, phone: nextPhone, ...returnContext.intrinsicPayload,
         }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
+        returnContext.handleRejection(payload);
         setError([payload?.message, payload?.suggestionMessage].filter(Boolean).join(" ") || "تعذّر الحجز.");
         if (typeof payload?.suggestion === "string") setNextTime(payload.suggestion);
         return;
@@ -506,7 +513,7 @@ export default function FlowBoard() {
         clinicName: CLINIC_NAME,
         clinicPhone,
       });
-      setNextBooked({ whenText, link: number ? `https://wa.me/${number}?text=${encodeURIComponent(text)}` : null });
+      setNextBooked({ whenText: `${whenText}${typeof payload?.doctorName === "string" ? ` — ${payload.doctorName}` : ""}`, link: number ? `https://wa.me/${number}?text=${encodeURIComponent(text)}` : null });
       setJustFinished(null);
       setError(null);
     } catch {
@@ -515,10 +522,11 @@ export default function FlowBoard() {
       inFlight.current = false;
       setBusy(false);
     }
-  }, [justFinished, nextDate, nextTime, nextDuration, nextPhone, CLINIC_NAME, clinicPhone]);
+  }, [justFinished, nextDate, nextTime, nextDuration, nextPhone, CLINIC_NAME, clinicPhone, bookingFetch, returnContext]);
 
   return (
     <main className="mx-auto max-w-5xl p-4 pb-24">
+      {nearbyBookingDialog}
       {/*
         العنوان سطرًا والروابط سطرًا تحته.
         كانت الروابط بجانب العنوان، فلمّا صارت أربعة انكسر اسم المركز إلى أربعة أسطر
@@ -838,6 +846,7 @@ export default function FlowBoard() {
       {justFinished ? (
         <section className="mb-5 rounded-2xl border-2 border-brand-blue bg-white p-4" aria-label="الجلسة القادمة">
           <h2 className="text-sm font-bold">الجلسة القادمة لـ {justFinished.patientName}</h2>
+          {returnContext.view}
           <div className="mt-3 flex flex-wrap gap-1.5">
             {FOLLOW_UP_WEEKS.map((option) => {
               const candidate = sessionAfterWeeks(localToday(), option.weeks);
@@ -906,7 +915,7 @@ export default function FlowBoard() {
           <div className="mt-3 flex gap-2">
             <button
               onClick={bookNextSession}
-              disabled={busy || !nextDate}
+              disabled={busy || !returnContext.ready || !nextDate}
               className="flex-1 rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
             >
               احجز الجلسة القادمة

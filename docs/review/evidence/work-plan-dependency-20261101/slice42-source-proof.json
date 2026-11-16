@@ -1,0 +1,20 @@
+{
+  "baseRevision": "b21b151c504128f853f58059ddd3cf689e7f125b",
+  "checks": {
+    "db_prefix_including_legacy_add_and_case_writers_unchanged": true,
+    "db_suffix_and_financial_engines_unchanged": true,
+    "delete_body_and_atomic_audit_preserved": true,
+    "legacy_POST_tail_identical": true,
+    "legacy_DELETE_tail_identical": true,
+    "lib/cases.ts": true,
+    "lib/commission.ts": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/canonical-plan-case-command.ts": true,
+    "components/patient/CanonicalPlanCaseEditor.tsx": true,
+    "components/PatientCases.tsx": true,
+    "app/api/plan-items/[id]/case/route.ts": true,
+    "no_migration_changes": true
+  },
+  "passed": 13,
+  "historicalSourceHashes": 472
+}

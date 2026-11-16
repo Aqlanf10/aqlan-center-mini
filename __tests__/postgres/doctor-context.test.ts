@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+let responsibilityFixtureSequence = 0;
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
@@ -42,7 +44,7 @@ describe("(P0-E) the doctor opens today's visit with context", () => {
                arrived_at = '2026-09-14 21:30:00+00', signed_at = '2026-09-14 22:00:00+00', status = 'done' WHERE id = $1`, [previous.id]);
 
     const specialty = SPECIALTIES.includes("endodontics") ? "endodontics" : SPECIALTIES[0];
-    const created = await createClinicalCase({
+    const created = await createClinicalCase({ admittedSession: await responsibilityAdminFixture("doctor-context-responsibility-" + (++responsibilityFixtureSequence)),
       patientId, specialty, title: "علاج عصب 36", site: "36", problem: "ألم ليلي", responsiblePartyId: doctorId,
       orthoCaseId: null, actor: "doctor",
     });

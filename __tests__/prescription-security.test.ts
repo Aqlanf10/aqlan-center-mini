@@ -867,7 +867,7 @@ describe("owner-only cross-clinician issuance", () => {
   });
   function owner() {
     const context = ownerContextFromTrustedBinding({ ownerUserId: 2, bindingVersion: "synthetic-v1" });
-    const access = resolveStaffCapabilities({ subject: { userId: 2, role: "admin", isActive: true, clinicianPartyId: 5 }, permissionDocument: { schemaVersion: 1, revision: 1, patientScope: "all", appointmentScope: "all", grants: {} } }, context);
+    const access = resolveStaffCapabilities({ subject: { userId: 2, role: "admin", isActive: true, clinicianPartyId: 5 }, permissionDocument: { schemaVersion: 2, revision: 1, confirmation: "owner", patientScope: "all", appointmentScope: "all", grants: {} } }, context);
     mocks.ownerAuthority.mockResolvedValue({ access, bindingVersion: "synthetic-v1" });
     mocks.requireSession.mockResolvedValue({ userId: 2, username: "owner-synthetic", role: "admin" });
     mocks.findUserByUsername.mockResolvedValue({ id: 2, username: "owner-synthetic", role: "admin", isActive: true, partyId: 5 });

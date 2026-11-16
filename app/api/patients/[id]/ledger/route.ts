@@ -3,22 +3,29 @@ import {
   getSettings, listPatientPlans, patientLedger, patientReceiptRemainders, patientReversedInstallmentRecoveries,
 } from "@/lib/db";
 import { openingBalanceAccess } from "@/lib/opening-access";
-import { planLedgerSummary } from "@/lib/plans";
-import {
-  CLINIC_BASE_CURRENCY, patientBalancesByCurrency, toCurrencyPaymentLikes,
-} from "@/lib/money";
+import { buildPatientLedgerPayload } from "@/lib/patient-ledger-payload";
 import { canViewMoney } from "@/lib/roles";
-import { CLINIC_TIME_ZONE, openingMinorsOf } from "@/lib/db";
+import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { listLegacyBalanceArrangements, listLegacyOpeningPositions } from "@/lib/legacy-balance-arrangements-db";
 import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalPatientLedger } from "@/lib/canonical-patient-account";
 
 export const dynamic = "force-dynamic";
 
 /** حساب المريض: فواتيره ودفعاته ورصيده — الرقم الذي يُسأل عنه على الباب. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 88: finance.patient-ledger.view inside the patient scope; the same body, grants for the controls.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalPatientLedger(selected.handle, Number((await context.params).id)), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل حساب المريض."); }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -59,47 +66,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       listLegacyOpeningPositions(id),
       patientReversedInstallmentRecoveries(id),
     ]);
-    /* (TD-05) أرصدة بعملاتها المستقلة: كل عملة اتفاقٍ بدلوها، والدفعات تسوّي
-       دلو فاتورتها إن رُبطت به، ودلو خطتها إن قُيّدت عليها (المقدَّمة قبل
-       الفوترة)، وإلا دلو الأساس — لا رقمٌ واحد يمزج العملات. */
-    const balances = patientBalancesByCurrency(
-      invoices.map((invoice) => ({
-        totalMinor: invoice.totalMinor,
-        discountMinor: invoice.discountMinor,
-        status: invoice.status,
-        baseCurrency: invoice.baseCurrency,
-      })),
-      toCurrencyPaymentLikes(
-        id,
-        payments.map((payment) => ({
-          settlementAllocation: payment.settlementAllocation,
-        amountMinor: payment.amountMinor,
-          currency: payment.currency,
-          exchangeRate: payment.exchangeRate,
-          baseAmountMinor: payment.baseAmountMinor,
-          kind: payment.kind,
-          invoiceId: payment.invoiceId,
-          planId: payment.planId,
-          openingCurrency: payment.openingCurrency,
-        })),
-        // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومستندات هذا الحساب من
-        // المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
-        new Map(invoices.map((invoice) => [invoice.id, { patientId: id, currency: invoice.baseCurrency }])),
-        new Map(plans.map((plan) => [plan.id, { patientId: id, currency: plan.baseCurrency }])),
-      ),
-      openingMinorsOf(openings),
-    );
-    // النظرة المفردة القديمة (دلو الأساس) بقيت للتوافق مع من يقرأ حقلًا واحدًا.
-    const balance = balances[CLINIC_BASE_CURRENCY];
+    const money = buildPatientLedgerPayload({ patientId: id, invoices, payments, openings, plans });
     // Display metadata only, after patient authorization and the canonical read.
     const receiptProvenance = await readReceiptProvenance(payments.map((payment) => payment.id));
     return NextResponse.json({
       clinicTimeZone: CLINIC_TIME_ZONE,
-      // (P1-5ب) opening: الرصيد اليمني للتوافق مع القرّاء القدامى؛ openings: كل العملات.
-      invoices, payments, opening: openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null, openings, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
-      // قصص الخطط: الخطة اتفاق لا دَين، لكن الحساب الذي يصمت عن اتفاقٍ قائم
-      // يبدو ملفًّا مفكّكًا — وهذا هو الجسر.
-      plans: plans.map(planLedgerSummary),
+      ...money,
       // (DAY1) من يضيف/يعدّل الرصيد السابق — الشاشة تُظهر ما يُسمح به فقط، والخادم يفرضه.
       ...(receiptRemaining ? { receiptRemaining } : {}),
       receiptProvenance,

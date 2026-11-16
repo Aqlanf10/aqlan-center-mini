@@ -1,0 +1,1453 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-assessment-canonical-command.test.ts (18 tests | 1 failed) 8723ms
+   × imaging and care sources need independent grants, even for an otherwise legitimate editor 517ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-assessment-canonical-command.test.ts > imaging and care sources need independent grants, even for an otherwise legitimate editor
+AssertionError: promise resolved "{ ok: true, …(2) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "ok": true,
++   "replayed": false,
++   "revision": {
++     "clinicalCaseId": 12,
++     "content": {
++       "draft": {
++         "analyses": [
++           {
++             "arch": "upper",
++             "id": "space_upper",
++             "measurementSetId": "current",
++             "method": "arch_space",
++             "state": "draft",
++           },
++           {
++             "arch": "lower",
++             "id": "space_lower",
++             "measurementSetId": "current",
++             "method": "arch_space",
++             "state": "draft",
++           },
++           {
++             "id": "bolton_anterior",
++             "measurementSetId": "current",
++             "method": "bolton_anterior",
++             "state": "draft",
++           },
++           {
++             "id": "bolton_overall",
++             "measurementSetId": "current",
++             "method": "bolton_overall",
++             "state": "draft",
++           },
++         ],
++         "measurementSets": [
++           {
++             "id": "current",
++             "lowerAvailableObservationId": "available_lower",
++             "toothWidthObservationIds": [
++               "width_11",
++               "width_12",
++               "width_13",
++               "width_14",
++               "width_15",
++               "width_16",
++               "width_17",
++               "width_18",
++               "width_21",
++               "width_22",
++               "width_23",
++               "width_24",
++               "width_25",
++               "width_26",
++               "width_27",
++               "width_28",
++               "width_31",
++               "width_32",
++               "width_33",
++               "width_34",
++               "width_35",
++               "width_36",
++               "width_37",
++               "width_38",
++               "width_41",
++               "width_42",
++               "width_43",
++               "width_44",
++               "width_45",
++               "width_46",
++               "width_47",
++               "width_48",
++             ],
++             "upperAvailableObservationId": "available_upper",
++           },
++         ],
++         "observations": {
++           "dentitionObservationId": "dentition",
++           "observations": [
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_11",
++               "label": "FDI 11",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [
++                   {
++                     "id": 1,
++                     "kind": "patient_history",
++                     "version": "sha256:5d1fe5d10d1063beab08aec316d321a2a57a50dde2d09039d38167842a12fff0",
++                   },
++                 ],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 11,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_12",
++               "label": "FDI 12",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 12,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_13",
++               "label": "FDI 13",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 13,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_14",
++               "label": "FDI 14",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 14,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_15",
++               "label": "FDI 15",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 15,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_16",
++               "label": "FDI 16",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 16,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_17",
++               "label": "FDI 17",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 17,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_18",
++               "label": "FDI 18",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 18,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_21",
++               "label": "FDI 21",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 21,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_22",
++               "label": "FDI 22",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 22,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_23",
++               "label": "FDI 23",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 23,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_24",
++               "label": "FDI 24",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 24,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_25",
++               "label": "FDI 25",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 25,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_26",
++               "label": "FDI 26",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 26,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_27",
++               "label": "FDI 27",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 27,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_28",
++               "label": "FDI 28",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 28,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_31",
++               "label": "FDI 31",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 31,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_32",
++               "label": "FDI 32",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 32,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_33",
++               "label": "FDI 33",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 33,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_34",
++               "label": "FDI 34",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 34,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_35",
++               "label": "FDI 35",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 35,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_36",
++               "label": "FDI 36",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 36,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_37",
++               "label": "FDI 37",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 37,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_38",
++               "label": "FDI 38",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 38,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_41",
++               "label": "FDI 41",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 41,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_42",
++               "label": "FDI 42",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 42,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_43",
++               "label": "FDI 43",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 43,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_44",
++               "label": "FDI 44",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 44,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_45",
++               "label": "FDI 45",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 45,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_46",
++               "label": "FDI 46",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 46,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_47",
++               "label": "FDI 47",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 47,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "mesiodistal_width",
++               "definitionVersion": 1,
++               "id": "width_48",
++               "label": "FDI 48",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "tooth",
++                 "tooth": 48,
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 7,
++               },
++             },
++             {
++               "definition": "arch_available_space",
++               "definitionVersion": 1,
++               "id": "available_upper",
++               "label": "upper",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "arch": "upper",
++                 "kind": "arch",
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 70,
++               },
++             },
++             {
++               "definition": "arch_available_space",
++               "definitionVersion": 1,
++               "id": "available_lower",
++               "label": "lower",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "arch": "lower",
++                 "kind": "arch",
++               },
++               "unit": "mm",
++               "value": {
++                 "state": "measured",
++                 "value": 70,
++               },
++             },
++             {
++               "definition": "dentition",
++               "definitionVersion": 1,
++               "id": "dentition",
++               "label": "Dentition",
++               "occurredOn": {
++                 "date": "2026-01-01",
++                 "state": "known",
++               },
++               "provenance": {
++                 "copiedFrom": null,
++                 "method": {
++                   "description": "Synthetic measurement fixture",
++                   "kind": "direct_examination",
++                   "version": 1,
++                 },
++                 "performer": {
++                   "attribution": "Synthetic examiner",
++                   "state": "documented",
++                 },
++                 "sources": [],
++               },
++               "target": {
++                 "kind": "case",
++               },
++               "unit": "qualitative",
++               "value": {
++                 "state": "recorded",
++                 "text": "permanent",
++               },
++             },
++           ],
++           "schemaVersion": 2,
++         },
++         "schemaVersion": 2,
++       },
++       "results": [
++         {
++           "analysisId": "space_upper",
++           "result": {
++             "dependencyObservationIds": [
++               "dentition",
++               "width_15",
++               "width_14",
++               "width_13",
++               "width_12",
++               "width_11",
++               "width_21",
++               "width_22",
++               "width_23",
++               "width_24",
++               "width_25",
++               "available_upper",
++             ],
++             "state": "ready",
++             "witness": {
++               "clinicalApproval": "unapproved",
++               "formula": {
++                 "engineVersion": "ortho-model-2.1.0",
++                 "formulaVersion": "available_minus_required_v2",
++               },
++               "reference": null,
++               "result": {
++                 "arch": "upper",
++                 "availableMinusRequiredMm": 0,
++                 "availableMm": 70,
++                 "method": "arch_space",
++                 "requiredMm": 70,
++                 "state": "calculated",
++               },
++             },
++           },
++           "resultHash": "3228ba0300fe239daf89ebed2373c2a7f7e982827c73bb56e6f3bad10748e55d",
++         },
++         {
++           "analysisId": "space_lower",
++           "result": {
++             "dependencyObservationIds": [
++               "dentition",
++               "width_45",
++               "width_44",
++               "width_43",
++               "width_42",
++               "width_41",
++               "width_31",
++               "width_32",
++               "width_33",
++               "width_34",
++               "width_35",
++               "available_lower",
++             ],
++             "state": "ready",
++             "witness": {
++               "clinicalApproval": "unapproved",
++               "formula": {
++                 "engineVersion": "ortho-model-2.1.0",
++                 "formulaVersion": "available_minus_required_v2",
++               },
++               "reference": null,
++               "result": {
++                 "arch": "lower",
++                 "availableMinusRequiredMm": 0,
++                 "availableMm": 70,
++                 "method": "arch_space",
++                 "requiredMm": 70,
++                 "state": "calculated",
++               },
++             },
++           },
++           "resultHash": "00d8e54726a7aa3b9bcc14b92f4dcd17e70dafeec48887190c021ef1c3a8ef8c",
++         },
++         {
++           "analysisId": "bolton_anterior",
++           "result": {
++             "dependencyObservationIds": [
++               "dentition",
++               "width_13",
++               "width_12",
++               "width_11",
++               "width_21",
++               "width_22",
++               "width_23",
++               "width_43",
++               "width_42",
++               "width_41",
++               "width_31",
++               "width_32",
++               "width_33",
++             ],
++             "state": "ready",
++             "witness": {
++               "clinicalApproval": "unapproved",
++               "formula": {
++                 "engineVersion": "ortho-model-2.1.0",
++                 "formulaVersion": "bolton_lower_over_upper_v1",
++               },
++               "reference": {
++                 "id": "bolton_1962_anterior",
++                 "percent": 77.2,
++                 "review": "unapproved",
++                 "source": "Bolton 1962, DOI 10.1016/0002-9416(62)90129-X, pp.506–508,517",
++                 "sourceVerification": "primary_verified",
++                 "version": 1,
++               },
++               "result": {
++                 "lowerMm": 42,
++                 "lowerReference": {
++                   "upperMinusExpectedMm": -12.404145077720209,
++                 },
++                 "method": "bolton_anterior",
++                 "ratioPercent": 100,
++                 "state": "calculated",
++                 "upperMm": 42,
++                 "upperReference": {
++                   "lowerMinusExpectedMm": 9.576,
++                 },
++               },
++             },
++           },
++           "resultHash": "dbee89e32a997f01cb35756d834c2bed17cd2d4ef97f43491d4b216025a4394e",
++         },
++         {
++           "analysisId": "bolton_overall",
++           "result": {
++             "dependencyObservationIds": [
++               "dentition",
++               "width_16",
++               "width_15",
++               "width_14",
++               "width_13",
++               "width_12",
++               "width_11",
++               "width_21",
++               "width_22",
++               "width_23",
++               "width_24",
++               "width_25",
++               "width_26",
++               "width_46",
++               "width_45",
++               "width_44",
++               "width_43",
++               "width_42",
++               "width_41",
++               "width_31",
++               "width_32",
++               "width_33",
++               "width_34",
++               "width_35",
++               "width_36",
++             ],
++             "state": "ready",
++             "witness": {
++               "clinicalApproval": "unapproved",
++               "formula": {
++                 "engineVersion": "ortho-model-2.1.0",
++                 "formulaVersion": "bolton_lower_over_upper_v1",
++               },
++               "reference": {
++                 "id": "bolton_1962_overall",
++                 "percent": 91.3,
++                 "review": "unapproved",
++                 "source": "Bolton 1962, DOI 10.1016/0002-9416(62)90129-X, pp.506–508,517",
++                 "sourceVerification": "primary_verified",
++                 "version": 1,
++               },
++               "result": {
++                 "lowerMm": 84,
++                 "lowerReference": {
++                   "upperMinusExpectedMm": -8.004381161007672,
++                 },
++                 "method": "bolton_overall",
++                 "ratioPercent": 100,
++                 "state": "calculated",
++                 "upperMm": 84,
++                 "upperReference": {
++                   "lowerMinusExpectedMm": 7.308000000000007,
++                 },
++               },
++             },
++           },
++           "resultHash": "52f4312cac882c845a91c8b277037e8259812959d172783629db4fc5743abc3a",
++         },
++       ],
++       "schemaVersion": 2,
++       "verifierVersion": "ortho-assessment-payload-2.1.0",
++     },
++     "contentHash": "06f2ac8f1ad0b77046350acf1ec72af3fbead93e761437cee3442bea164db8cb",
++     "createdAt": "2026-11-01T13:51:29.222Z",
++     "createdBy": "SYN-OAW-IMAGING",
++     "id": 8,
++     "orthoCaseId": 13,
++     "patientId": 13,
++     "reason": "Synthetic initial measurements",
++     "recordedPatientId": 13,
++     "recordingContext": "current",
++     "schemaVersion": 2,
++     "supersedesRevisionId": null,
++     "version": 1,
++   },
+  }
+
+ ❯ __tests__/postgres/ortho-assessment-canonical-command.test.ts:79:46
+     77|   const current=await sources.readAssessmentExternalSourcesWith(fx.poo…
+     78|   const careInput=command();careInput.content.observations.observation…
+     79|   await expect(run("imaging",care,careInput)).rejects.toMatchObject({s…
+       |                                              ^
+     80| });
+     81| it("a cleared new draft cannot discard a restricted historical ancesto…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 67 passed (68)
+   Start at  13:51:12
+   Duration  21.87s (transform 2.59s, setup 0ms, import 3.96s, tests 17.00s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

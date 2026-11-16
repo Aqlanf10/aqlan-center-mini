@@ -1,0 +1,218 @@
+{
+  "schema": 1,
+  "syntheticOnly": true,
+  "preparedAtUtc": "2026-10-30T22:27:45.133239+00:00",
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "branch": "feat/work-recovery-followup-20261027",
+  "baseCommit": "bc4397460efdc10f00b6efe98230100425d6ec43",
+  "readiness": "NOT_READY",
+  "inventorySourceDigest": "53f2ff1f7198aa64b13a1ca012f3a222f4206c228752957867eca111c6556285",
+  "mapCounts": {
+    "total": 383,
+    "canonical-done": 48,
+    "entry": 4,
+    "excluded": 12,
+    "existing": 296,
+    "owner-only": 20,
+    "self": 3
+  },
+  "inventoryCounts": {
+    "routeMethods": 416,
+    "pages": 97
+  },
+  "environment": {
+    "node": "22.23.3",
+    "postgres": "18.4",
+    "browser": "system Chromium 151.0.7922.173",
+    "database": "owned loopback synthetic databases only"
+  },
+  "results": {
+    "postgres": {
+      "passed": 73,
+      "files": 4,
+      "exit": 0,
+      "newTests": 25
+    },
+    "httpBrowser": {
+      "passed": 25,
+      "files": 2,
+      "exit": 0,
+      "newTests": 9,
+      "ddlStatements": 0
+    },
+    "unitAll": {
+      "passed": 13398,
+      "files": 798,
+      "exit": 0
+    },
+    "unitFocused": {
+      "passed": 72,
+      "files": 3,
+      "exit": 0
+    },
+    "mapGuards": {
+      "passed": 10,
+      "files": 2,
+      "exit": 0
+    },
+    "buildExit": 0,
+    "typecheckExit": 0,
+    "eslintAllExit": 0,
+    "eslintExistingWarnings": 209,
+    "eslintFocusedWarnings": 0,
+    "moneyGuardExit": 0,
+    "bodyGuardExit": 0,
+    "inventoryVerifyExit": 0
+  },
+  "expectedRedEvidence": {
+    "file": "baseline-http.log",
+    "stage": "built accepted base",
+    "assertion": "authorized canonical account: file GET 200, ortho GET 401 instead of 200"
+  },
+  "receiptSourceUnchanged": {
+    "lib/receipt-provenance-db.ts": "88d5a290b4297d803240c1e060cad8e9a3b7dd3bac1a5e6d078d0612dc1f5c10",
+    "lib/receipt-provenance.ts": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b"
+  },
+  "limits": [
+    "This slice admits one GET summary only, not the complete ortho record or the follow-up board.",
+    "Full PostgreSQL and HTTP suites left to final-head CI.",
+    "No writes or durable idempotency receipt added. Slice28 storage/retry limits remain.",
+    "Actual waiting-room audio quality from slice27 is still unverified."
+  ],
+  "finalHeadCI": "must be checked after push; final delivery records exact head, run and terminal status",
+  "sources": [
+    {
+      "path": "app/api/ortho/route.ts",
+      "sha256": "d34c867b5a810d0f23c5cf599f775c7fd58bb4a34bd845f6bc3f7826e3a03f1b"
+    },
+    {
+      "path": "components/patient/CanonicalPatientProfile.tsx",
+      "sha256": "874a30f4b02c01dcb315c6d936ffe5827ab51c68e100e24c9fa21755e751861d"
+    },
+    {
+      "path": "components/patient/CanonicalOrthoCases.tsx",
+      "sha256": "a17fbeaedb441abb8164b95caec9824c03cddb1ab9dd7f20afaa87993db22959"
+    },
+    {
+      "path": "lib/db.ts",
+      "sha256": "f028ecf47b9467d222ee1c6c231f1b4eb2b5dd83bcfc66c4dd6b5d55a6af856c"
+    },
+    {
+      "path": "lib/ortho.ts",
+      "sha256": "1eae8b91d95090f39436442e1d71002095a426e0acb91abd2dea3437c48c225e"
+    },
+    {
+      "path": "lib/canonical-record-reads.ts",
+      "sha256": "4f0f00ac40496476b50fa3b6dd94383553a193f92ab182efd1b31108143566c8"
+    },
+    {
+      "path": "lib/canonical-ortho-reads.ts",
+      "sha256": "d543be937fe4b20765336d0af0be93d3d9ae5073ce446fad86c44fc5e6a64b6b"
+    },
+    {
+      "path": "__tests__/postgres/ortho-canonical-cases.test.ts",
+      "sha256": "c7037a9cc265f4679b4f97d1265796234b2607e6498c096fa1f7497a75c762dd"
+    },
+    {
+      "path": "__tests__/security-http/canonical-ortho-cases-journey.test.ts",
+      "sha256": "2d32128f29a58bb201d1ca781094f1aa2ad34357dfdadacbafe4bfd450643db3"
+    },
+    {
+      "path": "docs/security/staff-cutover/HANDOFF.md",
+      "sha256": "cf05bef9d182407465e64ee95a50141df22e8d9621de902b08c9ad51229ae00c"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "e21c843a7de7cd72df16ce00c31812b59eb81f511e919f6431002cd9ad56468e"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md",
+      "sha256": "3a4877ecca2c47e5b2571a2cd66dbc843d1c37a177e5023d8d80dd2362092991"
+    },
+    {
+      "path": "docs/security/staff-cutover/inventory.json",
+      "sha256": "d257a3fc9e67c1c65a83ff1c4bd1b6dcc7258db6ed2d7bb50f7cdec7ac4db16b"
+    },
+    {
+      "path": "docs/review/work-ortho-cases-slice29-20261030.md",
+      "sha256": "d2cf6f5c87d04b21bbb7f9d9308674ad74dc7fe7afc4a18b1d0cd65feb63aba1"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "baseline-http.log",
+      "sha256": "439a78a6253031bb9c18a0ec468da40136e6a1aafaa697b4d111cc4e38142d0c",
+      "bytes": 1640
+    },
+    {
+      "path": "postgres-final.log",
+      "sha256": "4ced24484b948a8707223f65afabe9564474f939a8f9d74724fc9116b978046e",
+      "bytes": 541
+    },
+    {
+      "path": "http-verified.log",
+      "sha256": "4b446fc18c48d31822cd77a05f667e37343b764e507be06b0780db6bf2784fb8",
+      "bytes": 629
+    },
+    {
+      "path": "unit-all-verified.log",
+      "sha256": "d87dde8a41cda7055f73cbafacc90f295141f77da538e93fa5b03e1de8fb45db",
+      "bytes": 569
+    },
+    {
+      "path": "unit-focused-initial.log",
+      "sha256": "d1130e682a5308f63f8c60caddad507231a3fb70cb2de5f26f10e9e98e544f86",
+      "bytes": 430
+    },
+    {
+      "path": "map-guards.log",
+      "sha256": "d2b69ff48fd4f54c1f83b567c40f1d525fb2a91e99980101e4cfb7a7469f8a21",
+      "bytes": 430
+    },
+    {
+      "path": "typecheck-verified.log",
+      "sha256": "45342ca54fc3787657ce6eb4dbe6d4510cbf68d24318d44416c0176ab31ebf4b",
+      "bytes": 208
+    },
+    {
+      "path": "lint-all.log",
+      "sha256": "5839fac45ad2badba08e25a850f2d15938dd6e63de2cf144b0d217754f36b5a0",
+      "bytes": 58889
+    },
+    {
+      "path": "lint-focused-final.log",
+      "sha256": "45342ca54fc3787657ce6eb4dbe6d4510cbf68d24318d44416c0176ab31ebf4b",
+      "bytes": 208
+    },
+    {
+      "path": "build-verified.log",
+      "sha256": "dd1299c19a0661ab60789d12f8b69160e449cae8bf262f91419884be84ec52d7",
+      "bytes": 13584
+    },
+    {
+      "path": "money-guard.log",
+      "sha256": "22f23b17dc7db132f17b8f5c1660da5cf0dd509c6b30e14079250c01f50aba49",
+      "bytes": 1843
+    },
+    {
+      "path": "body-guard.log",
+      "sha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "bytes": 197
+    },
+    {
+      "path": "inventory-verify.log",
+      "sha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "bytes": 329
+    },
+    {
+      "path": "ortho-cases-390.png",
+      "sha256": "19a80c969ff71ba736f60f62ff1b9431160ff08927165feafcd60bc7bd58f76c",
+      "bytes": 94783
+    },
+    {
+      "path": "base-ci.json",
+      "sha256": "043b56e796d12e9dc1ab4a331ee283d0087ea97d4b9ab254b564c242ddd96fe2",
+      "bytes": 212
+    }
+  ]
+}

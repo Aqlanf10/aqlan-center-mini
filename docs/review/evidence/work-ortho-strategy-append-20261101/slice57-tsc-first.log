@@ -1,0 +1,7 @@
+lib/canonical-ortho-strategy-command.ts(15,33): error TS2339: Property 'value' does not exist on type 'Checked<StrategyCommand>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; message: string; }'.
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

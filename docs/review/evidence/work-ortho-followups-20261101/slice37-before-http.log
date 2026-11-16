@@ -1,0 +1,44 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/canonical-ortho-followups-journey.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-followups-journey.test.ts (1 test | 1 failed) 4928ms
+   × HTTP: a canonical ortho reader can read clinical follow-up without inheriting appointment access 259ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-followups-journey.test.ts > HTTP: a canonical ortho reader can read clinical follow-up without inheriting appointment access
+AssertionError: expected 401 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 401
+
+ ❯ __tests__/security-http/canonical-ortho-followups-journey.test.ts:20:27
+     18|   const session = await journey.login("own"); expect(session.status).t…
+     19|   const response = await journey.api("/api/ortho/followups", session.c…
+     20|   expect(response.status).toBe(200);
+       |                           ^
+     21|   const body = await response.json();
+     22|   expect(body).toMatchObject({ projection: "ortho-followups", appointm…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  02:21:10
+   Duration  9.60s (transform 173ms, setup 0ms, import 678ms, tests 4.93s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

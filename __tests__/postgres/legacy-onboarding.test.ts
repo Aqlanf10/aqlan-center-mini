@@ -48,13 +48,13 @@ describe("(P1-A) legacy ortho onboarding checklist on PG18", () => {
     expect(await patientLegacyOnboarding(await patient("ONB-0"))).toBeNull();
   });
 
-  it("opening_balance: missing balance → incomplete/OUTSIDE_CONTRACT; recorded → complete/LEGACY_INCLUDED; arrangement → done", async () => {
+  it("opening_balance: missing balance → incomplete/REVIEW_REQUIRED; recorded → complete/LEGACY_INCLUDED; arrangement → done", async () => {
     const patientId = await patient("ONB-1");
     const caseId = await legacyCase(patientId, "opening_balance");
     const before = await counts();
     const missing = await patientLegacyOnboarding(patientId);
     expect(await counts()).toEqual(before);
-    expect(missing).toMatchObject({ caseId, legacy: true, complete: false, adjustmentClass: "OUTSIDE_CONTRACT" });
+    expect(missing).toMatchObject({ caseId, legacy: true, complete: false, adjustmentClass: "REVIEW_REQUIRED" });
     expect(missing?.warning).not.toBeNull();
 
     await setPatientOpeningBalance({
@@ -80,7 +80,7 @@ describe("(P1-A) legacy ortho onboarding checklist on PG18", () => {
     const planId = (await q<{ id: number }>(
       `INSERT INTO treatment_plans (patient_id, title, total_minor) VALUES ($1, 'تقويم سابق', 600000) RETURNING id`, [patientId]))[0].id;
     await legacyCase(patientId, "installments", planId);
-    expect(await patientLegacyOnboarding(patientId)).toMatchObject({ complete: false, adjustmentClass: "OUTSIDE_CONTRACT" });
+    expect(await patientLegacyOnboarding(patientId)).toMatchObject({ complete: false, adjustmentClass: "REVIEW_REQUIRED" });
     await q(`INSERT INTO plan_installments (plan_id, number, due_date, amount_minor) VALUES ($1, 1, $2::date, 100000)`, [planId, today]);
     expect(await patientLegacyOnboarding(patientId)).toMatchObject({ complete: true, adjustmentClass: "INCLUDED", warning: null });
   });

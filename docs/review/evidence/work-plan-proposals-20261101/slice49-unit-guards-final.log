@@ -1,0 +1,34 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ scripts/audits/m2-route-capability-map.test.mjs (4 tests | 1 failed) 33ms
+   × role-dependent reads are inventoried, and no GET route is migrated without a declared projection 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/audits/m2-route-capability-map.test.mjs > role-dependent reads are inventoried, and no GET route is migrated without a declared projection
+AssertionError: GET /api/plans/proposals is canonical-done but declares no projection for its legacy signals
+
+simple
+
+ ❯ scripts/audits/m2-route-capability-map.test.mjs:66:12
+     64|   assert.deepEqual(projectionInventory(map), checkedIn, "projection in…
+     65|   for (const entry of map.filter(e => e.method === "GET" && e.status =…
+     66|     assert.ok(entry.projection, `${key(entry)} is canonical-done but d…
+       |            ^
+     67|   }
+     68|   const documents = map.find(e => key(e) === "GET /api/patients/[id]/d…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 28 passed (29)
+   Start at  10:12:20
+   Duration  10.01s (transform 2.02s, setup 0ms, import 4.60s, tests 4.68s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

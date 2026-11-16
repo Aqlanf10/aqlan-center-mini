@@ -1,7 +1,12 @@
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { CanonicalNextSessionRefusal, commandCanonicalNextSession } from "@/lib/canonical-next-session";
+import { readReturnBookingContext } from "@/lib/return-booking-context";
+import { parseReturnBookingSource } from "@/lib/return-booking-source";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createNextSession, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
+import { createNextSession, prepareNextSessionPatient, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
 import type { CapacityVerdict } from "@/lib/capacity";
 import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
@@ -21,6 +26,22 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  * السعة — يمرّ منه الاثنان.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); }
+    catch (error) { const bounded = bodyErrorResponse(error); if (bounded) { bounded.headers.set("Cache-Control", NO_STORE["Cache-Control"]); return bounded; }
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+    try {
+      const result = await commandCanonicalNextSession(selected.handle, Number((await context.params).id), body);
+      return NextResponse.json(result.ok ? result.value : result.conflict, { status: result.ok ? 201 : 409, headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalNextSessionRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      if ((error as { code?: string }).code === "55P03") return NextResponse.json({ code: "return_booking_source_changed", message: "يجري تحديث ملف المريض أو سياق العودة. حدّث البيانات وأعد المحاولة." }, { status: 409, headers: NO_STORE });
+      return canonicalWaitingFailure(error, "لم يتأكد الحجز. تحقّق من المواعيد قبل أي محاولة جديدة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -79,23 +100,58 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const overrideReason = typeof source.overrideReason === "string"
       ? source.overrideReason.trim().slice(0, 300) : "";
     /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
-    const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
+    const overrideState: { verdict: CapacityVerdict | null; doctorId: number | null; doctorName: string | null; refusal: { status: number; message: string; code?: string } | null } = { verdict: null, doctorId: null, doctorName: null, refusal: null };
     const result = await writeAppointmentInDay({
       date,
       judge: async (sameDay, client) => {
+        // Resolve the actual patient before admission, on the same transaction
+        // that writes the appointment. Walk-ins can match an existing phone.
+        const patientId = await prepareNextSessionPatient(client, { visitId, phone });
+        if (patientId === null) {
+          overrideState.refusal = { status: 404, message: "الزيارة غير موجودة." };
+          return { ok: false as const, conflict: null };
+        }
+        if (!await canAccessPatient(session, patientId, undefined, client, "nowait")) {
+          overrideState.refusal = { status: 403, message: "غير مصرّح لك بجدولة جلسة لهذا المريض." };
+          return { ok: false as const, conflict: null };
+        }
+        if (typeof source.returnBookingFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(source.returnBookingFingerprint)) {
+          overrideState.refusal = { status: 409, code: "return_booking_context_required", message: "تحقّق من سياق العودة والطبيب المسؤول قبل الحجز." };
+          return { ok: false as const, conflict: null };
+        }
+        const origin = { kind: "visit" as const, id: visitId };
+        const selected = source.returnBookingSource === undefined ? origin : parseReturnBookingSource(source.returnBookingSource);
+        if (!selected) {
+          overrideState.refusal = { status: 400, code: "return_booking_source_invalid", message: "اختر الحالة المرتبطة بهذه الزيارة." };
+          return { ok: false as const, conflict: null };
+        }
+        const responsible = await readReturnBookingContext(client, patientId, selected, { lock: true, origin });
+        if (!responsible.ok) {
+          overrideState.refusal = { status: 409, code: responsible.code, message: responsible.message };
+          return { ok: false as const, conflict: null };
+        }
+        if (source.returnBookingFingerprint !== undefined && source.returnBookingFingerprint !== responsible.fingerprint) {
+          overrideState.refusal = { status: 409, code: "return_booking_source_changed", message: "تغيّر الطبيب المسؤول. حدّث اقتراح الحجز وراجعه قبل التأكيد." };
+          return { ok: false as const, conflict: null };
+        }
+        overrideState.doctorId = responsible.doctorId;
+        overrideState.doctorName = responsible.doctorName;
         const judged = await judgeBookingInDay({
           sameDay, client, date, time, durationMinutes, service,
-          context: capacityContext, canOverride, overrideReason,
-          patientId: visit.patientId,
+          context: capacityContext, canOverride, overrideReason, providerId: responsible.doctorId, requireAssignedProvider: true,
+          nearbyAppointmentConfirmation: typeof source.nearbyAppointmentConfirmation === "string" ? source.nearbyAppointmentConfirmation.slice(0, 4096) : null,
+          bookingActor: `${session.userId}:${session.username}`, bookingScope: JSON.stringify({ entry: "next-visit", visitId, phone, note, source: selected, fingerprint: responsible.fingerprint }),
+          patientId,
         });
         if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
         if (judged.overridden) overrideState.verdict = judged.verdict;
         return { ok: true as const };
       },
       commit: (client) =>
-        createNextSession({ visitId, date, time, durationMinutes, phone, note }, client),
+        createNextSession({ visitId, date, time, durationMinutes, phone, note, doctorId: overrideState.doctorId }, client),
     });
     if (!result.ok) {
+      if (overrideState.refusal) return NextResponse.json({ message: overrideState.refusal.message, ...(overrideState.refusal.code ? { code: overrideState.refusal.code } : {}) }, { status: overrideState.refusal.status });
       return NextResponse.json(result.conflict, { status: 409 });
     }
     const created = result.value;
@@ -111,8 +167,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         actorRole: session.role, channel: "visit",
       });
     }
-    return NextResponse.json(created, { status: 201 });
-  } catch {
+    return NextResponse.json({ ...created, doctorId: overrideState.doctorId, doctorName: overrideState.doctorName }, { status: 201 });
+  } catch (error) {
+    if ((error as { code?: string }).code === "55P03") {
+      return NextResponse.json({ code: "return_booking_source_changed", message: "يجري تحديث ملف المريض. أعد المحاولة بعد لحظة." }, { status: 409 });
+    }
     return NextResponse.json({ message: "تعذّر حجز الجلسة. أعد المحاولة." }, { status: 500 });
   }
 }

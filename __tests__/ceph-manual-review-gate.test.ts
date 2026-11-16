@@ -52,7 +52,7 @@ beforeAll(async () => {
   };
   pool = { query, connect: async () => ({ query, release: () => {} }) };
   const output: Record<string, unknown> = {};
-  const dependencies = { ...cephProvenanceDependencies, assessCephCalculationReadiness, ensureSchema: async () => {}, getPool: () => pool, isCephLandmarkCode, MEASUREMENTS, REQUIRED_LANDMARKS, parseCephCompletionSnapshot, sameCephCompletionSnapshot,
+  const dependencies = { ...cephProvenanceDependencies, assessCephCalculationReadiness, ensureSchema: async () => {}, getPool: () => pool, cephWriterClient: () => pool.connect(), /* integration: ceph writers take their client from cephWriterClient (pooled outside a canonical operation) */ isCephLandmarkCode, MEASUREMENTS, REQUIRED_LANDMARKS, parseCephCompletionSnapshot, sameCephCompletionSnapshot,
     describeAudit, sanitizeDetails, currentAuditSource: async () => ({ ip: null, userAgent: null }),
     computeAll: compute, summarize: () => ({ skeletal: "Synthetic summary", vertical: "Synthetic vertical" }),
     recordAudit: (input: unknown) => (output.insertAuditRow as (pool: DbPool, input: unknown) => Promise<void>)(pool, input),

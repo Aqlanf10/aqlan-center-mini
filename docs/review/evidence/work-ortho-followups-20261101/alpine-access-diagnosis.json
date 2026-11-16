@@ -1,0 +1,10 @@
+{
+  "action": "One diagnostic HEAD, authorized by the new parent instruction to verify the access cause; no apk/build retry",
+  "target": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/APKINDEX.tar.gz",
+  "curlDiagnostic": "curl: (56) CONNECT tunnel failed, response 403",
+  "httpStatus": 403,
+  "serverHeader": "envoy",
+  "stage": "CONNECT tunnel rejected by network proxy before TLS to the Alpine repository",
+  "outcome": "denied; no package downloaded and no WORK image built",
+  "nextBoundary": "Requires authorized network access or independently approved build environment; no mirror/proxy/TLS bypass"
+}

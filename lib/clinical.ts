@@ -15,6 +15,8 @@ import type { Currency } from "./money";
 
 /** إجراء منفَّذ في زيارة: خدمةٌ من الدليل، وسنٌّ إن كان الإجراء على سن. */
 export interface VisitProcedureInput {
+  /** Explicit durable laboratory identity; never inferred from a disposable row ID. */
+  labWork?: import("./lab-work-intent-contract").LabWorkDraft | null;
   serviceId: number;
   toothCode: number | null;
   surfaces: string | null;
@@ -68,6 +70,8 @@ export interface ClinicalVisitInput {
 }
 
 export interface ProcedureLine {
+  labWork?: import("./lab-work-intent-contract").LabWorkDraft;
+  labWorkOrderId?: number | null;
   /** رقم سطر الإجراء — هو مصدر الفوترة (`source_id`) في سطر الفاتورة. */
   id: number;
   serviceId: number;

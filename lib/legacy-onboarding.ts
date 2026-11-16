@@ -76,7 +76,7 @@ export function legacyOnboarding(input: {
       done: financialReference.hasRecordedSchedule,
       hint: "اختياري: جدول التحصيل ينظّم سداد الدين القائم ولا ينشئ أصلًا جديدًا أو يحدد شمول الشدّة." });
     return { legacy: true, steps, complete: steps.every((step) => step.optional || step.done), adjustmentClass,
-      financialReference, warning: adjustmentClass === "OUTSIDE_CONTRACT"
+      financialReference, warning: (adjustmentClass === "OUTSIDE_CONTRACT" || adjustmentClass === "REVIEW_REQUIRED")
         ? "مرجع العلاج لا يثبت وحده شمول هذه الشدّة؛ يلزم قرار فوترة موثّق، دون إنشاء فاتورة أو رسوم تلقائيًا." : null };
   }
   if (input.financialMode === "opening_balance") {
@@ -101,7 +101,7 @@ export function legacyOnboarding(input: {
     });
   }
   const complete = steps.every((step) => step.optional || step.done);
-  const warning = adjustmentClass === "OUTSIDE_CONTRACT" && input.financialMode !== "per_session"
+  const warning = (adjustmentClass === "OUTSIDE_CONTRACT" || adjustmentClass === "REVIEW_REQUIRED") && input.financialMode !== "per_session"
     ? "الشدّة اليوم لن تُعدّ مشمولة: أكمل الخطوات الناقصة أعلاه، وإلا احتاجت قرار فوترة منفصلًا."
     : null;
   return { legacy: true, steps, complete, adjustmentClass, warning, financialReference };

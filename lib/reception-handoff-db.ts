@@ -1,4 +1,4 @@
-import { CLINIC_TIME_ZONE, ensureSchema, getPool, insertAuditRow, visitWalkout, type VisitActor, type VisitWalkout } from "./db";
+import { CLINIC_TIME_ZONE, ensureSchema, getPool, insertAuditRow, visitWalkout, type DbClient, type VisitActor, type VisitWalkout } from "./db";
 import { onClinicDaysSql } from "./clinic-day-sql";
 import { clinicDateString } from "./schedule";
 import { canReadReceptionHandoff, isHandoffDate, type ReceptionHandoff } from "./reception-handoff";
@@ -66,7 +66,11 @@ async function toHandoff(row: HandoffRow, walkout?: VisitWalkout | null): Promis
 /** Also serves the exact-visit checkout, including signatures outside today's window. */
 export async function readReceptionHandoff(visitId: number, walkout: VisitWalkout): Promise<ReceptionHandoff | null> {
   await ensureSchema();
-  const { rows: [row] } = await getPool().query<HandoffRow>(
+  return readReceptionHandoffWith(getPool(), visitId, walkout);
+}
+/** The same read on a caller's snapshot (M2 slice 89). */
+export async function readReceptionHandoffWith(q: Pick<DbClient, "query">, visitId: number, walkout: VisitWalkout): Promise<ReceptionHandoff | null> {
+  const { rows: [row] } = await q.query<HandoffRow>(
     `${HANDOFF_SELECT} WHERE v.id = $1 AND v.signed_at IS NOT NULL`, [visitId]);
   // A concurrent change cannot attach a different patient's/signature's decision
   // to a walkout payload already read by the caller.

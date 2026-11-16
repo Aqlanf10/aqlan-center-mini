@@ -54,9 +54,12 @@ describe("built measurement session provenance preview", () => {
     page.on("request", request => { if (!["GET", "HEAD"].includes(request.method())) writes.push(request.url()); });
     try {
       await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=ortho&orthoCaseId=${orthoCaseId}&pillar=diagnostics`);
-      await page.getByRole("button", { name: "إعداد ملف التقويم خطوة بخطوة", exact: true }).click();
-      const step = page.getByLabel("خطوة إعداد ملف التقويم", { exact: true }); await step.selectOption("4");
-      await page.getByRole("button", { name: "فتح التقييم السريري والقياسات", exact: true }).click();
+      // Direct entry (#538/6838132093): open the workspace, then the measurements section, with no forced steps.
+      await page.getByRole("button", { name: "فتح مساحة عمل التقويم", exact: true }).click();
+      const workspace = page.getByRole("region", { name: "مساحة عمل ملف التقويم", exact: true });
+      await workspace.getByRole("navigation", { name: "مجموعات ملف التقويم", exact: true }).getByRole("button", { name: "الفحص والسجلات", exact: true }).click();
+      // A section opens the assessment directly; no extra "open" press (6838132093).
+      await workspace.getByRole("button", { name: "القياسات وتحليل الموديلات", exact: true }).click();
       await page.getByRole("button", { name: "بدء تقييم غير معبأ", exact: true }).click();
       await measurement(page, 11, "7.5", "2026-10-01", "طريقة مصدر اصطناعية", "منفذ مصدر اصطناعي");
       await measurement(page, 12, "8.1", "2026-09-01", "طريقة سابقة اصطناعية", "منفذ سابق اصطناعي");
@@ -99,7 +102,10 @@ describe("built measurement session provenance preview", () => {
         expect(await metadata.getByLabel("وصف طريقة القياس", { exact: true }).inputValue()).toBe(method);
         expect(await metadata.getByLabel("إسناد منفذ الفحص", { exact: true }).inputValue()).toBe(operator);
       }
-      await step.selectOption("1"); await step.selectOption("4");
+      // Leave for the interview section and come back: the unsent draft survives direct navigation.
+      const sections = page.getByRole("region", { name: "مساحة عمل ملف التقويم", exact: true });
+      await sections.getByRole("button", { name: "المقابلة والشكوى", exact: true }).click();
+      await sections.getByRole("button", { name: "القياسات وتحليل الموديلات", exact: true }).click();
       expect(await page.getByLabel("قيمة السن 12 (mm)", { exact: true }).inputValue()).toBe("8.1");
       expect(writes).toEqual([]);
       await page.getByLabel("سبب إنشاء هذه المراجعة", { exact: true }).fill("توثيق اصطناعي بعد مراجعة المصدر والاستبعاد");

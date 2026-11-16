@@ -1,0 +1,125 @@
+{
+  "format": "work-ortho-coverage-editor-v1",
+  "preparedAt": "2026-11-01T18:43:11.453209+00:00",
+  "base": "0f7f3a20bd99390d6ed8971dffd4ebc8afe7d106",
+  "buildId": "BBgs4q_qVgC1JARNDBrfB",
+  "acceptance": {
+    "focusedPG": {
+      "passed": 113,
+      "files": 7,
+      "newEditorCases": 19
+    },
+    "unitGuards": {
+      "passed": 93,
+      "files": 7
+    },
+    "nativeJournalUnit": {
+      "passed": 4,
+      "files": 1
+    },
+    "HTTPChromium": {
+      "passed": 79,
+      "files": 7,
+      "seconds": 356.8
+    },
+    "nativeJournalBrowser": {
+      "passed": 6,
+      "files": 1
+    },
+    "typeBuild": "passed",
+    "targetedLint": "0 errors; 2 pre-existing native-panel effect warnings",
+    "fullUnit": "First14826pass4fail, corrected14829pass1import-guard timeout at6118ms under concurrent load. Full composed run remains pending; unchanged5000ms bound.",
+    "fullPG": {
+      "passed": 5534,
+      "files": 417,
+      "skipped": 0,
+      "seconds": 3118.47
+    },
+    "runtime": "All quality/runtime gates passed on build BBgs4q_qVgC1JARNDBrfB. Tooling time includes intentional pause and is not a benchmark.",
+    "CI": "not published",
+    "independentReview": "pending"
+  },
+  "failuresRetained": [
+    "Actual old context: GET200 but editGET400vs200",
+    "First PG: 18pass1synthetic fixture constraint failure, corrected separate patient; final113 pass",
+    "First HTTP:39pass3fail plus disposed in-flight route; corrected actual response/parent withdrawal waits:42pass on unchanged firstbuild",
+    "Periodic poll lost unsent reason:1target failure on original63build; final actual79 suite passes after in-memory draft owner repair",
+    "Full unit first failed4 clock witness cases that bypassed React dispatcher; test now renders real React while preserving date assertions. Corrected full run failed only import guard bound; not a passing run."
+  ],
+  "limits": [
+    "Not a new financial engine or broader read grant; source editor requires agreement management, invoice view, plan view, ortho view and current patient scope.",
+    "Existing minimal read, POST/PUT durable writers and ten domain files remain byte-exact as source proof records.",
+    "Unsent text survives only the current patient/session component lifetime, not reload. Submitted request recovery retains the existing durable journal; no automatic resend.",
+    "No migration, live state, owner mapping, finance amount or signed history change.",
+    "Inventory NOT_READY; Docker destination denial, schema convergence and broad operational review remain."
+  ],
+  "sourceSha256": {
+    "app/api/ortho/[id]/followup-coverage/route.ts": "5b00fb01da068516e21dabf09010cce0669f1beaeb9769b4009b04c50a4d862a",
+    "lib/canonical-ortho-coverage-editor.ts": "cfb87f84fb1059fb462bf008347b5e3c4fdc275ec06e3cabb4a6d855dddfce79",
+    "lib/canonical-ortho-coverage-editor-projection.ts": "9b66a84991b6e197e2dbbc37d71b915fb3696c8cdf696cc6b2ce8b1d404fa4af",
+    "lib/canonical-ortho-coverage-draft.ts": "7248d25d9a4d3419833bcc836f7f5a001a9f7478b5728dc41641c4da0af29dfa",
+    "components/OrthoFollowupCoveragePanel.tsx": "8dafbb2524adec8b84eb8ac113c4bc06e93c95dadf016e8c106d968ee0b7fa15",
+    "components/patient/CanonicalOrthoCoverage.tsx": "1c3e8331dc97476723baa0fbe9b9fe26c8f468b66ce75bf0690b943492ac526a",
+    "components/patient/CanonicalOrthoDetail.tsx": "61c9eacfa00061d04859da562738fcaf52c8ca82a5a5d911823a0462908f772b",
+    "components/patient/CanonicalOrthoCases.tsx": "778bd4a2bccaee0918c938ecfe64fd06e86d40c1891a53a3d0e414317eee16e0",
+    "__tests__/canonical-ortho-coverage-draft.test.ts": "45cf3fa0bd89dcb55b123772af720e7915774e3f05e48b431b877d2c63fbd37a",
+    "__tests__/canonical-ortho-coverage-editor.test.ts": "873bbe6246115497910f9b52a99fb99984a5686ebca05786ad53f39d6705fc04",
+    "__tests__/ortho-followup-coverage-panel.test.tsx": "37ce43775f533bcedfe08a7cd01efcafb1fcc487813420a6364268d30098079a",
+    "__tests__/postgres/ortho-coverage-canonical-editor.test.ts": "1a0de4fa1bc6a764d0142da499c01346381752da5fc83edb3b5887b4cc450bf6",
+    "__tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts": "afb3300058188c903ebd3394862135c923f89bb4a6da12c8e890810e0c80f9c9"
+  },
+  "diagnosticSanitization": {
+    "slice63-http-first.log": {
+      "reason": "Only synthetic session cookies in diagnostic lines redacted; failure assertions retained",
+      "rawSha256": "927f113032f5c12bf01c2bc92d17137f431a531c903f1eeef9c0eba4a4414d0e"
+    }
+  },
+  "evidenceSha256": {
+    "slice63-type-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice63-design.md": "f145c7db80a2aceb697674f9f502a171ac03176966b625f1414748016545d683",
+    "canonical-strategy-editor-saved-390.png": "4e75d522fb95db5a1e6e465d93ca231fd89556c5b850930fd224a837927eeb8d",
+    "slice63-http-before.log": "c981510945e6bc9cfdecc8508bd150700c3659041f8464afef147981301ca85e",
+    "slice63-draft-lint.log": "3a7b788ce2a0f1c4285399d594e40f779a604139e0807dd8fd2e088874f38bd1",
+    "slice63-build-first.log": "8f3f3e1973f7cd8ef26a4216f180ad18bad376876fe97ebe0e722c46ac1537d8",
+    "slice63-pg-full.log": "008dc98de8d50e18f3bd33cef596e59bc3d9f1d1df7cde2719cfeefd87fb7bec",
+    "slice63-http-corrected.log": "d3c1059d8c54bd8e814689bd032ac58e697e36476d6ce4a6ef4b1b6f517a4ee7",
+    "slice63-product-freeze.json": "602facb9b3fb83bb1a5c6a39a6dcf5e8376c9510bb7c28837f0d89ff45598391",
+    "ortho-lifecycle-390.png": "94164961d343268d7f7d6d30e509603eb807b81648256e7259a5d6540a5f8ae0",
+    "slice63-lint-first.log": "43f1a69a81489794fb7c254473760fdce9961378fa7af57c0f7cef747a64d65d",
+    "slice63-source-proof.json": "34d92a79a15b0801bb94c15d0ccd195ea8a9947e664f5eaceff3dde452356d78",
+    "slice63-product-draft-freeze.json": "3f111c3510ec2b24f343460e9eddc20c01b9c1ddc63b0f45743ab93d45c9764f",
+    "slice63-money-full.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice63-type-expanded.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice63-lint-full.log": "7588524d65771b4e1f1e2f0d6b42011feec79c65d343253aafed2f699019355e",
+    "slice63-clock-renderer-corrected.log": "395c0537a68f5bb890efe949185ec155ce8338c3140aaf53d69d286a5691c7ce",
+    "slice63-inventory-draft.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice63-native-journal-browser.log": "7f6bc835ced40c367435890d57c77be9bdda37d585dc13ea69b7afcdb2c4df9c",
+    "slice63-http-draft.log": "546d960c7450bdd707833d627afb09be1b6aa0dc55201eb3684b4f3fd4e921bc",
+    "slice63-runtime-tooling-full.log": "1dc81cf9a6218da13a595f942022d134c0e30a16a0b67e4ae2971d18714fd096",
+    "slice63-draft-poll-before.log": "1f8ad3109fdbd9fcfb4e558482d42a1ad86e7052376190c0b04bc29a26831d76",
+    "slice63-unit-first.log": "67e7f95f3030d12f003ad1df9c09c0ee952c98e220a0f0e4f3288a52cc2d3c28",
+    "canonical-assessment-empty-saved-390.png": "64ee18ef5a427078827a937ebeb7a744b8407e2d3590b3db9cc6894ef157756b",
+    "slice63-runtime-braces-full.log": "bb36340f4ba89179d6813ef892e312d008a0b4a9b6f089c2f1c26cb37f4d2fb8",
+    "slice63-inventory-first.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice63-draft-type-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice63-unit-guards.log": "75e1223489433276c22667fe3350c39952a903cfef5af998252094e76908a543",
+    "ortho-coverage-390.png": "c00a59687dbe6e32d1f13b06f6e9421dcc598aadbf2c784e83269e96af8ec5b9",
+    "slice63-unit-full.log": "c5cfbf120820de5490e5d52bce614eba1d5a327db1054c1fb7d8e6915e4117c6",
+    "slice63-quality-results.json": "69a17bfd29aef2d4f83b9a63b7ff0e0254c4cb6150c14850cde2becc84bccb3d",
+    "slice63-native-journal-unit.log": "c20eab67e7e973ce6532e06cefe2102e9d971385c879f562af7e592bf5eff94c",
+    "slice63-pg-expanded.log": "7683f887c93ea47327bd91ae21a6566b125e7fb202061049dee6f132511e5985",
+    "ortho-coverage-clinic-midnight-390.png": "c00a59687dbe6e32d1f13b06f6e9421dcc598aadbf2c784e83269e96af8ec5b9",
+    "slice63-before-build-provenance.json": "201790ade6c10766a41c03ec8d9d9674c511cd9fc48fbfc6c6e0a4f65b2bc9c4",
+    "slice63-pg-corrected.log": "30b753c96e84fc053a2d540e03c39c55b4f5831f48d6994334706986513bd744",
+    "slice63-preflight-full.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "canonical-coverage-editor-390.png": "d9906c42dca37f6b845478ff4e39d198002e7f80c28b9ca3af506aab6a5dcc44",
+    "slice63-unit-full-corrected.log": "0bbc3f8e40b6a77a139565e62615c78aa2fc78e2e3a121c54794caaa83c51c92",
+    "slice63-draft-unit-first.log": "bd718dbcd98e77880d9259d6b05d07a1af4d6a526a78113daaa3c04169f17a67",
+    "slice63-pg-first.log": "c797c5d2d9184d795a4cbc9a95130525b027a02a43d1c5f21e38675dc8c09728",
+    "slice63-environment-full.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice63-build-draft.log": "b857394499ac54dc1ed6ad009c7fc76132a603f07cb83659df3ca9342c6e5e1f",
+    "slice63-draft-unit-guards.log": "3169beca323fa9c2d420c8bd46e1a01aaebe6faf6d2b61537f9fd562fdbb41e1",
+    "slice63-http-first.log": "568b8f7f3d47308562b612c7cba86a6fa643d918d94bf03b8691e2bc87ad640d",
+    "slice63-body-full.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796"
+  }
+}

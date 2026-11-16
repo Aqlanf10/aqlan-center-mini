@@ -47,7 +47,7 @@ async function footprint() {
   return state;
 }
 async function checkedRead(status: number) {
-  const before = await footprint(), response = await GET(), payload = await response.json();
+  const before = await footprint(), response = await GET(new Request("http://localhost/api/ortho/followups")), payload = await response.json();
   expect(response.status).toBe(status);
   expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   expect(await footprint()).toEqual(before);

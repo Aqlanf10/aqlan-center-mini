@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  23:27:26
+   Duration  12.48s (transform 272ms, setup 0ms, import 4.25s, tests 7.64s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

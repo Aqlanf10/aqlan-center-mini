@@ -45,7 +45,7 @@ beforeAll(async () => {
   };
   const pool: DbPool = { query, connect: async () => ({ query, release: () => {} }) };
   const dependencies = {
-    ensureSchema: async () => {}, getPool: () => pool, isCephLandmarkCode, describeAudit, sanitizeDetails,
+    ensureSchema: async () => {}, getPool: () => pool, cephWriterClient: () => pool.connect(), /* integration: ceph writers take their client from cephWriterClient (pooled outside a canonical operation) */ isCephLandmarkCode, describeAudit, sanitizeDetails,
     currentAuditSource: async () => ({ ip: null, userAgent: null }),
     recordAudit: async (input: unknown) => (output.insertAuditRow as (executor: DbPool, input: unknown) => Promise<void>)(pool, input),
   };

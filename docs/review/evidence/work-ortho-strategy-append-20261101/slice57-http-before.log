@@ -1,0 +1,40 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+[security-http] الخادم جاهز على http://127.0.0.1:5917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-strategy-command-journey.test.ts (1 test | 1 failed) 5745ms
+   × HTTP: a scoped canonical editor appends a valid native strategy revision and replays only its exact receipt 385ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-strategy-command-journey.test.ts > HTTP: a scoped canonical editor appends a valid native strategy revision and replays only its exact receipt
+AssertionError: expected 401 to be 201 // Object.is equality
+
+- Expected
++ Received
+
+- 201
++ 401
+
+ ❯ __tests__/security-http/canonical-ortho-strategy-command-journey.test.ts:30:27
+     28|     reason: "SYN explicit strategy documentation", rows: [{ problemId,…
+     29|   const response = await journey.api(path, session.cookie, { method: "…
+     30|   expect(response.status).toBe(201);
+       |                           ^
+     31|   const saved = await response.json(); expect(saved).toMatchObject({ o…
+     32|   const replay = await journey.api(path, session.cookie, { method: "PO…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  14:39:37
+   Duration  11.95s (transform 179ms, setup 0ms, import 682ms, tests 5.75s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

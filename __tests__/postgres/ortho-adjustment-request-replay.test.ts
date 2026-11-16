@@ -190,18 +190,25 @@ describe("durable standalone orthodontic adjustment request", () => {
     expect(await db.recordAdjustment(input)).toMatchObject({ ok: true, created: false });
   });
 
-  it("retains exact visit-bound deduplication across separately keyed requests", async () => {
+  // One session per visit is kept. Review #483 6871207083: a separately keyed request is a different
+  // intention, so it is refused with the existing session named and never receives that session's receipt.
+  it("retains one session per visit and refuses a separately keyed request without a receipt", async () => {
     const scope = await fixture();
     const [{ id: visitId }] = await q<{ id: number }>("INSERT INTO visits(patient_name, patient_id) VALUES ('Synthetic owned visit', $1) RETURNING id", [scope.patientId]);
     const a = await db.recordAdjustment({ ...command(scope, "ortho-visit-key-001"), visitId });
     const bInput = { ...command(scope, "ortho-visit-key-002"), visitId };
-    const b = await db.recordAdjustment(bInput);
     expect(a).toMatchObject({ ok: true, created: true });
     if (!a.ok) throw new Error(a.message);
-    expect(b).toMatchObject({ ok: true, id: a.id, created: false, attachedToToday: false });
-    expect(await db.recordAdjustment(bInput)).toMatchObject({ ok: true, id: a.id, created: false });
-    expect((await footprint(scope.caseId)).adjustments).toHaveLength(1);
-    expect(await q("SELECT request_key FROM ortho_adjustment_requests WHERE case_id=$1", [scope.caseId])).toHaveLength(2);
+    const before = await footprint(scope.caseId);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(await db.recordAdjustment(bInput)).toMatchObject({ ok: false, status: 409,
+        code: "adjustment_visit_already_recorded", existingAdjustmentId: a.id, visitId });
+    }
+    expect(await footprint(scope.caseId)).toEqual(before);
+    expect(before.adjustments).toHaveLength(1);
+    expect(await q("SELECT request_key FROM ortho_adjustment_requests WHERE case_id=$1", [scope.caseId])).toEqual([{ request_key: "ortho-visit-key-001" }]);
+    // The original key still replays its own receipt.
+    expect(await db.recordAdjustment({ ...command(scope, "ortho-visit-key-001"), visitId })).toMatchObject({ ok: true, id: a.id, created: false, replayed: true });
   });
 
   it("does not permit mutation of the durable command outcome", async () => {

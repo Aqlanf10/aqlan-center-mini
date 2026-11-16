@@ -42,11 +42,18 @@ function readRate(raw: unknown): number | null | "invalid" {
   return Math.round(rate * 1_000_000) / 1_000_000;
 }
 
+/**
+ * `authority` is the legacy admin label (both powers), or, on the canonical runtime, each power from its
+ * own grant: a rate different from the settings (`finance.fx.manage`) and a prepayment above a supplier's
+ * balance (`finance.payables.record`), or the protected owner.
+ */
 export function parseExpenseRequest(
   source: Record<string, unknown>,
   settingsRates: RateMap,
-  isAdmin: boolean,
+  authority: boolean | { rateOverride: boolean; prepayment: boolean },
 ): ParseResult {
+  const mayOverrideRate = typeof authority === "boolean" ? authority : authority.rateOverride;
+  const mayPrepay = typeof authority === "boolean" ? authority : authority.prepayment;
   if (!isExpenseCategory(source.category)) {
     return { ok: false, status: 400, message: "اختر تصنيف المصروف." };
   }
@@ -82,7 +89,7 @@ export function parseExpenseRequest(
     && overrideRate !== null && overrideRate !== settingsExchangeRate;
   const billRateOverridden = overrideBillRate !== null;
   if (paymentRateOverridden || billRateOverridden) {
-    if (!isAdmin) {
+    if (!mayOverrideRate) {
       return { ok: false, status: 403, message: "تعديل سعر الصرف عن سعر الإعدادات للمدير وحده." };
     }
     if (!rateOverrideReason || rateOverrideReason.length < 3) {
@@ -98,7 +105,7 @@ export function parseExpenseRequest(
   const prepaymentReason = typeof source.prepaymentReason === "string" && source.prepaymentReason.trim()
     ? source.prepaymentReason.trim().slice(0, 300) : null;
   if (prepayment) {
-    if (!isAdmin) {
+    if (!mayPrepay) {
       return { ok: false, status: 403, message: "الدفعة المقدمة فوق رصيد المورد للمدير وحده." };
     }
     if (!prepaymentReason || prepaymentReason.length < 3) {

@@ -1,5 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { OrthoFollowupCoveragePanel } from "../components/OrthoFollowupCoveragePanel";
+import { followupCoverageJournal } from "../lib/ortho-followup-coverage-recovery";
 import { PatientLedger } from "../components/PatientLedger";
 import { formatMoney } from "../lib/money";
 import { ServiceSelect } from "../components/ServiceSelect";
@@ -16,11 +18,12 @@ const hooks = vi.hoisted(() => {
   const make = (): Store => ({ values: [], cursor: 0, changed: false, effects: new Map(), memos: new Map(), pending: [] });
   return { make, current: make(), outer: make(), inner: make(), form: make() };
 });
+const journalFixture = vi.hoisted(() => ({ command: null as import("../lib/financial-command-journal").FinancialCommand | null }));
 // Browser-storage behaviour has separate real Chromium coverage. These hook
 // fixtures isolate ledger reads/feedback and provide an empty durable journal.
 vi.mock("../lib/financial-command-journal", async original => ({
   ...await original<typeof import("../lib/financial-command-journal")>(),
-  readFinancialJournal: async () => ({ revision: 0, command: null }),
+  readFinancialJournal: async () => ({ revision: 0, command: journalFixture.command }),
 }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic-feedback-owner", role: "admin" }) }));
 vi.mock("react", async original => {
@@ -88,6 +91,7 @@ const invoiceExpectation:InvoiceTemplateReceiptExpectation={owner:invoiceOwner,p
     kind:"clinical",specialty:"endodontics",scheduled:true,planItem:{mode:"new"},case:{mode:"new"}}]};
 const validateInvoice=(value:unknown)=>readInvoiceCommandReceipt(value,invoiceExpectation,invoiceOwner)!==null;
 beforeEach(() => {
+  journalFixture.command = null;
   hooks.outer = hooks.make(); hooks.inner = hooks.make(); hooks.form = hooks.make(); hooks.current = hooks.outer; entryRequestKey = 0; fetchMock.mockReset();
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn(), confirm: vi.fn(() => true) });
   write = async () => json({ id: 701, invoiceNumber: "INV-SYNTHETIC-701", patientId: 901, patientName: "Synthetic patient",
@@ -114,6 +118,22 @@ function renderInvoiceForm(historical = true): ReactNode {
 }
 
 describe("PatientLedger operation-scoped success feedback", () => {
+  it("recognizes pending coverage and opens exact-case recovery without clearing or starting other money work", async () => {
+    const pending = followupCoverageJournal({ actor: "synthetic-feedback-owner", patientId: 901, orthoCaseId: 73, command: {
+      schemaVersion: 1, commandId: "11111111-1111-4111-8111-111111111111", expectedRevisionId: null,
+      source: { patientId: 901, orthoCaseId: 73, clinicalCaseId: 74, planId: 75, planItemId: 76, invoiceId: 77 },
+      expectedSourceFingerprint: "a".repeat(64), scope: "routine_adjustments", decision: "included", reason: "Synthetic explicit coverage",
+    } });
+    journalFixture.command = pending;
+    render(); await settle();
+    expect(find(node => node.props["data-testid"] === "ortho-coverage-account-recovery")).toBeDefined();
+    const recovery = find(node => node.type === OrthoFollowupCoveragePanel);
+    expect(recovery?.props).toMatchObject({ patientId: 901, orthoCaseId: 73 });
+    expect(find(node => node.props["data-testid"] === "treatment-entry-open")?.props.disabled).toBe(true);
+    expect(text(render())).not.toContain("تعذّر حفظ أو قراءة طلب العملية");
+    expect(journalFixture.command).toBe(pending);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
   it.each(["toolbar", "request"] as const)("a new %s draft retires old success before refused preview, without a write", async entry => {
     render(); await settle(); open("invoice");
     const invoice = find(node => typeof node.type === "function" && node.type.name === "InvoiceForm")!;

@@ -148,6 +148,9 @@ async function fixture(width: number, planned = true) {
     if (path === clinicalPath) await json(route, stored);
     else if (path === `/api/visits/${visitId}/billing-preview`) await json(route, { message: "Synthetic preview unavailable" }, 503);
     else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId });
+    // This unrelated clinical fixture models capability availability, not lab commands.
+    // Keep the exact read local; every unlisted request still fails the fixture.
+    else if (method === "GET" && path === "/api/lab/work-intents/capability" && !url.search) await json(route, { supported: true });
     else if (path === "/api/services") await json(route, services);
     else if (path === "/api/parties") await json(route, [{ id: doctorId, name: "طبيب اصطناعي" }]);
     else if (path === "/api/booking-requests") await json(route, []);

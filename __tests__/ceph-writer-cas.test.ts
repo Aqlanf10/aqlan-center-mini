@@ -54,7 +54,7 @@ beforeAll(async () => {
   };
   pool = { query, connect: async () => ({ query, release: () => {} }) };
   const output: Record<string, unknown> = {};
-  const dependencies = { ensureSchema: async () => {}, getPool: () => pool, normalizeCephDiagnosis, parseCephCalibrationState, sameCephCalibrationState, parseCephCompletionDiagnosis,
+  const dependencies = { ensureSchema: async () => {}, getPool: () => pool, cephWriterClient: () => pool.connect(), /* integration: ceph writers take their client from cephWriterClient (pooled outside a canonical operation) */ normalizeCephDiagnosis, parseCephCalibrationState, sameCephCalibrationState, parseCephCompletionDiagnosis,
     describeAudit, sanitizeDetails, currentAuditSource: async () => ({ ip: null, userAgent: null }) };
   new Function("exports", ...Object.keys(dependencies), compiled)(output, ...Object.values(dependencies));
   calibrate = output.calibrate as typeof calibrate; diagnose = output.diagnose as typeof diagnose;

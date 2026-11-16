@@ -1,17 +1,46 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { asPaymentLikes, CLINIC_TIME_ZONE, closeShift, findUserByUsername, getOpenShift, listShiftExpenses, listShiftPayments, listShifts, openShift, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
+import { asPaymentLikes, CLINIC_TIME_ZONE, closeShift, findUserByUsername, getOpenShift, listOpeningReviews, listShiftExpenses, listShiftPayments, listShiftsForViewer, openShift, pendingOpeningReviewCount, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
+import { projectOpeningReview } from "@/lib/shift-opening-reviews";
 import { expenseTotals } from "@/lib/expenses";
 import { CURRENCIES, formatMoney, parseAmount, shiftTotals, type Currency } from "@/lib/money";
-import { canHandleMoney, canViewMoney } from "@/lib/roles";
+import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalErrorResponse, NO_STORE } from "@/lib/canonical-route";
+import { CanonicalShiftRefusal, commandCanonicalShiftClose, commandCanonicalShiftOpen, openingAuditDetails, readCanonicalShifts } from "@/lib/canonical-shifts";
 
 export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+
+/** A canonical failure never falls through to a legacy role/session. The domain
+ * command owns admission, its transaction, the actual shift write and its audit. */
+async function canonicalShiftWrite(request: Request, action: "open" | "close") {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "legacy" || selected.kind === "none") return null;
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
+    const response = bodyErrorResponse(error) ?? NextResponse.json({ code: "invalid_shift", message: "طلب غير صالح." }, { status: 400 });
+    response.headers.set("Cache-Control", NO_STORE["Cache-Control"]);
+    return response;
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ code: "invalid_shift", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+  try {
+    const result = action === "open"
+      ? await commandCanonicalShiftOpen(selected.handle, body as Record<string, unknown>)
+      : await commandCanonicalShiftClose(selected.handle, body as Record<string, unknown>);
+    return NextResponse.json(result, { status: action === "open" ? 201 : 200, headers: NO_STORE });
+  } catch (error) {
+    if (error instanceof CanonicalShiftRefusal) return NextResponse.json({ code: error.code, message: error.message,
+      ...(error.difference ? { difference: error.difference, expected: error.expected } : {}) }, { status: error.status, headers: NO_STORE });
+    return canonicalErrorResponse(error);
+  }
+}
 
 /** يقرأ ثلاثة مبالغ — واحدًا لكل عملة — ويرفض ما لا يُقرأ رقمًا. */
 function readAmounts(source: Record<string, unknown>, key: string): Record<Currency, number> | null {
@@ -28,6 +57,12 @@ function readAmounts(source: Record<string, unknown>, key: string): Record<Curre
 }
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalShifts(selected.handle), { headers: NO_STORE }); }
+    catch (error) { return canonicalErrorResponse(error); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   /* صلاحيات الوكيل المساعد: الصندوق والورديات من «المالية المخفية» — الطبيب
@@ -43,10 +78,15 @@ export async function GET() {
   } else if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
+  // 0129 §8.1: on the legacy runtime only the admin (the owner's account) sees opening amounts and the sealed close.
+  const authorized = isAdmin(session.role);
   try {
-    const open = await getOpenShift();
+    const shift = await getOpenShift();
+    // 0129: the open shift's opening differences, and the clinic's pending count (never hidden before the cutover).
+    const open = shift ? { ...shift, openingReviews: (await listOpeningReviews({ shiftId: shift.id })).map(review => projectOpeningReview(review, authorized)) } : null;
+    const pendingOpeningReviews = await pendingOpeningReviewCount();
     const [payments, expenses, drawer] = open
-      ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id), shiftDrawerBreakdown(open)])
+      ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id), shiftDrawerBreakdown(shift!)])
       : [[], [], null];
     const receiptProvenance = await readReceiptProvenance(payments.map((payment) => payment.id));
     return NextResponse.json({
@@ -62,7 +102,11 @@ export async function GET() {
       payments,
       receiptProvenance,
       expenses,
-      recent: await listShifts(15),
+      // §8.3: the latest close is sealed for everyone but the admin until the next count is fixed.
+      recent: await listShiftsForViewer({ authorized }, 15),
+      pendingOpeningReviews,
+      // The review is canonical only (docs/finance/SHIFT_OPENING_REVIEWS_0129.md §2.2).
+      canReviewOpening: false,
     });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الوردية." }, { status: 500 });
@@ -70,6 +114,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const canonical = await canonicalShiftWrite(request, "open");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.operateShift)) {
@@ -85,6 +131,7 @@ export async function POST(request: Request) {
   if (!opening) return NextResponse.json({ message: "مبلغ افتتاحي غير صحيح." }, { status: 400 });
 
   try {
+    // 0129 §8.2 (blind count): a difference never refuses the opening; it is recorded for review in its transaction.
     const shift = await openShift({ openedBy: session.username, opening });
     if (!shift) {
       return NextResponse.json(
@@ -94,16 +141,19 @@ export async function POST(request: Request) {
     }
     await recordAudit({
       action: "shift.open", entity: "shift", entityId: shift.id,
-      details: { الافتتاحي: shift.opening },
+      details: { الافتتاحي: shift.opening, ...openingAuditDetails(shift) },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(shift, { status: 201 });
+    return NextResponse.json({ ...shift, openingReviews: (shift.openingReviews ?? []).map(review => projectOpeningReview(review, isAdmin(session.role))) },
+      { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح الوردية." }, { status: 500 });
   }
 }
 
 export async function PATCH(request: Request) {
+  const canonical = await canonicalShiftWrite(request, "close");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.operateShift)) {

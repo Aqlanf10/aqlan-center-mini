@@ -44,7 +44,7 @@ it.each([390, 1280])('keeps unknown legacy durations explicit and avoids invente
     if (url.origin === baseUrl && ['GET', 'HEAD'].includes(request.method())) return route.continue();
     if (url.origin === baseUrl && request.method() === 'POST' && url.pathname === '/api/ortho/baseline' && !posts.length) {
       const body = request.postDataJSON() as Record<string, unknown>; posts.push(body);
-      expect(body).toMatchObject({ patientId, monthsElapsed: 6, monthsRemaining: 12, financialMode: 'opening_balance' });
+      expect(body).toMatchObject({ patientId, monthsElapsed: 6, monthsRemaining: 12, financialMode: 'opening_balance', responsibleDoctorId: expect.any(Number) });
       const response = await route.fetch(); expect(response.status()).toBe(201);
       return route.fulfill({ response }); // Forward actual response, never fabricate business data.
     }
@@ -62,6 +62,10 @@ it.each([390, 1280])('keeps unknown legacy durations explicit and avoids invente
     expect(await form.innerText()).not.toContain('بدء تقريبي:');
     await form.getByRole('combobox', { name: 'المرحلة الحالية', exact: true }).selectOption('working');
     await form.getByRole('combobox', { name: 'النظام المالي السابق', exact: true }).selectOption('opening_balance');
+    // An administrator records a legacy case only with an explicitly chosen responsible doctor (#539).
+    const doctor = form.getByRole('combobox', { name: 'الطبيب المسؤول', exact: true });
+    await expect.poll(() => doctor.locator('option').count()).toBeGreaterThan(1);
+    expect(await doctor.inputValue()).toBe(''); await doctor.selectOption({ index: 1 });
     const objectives = 'Synthetic remaining objectives preserved through validation';
     await form.getByRole('textbox', { name: 'الأهداف المتبقية', exact: true }).fill(objectives);
     await form.getByLabel('السلك العلوي الحالي', { exact: true }).fill('Synthetic recorded wire');

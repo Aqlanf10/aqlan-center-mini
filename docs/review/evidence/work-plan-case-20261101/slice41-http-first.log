@@ -1,0 +1,68 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-plan-case-command-journey.test.ts (10 tests | 4 failed) 134952ms
+   × browser: explicit case/priority edit uses canonical authority and preserves the patient workflow 31944ms
+   × browser: a concurrent change refuses the stale draft without overwriting it 31579ms
+   × browser: a committed command with a lost reply is never replayed on reload; a new edit needs new intent 31480ms
+   × browser: revocation during editing refuses the mutation and clears stale case facts 31451ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-plan-case-command-journey.test.ts > browser: explicit case/priority edit uses canonical authority and preserves the patient workflow
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-patient-cases').getByTestId('canonical-plan-case-editor').getByLabel('بند الخطة', { exact: true })[22m
+
+ ❯ openEditor __tests__/security-http/canonical-plan-case-command-journey.test.ts:69:148
+
+ ❯ __tests__/security-http/canonical-plan-case-command-journey.test.ts:73:60
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/security-http/canonical-plan-case-command-journey.test.ts > browser: a concurrent change refuses the stale draft without overwriting it
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-patient-cases').getByTestId('canonical-plan-case-editor').getByLabel('بند الخطة', { exact: true })[22m
+
+ ❯ openEditor __tests__/security-http/canonical-plan-case-command-journey.test.ts:69:148
+
+ ❯ __tests__/security-http/canonical-plan-case-command-journey.test.ts:89:60
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  __tests__/security-http/canonical-plan-case-command-journey.test.ts > browser: a committed command with a lost reply is never replayed on reload; a new edit needs new intent
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-patient-cases').getByTestId('canonical-plan-case-editor').getByLabel('بند الخطة', { exact: true })[22m
+
+ ❯ openEditor __tests__/security-http/canonical-plan-case-command-journey.test.ts:69:148
+
+ ❯ __tests__/security-http/canonical-plan-case-command-journey.test.ts:98:60
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  __tests__/security-http/canonical-plan-case-command-journey.test.ts > browser: revocation during editing refuses the mutation and clears stale case facts
+TimeoutError: locator.selectOption: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-patient-cases').getByTestId('canonical-plan-case-editor').getByLabel('بند الخطة', { exact: true })[22m
+
+ ❯ openEditor __tests__/security-http/canonical-plan-case-command-journey.test.ts:69:148
+
+ ❯ __tests__/security-http/canonical-plan-case-command-journey.test.ts:116:67
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  4 failed | 17 passed (21)
+   Start at  05:59:05
+   Duration  157.37s (transform 197ms, setup 0ms, import 657ms, tests 151.56s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -107,7 +107,13 @@ export type SupplierPaymentRefusal =
   | "exceeds_party_balance"
   | "hr_payroll_settlement_required"
   | "hr_payroll_reconciliation_required"
-  | "stale_quote";
+  | "stale_quote"
+  /** 0128: the same request key with a different request (docs/finance/EXPENSE_COMMANDS_0128.md §2.1). */
+  | "expense_request_conflict"
+  /** 0128: the drawer part exceeds the cash expected in the open drawer (docs/finance/EXPENSE_COMMANDS_0128.md §2.2). */
+  | "exceeds_drawer_cash"
+  /** 0133: this exact request was retired; a late send of it writes nothing (docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md). */
+  | "expense_request_retired";
 
 export interface SettlementQuote {
   paymentCurrency: Currency;
@@ -139,6 +145,8 @@ export interface SettlementQuote {
     outstandingAfterMinor: number | null;
     prepayment: boolean;
   };
+  /** 0128: set only on an exceeds_drawer_cash refusal — the cash expected in the open drawer, in the payment currency. */
+  drawer?: { availableMinor: number };
 }
 
 export function refusalMessage(reason: SupplierPaymentRefusal, quote?: SettlementQuote | null): string {
@@ -159,6 +167,15 @@ export function refusalMessage(reason: SupplierPaymentRefusal, quote?: Settlemen
       return "سعر الصرف غير مضبوط لإحدى العملتين. اضبطه في الإعدادات قبل الصرف.";
     case "stale_quote":
       return "تغيّر سعر الصرف أو المتبقي على الفاتورة منذ المعاينة — أعد المعاينة قبل التأكيد.";
+    case "exceeds_drawer_cash": {
+      const available = quote?.drawer?.availableMinor;
+      const text = available === undefined || !quote ? "" : ` المتوقع في الدرج الآن ${formatMoney(available, quote.paymentCurrency)}.`;
+      return `المبلغ يتجاوز النقد الموجود في الدرج بهذه العملة؛ لم يُسجَّل شيء.${text} لا يُصرف من الدرج أكثر مما فيه.`;
+    }
+    case "expense_request_retired":
+      return "أُنهي هذا الطلب نهائيًا من قبل ولم يُسجَّل به سند؛ لم يُسجَّل شيء الآن. إن كان الصرف مطلوبًا فسجّله من جديد.";
+    case "expense_request_conflict":
+      return "هذا الطلب يحمل مفتاح سند صرف سابق بمحتوى مختلف؛ لم يُسجَّل شيء. أعد فتح نموذج الصرف وسجّل السند الجديد من جديد.";
     case "zero_settlement":
       return "المبلغ أصغر من أن يسدّد شيئًا من الفاتورة بعملتها.";
     case "exceeds_payable": {

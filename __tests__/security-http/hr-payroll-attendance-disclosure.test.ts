@@ -8,7 +8,7 @@ it("discloses that attendance and leave do not automatically adjust payroll, wit
   const built = await build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {HrPayrollPanel} from './components/hr/PayrollPanel';createRoot(document.getElementById('root')).render(React.createElement(HrPayrollPanel));`, resolveDir: process.cwd(), loader: "jsx" }, bundle: true, write: false, platform: "browser", jsx: "automatic", define: { "process.env.NODE_ENV": '"development"' } });
   // Own a dedicated process so teardown does not depend on Chromium's
   // graceful-close handshake (which can stall on Windows headless shell).
-  server = await chromium.launchServer({ host: "127.0.0.1" });
+  server = await chromium.launchServer({ host: "127.0.0.1", executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
   const browser = await chromium.connect(server.wsEndpoint());
   const context = await browser.newContext();
   const page = await context.newPage();

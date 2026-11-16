@@ -5,14 +5,19 @@ import { buildFamilyView } from "@/lib/family-view";
 import { familyFailure, familyResponse, familyWriter } from "@/lib/family-route";
 import { parseFamilyName, parseFamilyNote } from "@/lib/patient-families";
 import { requireSession } from "@/lib/session";
+import { canonicalFamilyRoute, commandCanonicalFamilyUpdate, readCanonicalFamily } from "@/lib/canonical-families";
 
 export const dynamic = "force-dynamic";
 
 /** (PAT-4) العائلة كما يراها صاحب الجلسة: الأفراد بوصوله إليهم، والأرصدة لمن يرى المال. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  /* M2 slice 72: members inside the patient scope; money only with finance.patient-ledger.view. */
+  const { id } = await params;
+  const canonical = await canonicalFamilyRoute(null, handle => readCanonicalFamily(handle, id), "تعذّر تحميل العائلة.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return json("انتهت الجلسة. سجّل الدخول من جديد.", 401);
-  const familyId = idOf((await params).id);
+  const familyId = idOf(id);
   if (!familyId) return json("رقم العائلة غير صالح.", 400);
   try {
     const result = await buildFamilyView(session, familyId);
@@ -27,9 +32,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 /** تعديل اسم العائلة أو ملاحظتها. */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const canonical = await canonicalFamilyRoute(request, (handle, body) => commandCanonicalFamilyUpdate(handle, id, body), "تعذّر حفظ العائلة. أعد المحاولة.");
+  if (canonical) return canonical;
   const guard = await familyWriter();
   if (!guard.ok) return guard.response;
-  const familyId = idOf((await params).id);
+  const familyId = idOf(id);
   if (!familyId) return json("رقم العائلة غير صالح.", 400);
   const read = await readBody(request);
   if (!read.ok) return read.response;

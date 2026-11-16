@@ -206,6 +206,15 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
         await expect.poll(() => tooth.getAttribute("aria-pressed")).toBe("true");
         expect(await dialog.locator('[data-testid^="odontogram-tooth-"][aria-pressed="true"]').count()).toBe(1);
         geometry.push({ code, ...proof });
+        // Fillings support multiple teeth. Toggle this proven target off before
+        // the next reachability probe; keep only the last tooth for confirmation.
+        if (code !== ALL_TEETH.at(-1)) {
+          const deselectProof = await revealDialogControlByWheel(page, tooth);
+          expect(deselectProof.fits).toBe(true); expect(deselectProof.clear).toBe(true);
+          await page.mouse.click((deselectProof.rect.left + deselectProof.rect.right) / 2, (deselectProof.rect.top + deselectProof.rect.bottom) / 2);
+          await expect.poll(() => tooth.getAttribute("aria-pressed")).toBe("false");
+          expect(await dialog.locator('[data-testid^="odontogram-tooth-"][aria-pressed="true"]').count()).toBe(0);
+        }
       }
       expect(geometry.map(one => one.code)).toEqual(ALL_TEETH);
       const confirmControl = page.getByTestId("tooth-dialog-confirm");
@@ -348,13 +357,47 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     await context.close();
   });
 
+  it("fillings: one grouped entry preserves each tooth's surfaces, price, provider and invoice linkage", async () => {
+    const patientId = await newPatient("fillings-independent");
+    const { context, page } = await openInvoice(patientId);
+    try {
+      await chooseService(page, services.filling);
+      await page.getByTestId("invoice-provider-0").selectOption(String(doctorPartyId));
+      const dialog = await pickTeeth(page, 0, [26, 27]);
+      for (const surface of ["M", "O"]) await dialog.getByTestId("tooth-surfaces-26").getByTestId(`surface-${surface}`).click();
+      await dialog.getByTestId("tooth-surfaces-27").getByTestId("surface-D").click();
+      await confirm(page);
+      expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 26 (MO)، 27 (D)");
+      // The grouped entry's per-tooth details and a ready link proof are both collapsed by design when no
+      // decision is needed; wait for readiness, then open the group and the proof to review it.
+      const preview = page.getByTestId("invoice-clinical-preview-0");
+      await page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]').waitFor({ state: "attached" });
+      const group = page.getByTestId("invoice-group-details-0");
+      if (await group.getAttribute("open") === null) await group.locator("> summary").click();
+      if (!await preview.isVisible()) await preview.locator("..").locator("summary").click();
+      await preview.waitFor();
+      expect(await preview.innerText()).toContain("بند خطة جديد");
+      await save(page);
+      expect(await planItems(patientId)).toEqual([{ tooth_code: 26, surfaces: "MO" }, { tooth_code: 27, surfaces: "D" }]);
+      const rows = (await db.query(`SELECT ii.quantity, ii.unit_price_minor::text, ii.doctor_id,
+        pi.tooth_code, pi.surfaces, pi.service_id, pi.id AS plan_item_id
+        FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id JOIN plan_items pi ON pi.id = ii.plan_item_id
+        WHERE i.patient_id = $1 ORDER BY pi.tooth_code`, [patientId])).rows;
+      expect(rows).toEqual([{ tooth_code: 26, surfaces: "MO" }, { tooth_code: 27, surfaces: "D" }].map(site => ({
+        ...site, quantity: 1, unit_price_minor: "1500000", doctor_id: doctorPartyId,
+        service_id: services.filling, plan_item_id: expect.any(Number),
+      })));
+      expect(new Set(rows.map(row => row.plan_item_id)).size).toBe(2);
+    } finally { await context.close(); }
+  });
+
   it("filling: tooth 26 + surfaces M, O ⇒ plan item surfaces MO", async () => {
     const patientId = await newPatient("filling");
     const { context, page } = await openInvoice(patientId);
     await chooseService(page, services.filling);
     await pickTeeth(page, 0, [26], ["M", "O"]);
     await confirm(page);
-    expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("سن 26 — أسطح MO");
+    expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 26 (MO)");
     await page.getByTestId("invoice-clinical-preview-0").waitFor();
     await save(page);
     expect(await planItems(patientId)).toEqual([{ tooth_code: 26, surfaces: "MO" }]);

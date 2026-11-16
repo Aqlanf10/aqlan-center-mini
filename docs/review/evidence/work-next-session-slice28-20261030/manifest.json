@@ -1,0 +1,232 @@
+{
+  "schema": 1,
+  "syntheticOnly": true,
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "branch": "feat/work-recovery-followup-20261027",
+  "baseCommit": "27f0818fb143569324772290424dd7c903d4c2da",
+  "preparedAtUtc": "2026-10-30T20:54:55.390500+00:00",
+  "readiness": "NOT_READY",
+  "inventorySourceDigest": "740b62da9d6b042b3fe86bb4c522df8384ba376ac2d72e2f790fab8920a5490c",
+  "environment": {
+    "node": "22.23.3",
+    "postgres": "18.4",
+    "browser": "system Chromium 151.0.7922.173",
+    "database": "owned loopback synthetic databases only"
+  },
+  "results": {
+    "postgres": {
+      "files": 6,
+      "passed": 79,
+      "newNextSessionTests": 31,
+      "exit": 0
+    },
+    "httpBrowser": {
+      "files": 3,
+      "passed": 16,
+      "newNextSessionTests": 7,
+      "ddlStatements": 0,
+      "exit": 0
+    },
+    "unitFocused": {
+      "files": 6,
+      "passed": 67,
+      "exit": 0
+    },
+    "unitAll": {
+      "files": 798,
+      "passed": 13398,
+      "exit": 0,
+      "exclude": ".next/**"
+    },
+    "typecheckExit": 0,
+    "buildExit": 0,
+    "eslintAllExit": 0,
+    "eslintNewFilesWarnings": 0,
+    "moneyGuardExit": 0,
+    "bodyGuardExit": 0,
+    "inventoryVerifyExit": 0
+  },
+  "expectedRedEvidence": [
+    {
+      "file": "baseline-http.log",
+      "stage": "built accepted base",
+      "assertion": "201 expected, 401 received for authorized canonical next-session POST"
+    },
+    {
+      "file": "patient-lock-race-red.log",
+      "stage": "unpublished initial slice28 draft",
+      "assertion": "40P01 shared patient row lock upgrade; fixed with write lock NOWAIT",
+      "sourceProof": "patient-lock-red-source.json",
+      "fix": "patient-lock-fix.diff"
+    }
+  ],
+  "mapCounts": {
+    "total": 383,
+    "existing": 297,
+    "excluded": 12,
+    "canonical-done": 47,
+    "entry": 4,
+    "self": 3,
+    "owner-only": 20
+  },
+  "inventoryCounts": {
+    "routeMethods": 416,
+    "pages": 97
+  },
+  "receiptSourceUnchanged": {
+    "lib/receipt-provenance-db.ts": "88d5a290b4297d803240c1e060cad8e9a3b7dd3bac1a5e6d078d0612dc1f5c10",
+    "lib/receipt-provenance.ts": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b"
+  },
+  "limits": [
+    "Full PostgreSQL and HTTP suites are left to final-head CI; local runs listed above are focused.",
+    "No durable next-session request receipt; overlap and nearby confirmation semantics retained.",
+    "Pending POST recovery survives tab reload when sessionStorage is available; no names/phones/tokens stored.",
+    "Real waiting-room speech quality remains unverified from slice27; unrelated source work can continue."
+  ],
+  "finalHeadCI": "must be checked after push; final task delivery supplies exact head/run/status, not the previous run",
+  "sources": [
+    {
+      "path": "lib/db.ts",
+      "sha256": "86dd859d2473770512b6c5f4c35c869aeebab0cab5ab60929bd6b12183a98914"
+    },
+    {
+      "path": "lib/canonical-next-session.ts",
+      "sha256": "3c2cf22afa57c68a91a62637c9c7d25a1ec5a4623494e5f24c98d4516984a39b"
+    },
+    {
+      "path": "app/api/visits/[id]/next/route.ts",
+      "sha256": "8ce241d02c6368a0ecb35e13508af4e242f7b327e9af0d9fc39c4a9649008cf9"
+    },
+    {
+      "path": "components/patient/CanonicalNextSession.tsx",
+      "sha256": "dab9e0a11555ca3040a7bb2314347a6cca05e8c80aa4c62c845c9932a4fefa37"
+    },
+    {
+      "path": "components/patient/CanonicalPatientProfile.tsx",
+      "sha256": "a6ab3d180c964da8651585a21c324e6b3ba27115a8110b3b6d3bd7931274a44a"
+    },
+    {
+      "path": "components/today/CanonicalTodayQueue.tsx",
+      "sha256": "b9be1fd9ba11351a1e3be3ee2d4223cac0f2829cfe70160e4bd0558cea233571"
+    },
+    {
+      "path": "__tests__/postgres/visits-canonical-next-session.test.ts",
+      "sha256": "d61a639924fe936996dd1f05f74c282442017be193ca48d00eed6c45bb08346b"
+    },
+    {
+      "path": "__tests__/security-http/canonical-next-session-journey.test.ts",
+      "sha256": "78a0f6355008a1b6a4941ff6a7dbd7dd02ab46fb39c90068bb9d78d58e3f3159"
+    },
+    {
+      "path": "__tests__/scheduling-single-door.test.ts",
+      "sha256": "5cb4b0cc8b65841c4874a0c56c9368fe84f01f3cad75cd3c8fc3fa985d24ddda"
+    },
+    {
+      "path": "docs/security/staff-cutover/HANDOFF.md",
+      "sha256": "ffd719ebbe0c83f98a488491f049cfe2f71396f26eb71ec8cb6e2b15000e129a"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "760af3400ef01b05f4695aa379b20fbd0e5349dd9a92185af1eb9a2eb0f602d9"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md",
+      "sha256": "d9eb8102436b314fde7a298eb80f54bda44fd72da7491771ac3dd2bec1ccca8a"
+    },
+    {
+      "path": "docs/security/staff-cutover/inventory.json",
+      "sha256": "1f308bbb89e7bf7d88ea47cc175533f903a4807817e84844302b0b899809cb64"
+    },
+    {
+      "path": "docs/review/work-next-session-slice28-20261030.md",
+      "sha256": "4a6c96f9932f95e51ddc8f9e1831eb105942da3dd3ae3809a1defa083fd4964a"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "base-ci.json",
+      "sha256": "2476fc6d6fa2eba9a33a4087e7865db9f9825d1c1258777860697e35ffda225d",
+      "bytes": 203
+    },
+    {
+      "path": "baseline-http.log",
+      "sha256": "3ffc9798abcdbe5f555f308f0f0e27796b488a4e51c606e86280b31e6503d6df",
+      "bytes": 1095
+    },
+    {
+      "path": "body-guard.log",
+      "sha256": "040707324ed7862b350bebb81c657cf17272a9d5115d01cf0a7f059eb332c8c4",
+      "bytes": 120
+    },
+    {
+      "path": "build-lock-final.log",
+      "sha256": "4322db230991e2b7a2eeae29155cde62e459f3e2dd8da1bf97d3d4371b4d07d6",
+      "bytes": 13357
+    },
+    {
+      "path": "focused-lock-final.log",
+      "sha256": "25a4705f7caeffa5e8f5260cedc9a8f418fa6cfd1d6b726742450489c5022659",
+      "bytes": 222
+    },
+    {
+      "path": "http-lock-final.log",
+      "sha256": "830c3ae55bccfff1c9162c0b29b05af7ea2926bdc703f03ed677c584af6c1f72",
+      "bytes": 421
+    },
+    {
+      "path": "inventory-lock-verify.log",
+      "sha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "bytes": 329
+    },
+    {
+      "path": "lint-new-lock-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "lint.log",
+      "sha256": "5839fac45ad2badba08e25a850f2d15938dd6e63de2cf144b0d217754f36b5a0",
+      "bytes": 58889
+    },
+    {
+      "path": "money-guard.log",
+      "sha256": "c830726712c1e856257a19eb43aadb6471d493020cec31770e6822b7f6c4e8b5",
+      "bytes": 1546
+    },
+    {
+      "path": "next-session-390.png",
+      "sha256": "1ad986abb0d45756449b973796a90c3d6a90ecee07325740bb2017fa98151438",
+      "bytes": 103137
+    },
+    {
+      "path": "patient-lock-fix.diff",
+      "sha256": "4ef14107568fc987a95da1bd8e69239f81acdda1f587d2c72f8b5bf4bc986f3f",
+      "bytes": 907
+    },
+    {
+      "path": "patient-lock-race-red.log",
+      "sha256": "6446bf5d10f32f96ab6382a43dd59bfb29de5202050cb08ba07cc86d996c88a4",
+      "bytes": 1465
+    },
+    {
+      "path": "patient-lock-red-source.json",
+      "sha256": "97f7d130450047c2d0cc3b5fe6d283b7f89e89eee8191f9e3ceebc04d8948f03",
+      "bytes": 395
+    },
+    {
+      "path": "postgres-lock-final.log",
+      "sha256": "506aba027e9e05db4dbc810f1000e57923076c2d9e0efddf8754aa4ffc23dfbd",
+      "bytes": 333
+    },
+    {
+      "path": "typecheck-lock-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "unit-all-final.log",
+      "sha256": "38451334f155fd17d79020567ff29712625de909a4060c734ec52d67aed77be6",
+      "bytes": 420
+    }
+  ]
+}

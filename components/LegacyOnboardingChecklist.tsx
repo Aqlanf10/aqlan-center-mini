@@ -7,7 +7,8 @@ import { useSession } from "./SessionProvider";
 
 const CLASS_TEXT: Record<string, string> = {
   LEGACY_INCLUDED: "الشدّة اليوم مشمولة بالعلاج السابق — بلا فاتورة جديدة.",
-  INCLUDED: "الشدّة اليوم مشمولة باتفاق الأقساط — بلا فاتورة مستقلة.",
+  INCLUDED: "الشدّة اليوم مشمولة بالاتفاق — بلا فاتورة مستقلة.",
+  REVIEW_REQUIRED: "شمول الشدّة ضمن الاتفاق غير محدد؛ راجع نطاق المتابعات دون فاتورة بديلة.",
   OUTSIDE_CONTRACT: "الشدّة اليوم تحتاج قرار فوترة (خارج العقد أو تُفوتر كل جلسة).",
   NEW_BILLABLE: "مستحق جديد.",
   NO_CHARGE: "بلا رسوم.",

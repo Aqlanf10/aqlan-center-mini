@@ -124,6 +124,20 @@ beforeEach(() => {
 afterEach(() => { unmount(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("case record slot ownership", () => {
+  it("retires a read across effect cleanup/setup replay even when the render owner token is reused", async () => {
+    const pending = deferred<ReturnType<typeof response>>();
+    read = () => pending.promise;
+    render();
+    const firstSignal = fetchMock.mock.calls[0][1].signal as AbortSignal;
+    // StrictMode-style effect replay preserves hook state/memos, but cleans up
+    // every committed effect before running the new setup for the same token.
+    unmount(); expect(firstSignal.aborted).toBe(true);
+    read = url => response(url.endsWith("/documents") ? { documents: [document({ id: 55 })] } : { analyses: [] });
+    await ready(); expect(imageSources()).toEqual(["/api/documents/55"]);
+    pending.resolve(response({ documents: [document()], analyses: [study()] })); await ready();
+    expect(imageSources()).toEqual(["/api/documents/55"]);
+    expect(writes()).toHaveLength(0);
+  });
   it("fills slots only from the current case and keeps other/unassigned images as explicit references", async () => {
     read = url => response(url.endsWith("/documents") ? { documents: [
       document({ id: 52, orthoCaseId: 20, title: "Historical image" }),

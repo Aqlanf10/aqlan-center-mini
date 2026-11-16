@@ -12,7 +12,16 @@ import { revalidateSessionInTransaction } from "./session";
  */
 export async function authorizeCephCompletion(
   client: DbClient, session: SessionPayload, patientId: number, by: string,
+  admit?: (client: DbClient, patientId: number) => Promise<SessionPayload>,
 ): Promise<number | null> {
+  if (admit) {
+    // Canonical admission: same patient-first order; the admitted actor must be the signer.
+    if (!Number.isSafeInteger(patientId) || patientId <= 0) return null;
+    const patient = await client.query<{ id: number }>("SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE", [patientId]);
+    if (!patient.rows[0]) return null;
+    const current = await admit(client, patientId);
+    return current.username === by && current.userId === session.userId && current.expiresAt >= Date.now() ? current.userId : null;
+  }
   if (!Number.isSafeInteger(patientId) || patientId <= 0 || !session
     || !Number.isSafeInteger(session.userId) || session.userId <= 0
     || !Number.isFinite(session.expiresAt) || session.expiresAt < Date.now()

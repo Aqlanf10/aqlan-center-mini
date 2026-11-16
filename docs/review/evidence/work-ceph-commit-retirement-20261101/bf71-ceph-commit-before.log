@@ -1,0 +1,53 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+[security-http] الخادم جاهز على http://127.0.0.1:15155 — قاعدة aqlan_sec_http معزولة
+stdout | __tests__/security-http/canonical-ceph-commit-window.test.ts > real React: close commit retires POST ownership before passive effects can run
+SYN canonical commit boundary close {"events":["passive:0","passive:0","commit:1","release-body:1","created","microtasks:1","passive:1"],"unexpected":[],"jsonCalls":1,"created":1,"refreshes":0,"posts":1,"passiveEpoch":1,"early":{"passiveEpoch":0,"created":1,"marker":null},"marker":null}
+
+stdout | __tests__/security-http/canonical-ceph-commit-window.test.ts > real React: owner commit retires POST ownership before passive effects can run
+SYN canonical commit boundary owner {"events":["passive:0","passive:0","commit:1","release-body:1","created","microtasks:1","passive:1"],"unexpected":[],"jsonCalls":1,"created":1,"refreshes":0,"posts":1,"passiveEpoch":1,"early":{"passiveEpoch":0,"created":1,"marker":null},"marker":null}
+
+stdout | __tests__/security-http/canonical-ceph-commit-window.test.ts > real React: unmount commit retires POST ownership before passive effects can run
+SYN canonical commit boundary unmount {"events":["passive:0","passive:0","commit:1","release-body:1","created","microtasks:1","passive:1"],"unexpected":[],"jsonCalls":1,"created":1,"refreshes":0,"posts":1,"passiveEpoch":1,"early":{"passiveEpoch":0,"created":1,"marker":null},"marker":null}
+
+ ❯ __tests__/security-http/canonical-ceph-commit-window.test.ts (3 tests | 3 failed) 3698ms
+   × real React: close commit retires POST ownership before passive effects can run 766ms
+   × real React: owner commit retires POST ownership before passive effects can run 548ms
+   × real React: unmount commit retires POST ownership before passive effects can run 736ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-commit-window.test.ts > real React: close commit retires POST ownership before passive effects can run
+ FAIL  __tests__/security-http/canonical-ceph-commit-window.test.ts > real React: owner commit retires POST ownership before passive effects can run
+ FAIL  __tests__/security-http/canonical-ceph-commit-window.test.ts > real React: unmount commit retires POST ownership before passive effects can run
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ __tests__/security-http/canonical-ceph-commit-window.test.ts:43:35
+     41|     expect(result.early!.passiveEpoch).toBe(0);
+     42|     expect(result.events.indexOf("commit:1")).toBeLessThan(result.even…
+     43|     expect(result.early!.created).toBe(0); expect(result.early!.marker…
+       |                                   ^
+     44|     expect(result.created).toBe(0); expect(result.refreshes).toBe(0); …
+     45|     expect(result.unexpected).toEqual([]); expect(external).toEqual([]…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed (3)
+   Start at  19:18:55
+   Duration  9.92s (transform 27ms, setup 0ms, import 454ms, tests 3.70s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

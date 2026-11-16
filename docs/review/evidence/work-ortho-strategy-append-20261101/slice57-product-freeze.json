@@ -1,0 +1,11 @@
+{
+  "at": "2026-11-01T14:59:11.224041+00:00",
+  "base": "177825e508d3d21078dde4798fae791063195db6",
+  "sourceSha256": {
+    "app/api/ortho/[id]/strategy/route.ts": "a3f156ccb458106d1fbfcdbe1658b72007b24edbd5637bde0dc776db7a6266ad",
+    "lib/canonical-ortho-strategy-command.ts": "e8de0cae1e7bd05345ed08451d42990f07c4814eda38fd519786eeb0c3ef31b8",
+    "lib/ortho-treatment-strategy-store.ts": "4e0174ffa6ef8e0ce2b6ed76054112e35ef873afd9b3c49b191d516f83a4bae5"
+  },
+  "qualification": "Build completed on frozen server-only57 source; default GET and all UI unchanged from56. HTTP tests run against this actual artifact.",
+  "buildId": "1MgY7wIDuGln87vYnj4UN"
+}

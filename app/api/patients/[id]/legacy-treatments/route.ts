@@ -8,6 +8,11 @@ import { openingBalanceAccess } from "@/lib/opening-access";
 import { canAccessPatient } from "@/lib/patient-access";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalLegacyTreatments } from "@/lib/canonical-legacy-reads";
+import { commandCanonicalLegacyTreatment } from "@/lib/canonical-legacy-writes";
+import { canonicalLegacyFailure } from "@/lib/canonical-legacy-http";
 import { effectiveTemplates } from "@/lib/specialty-templates";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 
@@ -25,6 +30,13 @@ function patientIdOf(raw: string): number | null {
  * مرضاه (كحساب المريض). الصندوق والمحاسبة لا يبلغون مسارات ملف المريض من الباب أصلًا.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 95a (G4-2): the clinical description with the record read; amounts with the ledger view.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalLegacyTreatments(selected.handle, Number((await context.params).id)), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل العلاجات السابقة للنظام."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = patientIdOf((await context.params).id);
@@ -53,6 +65,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
  * الصلاحية صلاحية إضافة الرصيد السابق نفسها (المدير، والاستقبال إن فعّلها الإعداد) — قبل قراءة الطلب.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 95b (G4-1, G4-6): finance.legacy.record; an existing opening also needs opening management.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const canonicalPatient = patientIdOf((await context.params).id);
+      if (canonicalPatient === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400, headers: NO_STORE });
+      const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      if (typeof body !== "object" || body === null || Array.isArray(body)) return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+      const parsed = parseLegacyTreatmentRequest(body as Record<string, unknown>, clinicDateString(new Date(), CLINIC_TIME_ZONE));
+      if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: 400, headers: NO_STORE });
+      const made = await commandCanonicalLegacyTreatment(selected.handle, canonicalPatient, parsed.value);
+      return NextResponse.json(made, { status: made.replayed ? 200 : 201, headers: NO_STORE });
+    } catch (error) { return canonicalLegacyFailure(error, "تعذّر تسجيل العلاج السابق للنظام. أعد المحاولة."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const settings = await getSettings().catch(() => null);

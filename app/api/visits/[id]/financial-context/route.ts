@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalVisitFinancialContext } from "@/lib/canonical-visit-money";
 import { canAccessPatient } from "@/lib/patient-access";
 import { canViewMoney } from "@/lib/roles";
 import { getClinicalVisit, CLINIC_TIME_ZONE } from "@/lib/db";
@@ -10,6 +13,13 @@ import { redactVisitFinancialContext } from "@/lib/visit-financial-context";
 export const dynamic = "force-dynamic";
 /** Same patient/date gates as clinical GET; this read grants no command permissions. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 89 (owner decisions G4-1, G4-4, G4-6): the groups by grant, one snapshot.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalVisitFinancialContext(selected.handle, (await context.params).id), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر التحقق من مصادر العمل."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
   const id = Number((await context.params).id);

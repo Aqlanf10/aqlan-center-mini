@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { newRequestKey } from "@/lib/request-key";
 import {
   ASA_CLASSES, ASA_LABEL, HISTORY_QUESTIONS, SEVERITY_LABEL,
   type Allergy, type Answer, type AsaClass, type DerivedAlert, type Medication, type Severity,
@@ -142,6 +143,7 @@ function HistoryForm({ patientId, initial, onClose, onSaved }: {
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestKey = useRef(newRequestKey());
 
   async function save() {
     setBusy(true); setError(null);
@@ -149,10 +151,11 @@ function HistoryForm({ patientId, initial, onClose, onSaved }: {
       const response = await fetch(`/api/patients/${patientId}/medical-history`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ answers, allergies, medications, asaClass: asaClass || null, bloodGroup: bloodGroup || null, notes, patientConfirmed: confirmed }),
+        body: JSON.stringify({ requestKey: requestKey.current, answers, allergies, medications, asaClass: asaClass || null, bloodGroup: bloodGroup || null, notes, patientConfirmed: confirmed }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) { setError(payload.message ?? "تعذّر الحفظ."); return; }
+      requestKey.current = newRequestKey();
       onSaved();
     } finally {
       setBusy(false);

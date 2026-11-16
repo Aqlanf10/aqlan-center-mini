@@ -75,7 +75,8 @@ describe("actual saved converted-quote invoice in statement SSR", () => {
     expect(bodyMarkup).toBeTypeOf("string");
     expect(bodyMarkup).not.toContain(ledger.invoices[0].invoiceNumber);
     expect(table).toContain("1,500.00"); expect(table).toContain("صافي الفاتورة بعد الخصم");
-    expect(html).toContain("صافي المحصّل بعد الاستردادات وعكس السندات");
+    expect(html).toContain("صافي المدفوع");
+    expect(html).not.toContain("عكس السندات");
     const contract = await authedGet(`/print/plan/${before.arrangements[0].id}?source=debt-repayment&version=1`, h.sessions[role]);
     expect(contract.status).toBe(200);
     const contractHtml = await contract.text();

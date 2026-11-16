@@ -1,0 +1,11 @@
+# Proposed next bounded contract — native orthodontic lifecycle
+
+Planned after the local 53–54 saved cephalometric draft/completion batch. This is design only; no source edits in the frozen batch.
+
+Admit only the existing phase, retainer and completed/discontinued branches of PATCH /api/ortho/[id], using clinical.ortho.edit and its existing view prerequisite, current patient scope, and an opaque observation from the canonical detail read. The planId branch remains explicitly held until its independent financial/plan authorization contract is implemented; the route remains `existing` with partial-branch notes, not falsely counted fully converted.
+
+Preserve exact native rules: updates only active/retention, existing retainer delivery date preservation, no completion without a recorded retainer decision (the existing explicit `none` decision is valid; null is not), discontinuation distinct from completion, no reopening terminal cases. Extract same-connection writers; canonical commands lock patient before native case, revalidate scope/session after actual waits, preserve atomic original state transition plus new explicit audit coverage. No changes to clinical case bridge identity, invoices, agreement link, payments, assignments or clinical formulas. The independent clinical shell status editor remains blocked for native orthodontic cases.
+
+UI: current detail panel gets separate explicit controls only for the central edit capability; confirm observed current case, no implicit scope grant, no hidden financial control. Acknowledgment refreshes list and detail consistently. Unknown result uses per-principal/patient/case generic pending marker and fresh-read/new-intent recovery; no automatic resend or durable-idempotency claim. Preserve RTL identity and mobile fit.
+
+Acceptance: original legacy state rules, none/own/all/owner, exact one operation and typed fields, actual two-waiter conflict, capability withdrawal and expiry after wait, changed record, failed late audit, untouched nonempty finance/assignments/clinical shell, bounded response, old prepared intent, committed response loss and reload, no storage guarantee, status list refresh, HTTP/Chromium. Any clinical or financial decision not present in existing rules remains held rather than invented.

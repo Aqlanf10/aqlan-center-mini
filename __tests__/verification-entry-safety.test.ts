@@ -366,7 +366,7 @@ describe("valid direct-entry maintenance contract", () => {
     expect(error).toBeInstanceOf(CliExit);
     expect((error as CliExit).code).toBe(0);
     expect(boundary.spawn).toHaveBeenCalled();
-    expect(boundary.spawn).toHaveBeenCalledWith("npx", ["tsx", "scripts/verify-ceph.mjs"], expect.objectContaining({
+    expect(boundary.spawn).toHaveBeenCalledWith(process.execPath, ["--import", "tsx", "scripts/verify-ceph.mjs"], expect.objectContaining({
       env: expect.objectContaining({ DATABASE_URL: LOCAL_MAINTENANCE, TEST_DATABASE_URL: LOCAL_TEST }),
     }));
     expect(boundary.client).not.toHaveBeenCalled();

@@ -1,3 +1,7 @@
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { CanonicalCephReadRefusal } from "@/lib/canonical-ceph-reads";
+import { canonicalCephPairIds, CanonicalCephPairRefusal, readCanonicalCephPair } from "@/lib/canonical-ceph-pair-reads";
 import { NextResponse } from "next/server";
 import { getCephAnalysisForCompare } from "@/lib/db";
 import { resolveCephComparisonOrder, cephComparisonUrlParams, CEPH_ORDER_REQUIRED_NOTICE } from "@/lib/cephCompare";
@@ -10,6 +14,17 @@ export const dynamic = "force-dynamic";
 
 /** Compare only after acquisition chronology or a deliberate reference resolves direction. */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const [first, second] = canonicalCephPairIds(new URL(request.url).searchParams);
+      return NextResponse.json(await readCanonicalCephPair(selected.handle, "superimpose", first, second), { headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalCephReadRefusal || error instanceof CanonicalCephPairRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.code === "ceph_pair_patient_mismatch" ? 400 : 409, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تحميل المقارنة المحفوظة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

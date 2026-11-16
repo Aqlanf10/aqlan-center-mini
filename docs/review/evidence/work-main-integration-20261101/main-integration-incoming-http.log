@@ -1,0 +1,48 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/hr-payroll-attendance-disclosure.test.ts __tests__/security-http/hr-leave-read-lifetime.test.ts __tests__/security-http/reconciled-reminders-http.test.ts __tests__/security-http/positive-print-routes-ui.test.ts __tests__/security-http/lab-accounting-saved-fx-ui.test.ts __tests__/security-http/lab-pricing-scope-ui.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/hr-payroll-attendance-disclosure.test.ts (1 test | 1 failed) 73ms
+   × discloses that attendance and leave do not automatically adjust payroll, without writes 73ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/hr-payroll-attendance-disclosure.test.ts > discloses that attendance and leave do not automatically adjust payroll, without writes
+Error: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝ Failed to launch browser.
+ ❯ executablePathOrDie node_modules/playwright-core/lib/coreBundle.js:33180:19
+ ❯ Object.executablePathOrDie node_modules/playwright-core/lib/coreBundle.js:33211:49
+ ❯ Chromium._prepareToLaunch node_modules/playwright-core/lib/coreBundle.js:39787:43
+ ❯ Chromium._launchProcess node_modules/playwright-core/lib/coreBundle.js:39799:26
+ ❯ Chromium._innerLaunch node_modules/playwright-core/lib/coreBundle.js:39712:86
+ ❯ Chromium._innerLaunchWithRetries node_modules/playwright-core/lib/coreBundle.js:39699:18
+ ❯ node_modules/playwright-core/lib/coreBundle.js:57198:22
+ ❯ _ProgressController.run node_modules/playwright-core/lib/coreBundle.js:12374:27
+ ❯ BrowserServerLauncherImpl.launchServer node_modules/playwright-core/lib/coreBundle.js:57189:21
+ ❯ BrowserType2.launchServer node_modules/playwright-core/lib/coreBundle.js:63318:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  1 failed | 37 passed (38)
+   Start at  04:57:17
+   Duration  54.23s (transform 160ms, setup 0ms, import 571ms, tests 48.91s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

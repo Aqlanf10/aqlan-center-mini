@@ -6,6 +6,10 @@ import { LEGACY_TREATMENT_MESSAGE, LEGACY_TREATMENT_STATUS, type LegacyVoidRefus
 import { isLegacyVoidMode, parseLegacyVoidRequest } from "@/lib/legacy-treatment-void";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalLegacyFailure } from "@/lib/canonical-legacy-http";
+import { commandCanonicalLegacyVoid, readCanonicalLegacyVoidPreview } from "@/lib/canonical-legacy-writes";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string; agreementId: string }> };
@@ -21,6 +25,18 @@ const idsFrom = (params: { id: string; agreementId: string }) => {
 
 /** Read-only financial preview; no role expansion and no guessed agreement-to-receipt allocation. */
 export async function GET(request: Request, context: Context) {
+  // M2 slice 95b: finance.legacy.void with the ledger view; the exception mode also opening management.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const ids = idsFrom(await context.params);
+    if (!ids) return refused("bad_void_request");
+    const modes = new URL(request.url).searchParams.getAll("mode");
+    const mode = modes[0] ?? "ordinary";
+    if (modes.length > 1 || !isLegacyVoidMode(mode)) return refused("bad_void_request");
+    try { return NextResponse.json(await readCanonicalLegacyVoidPreview(selected.handle, ids.patientId, ids.agreementId, mode), { headers: NO_STORE }); }
+    catch (error) { return canonicalLegacyFailure(error, "تعذّر عرض أثر إبطال الاتفاق. أعد المحاولة."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });
   if (!isAdmin(session.role)) return refused("void_forbidden");
@@ -40,6 +56,17 @@ export async function GET(request: Request, context: Context) {
 
 /** Both modes retain existing isAdmin authority; only explicit manager_authorized can use the reviewed exception. */
 export async function POST(request: Request, context: Context) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const ids = idsFrom(await context.params);
+    if (!ids) return refused("bad_void_request");
+    try {
+      const parsed = parseLegacyVoidRequest(await readJsonBody(request, JSON_BODY_LIMIT_BYTES));
+      if (!parsed.ok) return refused(parsed.reason);
+      return NextResponse.json(await commandCanonicalLegacyVoid(selected.handle, ids.patientId, ids.agreementId, parsed.value), { headers: NO_STORE });
+    } catch (error) { return canonicalLegacyFailure(error, "تعذّر إبطال الاتفاق التاريخي. أعد المحاولة."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });
   if (!isAdmin(session.role)) return refused("void_forbidden");

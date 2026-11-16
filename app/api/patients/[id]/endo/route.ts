@@ -1,5 +1,7 @@
 import { visibleEndoTreatment } from "@/lib/endodontics-response";
 import { NextResponse } from "next/server";
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { canonicalEndoRoute, commandCanonicalEndoOpen, readCanonicalEndo } from "@/lib/canonical-endo";
 import { checkEndoTreatmentDraft } from "@/lib/endodontics";
 import { listPatientEndo, openEndoTreatment, OPEN_ENDO_MESSAGE } from "@/lib/endodontics-db";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
@@ -8,6 +10,9 @@ export const dynamic = "force-dynamic";
 
 /** (ENDO-2) نوبات علاج الجذور للمريض — القراءة لمن يملك الوصول إلى ملفه (العزل المركزي نفسه). */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // M2 slice 77: owning snapshot, a clinical grant inside the patient scope; plan items by clinical.plans.view.
+  const canonical = await canonicalPatientGet((await params).id, readCanonicalEndo, "تعذّر تحميل علاج الجذور.");
+  if (canonical) return canonical;
   const patientId = idOf((await params).id);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, false);
@@ -22,6 +27,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 /** فتح نوبة علاج جذور لسنٍّ داخل حالةٍ تخصصية — الطبيب والمدير. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  /* M2 slice 77: clinical.visits.document inside the patient scope, the clinician link or the owner. */
+  const canonical = await canonicalEndoRoute(request, async (handle, body) => commandCanonicalEndoOpen(handle, (await params).id, body), "تعذّر فتح علاج الجذور. أعد المحاولة.");
+  if (canonical) return canonical;
   const patientId = idOf((await params).id);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, true);

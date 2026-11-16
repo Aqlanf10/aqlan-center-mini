@@ -1,0 +1,77 @@
+
+ RUN  v4.1.12 /workspace/work-tooling-baseline
+
+ ❯ __tests__/nearby-booking-dialog-ui.test.tsx (7 tests | 2 failed | 5 skipped) 23ms
+   × an abandoned proposal render cannot revoke the committed booking or send another request 20ms
+   × committed A to B to A retires stale callbacks and unmount settles the pending decision 1ms
+ ❯ __tests__/modern-operations-read-ownership.test.tsx (7 tests | 2 failed | 5 skipped) 13ms
+   × an abandoned reference authority cannot replace the committed journal owner 10ms
+   × an abandoned supplier authority cannot discard the committed storage read, while unmount retires it 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/modern-operations-read-ownership.test.tsx > an abandoned reference authority cannot replace the committed journal owner
+Error: Ref write during render
+ ❯ Object.set __tests__/modern-operations-read-ownership.test.tsx:33:88
+     31|     useRef: (initial: unknown) => { const s = slot(); if (!("value" in…
+     32|       get: (target, key) => { if (runtime.rendering && key === "curren…
+     33|       set: (target, key, value) => { if (runtime.rendering && key === …
+       |                                                                                        ^
+     34|     }); return s.value; },
+     35|     useMemo: memo, useCallback: (fn: unknown, deps?: readonly unknown[…
+ ❯ Module.useReferenceCommand components/inventory/useReferenceCommand.ts:24:11
+ ❯ __tests__/modern-operations-read-ownership.test.tsx:150:38
+ ❯ render __tests__/modern-operations-read-ownership.test.tsx:46:16
+ ❯ __tests__/modern-operations-read-ownership.test.tsx:150:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/modern-operations-read-ownership.test.tsx > an abandoned supplier authority cannot discard the committed storage read, while unmount retires it
+Error: Ref write during render
+ ❯ Object.set __tests__/modern-operations-read-ownership.test.tsx:33:88
+     31|     useRef: (initial: unknown) => { const s = slot(); if (!("value" in…
+     32|       get: (target, key) => { if (runtime.rendering && key === "curren…
+     33|       set: (target, key, value) => { if (runtime.rendering && key === …
+       |                                                                                        ^
+     34|     }); return s.value; },
+     35|     useMemo: memo, useCallback: (fn: unknown, deps?: readonly unknown[…
+ ❯ Module.useSupplierCommand components/inventory/useSupplierCommand.ts:51:8
+ ❯ __tests__/modern-operations-read-ownership.test.tsx:161:38
+ ❯ render __tests__/modern-operations-read-ownership.test.tsx:46:16
+ ❯ __tests__/modern-operations-read-ownership.test.tsx:161:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  __tests__/nearby-booking-dialog-ui.test.tsx > an abandoned proposal render cannot revoke the committed booking or send another request
+ FAIL  __tests__/nearby-booking-dialog-ui.test.tsx > committed A to B to A retires stale callbacks and unmount settles the pending decision
+Error: Ref read during render
+ ❯ Object.get __tests__/nearby-booking-dialog-ui.test.tsx:20:79
+     18|     useState: (initial: unknown) => { const i = slot(initial); return …
+     19|     useRef: (initial: unknown) => hooks.values[slot(new Proxy({ curren…
+     20|       get: (target, key) => { if (hooks.rendering && key === "current"…
+       |                                                                               ^
+     21|       set: (target, key, value) => { if (hooks.rendering && key === "c…
+     22|     }))],
+ ❯ Module.useNearbyBooking components/useNearbyBooking.tsx:38:13
+ ❯ HookHarness __tests__/nearby-booking-dialog-ui.test.tsx:32:11
+ ❯ Object.react_stack_bottom_frame ../aqlan-assessment-final/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:9808:18
+ ❯ renderWithHooks ../aqlan-assessment-final/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:5062:19
+ ❯ renderElement ../aqlan-assessment-final/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:5497:23
+ ❯ retryNode ../aqlan-assessment-final/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6428:21
+ ❯ performWork ../aqlan-assessment-final/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:7435:17
+ ❯ startWork ../aqlan-assessment-final/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:8270:7
+ ❯ renderToStringImpl ../aqlan-assessment-final/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:8380:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 10 skipped (14)
+   Start at  23:55:19
+   Duration  1.83s (transform 592ms, setup 0ms, import 854ms, tests 36ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

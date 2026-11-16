@@ -10,13 +10,15 @@
  * الذي يحادثه، ويخضع لمحرّك السعة نفسه، وقفل اليوم نفسه، وسجلّ التدقيق نفسه.
  * وقناة الطلب (`channel`) تُسجَّل للتدقيق فقط — لا تغيّر قاعدةً واحدة.
  */
+import { readReturnBookingContext, type ReturnBookingSource } from "./return-booking-context";
+import { nearbyPatientBookingWarning, type NearbyPatientAppointment } from "./nearby-patient-booking";
 import { isAdmin } from "./roles";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./ortho-booking-intent";
 import { APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE, lockBookableAppointmentDoctor } from "./appointment-doctor";
 import type { Role } from "./roles";
 import {
-  getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
-  writeAppointmentAcrossDays, writeAppointmentInDay, type DbClient,
+  getAppointment, getAppointmentWith, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
+  writeAppointmentAcrossDays, writeAppointmentInDay, type AuditInput, type DbClient,
 } from "./db";
 import {
   prepareCapacityEvaluator, loadCapacityContext, resolveService, type CapacityContext,
@@ -30,9 +32,16 @@ import {
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^\d{1,2}:\d{2}$/;
 
+function bookingProposalScope(kind: string, input: object): string {
+  return JSON.stringify([kind, Object.fromEntries(Object.entries(input)
+    .filter(([key]) => key !== "nearbyAppointmentConfirmation")
+    .sort(([a], [b]) => a.localeCompare(b)))]);
+}
+
 /** من يحجز — إنسانٌ موثَّق دائمًا، ولو كانت يدُه وكيلًا ذكيًّا. */
 export interface BookingActor {
   username: string;
+  userId?: number;
   role: Role | string | null | undefined;
   /** جهة الطبيب حين يكون الفاعل طبيبًا — يُسجّل موعده على نفسه. */
   doctorPartyId?: number | null;
@@ -65,9 +74,17 @@ export interface BookAppointmentInput {
    * سقوطٍ في منتصف التحويل تجده فتربطه، ولا تكتب للمريض موعدًا ثانيًا.
    */
   waitingListId?: number | null;
+  nearbyAppointmentConfirmation?: string | null;
+  /** Exact clinical origin; responsibility is resolved on the server, not picked. */
+  returnBookingSource?: ReturnBookingSource | null;
+  returnBookingOrigin?: ReturnBookingSource | null;
+  returnBookingFingerprint?: string | null;
 }
 
 export interface BookingConflict {
+  kind?: "nearby_patient_appointments";
+  nearbyAppointments?: NearbyPatientAppointment[];
+  confirmationToken?: string;
   message: string;
   state: CapacityVerdict["state"];
   reasons: string[];
@@ -94,7 +111,7 @@ export type BookingResult =
       /** تنبيهٌ لا خطأ — الحجز تمّ والمستخدم يُخبَر ليتأكّد قبل أن يَعِد المريض. */
       warning: string | null;
     }
-  | { ok: false; status: 400; message: string }
+  | { ok: false; status: 400; message: string; code?: string }
   | { ok: false; status: 409; conflict: BookingConflict };
 
 /** صلاحية التجاوز تُشتقّ من المستخدم لا من القناة — والوكيل الذكي قناة. */
@@ -122,8 +139,10 @@ export async function recordCapacityOverride(input: {
   actor: string;
   actorRole?: string | null;
   channel: BookingActor["channel"];
-}): Promise<void> {
-  await recordAudit({
+}, audit?: (input: AuditInput) => Promise<void>): Promise<void> {
+  // The canonical path passes its transaction's audit writer: the row is atomic with
+  // the booking. The legacy path keeps its best-effort write after the commit.
+  const row: AuditInput = {
     action: "appointment.capacity_override",
     entity: "appointment",
     entityId: String(input.appointmentId),
@@ -139,7 +158,9 @@ export async function recordCapacityOverride(input: {
       القناة: input.channel,
       السبب: input.reason,
     },
-  }).catch(() => {});
+  };
+  if (audit) await audit(row);
+  else await recordAudit(row).catch(() => {});
 }
 
 function timeToMinutes(time: string): number {
@@ -194,6 +215,7 @@ export async function judgeBookingInDay(input: {
   service: AppointmentService | null;
   context: CapacityContext;
   providerId?: number | null;
+  requireAssignedProvider?: boolean;
   chairNo?: number | null;
   excludeId?: number;
   /** مريضٌ جديد — يُقارَن بحدّ اليوم إن ضبط المالك له رقمًا. */
@@ -205,6 +227,9 @@ export async function judgeBookingInDay(input: {
   patientId: number | null;
   canOverride: boolean;
   overrideReason: string;
+  nearbyAppointmentConfirmation?: string | null;
+  bookingActor?: string;
+  bookingScope?: string;
 }): Promise<
   | { ok: true; verdict: CapacityVerdict; overridden: boolean }
   | { ok: false; verdict: CapacityVerdict; conflict: BookingConflict }
@@ -221,6 +246,7 @@ export async function judgeBookingInDay(input: {
     sameDay: input.sameDay, date: input.date, time: input.time,
     durationMinutes: input.durationMinutes, service: input.service,
     context: input.context, providerId: input.providerId ?? null,
+    requireAssignedProvider: input.requireAssignedProvider,
     chairNo: input.chairNo ?? null, excludeId: input.excludeId,
     isNewPatient: input.isNewPatient ?? false, newPatientsBookedToday,
     client: input.client,
@@ -251,6 +277,27 @@ export async function judgeBookingInDay(input: {
     };
   }
 
+  // Acknowledgement is never a capacity or overlap override. Only ask after
+  // those existing guards admit this proposal, and re-read on every attempt.
+  if (input.patientId !== null && (verdict.state !== "OVER_CAPACITY"
+    || (input.canOverride && input.overrideReason.trim().length >= 3))) {
+    const warning = await nearbyPatientBookingWarning(input.client, {
+      actor: input.bookingActor ?? "", scope: input.bookingScope ?? "booking",
+      patientId: input.patientId, date: input.date, time: input.time,
+      durationMinutes: input.durationMinutes, serviceId: input.service?.id ?? null,
+      doctorId: input.providerId ?? null, chairNo: input.chairNo ?? null,
+      excludeId: input.excludeId ?? null,
+    }, input.nearbyAppointmentConfirmation);
+    if (warning) {
+      const message = "للمريض موعد قائم في يوم الحجز المقترح أو خلال اليومين التاليين. هل الموعد الإضافي مقصود؟";
+      return { ok: false, verdict, conflict: {
+        ...warning, message, state: verdict.state, reasons: [message],
+        dayPercent: verdict.dayPercent, canOverride: false,
+        overrideHint: "ألغِ المحاولة أو أكّد أن الموعد الإضافي مقصود.",
+        suggestion: null, suggestionMessage: "",
+      } };
+    }
+  }
   if (verdict.state !== "OVER_CAPACITY") return { ok: true, verdict, overridden: false };
 
   /* التجاوز حقٌّ موثَّق: صلاحيةٌ **وسبب**. وغيابُ أيّهما رفضٌ لا استثناء — وهذا
@@ -307,6 +354,12 @@ export async function judgeBookingInDay(input: {
  */
 export async function bookAppointment(
   input: BookAppointmentInput, actor: BookingActor,
+  /** The canonical path (M2 slice 16): its admitted transaction, and an atomic audit
+   * writer on it for the capacity override. Without them, as before: the engine owns
+   * its transaction and the override audit is written after the commit.
+   * assertAssignment sees the resolved clinician under the day/doctor locks,
+   * before insertion; it cannot authorize itself through the new appointment. */
+  options: { client?: DbClient; audit?: (input: AuditInput) => Promise<void>; assertAssignment?: (patientId: number, doctorId: number | null) => Promise<void> } = {},
 ): Promise<BookingResult> {
   const patientId = Number(input.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
@@ -333,6 +386,14 @@ export async function bookAppointment(
   }
 
 
+  const isReturnBooking = input.appointmentType === "follow_up"
+    || service?.legacyType === "follow_up" || input.returnBookingSource != null || input.returnBookingOrigin != null;
+  if (isReturnBooking && (!input.returnBookingSource
+    || typeof input.returnBookingFingerprint !== "string"
+    || !/^[a-f0-9]{64}$/.test(input.returnBookingFingerprint))) {
+    return { ok: false, status: 400, message: "اختر سياق العودة وتحقّق من الطبيب المسؤول الحالي قبل الحجز.", code: "return_booking_context_required" };
+  }
+
   /* المدّة: ما طلبه المستخدم، وإلا مدّة الخدمة، وإلا ثلاثون. والخدمة تُقترح ولا
      تفرض: قد يحتاج مريضٌ بعينه ضعف المدّة. */
   const requested = Number(input.durationMinutes);
@@ -357,7 +418,7 @@ export async function bookAppointment(
   }
 
   /* الطبيب يحجز لنفسه؛ وغيرُه يحدّد الطبيب صراحةً. */
-  const doctorId = actor.role === "doctor" && typeof actor.doctorPartyId === "number"
+  let doctorId = actor.role === "doctor" && typeof actor.doctorPartyId === "number"
     && actor.doctorPartyId > 0
     ? actor.doctorPartyId
     : (Number.isInteger(Number(input.doctorId)) && Number(input.doctorId) > 0
@@ -367,11 +428,12 @@ export async function bookAppointment(
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
   const state: {
     verdict: CapacityVerdict | null; overridden: boolean;
-    followupServiceRejected: boolean; doctorRejected: boolean;
-  } = { verdict: null, overridden: false, followupServiceRejected: false, doctorRejected: false };
+    followupServiceRejected: boolean; doctorRejected: boolean; returnRejected: { message: string; code: string } | null;
+  } = { verdict: null, overridden: false, followupServiceRejected: false, doctorRejected: false, returnRejected: null };
 
   const result = await writeAppointmentInDay({
     date: input.date,
+    client: options.client,
     judge: async (sameDay, client) => {
       if (input.bookingIntent === "ortho_follow_up") {
         // Existing order: day advisory lock, then this service row. The row lock
@@ -386,44 +448,73 @@ export async function bookAppointment(
         durationMinutes = Number.isFinite(requested) && requested > 0
           ? Math.round(requested) : service.defaultDurationMinutes;
       }
+      if (isReturnBooking) {
+        const source = await readReturnBookingContext(client, patientId, input.returnBookingSource!, {
+          lock: true, ...(input.returnBookingOrigin ? { origin: input.returnBookingOrigin } : {}),
+        });
+        if (!source.ok) {
+          state.returnRejected = { message: source.message, code: source.code };
+          return { ok: false as const, conflict: null };
+        }
+        if (source.fingerprint !== input.returnBookingFingerprint
+          || (input.doctorId != null && Number(input.doctorId) !== source.doctorId)) {
+          state.returnRejected = { message: "تغيّر الطبيب المسؤول أو سياق العودة. حدّث الاقتراح؛ تغيير المسؤول من الإعدادات فقط.", code: "return_booking_source_changed" };
+          return { ok: false as const, conflict: null };
+        }
+        // A return belongs to its current case clinician, never the booking
+        // actor or an arbitrary picker. This grants no patient access itself.
+        doctorId = source.doctorId;
+      }
       if (!await lockBookableAppointmentDoctor(client, doctorId)) {
         state.doctorRejected = true;
         return { ok: false as const, conflict: null };
       }
       const judged = await judgeBookingInDay({
         sameDay, client, date: input.date, time: input.time, durationMinutes,
-        service, context, providerId: doctorId, chairNo,
+        service, context, providerId: doctorId, chairNo, requireAssignedProvider: isReturnBooking,
         isNewPatient: input.isNewPatient ?? false,
         patientId,
         canOverride, overrideReason,
+        nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
+        bookingActor: actor.userId === undefined ? actor.username : `${actor.userId}:${actor.username}`, bookingScope: bookingProposalScope("create", input),
       });
       state.verdict = judged.verdict;
       if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
       state.overridden = judged.overridden;
       return { ok: true as const };
     },
-    commit: (client) => insertAppointmentOnClient(client, {
-      patientId,
-      date: input.date,
-      time: input.time,
-      durationMinutes,
-      appointmentType: input.appointmentType ?? service?.legacyType ?? null,
-      note: input.note ? input.note.slice(0, 300) : null,
-      doctorId,
-      serviceId: service?.id ?? null,
-      /* لقطةُ الفواصل تُكتب مع الموعد: تغييرُ الخدمة غدًا لا يعيد حساب ما حُجز. */
-      bufferBeforeMinutes: service?.bufferBeforeMinutes ?? 0,
-      bufferAfterMinutes: service?.bufferAfterMinutes ?? 0,
-      chairNo,
-      /* لقطتان يسألُ عنهما المحرّك لاحقًا: هل شغل هذا الموعد كرسيًّا، وهل كان
-         صاحبه مريضًا جديدًا. وقراءتهما من الخدمة الحاضرة تُعيد رسم ما مضى. */
-      occupiesChair: service ? service.requiresChair : true,
-      isNewPatient: input.isNewPatient ?? false,
-      waitingListId: input.waitingListId ?? null,
-    }),
+    commit: async (client) => {
+      await options.assertAssignment?.(patientId, doctorId);
+      return insertAppointmentOnClient(client, {
+        patientId,
+        date: input.date,
+        time: input.time,
+        durationMinutes,
+        appointmentType: input.appointmentType ?? service?.legacyType ?? null,
+        note: input.note ? input.note.slice(0, 300) : null,
+        doctorId,
+        serviceId: service?.id ?? null,
+        /* لقطةُ الفواصل تُكتب مع الموعد: تغييرُ الخدمة غدًا لا يعيد حساب ما حُجز. */
+        bufferBeforeMinutes: service?.bufferBeforeMinutes ?? 0,
+        bufferAfterMinutes: service?.bufferAfterMinutes ?? 0,
+        chairNo,
+        /* لقطتان يسألُ عنهما المحرّك لاحقًا: هل شغل هذا الموعد كرسيًّا، وهل كان
+           صاحبه مريضًا جديدًا. وقراءتهما من الخدمة الحاضرة تُعيد رسم ما مضى. */
+        occupiesChair: service ? service.requiresChair : true,
+        isNewPatient: input.isNewPatient ?? false,
+        waitingListId: input.waitingListId ?? null,
+      });
+    },
+  }).catch(error => {
+    if (isReturnBooking && (error as { code?: string }).code === "55P03") {
+      state.returnRejected = { message: "يجري تحديث مسؤولية الحالة. حدّث اقتراح العودة وأعد المحاولة.", code: "return_booking_source_changed" };
+      return { ok: false as const, conflict: null };
+    }
+    throw error;
   });
 
   if (!result.ok) {
+    if (state.returnRejected) return { ok: false, status: 400, ...state.returnRejected };
     if (state.followupServiceRejected) return { ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE };
     if (state.doctorRejected) return { ok: false, status: 400, message: APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE };
     return { ok: false, status: 409, conflict: result.conflict as BookingConflict };
@@ -440,7 +531,7 @@ export async function bookAppointment(
       reason: overrideReason, serviceName: service?.nameAr,
       actor: actor.username, actorRole: (actor.role ?? null) as string | null,
       channel: actor.channel,
-    });
+    }, options.audit);
   }
 
   return {
@@ -471,11 +562,16 @@ export interface RescheduleInput {
   chairNo?: number | null;
   reason: string;
   overrideReason?: string | null;
+  nearbyAppointmentConfirmation?: string | null;
+  transferToCurrentResponsibleDoctor?: boolean;
+  returnBookingSource?: ReturnBookingSource | null;
+  returnBookingOrigin?: ReturnBookingSource | null;
+  returnBookingFingerprint?: string | null;
 }
 
 export type RescheduleResult =
   | { ok: true; appointment: Appointment; verdict: CapacityVerdict; overridden: boolean; warning: string | null }
-  | { ok: false; status: 400 | 404 | 409; message: string; conflict?: BookingConflict };
+  | { ok: false; status: 400 | 404 | 409; message: string; code?: string; conflict?: BookingConflict };
 
 /**
  * نقلُ موعدٍ إلى وقتٍ آخر — عبر محرّك السعة نفسه، لا بابًا ثانيًا.
@@ -499,6 +595,10 @@ export type RescheduleResult =
  */
 export async function rescheduleAppointment(
   input: RescheduleInput, actor: BookingActor,
+  /** The canonical path (M2 slice 18): its admitted transaction, and an atomic audit
+   * writer on it for the reschedule and capacity-override rows. Without them, as
+   * before: the engine owns its transaction and both rows are written after commit. */
+  options: { client?: DbClient; audit?: (input: AuditInput) => Promise<void> } = {},
 ): Promise<RescheduleResult> {
   const id = Number(input.appointmentId);
   if (!Number.isInteger(id) || id <= 0) {
@@ -516,7 +616,7 @@ export async function rescheduleAppointment(
     return { ok: false, status: 400, message: "اكتب سبب نقل الموعد." };
   }
 
-  const current = await getAppointment(id);
+  const current = options.client ? await getAppointmentWith(options.client, id) : await getAppointment(id);
   if (!current) return { ok: false, status: 404, message: "الموعد غير موجود." };
   if (current.status !== "booked") {
     return {
@@ -557,32 +657,58 @@ export async function rescheduleAppointment(
     };
   }
 
-  const doctorId = input.doctorId === undefined
+  let doctorId = input.doctorId === undefined
     ? (current.doctorId ?? null)
     : (Number.isInteger(Number(input.doctorId)) && Number(input.doctorId) > 0
       ? Number(input.doctorId) : null);
 
+  const transferring = input.transferToCurrentResponsibleDoctor === true;
+  if ((!transferring && doctorId !== (current.doctorId ?? null))
+    || (transferring && (!input.returnBookingSource || typeof input.returnBookingFingerprint !== "string"
+      || !/^[a-f0-9]{64}$/.test(input.returnBookingFingerprint)))) {
+    return { ok: false, status: 400, code: "return_booking_context_required",
+      message: "نقل الطبيب يحتاج اختيارًا صريحًا لسياق الحالة والتحقق من المسؤول الحالي؛ نقل الوقت وحده لا يغيّر الطبيب." };
+  }
   const canOverride = actorCanOverride(actor);
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
-  const state: { verdict: CapacityVerdict | null; overridden: boolean; doctorRejected: boolean } =
-    { verdict: null, overridden: false, doctorRejected: false };
+  const state: { verdict: CapacityVerdict | null; overridden: boolean; doctorRejected: boolean;
+    returnRejected: { message: string; code: string } | null } =
+    { verdict: null, overridden: false, doctorRejected: false, returnRejected: null };
 
   const result = await writeAppointmentAcrossDays({
+    client: options.client,
     fromDate: current.scheduledDate,
     toDate: input.date,
     judge: async (targetDay, client) => {
+      if (transferring) {
+        const source = await readReturnBookingContext(client, current.patientId, input.returnBookingSource!, {
+          lock: true, ...(input.returnBookingOrigin ? { origin: input.returnBookingOrigin } : {}),
+        });
+        if (!source.ok) {
+          state.returnRejected = { code: source.code, message: source.message };
+          return { ok: false as const, conflict: null };
+        }
+        if (source.fingerprint !== input.returnBookingFingerprint
+          || (input.doctorId != null && Number(input.doctorId) !== source.doctorId)) {
+          state.returnRejected = { code: "return_booking_source_changed", message: "تغيّر سياق الحالة أو الطبيب المسؤول. حدّث الاختيار قبل نقل الموعد." };
+          return { ok: false as const, conflict: null };
+        }
+        doctorId = source.doctorId;
+      }
       if (!await lockBookableAppointmentDoctor(client, doctorId)) {
         state.doctorRejected = true;
         return { ok: false as const, conflict: null };
       }
       const judged = await judgeBookingInDay({
         sameDay: targetDay, client, date: input.date, time: input.time,
-        durationMinutes, service, context, providerId: doctorId, chairNo,
+        durationMinutes, service, context, providerId: doctorId, chairNo, requireAssignedProvider: transferring || (!service && doctorId !== null),
         /* الموعد لا يزاحم نفسه. */
         excludeId: id,
         isNewPatient: current.isNewPatient ?? false,
         patientId: current.patientId,
         canOverride, overrideReason,
+        nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
+        bookingActor: actor.userId === undefined ? actor.username : `${actor.userId}:${actor.username}`, bookingScope: bookingProposalScope("reschedule", input),
       });
       state.verdict = judged.verdict;
       if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
@@ -608,10 +734,18 @@ export async function rescheduleAppointment(
         ? (service ? service.requiresChair : true) : (current.occupiesChair !== false),
       chairNo,
       doctorId,
+      expectedDoctorId: current.doctorId ?? null,
     }),
+  }).catch(error => {
+    if (transferring && (error as { code?: string }).code === "55P03") {
+      state.returnRejected = { code: "return_booking_source_changed", message: "يجري تحديث مسؤولية الحالة. حدّث السياق وأعد المحاولة." };
+      return { ok: false as const, conflict: null };
+    }
+    throw error;
   });
 
   if (!result.ok) {
+    if (state.returnRejected) return { ok: false, status: 409, ...state.returnRejected };
     if (state.doctorRejected) return { ok: false, status: 400, message: APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE };
     return {
       ok: false, status: 409,
@@ -629,7 +763,7 @@ export async function rescheduleAppointment(
   }
 
   const verdict = state.verdict;
-  await recordAudit({
+  const rescheduled: AuditInput = {
     action: "appointment.reschedule",
     entity: "appointment",
     entityId: String(id),
@@ -643,9 +777,13 @@ export async function rescheduleAppointment(
       الخدمة: changingService ? (service?.nameAr ?? "غير محدَّدة") : "كما هي",
       الكرسي: chairNo ?? "لم يُخصَّص",
       السبب: reason.slice(0, 300),
+      ...(transferring ? { "نقل مسؤولية الموعد صراحة": true, "الطبيب السابق": current.doctorId ?? null,
+        "الطبيب الحالي": doctorId, "سياق المسؤولية": input.returnBookingSource } : {}),
       القناة: actor.channel,
     },
-  }).catch(() => {});
+  };
+  if (options.audit) await options.audit(rescheduled);
+  else await recordAudit(rescheduled).catch(() => {});
 
   if (state.overridden && verdict) {
     await recordCapacityOverride({
@@ -653,7 +791,7 @@ export async function rescheduleAppointment(
       reason: overrideReason, serviceName: service?.nameAr,
       actor: actor.username, actorRole: (actor.role ?? null) as string | null,
       channel: actor.channel,
-    });
+    }, options.audit);
   }
 
   return {

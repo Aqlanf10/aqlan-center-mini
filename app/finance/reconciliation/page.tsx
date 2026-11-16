@@ -24,6 +24,8 @@ interface CashierShift {
   difference?: Record<Currency, number> | null;
   differenceReason?: string | null;
   expectedSource?: "stored" | "computed";
+  /** 0129 §8.3: the latest close before the next opening, withheld from this viewer by the server. */
+  sealed?: boolean;
 }
 
 interface OpenShiftData {
@@ -68,6 +70,7 @@ export default function ReconciliationPage() {
   // Open shift form state
   const [openAmounts, setOpenAmounts] = useState<Record<Currency, string>>({ YER: "0", SAR: "0", USD: "0" });
   const [showOpenModal, setShowOpenModal] = useState(false);
+  // (0129) a difference with the previous close needs the opener's note before the shift opens.
 
   const loadData = useCallback(async () => {
     const requestId = ++shiftRequest.current.id;
@@ -401,6 +404,10 @@ export default function ReconciliationPage() {
                   />
                 </div>
               ))}
+
+              <p className="mt-3 text-xs font-bold text-slate-500">
+                عُدّ النقد وأدخله كما هو؛ يُسجَّل كما أُدخل، وأي فرق عن الإقفال السابق يُحال إلى المراجعة.
+              </p>
 
               <div className="mt-6 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
                 <button

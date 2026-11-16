@@ -1,0 +1,90 @@
+Auto-merging .github/workflows/ci.yml
+Auto-merging __tests__/environment-parity.test.ts
+Auto-merging __tests__/lab-accounting-fx-snapshot.test.ts
+CONFLICT (content): Merge conflict in __tests__/lab-accounting-fx-snapshot.test.ts
+Auto-merging __tests__/lab-accounting-monetary-intent-route.test.ts
+CONFLICT (content): Merge conflict in __tests__/lab-accounting-monetary-intent-route.test.ts
+Auto-merging __tests__/layout-clinic-timezone.test.ts
+Auto-merging __tests__/migrations.test.ts
+CONFLICT (content): Merge conflict in __tests__/migrations.test.ts
+Auto-merging __tests__/patient-appointment-history-schema.test.ts
+CONFLICT (content): Merge conflict in __tests__/patient-appointment-history-schema.test.ts
+Auto-merging __tests__/patient-ledger-write-feedback.test.tsx
+Auto-merging __tests__/patient-statement-print.test.tsx
+Auto-merging __tests__/periodontal-candidate-chain.test.ts
+CONFLICT (content): Merge conflict in __tests__/periodontal-candidate-chain.test.ts
+Auto-merging __tests__/periodontal-schema.test.ts
+CONFLICT (content): Merge conflict in __tests__/periodontal-schema.test.ts
+Auto-merging __tests__/postgres/_periodontal-fixture.ts
+CONFLICT (content): Merge conflict in __tests__/postgres/_periodontal-fixture.ts
+Auto-merging __tests__/postgres/debt-installments-storage.test.ts
+CONFLICT (content): Merge conflict in __tests__/postgres/debt-installments-storage.test.ts
+Auto-merging __tests__/postgres/hr-composed-backup.test.ts
+CONFLICT (content): Merge conflict in __tests__/postgres/hr-composed-backup.test.ts
+Auto-merging __tests__/postgres/hr-runtime-registration.test.ts
+CONFLICT (content): Merge conflict in __tests__/postgres/hr-runtime-registration.test.ts
+Auto-merging __tests__/postgres/lab-accounting-fx-snapshot.test.ts
+Auto-merging __tests__/postgres/legacy-doctor-fk-compatibility.test.ts
+CONFLICT (content): Merge conflict in __tests__/postgres/legacy-doctor-fk-compatibility.test.ts
+Auto-merging __tests__/postgres/patient-appointment-history-index.test.ts
+CONFLICT (content): Merge conflict in __tests__/postgres/patient-appointment-history-index.test.ts
+Auto-merging __tests__/postgres/periodontal-restore.test.ts
+CONFLICT (content): Merge conflict in __tests__/postgres/periodontal-restore.test.ts
+Auto-merging __tests__/postgres/schema-ownership.test.ts
+CONFLICT (content): Merge conflict in __tests__/postgres/schema-ownership.test.ts
+Auto-merging __tests__/schema-preflight-cli.test.ts
+CONFLICT (content): Merge conflict in __tests__/schema-preflight-cli.test.ts
+Auto-merging __tests__/security-http/hr-temporal-history-ui.test.ts
+CONFLICT (content): Merge conflict in __tests__/security-http/hr-temporal-history-ui.test.ts
+Auto-merging app/api/lab/[id]/route.ts
+CONFLICT (content): Merge conflict in app/api/lab/[id]/route.ts
+Auto-merging app/lab/page.tsx
+Auto-merging app/layout.tsx
+CONFLICT (content): Merge conflict in app/layout.tsx
+Auto-merging app/login/page.tsx
+CONFLICT (content): Merge conflict in app/login/page.tsx
+Auto-merging app/print/invoice/[id]/page.tsx
+Auto-merging app/print/lab/[id]/page.tsx
+CONFLICT (content): Merge conflict in app/print/lab/[id]/page.tsx
+Auto-merging app/print/statement/[id]/page.tsx
+Auto-merging app/settings/page.tsx
+CONFLICT (content): Merge conflict in app/settings/page.tsx
+Auto-merging components/LabDentalChart.tsx
+CONFLICT (content): Merge conflict in components/LabDentalChart.tsx
+Auto-merging components/LabPrescriptionModal.tsx
+Auto-merging components/PatientLabOrders.tsx
+CONFLICT (content): Merge conflict in components/PatientLabOrders.tsx
+Auto-merging components/PatientLedger.tsx
+Auto-merging components/PatientPlans.tsx
+Auto-merging components/inventory/DoctorCustody.tsx
+CONFLICT (content): Merge conflict in components/inventory/DoctorCustody.tsx
+Auto-merging components/inventory/ProcurementAdministration.tsx
+CONFLICT (content): Merge conflict in components/inventory/ProcurementAdministration.tsx
+Auto-merging components/inventory/ProcurementOperations.tsx
+CONFLICT (content): Merge conflict in components/inventory/ProcurementOperations.tsx
+Auto-merging docs/DATABASE_MIGRATIONS.md
+CONFLICT (content): Merge conflict in docs/DATABASE_MIGRATIONS.md
+Auto-merging lib/audit.ts
+CONFLICT (content): Merge conflict in lib/audit.ts
+Auto-merging lib/db.ts
+CONFLICT (content): Merge conflict in lib/db.ts
+Auto-merging lib/env-contract.ts
+Auto-merging lib/fullBackup.ts
+CONFLICT (content): Merge conflict in lib/fullBackup.ts
+Auto-merging lib/http-permissions.ts
+Auto-merging lib/lab.ts
+Auto-merging lib/restore/staging.ts
+CONFLICT (content): Merge conflict in lib/restore/staging.ts
+Auto-merging lib/settings-definitions.ts
+CONFLICT (content): Merge conflict in lib/settings-definitions.ts
+Auto-merging lib/settings.ts
+Auto-merging package.json
+Auto-merging proxy.ts
+Auto-merging schema/current-schema-contract.pg18.json
+CONFLICT (content): Merge conflict in schema/current-schema-contract.pg18.json
+Auto-merging schema/preflight-disclosure.pg18.json
+CONFLICT (content): Merge conflict in schema/preflight-disclosure.pg18.json
+Auto-merging scripts/verify-schema-ownership.ts
+CONFLICT (content): Merge conflict in scripts/verify-schema-ownership.ts
+Auto-merging vitest.config.mts
+Automatic merge failed; fix conflicts and then commit the result.

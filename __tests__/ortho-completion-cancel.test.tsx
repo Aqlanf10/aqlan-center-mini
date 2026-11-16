@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientOrtho, type AdjustmentForm } from "../components/PatientOrtho";
+import { OrthoCaseNavigation } from "../components/OrthoWorkupNavigation";
 import { RETAINER_LABEL } from "../lib/ortho";
 import { OrthoPackageLink } from "../components/OrthoPackageLink";
 import TreatmentFinancialContext from "../components/TreatmentFinancialContext";
@@ -103,6 +104,9 @@ function elements(node: ReactNode): Element[] {
   if (Array.isArray(node)) return node.flatMap(elements);
   if (!node || typeof node !== "object" || !("props" in node)) return [];
   const element = node as Element;
+  // The tab buttons now live in a stateless child. Execute that real child so
+  // the existing prompt/write assertions still use the parent's actual handler.
+  if (element.type === OrthoCaseNavigation) return elements(OrthoCaseNavigation(element.props as ComponentProps<typeof OrthoCaseNavigation>));
   return [element, ...elements(element.props.children as ReactNode)];
 }
 function text(node: ReactNode): string {
@@ -138,7 +142,7 @@ async function settle() { for (let index = 0; index < 40; index++) await Promise
 async function openRetention(status: "active" | "retention") {
   caseRow = { ...fixture, status };
   render(); await settle();
-  await click(button("التثبيت والاستبقاء"));
+  await click(button("التثبيت والإقفال"));
   expect(buttons(COMPLETE_LABEL)).toHaveLength(1);
   expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"])).toEqual([
     [`/api/ortho?patientId=${PATIENT_ID}`, "GET"], [`/api/patients/${PATIENT_ID}`, "GET"],
