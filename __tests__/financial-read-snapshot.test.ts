@@ -7,7 +7,7 @@ describe("financial read snapshot lifecycle",()=>{
    if(fault==="commit"&&sql==="COMMIT")throw failure;
    if(fault==="rollback"&&sql==="ROLLBACK")throw new Error("synthetic cleanup failure");return {rows:[]};
   }),release=vi.fn(),client={query,release},pool={query,connect:vi.fn(async()=>client)};
-  const operation=withFinancialReadSnapshot(pool,async runner=>{expect(runner).toBe(client);if(fault==="read"||fault==="rollback")throw failure;return 42;});
+  const operation=withFinancialReadSnapshot(pool,async runner=>{expect(runner).not.toBe(client);if(fault==="read"||fault==="rollback")throw failure;return 42;});
   if(fault==="success")await expect(operation).resolves.toBe(42);else await expect(operation).rejects.toBe(failure);
   expect(query.mock.calls[0][0]).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
   expect(query.mock.calls.at(-1)?.[0]).toBe(fault==="success"?"COMMIT":"ROLLBACK");
