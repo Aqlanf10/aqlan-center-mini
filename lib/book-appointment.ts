@@ -15,9 +15,11 @@ import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./or
 import { APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE, lockBookableAppointmentDoctor } from "./appointment-doctor";
 import type { Role } from "./roles";
 import {
-  getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
+  doctorOwnsPatient, getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
   writeAppointmentAcrossDays, writeAppointmentInDay, type DbClient,
 } from "./db";
+import { resolveRestrictedDoctorScope } from "./patient-access";
+import type { SessionPayload } from "./auth";
 import {
   prepareCapacityEvaluator, loadCapacityContext, resolveService, type CapacityContext,
 } from "./capacity-context";
@@ -38,6 +40,8 @@ export interface BookingActor {
   doctorPartyId?: number | null;
   /** صلاحية تجاوز السعة كما هي في المستخدم، لا كما تدّعيها القناة. */
   canOverrideCapacity?: boolean;
+  /** جلسة الموظف الحية للتحقق الذرّي من نطاق المريض داخل قفل اليوم. */
+  actorSession?: SessionPayload | null;
   /** كيف وصل الطلب — للتدقيق فقط. */
   channel: "ui" | "ai" | "portal" | "visit";
 }
@@ -94,7 +98,7 @@ export type BookingResult =
       /** تنبيهٌ لا خطأ — الحجز تمّ والمستخدم يُخبَر ليتأكّد قبل أن يَعِد المريض. */
       warning: string | null;
     }
-  | { ok: false; status: 400; message: string }
+  | { ok: false; status: 400 | 403; message: string }
   | { ok: false; status: 409; conflict: BookingConflict };
 
 /** صلاحية التجاوز تُشتقّ من المستخدم لا من القناة — والوكيل الذكي قناة. */
@@ -367,8 +371,11 @@ export async function bookAppointment(
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
   const state: {
     verdict: CapacityVerdict | null; overridden: boolean;
-    followupServiceRejected: boolean; doctorRejected: boolean;
-  } = { verdict: null, overridden: false, followupServiceRejected: false, doctorRejected: false };
+    followupServiceRejected: boolean; doctorRejected: boolean; patientOutOfScope: boolean;
+  } = {
+    verdict: null, overridden: false,
+    followupServiceRejected: false, doctorRejected: false, patientOutOfScope: false,
+  };
 
   const result = await writeAppointmentInDay({
     date: input.date,
@@ -389,6 +396,20 @@ export async function bookAppointment(
       if (!await lockBookableAppointmentDoctor(client, doctorId)) {
         state.doctorRejected = true;
         return { ok: false as const, conflict: null };
+      }
+      if (actor.actorSession) {
+        const scope = await resolveRestrictedDoctorScope(actor.actorSession, client);
+        if (scope.restricted) {
+          if (
+            scope.blockAllPatients ||
+            !scope.doctorPartyId ||
+            doctorId !== scope.doctorPartyId ||
+            !(await doctorOwnsPatient(scope.doctorPartyId, patientId, client))
+          ) {
+            state.patientOutOfScope = true;
+            return { ok: false as const, conflict: null };
+          }
+        }
       }
       const judged = await judgeBookingInDay({
         sameDay, client, date: input.date, time: input.time, durationMinutes,
@@ -426,6 +447,7 @@ export async function bookAppointment(
   if (!result.ok) {
     if (state.followupServiceRejected) return { ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE };
     if (state.doctorRejected) return { ok: false, status: 400, message: APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE };
+    if (state.patientOutOfScope) return { ok: false, status: 403, message: "هذا المريض خارج نطاق صلاحيتك السريرية." };
     return { ok: false, status: 409, conflict: result.conflict as BookingConflict };
   }
   const appointment = result.value;
@@ -475,7 +497,7 @@ export interface RescheduleInput {
 
 export type RescheduleResult =
   | { ok: true; appointment: Appointment; verdict: CapacityVerdict; overridden: boolean; warning: string | null }
-  | { ok: false; status: 400 | 404 | 409; message: string; conflict?: BookingConflict };
+  | { ok: false; status: 400 | 403 | 404 | 409; message: string; conflict?: BookingConflict };
 
 /**
  * نقلُ موعدٍ إلى وقتٍ آخر — عبر محرّك السعة نفسه، لا بابًا ثانيًا.
@@ -564,8 +586,10 @@ export async function rescheduleAppointment(
 
   const canOverride = actorCanOverride(actor);
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
-  const state: { verdict: CapacityVerdict | null; overridden: boolean; doctorRejected: boolean } =
-    { verdict: null, overridden: false, doctorRejected: false };
+  const state: {
+    verdict: CapacityVerdict | null; overridden: boolean;
+    doctorRejected: boolean; patientOutOfScope: boolean;
+  } = { verdict: null, overridden: false, doctorRejected: false, patientOutOfScope: false };
 
   const result = await writeAppointmentAcrossDays({
     fromDate: current.scheduledDate,
@@ -574,6 +598,21 @@ export async function rescheduleAppointment(
       if (!await lockBookableAppointmentDoctor(client, doctorId)) {
         state.doctorRejected = true;
         return { ok: false as const, conflict: null };
+      }
+      if (actor.actorSession) {
+        const scope = await resolveRestrictedDoctorScope(actor.actorSession, client);
+        if (scope.restricted) {
+          if (
+            scope.blockAllPatients ||
+            !scope.doctorPartyId ||
+            !(await doctorOwnsPatient(scope.doctorPartyId, current.patientId, client)) ||
+            (current.doctorId !== null && current.doctorId !== scope.doctorPartyId) ||
+            (doctorId !== null && doctorId !== scope.doctorPartyId)
+          ) {
+            state.patientOutOfScope = true;
+            return { ok: false as const, conflict: null };
+          }
+        }
       }
       const judged = await judgeBookingInDay({
         sameDay: targetDay, client, date: input.date, time: input.time,
@@ -613,6 +652,7 @@ export async function rescheduleAppointment(
 
   if (!result.ok) {
     if (state.doctorRejected) return { ok: false, status: 400, message: APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE };
+    if (state.patientOutOfScope) return { ok: false, status: 403, message: "هذا المريض خارج نطاق صلاحيتك السريرية." };
     return {
       ok: false, status: 409,
       message: (result.conflict as BookingConflict).message,

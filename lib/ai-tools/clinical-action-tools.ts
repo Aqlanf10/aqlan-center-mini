@@ -24,7 +24,15 @@ import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, Structu
 function doctorScopeIdFor(context: AiToolContext): number | null {
   if (context.role !== "doctor" && context.userRole !== "doctor") return null;
   if (context.canViewAllPatients || context.permissions?.canViewAllPatients) return null;
-  return context.doctorPartyId ?? null;
+  return typeof context.doctorPartyId === "number" && context.doctorPartyId > 0
+    ? context.doctorPartyId
+    : null;
+}
+
+function isUnlinkedScopedDoctor(context: AiToolContext): boolean {
+  if (context.role !== "doctor" && context.userRole !== "doctor") return false;
+  if (context.canViewAllPatients || context.permissions?.canViewAllPatients) return false;
+  return typeof context.doctorPartyId !== "number" || context.doctorPartyId <= 0;
 }
 
 // ─── 1. مساعد السلامة الدوائية — فحصٌ لا اختيار (Medication Safety Assistant) ────
@@ -354,13 +362,45 @@ export async function generatePostOpCareAction(
   let patientId = params.patientId;
 
   if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
+    const session = {
+      userId: context.userId ?? 1,
+      username: context.username || "anonymous",
+      role: (context.role || context.userRole || "doctor") as string,
+      expiresAt: Date.now() + 3600_000,
+      partyId: context.doctorPartyId ?? undefined,
+    };
     let p = null;
     if (patientId) {
+      const allowed = await canAccessPatient(session, patientId).catch(() => false);
+      if (!allowed) {
+        return {
+          success: false,
+          textSummary: "🔒 **تنبيه أمني:** ليس لديك صلاحية للوصول إلى ملف هذا المريض (عزل الكادر السريري).",
+          warnings: ["عزل الأطباء: محاولة قراءة ملف مريض غير مسند"],
+        };
+      }
       p = await getPatient(patientId);
     } else {
+      if (isUnlinkedScopedDoctor(context)) {
+        return {
+          success: false,
+          textSummary: "🔒 **تنبيه أمني:** حساب الطبيب غير مرتبط بجهة طبيب في المركز.",
+          warnings: ["عزل الأطباء: حساب طبيب غير مرتبط بجهة طبيب"],
+        };
+      }
       const q = params.patientName || context.currentPatientName || "";
       const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
-      if (matches[0]) p = await getPatient(matches[0].id);
+      if (matches[0]) {
+        const allowed = await canAccessPatient(session, matches[0].id).catch(() => false);
+        if (!allowed) {
+          return {
+            success: false,
+            textSummary: "🔒 **تنبيه أمني:** ليس لديك صلاحية للوصول إلى ملف هذا المريض (عزل الكادر السريري).",
+            warnings: ["عزل الأطباء: محاولة قراءة ملف مريض غير مسند"],
+          };
+        }
+        p = await getPatient(matches[0].id);
+      }
     }
     if (p) {
       patientName = p.fullName;

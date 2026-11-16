@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/session";
 import { callVisitAgain, callVisitGated, clearVisit, deferVisitPayment, deleteVisit, finishVisit, linkVisitToPatient, openVisitPatientFile, recordAudit, returnVisitToWaiting, seatVisitGated, type GatedMoveResult } from "@/lib/db";
 import { normalizeEmergencyReason } from "@/lib/chair-readiness";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
+import { AmbiguousSharedPhonePatientError, PatientOutOfScopeError } from "@/lib/patient-scope-error";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
@@ -156,7 +157,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!target.ok) {
         return NextResponse.json({ message: target.message }, { status: target.status });
       }
-      const linked = await linkVisitToPatient(id, patientId);
+      const linked = await linkVisitToPatient(id, patientId, session);
       if (!linked.ok) return NextResponse.json({ message: linked.message }, { status: 409 });
       return NextResponse.json({ ok: true, patientName: linked.patientName });
     }
@@ -167,7 +168,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!isAdmin(session.role) && session.role !== "doctor" && session.role !== "reception") {
         return NextResponse.json({ message: "فتح الملف للطبيب أو المدير أو الاستقبال." }, { status: 403 });
       }
-      const opened = await openVisitPatientFile(id);
+      const opened = await openVisitPatientFile(id, session);
       if (!opened.ok) {
         return NextResponse.json(
           { message: opened.reason === "signed" ? "الزيارة موقَّعة — ملفّها فُتح عند توقيعها." : "الزيارة غير موجودة." },
@@ -185,7 +186,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     return NextResponse.json({ message: "إجراء غير معروف." }, { status: 400 });
-  } catch {
+  } catch (error) {
+    if (error instanceof PatientOutOfScopeError) {
+      return NextResponse.json({ message: error.message }, { status: 403 });
+    }
+    if (error instanceof AmbiguousSharedPhonePatientError) {
+      return NextResponse.json(
+        { message: error.message, code: error.code, candidates: error.candidates },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ message: "تعذّر تنفيذ الإجراء. أعد المحاولة." }, { status: 500 });
   }
 }

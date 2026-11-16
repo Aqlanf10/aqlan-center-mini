@@ -5,6 +5,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
   deleteLabOrder,
+  findUserByUsername,
   getLabOrderById,
   getSettings,
   labOrderEvents,
@@ -15,6 +16,8 @@ import {
   updateLabOrderShades,
   updateLabOrderClinical,
 } from "@/lib/db";
+import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
+import { canAccessPatient, PatientOutOfScopeError } from "@/lib/patient-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -81,6 +84,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     /* سجل أحداث الطلب (المختبرات V2) — قبل أي تغيير أو بدونه عند الطلب المجرد. */
     if (source.action === "events") {
+      const existing = await getLabOrderById(id);
+      if (!existing) {
+        return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+      }
+      if (!(await canAccessPatient(session, existing.patientId))) {
+        return NextResponse.json({ message: "أمر المختبر خارج نطاق صلاحيتك السريرية." }, { status: 403 });
+      }
       const events = await labOrderEvents(id);
       return NextResponse.json({ events });
     }
@@ -166,30 +176,52 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json(updated);
     }
 
+    let hideCosts = false;
+    if (session.role === "doctor") {
+      const doctorUser = await findUserByUsername(session.username).catch(() => null);
+      if (!canDoctorViewCostPrices(doctorUser?.permissions, session.role)) hideCosts = true;
+    }
+    const maskCosts = <T extends { costMinor?: number | null; costCurrency?: Currency | null; baseAmountMinor?: number | null }>(
+      order: T,
+    ): T => (hideCosts ? { ...order, costMinor: null, costCurrency: null, baseAmountMinor: null } : order);
+
     if (typeof source.dueDate === "string") {
       if (!DATE_PATTERN.test(source.dueDate)) {
         return NextResponse.json({ message: "تاريخ غير صالح." }, { status: 400 });
       }
-      const updated = await setLabOrderDueDate(id, source.dueDate);
+      const existing = await getLabOrderById(id);
+      if (!existing) {
+        return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+      }
+      if (!(await canAccessPatient(session, existing.patientId))) {
+        return NextResponse.json({ message: "أمر المختبر خارج نطاق صلاحيتك السريرية." }, { status: 403 });
+      }
+      const updated = await setLabOrderDueDate(id, source.dueDate, session.username, session);
       if (!updated) {
         return NextResponse.json(
           { message: "لا يمكن تأجيل عمل وصل أو أُلغي." },
           { status: 409 },
         );
       }
-      return NextResponse.json(updated);
+      return NextResponse.json(maskCosts(updated));
     }
 
     const status = typeof source.status === "string" ? source.status : "";
     if (!STATUSES.includes(status as LabOrderStatus)) {
       return NextResponse.json({ message: "حالة غير معروفة." }, { status: 400 });
     }
+    const existing = await getLabOrderById(id);
+    if (!existing) {
+      return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+    }
+    if (!(await canAccessPatient(session, existing.patientId))) {
+      return NextResponse.json({ message: "أمر المختبر خارج نطاق صلاحيتك السريرية." }, { status: 403 });
+    }
     /* إلغاء الإرسالية قرار إداري لا تشغيلي: يمسّ المال (يعكس الالتزام غير
      * المسدَّد) ويوقف عملًا قائمًا عند المختبر — للمدير وحده. طلب «لم يُرسل بعد»
      * استثناء: لم يغادر العيادة ولم يدخل الدفاتر، فإلغاؤه حقٌّ تشغيلي للجميع. */
     if (status === "cancelled") {
-      const existing = await getLabOrderById(id);
-      if (existing && existing.status !== "needed" && !isAdmin(session.role)) {
+      if (existing.status !== "needed" && !isAdmin(session.role)) {
         return NextResponse.json(
           { message: "إلغاء إرسالية أُرسلت للمختبر للمدير وحده." },
           { status: 403 },
@@ -200,6 +232,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       actor: session.username,
       actorRole: session.role,
       notes: typeof source.note === "string" && source.note.trim() ? source.note.trim().slice(0, 300) : null,
+      actorSession: session,
     });
     if (!updated) {
       // الرفض هنا يعني أن جهازًا آخر سبقنا، أو أن الانتقال غير منطقي (مركَّب ثم مُرسَل).
@@ -225,8 +258,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actorRole: session.role,
       });
     }
-    return NextResponse.json(updated);
+    return NextResponse.json(maskCosts(updated));
   } catch (error) {
+    if (error instanceof PatientOutOfScopeError) {
+      return NextResponse.json({ message: error.message }, { status: 403 });
+    }
     const code = error instanceof Error ? error.message : "";
     if (code === "lab_order_accounting_price_invalid") return NextResponse.json({ code, message: "التكلفة المعدّلة يجب أن تكون مبلغًا موجبًا؛ لا يمكن مسح الالتزام المالي من هذا الإجراء." }, { status: 400 });
     const accountingConflicts: Record<string, string> = {

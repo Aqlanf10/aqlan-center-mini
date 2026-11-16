@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, ledgerBalancesByCurrency, patientStatementSnapshot } from "@/lib/db";
 import { requirePortalSession } from "@/lib/portal-server";
+import { readPortalSettings } from "@/lib/portal-settings";
 import { portalStatementView } from "@/lib/portal-statement";
 import { clinicDateString } from "@/lib/schedule";
 import { historicalOpeningBuckets } from "@/lib/statement-historical-details";
@@ -21,6 +22,13 @@ export async function GET() {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
   try {
+    const settings = await readPortalSettings();
+    if (!settings.showStatement) {
+      return NextResponse.json(
+        { message: "عرض كشف الحساب والفواتير غير متاح حاليًا في إعدادات بوابة المريض." },
+        { status: 403 },
+      );
+    }
     // The printed statement's readers, in one snapshot: balances and agreement progress
     // in a response always describe the same committed state.
     // Previous-treatment details ride the same snapshot. A malformed saved historical fact withholds that

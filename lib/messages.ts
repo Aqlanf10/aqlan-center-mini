@@ -316,6 +316,43 @@ export function fileMatchesMagicBytes(mime: string, base64: string): boolean {
   }
 }
 
+/**
+ * البصمة السحرية للتسجيلات الصوتية المرفوعة عبر الشبكة — تمنع تخزين HTML/SVG/تنفيذي
+ * متنكّر بنوع صوتي (`audio/webm`، `audio/ogg`، `audio/wav`، `audio/mp4`، `audio/mpeg`).
+ */
+export function voiceMatchesMagicBytes(mime: string, base64: string): boolean {
+  let prefix: Buffer;
+  try {
+    prefix = Buffer.from(base64.slice(0, 32), "base64");
+  } catch {
+    return false;
+  }
+  if (prefix.length < 4) return false;
+  const startsWith = (bytes: number[]) =>
+    bytes.length <= prefix.length && bytes.every((byte, index) => prefix[index] === byte);
+  const ascii = (text: string, at: number) =>
+    prefix.length >= at + text.length && prefix.subarray(at, at + text.length).toString("latin1") === text;
+
+  const normalized = normalizeVoiceMime(mime);
+  switch (normalized) {
+    case "audio/webm":
+      return startsWith([0x1a, 0x45, 0xdf, 0xa3]); // EBML (WebM/Matroska)
+    case "audio/ogg":
+      return ascii("OggS", 0);
+    case "audio/wav":
+      return ascii("RIFF", 0) && ascii("WAVE", 8);
+    case "audio/mp4":
+    case "audio/x-m4a":
+      return ascii("ftyp", 4);
+    case "audio/mpeg":
+    case "audio/mp3":
+    case "audio/aac":
+      return ascii("ID3", 0) || (prefix[0] === 0xff && (prefix[1]! & 0xe0) === 0xe0);
+    default:
+      return false;
+  }
+}
+
 /** مدة صوتية مقروءة: 1:05 — أرقام موحّدة فتتسق في فقاعة الرسالة. */
 export function formatVoiceDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.round(ms / 1000));

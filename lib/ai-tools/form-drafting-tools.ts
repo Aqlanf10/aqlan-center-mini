@@ -12,6 +12,7 @@
  */
 
 import { getPatient, searchPatients, getSettings } from "../db";
+import { canAccessPatient } from "../patient-access";
 import { CONSENT_TEMPLATES, getConsentTemplate, type ConsentTemplate } from "../consent-templates";
 import { buildInstallmentPlanAgreement, STANDARD_PLAN_TERMS, type Installment } from "../plans";
 import { parseMedicalAlerts } from "../patient";
@@ -26,7 +27,56 @@ import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, Structu
 function doctorScopeIdFor(context: AiToolContext): number | null {
   if (context.role !== "doctor" && context.userRole !== "doctor") return null;
   if (context.canViewAllPatients || context.permissions?.canViewAllPatients) return null;
-  return context.doctorPartyId ?? null;
+  return typeof context.doctorPartyId === "number" && context.doctorPartyId > 0
+    ? context.doctorPartyId
+    : null;
+}
+
+async function loadScopedPatientForDraft(
+  params: { patientId?: number; patientName?: string },
+  context: AiToolContext,
+): Promise<
+  | { ok: true; patient: Awaited<ReturnType<typeof getPatient>> }
+  | { ok: false; refusal: ToolExecutionResult }
+> {
+  if (!context.isDbConnected || !(params.patientId || params.patientName || context.currentPatientName)) {
+    return { ok: true, patient: null };
+  }
+  const role = context.role || context.userRole;
+  const session = {
+    userId: context.userId ?? 1,
+    username: context.username || "anonymous",
+    role: (role || "doctor") as string,
+    expiresAt: Date.now() + 3600_000,
+    partyId: context.doctorPartyId ?? undefined,
+  };
+  const deniedResult = (): ToolExecutionResult => ({
+    success: false,
+    textSummary: "🔒 **تنبيه أمني:** ليس لديك صلاحية للوصول إلى ملف هذا المريض (عزل الكادر السريري).",
+    warnings: ["عزل الأطباء: محاولة صياغة نموذج لمريض خارج النطاق"],
+  });
+
+  if (params.patientId) {
+    const allowed = await canAccessPatient(session, params.patientId).catch(() => false);
+    if (!allowed) return { ok: false, refusal: deniedResult() };
+    const p = await getPatient(params.patientId);
+    return { ok: true, patient: p };
+  }
+
+  const isRestrictedDoctor =
+    role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients;
+  if (isRestrictedDoctor && (typeof context.doctorPartyId !== "number" || context.doctorPartyId <= 0)) {
+    return { ok: false, refusal: deniedResult() };
+  }
+
+  const q = (params.patientName || context.currentPatientName || "").trim();
+  if (!q) return { ok: true, patient: null };
+  const matches = await searchPatients(q, 1, doctorScopeIdFor(context));
+  if (!matches[0]) return { ok: true, patient: null };
+  const allowed = await canAccessPatient(session, matches[0].id).catch(() => false);
+  if (!allowed) return { ok: false, refusal: deniedResult() };
+  const p = await getPatient(matches[0].id);
+  return { ok: true, patient: p };
 }
 
 export async function draftConsentFormAction(
@@ -45,21 +95,13 @@ export async function draftConsentFormAction(
   let patientId = params.patientId;
   let medicalAlert: string | null = null;
 
-  if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
-    let p = null;
-    if (patientId) {
-      p = await getPatient(patientId);
-    } else {
-      const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
-      if (matches[0]) p = await getPatient(matches[0].id);
-    }
-    if (p) {
-      patientName = p.fullName;
-      patientPhone = p.phone;
-      patientId = p.id;
-      medicalAlert = p.medicalAlert;
-    }
+  const scoped = await loadScopedPatientForDraft(params, context);
+  if (!scoped.ok) return scoped.refusal;
+  if (scoped.patient) {
+    patientName = scoped.patient.fullName;
+    patientPhone = scoped.patient.phone;
+    patientId = scoped.patient.id;
+    medicalAlert = scoped.patient.medicalAlert;
   }
 
   // كشف القالب الأنسب
@@ -167,20 +209,12 @@ export async function draftTreatmentPlanFormAction(
   let patientPhone: string | null = null;
   let patientId = params.patientId;
 
-  if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
-    let p = null;
-    if (patientId) {
-      p = await getPatient(patientId);
-    } else {
-      const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
-      if (matches[0]) p = await getPatient(matches[0].id);
-    }
-    if (p) {
-      patientName = p.fullName;
-      patientPhone = p.phone;
-      patientId = p.id;
-    }
+  const scoped = await loadScopedPatientForDraft(params, context);
+  if (!scoped.ok) return scoped.refusal;
+  if (scoped.patient) {
+    patientName = scoped.patient.fullName;
+    patientPhone = scoped.patient.phone;
+    patientId = scoped.patient.id;
   }
 
   /* مراجعة الجولة الثانية (Blocker C): وثيقةٌ مالية تخصّ مريضًا لا تُختلق
@@ -390,19 +424,11 @@ export async function draftLabOrderFormAction(
   let patientName = params.patientName || context.currentPatientName || "المريض";
   let patientId = params.patientId;
 
-  if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
-    let p = null;
-    if (patientId) {
-      p = await getPatient(patientId);
-    } else {
-      const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
-      if (matches[0]) p = await getPatient(matches[0].id);
-    }
-    if (p) {
-      patientName = p.fullName;
-      patientId = p.id;
-    }
+  const scoped = await loadScopedPatientForDraft(params, context);
+  if (!scoped.ok) return scoped.refusal;
+  if (scoped.patient) {
+    patientName = scoped.patient.fullName;
+    patientId = scoped.patient.id;
   }
 
   const toothCode = params.toothCode || "السن المرفق بالطبعة";
@@ -450,8 +476,8 @@ export async function draftLabOrderFormAction(
   ];
 
   const actions: ActionButton[] = [
-    { label: "🖨️ طباعة أمر عمل المعمل", href: `/print/lab/${patientId || 0}`, actionType: "print" },
-    { label: "فتح شاشة المعمل", href: "/lab", actionType: "navigate" },
+    /* مسودة أمر معمل غير محفوظة: /print/lab/[id] يتوقع معرّف أمر المعمل المحفوظ (labOrderId) لا معرّف المريض. */
+    { label: "فتح شاشة المعمل لإصدار وطباعة الأمر", href: "/lab", actionType: "navigate" },
   ];
 
   return {
@@ -545,20 +571,12 @@ export async function draftMedicalReportFormAction(
   let patientPhone: string | null = null;
   let patientId = params.patientId;
 
-  if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
-    let p = null;
-    if (patientId) {
-      p = await getPatient(patientId);
-    } else {
-      const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
-      if (matches[0]) p = await getPatient(matches[0].id);
-    }
-    if (p) {
-      patientName = p.fullName;
-      patientPhone = p.phone;
-      patientId = p.id;
-    }
+  const scoped = await loadScopedPatientForDraft(params, context);
+  if (!scoped.ok) return scoped.refusal;
+  if (scoped.patient) {
+    patientName = scoped.patient.fullName;
+    patientPhone = scoped.patient.phone;
+    patientId = scoped.patient.id;
   }
 
   const addressedTo = params.addressedTo || "إلى من يهمه الأمر / الجهة المختصة";

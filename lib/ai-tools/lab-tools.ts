@@ -24,15 +24,25 @@ export async function getLabCases(
 
   try {
     let doctorId = params.doctorId;
-    if (context.role === "doctor" && !context.canViewAllPatients && context.doctorPartyId) {
+    const restrictedDoctor = context.role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients;
+    if (restrictedDoctor) {
+      if (!context.doctorPartyId || context.doctorPartyId <= 0) {
+        return {
+          success: false,
+          textSummary: "⛔ حساب الطبيب غير مربوط بجهة طبيب نشطة لعرض أوامر المعمل.",
+        };
+      }
       doctorId = context.doctorPartyId;
     }
 
-    const orders: LabOrder[] = await listLabOrders({
-      status: params.status || "active",
-      doctorId,
-      limit: 30,
-    }).catch(() => []);
+    const orders: LabOrder[] = await listLabOrders(
+      {
+        status: params.status || "active",
+        doctorId,
+        limit: 30,
+      },
+      restrictedDoctor ? { doctorPartyId: context.doctorPartyId } : undefined,
+    ).catch(() => []);
 
     const statusMap: Record<string, string> = {
       needed: "مطلوبة 📝",

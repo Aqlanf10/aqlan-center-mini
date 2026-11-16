@@ -18,9 +18,10 @@ import {
   parseMessageTarget,
   validateMessageEdit,
   validateOutgoingMessage,
+  voiceMatchesMagicBytes,
 } from "@/lib/messages";
 import { requireSession } from "@/lib/session";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, resolveRestrictedDoctorScope } from "@/lib/patient-access";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES, MESSAGES_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 
@@ -43,18 +44,26 @@ export async function GET(request: Request) {
 
   try {
     if (url.searchParams.get("conversations") === "1") {
+      const scope = await resolveRestrictedDoctorScope(session);
+      const filter = scope.restricted
+        ? { doctorPartyId: scope.doctorPartyId, blockAllPatients: scope.blockAllPatients }
+        : undefined;
       const [list, unread, urgent] = await Promise.all([
-        staffConversationList(session.userId),
-        unreadMessageCount(session.userId),
-        urgentUnreadMessageCount(session.userId),
+        staffConversationList(session.userId, filter),
+        unreadMessageCount(session.userId, filter),
+        urgentUnreadMessageCount(session.userId, filter),
       ]);
       return NextResponse.json({ ...list, unread, urgent, meUserId: session.userId });
     }
 
     if (url.searchParams.get("unread") === "1") {
+      const scope = await resolveRestrictedDoctorScope(session);
+      const filter = scope.restricted
+        ? { doctorPartyId: scope.doctorPartyId, blockAllPatients: scope.blockAllPatients }
+        : undefined;
       const [unread, urgent] = await Promise.all([
-        unreadMessageCount(session.userId),
-        urgentUnreadMessageCount(session.userId),
+        unreadMessageCount(session.userId, filter),
+        urgentUnreadMessageCount(session.userId, filter),
       ]);
       return NextResponse.json({ unread, urgent });
     }
@@ -119,6 +128,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: verdict.message }, { status: 400 });
   }
   const message = verdict.value;
+  if (
+    message.kind === "voice" &&
+    (!message.voiceMime ||
+      !message.voiceData ||
+      !voiceMatchesMagicBytes(message.voiceMime, message.voiceData))
+  ) {
+    return NextResponse.json(
+      { message: "ترويسة المقطع الصوتي لا تطابق الصيغة الصوتية المعلنة." },
+      { status: 400 },
+    );
+  }
 
   if (target.type === "user") {
     const recipient = await getStaffUserById(target.id!);
@@ -231,8 +251,24 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const result = await deleteStaffMessage(id, session.userId);
+    const result = await deleteStaffMessage(id, session.userId, {
+      username: session.username,
+      role: session.role,
+      session,
+    });
     if (!result.ok) {
+      if (result.reason === "already-deleted") {
+        return NextResponse.json(
+          { message: "هذه الرسالة محذوفة مسبقًا." },
+          { status: 409 },
+        );
+      }
+      if (result.reason === "patient-out-of-scope") {
+        return NextResponse.json(
+          { message: "غير مصرّح لك بحذف رسائل مريض خارج نطاقك." },
+          { status: 403 },
+        );
+      }
       return NextResponse.json(
         { message: "لا يمكن حذف هذه الرسالة — رسائلك المرسلة وحدك." },
         { status: 403 },

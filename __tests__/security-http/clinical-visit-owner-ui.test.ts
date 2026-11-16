@@ -172,6 +172,15 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean; holdR
     });
     else if (path === `${patientPath}/family`) await json(route, { family: null, canEdit: false });
     else if (path === `${patientPath}/intake-history`) await json(route, { forms: [] });
+    else if (path === `${patientPath}/portal-account`) await json(route, {
+      account: {
+        exists: false, patientId, loginName: null, status: "not_activated",
+        activatedAt: null, lastLoginAt: null, disabledReason: null,
+        hasPendingToken: false, pendingTokenPurpose: null, pendingTokenExpiresAt: null,
+        hasSharedFamilyPhone: false, sharedPhonePatientsCount: 0,
+      },
+      permissions: { isOwner: false, canManagePortal: false, canPreviewPortal: false },
+    });
     else if (path === "/api/services") await json(route, services);
     else if (path === "/api/parties") await json(route, [{ id: doctorId, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);

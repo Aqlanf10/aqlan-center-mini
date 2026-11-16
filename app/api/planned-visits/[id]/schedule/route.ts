@@ -6,7 +6,7 @@ import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
 import type { CapacityVerdict } from "@/lib/capacity";
 import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, resolveRestrictedDoctorScope } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -33,8 +33,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   await ensureSchema();
-  const { rows } = await getPool().query<{ patient_id: number }>(
-    "SELECT patient_id FROM planned_visits WHERE id = $1",
+  const { rows } = await getPool().query<{ patient_id: number; doctor_id: number | null }>(
+    "SELECT patient_id, doctor_id FROM planned_visits WHERE id = $1",
     [plannedVisitId],
   );
   if (rows.length === 0) {
@@ -42,6 +42,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   if (!(await canAccessPatient(session, rows[0].patient_id))) {
     return NextResponse.json({ message: "غير مصرّح لك بجدولة جلسة لهذا المريض." }, { status: 403 });
+  }
+  const doctorScope = await resolveRestrictedDoctorScope(session);
+  if (doctorScope.restricted) {
+    if (doctorScope.blockAllPatients || !doctorScope.doctorPartyId) {
+      return NextResponse.json({ message: "غير مصرّح لك بجدولة جلسة لهذا المريض." }, { status: 403 });
+    }
+    if (rows[0].doctor_id !== null && rows[0].doctor_id !== doctorScope.doctorPartyId) {
+      return NextResponse.json({ message: "هذه الزيارة المخطَّطة مسندة لطبيب آخر." }, { status: 403 });
+    }
   }
 
   let body: unknown;

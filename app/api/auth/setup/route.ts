@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { countUsers, createFirstAdmin } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
@@ -68,7 +69,9 @@ export async function POST(request: Request) {
 
   const source = (body ?? {}) as Record<string, unknown>;
   const token = typeof source.token === "string" ? source.token : "";
-  if (token !== expected) {
+  const tokenDigest = createHash("sha256").update(token, "utf8").digest();
+  const expectedDigest = createHash("sha256").update(expected, "utf8").digest();
+  if (!token || !timingSafeEqual(tokenDigest, expectedDigest)) {
     return NextResponse.json({ message: "رمز الإعداد غير صحيح." }, { status: 403 });
   }
 

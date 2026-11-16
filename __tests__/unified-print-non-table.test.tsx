@@ -9,11 +9,11 @@ import { friendlyDateLong, friendlyTime } from "../lib/reminders";
 import { POST_OP_TEMPLATES } from "../lib/post-op-care";
 import { CONSENT_TEMPLATES } from "../lib/consent-templates";
 
-const readers = vi.hoisted(() => ({ patient: vi.fn(), settings: vi.fn(), prescription: vi.fn(), referral: vi.fn(), appointment: vi.fn(), appointments: vi.fn(), expense: vi.fn(), document: vi.fn(), file: vi.fn(), contract: vi.fn(), addenda: vi.fn(), session: vi.fn(), access: vi.fn(), printCount: vi.fn() }));
+const readers = vi.hoisted(() => ({ patient: vi.fn(), settings: vi.fn(), prescription: vi.fn(), referral: vi.fn(), appointment: vi.fn(), appointments: vi.fn(), expense: vi.fn(), document: vi.fn(), file: vi.fn(), contract: vi.fn(), addenda: vi.fn(), session: vi.fn(), access: vi.fn(), printCount: vi.fn(), visitPostOp: vi.fn() }));
 vi.mock("@/lib/session", () => ({ requireSession: readers.session }));
 vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", getPatient: readers.patient, getSettingsSafe: readers.settings, getPrescriptionPrintSettings: readers.settings,
   getPrescription: readers.prescription, getReferral: readers.referral, getAppointment: readers.appointment,
-  patientAppointmentsFrom: readers.appointments, getExpense: readers.expense, getDocumentForDownload: readers.document, printCount: readers.printCount }));
+  patientAppointmentsFrom: readers.appointments, getExpense: readers.expense, getDocumentForDownload: readers.document, printCount: readers.printCount, getVisitPostOpContext: readers.visitPostOp }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: readers.access }));
 vi.mock("@/lib/files", () => ({ readFileByKey: readers.file }));
 vi.mock("@/lib/hr", () => ({ canManageStaff: (role: string) => role === "admin" }));
@@ -81,6 +81,7 @@ beforeEach(() => {
   readers.expense.mockResolvedValue(expense); readers.printCount.mockResolvedValue(1); readers.contract.mockResolvedValue(contract);
   readers.addenda.mockResolvedValue([{ id: 99009, title: "ملحق صناعي محفوظ", contractNumber: "SYNTHETIC-ADDENDUM", startDate: "2031-02-01", addendumReason: "سبب ملحق صناعي محفوظ" }]);
   readers.document.mockResolvedValue(signedDocument); readers.file.mockResolvedValue(Buffer.from("synthetic signature file exists"));
+  readers.visitPostOp.mockResolvedValue({ id: 99003, patientId: patient.id, arrivedAt: "2031-01-04T10:00:00Z", signedAt: "2031-01-04T10:30:00Z", signedBy: "dr.synthetic", doctorId: 5, doctorName: "د. طبيب عناية صناعي محفوظ", nextPlan: "ملاحظة عناية صناعية محفوظة للعرض", addendum: null });
 });
 afterEach(() => { vi.useRealTimers(); });
 
@@ -114,10 +115,11 @@ describe("actual non-table print routes retain source semantics (synthetic SSR)"
     for (const value of [referral.reason, referral.teeth, referral.doctorName, referral.toName, patient.medicalAlert, "التوقيع والختم", "الاستعجال"]) expect(html).toContain(value);
     expect(referral).toEqual(before); artifact("referral", html, "A5");
   });
-  it("post-op handout retains existing printed sections, warnings and free note", async () => {
+  it("post-op handout retains existing printed sections, warnings and saved visit note while rejecting query notes", async () => {
     const template = POST_OP_TEMPLATES[0], before = structuredClone(template);
-    const html = render(await PostOpPage({ params: params(), searchParams: Promise.resolve({ templateId: template.id, notes: "ملاحظة عناية صناعية محفوظة للعرض", date: "2031-01-04" }) }));
-    for (const text of [template.title, ...template.first24Hours, ...template.diet.allowed, ...template.diet.avoid, ...template.hygiene, ...template.medications, ...template.emergencyWarnings, "ملاحظة عناية صناعية محفوظة للعرض"]) expect(html).toContain(text);
+    const html = render(await PostOpPage({ params: params(), searchParams: Promise.resolve({ templateId: template.id, visitId: "99003", notes: "UNTRUSTED-POSTOP-QUERY-NOTE" } as Record<string, string>) }));
+    for (const text of [template.title, ...template.first24Hours, ...template.diet.allowed, ...template.diet.avoid, ...template.hygiene, ...template.medications, ...template.emergencyWarnings, "ملاحظة عناية صناعية محفوظة للعرض", "د. طبيب عناية صناعي محفوظ"]) expect(html).toContain(text);
+    expect(html).not.toContain("UNTRUSTED-POSTOP-QUERY-NOTE"); expect(html).not.toContain("د. synthetic-session");
     expect(template).toEqual(before); artifact("post-op", html, "A5");
   });
   it("blank consent keeps unsigned warning and empty signature fields, never query-supplied signatory", async () => {

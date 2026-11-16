@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, browsePatients, createPatient, duplicateCandidates, findUserByUsername, getSettings, isPeriodLocked, recordAudit, searchPatients, setPatientOpeningBalance } from "@/lib/db";
+import { CLINIC_TIME_ZONE, browsePatients, createPatient, doctorOwnedPatientIds, duplicateCandidates, findUserByUsername, getSettings, isPeriodLocked, recordAudit, searchPatients, setPatientOpeningBalance } from "@/lib/db";
 import { parseListFilter, parseListSort } from "@/lib/patient-browse";
 import { openingBalanceAccess, parseOpeningInput, type OpeningInput } from "@/lib/opening-access";
 import { PATIENT_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
@@ -80,14 +80,30 @@ export async function POST(request: Request) {
   if (!session) return denied();
   /* صلاحيات الوكيل المساعد: الطبيب الذي أغلق المدير عليه «إضافة مريض» لا ينشئ
      ملفات — الاستقبال والإدارة يبقى لهم الحق دائمًا. */
+  let doctorPrimaryPartyId: number | null = null;
+  let doctorRestricted = false;
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (!user) return denied();
+    if (!user || user.isActive !== true || user.id !== session.userId
+      || user.username.toLowerCase() !== session.username.toLowerCase()
+      || user.role !== session.role) return denied();
     if (user.permissions && user.permissions.canAddPatient === false) {
       return NextResponse.json(
         { message: "إضافة المرضى مخفية عنك بحسب صلاحياتك." },
         { status: 403 },
       );
+    }
+    doctorPrimaryPartyId = typeof user.partyId === "number" && Number.isSafeInteger(user.partyId) && user.partyId > 0
+      ? user.partyId
+      : null;
+    if (user.permissions?.canViewAllPatients !== true) {
+      if (!doctorPrimaryPartyId) {
+        return NextResponse.json(
+          { message: "لا يمكنك إضافة المرضى دون ربط حسابك بجهة طبيب نشطة." },
+          { status: 403 },
+        );
+      }
+      doctorRestricted = true;
     }
   }
   let body: unknown;
@@ -137,13 +153,32 @@ export async function POST(request: Request) {
       const candidates = await duplicateCandidates(validation.value);
       const matches = findDuplicates(validation.value, candidates);
       if (matches.length > 0) {
+        if (doctorRestricted && doctorPrimaryPartyId) {
+          const ownedIds = await doctorOwnedPatientIds(doctorPrimaryPartyId, matches.map((m) => m.patient.id));
+          const ownedMatches = matches.filter((m) => ownedIds.has(m.patient.id));
+          if (ownedMatches.length === 0) {
+            return NextResponse.json(
+              {
+                message: "يوجد ملف مطابق بالاسم أو الجوال خارج نطاق صلاحيتك؛ راجع الاستقبال لربط الملف القائم بدل إنشاء ملف مكرر.",
+                duplicates: [],
+              },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json(
+            { message: duplicateWarning(ownedMatches), duplicates: ownedMatches },
+            { status: 409 },
+          );
+        }
         return NextResponse.json(
           { message: duplicateWarning(matches), duplicates: matches },
           { status: 409 },
         );
       }
     }
-    const created = await createPatient(validation.value);
+    const created = await createPatient(
+      doctorPrimaryPartyId ? { ...validation.value, primaryDoctorId: doctorPrimaryPartyId } : validation.value,
+    );
     // (P1-4) الإنشاء يُدقَّق بلقطته — ومع علامة إن أُكِّد رغم تحذير التكرار.
     await recordAudit({
       action: "patient.create",

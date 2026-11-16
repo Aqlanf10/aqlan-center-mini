@@ -110,13 +110,14 @@ export async function POST(request: Request) {
       role: session.role,
       doctorPartyId: actor?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null),
       canOverrideCapacity: actor?.permissions?.canOverrideCapacity === true,
+      actorSession: session,
       channel: "ui",
     });
 
     if (!result.ok) {
       return result.status === 409
         ? NextResponse.json(result.conflict, { status: 409 })
-        : NextResponse.json({ message: result.message }, { status: 400 });
+        : NextResponse.json({ message: result.message }, { status: result.status });
     }
     /* تنبيهٌ لا خطأ: الموعد حُجز، والاستقبال تُخبَر لتتأكّد قبل أن تَعِد المريض. */
     return NextResponse.json(

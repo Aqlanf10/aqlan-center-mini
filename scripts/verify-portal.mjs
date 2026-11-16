@@ -52,6 +52,7 @@ try {
   await admin.query(`CREATE DATABASE ${temporary}`);
   const db = await import("../lib/db.ts");
   const portal = await import("../lib/portal.ts");
+  const portalSecurity = await import("../lib/portal-security.ts");
   const auth = await import("../lib/auth.ts");
   await db.ensureSchema();
 
@@ -79,13 +80,70 @@ try {
   });
   const past = await db.createAppointment({ patientId: patient1.id, date: addDays(-5), time: "09:00", durationMinutes: 30, note: null });
 
-  // ── ١) الدخول ──
+  // ── ١) إغلاق الدخول القديم وتفعيل الدخول الآمن (0127) ──
   const wrongNumber = await db.portalLogin("+967777000001", "P-XXXX");
   check("رقم ملف خاطئ لا يدخل", wrongNumber === null);
   const wrongPhone = await db.portalLogin("+967777099999", patient1.patientNumber);
   check("هاتف لا يملكه لا يدخل حتى لو عرف رقم الملف", wrongPhone === null);
-  const ok = await db.portalLogin("+967777000001", patient1.patientNumber);
-  check("العاملان الصحيحان يدخلان", ok != null && ok.patient.id === patient1.id, ok?.patient.patientNumber);
+  const legacyRetired = await db.portalLogin("+967777000001", patient1.patientNumber);
+  check("مسار الدخول القديم برقم الملف والهاتف مغلق نهائيًا بلا استثناء", legacyRetired === null);
+
+  const staffPassHash = await auth.hashPassword("PortalVerifyStaff#123");
+  const { rows: [staffRow] } = await db.getPool().query(
+    `INSERT INTO users (username, display_name, password_hash, role, is_active)
+     VALUES ('portal_verifier', 'موظف تفعيل البوابة', $1, 'reception', TRUE)
+     RETURNING id`,
+    [staffPassHash],
+  );
+  await db.getPool().query(
+    `INSERT INTO patient_portal_staff_grants (user_id, can_manage_portal, can_preview_portal, granted_by_user_id)
+     VALUES ($1, TRUE, FALSE, $1)`,
+    [staffRow.id],
+  );
+  const staffSession = {
+    userId: staffRow.id,
+    username: "portal_verifier",
+    role: "reception",
+    expiresAt: Date.now() + 60_000,
+    credentialVersion: auth.sessionCredentialVersion(staffPassHash),
+  };
+  const prevPortalActivationEnv = process.env.PATIENT_PORTAL_ACTIVATION_ENABLED;
+  delete process.env.PATIENT_PORTAL_ACTIVATION_ENABLED;
+  const blockedByDefault = await portalSecurity.issuePortalActivation({
+    actorSession: staffSession,
+    patientId: patient1.id,
+    loginName: "verify_patient_one",
+    deliveryChannel: "in_person",
+    verificationNote: "تحقق حضوري لرحلة فحص البوابة الاصطناعية",
+    baseOrigin: "http://localhost:3000",
+  });
+  check(
+    "التفعيل معطّل افتراضيًا (Fail-Closed 503) قبل اعتماد السياسات",
+    blockedByDefault.ok === false && blockedByDefault.status === 503 && blockedByDefault.code === "portal_activation_disabled_pending_policy",
+  );
+
+  process.env.PATIENT_PORTAL_ACTIVATION_ENABLED = "true";
+  const issued = await portalSecurity.issuePortalActivation({
+    actorSession: staffSession,
+    patientId: patient1.id,
+    loginName: "verify_patient_one",
+    deliveryChannel: "in_person",
+    verificationNote: "تحقق حضوري لرحلة فحص البوابة الاصطناعية",
+    baseOrigin: "http://localhost:3000",
+  });
+  const rawActivationToken = new URL(issued.inPersonUrl ?? "http://localhost:3000").searchParams.get("token") ?? "";
+  const redeemed = await portalSecurity.redeemPortalActionToken({
+    rawToken: rawActivationToken,
+    expectedMode: "activate",
+    newPassword: "StrongPortal#Pass99",
+  });
+  if (prevPortalActivationEnv === undefined) delete process.env.PATIENT_PORTAL_ACTIVATION_ENABLED;
+  else process.env.PATIENT_PORTAL_ACTIVATION_ENABLED = prevPortalActivationEnv;
+  check("تفعيل البوابة برابط مؤقت أحادي الاستخدام ينجح عند تفعيل مفتاح الاختبار", redeemed.ok === true);
+  const wrongSecret = await portalSecurity.authenticatePortalAccount("verify_patient_one", "Wrong#Pass00");
+  check("كلمة مرور خاطئة لا تدخل", wrongSecret === null);
+  const authenticated = await portalSecurity.authenticatePortalAccount("verify_patient_one", "StrongPortal#Pass99");
+  check("اسم المستخدم وكلمة المرور الصحيحان يدخلان", authenticated != null && authenticated.patientId === patient1.id);
 
   // ── ٢) العزل التوقيعي ──
   check("كوكي البوابة غير كوكي الطاقم", portal.PORTAL_COOKIE !== auth.SESSION_COOKIE);

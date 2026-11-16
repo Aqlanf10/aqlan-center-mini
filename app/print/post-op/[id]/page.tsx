@@ -1,8 +1,14 @@
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
-import { getPatient, getSettingsSafe } from "@/lib/db";
-import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
+import {
+  CLINIC_TIME_ZONE,
+  getPatient,
+  getSettingsSafe,
+  getVisitPostOpContext,
+} from "@/lib/db";
+import { ageFromBirthDate, ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
+import { clinicDateString } from "@/lib/schedule";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
@@ -17,15 +23,18 @@ export const dynamic = "force-dynamic";
 
 interface PostOpSearchParams {
   templateId?: string;
-  notes?: string;
-  date?: string;
+  visitId?: string;
 }
 
 /**
- * بطاقة إرشادات العناية المنزلية ما بعد العلاج السني — مقاس A5 قياسي.
+ * بطاقة إرشادات العناية المنزلية ما بعد العلاج السني — مقاس A5 قياسي (F-07).
  *
- * وثيقة مطبوعة يتسلمها المريض عند مغادرة العيادة توضح التعليمات الصحية
- * الدقيقة والمأكولات المسموحة والممنوعة وهواتف الطوارئ السريعة.
+ * العقد الأمني والسريري:
+ *  - لا يُعرض أي نص أو تاريخ أو اسم طبيب من رابط الصفحة (URL searchParams) إطلاقًا.
+ *  - عند تمرير templateId صريح غير معروف في القوالب المعتمدة تُرفض الصفحة بـ 404.
+ *  - عند ربط الطباعة بزيارة موثّقة (?visitId=...) يُتحقق من انتماء الزيارة للمريض نفسه،
+ *    وتُعرض الملاحظة السريرية المحفوظة في القاعدة واسم الطبيب المعالج الفعلي منفصلًا
+ *    عن اسم المستخدم الذي طبع الورقة.
  */
 export default async function PostOpPrintPage({
   params,
@@ -41,29 +50,64 @@ export default async function PostOpPrintPage({
   const patientId = Number(rawId);
   if (!Number.isInteger(patientId) || patientId <= 0) notFound();
 
-  const sParams = await searchParams;
+  /* حرس الباب (P0.12): التحقق من ملكية المريض قبل قراءة أي سجل من القاعدة. */
+  if (!(await canAccessPatient(session, patientId).catch(() => false))) notFound();
 
-  const [patient, settings] = await Promise.all([
+  const sParams = await searchParams;
+  const rawTemplateId = typeof sParams.templateId === "string" ? sParams.templateId.trim() : "";
+  let template: PostOpTemplate;
+  if (rawTemplateId) {
+    const matched = getPostOpTemplate(rawTemplateId);
+    if (!matched) notFound();
+    template = matched;
+  } else {
+    template = POST_OP_TEMPLATES[0];
+  }
+
+  const rawVisitId = typeof sParams.visitId === "string" ? sParams.visitId.trim() : "";
+  let parsedVisitId: number | null = null;
+  if (rawVisitId) {
+    const candidate = Number(rawVisitId);
+    if (!Number.isInteger(candidate) || candidate <= 0) notFound();
+    parsedVisitId = candidate;
+  }
+
+  const [patient, settings, visitContext] = await Promise.all([
     getPatient(patientId),
     getSettingsSafe(),
+    parsedVisitId ? getVisitPostOpContext(parsedVisitId) : Promise.resolve(null),
   ]);
 
   if (!patient) notFound();
-  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
-   * تعتمد على الوكيل العام الذي يمرر /print/*. */
-  if (!(await canAccessPatient(session, patientId).catch(() => false))) notFound();
+  if (parsedVisitId !== null && (!visitContext || visitContext.patientId !== patientId)) {
+    notFound();
+  }
 
+  const dateStr = visitContext
+    ? clinicDateString(new Date(visitContext.arrivedAt), CLINIC_TIME_ZONE)
+    : clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
-  const templateId = sParams.templateId || "surgical_extraction";
-  const template: PostOpTemplate =
-    getPostOpTemplate(templateId) ?? POST_OP_TEMPLATES[0];
+  const age = patient.birthDate
+    ? ageFromBirthDate(patient.birthDate, dateStr)
+    : ageFromBirthYear(patient.birthYear, dateStr);
 
-  const now = new Date();
-  const dateStr =
-    sParams.date ||
-    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const savedClinicalNote = visitContext
+    ? [visitContext.nextPlan?.trim(), visitContext.addendum?.trim()].filter(Boolean).join(" — ")
+    : "";
 
-  const age = ageFromBirthYear(patient.birthYear, dateStr);
+  const noteHeading = visitContext?.signedAt
+    ? "توجيه سريري محفوظ من سجل الزيارة الموقّعة: "
+    : "ملاحظة متابعة محفوظة في مسودة الزيارة: ";
+
+  const authorLabel = visitContext?.doctorName
+    ? "الطبيب المعالج: "
+    : visitContext?.signedBy
+      ? "صاحب التوثيق السريري: "
+      : "مصدر التعليمات: ";
+
+  const authorValue = visitContext?.doctorName
+    || visitContext?.signedBy
+    || "قالب إرشادات قياسي معتمد من المركز";
 
   return (
     <>
@@ -220,8 +264,8 @@ export default async function PostOpPrintPage({
           </ul>
         </div>
 
-        {/* ملاحظات خاصة من الطبيب */}
-        {sParams.notes && (
+        {/* ملاحظة سريرية محفوظة من الزيارة الموثّقة فقط (لا يُعرض نص من الرابط أبدًا) */}
+        {savedClinicalNote ? (
           <div
             style={{
               marginTop: "2mm",
@@ -233,12 +277,12 @@ export default async function PostOpPrintPage({
               color: "#78350f",
             }}
           >
-            <strong>توجيه خاص من الطبيب المعالج: </strong>
-            <span>{sParams.notes}</span>
+            <strong>{noteHeading}</strong>
+            <span>{savedClinicalNote}</span>
           </div>
-        )}
+        ) : null}
 
-        {/* التذييل والاتصال */}
+        {/* التذييل والاتصال: فصل صريح بين مصدر التعليمات والموظف الذي طبع الورقة */}
         <div
           style={{
             marginTop: "4mm",
@@ -247,13 +291,17 @@ export default async function PostOpPrintPage({
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            gap: "3mm",
+            flexWrap: "wrap",
             fontSize: "7.5pt",
             color: "#64748b",
           }}
         >
           <div>
-            <span>الطبيب المعالج: </span>
-            <strong style={{ color: "#0f172a" }}>د. {session.username}</strong>
+            <span>{authorLabel}</span>
+            <strong style={{ color: "#0f172a" }}>{authorValue}</strong>
+            <span> · طُبعت بواسطة: </span>
+            <strong style={{ color: "#0f172a" }}>{session.username}</strong>
           </div>
           <div>
             <span>طوارئ واستفسارات المركز: </span>

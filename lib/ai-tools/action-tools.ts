@@ -16,6 +16,7 @@
 import {
   createPatient,
   doctorOwnedPatientIds,
+  doctorOwnsPatient,
   getPatient,
   updatePatient,
   searchPatients,
@@ -51,12 +52,35 @@ function doctorScopeIdFor(context: AiToolContext): number | null {
   return context.doctorPartyId ?? null;
 }
 
+function isRestrictedDoctorContext(context: AiToolContext): boolean {
+  if (context.role !== "doctor" && context.userRole !== "doctor") return false;
+  return !(context.canViewAllPatients || context.permissions?.canViewAllPatients);
+}
+
+async function ensureAiDoctorCanAccessPatient(
+  patientId: number,
+  context: AiToolContext,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (!isRestrictedDoctorContext(context)) return { ok: true };
+  if (!context.doctorPartyId || context.doctorPartyId <= 0) {
+    return { ok: false, message: "⛔ حساب الطبيب غير مربوط بجهة طبيب نشطة." };
+  }
+  const owns = await doctorOwnsPatient(context.doctorPartyId, patientId);
+  if (!owns) {
+    return { ok: false, message: "⛔ هذا المريض خارج نطاق صلاحيتك السريرية." };
+  }
+  return { ok: true };
+}
+
 /** بحث مرضى مقيّد بمجال الطبيب — دفاعٌ في العمق فوق بوابة السياسة المركزية. */
 async function scopedSearchPatients(
   name: string,
   limit: number,
   context: AiToolContext,
 ) {
+  if (isRestrictedDoctorContext(context) && (!context.doctorPartyId || context.doctorPartyId <= 0)) {
+    return [];
+  }
   return searchPatients(name.trim(), limit, doctorScopeIdFor(context));
 }
 
@@ -99,7 +123,17 @@ export async function createPatientAction(
     };
   }
 
+  if (isRestrictedDoctorContext(context) && (!context.doctorPartyId || context.doctorPartyId <= 0)) {
+    return {
+      success: false,
+      textSummary: "⛔ حساب الطبيب غير مربوط بجهة طبيب نشطة.",
+    };
+  }
+
   try {
+    const primaryDoctorId = role === "doctor" && context.doctorPartyId && context.doctorPartyId > 0
+      ? context.doctorPartyId
+      : null;
     const patient = await createPatient({
       fullName,
       phone: params.phone || "",
@@ -109,7 +143,7 @@ export async function createPatientAction(
       address: params.address || null,
       medicalAlert: params.medicalAlert || null,
       note: params.note || "تم التسجيل بواسطة المساعد الذكي",
-    });
+    }, { primaryDoctorId });
 
     await recordAudit({
       action: "patient.create",
@@ -249,10 +283,23 @@ export async function bookAppointmentAction(
       };
     }
 
+    const patientScope = await ensureAiDoctorCanAccessPatient(targetPatientId, context);
+    if (!patientScope.ok) {
+      return { success: false, textSummary: patientScope.message };
+    }
+
     // 2. فحص الطبيب إن وجد
     let doctorId = params.doctorId || null;
     let doctorDisplayName = params.doctorName || null;
-    if (!doctorId && params.doctorName) {
+    if (isRestrictedDoctorContext(context)) {
+      if (doctorId && doctorId !== context.doctorPartyId) {
+        return {
+          success: false,
+          textSummary: "⛔ لا يحق للطبيب حجز موعد باسم طبيب آخر.",
+        };
+      }
+      doctorId = context.doctorPartyId ?? null;
+    } else if (!doctorId && params.doctorName) {
       const doctors = await listParties("doctor").catch(() => []);
       const matchedDoc = doctors.find((d) => d.name.includes(params.doctorName!.trim()));
       if (matchedDoc) {
@@ -419,6 +466,17 @@ export async function updateAppointmentStatusAction(
       };
     }
 
+    if (isRestrictedDoctorContext(context) || (context.role === "doctor" && !context.permissions?.canViewAllAppointments)) {
+      const existingAppt = await getAppointment(appointmentId).catch(() => null);
+      if (!existingAppt) {
+        return { success: false, textSummary: "❌ الموعد المطلوب غير موجود." };
+      }
+      const patientScope = await ensureAiDoctorCanAccessPatient(existingAppt.patientId, context);
+      if (!patientScope.ok && existingAppt.doctorId !== context.doctorPartyId) {
+        return { success: false, textSummary: patientScope.ok ? "⛔ الموعد خارج نطاقك." : patientScope.message };
+      }
+    }
+
     let updatedMsg = "";
     if (params.action === "arrive") {
       const ok = await arriveAppointment(appointmentId, {
@@ -554,6 +612,11 @@ export async function addPatientMedicalAlertAction(
       return { success: false, textSummary: "يرجى تحديد المريض لتسجيل التنبيه الطبي." };
     }
 
+    const patientScope = await ensureAiDoctorCanAccessPatient(patientId, context);
+    if (!patientScope.ok) {
+      return { success: false, textSummary: patientScope.message };
+    }
+
     const patient = await getPatient(patientId);
     if (!patient) return { success: false, textSummary: "المريض غير موجود." };
 
@@ -647,6 +710,11 @@ export async function createLabOrderAction(
 
     if (!patientId) {
       return { success: false, textSummary: "❌ يرجى تحديد المريض لإنشاء طلب المعمل." };
+    }
+
+    const patientScope = await ensureAiDoctorCanAccessPatient(patientId, context);
+    if (!patientScope.ok) {
+      return { success: false, textSummary: patientScope.message };
     }
 
     // المعمل الافتراضي
@@ -837,6 +905,10 @@ export async function generateWhatsAppReminderAction(
   if (context.isDbConnected && (params.patientId || params.patientName)) {
     let p = null;
     if (params.patientId) {
+      const patientScope = await ensureAiDoctorCanAccessPatient(params.patientId, context);
+      if (!patientScope.ok) {
+        return { success: false, textSummary: patientScope.message };
+      }
       p = await getPatient(params.patientId);
     } else if (params.patientName) {
       const matches = await scopedSearchPatients(params.patientName, 1, context);

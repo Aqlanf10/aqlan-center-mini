@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createNextSession, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
+import { AmbiguousSharedPhonePatientError, createNextSession, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
 import type { CapacityVerdict } from "@/lib/capacity";
 import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { requireSession } from "@/lib/session";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, PatientOutOfScopeError, resolveRestrictedDoctorScope } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +37,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
     return NextResponse.json({ message: "غير مصرّح لك بجدولة جلسة لهذا المريض." }, { status: 403 });
+  }
+  const doctorScope = await resolveRestrictedDoctorScope(session);
+  if (doctorScope.restricted) {
+    if (doctorScope.blockAllPatients || !doctorScope.doctorPartyId) {
+      return NextResponse.json({ message: "غير مصرّح لك بجدولة جلسة لهذا المريض." }, { status: 403 });
+    }
+    if (visit.patientId === null && visit.doctorId !== null && visit.doctorId !== doctorScope.doctorPartyId) {
+      return NextResponse.json({ message: "غير مصرّح لك بجدولة جلسة لهذا المريض." }, { status: 403 });
+    }
   }
 
   let body: unknown;
@@ -86,6 +95,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         const judged = await judgeBookingInDay({
           sameDay, client, date, time, durationMinutes, service,
           context: capacityContext, canOverride, overrideReason,
+          providerId: doctorScope.restricted ? doctorScope.doctorPartyId : (visit.doctorId ?? null),
           patientId: visit.patientId,
         });
         if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
@@ -93,7 +103,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         return { ok: true as const };
       },
       commit: (client) =>
-        createNextSession({ visitId, date, time, durationMinutes, phone, note }, client),
+        createNextSession({ visitId, date, time, durationMinutes, phone, note, actorSession: session }, client),
     });
     if (!result.ok) {
       return NextResponse.json(result.conflict, { status: 409 });
@@ -112,7 +122,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       });
     }
     return NextResponse.json(created, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof PatientOutOfScopeError) {
+      return NextResponse.json({ message: error.message }, { status: 403 });
+    }
+    if (error instanceof AmbiguousSharedPhonePatientError) {
+      return NextResponse.json(
+        { message: error.message, code: error.code, candidates: error.candidates },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ message: "تعذّر حجز الجلسة. أعد المحاولة." }, { status: 500 });
   }
 }

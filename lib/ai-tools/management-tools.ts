@@ -137,13 +137,21 @@ export async function getClinicStatistics(context: AiToolContext): Promise<ToolE
   }
 
   try {
+    const role = context.role || context.userRole;
+    const isRestrictedDoctor =
+      role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients;
+    if (isRestrictedDoctor && (typeof context.doctorPartyId !== "number" || context.doctorPartyId <= 0)) {
+      return {
+        success: false,
+        textSummary: "🔒 **تنبيه أمني:** حساب الطبيب غير مرتبط بجهة طبيب في المركز — لا يمكن عرض إحصائيات المركز العامة.",
+        warnings: ["عزل الأطباء: حساب طبيب غير مرتبط بجهة طبيب"],
+      };
+    }
+
     const pool = getPool();
     /* عزل الطبيب (P0.14): الإحصاءات التجميعية تُحسب بعد تطبيق مجال الطبيب —
        لا يتسرب عدد مرضى المركز كله لطبيبٍ بلا منحٍ عامة. */
-    const doctorScope =
-      context.role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients && context.doctorPartyId
-        ? context.doctorPartyId
-        : null;
+    const doctorScope = isRestrictedDoctor ? context.doctorPartyId! : null;
 
     const scopedFrom = doctorScope
       ? `FROM patients WHERE EXISTS (

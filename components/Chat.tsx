@@ -643,6 +643,8 @@ export function ChatComposer({
   replyTo, onCancelReply,
   editing, onSaveEdit, onCancelEdit,
   allowUrgent,
+  allowVoice = true,
+  allowFile = true,
 }: {
   onSendText: (body: string, options?: { urgent?: boolean; replyToId?: number | null }) => Promise<void>;
   onSendVoice: (voice: { data: string; mime: string; ms: number }, options?: { replyToId?: number | null }) => Promise<void>;
@@ -656,6 +658,8 @@ export function ChatComposer({
   onCancelEdit?: () => void;
   /** للمريض في البوابة: زر العاجلة. */
   allowUrgent?: boolean;
+  allowVoice?: boolean;
+  allowFile?: boolean;
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -824,35 +828,41 @@ export function ChatComposer({
             <Icon name="alert" className="h-5 w-5" />
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => { setError(null); void recorder.start(); }}
-          disabled={disabled || sending || recorder.busy || Boolean(attachment)}
-          aria-label="تسجيل رسالة صوتية"
-          title="تسجيل رسالة صوتية"
-          className="shrink-0 rounded-xl border border-slate-200 bg-white p-2.5 text-navy-800 transition-colors hover:border-navy-300 hover:bg-navy-50 disabled:opacity-50"
-        >
-          <Icon name="mic" className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || sending || recorder.busy}
-          aria-label="إرفاق صورة أو مستند"
-          title="إرفاق صورة أو مستند (حتى 10 ميغابايت)"
-          className="shrink-0 rounded-xl border border-slate-200 bg-white p-2.5 text-navy-800 transition-colors hover:border-navy-300 hover:bg-navy-50 disabled:opacity-50"
-        >
-          <Icon name="attach" className="h-5 w-5" />
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
-          onChange={(event) => { void pickFile(event.target.files?.[0]); }}
-          className="hidden"
-          aria-hidden="true"
-          tabIndex={-1}
-        />
+        {allowVoice && (
+          <button
+            type="button"
+            onClick={() => { setError(null); void recorder.start(); }}
+            disabled={disabled || sending || recorder.busy || Boolean(attachment)}
+            aria-label="تسجيل رسالة صوتية"
+            title="تسجيل رسالة صوتية"
+            className="shrink-0 rounded-xl border border-slate-200 bg-white p-2.5 text-navy-800 transition-colors hover:border-navy-300 hover:bg-navy-50 disabled:opacity-50"
+          >
+            <Icon name="mic" className="h-5 w-5" />
+          </button>
+        )}
+        {allowFile && (
+          <>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || sending || recorder.busy}
+              aria-label="إرفاق صورة أو مستند"
+              title="إرفاق صورة أو مستند (حتى 10 ميغابايت)"
+              className="shrink-0 rounded-xl border border-slate-200 bg-white p-2.5 text-navy-800 transition-colors hover:border-navy-300 hover:bg-navy-50 disabled:opacity-50"
+            >
+              <Icon name="attach" className="h-5 w-5" />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+              onChange={(event) => { void pickFile(event.target.files?.[0]); }}
+              className="hidden"
+              aria-hidden="true"
+              tabIndex={-1}
+            />
+          </>
+        )}
         <textarea
           value={text}
           onChange={(event) => setText(event.target.value)}

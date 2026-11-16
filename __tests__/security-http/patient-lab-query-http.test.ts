@@ -30,6 +30,10 @@ beforeAll(async () => {
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
   fixture = await seedPatientLabQuery((sql, values) => db.query(sql, values), `HTTP-PATIENT-LAB-QUERY-${Date.now()}`);
+  await db.query(
+    `UPDATE patients SET primary_doctor_id = (SELECT party_id FROM users WHERE username = $1) WHERE id = $2`,
+    [TEST_USERS.doctorA.username, fixture.targetPatientId],
+  );
   beforeReads = await snapshot();
 }, 120_000);
 
@@ -92,6 +96,7 @@ describe("patient lab query through the built HTTP application", () => {
     expect(reception).toEqual(admin);
     const doctor = await list(path, h.sessions.doctorA);
     expect(doctor).toEqual({ ...admin, orders: admin.orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })) });
+    expect((await authedGet(path, h.sessions.doctorB)).status).toBe(403);
   });
 
   it("preserves explicit doctor cost-price permission without modifying the read policy", async () => {
