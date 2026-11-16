@@ -5,6 +5,7 @@ import { findUserByUsername, getReferral, transitionInternalReferral } from "@/l
 import { canAccessPatient } from "@/lib/patient-access";
 import { canActOnReferral, checkReferralTransition } from "@/lib/referrals";
 import { requireSession } from "@/lib/session";
+import { canonicalReferralRoute, commandCanonicalReferralTransition } from "@/lib/canonical-referrals";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,14 @@ const json = (message: string, status: number) => NextResponse.json({ message },
  * المحيل)، اطّلاع المحيل، إلغاء. من يفعل ماذا: `canActOnReferral` — والمسار المسموح: الخادم.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  /* M2 slice 73: the workflow step by the receiving/referring clinician (owner: every step;
+     schedule: also the whole appointment scope), inside the patient scope. */
+  const { id: rawId } = await params;
+  const canonical = await canonicalReferralRoute(request, (handle, body) => commandCanonicalReferralTransition(handle, rawId, body), "تعذّر تحديث الإحالة. أعد المحاولة.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return json("انتهت الجلسة. سجّل الدخول من جديد.", 401);
-  const id = Number((await params).id);
+  const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) return json("رقم إحالة غير صالح.", 400);
 
   let body: Record<string, unknown>;

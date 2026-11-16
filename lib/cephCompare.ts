@@ -167,9 +167,12 @@ export function comparisonSummary(comparison: Comparison): { ar: string; en: str
 }
 
 export interface OrderableStudy {
-  id: number;
+  /** PostgreSQL BIGINT readers may retain the decimal string on the wire. */
+  id: number | string;
   /** تاريخ تصوير الشععة `YYYY-MM-DD` — أو `null`/غائب فيُستخدم تاريخ الإنشاء. */
   takenOn?: string | null;
+  /** Persisted ceph reader spelling; keep the generic takenOn contract too. */
+  xrayDate?: string | null;
   createdAt: string;
 }
 
@@ -181,9 +184,9 @@ export interface OrderableStudy {
  * يتساوى أبدًا — فالترتيب حاسمٌ دائمًا، ولا يبقى شيءٌ لمن نادى.
  */
 export function chronologicalOrder<T extends OrderableStudy>(one: T, two: T): [T, T] {
-  const day = (study: T) => (study.takenOn ?? study.createdAt.slice(0, 10));
-  const keys = (study: T): [string, string, number] =>
-    [day(study), study.createdAt, study.id];
+  const day = (study: T) => (study.takenOn ?? study.xrayDate ?? study.createdAt.slice(0, 10));
+  const keys = (study: T): [string, string, bigint] =>
+    [day(study), study.createdAt, BigInt(study.id)];
 
   const [a, b] = [keys(one), keys(two)];
   for (let index = 0; index < a.length; index += 1) {

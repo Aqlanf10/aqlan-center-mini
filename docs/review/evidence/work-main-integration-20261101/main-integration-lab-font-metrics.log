@@ -1,0 +1,36 @@
+
+> aqlan-center@0.1.0 test:contract-print
+> vitest run --config vitest.config.print-visual.mts __tests__/print-visual/compact-print-regressions.test.tsx -t preserves lab paper
+
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ __tests__/print-visual/compact-print-regressions.test.tsx (5 tests | 1 failed | 4 skipped) 4037ms
+     × preserves lab paper and field integrity 1680ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/print-visual/compact-print-regressions.test.tsx > native compact print regression witnesses > preserves lab paper and field integrity
+Error: PDF lab field label/phone boundary changed
+ ❯ Module.assertLabDispatchPdfFields __tests__/helpers/lab-dispatch-pdf-fields.ts:93:99
+     91|   const phone = labLines.flat().filter(word => compact(word.text) === …
+     92|   const attachedColon = label.length === 1 && matchesPrintPdfWord(labe…
+     93|   if (label.length !== 1 || colon.length !== (attachedColon ? 0 : 1) |…
+       |                                                                                                   ^
+     94|   const ancillary = new Set([...label, ...colon, ...phone]);
+     95|   const identifier = labLines.flat().filter(word => !ancillary.has(wor…
+ ❯ __tests__/print-visual/compact-print-regressions.test.tsx:94:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  04:37:04
+   Duration  5.43s (transform 510ms, setup 0ms, import 1.19s, tests 4.04s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

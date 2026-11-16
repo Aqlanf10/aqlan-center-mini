@@ -7,6 +7,10 @@ import { LEGACY_TREATMENT_MESSAGE, parseLegacyTreatmentRequest } from "@/lib/leg
 import { openingBalanceAccess } from "@/lib/opening-access";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalLegacyFailure } from "@/lib/canonical-legacy-http";
+import { readCanonicalLegacyTreatmentPreview } from "@/lib/canonical-legacy-writes";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +22,24 @@ export const dynamic = "force-dynamic";
  * الرفض المتوقَّع يعود 200 بسببٍ ورسالة عربية (المعاينة تحذّر؛ الحفظ يرفض فعلًا تحت الأقفال).
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 95b: read-only under read:legacy.record; opening amounts with the ledger view.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const canonicalPatient = Number((await context.params).id);
+      const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      if (typeof body !== "object" || body === null || Array.isArray(body)) return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+      const parsed = parseLegacyTreatmentRequest(body as Record<string, unknown>, clinicDateString(new Date(), CLINIC_TIME_ZONE));
+      if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: 400, headers: NO_STORE });
+      const result = await readCanonicalLegacyTreatmentPreview(selected.handle, canonicalPatient, parsed.value);
+      if (!result.ok) {
+        if (result.reason === "no_patient") return NextResponse.json({ message: LEGACY_TREATMENT_MESSAGE.no_patient }, { status: 404, headers: NO_STORE });
+        return NextResponse.json({ refusal: result.reason, refusalMessage: LEGACY_TREATMENT_MESSAGE[result.reason], preview: null }, { headers: NO_STORE });
+      }
+      return NextResponse.json({ refusal: null, refusalMessage: null, replayed: result.replayed, preview: result.preview }, { headers: NO_STORE });
+    } catch (error) { return canonicalLegacyFailure(error, "تعذّرت معاينة تسجيل العلاج السابق. أعد المحاولة."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const settings = await getSettings().catch(() => null);

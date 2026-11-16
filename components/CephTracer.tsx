@@ -215,6 +215,8 @@ export function CephTracer({
     return computeAll(map, analysis.mmPerPixel ?? NaN);
   });
   const dragging = useRef<LandmarkCode | null>(null);
+  // Event-time pointer ownership and its rendered indicator are separate.
+  const [draggingPoint, setDraggingPoint] = useState<LandmarkCode | null>(null);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [dx, setDx] = useState<DxState>(() => ({
@@ -294,6 +296,7 @@ export function CephTracer({
     if (completed || calMode) return;
     pushHistory(points);
     dragging.current = code;
+    setDraggingPoint(code);
     setSelected(code);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     if (points[code]) {
@@ -353,6 +356,7 @@ export function CephTracer({
   const onPointerUp = () => {
     const code = dragging.current;
     dragging.current = null;
+    setDraggingPoint(null);
     setCursorSurfacePt(null);
     setCursorClientPos(null);
     setHoveredPoint(null);
@@ -1350,7 +1354,7 @@ export function CephTracer({
                   {(Object.keys(points) as LandmarkCode[]).map((code) => {
                     const pt = points[code];
                     if (!pt) return null;
-                    const isDragging = dragging.current === code;
+                    const isDragging = draggingPoint === code;
                     const isSuggested = sources[code] === "suggested";
                     const isHovered = hoveredPoint === code;
                     const pointFill = isDragging || isHovered
@@ -1434,8 +1438,8 @@ export function CephTracer({
                 <div className="absolute top-1/2 left-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-rose-500/90" />
                 {/* شارة المعلم والإحداثيات اللحظية */}
                 <div className="absolute bottom-1.5 inset-x-0 mx-auto w-max rounded bg-slate-900/90 px-2 py-0.5 text-center font-mono text-[10px] text-white shadow">
-                  {dragging.current
-                    ? `${dragging.current} ✦ سحب `
+                  {draggingPoint
+                    ? `${draggingPoint} ✦ سحب `
                     : hoveredPoint
                     ? `${hoveredPoint} · ${landmarkDef(hoveredPoint).ar} `
                     : ""}

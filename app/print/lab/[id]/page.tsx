@@ -1,7 +1,6 @@
+import { LabDispatchDentalChart } from "@/components/LabDentalChart";
 import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import styles from "./lab-dispatch.module.css";
-import { DentalArchRow } from "@/components/dental/DentalArchRow";
-import { PERMANENT_UPPER, PERMANENT_LOWER, PRIMARY_UPPER, PRIMARY_LOWER } from "@/lib/dental";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { getLabOrderById, getSettingsSafe } from "@/lib/db";
@@ -67,15 +66,6 @@ export default async function LabOrderPrintPage({
   const priorityInfo = order.priority ? LAB_PRIORITY_LABEL[order.priority] : { label: "غير محدد" };
   const impressionLabel = order.impressionType ? LAB_IMPRESSION_LABEL[order.impressionType] : "غير محدد";
 
-  const upperTeeth = PERMANENT_UPPER;
-  const lowerTeeth = PERMANENT_LOWER;
-
-  const primaryArches = [
-    { label: "الأسنان اللبنية — الفك العلوي", teeth: PRIMARY_UPPER },
-    { label: "الأسنان اللبنية — الفك السفلي", teeth: PRIMARY_LOWER },
-  ];
-  const hasPrimaryTeeth = primaryArches.some((arch) => arch.teeth.some((code) => selectedTeethCodes.includes(code)));
-
   return (
     <>
       <PrintButton />
@@ -96,7 +86,7 @@ export default async function LabOrderPrintPage({
             <PrintMetadata>
               <div className="line"><span>مرجع الطلب:</span><strong dir="ltr">{order.reference}</strong></div>
               {order.patientName ? <div className="line"><span>اسم المريض: </span><strong>{order.patientName}</strong></div> : null}
-              <div className={styles.labIdentity}><span>المختبر: </span><strong>{order.labName}</strong>{order.labPhone ? <span dir="ltr" style={{ marginRight: "2mm", fontSize: "8pt" }}>({order.labPhone})</span> : null}</div>
+              <div className={styles.labIdentity}><span>المختبر: </span><strong>{order.labName}</strong>{order.labPhone ? <span dir="ltr" style={{ marginRight: "1mm", fontSize: "8pt" }}>({order.labPhone})</span> : null}</div>
               <div className="line"><span>الطبيب المعالج: </span><strong>{order.doctorName || "غير محدد"}</strong></div>
               <div className="line"><span>تاريخ الإرسال: </span><strong dir="ltr" className={styles.date}>{order.sentDate}</strong></div>
               <div className="line"><span>التسليم المطلوب: </span><strong dir="ltr" className={styles.date} style={{ color: "#b91c1c" }}>{order.dueDate}</strong></div>
@@ -230,103 +220,7 @@ export default async function LabOrderPrintPage({
           {labDispatchShadeLines(order).map((line, index) => <p key={index}>{line}</p>)}
         </section> : null}
 
-        {/* المخطط السني المرئي المبسط للطباعة */}
-        <div
-          className="print-watermark-protected"
-          style={{
-            marginTop: "4mm",
-            padding: "3mm",
-            border: "1px solid #cbd5e1",
-            borderRadius: "3mm",
-            backgroundColor: "#f8fafc",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2mm" }}>
-            <span style={{ fontWeight: "bold", fontSize: "8.5pt", color: "#334155" }}>
-              مخطط الأسنان السريري لترتيب الجسور والتيجان (FDI Two-Digit Chart)
-            </span>
-            <span style={{ fontSize: "7.5pt", color: "#64748b" }}>
-              الأسنان المحددة موضحة بلون مميز
-            </span>
-          </div>
-
-          {/* الفك العلوي */}
-          <DentalArchRow teeth={upperTeeth} style={{ display: "flex", justifyContent: "center", gap: "1mm", marginBottom: "1.5mm" }} renderTooth={(tooth) => {
-              const isSelected = selectedTeethCodes.includes(tooth);
-              return (
-                <div
-                  key={tooth}
-                  style={{
-                    width: "20px",
-                    height: "22px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "7.5pt",
-                    fontWeight: isSelected ? "900" : "500",
-                    backgroundColor: isSelected ? "#0284c7" : "#ffffff",
-                    color: isSelected ? "#ffffff" : "#64748b",
-                    border: isSelected ? "1.5px solid #0369a1" : "1px solid #cbd5e1",
-                    borderRadius: "3px",
-                  }}
-                >
-                  {tooth}
-                </div>
-              );
-            }} />
-
-          {/* خط منتصف الإطباق */}
-          <div className="lab-occlusal-divider" style={{ height: "1px", backgroundColor: "#cbd5e1", margin: "1mm 5%", width: "auto" }} />
-
-          {/* الفك السفلي */}
-          <DentalArchRow teeth={lowerTeeth} style={{ display: "flex", justifyContent: "center", gap: "1mm", marginTop: "1.5mm" }} renderTooth={(tooth) => {
-              const isSelected = selectedTeethCodes.includes(tooth);
-              return (
-                <div
-                  key={tooth}
-                  style={{
-                    width: "20px",
-                    height: "22px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "7.5pt",
-                    fontWeight: isSelected ? "900" : "500",
-                    backgroundColor: isSelected ? "#0284c7" : "#ffffff",
-                    color: isSelected ? "#ffffff" : "#64748b",
-                    border: isSelected ? "1.5px solid #0369a1" : "1px solid #cbd5e1",
-                    borderRadius: "3px",
-                  }}
-                >
-                  {tooth}
-                </div>
-              );
-            }} />
-          {hasPrimaryTeeth && primaryArches.map((arch) => (
-            <section key={arch.label} aria-label={arch.label} style={{ marginTop: "2mm", breakInside: "avoid" }}>
-              <div style={{ textAlign: "center", fontSize: "8pt", color: "#475569", marginBottom: "1mm" }}>{arch.label}</div>
-              <DentalArchRow teeth={arch.teeth} label={arch.label} style={{ display: "flex", justifyContent: "center", gap: "1mm" }} renderTooth={(tooth) => {
-                  const isSelected = selectedTeethCodes.includes(tooth);
-                  return (
-                    <div
-                      key={tooth}
-                      data-primary-tooth={tooth}
-                      data-selected={isSelected}
-                      style={{
-                        width: "20px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: "7.5pt", fontWeight: isSelected ? "900" : "500",
-                        backgroundColor: isSelected ? "#0284c7" : "#ffffff",
-                        color: isSelected ? "#ffffff" : "#64748b",
-                        border: isSelected ? "1.5px solid #0369a1" : "1px solid #cbd5e1", borderRadius: "3px",
-                      }}
-                    >
-                      {tooth}
-                    </div>
-                  );
-                }} />
-            </section>
-          ))}
-        </div>
+        <div className="print-watermark-protected"><LabDispatchDentalChart teeth={order.teeth} /></div>
 
         <section className={styles.closing}>
         {/* توقيعات الطبيب ومندوب المعمل */}

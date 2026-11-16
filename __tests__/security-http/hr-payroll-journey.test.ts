@@ -338,7 +338,10 @@ for(const change of ["role","credential"] as const){
    if(change==="role") await blocker.query("UPDATE users SET role='doctor' WHERE username='secadmin'");
    else await blocker.query("UPDATE users SET password_hash='synthetic-revoked-credential' WHERE username='secadmin'");
    await blocker.query("COMMIT");
-   const result=await pending;expect(result.status).toBe(403);
+   // WORK admission (requireSession → findUserByUsername) holds the actor row FOR SHARE, so the
+   // queued request observes the committed revocation at admission (401) — before the writer's
+   // own re-read would answer 403. Either way: refused, and nothing below is written.
+   const result=await pending;expect([401,403]).toContain(result.status);
    expect((await db.query("SELECT count(*)::int AS n FROM hr_payroll_disbursements WHERE item_id=$1",[item.id])).rows[0].n).toBe(0);
    expect((await db.query("SELECT count(*)::int AS n FROM expenses WHERE payable_id=$1",[item.payableId])).rows[0].n).toBe(0);
    expect((await db.query("SELECT paid_minor::text FROM hr_payroll_items WHERE id=$1",[item.id])).rows[0].paid_minor).toBe("0");

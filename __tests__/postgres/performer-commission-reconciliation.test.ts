@@ -1,3 +1,4 @@
+import { signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -84,7 +85,7 @@ describe("performer commission and settlement reconciliation", () => {
     const a = await doctor(30), b = await doctor(40), p = await patient();
     const creator = await doctor(50);
     const creatorName = `synthetic-invoice-creator-${++seq}`;
-    await db.createStaffUser({ username: creatorName, displayName: "SYNTHETIC signing doctor", passwordHash: "synthetic-creator-hash", role: "doctor", partyId: creator.id });
+    await db.createStaffUser({ username: creatorName, displayName: "SYNTHETIC signing doctor", passwordHash: "synthetic-creator-hash", role: "doctor", partyId: creator.id }, undefined, signedLegacyStaffProof(admin));
     const serviceId = await id(`INSERT INTO services(name,category,price_minor,price_configured,is_active)
       VALUES('SYNTHETIC performed service','endo',10000,TRUE,TRUE) RETURNING id`);
     const visit = await db.addVisit({ patientId: p, patientName: "SYNTHETIC commission patient", patientPhone: null, note: null });
@@ -110,25 +111,26 @@ describe("performer commission and settlement reconciliation", () => {
     expect(rows.find(row => row.doctorId === creator.id)).toBeUndefined();
   });
 
-  it("characterizes the documented gross-share discount basis, linked refunds, cancellation and separate currency buckets", async () => {
+  it("takes the share after the invoice discount (owner decision 2026-11-11), with linked refunds, cancellation and separate currency buckets", async () => {
     const d = await doctor(30), p = await patient();
     const yer = await invoice(p, d.id, "YER", 2000);
     const usd = await invoice(p, d.id, "USD");
     const payment = await receipt(p, yer, 4000, "YER");
     await receipt(p, usd, 2000, "USD");
     let rows = (await report()).filter(row => row.doctorId === d.id);
-    // Existing documented formula uses gross line share / invoice net.
-    // This is characterization, not a new net-of-discount policy.
-    expect(rows.find(row => row.currency === "YER")).toMatchObject({ accruedMinor: 3000, earnedMinor: 1500 });
+    // Owner decision 2026-11-11: the percentage is taken after the invoice discount.
+    // 10,000 with a 2,000 discount = 8,000 net; 30% = 2,400 accrued; 4,000 of 8,000 collected = 1,200.
+    // (The previous characterization used the gross line: 3,000 accrued and 1,500 earned.)
+    expect(rows.find(row => row.currency === "YER")).toMatchObject({ accruedMinor: 2400, earnedMinor: 1200 });
     expect(rows.find(row => row.currency === "USD")).toMatchObject({ accruedMinor: 3000, earnedMinor: 600 });
     await receipt(p, yer, 2000, "YER", payment);
     rows = (await report()).filter(row => row.doctorId === d.id);
-    expect(rows.find(row => row.currency === "YER")?.earnedMinor).toBe(750);
+    expect(rows.find(row => row.currency === "YER")?.earnedMinor).toBe(600);
     expect(rows.find(row => row.currency === "USD")?.earnedMinor).toBe(600);
     expect(await db.setInvoiceStatus(usd, "cancelled", { actor: admin.username, actorRole: "admin" })).toMatchObject({ status: "cancelled" });
     rows = (await report()).filter(row => row.doctorId === d.id);
     expect(rows.find(row => row.currency === "USD")).toBeUndefined();
-    expect(rows.find(row => row.currency === "YER")?.earnedMinor).toBe(750);
+    expect(rows.find(row => row.currency === "YER")?.earnedMinor).toBe(600);
   });
 });
 
@@ -161,14 +163,22 @@ describe("doctor report versus payroll settlement", () => {
       await q("UPDATE expenses SET created_at='2026-10-12T07:00:00Z' WHERE id=$1", [paid.parts[0].expenseId]);
       expect((await report()).find(row => row.doctorId === d.id && row.currency === currency))
         .toMatchObject({ earnedMinor: 1200, paidMinor: 1200, dueMinor: 0 });
-      const [settlement] = await q<{ remaining: string; voucher_number: string; currency: string; party_id: number }>(
-        `SELECT (${db.payableAmountSql("p")}-${db.payableSettledTotalSql("p")})::text AS remaining,e.voucher_number,e.currency,e.party_id
+      const [settlement] = await q<{ remaining: string; voucher_number: string; currency: string; party_id: number; cash_day: string }>(
+        `SELECT (${db.payableAmountSql("p")}-${db.payableSettledTotalSql("p")})::text AS remaining,e.voucher_number,e.currency,e.party_id,
+         (e.created_at AT TIME ZONE $3)::date::text AS cash_day
          FROM payables p JOIN expenses e ON e.payable_id=p.id WHERE p.id=$1 AND e.id=$2`,
-        [item.commissionPayableId, paid.parts[0].expenseId]);
+        [item.commissionPayableId, paid.parts[0].expenseId, db.CLINIC_TIME_ZONE]);
       expect(settlement).toMatchObject({ remaining: "0", currency, party_id: d.id });
-      expect((await db.journalEntries(FROM, "2026-10-11")).some(entry => entry.reference === settlement.voucher_number)).toBe(false);
-      const entries = await db.journalEntries(FROM, TO);
+      // Payroll belongs to October, but its cash settlement occurs on the
+      // persisted expense day. Do not backdate the actual payout or widen the
+      // ledger query to hide a missing journal entry.
+      expect(settlement.cash_day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      const entries = await db.journalEntries(settlement.cash_day, settlement.cash_day);
+      if (settlement.cash_day < FROM || settlement.cash_day > TO) {
+        expect((await db.journalEntries(FROM, TO)).some(entry => entry.reference === settlement.voucher_number)).toBe(false);
+      }
       const cashEntry = entries.find(entry => entry.reference === settlement.voucher_number)!;
+      expect(cashEntry).toBeDefined();
       expect(isBalanced(cashEntry)).toBe(true);
       expect(cashEntry.lines).toEqual(expect.arrayContaining([
         { accountCode: "2101", currency, amountMinor: 1200, side: "debit" },
@@ -310,13 +320,14 @@ describe("explicit reservation and currency-boundary ordering", () => {
     // Ordinary linked receipt still enters the pre-existing pooled FIFO path.
     await receipt(p, earlierSar, 2000, "SAR");
     const cashBefore = await q("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1 ORDER BY id", [p]);
-    // Before the reclassification instant, the original YER coverage remains historical truth.
+    // October 12 is the persisted reclassification day. A report ending before
+    // it must still show the original YER settlement, even after the correction.
     const beforeReclassification = await db.commissionDetailReport(FROM, "2026-10-11");
     expect(beforeReclassification.lines.filter(line => line.patientId === p).map(line => ({ invoice: line.invoiceId,
-      doctor: line.doctorId, covered: line.invoiceCoveredMinor, earned: line.earnedMinor })).sort((left, right) => left.invoice - right.invoice))
-      .toEqual([{ invoice: yerOrigin, doctor: b.id, covered: 8000, earned: 3200 },
-        { invoice: earlierSar, doctor: a.id, covered: 2000, earned: 600 },
-        { invoice: targetSar, doctor: b.id, covered: 0, earned: 0 }]);
+      doctor: line.doctorId, currency: line.currency, covered: line.invoiceCoveredMinor, earned: line.earnedMinor })).sort((left, right) => left.invoice - right.invoice))
+      .toEqual([{ invoice: yerOrigin, doctor: b.id, currency: "YER", covered: 8000, earned: 3200 },
+        { invoice: earlierSar, doctor: a.id, currency: "SAR", covered: 2000, earned: 600 },
+        { invoice: targetSar, doctor: b.id, currency: "SAR", covered: 0, earned: 0 }]);
     const check = async (target: number) => {
       const detail = await db.commissionDetailReport(FROM, TO);
       expect(detail.lines.filter(line => line.patientId === p).map(line => ({ invoice: line.invoiceId,

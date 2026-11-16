@@ -328,6 +328,14 @@ describe("schema ownership harness safety", () => {
     expect(artifactContainsSensitiveText(JSON.stringify(artifact))).toBe(true);
   });
 
+  it("does not fingerprint a modified patient-number guard under its reviewed name", () => {
+    const source = catalog({ functions: [{ key: "aqlan_patient_number_guard()", name: "aqlan_patient_number_guard",
+      value: JSON.stringify({body: "INSERT INTO patients VALUES ('synthetic-only')"}) }] });
+    const artifact = schemaOwnershipArtifactCatalog(source);
+    expect(artifact.functions).toEqual(source.functions);
+    expect(artifactContainsSensitiveText(JSON.stringify(artifact))).toBe(true);
+  });
+
   it("rejects every CLI shape except no args or one output pair", () => {
     expect(parseOwnershipCliArgs([])).toContain("aqlan-schema-ownership-report.json");
     expect(parseOwnershipCliArgs(["--output", "report.json"])).toMatch(/report\.json$/);

@@ -1,5 +1,6 @@
 import { visibleEndoTreatment } from "@/lib/endodontics-response";
 import { NextResponse } from "next/server";
+import { canonicalEndoRoute, commandCanonicalEndoStatus } from "@/lib/canonical-endo";
 import { checkEndoStatusChange } from "@/lib/endodontics";
 import { changeEndoStatus, ENDO_STATUS_MESSAGE } from "@/lib/endodontics-db";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
@@ -8,6 +9,9 @@ export const dynamic = "force-dynamic";
 
 /** (ENDO-2) إكمال علاج الجذور أو إيقافه (بسبب) — النوبة المنتهية لا تعود. */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string; treatmentId: string }> }) {
+  /* M2 slice 77: clinical.visits.document inside the patient scope, the clinician link or the owner. */
+  const canonical = await canonicalEndoRoute(request, async (handle, body) => { const { id, treatmentId } = await params; return commandCanonicalEndoStatus(handle, id, treatmentId, body); }, "تعذّر تغيير حالة علاج الجذور. أعد المحاولة.");
+  if (canonical) return canonical;
   const { id, treatmentId: rawTreatment } = await params;
   const patientId = idOf(id);
   const treatmentId = idOf(rawTreatment);

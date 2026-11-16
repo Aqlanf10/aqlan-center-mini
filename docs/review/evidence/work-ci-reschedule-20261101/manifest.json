@@ -1,0 +1,72 @@
+{
+  "format": "work-ci-reschedule-race-evidence-v1",
+  "productRevision": "ed830332558afab1c2209616f390d5391b1960a4",
+  "publishedFailureRevision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+  "sourceRevision": "8e12f9591ebd0aafc578587b4d6c3e5e657eee6f",
+  "results": {
+    "publishedProductFocusedPG": {
+      "tests": 9,
+      "files": 1
+    },
+    "integratedProductFocusedPG": {
+      "tests": 16,
+      "files": 2
+    },
+    "typecheck": "pass",
+    "focusedLint": "pass",
+    "historicalSourceHashes": 433,
+    "finalHeadCI": "pending"
+  },
+  "sourceSha256": {
+    "__tests__/postgres/appointments-canonical-reschedule.test.ts": "4bc3bb71bbb6a84bed8a9e5d5979287595bdc657c2f5c2857772711d37d0b732",
+    "docs/review/work-ci-reschedule-race-20261101.md": "af3f46f7b44515a3b099043bd7a812cfe6b57371479f7806975572327668b6ca",
+    "docs/security/staff-cutover/HANDOFF.md": "8f648c1971fad3f7927d66d620a1601dd349761f97d3ca26c40b009924c77a8b"
+  },
+  "artifacts": {
+    "93b-ci-failure-checkpoint.json": {
+      "sha256": "e52c7cbb7b18d015a76b7503b191b3cd3d930e440a3bd976b7a899b4e0da398c",
+      "bytes": 13198
+    },
+    "93b-pg-check-annotations.json": {
+      "sha256": "bc158eb6167e6a379be71715ddd728175e4ee11a70f49cddce0778a2982ae3bf",
+      "bytes": 2471
+    },
+    "93b-pg-job-metadata.json": {
+      "sha256": "6486cc312151fc4fe4ef2717549d5f9197dbc2582a53ac26484590fa1f4583d3",
+      "bytes": 4614
+    },
+    "93b-reschedule-barrier-final.log": {
+      "sha256": "729b4dc3f833bb7cbce4b1be8a2c0706d35d6f6f837019acc1bea0fe4096eb11",
+      "bytes": 709
+    },
+    "93b-reschedule-barrier-focused.log": {
+      "sha256": "b7faebbf1036bd017970edb6cabe03c590ce194919ebb415d9567b1f475ad376",
+      "bytes": 2081
+    },
+    "historical-source-verification.json": {
+      "sha256": "025db6ceb3e1cd8e5f371df39295ebeff1356e77a945d9bcbe9ea7ee91aedb92",
+      "bytes": 130068
+    },
+    "main-integration-reschedule-lint.log": {
+      "sha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "bytes": 209
+    },
+    "main-integration-reschedule-pg-final.log": {
+      "sha256": "81d79f96ba436dbd30cf925630d83f3d857a058a14f0c6aa5efdcceaed4d1ba5",
+      "bytes": 759
+    },
+    "main-integration-reschedule-types.log": {
+      "sha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "bytes": 257
+    },
+    "reschedule-race-test-source.json": {
+      "sha256": "dfb0db4bf5168b0efb5b27f30ad5411e6ce462fb1574f2b2ff623f0003b1609c",
+      "bytes": 437
+    }
+  },
+  "limits": [
+    "No product or policy change. Real day-lock barrier proves overlap; sequential fresh intentions remain valid.",
+    "Original full CI job log denied HTTP 403; separately available annotations preserved.",
+    "Not durable request idempotency or a deployment/activation approval."
+  ]
+}

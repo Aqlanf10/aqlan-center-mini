@@ -1,0 +1,13 @@
+[BABEL] Note: The code generator has deoptimised the styling of <checkout>/lib/db.ts as it exceeds the max of 500KB.
+
+<checkout>/lib/db.ts
+     57:21  warning  'PoolClient' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+     65:8   warning  'fs' is defined but never used. Allowed unused vars must match /^_/u                     @typescript-eslint/no-unused-vars
+     66:8   warning  'path' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+    147:35  warning  'isCephMeasurementCode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  11265:10  warning  'isUniqueViolation' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  17321:26  warning  'normalizeBillingRule' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  17321:48  warning  'normalizeSessionCount' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  17322:38  warning  'suggestVisitMinutes' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+
+✖ 8 problems (0 errors, 8 warnings)

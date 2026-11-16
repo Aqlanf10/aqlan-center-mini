@@ -1,0 +1,15 @@
+{
+  "buildSource": "7f586db2d869e33ea439ec85ef14d20cc4a59ae9",
+  "localSource": "177825e508d3d21078dde4798fae791063195db6",
+  "buildId": "Chpd2GcxS6DtKukI0zRmm",
+  "unchangedStrategyInputs": {
+    "app/api/ortho/[id]/strategy/route.ts": true,
+    "lib/ortho-treatment-strategy-store.ts": true,
+    "lib/canonical-ortho-strategy.ts": true,
+    "lib/ortho-treatment-strategy.ts": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/staff-session-admission.ts": true,
+    "lib/db.ts": true
+  },
+  "qualification": "Before witness uses the actual prior7f built application; it is not claimed to be a full56 rebuild."
+}

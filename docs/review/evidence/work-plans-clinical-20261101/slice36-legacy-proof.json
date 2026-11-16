@@ -1,0 +1,97 @@
+{
+  "base": "55aca0078c2fa5517fc8b752820f961214da833b",
+  "checks": [
+    {
+      "file": "app/api/patients/[id]/plans/route.ts",
+      "part": "legacy GET suffix",
+      "sha256": "addc4a7ecc15de1bc7ead0fc25a85bd48b56cdea31a3adc705bfc49343b17a93",
+      "unchanged": true
+    },
+    {
+      "file": "lib/db.ts",
+      "sha256": "ca59467d9f3424c0eab870564606eb438c30bb253d786d459e92510edbeb07c7",
+      "unchanged": true
+    },
+    {
+      "file": "lib/plans.ts",
+      "sha256": "0ceb498cc667227dae56d655c88e758c0dea1cc679d79e4d4a1f52d66b73fbcc",
+      "unchanged": true
+    },
+    {
+      "file": "lib/plan-payment-projection.ts",
+      "sha256": "1bb0ed9a1c5dbe252858357931f4e09a057f4756efbf744029c83344feaf9955",
+      "unchanged": true
+    },
+    {
+      "file": "lib/planned-visit-projection.ts",
+      "sha256": "48ed0be49752dd519a802369d1ce78cdbcad32978a17f3223461f98da73e9c95",
+      "unchanged": true
+    },
+    {
+      "file": "lib/plan-financial-position.ts",
+      "sha256": "3757069a81ed7b3d82088c26c3a9188b83332f21112f20cefe6c485589a2d9c0",
+      "unchanged": true
+    },
+    {
+      "file": "lib/approved-agreements.ts",
+      "sha256": "9004da5eac12a71fb701241578d0e7a6c64f1406a6d472ef6311a14b5c221143",
+      "unchanged": true
+    },
+    {
+      "file": "lib/agreement-amendment-db.ts",
+      "sha256": "8bb44bc68f5c5b845845a01c99eb9708bcdc621d3a1696dba52a736fe6d0e2c0",
+      "unchanged": true
+    },
+    {
+      "file": "lib/hr-payroll.ts",
+      "sha256": "df5db4921d350ccf7c71e64acc07b124fbe6d8689739cf3dace2b7aa93584a4d",
+      "unchanged": true
+    },
+    {
+      "file": "lib/staff-authority-proof-internal.ts",
+      "sha256": "c259bbdbefc02d01b0e004e053c1bb487bb637947be32d82eb6f25473b40c96a",
+      "unchanged": true
+    },
+    {
+      "file": "lib/staff-capability-catalogue.ts",
+      "sha256": "2e6b83691df24db4ef63d941fe48bbb047523285eeeef1bdb986cb100624100d",
+      "unchanged": true
+    },
+    {
+      "file": "lib/staff-operation-runtime.ts",
+      "sha256": "2a1b2770ab7806498c7a99b0ec71d672c50b58fd776e8a6f3a0019ff461b10c5",
+      "unchanged": true
+    },
+    {
+      "file": "lib/canonical-read-snapshot.ts",
+      "sha256": "7321dbd8af7a2412003bc315c384195277c7f8fe0c4ebdb63837c81c3ae0bb93",
+      "unchanged": true
+    },
+    {
+      "file": "lib/canonical-ortho-assessment.ts",
+      "sha256": "a8717164ecd01ce833ef25db0f2d78c3ae61aad2f33d4ea1519b748cf10e7b35",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-assessment-store.ts",
+      "sha256": "dc13e538d0e3618df6713a5feb7643b4ed1483c1b7d3c2de8264943c6738b3fa",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-assessment-versioned-sources.ts",
+      "sha256": "f5f9dd9e5523e7a65aec0aa3f6f210054829802a9cae0329c2783e1a1a361ed8",
+      "unchanged": true
+    },
+    {
+      "file": "lib/canonical-ceph-reads.ts",
+      "sha256": "e31416667f7b87344ed703e9fbb2a21c001b6b860b8c76e929dc0828ced0c525",
+      "unchanged": true
+    },
+    {
+      "file": "lib/canonical-record-reads.ts",
+      "allowedDifference": "one exact read:plans.clinical registration; all other bytes unchanged",
+      "beforeSha256": "40bb8dfe6645a3bd5b733006c22b9b2677e24c05a8be488abef048490afd34b1",
+      "afterSha256": "cec9ae3d00174e9e3e64ca06b40bbf299eedb2185c51b317db08740d4fe46527"
+    }
+  ]
+}

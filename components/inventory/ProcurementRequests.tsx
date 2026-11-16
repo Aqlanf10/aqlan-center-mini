@@ -3,14 +3,17 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { PackagePlus, Plus, Send, X, RefreshCw, ClipboardCheck, Languages } from "lucide-react";
 import { useSession, type SessionInfo } from "@/components/SessionProvider";
+import { inventoryCan } from "@/lib/inventory-ui-access";
 import { convertQuantity, type UnitConversionSnapshot } from "@/lib/inventory-domain/quantities";
 import type { RequestRevision } from "@/lib/inventory-domain/procurement";
 import styles from "./inventory.module.css";
 import { useInventoryCommand } from "./useInventoryCommand";
+import { inventoryRecoveryEnglish } from "@/lib/inventory-command-recovery";
 interface Catalog {items:{itemId:number;name:string;conversion:UnitConversionSnapshot}[];scope:string}
 interface RequestRow {id:string;version:number;status:string;document:RequestRevision}
 const labels:Record<string,string>={submitted:"بانتظار الاعتماد",approved:"معتمد",partially_approved:"معتمد جزئيًا",rejected:"مرفوض"};
 const english:Record<string,string>={
+ ...inventoryRecoveryEnglish,
   "بانتظار الاعتماد": "Awaiting approval",
   "معتمد": "Approved",
   "معتمد جزئيًا": "Partially approved",
@@ -61,7 +64,7 @@ function ProcurementRequestForm({session}:{session:SessionInfo|null}){
  const [reload,setReload]=useState(0);const [page,setPage]=useState(0);
  const [read,setRead]=useState<{owner:string;catalog:Catalog;items:RequestRow[];itemNames:Record<string,string>;hasMore:boolean}|null>(null);
  const [failed,setFailed]=useState<{owner:string;message:string}|null>(null);const [lines,setLines]=useState<{id:string;catalogIndex:string;quantity:string}[]>([]);
- const [reason,setReason]=useState("");const command=useInventoryCommand();const busy=command.locked;const [feedback,setFeedback]=useState("");const [fieldError,setFieldError]=useState("");
+ const [reason,setReason]=useState("");const command=useInventoryCommand("requests");const busy=command.locked;const [feedback,setFeedback]=useState("");const [fieldError,setFieldError]=useState("");
  const dirty=Boolean(reason.trim()||lines.length);
  useEffect(()=>{if(!dirty)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue="";};window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn);},[dirty]);
  const firstField=useRef<HTMLTextAreaElement>(null);
@@ -83,7 +86,7 @@ function ProcurementRequestForm({session}:{session:SessionInfo|null}){
  const complete=()=>{setReason("");setLines([]);setFeedback("تم تقديم الطلب. لم يتغير المخزون أو حساب المورد. تقدير القيمة واعتماد الأمر خطوة مستقلة لدى الإدارة.");setPage(0);setReload(value=>value+1);};
  return <section className={`${styles.root} space-y-5`} dir={locale==="ar"?"rtl":"ltr"} lang={locale} data-testid="inventory-procurement">
   <div className={styles.toolbar}><div><h1 className={styles.title}>{text("طلبات شراء المواد")}</h1><p className={styles.caption}>{text("الطلب والاعتماد والتوريد حالات مستقلة")}</p></div><Link className={styles.button} href="/inventory">{text("المخزون")}</Link></div>
-  <div className={styles.actions}><button type="button" className={styles.button} disabled={busy} onClick={()=>setLocale(locale==="ar"?"en":"ar")}><Languages size={16} aria-hidden="true"/>{locale==="ar"?"English":"العربية"}</button><Link className={styles.button} href="/inventory/review">{text("التقييم والطباعة")}</Link>{session?.role==="admin"?<><Link className={styles.button} href="/inventory/procurement/review">{text("مراجعة واعتماد الطلبات")}</Link><Link className={styles.button} href="/inventory/procurement/operations">{text("أوامر الشراء والاستلام والمطابقة")}</Link></>:null}<button className={styles.button} type="button" onClick={()=>setReload(value=>value+1)} disabled={busy}><RefreshCw size={16} aria-hidden="true"/>{text("تحديث")}</button></div>
+  <div className={styles.actions}><Link className={styles.button} href="/inventory/procurement/setup">{locale==="ar"?"تهيئة المواد والمواقع":"Materials and locations setup"}</Link><button type="button" className={styles.button} disabled={busy} onClick={()=>setLocale(locale==="ar"?"en":"ar")}><Languages size={16} aria-hidden="true"/>{locale==="ar"?"English":"العربية"}</button><Link className={styles.button} href="/inventory/review">{text("التقييم والطباعة")}</Link>{session?.role==="admin"?<><Link className={styles.button} href="/inventory/procurement/review">{text("مراجعة واعتماد الطلبات")}</Link><Link className={styles.button} href="/inventory/procurement/operations">{text("أوامر الشراء والاستلام والمطابقة")}</Link></>:null}<button className={styles.button} type="button" onClick={()=>setReload(value=>value+1)} disabled={busy}><RefreshCw size={16} aria-hidden="true"/>{text("تحديث")}</button></div>
   {error?<p className={styles.feedback} role="alert">{text(error)}</p>:!data?<p className={styles.feedback} role="status">{text("جارٍ تحميل الطلبات…")}</p>:<>
    <div className={styles.panel}><h2 className={styles.panelHeading}><span>{text("طلب جديد")}</span><PackagePlus size={18} aria-hidden="true"/></h2>
     <form noValidate onSubmit={submit} className="space-y-4 p-4">
@@ -96,13 +99,13 @@ function ProcurementRequestForm({session}:{session:SessionInfo|null}){
      </fieldset>)}
      {!data.catalog.items.length?<p>{text("تحتاج الإدارة لتسجيل وحدات العبوات المعتمدة قبل تقديم الطلب.")}</p>:null}
      <div className={styles.actions}><button type="button" className={styles.button} disabled={busy||!data.catalog.items.length||lines.length>=100} onClick={()=>{edited();addLine();}}><Plus size={16} aria-hidden="true"/>{text("إضافة مادة")}</button><button className={`${styles.button} ${styles.primary}`} disabled={busy||!data.catalog.items.length} type="submit" aria-busy={command.busy}><Send size={16} aria-hidden="true"/>{command.busy?text("جارٍ تقديم الطلب…"):text("تقديم طلب الشراء")}</button></div>
-     {command.message?<p role="alert" className="text-sm text-red-800">{text(command.message)}</p>:null}
+     {command.describe(locale)?<p className="text-sm" data-testid="inventory-saved-command">{command.describe(locale)}</p>:null}{command.message?<p role="alert" className="text-sm text-red-800">{text(command.message)}</p>:null}
      {command.status==="uncertain"?<button type="button" className={styles.button} onClick={async()=>{if(await command.retry())complete();}}>{text("إعادة تأكيد الطلب نفسه")}</button>:null}
      {fieldError?<p id="procurement-error" role="alert" className="text-sm text-red-800">{text(fieldError)}</p>:null}
      {feedback?<p role="status" className="text-sm text-green-800">{text(feedback)}</p>:null}
     </form>
    </div>
-   <div className={styles.panel}><h2 className={styles.panelHeading}><span>{session?.role==="admin"?text("طلبات للمراجعة"):text("طلباتي")}</span><ClipboardCheck size={18} aria-hidden="true"/></h2><div className={styles.items}>{data.items.map(row=><article className={styles.item} key={row.id}><span className={styles.badge} data-state={row.status==="approved"?"known":"estimated"}>{text(labels[row.status]??row.status)}</span><h3 className="mt-2 font-semibold">{row.document.reason}</h3><p className={styles.caption}>{text("إصدار")} {row.version} · {row.document.lines.length} {text("بنود")}</p><ul className="mt-3 space-y-2 text-sm">{row.document.lines.map(line=><li key={line.id}><span className="block mb-1">{data.itemNames[line.itemId]??(locale==="ar"?`مادة #${line.itemId}`:`Item #${line.itemId}`)} · {text("الاسم الحالي")}</span><span dir="ltr" className="inline-flex items-center gap-1"><bdi>{line.quantity} {line.conversion.enteredUnit}</bdi><span>=</span><bdi>{convertQuantity(line.quantity,line.conversion).baseQuantity} {line.conversion.baseUnit}</bdi></span></li>)}</ul></article>)}</div>{!data.items.length?<p className={styles.note}>{text("لا توجد طلبات في هذا النطاق.")}</p>:null}<div className={`${styles.toolbar} ${styles.note}`}><span>{text("صفحة")} {page+1}</span><div className={styles.actions}><button className={styles.button} disabled={!page} type="button" onClick={()=>setPage(value=>value-1)}>{text("السابق")}</button><button className={styles.button} disabled={!data.hasMore} type="button" onClick={()=>setPage(value=>value+1)}>{text("التالي")}</button></div></div></div>
+   <div className={styles.panel}><h2 className={styles.panelHeading}><span>{inventoryCan(session,"inventory.requests.approve","inventory.orders.manage")?text("طلبات للمراجعة"):text("طلباتي")}</span><ClipboardCheck size={18} aria-hidden="true"/></h2><div className={styles.items}>{data.items.map(row=><article className={styles.item} key={row.id}><span className={styles.badge} data-state={row.status==="approved"?"known":"estimated"}>{text(labels[row.status]??row.status)}</span><h3 className="mt-2 font-semibold">{row.document.reason}</h3><p className={styles.caption}>{text("إصدار")} {row.version} · {row.document.lines.length} {text("بنود")}</p><ul className="mt-3 space-y-2 text-sm">{row.document.lines.map(line=><li key={line.id}><span className="block mb-1">{data.itemNames[line.itemId]??(locale==="ar"?`مادة #${line.itemId}`:`Item #${line.itemId}`)} · {text("الاسم الحالي")}</span><span dir="ltr" className="inline-flex items-center gap-1"><bdi>{line.quantity} {line.conversion.enteredUnit}</bdi><span>=</span><bdi>{convertQuantity(line.quantity,line.conversion).baseQuantity} {line.conversion.baseUnit}</bdi></span></li>)}</ul></article>)}</div>{!data.items.length?<p className={styles.note}>{text("لا توجد طلبات في هذا النطاق.")}</p>:null}<div className={`${styles.toolbar} ${styles.note}`}><span>{text("صفحة")} {page+1}</span><div className={styles.actions}><button className={styles.button} disabled={!page} type="button" onClick={()=>setPage(value=>value-1)}>{text("السابق")}</button><button className={styles.button} disabled={!data.hasMore} type="button" onClick={()=>setPage(value=>value+1)}>{text("التالي")}</button></div></div></div>
   </>}
  </section>;
 }

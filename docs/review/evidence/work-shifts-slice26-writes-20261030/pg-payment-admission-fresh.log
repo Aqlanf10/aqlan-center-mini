@@ -1,0 +1,11 @@
+
+ RUN  v4.1.12 <worktree>
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+(node:5226) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+   Start at  02:21:57
+   Duration  7.68s (transform 3.10s, setup 0ms, import 3.62s, tests 3.23s, environment 0ms)

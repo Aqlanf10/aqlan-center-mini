@@ -76,6 +76,7 @@ export function useDurablePurchaseAttempt(itemId: number | null) {
     publish({ token, ready: true, revision: saved.revision, error: null,
       attempt: saved.command ? { command: saved.command, phase: "uncertain" } : null });
   }, [publish, token]);
+  const role = session?.role;
   const refresh = useCallback(async () => {
     if (!enabled || itemId === null || lifetime.current !== token) return;
     const version = ++readVersion.current;
@@ -84,7 +85,7 @@ export function useDurablePurchaseAttempt(itemId: number | null) {
       if (lifetime.current !== token || version !== readVersion.current) return;
       const identity = me as { id?: number; username?: string; role?: string } | null;
       if (!response.ok || response.redirected || !identity || !Number.isSafeInteger(identity.id) || identity.id! <= 0
-        || identity.username !== actor || identity.role !== session?.role
+        || identity.username !== actor || identity.role !== role
         || principal.current?.token === token && principal.current.id !== identity.id) {
         publish({ ...empty, token, error: "تعذّر التحقق من الجلسة أو تغيّرت. أعد تحميل الصفحة وسجّل الدخول بالحساب الذي بدأ الشراء لاستعادة طلبه." });
         // Revoke this execution generation, not just the rendered view. Older
@@ -105,7 +106,7 @@ export function useDurablePurchaseAttempt(itemId: number | null) {
         publish({ ...old, error: PURCHASE_STORAGE_ERROR });
       }
     }
-  }, [actor, itemId, enabled, token, adopt, publish, session?.role]);
+  }, [actor, itemId, enabled, token, adopt, publish, role]);
   useEffect(() => {
     if (!enabled) return;
     void refresh();

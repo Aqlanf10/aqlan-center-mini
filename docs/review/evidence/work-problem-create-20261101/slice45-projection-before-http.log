@@ -1,0 +1,40 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-problem-create-journey.test.ts (11 tests | 1 failed | 10 skipped) 5713ms
+   × HTTP: problem list never restores a hidden orthodontic case link from the legacy projection 666ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-problem-create-journey.test.ts > HTTP: problem list never restores a hidden orthodontic case link from the legacy projection
+AssertionError: expected { id: 3, patientId: 1, …(10) } to match object { caseId: null, caseTitle: null }
+(10 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "caseId": null,
+-   "caseTitle": null,
++   "caseId": 3,
++   "caseTitle": "SYN hidden ortho association",
+  }
+
+ ❯ __tests__/security-http/canonical-problem-create-journey.test.ts:56:189
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  07:27:34
+   Duration  10.92s (transform 148ms, setup 0ms, import 550ms, tests 5.71s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

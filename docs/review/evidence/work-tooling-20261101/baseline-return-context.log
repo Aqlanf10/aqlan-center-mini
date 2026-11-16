@@ -1,0 +1,35 @@
+
+ RUN  v4.1.12 /workspace/work-tooling-baseline
+
+ ❯ __tests__/return-booking-context-ui.test.tsx (9 tests | 1 failed | 8 skipped) 59ms
+   × a committed principal A to B to A never revives old listed cases before a fresh response 53ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/return-booking-context-ui.test.tsx > a committed principal A to B to A never revives old listed cases before a fresh response
+AssertionError: expected '<section aria-label="الطبيب المسؤول ع…' not to contain 'علاج عصب — 36'
+
+Expected: "علاج عصب — 36"
+Received: "<section aria-label="الطبيب المسؤول عن موعد المراجعة" class="my-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-navy-950" dir="rtl"><label class="block text-xs font-bold">الحالة التي تخصها المراجعة<select aria-label="سياق موعد المراجعة" class="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"><option value="" selected="">اختر الحالة المقصودة</option><option value="clinical_case:31">علاج عصب — 36</option></select></label><p role="status" class="mt-1 text-xs">اختر الحالة لتحديد طبيبها المسؤول، وليس طبيبًا بديلًا لهذا الموعد فقط.</p><div class="mt-2 flex flex-wrap gap-3 text-xs"><button type="button" class="min-h-9 rounded-lg border border-sky-300 bg-white px-3 font-bold">تحديث الطبيب المسؤول</button><a href="/patients/19?tab=treatment&amp;sub=cases&amp;patientId=19&amp;clinicalCaseId=31" class="min-h-9 rounded-lg border border-sky-300 bg-white px-3 py-2 font-bold">إعداد الطبيب المسؤول للحالة</a><span>تُضبط المسؤولية من إعدادات الحالة بواسطة المدير؛ لا يُختار طبيب عابر لهذا الموعد.</span></div></section>"
+
+ ❯ __tests__/return-booking-context-ui.test.tsx:113:129
+    111|  render();const listed=await flush();expect(renderToStaticMarkup(liste…
+    112|  hooks.username="synthetic-b";expect(renderToStaticMarkup(render().vie…
+    113|  hooks.username="synthetic-a";const again=render();expect(again.ready)…
+       |                                                                                                                                 ^
+    114|  expect(fetcher).toHaveBeenCalledTimes(3);
+    115| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  00:00:43
+   Duration  986ms (transform 161ms, setup 0ms, import 262ms, tests 59ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,8 @@
+{
+  "baseRevision": "a3812c1127e41ab60a57754c0e3912f8dbff9316",
+  "beforeCommandSha256": "a2490dd89c5cde472dacab7adbc1ee8963f0bf52b492d3582eb5fe8a52b93b96",
+  "afterCommandSha256": "fecb5845c8f0636ab2755a664bc86b3ced7db7d691043c9ce78aea2db360adda",
+  "failure": "Two synthetic valid observations could be committed beyond the existing256-row/2MiB study-read limits; both witnesses resolved before the fix instead of refusing",
+  "scope": "Unpublished new53 code only; no production incident or data repair claimed",
+  "assertions": "Same exact witnesses must reject and prove full state+audit rollback and continued readable draft"
+}

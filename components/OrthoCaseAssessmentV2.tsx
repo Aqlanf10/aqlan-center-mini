@@ -7,6 +7,7 @@ import { readAssessmentResponseV2 } from "@/lib/ortho-assessment-client-v2";
 import { newAssessmentEditorV2, readAssessmentEditorV2, assessmentEditorCommandV2, type AssessmentEditorV2 } from "@/lib/ortho-assessment-editor-v2";
 import type { AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import type { AssessmentReadResponseV2, AssessmentSaveExpectationV2 } from "@/lib/ortho-assessment-response-v2";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { plain } from "@/lib/ortho-assessment-model";
 export interface AssessmentLifetimeV2 {
   identity: object; active(): boolean; editable(): boolean; denied(): void;
@@ -18,6 +19,7 @@ export interface AssessmentLifetimeV2 {
 }
 export interface OrthoCaseAssessmentV2Props {
   patientId: number; orthoCaseId: number; clinicalCaseId?: number; lifetime?: AssessmentLifetimeV2;
+  readOnly?: boolean; clinicTimeZone?: string;
   sectionView?: "interview" | "extraoral" | "intraoral" | "measurements";
 }
 const control = "min-h-11 min-w-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-40";
@@ -32,9 +34,13 @@ export function OrthoCaseAssessmentV2(props: OrthoCaseAssessmentV2Props) {
   const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
   return <Workspace key={`${props.patientId}:${props.orthoCaseId}:${props.clinicalCaseId ?? "unresolved"}:${authority}`} {...props} />;
 }
-function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionView }: OrthoCaseAssessmentV2Props) {
-  const owner = useMemo(() => ({ active: false }), [lifetime?.identity]);
-  useLayoutEffect(() => { owner.active = true; return () => { owner.active = false; }; }, [owner]);
+function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionView, readOnly = false, clinicTimeZone }: OrthoCaseAssessmentV2Props) {
+  const owner = useMemo(() => ({ identity: lifetime?.identity }), [lifetime?.identity]);
+  const activeOwner = useRef<typeof owner | null>(null);
+  useLayoutEffect(() => {
+    activeOwner.current = owner;
+    return () => { if (activeOwner.current === owner) activeOwner.current = null; };
+  }, [owner]);
   const latest = useRef(lifetime);
   useLayoutEffect(() => { latest.current = lifetime; }, [lifetime]);
   const [selected, setSelected] = useState<number>();
@@ -49,7 +55,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     committedGeneration.current = generation;
     return () => { if (committedGeneration.current === generation) committedGeneration.current = null; };
   }, [generation]);
-  const currentView = () => owner.active && committedGeneration.current === generation
+  const currentView = () => (activeOwner.current === owner) && committedGeneration.current === generation
     && latest.current?.identity === lifetime?.identity && (!lifetime || lifetime.active());
   // Same-generation callbacks must also own the exact draft bytes they rendered.
   const currentDraft = () => currentView() && latest.current?.values.document === lifetime?.values.document;
@@ -59,11 +65,11 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
   const draft = readAssessmentEditorV2(lifetime?.values.document ?? "");
   const malformed = !!lifetime?.values.document && !draft;
   const stale = !!draft && !!data && draft.expectedRevisionId !== (data.history[0]?.id ?? null);
-  const writable = !!lifetime && lifetime.active() && lifetime.editable() && data?.state === "ready" && data.clinicalWritable;
+  const writable = !readOnly && !!lifetime && lifetime.active() && lifetime.editable() && data?.state === "ready" && data.clinicalWritable;
   const editable = !!writable && !stale;
   useEffect(() => {
     const life = latest.current, controller = new AbortController(); let live = true;
-    const current = () => live && owner.active && committedGeneration.current === generation
+    const current = () => live && (activeOwner.current === owner) && committedGeneration.current === generation
       && !controller.signal.aborted && (!life || life.active());
     const timer = setTimeout(() => { if (current()) { setRead({ generation, data: null, error: "تعذرت القراءة؛ لم يُعتبر السجل فارغًا." }); controller.abort(); } }, 15000);
     void (async () => {
@@ -77,11 +83,11 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
         if (!current()) return;
         if (!accepted) throw Error("تعذّر التحقق من هوية السجل أو بصمة نتائجه.");
         setRead({ generation, data: accepted, error: null });
-      } catch (caught) { if (current()) setRead({ generation, data: null, error: caught instanceof Error ? caught.message : "تعذرت القراءة." }); }
+      } catch (caught) { if (current()) setRead({ generation, data: null, error: caught instanceof Error && (!readOnly || caught.name === "Error") ? caught.message : "تعذرت القراءة؛ أعد تحميل التقييم." }); }
       finally { clearTimeout(timer); }
     })();
     return () => { live = false; controller.abort(); clearTimeout(timer); };
-  }, [generation, owner, patientId, orthoCaseId, clinicalCaseId, selected]);
+  }, [generation, owner, patientId, orthoCaseId, clinicalCaseId, selected, readOnly]);
   const change = (next: AssessmentEditorV2) => { if (currentDraft() && editable && lifetime?.active() && latest.current?.editable()) lifetime.change("document", JSON.stringify(next)); };
   function begin() {
     if (!currentDraft() || !writable || !data || !lifetime || draft || malformed || data.revision?.id !== data.history[0]?.id) return;
@@ -90,7 +96,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     lifetime.settle("document", JSON.stringify(next)); setMessage(null);
   }
   async function save(retry = false) {
-    if (!currentDraft() || !lifetime || !draft || data?.state !== "ready" || !data.clinicalWritable || !owner.active || !lifetime.active()
+    if (!currentDraft() || !lifetime || !draft || data?.state !== "ready" || !data.clinicalWritable || !(activeOwner.current === owner) || !lifetime.active()
       || lifetime.busy || (!retry && !editable) || retry && !lifetime.uncertain) return;
     const command = assessmentEditorCommandV2(draft);
     if (!command) { setMessage("أكمل السبب والقياسات ومصدر وتاريخ كل قيمة قبل الحفظ؛ الفراغ ليس صفرًا."); return; }
@@ -125,7 +131,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">التقييم وقياسات الحالة</h3>
       <button type="button" className={control} disabled={!!lifetime?.busy} onClick={() => { if (currentView() && !latest.current?.busy) setReload(value => value + 1); }}>تحديث سجل التقييم</button></div>
     <p className="text-xs">توثيق الحالة ونتائج حسابية غير معتمدة سريريًا. الحفظ لا ينشئ خطة أو فاتورة ولا يغيّر التاريخ الطبي العام.</p>
-    {!lifetime && <p role="status">عرض للقراءة فقط؛ حماية مسودة الحالة غير موصولة.</p>}
+    {readOnly ? <p role="status">عرض التقييمات والقياسات المحفوظة للقراءة فقط.</p> : !lifetime && <p role="status">عرض للقراءة فقط؛ حماية مسودة الحالة غير موصولة.</p>}
     {!data && !error && <p role="status">جارٍ التحقق من السجل وبصماته…</p>}
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     {malformed && <p role="alert">المسودة غير قابلة للقراءة؛ لم تُستبدل بنموذج فارغ.</p>}
@@ -135,7 +141,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
       {data.recordingContext === "retrospective" && <p>توثيق لاحق لحالة سابقة؛ لا يعيد فتح العلاج.</p>}
       {!!data.history.length && <label className="block">نسخة التقييم<select className={`${control} w-full`} value={selected ?? data.history[0].id}
         disabled={!!draft || !!lifetime?.busy || !!lifetime?.uncertain} onChange={event => { if (currentDraft() && !draft && !latest.current?.busy && !latest.current?.uncertain) setSelected(Number(event.target.value)); }}>
-        {data.history.map(row => <option key={row.id} value={row.id}>نسخة {row.version} · {row.createdAt.slice(0, 10)} · {row.createdBy}</option>)}</select></label>}
+        {data.history.map(row => <option key={row.id} value={row.id}>نسخة {row.version} · {clinicTimeZone ? formatClinicDate(row.createdAt, clinicTimeZone) : row.createdAt.slice(0, 10)} · {row.createdBy}</option>)}</select></label>}
       {data.revision ? <details className="rounded-lg border p-3" data-testid="assessment-v2-saved"><summary className="min-h-11 cursor-pointer">السجل المحفوظ: نسخة {data.revision.version}</summary>
         <p>{data.revision.createdAt} · {data.revision.createdBy} · {data.revision.reason}</p>
         <p className="break-all text-xs">البصمة: {data.revision.contentHash}</p>
@@ -143,9 +149,9 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
       </details> : <p>لم تُسجّل مراجعة لهذه الحالة بعد.</p>}
       {data.sourceStates.map(row => <p className="break-all text-xs" key={`${row.source.kind}:${row.source.id}`}>{row.source.kind} #{row.source.id} · {row.source.version}: {row.state}</p>)}
       {data.sources.imaging === "restricted" && <p>مراجع الصور والأشعة مقيدة بالصلاحية الحالية.</p>}
-      {data.sources.truncated && <p>قائمة المصادر محدودة؛ غياب مصدر من القائمة لا يعني أنه غير موجود.</p>}
+      {!readOnly && data.sources.truncated && <p>قائمة المصادر محدودة؛ غياب مصدر من القائمة لا يعني أنه غير موجود.</p>}
       {data.revision?.schemaVersion === 1 && <p role="status">نسخة تاريخية بالإصدار الأول محفوظة للقراءة. الترقية تحتاج نقلًا صريحًا للقيم ومصادرها؛ لا تحويل تلقائي.</p>}
-      {!draft && !malformed && data.revision?.schemaVersion !== 1 && <button className={control} type="button" disabled={!writable || data.revision?.id !== data.history[0]?.id} onClick={begin}>
+      {!readOnly && !draft && !malformed && data.revision?.schemaVersion !== 1 && <button className={control} type="button" disabled={!writable || data.revision?.id !== data.history[0]?.id} onClick={begin}>
         {data.revision ? "فتح مراجعة تصحيحية من النسخة الحالية" : "بدء تقييم غير معبأ"}</button>}
     </>}
     {draft && <div data-testid="assessment-v2-draft" className="space-y-3">

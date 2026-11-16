@@ -1,0 +1,195 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts (27 tests | 25 failed) 7152ms
+   × owner, own and all analysts discard while preserving all child history and current actor 216ms
+   × reader, none and unlinked actors cannot use a known current version to gain authority 150ms
+   × foreign, missing and previously discarded records stay unavailable without repeat effects 271ms
+   × completed study and approved clinical results cannot be discarded with a stale draft version 135ms
+   × parent change invalidates the observed draft without overwriting it 127ms
+   × same-value-parent change invalidates the observed draft without overwriting it 146ms
+   × landmark change invalidates the observed draft without overwriting it 133ms
+   × measurement change invalidates the observed draft without overwriting it 157ms
+   × diagnosis change invalidates the observed draft without overwriting it 121ms
+   × child-add change invalidates the observed draft without overwriting it 100ms
+   × child-remove change invalidates the observed draft without overwriting it 128ms
+   × two canonical requests actually waiting on the patient create one discard and audit 233ms
+   × a proven waiting legacy discard and canonical refusal preserve one effect and audit 140ms
+   × inverse study lock refuses without changing the draft 110ms
+   × inverse document lock refuses without changing the draft 121ms
+   × inverse landmarks lock refuses without changing the draft 98ms
+   × inverse measurements lock refuses without changing the draft 96ms
+   × inverse diagnosis lock refuses without changing the draft 129ms
+   × foreign document references fail before accessing or waiting on foreign content 99ms
+   × foreign ortho references fail before accessing or waiting on foreign content 112ms
+   × audit refusal rolls back the status and note with all source history intact 95ms
+   × expire change during the patient wait prevents a stale discard 1778ms
+   × scope change during the patient wait prevents a stale discard 177ms
+   × source change during the patient wait prevents a stale discard 84ms
+   × child change during the patient wait prevents a stale discard 112ms
+ ❯ __tests__/postgres/ceph-canonical-study.test.ts (36 tests | 3 failed) 7209ms
+   × owner reads exact saved clinical values without a replacement engine or image access 132ms
+   × own reads exact saved clinical values without a replacement engine or image access 92ms
+   × all reads exact saved clinical values without a replacement engine or image access 93ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 28 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ceph-canonical-study.test.ts > owner reads exact saved clinical values without a replacement engine or image access
+ FAIL  __tests__/postgres/ceph-canonical-study.test.ts > own reads exact saved clinical values without a replacement engine or image access
+ FAIL  __tests__/postgres/ceph-canonical-study.test.ts > all reads exact saved clinical values without a replacement engine or image access
+AssertionError: expected [ 'analysis', 'diagnosis', …(5) ] to deeply equal [ 'analysis', 'diagnosis', …(4) ]
+
+- Expected
++ Received
+
+  [
+    "analysis",
+    "diagnosis",
++   "discardVersion",
+    "landmarks",
+    "measurements",
+    "measurementsState",
+    "projection",
+  ]
+
+ ❯ __tests__/postgres/ceph-canonical-study.test.ts:41:66
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > owner, own and all analysts discard while preserving all child history and current actor
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:50:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > reader, none and unlinked actors cannot use a known current version to gain authority
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:56:58
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > foreign, missing and previously discarded records stay unavailable without repeat effects
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:64:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > completed study and approved clinical results cannot be discarded with a stale draft version
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:71:53
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > parent change invalidates the observed draft without overwriting it
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > same-value-parent change invalidates the observed draft without overwriting it
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > landmark change invalidates the observed draft without overwriting it
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > measurement change invalidates the observed draft without overwriting it
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > diagnosis change invalidates the observed draft without overwriting it
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > child-add change invalidates the observed draft without overwriting it
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > child-remove change invalidates the observed draft without overwriting it
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:84:53
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > two canonical requests actually waiting on the patient create one discard and audit
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:93:195
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > a proven waiting legacy discard and canonical refusal preserve one effect and audit
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:103:85
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > inverse study lock refuses without changing the draft
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > inverse document lock refuses without changing the draft
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > inverse landmarks lock refuses without changing the draft
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > inverse measurements lock refuses without changing the draft
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > inverse diagnosis lock refuses without changing the draft
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:109:263
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > foreign document references fail before accessing or waiting on foreign content
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > foreign ortho references fail before accessing or waiting on foreign content
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:116:325
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > audit refusal rolls back the status and note with all source history intact
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:128:138
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > expire change during the patient wait prevents a stale discard
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > source change during the patient wait prevents a stale discard
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > child change during the patient wait prevents a stale discard
+error: column "entity_label" does not exist
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ audits __tests__/postgres/ceph-discard-canonical-command.test.ts:38:40
+
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:141:81
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/28]⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > scope change during the patient wait prevents a stale discard
+TypeError: fx.permissions is not a function
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:143:131
+    141|     await gate.query("COMMIT"); await expect(pending).rejects.toThrow(…
+    142|     expect((await status(s)).status).toBe(kind === "source" ? "complet…
+    143|   } finally { await gate.query("ROLLBACK"); gate.release(); await pend…
+       |                                                                                                                                   ^
+    144| });
+    145| it("uses one admitted connection without a legacy initializer or post-…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/28]⎯
+
+
+ Test Files  2 failed | 3 passed (5)
+      Tests  28 failed | 77 passed (105)
+   Start at  08:54:52
+   Duration  31.09s (transform 2.12s, setup 0ms, import 3.69s, tests 26.40s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,44 @@
+RUN  v4.1.12 <checkout>
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/display-public-snapshot.test.ts (1 test | 1 failed) 1330ms
+   × public GET preserves stored announcements and migration state on a canonical clinic 31ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/display-public-snapshot.test.ts > public GET preserves stored announcements and migration state on a canonical clinic
+AssertionError: expected [ { …(3) }, { …(3) } ] to deeply equal [ { …(3) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "key": "display.announcements",
+-     "updated_at": 2026-10-30T18:17:52.960Z,
+-     "value": "SYN public title | SYN public text",
++     "updated_at": 2026-10-30T18:17:52.969Z,
++     "value": "",
++   },
++   {
++     "key": "display.announcements_migrated",
++     "updated_at": 2026-10-30T18:17:52.969Z,
++     "value": "1",
+    },
+  ]
+
+ ❯ __tests__/postgres/display-public-snapshot.test.ts:27:123
+     25|   expect(response.status).toBe(200);
+     26|   expect((await response.json()).announcements).toEqual([{ title: "SYN…
+     27|   expect((await fx.pool.query("SELECT key,value,updated_at FROM settin…
+       |                                                                                                                           ^
+     28|   expect((await fx.pool.query("SELECT count(*)::int AS count FROM disp…
+     29| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  18:17:48
+   Duration  4.86s (transform 2.29s, setup 0ms, import 2.89s, tests 1.33s, environment 0ms)

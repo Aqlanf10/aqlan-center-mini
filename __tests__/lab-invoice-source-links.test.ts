@@ -1,0 +1,24 @@
+import {createHash} from "node:crypto";
+import {describe,expect,it,vi,beforeEach} from "vitest";
+vi.mock("../lib/lab-work-intent-db",()=>({labWorkIntentSupported:vi.fn(async()=>true),assertLabWorkCommandApplied:(result:{outcome:string;code?:string})=>{if(result.outcome!=="applied")throw Error(result.code);}}));
+vi.mock("../lib/debt-installments-db",()=>({DebtRepaymentError:class extends Error{constructor(readonly code:string,message:string){super(message);}}}));
+import {labWorkIntentSupported} from "../lib/lab-work-intent-db";
+import {invoiceLabWorkReceiptInTransaction,aliasCorrectedInvoiceLabWorkInTransaction,linkedLabWorkForInvoiceInTransaction} from "../lib/lab-invoice-source-links";
+import type {DbClient} from "../lib/db";
+const intent="11111111-1111-4111-8111-111111111111",member="22222222-2222-4222-8222-222222222222";
+const source={invoice_item_id:10,plan_item_id:30,intent_id:intent,member_id:member,patient_id:91};
+const args={patientId:91,invoiceId:5,actorUserId:17,requestKey:"synthetic-invoice-key",requestHash:"invoice-catalogue-intent-v1:synthetic"};
+function client(results:unknown[][]){const query=vi.fn(async()=>({rows:results.shift()??[],rowCount:1}));return {query} as unknown as DbClient;}
+beforeEach(()=>vi.mocked(labWorkIntentSupported).mockResolvedValue(true));
+describe("exact invoice lab aliases and command receipts",()=>{
+ it("does not query undeployed proposal tables",async()=>{vi.mocked(labWorkIntentSupported).mockResolvedValue(false);const db=client([]);expect(await invoiceLabWorkReceiptInTransaction(db,args)).toBeUndefined();expect((await linkedLabWorkForInvoiceInTransaction(db,args)).sources).toEqual([]);expect(db.query).not.toHaveBeenCalled();});
+ it("keeps legacy absent command receipt absent",async()=>{expect(await invoiceLabWorkReceiptInTransaction(client([[]]),args)).toBeUndefined();});
+ it("replays original revision, proving exact invoice/member aliases",async()=>{const labWork=[{intentId:intent,orderId:8,revision:1,memberIds:[member]}];const db=client([[{patient_id:91,source_kind:"invoice",source_id:5,request_hash:createHash("sha256").update(args.requestHash).digest("hex"),result:{labWork}}],[{member_id:member}]]);expect(await invoiceLabWorkReceiptInTransaction(db,args)).toEqual(labWork);expect(vi.mocked(db.query).mock.calls[1][0]).toContain("ii.invoice_id=$1");});
+ it("refuses receipt hash drift before alias access",async()=>{const db=client([[{patient_id:91,source_kind:"invoice",source_id:5,request_hash:"changed",result:{labWork:[]}}]]);await expect(invoiceLabWorkReceiptInTransaction(db,args)).rejects.toThrow();expect(db.query).toHaveBeenCalledTimes(1);});
+ it("refuses incomplete receipt alias proof",async()=>{const db=client([[{patient_id:91,source_kind:"invoice",source_id:5,request_hash:createHash("sha256").update(args.requestHash).digest("hex"),result:{labWork:[{intentId:intent,orderId:8,revision:1,memberIds:[member]}]}}],[]]);await expect(invoiceLabWorkReceiptInTransaction(db,args)).rejects.toThrow();});
+ it("retains lifetime linked work, including cancelled or retired history",async()=>{const db=client([[source]]);expect((await linkedLabWorkForInvoiceInTransaction(db,args)).invoiceItemIds).toEqual([10]);const sql=String(vi.mocked(db.query).mock.calls[0][0]);expect(sql).not.toContain("retired_revision IS NULL");expect(sql).not.toContain("status");});
+ it("adds only proven financial replacement alias, never order or monetary write",async()=>{const db=client([[source],[],[],[{valid:true}],[],[]]);await aliasCorrectedInvoiceLabWorkInTransaction(db,{patientId:91,originalInvoiceId:5,correctedInvoiceId:6,actorUserId:17,itemPairs:[{originalItemId:10,correctedItemId:11}]});const sql=vi.mocked(db.query).mock.calls.map(call=>String(call[0]));expect(sql.filter(s=>s.startsWith("INSERT"))).toHaveLength(1);expect(sql.at(-1)).toContain("INSERT INTO lab_prescription_source_memberships");expect(sql.join(" ")).not.toContain("INSERT INTO lab_orders");});
+ it("refuses removal of linked source rather than guessing replacement",async()=>{await expect(aliasCorrectedInvoiceLabWorkInTransaction(client([[source],[],[]]),{patientId:91,originalInvoiceId:5,correctedInvoiceId:6,actorUserId:17,itemPairs:[]})).rejects.toThrow();});
+ it("refuses changed clinical tuple even with exact item pair",async()=>{await expect(aliasCorrectedInvoiceLabWorkInTransaction(client([[source],[],[],[{valid:false}]]),{patientId:91,originalInvoiceId:5,correctedInvoiceId:6,actorUserId:17,itemPairs:[{originalItemId:10,correctedItemId:11}]})).rejects.toThrow();});
+ it.each(["rejected","unknown"])("never acknowledges %s outcome even with labWork array",async(outcome)=>{const db=client([[{patient_id:91,source_kind:"invoice",source_id:5,request_hash:createHash("sha256").update(args.requestHash).digest("hex"),result:{outcome,code:"cancelled_intent",labWork:[]}}]]);await expect(invoiceLabWorkReceiptInTransaction(db,args)).rejects.toThrow();expect(db.query).toHaveBeenCalledTimes(1);});
+});

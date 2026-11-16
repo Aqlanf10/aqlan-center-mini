@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+
+ Test Files  3 passed (3)
+      Tests  58 passed (58)
+   Start at  12:07:32
+   Duration  9.00s (transform 1.59s, setup 0ms, import 4.08s, tests 4.37s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

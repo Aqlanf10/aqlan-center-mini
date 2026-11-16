@@ -1,0 +1,11 @@
+
+ RUN  v4.1.12 <checkout>
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  3 passed (3)
+      Tests  21 passed (21)
+   Start at  15:37:17
+   Duration  31.53s (transform 239ms, setup 0ms, import 771ms, tests 26.57s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

@@ -1,0 +1,29 @@
+
+ RUN  v4.1.12 /tmp/aqlan-work-intake-20261030
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/receipt-provenance-performance.test.ts (1 test | 1 skipped) 166ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/receipt-provenance-performance.test.ts [ __tests__/postgres/receipt-provenance-performance.test.ts ]
+AssertionError: expected '2a508954ec1267340d5a7f27b76c172b15c0a…' to be '4dd0c716013b25df510d36570e27181e4d680…' // Object.is equality
+
+Expected: "4dd0c716013b25df510d36570e27181e4d680a9dd4daa7da2d68809367db187b"
+Received: "2a508954ec1267340d5a7f27b76c172b15c0a328314b943f935f45d869c0a2ee"
+
+ ❯ __tests__/postgres/receipt-provenance-performance.test.ts:89:98
+     87| beforeAll(async () => {
+     88|   // Source fingerprints bind evidence to the immutable accepted produ…
+     89|   for (const [path, digest] of Object.entries(SOURCE_HASHES)) expect(s…
+       |                                                                                                  ^
+     90|   await dropPublicSchema(process.env.DATABASE_URL!);
+     91|   await ensureSchema();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  9 passed | 1 skipped (10)
+   Start at  00:41:33
+   Duration  19.43s (transform 7.16s, setup 0ms, import 9.81s, tests 7.16s, environment 0ms)

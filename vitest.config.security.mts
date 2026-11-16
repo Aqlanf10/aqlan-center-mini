@@ -14,18 +14,21 @@ import { fileURLToPath } from "node:url";
  */
 export default defineConfig({
   resolve: {
-    alias: {
-      "@": fileURLToPath(new URL(".", import.meta.url)),
-    },
+    alias: [
+      { find: "@", replacement: fileURLToPath(new URL(".", import.meta.url)) },
+      // Vitest executes trusted server modules outside Next's compiler. Match
+      // only the boundary marker; production imports/poisoning are unchanged.
+      { find: /^server-only$/, replacement: fileURLToPath(new URL("./node_modules/next/dist/compiled/server-only/empty.js", import.meta.url)) },
+    ],
   },
   test: {
     // الخادم يبدأ مرة واحدة لكل الجولة (لا لكل ملف) — التوكنات تبقى صالحة
     // بين الملفات، وإيقافه/إسقاط القاعدة في التفكيك العالمي.
     globalSetup: ["__tests__/security-http/_global-setup.ts"],
     include: process.env.INVENTORY_SCHEMA_TEST === "1"
-      ? ["__tests__/security-http/inventory-procurement-http-ui.test.ts"]
+      ? ["__tests__/security-http/inventory-procurement-http-ui.test.ts", "__tests__/security-http/inventory-supplier-operational-http-ui.test.ts", "__tests__/security-http/inventory-reference-closed-http-ui.test.ts"]
       : ["__tests__/security-http/**/*.test.ts"],
-    exclude: process.env.INVENTORY_SCHEMA_TEST === "1" ? [] : ["__tests__/security-http/inventory-procurement-http-ui.test.ts"],
+    exclude: process.env.INVENTORY_SCHEMA_TEST === "1" ? [] : ["__tests__/security-http/inventory-procurement-http-ui.test.ts", "__tests__/security-http/inventory-supplier-operational-http-ui.test.ts", "__tests__/security-http/inventory-reference-closed-http-ui.test.ts"],
     pool: "forks",
     fileParallelism: false,
     maxConcurrency: 1,

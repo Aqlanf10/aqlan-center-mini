@@ -16,6 +16,8 @@ import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
+import { canonicalLabRoute } from "@/lib/canonical-lab-http";
+import { commandCanonicalLabPricingCreate, readCanonicalLabPricing } from "@/lib/canonical-lab-pricing";
 export const dynamic = "force-dynamic";
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -24,6 +26,9 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  /* M2 slice 70b (owner decision): cost prices only with finance.cost-prices.view. */
+  const canonical = await canonicalLabRoute(null, handle => readCanonicalLabPricing(handle, new URL(request.url).searchParams), "تعذّر تحميل جدول تسعير خدمات المختبرات.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
 
@@ -53,6 +58,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const canonical = await canonicalLabRoute(request, (handle, body) => commandCanonicalLabPricingCreate(handle, body), "تعذّر حفظ قاعدة التسعير للمختبر.", 201);
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

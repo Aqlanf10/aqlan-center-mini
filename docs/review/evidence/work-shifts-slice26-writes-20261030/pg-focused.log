@@ -1,0 +1,47 @@
+
+ RUN  v4.1.12 <worktree>
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+(node:6569) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — إعادة إنتاج عيوب تدقيق الجاهزية > AUDIT-P13-1: التحويل لا يُرحَّل «عجز جرد» حين يطابق المعدودُ النقدَ الفعلي 1910ms
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — إعادة إنتاج عيوب تدقيق الجاهزية > AUDIT-P13-2: جردٌ ناقص (عجز ١٠٬٠٠٠) لا يُقفَل بلا سبب 2542ms
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — الإقفال الأعمى والمتوقَّع المحفوظ > CASE 1: المتوقَّع = افتتاحي + نقد − مردود نقدي − صرف؛ التحويل خارجه؛ والجرد المطابق يُقفَل بلا سبب 1906ms
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — الإقفال الأعمى والمتوقَّع المحفوظ > CASE 2: العجز يُرفض بلا سبب ويُعاد مقداره، ثم يُقفَل بسببه ويُحفظ 1442ms
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — الإقفال الأعمى والمتوقَّع المحفوظ > CASE 3: الوردية المقفلة لا تُعدَّل — حتى من psql 1306ms
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — الإقفال الأعمى والمتوقَّع المحفوظ > CASE 4: القيد البنيوي — فرقٌ غير صفري بلا سبب مرفوض من القاعدة نفسها 1145ms
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — الإقفال الأعمى والمتوقَّع المحفوظ > CASE 5: وردية أُقفلت قبل 0014 (بلا متوقَّع محفوظ) — يُحسب بالقاعدة نفسها ويوسَم «محسوب» 3292ms
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — الإقفال الأعمى والمتوقَّع المحفوظ > CASE 6: سند صرف أثناء إقفالٍ جارٍ ينتظره ثم يُرفض — لا يدخل ورديةً أُقفل جردها 1919ms
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — الإقفال الأعمى والمتوقَّع المحفوظ > CASE 7: قيد التحويل في حساب البنك لا الصندوق 1615ms
+ ✓ __tests__/postgres/shift-close.test.ts > P1-3 — الإقفال الأعمى والمتوقَّع المحفوظ > CASE 8: مسارا المخطط — التكرار لا يغيّر شيئًا 1117ms
+SYNTHETIC_RECEIPT_QUERY_PLAN_V1 {"kind":"begin","bytes":107700,"sha256":"af03f3298bc2f0e2428fc82f1bb19c8358ef00a223612951c0c3031980639c78","chunks":36}
+ ✓ __tests__/postgres/receipt-provenance-performance.test.ts > actual receipt provenance SELECT plans at bounded scale > measures exact 5000, neutral 5001 overflow, and 1000 IDs across 1000 patients without writes 8032ms
+SYNTHETIC_RECEIPT_QUERY_PLAN_V1 {"kind":"end","sha256":"af03f3298bc2f0e2428fc82f1bb19c8358ef00a223612951c0c3031980639c78","chunks":36}
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > uses the exact grant, never the role label; captures the actor and three currencies atomically 382ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > serializes double open and double close: one effect and one audit, other attempt conflicts 324ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > preserves the drawer equation, excludes transfers, and never changes money rows while closing 483ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > rolls the whole shift.open effect back when its audit fails 69ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > rolls the whole shift.close effect back when its audit fails 183ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > waits for an actual in-flight payment writer and computes the drawer from its committed cash 443ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > denies expiry after a real shift-row lock wait before computing or writing the close 1872ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > denies expiry after the no-row lifecycle lock wait before opening a shift 1829ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > re-proves authority after waiting for an earlier revocation and refuses stale or now-ungranted sessions 61ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > rejects invalid monetary input without any shift or audit effect 22ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > keeps the snapshot control guard and reads identical provenance with SELECTs only 156ms
+ ✓ __tests__/postgres/shifts-canonical.test.ts > canonical shift commands > a real audit-query failure aborts the owned snapshot and never publishes a partial success 227ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > preserves correction lineage and the caller's read-only snapshot after extraction 124ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > recovers a real PostgreSQL audit-query error without aborting the caller's snapshot 31ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > separates immutable face values from derived provenance while exposing the stored reversal link 34ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > voids have no invented replacement and retain their exact audit-linked reversal 16ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > does not call an earlier ordinary partial refund a correction reversal 36ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > keeps incoming and outgoing lineage when a replacement is itself corrected 40ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > does not infer correction from same-looking notes or a full ordinary refund 20ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > rejects a cross-patient replacement claimed by malformed audit data 34ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > treats two correction audit candidates as ambiguous, preserving structural reversal 33ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > does not manufacture an ordinary receipt when the requested row is missing 11ms
+ ✓ __tests__/postgres/receipt-provenance.test.ts > receipt provenance is an append-only read projection > fails closed when request or patient-context bounds would hide relevant history 473ms
+
+ Test Files  4 passed (4)
+      Tests  34 passed (34)
+   Start at  02:24:30
+   Duration  49.96s (transform 4.39s, setup 0ms, import 6.63s, tests 41.61s, environment 0ms)

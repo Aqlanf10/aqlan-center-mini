@@ -1,0 +1,13 @@
+--- unpublished-draft/lib/canonical-next-session.ts
++++ final/lib/canonical-next-session.ts
+@@ -69,7 +69,9 @@
+             }
+             // Match the central patient predicate, with a positive witness held to
+             // commit. NOWAIT refuses clinical lock inversions without leaking SQL.
+-            const found = await client.query("SELECT id FROM patients WHERE id=$1 FOR SHARE NOWAIT", [target]);
++            // The resolver may fill an empty phone. Take its write lock now;
++            // two far-apart day windows must not upgrade SHARE locks together.
++            const found = await client.query("SELECT id FROM patients WHERE id=$1 FOR UPDATE NOWAIT", [target]);
+             if (!found.rows.length || (scope.kind === "own" && !await doctorOwnsPatient(scope.clinicianPartyId, target, client, "nowait"))) throw missing();
+           });
+           if (patientId === null) throw missing();

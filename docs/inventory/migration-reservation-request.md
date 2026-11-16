@@ -1,5 +1,13 @@
 # Coordinated schema reservation request
 
+**Historical request below (2026-10-16).** The active 2026-10-27 inventory
+continuation adds supplier finance, durable command transport and an identity
+proposal. Use [the current exact manifest](proposals/migration-manifest-20261027.json)
+for names and dependencies, and [the operational completion plan](OPERATIONAL-COMPLETION-20261026.md)
+for activation holds. Nothing here assigns a migration number. The later work
+includes narrow authenticated-session and managed-restore hooks; statements
+below about untouched shared files describe the historical checkpoint only.
+
 No migration number has been selected or registered. Root controls serial integration after invoice, HR and Ortho/Ceph acceptance. These SQL modules are proposals explicitly applied in synthetic PostgreSQL fixtures only. Runtime is disabled by default through the server-only rollout gate. Authentication precedes that gate; admitted authenticated requests receive `inventory_integration_disabled`. Explicit test enablement still fails with `schema_not_ready` when proposal tables are absent. The environment key is not authorization for live activation; Production remains closed and no settings are changed.
 
 Verified against `origin/main` (`6090722977a37981ddf56585c180f782b5a5249b`) on 2026-10-16:

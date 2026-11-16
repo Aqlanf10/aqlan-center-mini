@@ -1,0 +1,53 @@
+{
+  "testedRevision": "f3ce7bbb7b22ea0a4800154b6a1d7dbe037bf2a0",
+  "productRevision": "2b4e5f4bad08297212870c7c318380377567e73e",
+  "buildId": "DyLznC2ConMfswaBdRqwY",
+  "results": {
+    "unit": {
+      "passed": 14396,
+      "files": 853
+    },
+    "postgres": {
+      "passed": 5112,
+      "files": 396
+    },
+    "httpBrowser": {
+      "passed": 74,
+      "files": 6
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 345
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "runtimeProvenance": "passed; map-supported absence only",
+    "preflight": "71 immutable migration assets",
+    "environment": "passed",
+    "moneyGuard": "passed",
+    "rawBodyGuard": "passed; 265 API routes, zero exceptions",
+    "exactHeadCI": "not published at this checkpoint",
+    "independentReview": "pending",
+    "actualDocker": "blocked: prior Alpine destination refusal"
+  },
+  "artifacts": {
+    "batch43-45-body.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "batch43-45-braces-runtime.log": "1ef1e861cfa26ca0022a1e9f1362567d66eba4969d8bc8d243b5ea2eab6b9a7e",
+    "batch43-45-build-final.log": "7c3de60fcd7d5c116c7d99bd6a3f63ffba82d6058942d8c4805a7fccf1cee286",
+    "batch43-45-environment.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "batch43-45-http-final.log": "7a8dde3325cf5fa629a34b9db5fb29af01161f2ad4905a340e5472fd1c80bc37",
+    "batch43-45-inventory-guards.log": "f8bc49b1ddc6d1c4258eefb93d94ca593b6ed562dec0af413cfbd70a8b74ead7",
+    "batch43-45-inventory-regenerated.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "batch43-45-lint-final.log": "e1a0d597ad0ae88ec64808de7d4fd59d090df5fb1c70baaeecdc10ee7c60d89a",
+    "batch43-45-lint-runtime.log": "8df72c6d51dfc463f99e25d253880616e3957618aaf0f950f60f3cc2cce73f9e",
+    "batch43-45-money.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "batch43-45-pg-full.log": "c580d5ec6552250b53c8939c9d1b35d17125ad5039c6297e573c876af0301e43",
+    "batch43-45-preflight.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "batch43-45-types-final.log": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+    "batch43-45-unit-clean.log": "065709fba935108b0cf60b4a694f29a1278511f6fabcafc8736d486727d84fa0",
+    "batch43-45-unit-final.log": "857386f8443b9ab1606ea0ebbcde160033c095d18d0275be2fc6b5b86954f425",
+    "inventory-correction.json": "d000b31025a0645c71b268f91fd682d5daabdb97df70ddbe59c96f56c19621d1",
+    "lint-tooling-runtime-proof.json": "fc06c7dc8e495ce08fd146bd8d4c0ae758b7bde0cd6f43f0dd93c8c100002283",
+    "runtime-proof.json": "eb06ab6fc052871c9c18a88aaaa0d50175b82dffdf56bddbfc7e6e30ff7824a9"
+  }
+}

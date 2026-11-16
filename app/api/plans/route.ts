@@ -9,6 +9,10 @@ import { requireSession } from "@/lib/session";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { canViewPatientMoney } from "@/lib/patient-access";
 import { withoutPlanPayments } from "@/lib/plan-payment-projection";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalPlanList } from "@/lib/canonical-plan-list";
+import { CanonicalPlanRefusal, commandCanonicalPlanCreateEntry } from "@/lib/canonical-plan-writes";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +20,13 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  // M2 slice 94a (G4-1, G4-6, G4-8): read:plans.list, groups by grant inside the patient scope.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalPlanList(selected.handle, new URL(request.url).searchParams.get("patientId")), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل الخطط."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
@@ -82,6 +93,23 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // M2 slice 94b (G4-8): the creation entry by clinical.plans.edit inside the patient scope; the
+  // same refusal as legacy after admission (new treatment starts from the invoice or agreement).
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let canonicalBody: unknown;
+    try { canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    const canonicalPatientId = Number(((canonicalBody ?? {}) as Record<string, unknown>).patientId);
+    if (!Number.isInteger(canonicalPatientId) || canonicalPatientId <= 0) return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400, headers: NO_STORE });
+    try { return await commandCanonicalPlanCreateEntry(selected.handle, canonicalPatientId); }
+    catch (error) {
+      if (error instanceof CanonicalPlanRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تنفيذ الإجراء.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
 

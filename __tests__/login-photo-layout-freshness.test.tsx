@@ -2,7 +2,9 @@ import { Children, isValidElement, type ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { SETTING_DEFAULTS } from "../lib/settings";
 import { SettingsProvider } from "../components/SettingsProvider";
-const h = vi.hoisted(() => ({ cached: "false", stored: "true", fail: false, reads: vi.fn() }));
+const h = vi.hoisted(() => ({ cached: "false", stored: "true", fail: false, publicDisplay: false, reads: vi.fn() }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers(h.publicDisplay ? { "x-aqlan-public-display": "1" } : {}) }));
+vi.mock("../lib/staff-session-admission", () => ({ selectRequestStaffEnvelope: async () => ({ kind: "none" }), admitCanonicalStaffSession: vi.fn() }));
 vi.mock("next/font/local", () => ({ default: () => ({ variable: "test-font" }) }));
 vi.mock("../lib/session", () => ({ requireSession: vi.fn(async () => null) }));
 vi.mock("../lib/db", () => ({
@@ -15,7 +17,7 @@ vi.mock("../lib/db", () => ({
 }));
 vi.mock("../components/AppShell", () => ({ AppShell: () => null }));
 const { default: RootLayout } = await import("../app/layout");
-async function visibility() {
+async function projection() {
   const layout = await RootLayout({ children: "public login" });
   let value: Record<string, string> | undefined;
   function visit(node: ReactNode) {
@@ -25,9 +27,10 @@ async function visibility() {
       visit(child.props.children);
     });
   }
-  visit(layout); return value?.["clinic.login_photo_visible"];
+  visit(layout); return value;
 }
-beforeEach(() => { h.cached = "false"; h.stored = "true"; h.fail = false; h.reads.mockClear(); });
+async function visibility() { return (await projection())?.["clinic.login_photo_visible"]; }
+beforeEach(() => { h.publicDisplay = false; h.cached = "false"; h.stored = "true"; h.fail = false; h.reads.mockClear(); });
 it("reflects newly published photo on navigation despite a warm hidden settings cache", async () => {
   expect(await visibility()).toBe("true"); expect(h.reads).toHaveBeenCalledOnce();
 });
@@ -36,4 +39,10 @@ it("reflects hiding despite a warm visible settings cache", async () => {
 });
 it("fails closed instead of serving a stale visible flag when the fresh read fails", async () => {
   h.cached = "true"; h.fail = true; expect(await visibility()).toBe("false");
+});
+
+it("keeps the public display allowlist separate from the richer login settings and fresh photo read", async () => {
+  h.publicDisplay = true;
+  expect(await projection()).toEqual({ "clinic.name": SETTING_DEFAULTS["clinic.name"] });
+  expect(h.reads).not.toHaveBeenCalled();
 });

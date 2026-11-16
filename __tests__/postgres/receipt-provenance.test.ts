@@ -10,7 +10,7 @@ stubPostgresEnv();
 
 const { ensureSchema, getPool, resetPoolForTesting, openShift, recordPayment, correctPayment, getPayment } =
   await import("../../lib/db");
-const { readReceiptProvenance, RECEIPT_PROVENANCE_REQUEST_LIMIT, RECEIPT_PROVENANCE_CONTEXT_LIMIT } =
+const { readReceiptProvenance, readReceiptProvenanceWith, RECEIPT_PROVENANCE_REQUEST_LIMIT, RECEIPT_PROVENANCE_CONTEXT_LIMIT } =
   await import("../../lib/receipt-provenance-db");
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -70,6 +70,63 @@ beforeAll(async () => {
 afterAll(async () => { await resetPoolForTesting(); });
 
 describe("receipt provenance is an append-only read projection", () => {
+  it("preserves correction lineage and the caller's read-only snapshot after extraction", async () => {
+    const original = await pay(await patient(), 9_000);
+    const first = await correct(original.id, 6_000);
+    const second = await correct(first.replacement!.id, 3_000);
+    const ids = [original.id, first.reversal!.id, first.replacement!.id, second.reversal!.id, second.replacement!.id];
+    const expected = await readUnchanged(ids), before = await snapshot();
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      const state = () => client.query(`SELECT pg_backend_pid() AS pid, pg_current_snapshot()::text AS snapshot,
+        current_setting('transaction_isolation') AS isolation, current_setting('transaction_read_only') AS read_only`);
+      const initial = (await state()).rows;
+      expect(initial[0]).toMatchObject({ isolation: "repeatable read", read_only: "on" });
+      expect(await readReceiptProvenanceWith(client, ids)).toEqual(expected);
+      expect(await readReceiptProvenanceWith(client, [first.replacement!.id])).toEqual({
+        [first.replacement!.id]: expected[first.replacement!.id],
+      });
+      expect((await state()).rows).toEqual(initial);
+      await client.query("COMMIT");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("recovers a real PostgreSQL audit-query error without aborting the caller's snapshot", async () => {
+    const original = await pay(await patient(), 4_000), corrected = await correct(original.id, 2_000);
+    const ids = [original.id, corrected.reversal!.id, corrected.replacement!.id];
+    const expected = await readUnchanged(ids), before = await snapshot();
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      const initial = await client.query("SELECT pg_current_snapshot()::text AS snapshot");
+      let auditFaults = 0;
+      const runner = { query: ((sql: string, values?: unknown[]) => {
+        if (sql.includes("FROM audit_log")) {
+          auditFaults++;
+          return client.query("SELECT 1 / 0");
+        }
+        return client.query(sql, values);
+      }) as typeof client.query };
+      const degraded = await readReceiptProvenanceWith(runner, ids);
+      expect(auditFaults).toBe(1);
+      expect(degraded[original.id]).toMatchObject({ reversal: { state: "full", reversedMinor: 4_000 },
+        correction: null, correctionUnverified: true });
+      expect(degraded[corrected.replacement!.id].replacementOf).toBeNull();
+      expect((await client.query("SELECT pg_current_snapshot()::text AS snapshot")).rows).toEqual(initial.rows);
+      expect(await readReceiptProvenanceWith(client, ids)).toEqual(expected);
+      await client.query("COMMIT");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    expect(await snapshot()).toEqual(before);
+  });
+
   it("separates immutable face values from derived provenance while exposing the stored reversal link", async () => {
     const original = await pay(await patient(), 50_000);
     const corrected = await correct(original.id, 5_000);

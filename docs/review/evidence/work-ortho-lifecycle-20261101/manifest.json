@@ -1,0 +1,92 @@
+{
+  "format": "work-ortho-lifecycle-v1",
+  "baseRevision": "16999f9c093ba4194503e3e32d7c966881c647b2",
+  "buildId": "bJRCBERMr-U7F-doqtn6s",
+  "scope": "partial PATCH native phase/retainer/closure; financial planId held, route remains existing",
+  "acceptance": {
+    "unitGuards": {
+      "passed": 31,
+      "files": 3
+    },
+    "PGFirst": {
+      "passed": 61,
+      "failed": 3,
+      "files": 3
+    },
+    "PGCorrected": {
+      "passed": 64,
+      "files": 3
+    },
+    "PGAddedWitness": {
+      "passed": 18,
+      "files": 1
+    },
+    "PGDistinctTotal": 65,
+    "HTTPBrowser": {
+      "passed": 32,
+      "files": 3,
+      "runs": [
+        {
+          "passed": 23,
+          "files": 2
+        },
+        {
+          "passed": 9,
+          "files": 1
+        }
+      ]
+    },
+    "typeBuildLintBodyEnvironmentMoneyPreflight": "passed",
+    "lintWarnings": 345,
+    "sourcePreservation": 12,
+    "fullUnitPG": "pending combined head",
+    "runtimeProvenance": "pending combined head",
+    "exactHeadCI": "unpublished",
+    "independentReview": "pending",
+    "dateDisplayFollowup": "Other canonical UTC date labels still require causal correction; coverage correction0937 separate, not yet integrated",
+    "Docker": "previous enforced Alpine destination denial; no bypass"
+  },
+  "sourceSha256": {
+    "__tests__/canonical-ortho-lifecycle-command.test.ts": "81bf4b2e65999eea7716814140f29b259b6e3b916931780c2abdded87ba50f3a",
+    "__tests__/postgres/ortho-canonical-detail.test.ts": "036d4c3e72f419d03455954a794edee2c0bafa3d3d85ba010c22820b65ecf44b",
+    "__tests__/postgres/ortho-lifecycle-canonical-command.test.ts": "89ba10d476ccea58a6bb28661c84a2b81e958755b48375ce77385c679be39ac3",
+    "__tests__/security-http/canonical-ortho-detail-journey.test.ts": "50af5b01b1b3d1474c580d75321d7b4f2732cee7093a906a5ff3d096365db6fc",
+    "__tests__/security-http/canonical-ortho-lifecycle-journey.test.ts": "3ed2b46536fa328019a9d85aa2b47fcee48d720a2dc9b88b1bdc31e9d300448f",
+    "app/api/ortho/[id]/route.ts": "be004197d21d8be547fc40ceacb858277996aa3658b5686f8c04e907d90a7e92",
+    "components/patient/CanonicalOrthoCases.tsx": "4f3d59a5e12e98d478024ae74af0dfdb8ba27a262b23dacade38c3dea9d4b8e7",
+    "components/patient/CanonicalOrthoDetail.tsx": "e2456e211c50d1c6b04e47681d46618ae91df23f97b5cc3ba75fa45fdef0ca92",
+    "components/patient/CanonicalOrthoLifecycleEditor.tsx": "021c4a747227f2ee012a8b5ef8845a76ef3e3e0e864ba44e9b474223b43ad0ae",
+    "components/patient/CanonicalPatientProfile.tsx": "4dbf613925d355f567a43a6aa0561a93b379543b20c0a3e2aa2c5f865f59c67b",
+    "docs/review/work-ortho-lifecycle-slice55-20261101.md": "efcbbd2ac1b9511176927277f3352ec4016139d8a4dc1b4dd6db9870d00fc895",
+    "docs/security/staff-cutover/HANDOFF.md": "4e697a215f18f3ae5380a4703c1262490283fdfd19983dfc67e28f520f070849",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "1fa941ab761a3bfb4ba533a5e1fe746b1191c8502112caed4b6f0e0b58cf4903",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "0ece475d45852ab375974c559701a9e3ff9a2a3ce526b4b0bec5e782fd32cc06",
+    "docs/security/staff-cutover/inventory.json": "25456780cab7f4240e3c995598adaf5c0c5e959df7518397c0c48d98ce38d0fa",
+    "lib/audit.ts": "2ef8b7648e01ac43291e026f6d82ae28331efc3077fe054a1d32d0b9045c53bd",
+    "lib/canonical-ortho-lifecycle-command.ts": "5655bd82d71fe4195ef00785ee2120882364a18a018d393c028ae7948836a847",
+    "lib/canonical-ortho-lifecycle-version.ts": "de14c4e614ef2e3bcf7d57d21578a1b6d0564bb339721be909f09b3423461201",
+    "lib/canonical-ortho-reads.ts": "6f1410fd89c479082e543f4704380f456a10253d85ccad1a26f10085964f585f",
+    "lib/db.ts": "ab267b1c2e9d92c841265f7048e7a4f25052bd664b6033eea6202a90ccef3b8b",
+    "lib/ortho.ts": "0422435f418bd47304270d3501201ded0de165f176138dd7b1da5917da720bdc"
+  },
+  "artifacts": {
+    "ortho-lifecycle-390.png": "94164961d343268d7f7d6d30e509603eb807b81648256e7259a5d6540a5f8ae0",
+    "slice55-body-final.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice55-build-first.log": "10d148ed38eca3083da5b2a83eda869d28c9764eb242b149dd21678224c38e85",
+    "slice55-build-local-deps.log": "84d81a9f6a177b34964aaf2543cdb584925092095017f7a4c453ce95bc728d33",
+    "slice55-design.md": "44aa106d23f422e8752377eb1afb4fee344e2653ea39dd4bce12538d8ac08f7e",
+    "slice55-environment-final.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice55-http-cases.log": "1eb878c1d7818993207ac50752a56a64d901f9f187f698d3d1aaa8c46332e068",
+    "slice55-http-first.log": "7574e24f623ad606d3e46a56683955e0c99e2c9ed7525c6f2a731846c93445b5",
+    "slice55-lint-final.log": "d579808f166dea4ce3fb5f0a648abdb7049aae55fc2a10c87094a9438bc635bf",
+    "slice55-money-final.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice55-pg-assignee-closure.log": "4502ee72fa8c0174c01d58086e7f4865a9cb8cbb8be1e562860a9ff10facd3af",
+    "slice55-pg-first.log": "a4162cb605230e26ed17152198ac077352b1e7576e8b82c8fe9b142ea0509eb3",
+    "slice55-pg-second.log": "d2e103843d43a803bdb75e5dd5eca06d110901fb9ed2af36c3df91cf5e7677fd",
+    "slice55-preflight-final.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "slice55-source-proof.json": "0979bd2b076a89a8298d542ca8fee1ff26842d8369cfb4bf382d416b8d91e549",
+    "slice55-tsc-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice55-unit-guards.log": "4a05fcbbf283c071dea1c55fd8c213dfc149c395eb67cbf3edeec0112257d258"
+  },
+  "sourceRevision": "8ffbc6644c5259369cc2a59323399b4d039303c7"
+}

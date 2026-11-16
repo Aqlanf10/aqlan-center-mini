@@ -13,7 +13,7 @@ import {
   labDispatchShadeLines,
   formatLabPrescriptionText,
 } from "@/lib/lab";
-import { LabDentalChart } from "./LabDentalChart";
+import { LabDispatchDentalChart } from "./LabDentalChart";
 import { toUniversal } from "@/lib/dental";
 import { useSetting } from "./SettingsProvider";
 import { ReportPrintIdentity } from "./ReportPrintHeader";
@@ -316,15 +316,7 @@ export function LabPrescriptionModal({
               )}
             </div>
 
-            {order.toothNumbers && order.teeth.every((tooth) => tooth.role) ? (
-              <div className={paperSize === "a5" ? "scale-[0.88] origin-top -mb-2" : ""}>
-                <LabDentalChart value={order.toothNumbers} readOnly={true} showSummary={false} />
-              </div>
-            ) : (
-              <p className="rounded-xl border border-dashed border-slate-200 p-3 text-center text-xs text-slate-400">
-                المخطط يحتاج أرقام أسنان وأدوارًا محددة؛ راجع البيانات أدناه قبل التنفيذ.
-              </p>
-            )}
+            <LabDispatchDentalChart teeth={order.teeth} />
 
             {/* Tooth Roles Breakdown Badges */}
             {selectedTeethCodes.length > 0 && (

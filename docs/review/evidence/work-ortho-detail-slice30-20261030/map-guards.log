@@ -1,0 +1,91 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs (6 tests | 2 failed) 3978ms
+   × checked-in exhaustive source inventory has no drift or API export mismatch 286ms
+   × CLI drift success and explicit NOT_READY failure are intentional, not exceptions 3662ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > checked-in exhaustive source inventory has no drift or API export mismatch
+AssertionError: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    baseCommit: '74b82cea27d407626fb3c5e691bf68e6defb4598',
+    canonicalDirectReferences: [],
+    formatVersion: 2,
+    layouts: [
+...
+    scope: 'All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.',
++   sourceDigest: 'e5105ab4d079e67a45877d74b4f2626c9cfea38eb2b535a4055ca4de12d88d1e',
+-   sourceDigest: '5bab4b28cdb1200dccc436cb6485f0bd699e65edfac584de8dbb5bd5d0d69e7a',
+    sourceEntries: [
+      'app/account/page.tsx',
+      'app/api/accounting/route.ts',
+      'app/api/ai/chat/route.ts',
+      'app/api/ai/confirmation/route.ts',
+
+
+- Expected
++ Received
+
+@@ -15845,11 +15845,11 @@
+      "appointments.schedule.manage",
+      "finance.shifts.view",
+      "finance.shifts.operate",
+    ],
+    "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
+-   "sourceDigest": "5bab4b28cdb1200dccc436cb6485f0bd699e65edfac584de8dbb5bd5d0d69e7a",
++   "sourceDigest": "e5105ab4d079e67a45877d74b4f2626c9cfea38eb2b535a4055ca4de12d88d1e",
+    "sourceEntries": [
+      "app/account/page.tsx",
+      "app/api/accounting/route.ts",
+      "app/api/ai/chat/route.ts",
+      "app/api/ai/confirmation/route.ts",
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:7:9
+      5| const report=buildInventory();
+      6| test('checked-in exhaustive source inventory has no drift or API expor…
+      7|  assert.deepEqual(report,JSON.parse(readFileSync(new URL('../../docs/s…
+       |         ^
+      8|  assert.deepEqual(report.matrixExportMismatches,[]);
+      9|  assert.equal(new Set(report.routes.map(r=>`${r.method} ${r.route}`)).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > CLI drift success and explicit NOT_READY failure are intentional, not exceptions
+AssertionError: Inventory drift: regenerate and review with --write.
+
+
+1 !== 0
+
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:87:10
+     85|  for(const [args,status] of [[[],0],[['--require-ready'],1]]) {
+     86|   const result=spawnSync(process.execPath,[fileURLToPath(script),...ar…
+     87|   assert.equal(result.status,status,result.stderr);
+       |          ^
+     88|   assert.equal(result.stderr,'');
+     89|   assert.equal(JSON.parse(result.stdout).readiness,'NOT_READY');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  2 failed | 18 passed (20)
+   Start at  23:26:52
+   Duration  17.75s (transform 366ms, setup 0ms, import 7.11s, tests 9.61s, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

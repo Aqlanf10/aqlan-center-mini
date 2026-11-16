@@ -5,6 +5,7 @@ import { closeReferral, getReferral } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { checkReferralClose } from "@/lib/referrals";
 import { requireSession } from "@/lib/session";
+import { canonicalReferralRoute, commandCanonicalReferralClose } from "@/lib/canonical-referrals";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +14,13 @@ export const dynamic = "force-dynamic";
  * المغلقة لا تُعاد فتحها ولا تُغلق ثانية (409).
  */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  /* M2 slice 73: clinical.referrals.manage inside the patient scope; audit in the same transaction. */
+  const { id: rawId } = await params;
+  const canonical = await canonicalReferralRoute(request, (handle, body) => commandCanonicalReferralClose(handle, rawId, body), "تعذّر تحديث الإحالة. أعد المحاولة.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
-  const id = Number((await params).id);
+  const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ message: "رقم إحالة غير صالح." }, { status: 400 });
 
   let body: Record<string, unknown>;

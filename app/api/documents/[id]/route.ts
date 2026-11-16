@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalDocumentFailure, commandCanonicalDocumentHide, readCanonicalDocumentFile } from "@/lib/canonical-documents";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getDocumentForDownload, recordAudit, removeDocument } from "@/lib/db";
@@ -28,6 +31,20 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 75: clinical.xrays.view inside the patient scope; the file read only after admission. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const { document, bytes } = await readCanonicalDocumentFile(selected.handle, (await context.params).id);
+      const download = new URL(request.url).searchParams.get("download") === "1";
+      return new NextResponse(new Uint8Array(bytes), { headers: {
+        "Content-Type": document.mimeType, "Content-Length": String(bytes.length),
+        "Content-Disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(document.title)}`,
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+      } });
+    } catch (error) { return canonicalDocumentFailure(error, "تعذّر فتح المستند."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const id = await idFrom(context);
@@ -73,6 +90,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
 /** إخفاء مستند — للمدير وحده، وبسببٍ مكتوب. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 75: patients.documents.delete inside the patient scope, a written reason, one transaction. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let canonicalBody: Record<string, unknown> = {};
+    try { const raw = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); canonicalBody = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>; }
+    catch (error) { return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+    try { return NextResponse.json(await commandCanonicalDocumentHide(selected.handle, (await context.params).id, canonicalBody), { headers: NO_STORE }); }
+    catch (error) { return canonicalDocumentFailure(error, "تعذّر إخفاء المستند."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

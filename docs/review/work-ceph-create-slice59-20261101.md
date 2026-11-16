@@ -1,0 +1,22 @@
+# Slice 59 — open an empty cephalometric study
+
+This converts the server command on an existing owned image. The source picker and actual create control remain a separate contract. Default saved readers and the legacy UI are retained.
+
+| Requirement | Evidence |
+|---|---|
+| Correct capability and scope | Mapped `clinical.xrays.upload`, with its central image-view prerequisite; protected owner, own and all positive. Reader-only, analyst-only, none and unlinked negative. Outside equals missing; no relationship or assignment is created to gain access. |
+| Stable owned references | Patient serialization, fresh authority and patient membership after waiting, same-patient document/case SHARE NOWAIT locks. Removed/non-image/foreign/missing documents refuse without identity disclosure. Current image ownership/type changes during a wait are checked again. No image bytes or file publication. |
+| Native clinical meaning | Original document/case SELECT and empty-study INSERT clauses shared on the owning connection. Calendar date/defaults and optional historical reference key preserved. No copied landmarks, diagnosis or approved measurement. Nonempty invoice and existing clinical/document facts remain unchanged. |
+| Atomic command | Actual canonical actor, original ceph.create audit meaning, final authority check. Audit failure and post-INSERT expiry roll back study and audit. No implicit schema initialization, rich legacy reader or pool query inside the operation. |
+| Concurrency and retry | Two canonical waiters and a mixed legacy/canonical contender retain one draft and one audit under the existing unique constraint. An existing current draft is a conflict, not a cached response. A later call after closure can create another draft: no permanent idempotency is claimed. |
+| Compatibility | Legacy route body, defaults and native SQL preserved. Legacy audit remains post-commit; the extracted wrapper also rolls back lookup errors before releasing its connection. Real legacy editor, saved list/study, copy/discard and 390px browser reader witnesses pass. |
+
+The causal before witness uses the actual previous build and unchanged create route: a scoped uploader reads successfully but receives **401 instead of 201** when opening the draft. Focused PostgreSQL then passed **81 tests in four files**; unit tests **108 in four files**, map/inventory guards **10 in two files**, typecheck, build **`q-_8KHs4niR6vSuHDSj8Y`**, and targeted lint (zero errors, eight existing db warnings) pass.
+
+Built HTTP/Chromium covers **87 distinct cases in seven files**: 37/37 command/copy/discard cases; compatibility first 49/50; corrected reader file 9/9. The old blanket owner-denial witness was replaced by a valid owned-image request from a reader without upload permission and now requires exact 403 plus unchanged effects. Earlier SQL test alias and mistyped file-path attempts remain recorded; nonexistent paths are not counted. This is not a single 87-pass execution.
+
+The server returns only id plus a bounded warning count for previous non-discarded studies on that image. It never returns an unbounded list of previous IDs or hidden image details. Unknown outcomes require fresh study review and a new explicit intention; the following UI must not automatically resend. The local map has **78 canonical-done / 266 existing ordinary methods**; source conversion is not module or release completion.
+
+Full combined gates on this new source, exact-head CI and independent review remain pending. The preceding 56–58 gate run is not attributed to this later DB/runtime change. No main merge, deployment, migration or live changes. Actual Docker, inventory NOT_READY, schema convergence, remaining integration review and operational acceptance stay open. See [manifest, original failures and source hashes](evidence/work-ceph-create-20261101/manifest.json).
+
+Full local gates later completed on frozen `a9a75d8`: **14,762 unit tests / 870 files**, **5,437 PostgreSQL tests / 413 files**, no skips. Lint (zero errors, 345 existing warnings), body/environment/money/preflight and both runtime verifiers passed for the recorded build (372 braces traces; 741 tooling traces, 86 manifests). A subsequent slice60 direct-link witness exposed a missing independent ortho-view guard despite those passes. The fix is separate and must pass its own combined gates; this source is not accepted on suite success alone.

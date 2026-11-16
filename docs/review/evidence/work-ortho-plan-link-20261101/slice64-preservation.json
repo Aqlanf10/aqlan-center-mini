@@ -1,0 +1,8 @@
+{
+  "base": "f5ff01a2c132f2ad3cacc4f10168c76441f5d6c3",
+  "nativeBodyExactAfterIndentationRemoval": true,
+  "nativeBodySha256": "bcfec89f74c570d8c7759b9380d10919f9249519c688c914a0e921d760b2e3ed",
+  "legacyPATCHandGETTailExact": true,
+  "routeTailSha256": "e92caa1dff653ab7d0ee06d14f6e48882718dd0a4abc5c32d50530c7a23dac79",
+  "noMigrations": true
+}

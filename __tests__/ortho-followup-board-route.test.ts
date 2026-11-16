@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../lib/staff-session-admission", () => ({ selectRequestStaffEnvelope: vi.fn(async () => ({ kind: "legacy" })) }));
 vi.mock("../lib/session", () => ({ requireSession: vi.fn() }));
 vi.mock("../lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden", orthoFollowupBoard: vi.fn(), findUserByUsername: vi.fn(), doctorOwnedPatientIds: vi.fn(),
@@ -37,11 +38,11 @@ afterEach(() => { vi.useRealTimers(); });
 describe("existing board API visibility with additive appointment context", () => {
   it("requires a session before loading any board context", async () => {
     session.mockResolvedValue(null);
-    expect((await GET()).status).toBe(401);
+    expect((await GET(new Request("http://localhost/api/ortho/followups"))).status).toBe(401);
     expect(board).not.toHaveBeenCalled();
   });
   it("preserves doctor ownership filtering, including nested booking labels", async () => {
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     const payload = await response.json();
     expect(response.status).toBe(200);
     expect(payload.today).toBe("2026-10-06");
@@ -54,19 +55,19 @@ describe("existing board API visibility with additive appointment context", () =
   });
   it.each(["admin", "reception"] as const)("preserves authorized %s board access", async (role) => {
     session.mockResolvedValue({ username: "synthetic", userId: 7, role, partyId: null, expiresAt: Date.now() + 60_000 });
-    const payload = await (await GET()).json();
+    const payload = await (await GET(new Request("http://localhost/api/ortho/followups"))).json();
     expect(JSON.stringify(payload)).toContain("Service 10");
     expect(JSON.stringify(payload)).toContain("Service 20");
     expect(owned).not.toHaveBeenCalled();
   });
   it("preserves explicit canViewAllPatients while not redefining case ownership", async () => {
     user.mockResolvedValue({ permissions: { canViewAllPatients: true } } as NonNullable<Awaited<ReturnType<typeof findUserByUsername>>>);
-    expect(JSON.stringify(await (await GET()).json())).toContain("Service 20");
+    expect(JSON.stringify(await (await GET(new Request("http://localhost/api/ortho/followups"))).json())).toContain("Service 20");
     expect(owned).not.toHaveBeenCalled();
   });
   it("does not turn a failed projection query into an empty successful board", async () => {
     board.mockRejectedValue(new Error("Synthetic projection unavailable"));
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/ortho/followups"));
     expect(response.status).toBe(500);
     expect(await response.json()).not.toHaveProperty("buckets");
   });

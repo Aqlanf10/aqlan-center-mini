@@ -1,0 +1,16 @@
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
+import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
+vi.mock("server-only", () => ({})); assertRealPostgresUrl(); stubPostgresEnv(); vi.stubEnv("SESSION_SECRET", "synthetic-null-visit-secret-0123456789abcdef");
+const db = await import("../../lib/db"), reads = await import("../../lib/canonical-ortho-decisions");
+const accounts = { owner: { username: "SYN-NULL-OWNER", role: "admin" }, own: { username: "SYN-NULL-OWN", role: "doctor", doctor: true, patientScope: "own", grants: { "clinical.ortho.view": true } }, other: { username: "SYN-NULL-OTHER", role: "doctor", doctor: true, patientScope: "none", grants: {} } } as const;
+let fx: CanonicalInventoryDatabase<keyof typeof accounts>;
+beforeAll(async () => { fx = await openCanonicalInventoryDatabase(db, accounts, "owner"); }, 180000);
+afterAll(async () => { await fx?.close(); });
+it("an adjustment pointing to a legacy visit without a patient must fail closed", async () => {
+  const patient = (await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-NULL-P','SYN own patient',$1) RETURNING id", [fx.parties.own])).rows[0].id;
+  const c = (await fx.pool.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id", [patient])).rows[0].id;
+  const visit = (await fx.pool.query("INSERT INTO visits(patient_name,doctor_id) VALUES('SYN unrelated unlinked visit',$1) RETURNING id", [fx.parties.other])).rows[0].id;
+  await fx.pool.query("INSERT INTO ortho_adjustments(case_id,visit_id,recorded_by,billing_class) VALUES($1,$2,'SYN','REVIEW_REQUIRED')", [c, visit]);
+  await expect(reads.readCanonicalOrthoDecisions(await fx.session("own"))).rejects.toThrow("STAFF_READ_READ_FAILED");
+});

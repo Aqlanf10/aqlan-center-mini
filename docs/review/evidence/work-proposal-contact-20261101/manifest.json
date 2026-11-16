@@ -1,0 +1,107 @@
+{
+  "format": "work-proposal-contact-v1",
+  "baseRevision": "b49e073b5b1e9d8a92f207c44f37d7512697b84a",
+  "sourceRevision": "985352177f0d3a552bd1c6df4ec478cd8ea5c015",
+  "buildId": "eYpsA9XH-V-fyyzHFLUBy",
+  "acceptance": {
+    "focusedPostgres": {
+      "passed": 41,
+      "files": 4,
+      "newCommandCases": 17
+    },
+    "focusedHttpBrowser": {
+      "passed": 31,
+      "files": 5,
+      "newCommandJourneys": 8
+    },
+    "focusedUnit": {
+      "passed": 36,
+      "files": 3
+    },
+    "mapInventoryGuards": {
+      "passed": 10,
+      "files": 2
+    },
+    "sourcePreservation": 19,
+    "historicalSourceHashes": 628,
+    "build": "passed",
+    "fullBatchGates": "frozen985 local full gates passed; later combined52 gates and exact-head CI recorded separately",
+    "exactHeadCI": "not published",
+    "independentReview": "pending",
+    "actualDocker": "blocked by prior enforced Alpine destination refusal",
+    "fullUnit": {
+      "passed": 14487,
+      "files": 858,
+      "sourceRevision": "985352177f0d3a552bd1c6df4ec478cd8ea5c015"
+    },
+    "fullPostgres": {
+      "passed": 5225,
+      "files": 402,
+      "sourceRevision": "985352177f0d3a552bd1c6df4ec478cd8ea5c015",
+      "skipped": 0
+    }
+  },
+  "sourceSha256": {
+    "__tests__/canonical-proposal-contact-command.test.ts": "d262107a03c0d16000c4c5fad2708cb724029c5a121599e4799a830aed4c26ea",
+    "__tests__/postgres/proposal-contact-canonical-command.test.ts": "70d73ed3ef197d8b242da90e7bf04fb4c2356441b30aacc766effcfb2d733955",
+    "__tests__/security-http/canonical-proposal-contact-journey.test.ts": "22446383141732e8ef6e62f172a0b32f954513b5a951a06ad296c2477ba0686f",
+    "__tests__/security-http/canonical-proposals-journey.test.ts": "4a136bbff323d964f7129d00a59798973e67b00bc1d24a7b93a469396592d2e1",
+    "app/api/plans/proposals/route.ts": "431668aaa99e7e1e0193287ccf0ce4781faff7c8b0939ea3fc7eec71dfe94ef5",
+    "app/recall/page.tsx": "217e1199078322645fd743760cb62f1a3d7a795aea36b9655050ba1349618c22",
+    "components/CanonicalProposalContactEditor.tsx": "bc3c7278398d8d66e58866d41cf07d8af0f199149b4ad8df1913ec027f60a5cd",
+    "components/CanonicalProposalFollowUp.tsx": "dd76cb8070437f839a902824c3846cf3d057adf43a3761b984fb9d39c91d4d05",
+    "docs/review/work-ortho-coverage-slice48-20261101.md": "dfaf5e9426183dae9cf8562edc2fff2d75f4987e12468c5cb57706272d79d0fe",
+    "docs/review/work-proposal-contact-slice50-20261101.md": "a75a3dd8384c3412592a04780b029d48b8bd921888570801e4f3028520607c30",
+    "docs/review/work-remaining-plan-20261101.md": "ab9674b6875196af8ce87289f4d6227d4c141e79b3dbc367ffbf9eebcf15bff8",
+    "docs/security/staff-cutover/HANDOFF.md": "7670191c3e904a6a1ed1d098ac8a536a7e8f429a49f578b245db081c44666b29",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "82a9f6e19bf375993431ef244da1a9bfc82b70eea4d562660abf8c8d53a9dea3",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "d8b7d9fa9c009915f9e9695412ea4b145c648ad710619afa29054ae7e5d9802c",
+    "docs/security/staff-cutover/inventory.json": "6c415f492528fdabc3a405cd50de47039fc3f5b0e8df79d12a4d6e3bb091843f",
+    "lib/canonical-proposal-contact-command.ts": "06d0fdfd2dcb8f1f68b8f857502982c22d61a4f0c08634c01f99678dacf50a57",
+    "lib/db.ts": "c847b3cbf4dde9af173d4167302005210f5586974e83ad7d4173390b590624c4"
+  },
+  "artifacts": {
+    "lint-tooling-runtime-proof.json.gz": "37c09315ffabeeeecdbb22178d48df1e8b260e2ceab1da930736a3dcd1273350",
+    "proposal-contact-390.png": "b8f3eb3aae4fab8a643e54690a9fdda57944a338c62cd4fe10c28d84a255011b",
+    "runtime-proof.json.gz": "45feb0ef83d0f40b2b853eb1f92a4fbdbc0e4f705278644509d737e38327ebef",
+    "slice50-braces-runtime.log": "abf7cc3f208512c52b29ca4d4baa131f56f47428b49f975556c6138e85556831",
+    "slice50-build-first.log": "9aa8df465bcc6c184b39087f9e4f1bce39082bb7f592b57b1800e47583b35a4e",
+    "slice50-build-first.log.gz": "b95b9f1f5f2f60b3dbb246ee79550eb65a20888168e298fa08be6da8443be8c6",
+    "slice50-guards.log": "7a020659e48e389b4d94a87ca911dac79095fc5dd3b307f0d34715e442faa849",
+    "slice50-http-before.log": "fb541b5ae0a2d83789a572771ddf21c25ff6927c311cb85b2052fa43ffac8745",
+    "slice50-http-first.log": "b1888275a8c5398132cc31eae038427ba8e471bded532a0a4fba3637e01c37ca",
+    "slice50-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice50-lint-runtime.log": "f24a4a84ec064fa3f6b59d26110bdc6c17627a8398d6d65ef0e9db98d229fdcf",
+    "slice50-pg-final.log": "f788b3359de956b685f3a8b8e75616e3027d7a5e2d53e1625b4e303744f28da5",
+    "slice50-pg-first.log": "6f3dac5834fa727ea4bc142003e2fa1b20ad115e40876e03cdbdadce1009b613",
+    "slice50-pg-full.log": "056579aa709725732e98247fb6c256226532c0e7befac073a7d78fe3b293903d",
+    "slice50-source-proof.json": "3d7ff4554b6f8a697b12ec33d273221587bfa3e578c1c4129c63a1f21265aba6",
+    "slice50-types-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice50-unit-first.log": "9d90a77d876ec68ce8d2ed51dbf7dee4e662c436ec80869af9614c24f2bfd441",
+    "slice50-unit-full.log": "bd67828cde9b716c28e1e8b9c0b45eff7363223e5ab15d009e4aea76c1dfb271",
+    "verify-slice50.py": "96f1ea9b474fd97c7daa513bf9cbd97d918fa5e3d65a5fa0b136fc932dcf3983"
+  },
+  "normalization": {
+    "slice50-build-first.log": {
+      "rawSha256": "ad38c2891c2e20a8aaab09ab28cb07417cb280ac0e03d43ce8add7dc141fa497",
+      "rawGzip": "slice50-build-first.log.gz",
+      "displayLog": "trailing whitespace/newlines normalized only; byte-exact original compressed"
+    }
+  },
+  "runtimeProofs": {
+    "runtime-proof.json": {
+      "compressed": "runtime-proof.json.gz",
+      "rawSha256": "fbe69908fe1105526d47837088379fe23b2544343d0b1a5bd9d780fcfe980b8d",
+      "buildId": "eYpsA9XH-V-fyyzHFLUBy",
+      "traceCount": 372,
+      "manifestCount": null
+    },
+    "lint-tooling-runtime-proof.json": {
+      "compressed": "lint-tooling-runtime-proof.json.gz",
+      "rawSha256": "04b2e0f7cc9bc2407dec7bdd7b782214a1ac3a18bf6fd249b5cd8d5b2636cc47",
+      "buildId": "eYpsA9XH-V-fyyzHFLUBy",
+      "traceCount": 741,
+      "manifestCount": 86
+    }
+  }
+}

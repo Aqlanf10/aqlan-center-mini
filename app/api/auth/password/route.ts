@@ -4,7 +4,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { consumeStaffLoginAttempt, findUserByUsername, recordAudit, updateUser } from "@/lib/db";
 import {
-  SESSION_COOKIE, SESSION_DURATION_MS, createSessionToken, hashPassword,
+  SESSION_COOKIE, SESSION_DURATION_MS, createSessionToken, hashPassword, legacySessionEvidence,
   sessionCredentialVersion, sessionPermissionVersion, verifyPassword,
 } from "@/lib/auth";
 import { staffSessionCookieSecure } from "@/lib/sessionCookie";
@@ -71,7 +71,9 @@ export async function POST(request: Request) {
     }
 
     const passwordHash = await hashPassword(newPassword);
-    const updated = await updateUser(user.id, { passwordHash });
+    const evidence=legacySessionEvidence(session);
+    if(!evidence)return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401});
+    const updated = await updateUser(user.id, { passwordHash }, {actor:session.username,actorRole:session.role,reason:"تغيير كلمة المرور ذاتياً"}, {evidence,selfPassword:true});
     if (!updated) {
       return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
     }

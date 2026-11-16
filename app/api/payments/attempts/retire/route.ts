@@ -4,11 +4,30 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { canHandleMoney } from "@/lib/roles";
 import { CollectionAttemptError, retireCollectionAttempt } from "@/lib/collection-attempts";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalRetireAttempt } from "@/lib/canonical-receipt-writes";
 
 export const dynamic = "force-dynamic";
 
 /** Prove a collection attempt key's outcome: "committed" (replay it) or "retired" (it can never land). */
 export async function POST(request: Request) {
+  // M2 slice 90d (G4-4): finance.payments.collect inside the patient scope on the canonical runtime.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      const fields = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+      const state = await commandCanonicalRetireAttempt(selected.handle, { idempotencyKey: fields.idempotencyKey, patientId: fields.patientId,
+        operation: fields.operation, requestBody: fields.requestBody, originalActor: fields.originalActor });
+      return NextResponse.json({ state }, { headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      if (error instanceof CollectionAttemptError) return NextResponse.json({ message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر التحقق من المحاولة الآن؛ بقيت محفوظة. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canHandleMoney(session.role)) return NextResponse.json({ message: "التحقق من محاولة التحصيل للإدارة والاستقبال والصندوق." }, { status: 403 });

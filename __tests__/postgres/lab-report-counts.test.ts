@@ -1,6 +1,6 @@
 /** PROPOSED, NOT EXECUTED. Use the existing guarded PG18 suite only, against an
  * explicitly authorized disposable synthetic target. No new database harness. */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { labSummary, type LabOrderClinicalDTO } from "../../lib/lab";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 import { validatePostgresTestTarget } from "./_safe-target";
@@ -27,13 +27,11 @@ const counts = (today = REPORT_LAB_TODAY) => workflowCounts({ mode: "workflow", 
 const q = async <T = Record<string, unknown>>(sql: string, values: unknown[] = []): Promise<T[]> =>
   (await db.getPool().query<T>(sql, values)).rows;
 
-beforeAll(async () => {
+beforeEach(async () => {
+  // Recreate only the guarded disposable schema; never bypass identity/history guards.
+  await db.resetPoolForTesting();
   await dropPublicSchema(target.testUrl.toString());
   await db.ensureSchema();
-});
-beforeEach(async () => {
-  // Existing disposable-PG fixture lifecycle; never disable integrity triggers.
-  await q("TRUNCATE lab_order_tracking, lab_orders, patients RESTART IDENTITY CASCADE");
 });
 afterAll(async () => { await db.resetPoolForTesting(); });
 

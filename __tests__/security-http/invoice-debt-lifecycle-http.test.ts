@@ -126,11 +126,11 @@ describe("invoice → debt schedule → partial receipt → correction/refund �
     expect(cancelled.status).toBe("cancelled");
     expect(await receipts(id)).toEqual(historical); // includes original timestamps
     await balances(id, { [currency]: -1150 });
-    const refundKey = key();
-    const refundBody = { mode: "void", reason: "Synthetic refund of cancelled invoice receipt" };
-    const refundPath = `/api/payments/${overpayment.id}/correct`;
-    const refund = await payload(await post(refundPath, refundBody, refundKey), 201);
-    expect(await payload(await post(refundPath, refundBody, refundKey))).toMatchObject({ replayed: true, reversal: { id: refund.reversal.id } });
+    const voidKey = key();
+    const voidBody = { mode: "void", reason: "Synthetic void of cancelled invoice receipt" };
+    const voidPath = `/api/payments/${overpayment.id}/correct`;
+    const voided = await payload(await post(voidPath, voidBody, voidKey), 201);
+    expect(await payload(await post(voidPath, voidBody, voidKey))).toMatchObject({ replayed: true, reversal: { id: voided.reversal.id } });
     expect((await receipts(id)).slice(0, historical.length)).toEqual(historical);
     await balances(id, { [currency]: -150 });
     expect((await db.query("SELECT id FROM invoices WHERE patient_id=$1", [id])).rows).toEqual([{ id: bill.id }]);
@@ -139,7 +139,34 @@ describe("invoice → debt schedule → partial receipt → correction/refund �
     const html = await statement.text();
     expect(html).toContain(`للمريض ${formatMoney(150, currency)}`);
     expect(html).toContain(corrected.replacement.receiptNumber);
-    expect(html).toContain(refund.reversal.receiptNumber);
+    // A void/correction reversal is internal evidence, not a patient-facing refund.
+    const internal = [recovered.payment, corrected.reversal, overpayment, voided.reversal];
+    for (const receipt of internal) expect(html).not.toContain(receipt.receiptNumber);
+    const canonical = await ledger(id);
+    expect(canonical.payments.map((receipt: { id: number }) => receipt.id).sort((a: number, b: number) => a - b))
+      .toEqual([...internal, corrected.replacement].map(receipt => receipt.id).sort((a, b) => a - b));
+    const immutable = await receipts(id);
+    expect(immutable).toHaveLength(5);
+
+    // A genuine refund remains visible, while internal pairs and immutable history
+    // remain separate. Exercise the refund writer, not the correction/void endpoint.
+    const refundKey = key();
+    const refundBody = { patientId: id, kind: "refund", reversalOfId: corrected.replacement.id,
+      amount: toInputAmount(50, currency), currency, method: "cash", note: "Synthetic actual patient refund" };
+    const refunded = await payload(await post("/api/payments", refundBody, refundKey), 201);
+    expect(refunded).toMatchObject({ kind: "refund", reversalOfId: corrected.replacement.id, amountMinor: 50, currency });
+    expect(await payload(await post("/api/payments", refundBody, refundKey))).toMatchObject({ id: refunded.id });
+    expect((await receipts(id)).slice(0, immutable.length)).toEqual(immutable);
+    expect(await receipts(id)).toHaveLength(6);
+    await balances(id, { [currency]: -100 });
+    const refundedStatement = await authedGet(`/print/statement/${id}`, h.sessions.admin);
+    expect(refundedStatement.status).toBe(200);
+    const refundedHtml = await refundedStatement.text();
+    expect(refundedHtml).toContain(`للمريض ${formatMoney(100, currency)}`);
+    expect(refundedHtml).toContain(corrected.replacement.receiptNumber);
+    expect(refundedHtml).toContain(refunded.receiptNumber);
+    expect(refundedHtml).toContain("استرداد");
+    for (const receipt of internal) expect(refundedHtml).not.toContain(receipt.receiptNumber);
   });
 
   it.each(currencies)("%s reports zero due now with future principal intact; cancelling only the schedule preserves receipts", async currency => {

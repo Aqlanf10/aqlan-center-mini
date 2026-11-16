@@ -24,7 +24,8 @@ import {
 export const SUPPORTED_NODE_MAJOR = 22;
 
 /** نطاق engines في package.json — نصٌّ حرفي يُفحَص تطابقه مع الثابت أعلاه. */
-export const SUPPORTED_NODE_RANGE = ">=22 <23";
+export const SUPPORTED_NODE_RANGE = ">=22.13 <23";
+export const SUPPORTED_NODE_MIN_MINOR = 13;
 
 /**
  * نطاق npm المدعوم للتثبيت والبناء (المرحلة C):
@@ -139,6 +140,15 @@ export function checkNodeContract(version: string): ContractViolation | null {
         + `بدّل إليه (‎.nvmrc مضبوط بالفعل: nvm use) قبل تشغيل البوابة الكاملة.`,
     };
   }
+  const minorMatch = /^v?\d+\.(\d+)(?:\.|$)/.exec(version.trim());
+  if (!minorMatch) return {
+    rule: "node.version.unparseable",
+    message: `يلزم إصدار Node كامل للتحقق من الحد الأدنى (${SUPPORTED_NODE_RANGE}).`,
+  };
+  if (Number(minorMatch[1]) < SUPPORTED_NODE_MIN_MINOR) return {
+    rule: "node.minor.unsupported",
+    message: `إصدار Node (${version}) أقدم من الحد الأدنى المدعوم (${SUPPORTED_NODE_RANGE}).`,
+  };
   return null;
 }
 

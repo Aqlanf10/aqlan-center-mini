@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /workspace/aqlan-null-visit-repro
+
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  10:56:17
+   Duration  13.53s (transform 259ms, setup 0ms, import 4.62s, tests 8.48s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

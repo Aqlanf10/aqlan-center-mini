@@ -49,7 +49,7 @@ describe("real invoice/clinical/Ortho source bridge read", () => {
     expect(status?.financialReference.sources).toHaveLength(1);
     expect(status?.financialReference.sources[0]).toMatchObject({ kind: "invoice", sourceId: billed.invoice.id, current: true });
     expect(status?.financialReference.hasRecordedSchedule).toBe(false);
-    expect(status?.adjustmentClass).toBe("OUTSIDE_CONTRACT");
+    expect(status?.adjustmentClass).toBe("REVIEW_REQUIRED");
     expect((await q<{ plan_id: number | null }>("SELECT plan_id FROM ortho_cases WHERE id=$1", [orthoCaseId]))[0].plan_id).toBeNull();
     const canonical = await listTreatmentFinancialReferences(patientId);
     const selected = canonical?.references.filter(row => row.orthoCaseId === orthoCaseId);

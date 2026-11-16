@@ -1,3 +1,8 @@
+import { AgreementReconciliationPanel } from "../components/AgreementReconciliationPanel";
+import { InvoiceArchive } from "../components/InvoiceArchive";
+import { reconciliationCommand } from "../lib/agreement-reconciliation-view";
+import { durableInvoiceMaintenance } from "../lib/invoice-maintenance-view";
+import type { FinancialCommand, FinancialCommandScope } from "../lib/financial-command-journal";
 import { createElement, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,13 +27,14 @@ const hooks = vi.hoisted(() => {
     effects: new Map(), memos: new Map(), layout: [], pending: [] });
   // The wrapper keeps its recovery owner; its keyed child owns independent reads.
   return { make, current: make(), outer: make(), inner: make(), lateUpdates: 0,
-    key: null as string | null, session: null as SessionInfo | null };
+    journals: new Map<string, FinancialCommand>(), reserve: vi.fn(), key: null as string | null, session: null as SessionInfo | null };
 });
 // Browser-storage behaviour has separate real Chromium coverage. These hook
 // fixtures isolate ledger reads/feedback and provide an empty durable journal.
 vi.mock("../lib/financial-command-journal", async original => ({
   ...await original<typeof import("../lib/financial-command-journal")>(),
-  readFinancialJournal: async () => ({ revision: 0, command: null }),
+  readFinancialJournal: async (scope: FinancialCommandScope) => ({ revision: 0, command: hooks.journals.get(JSON.stringify(scope)) ?? null }),
+  reserveFinancialCommand: hooks.reserve,
 }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 vi.mock("../components/ServiceSelect", () => ({ ServiceSelect: () => null }));
@@ -90,7 +96,10 @@ const unavailableLabel = "تعذّر التحقق من حالة السداد";
 const reviewLabel = "حالة السداد تحتاج مراجعة";
 
 beforeEach(() => {
-  resetHooks();
+  resetHooks(); hooks.journals.clear(); hooks.reserve.mockReset().mockImplementation(async (scope: FinancialCommandScope, _revision: number, command: FinancialCommand) => {
+    const key = JSON.stringify(scope); if (!hooks.journals.has(key)) hooks.journals.set(key, command);
+    return { revision: 0, command: hooks.journals.get(key) };
+  });
   hooks.session = { username: "synthetic-admin-a", role: "admin" };
   patientId = 201; key = null; fetchMock.mockReset();
   read = async () => response(payload());
@@ -457,5 +466,52 @@ describe("actual Ledger wire compatibility", () => {
     expect(changed).toEqual(before); expect(statusRows()).toHaveLength(0);
     expect(text(render())).toContain("تعذّر التحقق من بيانات حساب المريض");
     expect(text(render())).not.toContain("لا فواتير"); expect(find(CollectPaymentModal)).toBeUndefined();
+  });
+});
+
+
+describe("composed agreement and invoice-maintenance journal ownership", () => {
+  const reconciliation = () => reconciliationCommand({actor:"synthetic-admin-a",patientId:201,planId:82,
+    body:{operationKey:"synthetic-reconciliation-key",expectedSourceHash:"a".repeat(64),reason:"Synthetic reconciliation reason"}});
+  const maintenance = () => durableInvoiceMaintenance({operation:"archive",key:"synthetic-maintenance-key",actor:"synthetic-admin-a",patientId:201,invoiceId:61,
+    body:JSON.stringify({idempotencyKey:"synthetic-maintenance-key",action:"archive",expectedVersion:0,reason:"Synthetic archive reason"}),
+    expected:{kind:"archive",currency:"SAR",invoiceNumber:"SYNTH-INV-61",action:"archive",expectedVersion:0,reason:"Synthetic archive reason"},outcome:"uncertain",message:"Synthetic unknown result"});
+  const owner = JSON.stringify({actor:"synthetic-admin-a",patientId:201});
+  it("restored reconciliation blocks maintenance opening and direct stale button handlers", async () => {
+    hooks.journals.set(owner,reconciliation()); await mount();
+    expect(find(AgreementReconciliationPanel)).toBeDefined();
+    const actions=elements(render()).filter(node=>node.type==="button"&&["إضافة خدمة","أرشفة الفاتورة"].includes(text(node)));
+    expect(actions.length).toBeGreaterThan(0);
+    for(const action of actions){expect(action.props.disabled).toBe(true);(action.props.onClick as ()=>void)();}
+    expect(find(InvoiceArchive)).toBeUndefined();
+    expect(elements(render()).find(node=>node.props["data-testid"]==="treatment-entry-open")?.props.disabled).toBe(true);
+    expect(hooks.journals.get(owner)).toEqual(reconciliation());
+  });
+  it("a maintenance reservation prevents another command kind replacing the patient intent", async () => {
+    hooks.journals.set(owner,maintenance());await mount();
+    const editor=find(InvoiceArchive)!;expect(editor).toBeDefined();
+    const control=editor.props.financialRecovery as {reserve:(command:FinancialCommand,revision:number)=>Promise<boolean>};
+    expect(await control.reserve(reconciliation(),0)).toBe(false);await flush();
+    expect(hooks.journals.get(owner)).toEqual(maintenance());
+    expect(find(InvoiceArchive)).toBeDefined();expect(find(AgreementReconciliationPanel)).toBeUndefined();
+  });
+  it("ignores an old owner's pending reservation result after actor navigation", async () => {
+    hooks.journals.set(owner,maintenance());await mount();
+    const control=find(InvoiceArchive)!.props.financialRecovery as {reserve:(command:FinancialCommand,revision:number)=>Promise<boolean>};
+    const delayed=deferred<{revision:number;command:FinancialCommand}>();hooks.reserve.mockImplementationOnce(()=>delayed.promise);
+    const reserving=control.reserve(reconciliation(),0);
+    hooks.session={username:"synthetic-admin-b",role:"admin"};await flush();
+    delayed.resolve({revision:0,command:reconciliation()});expect(await reserving).toBe(false);await flush();
+    expect(find(AgreementReconciliationPanel)).toBeUndefined();expect(find(InvoiceArchive)).toBeUndefined();
+    hooks.session={username:"synthetic-admin-a",role:"admin"};await flush();
+    expect(find(InvoiceArchive)).toBeDefined();expect(hooks.journals.get(owner)).toEqual(maintenance());
+  });
+  it.each(["reconciliation","maintenance"] as const)("retains %s recovery across patient and actor navigation without exposing it to another owner",async kind=>{
+    const command=kind==="reconciliation"?reconciliation():maintenance();const component=kind==="reconciliation"?AgreementReconciliationPanel:InvoiceArchive;
+    hooks.journals.set(owner,command);await mount();expect(find(component)).toBeDefined();
+    patientId=202;await flush();expect(find(component)).toBeUndefined();
+    patientId=201;hooks.session={username:"synthetic-admin-b",role:"admin"};await flush();expect(find(component)).toBeUndefined();
+    hooks.session={username:"synthetic-admin-a",role:"admin"};await flush();expect(find(component)).toBeDefined();
+    expect(hooks.journals.get(owner)).toEqual(command);expect(hooks.journals.size).toBe(1);
   });
 });

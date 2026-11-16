@@ -1,0 +1,435 @@
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > invites an unbooked active patient without turning a calculated due date into a booking
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > invites an unbooked retention patient without turning a calculated due date into a booking
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > also omits a future calculated due date when no appointment is booked
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > preserves the exact existing reminder for an actual booked appointment
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > preserves the exact existing reminder for an actual arrived appointment
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > uses the feed's clinic day for a verified appointment today even when the browser clock is ahead
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not promise a future appointment when the feed's clinic day has already passed it
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not confirm an inactive cancelled appointment even if a stale feed puts it in nextAppointment
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not confirm an inactive done appointment even if a stale feed puts it in nextAppointment
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not confirm an inactive no_show appointment even if a stale feed puts it in nextAppointment
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > shows unrelated and uncertain bookings without representing either as a confirmed periodic follow-up
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps a past unresolved booked visit visible separately and sends only an invitation
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps a past unresolved arrived visit visible separately and sends only an invitation
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > warns rather than asserting appointment absence when context is missing (legacy nextAppointment: false)
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > warns rather than asserting appointment absence when context is missing (legacy nextAppointment: true)
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps patient details, appointment-day links, and WhatsApp destinations isolated across two rows
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps the message link absent for unusable phone null
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps the message link absent for unusable phone
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps the message link absent for unusable phone 04253028
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > switches to the real appointment after the existing booking modal reports success
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not mutate or duplicate context across repeated modal cancel and read-only reload cycles
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx (21 tests | 21 failed) 46ms
+     × invites an unbooked active patient without turning a calculated due date into a booking 30ms
+     × invites an unbooked retention patient without turning a calculated due date into a booking 1ms
+     × also omits a future calculated due date when no appointment is booked 1ms
+     × preserves the exact existing reminder for an actual booked appointment 1ms
+     × preserves the exact existing reminder for an actual arrived appointment 1ms
+     × uses the feed's clinic day for a verified appointment today even when the browser clock is ahead 1ms
+     × does not promise a future appointment when the feed's clinic day has already passed it 1ms
+     × does not confirm an inactive cancelled appointment even if a stale feed puts it in nextAppointment 1ms
+     × does not confirm an inactive done appointment even if a stale feed puts it in nextAppointment 1ms
+     × does not confirm an inactive no_show appointment even if a stale feed puts it in nextAppointment 1ms
+     × shows unrelated and uncertain bookings without representing either as a confirmed periodic follow-up 1ms
+     × keeps a past unresolved booked visit visible separately and sends only an invitation 1ms
+     × keeps a past unresolved arrived visit visible separately and sends only an invitation 1ms
+     × warns rather than asserting appointment absence when context is missing (legacy nextAppointment: false) 1ms
+     × warns rather than asserting appointment absence when context is missing (legacy nextAppointment: true) 0ms
+     × keeps patient details, appointment-day links, and WhatsApp destinations isolated across two rows 1ms
+     × keeps the message link absent for unusable phone null 0ms
+     × keeps the message link absent for unusable phone  0ms
+     × keeps the message link absent for unusable phone 04253028 0ms
+     × switches to the real appointment after the existing booking modal reports success 1ms
+     × does not mutate or duplicate context across repeated modal cancel and read-only reload cycles 1ms
+ ❯ scripts/audits/m2-route-capability-map.test.mjs (4 tests | 1 failed) 44ms
+   × role-dependent reads are inventoried, and no GET route is migrated without a declared projection 17ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 22 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > invites an unbooked active patient without turning a calculated due date into a booking
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > invites an unbooked retention patient without turning a calculated due date into a booking
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:157:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > also omits a future calculated due date when no appointment is booked
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:170:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > preserves the exact existing reminder for an actual booked appointment
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > preserves the exact existing reminder for an actual arrived appointment
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:177:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > uses the feed's clinic day for a verified appointment today even when the browser clock is ahead
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:191:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not promise a future appointment when the feed's clinic day has already passed it
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:199:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not confirm an inactive cancelled appointment even if a stale feed puts it in nextAppointment
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not confirm an inactive done appointment even if a stale feed puts it in nextAppointment
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not confirm an inactive no_show appointment even if a stale feed puts it in nextAppointment
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:208:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > shows unrelated and uncertain bookings without representing either as a confirmed periodic follow-up
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:222:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps a past unresolved booked visit visible separately and sends only an invitation
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps a past unresolved arrived visit visible separately and sends only an invitation
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:252:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > warns rather than asserting appointment absence when context is missing (legacy nextAppointment: false)
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > warns rather than asserting appointment absence when context is missing (legacy nextAppointment: true)
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:270:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps patient details, appointment-day links, and WhatsApp destinations isolated across two rows
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:289:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps the message link absent for unusable phone null
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps the message link absent for unusable phone
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > keeps the message link absent for unusable phone 04253028
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:316:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > switches to the real appointment after the existing booking modal reports success
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:321:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/22]⎯
+
+ FAIL  __tests__/ortho-followup-reminder-ui.test.tsx > orthodontic board follow-up message > does not mutate or duplicate context across repeated modal cancel and read-only reload cycles
+TypeError: Cannot read properties of null (reading 'useContext')
+ ❯ process.env.NODE_ENV.exports.useContext node_modules/react/cjs/react.development.js:1212:25
+ ❯ useSession components/SessionProvider.tsx:183:19
+    181|
+    182| export function useSession(): SessionInfo | null {
+    183|   const context = useContext(SessionContext);
+       |                   ^
+    184|   return context.session;
+    185| }
+ ❯ Module.OrthoFollowupPage app/ortho/page.tsx:49:19
+ ❯ render __tests__/ortho-followup-reminder-ui.test.tsx:90:12
+ ❯ openBoard __tests__/ortho-followup-reminder-ui.test.tsx:141:3
+ ❯ __tests__/ortho-followup-reminder-ui.test.tsx:345:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/22]⎯
+
+ FAIL  scripts/audits/m2-route-capability-map.test.mjs > role-dependent reads are inventoried, and no GET route is migrated without a declared projection
+AssertionError: GET /api/ortho/followups is canonical-done but declares no projection for its legacy signals
+
+simple
+
+ ❯ scripts/audits/m2-route-capability-map.test.mjs:66:12
+     64|   assert.deepEqual(projectionInventory(map), checkedIn, "projection in…
+     65|   for (const entry of map.filter(e => e.method === "GET" && e.status =…
+     66|     assert.ok(entry.projection, `${key(entry)} is canonical-done but d…
+       |            ^
+     67|   }
+     68|   const documents = map.find(e => key(e) === "GET /api/patients/[id]/d…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/22]⎯
+
+
+ Test Files  2 failed | 806 passed (808)
+      Tests  22 failed | 13577 passed (13599)
+   Start at  02:32:18
+   Duration  436.74s (transform 18.84s, setup 0ms, import 90.52s, tests 246.69s, environment 77ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,23 +1,71 @@
 /** Transaction-owned authority for template invoices. No process settings cache or second connection. */
 import { getSettingsInTransaction, type DbClient, type Service } from "./db";
+import type { LabWorkRetirement } from "./lab-work-intent-contract";
 import type { LinkedInvoiceLineInput } from "./invoice-linkage-db";
 import { invoiceCommandFingerprint, invoiceTemplateRequestFingerprint, parseInvoiceCommand, hasInvoiceCatalogQuote, invoiceCatalogRequestFingerprint } from "./invoice-template";
 import { checkInvoiceAuthority } from "./invoice-pricing";
 import { foreignRatesFromSettings } from "./service-pricing";
 import type { SessionPayload } from "./auth";
+import type { PriceGrants } from "./price-authority";
+import type { CanonicalLabActor, LabActorSource } from "./lab-work-intent-db";
+import type { CanonicalDebtActor, DebtActorSource } from "./debt-installments-db";
 import { revalidateSessionInTransaction } from "./session";
 import { canHandleMoney } from "./roles";
 import { invoicePricingAudit } from "./invoice-price-settings-db";
 
-export type InvoiceTemplateAuthority = { source: Record<string, unknown>; fingerprint: string; session: SessionPayload };
+/**
+ * The canonical actor of an invoice write (M2 slice 93b, owner decision G4-1). Minted only by
+ * the canonical operation after it proved `finance.invoices.create` and the patient scope;
+ * branded by a module-private symbol, so no JSON value passes as one. Wherever the legacy
+ * writer revalidated its session, `recheck` re-proves the live operation on the same client
+ * and returns the grants that decide there: the create grant, lab work
+ * (`clinical.visits.document`) and the price controls. `lab` and `debt` are the slice-87 and
+ * slice-91 actors for the writers this one calls. The lab actor is always present (the writer
+ * materialises lab work, possibly none, for every invoice; whether lab lines are allowed is the
+ * `labWork` grant, checked in the template validation); the debt actor exists only with
+ * `finance.payments.collect`.
+ */
+const CANONICAL_INVOICE_ACTOR = Symbol("canonical-invoice-actor");
+export interface InvoiceActorGrants { readonly create: boolean; readonly labWork: boolean; readonly price: PriceGrants }
+export interface CanonicalInvoiceActor {
+  readonly [CANONICAL_INVOICE_ACTOR]: true; readonly userId: number; readonly username: string; readonly role: string;
+  readonly recheck: (client: DbClient) => Promise<InvoiceActorGrants>;
+  readonly lab: CanonicalLabActor | null; readonly debt: CanonicalDebtActor | null;
+}
+export type InvoiceActorSource = SessionPayload | CanonicalInvoiceActor;
+export function canonicalInvoiceActor(identity: { userId: number; username: string; role: string },
+  recheck: (client: DbClient) => Promise<InvoiceActorGrants>, related: { lab: CanonicalLabActor | null; debt: CanonicalDebtActor | null }): CanonicalInvoiceActor {
+  return Object.freeze({ [CANONICAL_INVOICE_ACTOR]: true as const, userId: identity.userId, username: identity.username, role: identity.role,
+    recheck, lab: related.lab, debt: related.debt });
+}
+export const isCanonicalInvoiceActor = (source: InvoiceActorSource | undefined): source is CanonicalInvoiceActor =>
+  typeof source === "object" && source !== null && (source as Partial<CanonicalInvoiceActor>)[CANONICAL_INVOICE_ACTOR] === true;
+/** The lab writer's actor for this invoice actor (a canonical actor without the lab grant has none). */
+export function labActorOf(source: InvoiceActorSource): LabActorSource {
+  if (!isCanonicalInvoiceActor(source)) return source;
+  if (!source.lab) throw new InvoiceTemplateAuthorizationError();
+  return source.lab;
+}
+/** The debt writer's actor for this invoice actor (a canonical actor without the collect grant has none). */
+export function debtActorOf(source: InvoiceActorSource): DebtActorSource {
+  if (!isCanonicalInvoiceActor(source)) return source;
+  if (!source.debt) throw new InvoiceTemplateAuthorizationError();
+  return source.debt;
+}
+
+export type InvoiceTemplateAuthority = { source: Record<string, unknown>; fingerprint: string; session: InvoiceActorSource };
 export class InvoiceTemplateAuthorizationError extends Error {
   readonly code = "INVOICE_SESSION_REVOKED";
   constructor() { super("انتهت صلاحية الجلسة أثناء انتظار الطلب؛ سجّل الدخول قبل استعادة نتيجته."); }
 }
 /** Only an already admitted signed payload from the route, never client JSON. */
-export async function assertInvoiceTemplateSession(client: DbClient, session: SessionPayload | undefined,
+export async function assertInvoiceTemplateSession(client: DbClient, session: InvoiceActorSource | undefined,
   actor: { createdBy: string; actorRole: string | null }): Promise<void> {
   if (!session) throw new InvoiceTemplateAuthorizationError();
+  if (isCanonicalInvoiceActor(session)) {
+    if (!(await session.recheck(client)).create || session.username !== actor.createdBy || session.role !== actor.actorRole) throw new InvoiceTemplateAuthorizationError();
+    return;
+  }
   const current = await revalidateSessionInTransaction(session, client);
   if (!current || !canHandleMoney(current.role) || current.username !== actor.createdBy || current.role !== actor.actorRole) throw new InvoiceTemplateAuthorizationError();
 }
@@ -37,16 +85,18 @@ function itemsFingerprint(items: readonly LinkedInvoiceLineInput[]): string {
     item.templatePlan ? [item.templatePlan.templateId, item.templatePlan.version, item.templatePlan.stepKey,
       item.templatePlan.billingRule, item.templatePlan.sessionPlan.map((session) =>
         [session.title, session.minutes, session.afterDays, session.visitKey, session.visitTitle])] : null,
+    ...(item.labWork ? [{ labWork: item.labWork }] : []),
   ]));
 }
 
 /** Call after patient/replay handling, before any invoice/plan writes; caller owns transaction lifetime. */
 export async function validateInvoiceTemplateInTransaction(client: DbClient, input: {
   templateAuthority?: InvoiceTemplateAuthority; catalogueAuthority?: InvoiceTemplateAuthority; items: LinkedInvoiceLineInput[]; actorRole: string | null;
-  idempotencyKey: string | null; requestHash: string | null;
+  idempotencyKey: string | null; requestHash: string | null; labRetirements?: LabWorkRetirement[];
   patientId: number;visitId?:number; baseCurrency: string; existingPlanId?: number | null; discountMinor: number; note: string | null;
   createdBy: string; auditDetails?: Record<string, unknown>;
 }): Promise<void> {
+  if ((input.items.some(item=>item.labWork) || input.labRetirements !== undefined) && !input.templateAuthority && !input.catalogueAuthority) throw new InvoiceTemplateAuthorizationError();
   const usesTemplate = input.items.some((item) => item.templatePlan !== undefined);
   if (!usesTemplate && !input.catalogueAuthority) {
     if (input.templateAuthority) throw new InvoiceTemplateAuthorityError();
@@ -82,6 +132,9 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     throw error;
   }
   await assertInvoiceTemplateSession(client, authority.session, input);
+  const canonicalGrants = isCanonicalInvoiceActor(authority.session) ? await authority.session.recheck(client) : null;
+  if ((input.items.some(item=>item.labWork) || input.labRetirements !== undefined)
+    && (canonicalGrants ? !canonicalGrants.labWork : authority.session.role !== "admin" && authority.session.role !== "doctor")) throw new InvoiceTemplateAuthorizationError();
   const minor = (value: string): number => {
     const number = Number(value);
     if (!Number.isSafeInteger(number) || number < 0) throw new InvoiceTemplateAuthorityError();
@@ -99,10 +152,11 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     || current.patientId !== input.patientId || current.baseCurrency !== input.baseCurrency
     || current.existingPlanId !== (input.existingPlanId ?? null) || (current.visitId??null)!==(input.visitId??null) || current.discountMinor !== input.discountMinor
     || current.note !== input.note || current.idempotencyKey !== input.idempotencyKey
+    || JSON.stringify(current.labRetirements) !== JSON.stringify(input.labRetirements)
     || itemsFingerprint(current.items) !== itemsFingerprint(input.items)) throw new InvoiceTemplateAuthorityError();
   const pricing = checkInvoiceAuthority({ requireInvoiceManualReason:true,
     lines: current.authorityLines, currency: current.baseCurrency, rates: foreignRatesFromSettings(settings),
-    role: input.actorRole ?? "", maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
+    role: input.actorRole ?? "", ...(canonicalGrants ? { grants: canonicalGrants.price } : {}), maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
     totalMinor: current.items.reduce((sum, item) => sum + item.quantity * item.unitPriceMinor, 0),
     discountMinor: current.discountMinor,
     discountReason: typeof authority.source.discountReason === "string" ? authority.source.discountReason : null,

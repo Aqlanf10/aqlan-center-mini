@@ -1,5 +1,8 @@
 "use client";
 
+import { useReturnBookingContext } from "@/components/useReturnBookingContext";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, isCurrency } from "@/lib/money";
 import type { ReceptionHandoffStatus } from "@/lib/reception-handoff";
@@ -32,7 +35,8 @@ export function isCheckoutWalkout(value: unknown, visitId: number): value is Che
     && integer(line.unitPriceMinor) && isCurrency(line.currency) && typeof line.included === "boolean"
     && billingClass(line.billingClass) && typeof line.financialReviewRequired === "boolean")) return false;
   if (value.orthoAdjustment !== null && (!record(value.orthoAdjustment) || !positiveId(value.orthoAdjustment.id)
-    || !billingClass(value.orthoAdjustment.billingClass) || typeof value.orthoAdjustment.pendingDecision !== "boolean")) return false;
+    || !billingClass(value.orthoAdjustment.billingClass) || typeof value.orthoAdjustment.pendingDecision !== "boolean"
+    || value.orthoAdjustment.coverageReviewRequired !== undefined && typeof value.orthoAdjustment.coverageReviewRequired !== "boolean")) return false;
   if (value.nextAppointment !== null && (!record(value.nextAppointment)
     || typeof value.nextAppointment.date !== "string" || typeof value.nextAppointment.time !== "string")) return false;
   if (value.receptionHandoff !== undefined && (!record(value.receptionHandoff)
@@ -86,6 +90,7 @@ interface CheckoutExtrasProps {
   collected: boolean;
   suggestedDate: string | null;
   durationMinutes: number | null;
+  durationWarning?: string | null;
   onChanged: () => void;
   onFinancialReadChange?: (read: { visitId: number; reviewRequired: boolean | null }) => void;
 }
@@ -97,7 +102,7 @@ export function CheckoutExtras(props: CheckoutExtrasProps) {
   const owner = JSON.stringify([props.visitId, props.expectedPatientId, session.username, session.role, session.permissions ?? null]);
   return <OwnedCheckoutExtras key={owner} {...props} />;
 }
-function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = true, financialRevision = 0, dueRecommendation = null, financialSummary = null, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
+function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = true, financialRevision = 0, dueRecommendation = null, financialSummary = null, collected, suggestedDate, durationMinutes, durationWarning, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
   const mounted = useRef(true);
   const command = useRef(false);
   const [walkoutRead, setWalkout] = useState<CheckoutWalkout | null>(null);
@@ -109,6 +114,9 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
   const [date, setDate] = useState(() => suggestedDate ?? addDays(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), 28));
   const [time, setTime] = useState("10:00");
   const [booked, setBooked] = useState<string | null>(null);
+  const returnContext = useReturnBookingContext({ patientId: expectedPatientId ?? walkout?.patientId, source: { kind: "visit", id: visitId }, enabled: !booked && !walkout?.nextAppointment, locked: busy });
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([visitId, expectedPatientId, date, time, durationMinutes, returnContext.fingerprint]));
+
 
   useEffect(() => {
     mounted.current = true;
@@ -164,22 +172,24 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
   };
 
   const book = async () => {
-    if (busy || command.current || !mounted.current) return;
+    if (busy || command.current || !mounted.current || !returnContext.ready || !returnContext.isCurrent()) return;
+    if (durationWarning && !window.confirm(`${durationWarning}\nالمدة الأصلية: ${durationMinutes} دقيقة. هل راجعتها وتريد الحجز بهذه المدة؟`)) return;
     command.current = true;
     setBusy(true);
     try {
-      const response = await fetch(`/api/visits/${visitId}/next`, {
+      const response = await bookingFetch(`/api/visits/${visitId}/next`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, time, durationMinutes: durationMinutes ?? 30 }),
+        body: JSON.stringify({ date, time, durationMinutes: durationMinutes ?? 30, ...returnContext.intrinsicPayload }),
       });
       const payload = await response.json().catch(() => null);
       if (!mounted.current) return;
       if (!response.ok) {
+        returnContext.handleRejection(payload);
         setMessage({ tone: "error", text: [payload?.message, payload?.suggestionMessage].filter(Boolean).join(" ") || "تعذّر الحجز." });
         if (typeof payload?.suggestion === "string") setTime(payload.suggestion);
         return;
       }
-      setBooked(`${friendlyDateLong(date)} — ${friendlyTime(time)}`);
+      setBooked(`${friendlyDateLong(date)} — ${friendlyTime(time)}${payload?.doctorName ? ` — ${payload.doctorName}` : ""}`);
       setMessage(null);
       await load();
       if (mounted.current) onChanged();
@@ -231,6 +241,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
 
   return (
     <div className="mt-3 space-y-2">
+      {nearbyBookingDialog}
       {!walkout ? <p role="status" className="text-xs font-bold text-slate-500">ملخص المغادرة غير متحقق؛ لا تُستنتج منه حالة تغطية أو مبلغ للتحصيل.</p> : null}
       {/* (P0-G) «أُنجز اليوم» بتصنيف الخادم لكل سطر — لا حساب فوترة في الواجهة. */}
       {walkout && (walkout.lines.length > 0 || walkout.orthoAdjustment) ? (
@@ -299,12 +310,14 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-navy-200 bg-white px-3 py-2">
+          {returnContext.view}
+          {durationWarning ? <p className="w-full text-xs font-bold text-amber-800">{durationWarning}</p> : null}
           <span className="text-xs font-extrabold text-navy-900">احجز القادمة:</span>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label="تاريخ الجلسة القادمة"
             className="rounded-lg border border-slate-200 px-2 py-1 text-xs" />
           <input type="time" value={time} onChange={(event) => setTime(event.target.value)} aria-label="وقت الجلسة القادمة"
             className="rounded-lg border border-slate-200 px-2 py-1 text-xs" />
-          <button type="button" onClick={() => void book()} disabled={busy || !date || !time}
+          <button type="button" onClick={() => void book()} disabled={busy || !returnContext.ready || !date || !time}
             className="rounded-lg bg-navy-800 px-3 py-1 text-xs font-bold text-white disabled:opacity-40">
             احجز
           </button>

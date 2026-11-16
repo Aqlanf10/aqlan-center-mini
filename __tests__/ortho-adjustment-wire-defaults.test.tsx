@@ -97,7 +97,9 @@ function chooseWire(label: string, value: string) {
   expect(elements(control).some((entry) => entry.type === "option" && entry.props.value === value)).toBe(true);
   edit(label, value);
 }
-async function submit() {
+async function submit(documentReview = true) {
+  // Valid-save fixtures document an explicit review; fresh form defaults remain blank.
+  if (documentReview && !input("ما نُفّذ في الشدّة").props.value) edit("ما نُفّذ في الشدّة", "Explicit synthetic review without change");
   const form = render();
   await form.props.onSubmit({ preventDefault: vi.fn() });
 }
@@ -271,7 +273,7 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     previous({ nextWeeks });
     expect(input("أسابيع حتى الشدّة القادمة").props.value).toBe(String(nextWeeks));
     await submit();
-    expect(body()).toMatchObject({ nextWeeks, done: "", doneOn: today });
+    expect(body()).toMatchObject({ nextWeeks, done: "Explicit synthetic review without change", doneOn: today });
   });
 
   it("treats the latest recorded none as authoritative instead of reviving older or baseline elastics", async () => {
@@ -283,7 +285,7 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     expect(input("صنف المطاطات").props.value).toBe("none");
     expect(elements(render()).some((entry) => entry.props["data-testid"] === "adjustment-baseline-elastics")).toBe(false);
     await submit();
-    expect(body()).toMatchObject({ elastics: "none", elasticNote: "", nextWeeks: 8, done: "" });
+    expect(body()).toMatchObject({ elastics: "none", elasticNote: "", nextWeeks: 8, done: "Explicit synthetic review without change" });
   });
 
   it("keeps a current null description blank rather than copying stale baseline instructions", async () => {
@@ -291,7 +293,7 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     previous({ elastics: "vertical", elasticNote: null, nextWeeks: 3 });
     expect(input("وصف المطاطات").props.value).toBe("");
     await submit();
-    expect(body()).toMatchObject({ elastics: "vertical", elasticNote: "", nextWeeks: 3, done: "" });
+    expect(body()).toMatchObject({ elastics: "vertical", elasticNote: "", nextWeeks: 3, done: "Explicit synthetic review without change" });
   });
 
   it("shows and preserves a recorded description even when its saved class is none", async () => {
@@ -330,7 +332,7 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     edit("صنف المطاطات", "class_ii");
     await submit();
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(body()).toMatchObject({ elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", nextWeeks: 4, done: "" });
+    expect(body()).toMatchObject({ elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", nextWeeks: 4, done: "Explicit synthetic review without change" });
     expect(onError).toHaveBeenLastCalledWith(null);
     expect(onSaved).toHaveBeenCalledOnce();
   });
@@ -354,7 +356,7 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     edit("أسابيع حتى الشدّة القادمة", "2");
     await submit();
     expect(body()).toMatchObject({ upperWire: "014 NiTi", lowerWire: "012 NiTi", elastics: "triangle",
-      elasticNote: "New instructions selected today", nextWeeks: 2, done: "" });
+      elasticNote: "New instructions selected today", nextWeeks: 2, done: "Explicit synthetic review without change" });
   });
 
   it.each([null, "", "   "])("uses ordinary first-session defaults when the baseline has no description (%s)", async (elastics) => {
@@ -362,7 +364,7 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     expect(input("صنف المطاطات").props.value).toBe("none");
     expect(elements(render()).some((entry) => entry.props["data-testid"] === "adjustment-baseline-elastics")).toBe(false);
     await submit();
-    expect(body()).toMatchObject({ elastics: "none", elasticNote: "", nextWeeks: 4, done: "", doneOn: today });
+    expect(body()).toMatchObject({ elastics: "none", elasticNote: "", nextWeeks: 4, done: "Explicit synthetic review without change", doneOn: today });
   });
 
   it("keeps the ongoing regimen and explicit edits through rejection and retry", async () => {
@@ -395,6 +397,29 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     expect(input("أسابيع حتى الشدّة القادمة").props.value).toBe("2");
     expect(input("ما نُفّذ في الشدّة").props.value).toBe("");
     await submit();
-    expect(body(1)).toMatchObject({ elastics: "vertical", elasticNote: "Updated instructions", nextWeeks: 2, done: "" });
+    expect(body(1)).toMatchObject({ elastics: "vertical", elasticNote: "Updated instructions", nextWeeks: 2, done: "Explicit synthetic review without change" });
+  });
+});
+
+
+describe("standalone adjustment input fidelity", () => {
+  it("rejects a blank performed-work narrative before posting", async () => {
+    await submit(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("وثّق"));
+  });
+  it.each(["0", "abc", "", "1.5"])("does not replace invalid %s weeks with four", async (weeks) => {
+    edit("أسابيع حتى الشدّة القادمة", weeks);
+    await submit();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("52"));
+  });
+  it("posts an explicit upper removal without changing the lower wire", async () => {
+    const box = elements(render()).find(entry => entry.props["aria-label"] === "إزالة السلك العلوي");
+    expect(box).toBeDefined();
+    (box!.props.onChange as (event: { target: { checked: boolean } }) => void)({ target: { checked: true } });
+    await submit();
+    expect(body()).toMatchObject({ upperWire: "", upperWireAction: "remove", lowerWire: "012 NiTi" });
+    expect(body()).not.toHaveProperty("lowerWireAction");
   });
 });

@@ -1,0 +1,35 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-decisions-journey.test.ts (9 tests | 1 failed) 31347ms
+   × HTTP: no caller query can expand scope, and read grants never authorize a decision 363ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-decisions-journey.test.ts > HTTP: no caller query can expand scope, and read grants never authorize a decision
+AssertionError: expected 400 to be 401 // Object.is equality
+
+- Expected
++ Received
+
+- 401
++ 400
+
+ ❯ __tests__/security-http/canonical-ortho-decisions-journey.test.ts:38:215
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 45 passed (46)
+   Start at  11:23:32
+   Duration  192.91s (transform 4.73s, setup 0ms, import 7.45s, tests 177.40s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

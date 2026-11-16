@@ -14,7 +14,30 @@ export class DebtRepaymentError extends Error {
 }
 const safe = (value: string | number) => { const number = Number(value); if (!Number.isSafeInteger(number)) throw new DebtRepaymentError("invalid","المبلغ خارج النطاق الآمن."); return number; };
 
-export async function assertDebtSession(client: DbClient, session: SessionPayload): Promise<void> {
+/**
+ * The canonical actor of a debt write (M2 slice 91). Minted only by the canonical
+ * operation (lib/canonical-debt-repayments.ts) after it proved `finance.payments.collect`
+ * and the patient scope; branded by a module-private symbol, so no JSON body or object
+ * built elsewhere passes as one. `recheck` re-asserts the live operation and its grant on
+ * the same transaction client, wherever the legacy writer revalidated its session.
+ */
+const CANONICAL_DEBT_ACTOR = Symbol("canonical-debt-actor");
+export interface CanonicalDebtActor {
+  readonly [CANONICAL_DEBT_ACTOR]: true; readonly userId: number; readonly username: string; readonly role: string;
+  readonly recheck: (client: DbClient) => Promise<boolean>;
+}
+export type DebtActorSource = SessionPayload | CanonicalDebtActor;
+export function canonicalDebtActor(identity: { userId: number; username: string; role: string }, recheck: (client: DbClient) => Promise<boolean>): CanonicalDebtActor {
+  return Object.freeze({ [CANONICAL_DEBT_ACTOR]: true as const, userId: identity.userId, username: identity.username, role: identity.role, recheck });
+}
+export const isCanonicalDebtActor = (source: DebtActorSource): source is CanonicalDebtActor =>
+  typeof source === "object" && source !== null && (source as Partial<CanonicalDebtActor>)[CANONICAL_DEBT_ACTOR] === true;
+
+export async function assertDebtSession(client: DbClient, session: DebtActorSource): Promise<void> {
+  if (isCanonicalDebtActor(session)) {
+    if (!await session.recheck(client)) throw new DebtRepaymentError("unauthorized","انتهت الجلسة أو سُحبت صلاحية التحصيل؛ سجّل الدخول من جديد.");
+    return;
+  }
   const current = await revalidateSessionInTransaction(session,client);
   if (!current || !["admin","reception"].includes(current.role)) throw new DebtRepaymentError("unauthorized","انتهت الجلسة أو تغيّرت صلاحية إدارة الاتفاق؛ سجّل الدخول من جديد.");
 }
@@ -59,7 +82,7 @@ const latestRevision = async (client: DbClient, id: number) => (await client.que
   "SELECT * FROM debt_repayment_revisions WHERE arrangement_id=$1 ORDER BY version DESC LIMIT 1",[id])).rows[0];
 
 export type DebtRepaymentWrite = { target: DebtTarget; terms: unknown; expectedVersion: number; expectedRemainingMinor: number;
-  expectedSourceHash?: string; reason: string; idempotencyKey: string; cancel?: boolean; session: SessionPayload };
+  expectedSourceHash?: string; reason: string; idempotencyKey: string; cancel?: boolean; session: DebtActorSource };
 
 /** Caller owns BEGIN/COMMIT. Target lock precedes arrangement/version locks.
  * New invoice/historical composition may omit expectedSourceHash because it owns
@@ -117,12 +140,18 @@ export async function saveDebtRepayment(input: DebtRepaymentWrite) {
   await ensureSchema(); const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // Serializes creation of an absent target reference and follows invoice management order.
-    await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[input.target.patientId]);
-    await lockDebtAccountForSchedule(client,input.target.patientId);
-    const result = await writeDebtRepaymentInTransaction(client,input); await client.query("COMMIT"); return result;
+    const result = await saveDebtRepaymentOn(client,input); await client.query("COMMIT"); return result;
   } catch(error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
   finally { client.release(); }
+}
+/** The same write inside a caller's open transaction (the canonical operation, M2 slice 91). */
+export async function saveDebtRepaymentOn(client: DbClient, input: DebtRepaymentWrite, afterLocks?: () => Promise<void>) {
+  // Serializes creation of an absent target reference and follows invoice management order.
+  await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[input.target.patientId]);
+  await lockDebtAccountForSchedule(client,input.target.patientId);
+  // Canonical callers decide the patient scope here, after the patient and account locks (M2).
+  await afterLocks?.();
+  return writeDebtRepaymentInTransaction(client,input);
 }
 
 export async function readDebtRepayments(client: DbClient, patientId: number, today: string) {
@@ -148,24 +177,29 @@ export async function debtRepaymentWorkspace(patientId:number,today:string) {
   await ensureSchema();const client=await getPool().connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const arrangements=await readDebtRepayments(client,patientId,today);
-    const invoices=(await client.query<{id:number;invoice_number:string;base_currency:string}>("SELECT id,invoice_number,base_currency FROM invoices WHERE patient_id=$1 AND status<>'cancelled' ORDER BY id",[patientId])).rows;
-    const openings=(await client.query<{currency:string}>("SELECT currency FROM patient_opening_balances WHERE patient_id=$1 ORDER BY currency",[patientId])).rows;
-    const targets=[];
-    for (const target of [
-      ...invoices.map(row=>({patientId,currency:requireCurrency(row.base_currency,"فاتورة",row.id),invoiceId:row.id,openingCurrency:null,label:`فاتورة ${row.invoice_number}`})),
-      ...openings.map(row=>({patientId,currency:requireCurrency(row.currency,"رصيد",patientId),invoiceId:null,openingCurrency:requireCurrency(row.currency,"رصيد",patientId),label:`رصيد سابق ${row.currency}`})),
-    ]) {
-      const position=await readDebtPosition(client,target);
-      const existing=arrangements.find(row=>row.target.invoiceId===target.invoiceId&&row.target.openingCurrency===target.openingCurrency);
-      const accountDueMinor=(await debtAccountDue(client,patientId,target.currency)).due;
-      const legacyActive=target.openingCurrency!==null&&(await client.query("SELECT id FROM legacy_balance_arrangements WHERE patient_id=$1 AND currency=$2 AND cancelled_at IS NULL",[patientId,target.currency])).rows.length>0;
-      if(position.remainingMinor>0||existing)targets.push({target:{patientId:target.patientId,currency:target.currency,invoiceId:target.invoiceId,openingCurrency:target.openingCurrency},label:target.label,
-        remainingMinor:position.remainingMinor,collectedMinor:position.settledMinor,principalMinor:position.principalMinor,sourceHash:position.sourceHash,accountDueMinor,legacyActive,
-        arrangementId:existing?.id??null,version:existing?.version??0});
-    }
-    await client.query("COMMIT");return {arrangements,targets};
+    const result=await debtRepaymentWorkspaceInSnapshot(client,patientId,today);
+    await client.query("COMMIT");return result;
   } catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+}
+/** The same workspace on a caller-owned read-only snapshot (the canonical patient account, M2 slice 88). */
+export async function debtRepaymentWorkspaceInSnapshot(client:DbClient,patientId:number,today:string) {
+  const arrangements=await readDebtRepayments(client,patientId,today);
+  const invoices=(await client.query<{id:number;invoice_number:string;base_currency:string}>("SELECT id,invoice_number,base_currency FROM invoices WHERE patient_id=$1 AND status<>'cancelled' ORDER BY id",[patientId])).rows;
+  const openings=(await client.query<{currency:string}>("SELECT currency FROM patient_opening_balances WHERE patient_id=$1 ORDER BY currency",[patientId])).rows;
+  const targets=[];
+  for (const target of [
+    ...invoices.map(row=>({patientId,currency:requireCurrency(row.base_currency,"فاتورة",row.id),invoiceId:row.id,openingCurrency:null,label:`فاتورة ${row.invoice_number}`})),
+    ...openings.map(row=>({patientId,currency:requireCurrency(row.currency,"رصيد",patientId),invoiceId:null,openingCurrency:requireCurrency(row.currency,"رصيد",patientId),label:`رصيد سابق ${row.currency}`})),
+  ]) {
+    const position=await readDebtPosition(client,target);
+    const existing=arrangements.find(row=>row.target.invoiceId===target.invoiceId&&row.target.openingCurrency===target.openingCurrency);
+    const accountDueMinor=(await debtAccountDue(client,patientId,target.currency)).due;
+    const legacyActive=target.openingCurrency!==null&&(await client.query("SELECT id FROM legacy_balance_arrangements WHERE patient_id=$1 AND currency=$2 AND cancelled_at IS NULL",[patientId,target.currency])).rows.length>0;
+    if(position.remainingMinor>0||existing)targets.push({target:{patientId:target.patientId,currency:target.currency,invoiceId:target.invoiceId,openingCurrency:target.openingCurrency},label:target.label,
+      remainingMinor:position.remainingMinor,collectedMinor:position.settledMinor,principalMinor:position.principalMinor,sourceHash:position.sourceHash,accountDueMinor,legacyActive,
+      arrangementId:existing?.id??null,version:existing?.version??0});
+  }
+  return {arrangements,targets};
 }
 export async function listDebtRepayments(patientId: number, today: string) {
   await ensureSchema(); const client=await getPool().connect();
@@ -174,8 +208,8 @@ export async function listDebtRepayments(patientId: number, today: string) {
 }
 
 /** Original immutable terms, even if a later revision/cancellation exists. */
-export async function invoiceDebtRepaymentReceipt(patientId:number,invoiceId:number) {
-  const {rows:[row]}=await getPool().query<{id:number;arrangement_id:number;version:number;terms:DebtRepaymentTerms}>(
+export async function invoiceDebtRepaymentReceipt(patientId:number,invoiceId:number,q:Pick<DbClient,"query">=getPool()) {
+  const {rows:[row]}=await q.query<{id:number;arrangement_id:number;version:number;terms:DebtRepaymentTerms}>(
     `SELECT r.id,r.arrangement_id,r.version,r.terms FROM debt_repayment_revisions r
      JOIN debt_repayment_arrangements a ON a.id=r.arrangement_id
      WHERE a.patient_id=$1 AND a.invoice_id=$2 AND r.idempotency_key=$3`,[patientId,invoiceId,`invoice:${invoiceId}:repayment`]);

@@ -1,0 +1,28 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+[security-http] الخادم جاهز على http://127.0.0.1:4917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-assessment-journey.test.ts (10 tests | 1 failed) 15159ms
+   × HTTP: assessment reads and denied POST preserve revisions, money and audit 126ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-assessment-journey.test.ts > HTTP: assessment reads and denied POST preserve revisions, money and audit
+AssertionError: expected [ 401, 403 ] to include 400
+ ❯ __tests__/security-http/canonical-ortho-assessment-journey.test.ts:68:176
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 15 passed (16)
+   Start at  14:25:08
+   Duration  33.02s (transform 186ms, setup 0ms, import 603ms, tests 27.83s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

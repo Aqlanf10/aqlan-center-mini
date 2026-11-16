@@ -4,6 +4,9 @@ import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { readDoctorDailySchedule, resolveScheduleDate, type DoctorDailySchedule } from "@/lib/doctor-daily-schedule";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalMySchedule } from "@/lib/canonical-appointments";
 
 export const dynamic = "force-dynamic";
 const json = (body: unknown, status = 200) => NextResponse.json(body, {
@@ -12,6 +15,20 @@ const json = (body: unknown, status = 200) => NextResponse.json(body, {
 
 /** Personal account only. No client-selected doctor, even with broader appointments permission. */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 15): the actor's own clinician schedule only.
+    const params = new URL(request.url).searchParams;
+    if ([...params.keys()].some((key) => key !== "date") || params.getAll("date").length > 1) {
+      return json({ code: "invalid_appointment_query", message: "لا يمكن اختيار طبيب آخر من الجدول الشخصي." }, 400);
+    }
+    try {
+      return json(await readCanonicalMySchedule(selected.handle, params.get("date") ?? "today"));
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر تحميل جدول المواعيد. حاول التحديث.");
+    }
+  }
   const session = await requireSession();
   if (!session) return json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
   if (session.role !== "doctor" && session.role !== "admin") return json({ message: "هذا الجدول لحساب الطبيب فقط." }, 403);

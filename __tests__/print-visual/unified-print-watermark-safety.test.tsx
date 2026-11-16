@@ -47,7 +47,7 @@ describe("hosted watermark isolation and protected-pixel behavior", () => {
       services={[{ id: 99100, name: "خدمة صناعية فقط", code: "SYNTH-SERVICE", category: "prostho", toothScope: "single_tooth", requiresShade: false, defaultDays: 3, description: null, isActive: true, sortOrder: 1 }]}
       rules={[99001, 99002].map((id, index) => ({ id: 99200 + index, partyId: id, labServiceId: 99100, costMinor: 123456, costCurrency: "SAR" as const, effectiveFrom: "2000-01-01", effectiveTo: null, note: `SYNTHETIC-ROW-${index}`, createdBy: "synthetic", createdAt: "2000-01-01" }))}
       onClose={() => {}} /></main></>);
-    mkdirSync(output, { recursive: true }); const browser = await chromium.launch();
+    mkdirSync(output, { recursive: true }); const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
     try {
       const page = await browser.newPage(); await page.route("**/*", route => route.abort()); await page.setContent(html(markup, modalCss())); await page.emulateMedia({ media: "print" });
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode().catch(() => undefined))); });
@@ -70,7 +70,7 @@ describe("hosted watermark isolation and protected-pixel behavior", () => {
       <div className="print-watermark-protected" id="protected-pixels" style={{ position: "fixed", left: 322, top: 470, width: 150, padding: 8 }}>
         <img src={qr} alt="Synthetic QR" width={100} height={100} /><svg width="130" height="25"><rect width="65" height="25" fill="#0284c7" /><rect x="65" width="65" height="25" fill="#b91c1c" /></svg><img data-signature-img src={signature} alt="Synthetic signature" width={130} height={30} />
       </div></>);
-    const browser = await chromium.launch();
+    const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
     try {
       const page = await browser.newPage({ viewport: { width: 794, height: 1123 } }); await page.route("**/*", route => route.abort()); await page.setContent(html(markup)); await page.emulateMedia({ media: "print" });
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode().catch(() => undefined))); });

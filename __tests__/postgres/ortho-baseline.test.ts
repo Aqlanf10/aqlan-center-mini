@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+import type { SessionPayload } from "../../lib/auth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
@@ -13,6 +15,7 @@ assertRealPostgresUrl();
 stubPostgresEnv();
 
 const db = await import("../../lib/db");
+let responsibilityAdmin: SessionPayload;
 const {
   ensureSchema, getPool, resetPoolForTesting, recordOrthoBaseline, recordAdjustment, addVisit,
   signClinicalVisit, getClinicalVisit, getOrthoCase, listPatientCases, listOrthoDuplicateAdjustments, createClinicalCase,
@@ -50,6 +53,7 @@ const session = (caseId: number) => ({
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  responsibilityAdmin = await responsibilityAdminFixture("synthetic-ortho-baseline-admin");
   orthodontist = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'د. عقلان') RETURNING id`))[0].id;
   legacyPatient = (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ('P-ORTHO-1', 'سارة علي') RETURNING id`))[0].id;
   otherPatient = (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ('P-ORTHO-2', 'مريض آخر') RETURNING id`))[0].id;
@@ -66,7 +70,7 @@ describe("(CASE-1) legacy orthodontic baseline", () => {
       payments: await count(`SELECT COUNT(*)::int AS n FROM payments`),
       adjustments: await count(`SELECT COUNT(*)::int AS n FROM ortho_adjustments`),
     };
-    const result = await recordOrthoBaseline({
+    const result = await recordOrthoBaseline({ admittedSession: responsibilityAdmin,
       ...draft.value, responsibleDoctorId: orthodontist, patientId: legacyPatient, actor: "dr-aqlan", actorRole: "doctor",
     });
     if (!result.ok) throw new Error(result.reason);
@@ -91,7 +95,8 @@ describe("(CASE-1) legacy orthodontic baseline", () => {
 
     const audit = await q<{ action: string; actor: string; actor_role: string; entity_id: string }>(
       `SELECT action, actor, actor_role, entity_id FROM audit_log WHERE action = 'ortho.baseline'`);
-    expect(audit).toEqual([{ action: "ortho.baseline", actor: "dr-aqlan", actor_role: "doctor", entity_id: String(legacyPatient) }]);
+    // Attribution comes from the admitted session, not the legacy actor string.
+    expect(audit).toEqual([{ action: "ortho.baseline", actor: responsibilityAdmin.username, actor_role: responsibilityAdmin.role, entity_id: String(legacyPatient) }]);
   });
 
   it("the unified case list names the baseline's responsible doctor (no plan needed)", async () => {
@@ -100,7 +105,7 @@ describe("(CASE-1) legacy orthodontic baseline", () => {
   });
 
   it("after bridging, the case keeps the orthodontic responsible doctor even if the bridge names none", async () => {
-    const bridged = await createClinicalCase({
+    const bridged = await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId: legacyPatient, specialty: "orthodontics", title: "تقويم ثابت", site: null, problem: null,
       responsiblePartyId: null, orthoCaseId: legacyCase, actor: "reception",
     });
@@ -114,12 +119,12 @@ describe("(CASE-1) legacy orthodontic baseline", () => {
     if (!draft.ok) throw new Error(draft.message);
     const cases = await count(`SELECT COUNT(*)::int AS n FROM ortho_cases`);
     const audits = await count(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action = 'ortho.baseline'`);
-    expect(await recordOrthoBaseline({ ...draft.value, patientId: legacyPatient, actor: "dr" })).toEqual({ ok: false, reason: "open_case" });
+    expect(await recordOrthoBaseline({ admittedSession: responsibilityAdmin, ...draft.value, patientId: legacyPatient, actor: "dr" })).toEqual({ ok: false, reason: "open_case" });
     const lab = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('lab', 'معمل') RETURNING id`))[0].id;
-    expect(await recordOrthoBaseline({ ...draft.value, responsibleDoctorId: lab, patientId: otherPatient, actor: "dr" })).toEqual({ ok: false, reason: "bad_doctor" });
+    expect(await recordOrthoBaseline({ admittedSession: responsibilityAdmin, ...draft.value, responsibleDoctorId: lab, patientId: otherPatient, actor: "dr" })).toEqual({ ok: false, reason: "bad_doctor" });
     const plan = (await q<{ id: number }>(
       `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status) VALUES ($1, 'خطة', 0, 'YER', 'active') RETURNING id`, [legacyPatient]))[0].id;
-    expect(await recordOrthoBaseline({ ...draft.value, planId: plan, patientId: otherPatient, actor: "dr" })).toEqual({ ok: false, reason: "bad_plan" });
+    expect(await recordOrthoBaseline({ admittedSession: responsibilityAdmin, ...draft.value, planId: plan, patientId: otherPatient, actor: "dr" })).toEqual({ ok: false, reason: "bad_plan" });
     expect(await count(`SELECT COUNT(*)::int AS n FROM ortho_cases`)).toBe(cases);
     expect(await count(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action = 'ortho.baseline'`)).toBe(audits);
   });
@@ -187,7 +192,7 @@ describe("(CASE-1) one orthodontic session per visit", () => {
   it("without a visit the API keeps its old behaviour (each call is a new adjustment)", async () => {
     const input = {
       caseId: legacyCase, visitId: null, doneOn: TODAY, phase: null, upperWire: null, lowerWire: null,
-      elastics: "none" as const, elasticNote: null, done: null, nextWeeks: 4, note: null, recordedBy: "dr",
+      elastics: "none" as const, elasticNote: null, done: "Explicit synthetic review without change", nextWeeks: 4, note: null, recordedBy: "dr",
     };
     const a = await recordAdjustment(input);
     const b = await recordAdjustment(input);

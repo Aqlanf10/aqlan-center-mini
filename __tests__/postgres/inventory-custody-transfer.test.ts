@@ -8,6 +8,7 @@ const custody=await import("../../lib/inventory-domain/custody-store");
 const {INVENTORY_PROCUREMENT_SQL}=await import("../../lib/inventory-domain/schema-proposal");const {INVENTORY_CUSTODY_SQL}=await import("../../lib/inventory-domain/custody-schema-proposal");
 const {valuationSnapshot}=await import("../../lib/inventory-domain/procurement");
 import type {InventoryActor} from "../../lib/inventory-domain/procurement-store";
+import type {CustodyUsageInput} from "../../lib/inventory-domain/custody-store";
 let admin:InventoryActor;let doctorA:InventoryActor;let doctorB:InventoryActor;let reception:InventoryActor;let partyA:number;let partyB:number;let supplier:number;
 const key=()=>randomUUID();
 beforeAll(async()=>{
@@ -25,6 +26,13 @@ async function fixture(){const item=await db.createInventoryItem({name:`SYN-CUST
 const transfer=(f:Awaited<ReturnType<typeof fixture>>,quantity="30")=>({id:key(),fromLocationId:f.store,toLocationId:f.destination,transitLocationId:f.transit,reason:"Synthetic monthly custody supply",lines:[{id:key(),lotId:f.lot,quantity}]});
 const ack=(t:ReturnType<typeof transfer>,accepted="30",returned="0")=>({id:key(),transferId:t.id,reason:"Synthetic recipient count",lines:[{lineId:t.lines[0].id,acceptedQuantity:accepted,returnedQuantity:returned}]});
 const quantity=(read:Awaited<ReturnType<typeof custody.readDoctorCustody>>,location:string,lot:string)=>read.locations.find(row=>row.id===location)?.lots.find(row=>row.lotId===lot)?.quantity??"0";
+async function custodyEffectSnapshot(){
+ const snapshot:Record<string,string>={};
+ for(const table of ["inventory_movements","inventory_movement_allocations","custody_usage_events","inventory_operations","audit_log","payables","expenses"]){
+  snapshot[table]=(await db.getPool().query<{hash:string}>(`SELECT md5(COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text,'[]')) AS hash FROM ${table} t`)).rows[0].hash;
+ }
+ return snapshot;
+}
 async function moneyEffects(){return (await db.getPool().query("SELECT (SELECT count(*) FROM inventory_movements)::int AS movements,(SELECT count(*) FROM payables)::int AS payables,(SELECT count(*) FROM expenses)::int AS expenses")).rows[0];}
 // Synthetic pre-activation history must not go through the now-guarded live
 // legacy writer. The public writer is asserted refused before seeding evidence.
@@ -683,3 +691,97 @@ describe("P49/51/55/61 custody allocation transactions (no financial posting)",(
 
 
 
+
+describe("clinical-input custody evidence and return safety", () => {
+ it("rejects malformed supplied clinical references without dropping linkage or writing any effect", async () => {
+  const f=await fixture(), t=transfer(f,"30");
+  await custody.dispatchCustodyTransfer(admin,key(),t);
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ack(t,"30"));
+  const base:CustodyUsageInput={id:key(),locationId:f.destination,lotId:f.lot,kind:"consumed",quantity:"1",reason:"Synthetic malformed clinical input"};
+  for(const fields of [{patientId:12},{visitId:false},{caseId:[]},{procedureId:{}},{patientId:"9007199254740993"},{patientId:"not-a-patient"}]){
+   const before=await custodyEffectSnapshot();
+   await expect(custody.recordCustodyUsage(doctorA,key(),{...base,id:key(),...fields} as unknown as CustodyUsageInput)).rejects.toMatchObject({code:"clinical_context_mismatch"});
+   expect(await custodyEffectSnapshot()).toEqual(before);
+  }
+  const before=await custodyEffectSnapshot();
+  await expect(custody.recordCustodyUsage(doctorA,key(),{...base,id:key(),kind:"returned_to_store",storeLocationId:f.store,patientId:42} as unknown as CustodyUsageInput)).rejects.toMatchObject({code:"clinical_context_mismatch"});
+  expect(await custodyEffectSnapshot()).toEqual(before);
+  const returned=await custody.recordCustodyUsage(doctorA,key(),{...base,id:key(),kind:"returned_to_store",storeLocationId:f.store,patientId:null,visitId:"",procedureId:" "});
+  expect(returned).toMatchObject({clinicMovementEffects:0,payableEffects:0,cashEffects:0,clinicalAttributionStatus:"none"});
+  expect(quantity(await custody.readDoctorCustody(admin),f.destination,f.lot)).toBe("29");
+  expect(quantity(await custody.readDoctorCustody(admin),f.store,f.lot)).toBe("71");
+ });
+ it("keeps verified versus unmatched procedure evidence visible to the custody reader", async () => {
+  const f=await fixture(), t=transfer(f,"30");
+  await custody.dispatchCustodyTransfer(admin,key(),t);
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ack(t,"30"));
+  const patient=(await db.getPool().query<{id:number}>("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-ATTR-' || nextval('patient_number_seq'),'SYN-ATTR-PATIENT',$1) RETURNING id",[partyA])).rows[0].id;
+  const visit=(await db.getPool().query<{id:number}>("INSERT INTO visits(patient_name,patient_id,doctor_id) VALUES('SYN-ATTR-PATIENT',$1,$2) RETURNING id",[patient,partyA])).rows[0].id;
+  const base:CustodyUsageInput={id:key(),locationId:f.destination,lotId:f.lot,kind:"consumed",quantity:"1",patientId:String(patient),reason:"Synthetic actual material used"};
+  const verified=await custody.recordCustodyUsage(doctorA,key(),{...base,visitId:String(visit)});
+  const unmatched=await custody.recordCustodyUsage(doctorA,key(),{...base,id:key(),procedureId:"SYN-UNMATCHED-PROCEDURE"});
+  const absent=await custody.recordCustodyUsage(doctorA,key(),{...base,id:key(),patientId:null});
+  const read=await custody.readDoctorCustody(doctorA);
+  expect(read.usageEvents.find(row=>row.id===verified.id)).toMatchObject({patientId:String(patient),visitId:String(visit),clinicalAttributionStatus:"verified"});
+  expect(read.usageEvents.find(row=>row.id===unmatched.id)).toMatchObject({patientId:String(patient),visitId:null,procedureId:"SYN-UNMATCHED-PROCEDURE",clinicalAttributionStatus:"unmatched_pending_review"});
+  expect(read.usageEvents.find(row=>row.id===absent.id)).toMatchObject({patientId:null,visitId:null,procedureId:null,clinicalAttributionStatus:"none"});
+  expect(JSON.stringify(read)).not.toContain("unitPriceMinor");
+ });
+ it("assistant owner impersonation, reception and another doctor cannot consume or return custody", async () => {
+  const f=await fixture(), t=transfer(f,"30");
+  await custody.dispatchCustodyTransfer(admin,key(),t);
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ack(t,"30"));
+  const username=`SYN-CUSTODY-ASSISTANT-${key()}`;
+  const user=(await db.getPool().query<{id:number}>("INSERT INTO users(username,display_name,password_hash,role,party_id) VALUES($1,$1,'synthetic-disabled-login','assistant',$2) RETURNING id",[username,partyA])).rows[0];
+  const assistant={userId:user.id,username,role:"assistant"};
+  for(const actor of [assistant,reception,doctorB])for(const kind of ["consumed","returned_to_store"] as const){
+   const before=await custodyEffectSnapshot();
+   await expect(custody.recordCustodyUsage(actor,key(),{id:key(),locationId:f.destination,storeLocationId:kind==="returned_to_store"?f.store:null,lotId:f.lot,kind,quantity:"1",reason:"Synthetic forbidden custody attempt"})).rejects.toMatchObject({code:actor.role==="assistant"?"operation_forbidden":"custody_owner_forbidden"});
+   expect(await custodyEffectSnapshot()).toEqual(before);
+  }
+ });
+ it("a concurrent unused return and consumption share stock capacity and conserve clinic and custody quantities", async () => {
+  const f=await fixture(), t=transfer(f,"30");
+  await custody.dispatchCustodyTransfer(admin,key(),t);
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ack(t,"30"));
+  const returnKey=key(), consumptionKey=key();
+  const base:CustodyUsageInput={id:key(),locationId:f.destination,lotId:f.lot,kind:"consumed",quantity:"20",reason:"Synthetic competing usage"};
+  const returnDocument={...base,id:key(),kind:"returned_to_store" as const,storeLocationId:f.store};
+  const beforeMoney=await moneyEffects();
+  const results=await Promise.allSettled([custody.recordCustodyUsage(doctorA,returnKey,returnDocument),custody.recordCustodyUsage(doctorA,consumptionKey,base)]);
+  expect(results.filter(result=>result.status==="fulfilled")).toHaveLength(1);
+  expect(results.filter(result=>result.status==="rejected").map(result=>result.reason.code)).toEqual(["insufficient_location_stock"]);
+  expect(quantity(await custody.readDoctorCustody(admin),f.destination,f.lot)).toBe("10");
+  const beforeReplay=await custodyEffectSnapshot();
+  const returnWon=results[0].status==="fulfilled";
+  const read=await custody.readDoctorCustody(admin);
+  expect(quantity(read,f.store,f.lot)).toBe(returnWon?"90":"70");
+  const clinicQuantity=(await db.getPool().query<{qty:string}>("SELECT SUM(CASE WHEN kind='out' THEN -qty ELSE qty END)::text AS qty FROM inventory_movements WHERE item_id=$1",[f.itemId])).rows[0].qty;
+  expect(Number(clinicQuantity)).toBe(returnWon?100:80);
+  await expect(custody.recordCustodyUsage(doctorA,returnWon?returnKey:consumptionKey,returnWon?returnDocument:base)).resolves.toMatchObject({replayed:true});
+  expect(await custodyEffectSnapshot()).toEqual(beforeReplay);
+  const afterMoney=await moneyEffects();
+  expect(afterMoney.payables).toBe(beforeMoney.payables);
+  expect(afterMoney.expenses).toBe(beforeMoney.expenses);
+ });
+ it("mandatory audit failure rolls back an unused return and its durable operation result", async () => {
+  const f=await fixture(), t=transfer(f,"30");
+  await custody.dispatchCustodyTransfer(admin,key(),t);
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ack(t,"30"));
+  const before=await custodyEffectSnapshot();
+  await db.getPool().query("CREATE FUNCTION synthetic_custody_return_audit_failure() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN IF NEW.entity='custody_usage' THEN RAISE EXCEPTION 'synthetic_custody_return_audit_failure'; END IF; RETURN NEW; END; $$");
+  await db.getPool().query("CREATE TRIGGER synthetic_custody_return_audit_failure BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION synthetic_custody_return_audit_failure()");
+  const operationKey=key();
+  const document:CustodyUsageInput={id:key(),locationId:f.destination,storeLocationId:f.store,lotId:f.lot,kind:"returned_to_store",quantity:"5",reason:"Synthetic atomic unused return"};
+  try{
+   await expect(custody.recordCustodyUsage(doctorA,operationKey,document)).rejects.toThrow("synthetic_custody_return_audit_failure");
+   expect(await custodyEffectSnapshot()).toEqual(before);
+   expect(quantity(await custody.readDoctorCustody(admin),f.destination,f.lot)).toBe("30");
+   expect(quantity(await custody.readDoctorCustody(admin),f.store,f.lot)).toBe("70");
+  }finally{
+   await db.getPool().query("DROP TRIGGER synthetic_custody_return_audit_failure ON audit_log");
+   await db.getPool().query("DROP FUNCTION synthetic_custody_return_audit_failure()");
+  }
+  await expect(custody.recordCustodyUsage(doctorA,operationKey,document)).resolves.toMatchObject({replayed:false,clinicMovementEffects:0,payableEffects:0,cashEffects:0});
+ });
+});

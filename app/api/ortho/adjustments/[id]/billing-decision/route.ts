@@ -5,6 +5,9 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { canAccessPatient } from "@/lib/patient-access";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { CanonicalOrthoDecisionRefusal, commandCanonicalOrthoDecision } from "@/lib/canonical-ortho-decision-command";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +16,19 @@ export const dynamic = "force-dynamic";
  * «بلا رسوم» للطبيب أو المدير (قرارٌ سريريّ-ماليّ مسبَّب)، و«فوتِرت» برقم فاتورةٍ قائمة للمدير والاستقبال.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const { id } = await context.params, body: unknown = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      return NextResponse.json(await commandCanonicalOrthoDecision(selected.handle, id, body), { headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
+      if (error instanceof CanonicalOrthoDecisionRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد قرار الشدّة. تحقق من الحالة الحالية قبل أي طلب جديد.");
+    }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const adjustmentId = Number((await context.params).id);

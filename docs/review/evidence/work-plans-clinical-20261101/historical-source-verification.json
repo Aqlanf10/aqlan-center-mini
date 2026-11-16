@@ -1,0 +1,27 @@
+[
+  {
+    "folder": "work-tooling-20261101",
+    "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+    "sourceHashes": 82
+  },
+  {
+    "folder": "work-ortho-strategy-20261101",
+    "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+    "sourceHashes": 13
+  },
+  {
+    "folder": "work-ceph-list-20261101",
+    "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+    "sourceHashes": 12
+  },
+  {
+    "folder": "work-ceph-study-20261101",
+    "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+    "sourceHashes": 11
+  },
+  {
+    "folder": "work-ceph-references-20261101",
+    "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+    "sourceHashes": 14
+  }
+]

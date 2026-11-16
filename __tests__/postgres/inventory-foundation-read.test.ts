@@ -1,10 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
+import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 assertRealPostgresUrl();
 stubPostgresEnv();
 const db = await import("../../lib/db");
 const { inventoryDetailWithLinks, readInventoryValuation } = await import("../../lib/inventory-domain/read");
-beforeAll(async () => { await db.ensureSchema(); });
+beforeAll(async () => {
+  // The global valuation must see only this guarded disposable fixture, not prior overflow evidence.
+  await dropPublicSchema(process.env.DATABASE_URL!);
+  await db.ensureSchema();
+});
 afterAll(async () => { await db.resetPoolForTesting(); });
 async function item(name: string) {
   return db.createInventoryItem({ name: `synthetic-foundation-${name}-${Date.now()}`, unit: "piece", category: "other", minLevel: 5, note: null, createdBy: "inventory-test" });

@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+let responsibilityFixtureSequence = 0;
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { writeFile } from "node:fs/promises";
 import { Client } from "pg";
@@ -149,7 +151,7 @@ it("refuses upgraded same-context execution without creating another full-price 
 
 it("holds different-tooth unlinked work when ordinary amendment coverage has no immutable scope", async () => {
   const f = await fixture();
-  const createdCase = await db.createClinicalCase({ patientId: f.patientId, specialty: "prosthodontics", title: "Synthetic independent tooth 46 crown", site: "46", problem: "Synthetic separate tooth", responsiblePartyId: f.doctorId, orthoCaseId: null, actor: session.username });
+  const createdCase = await db.createClinicalCase({ admittedSession: await responsibilityAdminFixture("amended-service-clinical-boundary-witness-responsibility-" + (++responsibilityFixtureSequence)), patientId: f.patientId, specialty: "prosthodontics", title: "Synthetic independent tooth 46 crown", site: "46", problem: "Synthetic separate tooth", responsiblePartyId: f.doctorId, orthoCaseId: null, actor: session.username });
   if (!createdCase.ok) throw Error(createdCase.reason);
   const visitId = await visit(f, createdCase.case.id);
   const saved = await save(f, visitId, null, 46);
@@ -180,7 +182,7 @@ it("control: the existing guard already refuses original-service unlinked execut
 
 it.each([36, 46])("control: explicitly separate new linked work on tooth %i remains billable", async (tooth) => {
   const f = await fixture();
-  const createdCase = await db.createClinicalCase({ patientId: f.patientId, specialty: "prosthodontics", title: "Synthetic independently authorized new crown work", site: String(tooth), problem: "Synthetic distinct new-work episode", responsiblePartyId: f.doctorId, orthoCaseId: null, actor: session.username });
+  const createdCase = await db.createClinicalCase({ admittedSession: await responsibilityAdminFixture("amended-service-clinical-boundary-witness-responsibility-" + (++responsibilityFixtureSequence)), patientId: f.patientId, specialty: "prosthodontics", title: "Synthetic independently authorized new crown work", site: String(tooth), problem: "Synthetic distinct new-work episode", responsiblePartyId: f.doctorId, orthoCaseId: null, actor: session.username });
   if (!createdCase.ok) throw Error(createdCase.reason);
   const newPlan = await db.createPlanV2({ patientId: f.patientId, title: "Synthetic independent new work", specialty: null, primaryDoctorId: f.doctorId, billingMode: "per_procedure", baseCurrency: "YER", startDate: "2026-10-24", note: "Synthetic separate treatment authorization, not the upgraded original work", createdBy: session.username, items: [{ serviceId: f.zirconId, serviceName: "Synthetic zirconia crown", category: "crown", toothCode: tooth, surfaces: null, quantity: 1, unitPriceMinor: 800000, billingRule: "on_completion", sessionCount: 1, note: "Explicit independent work" }], installments: [] });
   if (!newPlan.ok) throw Error(newPlan.message);
@@ -251,7 +253,7 @@ it("keeps empty visits and price-only amendments out of the unsupported-service 
 
 it("does not treat an unrelated case label as proof that same-tooth unlinked work is new", async () => {
   const f = await fixture();
-  const createdCase = await db.createClinicalCase({ patientId: f.patientId, specialty: "prosthodontics", title: "Synthetic ambiguous second case", site: "36", problem: null, responsiblePartyId: f.doctorId, orthoCaseId: null, actor: session.username });
+  const createdCase = await db.createClinicalCase({ admittedSession: await responsibilityAdminFixture("amended-service-clinical-boundary-witness-responsibility-" + (++responsibilityFixtureSequence)), patientId: f.patientId, specialty: "prosthodontics", title: "Synthetic ambiguous second case", site: "36", problem: null, responsiblePartyId: f.doctorId, orthoCaseId: null, actor: session.username });
   if (!createdCase.ok) throw Error(createdCase.reason);
   const visitId = await visit(f, createdCase.case.id);
   expect((await save(f, visitId, null)).status).toBe(200);

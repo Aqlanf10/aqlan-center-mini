@@ -1,0 +1,136 @@
+{
+  "base": "f931585a92f81794b34954da66627dd2d1023a9a",
+  "checks": [
+    {
+      "file": "app/api/ceph/compare/route.ts",
+      "part": "legacy route suffix",
+      "unchanged": true,
+      "sha256": "cf81bf26e2793f0ba26e1089279ea3eb3458613803619fba59e3645ab55c83bc"
+    },
+    {
+      "file": "app/api/ceph/superimpose/route.ts",
+      "part": "legacy route suffix",
+      "unchanged": true,
+      "sha256": "c81e9dcd920e5c5bfcd1c0cf319601edbfcac98cbe78286c6273dabcf66cbeaa"
+    },
+    {
+      "file": "lib/db.ts",
+      "allowedDifference": "completed empty saved measurements no longer use computed replacement; one predicate and explanatory comments only",
+      "beforeSha256": "09616942c1f36833b0ead1fde832e463d77b2a847f1ff81c92e162cc888fcb06",
+      "afterSha256": "0a91a81f24a2400493f160c9cb868357d382695a4175f45e36e5bcbcc6f3a2c8"
+    },
+    {
+      "file": "lib/canonical-record-reads.ts",
+      "allowedDifference": "only two exact scoped clinical.xrays.view reads",
+      "beforeSha256": "29db2a58471ccc4122c0ac2b84caadc7bbcb9e7543fc92eff11c9760f8e0812a",
+      "afterSha256": "22464a29a5ca4364fd3a3e47f1c7552ef31f46382f076a4202d2f68c4c9d90c2"
+    },
+    {
+      "file": "components/patient/CanonicalCephStudies.tsx",
+      "allowedDifference": "only import and readonly pair mount",
+      "beforeSha256": "f7b8ebad0e22e2dfce8dc50cb39dc0565666d07489ce7fa8c50e5c31609468d8",
+      "afterSha256": "54466f0e18b50de7f2bd3909f17143d90adec75f4ad9e0c933e87b194369e908"
+    },
+    {
+      "file": "lib/cephCompare.ts",
+      "allowedDifference": "persisted xray date alias plus exact numeric BIGINT tie ordering; comparison math and clinical summaries unchanged",
+      "beforeSha256": "275bdee4c8050dc9dcc83d31474c5e503dd4f58ab6b7d8c93913437d13536485",
+      "afterSha256": "55af10db33b822fd1a91c206f79332cb0708109ce8db551d49e149f76b8bb6ba"
+    },
+    {
+      "file": "lib/canonical-ceph-reads.ts",
+      "unchanged": true,
+      "sha256": "e31416667f7b87344ed703e9fbb2a21c001b6b860b8c76e929dc0828ced0c525"
+    },
+    {
+      "file": "lib/canonical-ceph-projection.ts",
+      "unchanged": true,
+      "sha256": "a775c47e4a0190a3c1760f5faa68acde28ea1d06264843ec0143ff9c296d9a71"
+    },
+    {
+      "file": "lib/cephSuperimpose.ts",
+      "unchanged": true,
+      "sha256": "5278ee8d9539ea2deae8e55539bc96169452dc7ff610d50faffe11f4c33d8bd6"
+    },
+    {
+      "file": "lib/ceph.ts",
+      "unchanged": true,
+      "sha256": "db9bd6d9abc49ef47ff7a49a47dae8b25c0c9ae0704adad1147b40d0cd692997"
+    },
+    {
+      "file": "lib/canonical-read-snapshot.ts",
+      "unchanged": true,
+      "sha256": "7321dbd8af7a2412003bc315c384195277c7f8fe0c4ebdb63837c81c3ae0bb93"
+    },
+    {
+      "file": "lib/staff-authority-proof-internal.ts",
+      "unchanged": true,
+      "sha256": "c259bbdbefc02d01b0e004e053c1bb487bb637947be32d82eb6f25473b40c96a"
+    },
+    {
+      "file": "lib/staff-operation-runtime.ts",
+      "unchanged": true,
+      "sha256": "3061a0632468afc6b5495ca7581f4c4e351e5d21b47bf7f516632436f108144d"
+    },
+    {
+      "file": "lib/staff-capability-catalogue.ts",
+      "unchanged": true,
+      "sha256": "2e6b83691df24db4ef63d941fe48bbb047523285eeeef1bdb986cb100624100d"
+    },
+    {
+      "file": "lib/canonical-ortho-assessment.ts",
+      "unchanged": true,
+      "sha256": "a8717164ecd01ce833ef25db0f2d78c3ae61aad2f33d4ea1519b748cf10e7b35"
+    },
+    {
+      "file": "lib/ortho-assessment-store.ts",
+      "unchanged": true,
+      "sha256": "dc13e538d0e3618df6713a5feb7643b4ed1483c1b7d3c2de8264943c6738b3fa"
+    },
+    {
+      "file": "lib/ortho-assessment-versioned-sources.ts",
+      "unchanged": true,
+      "sha256": "f5f9dd9e5523e7a65aec0aa3f6f210054829802a9cae0329c2783e1a1a361ed8"
+    },
+    {
+      "file": "lib/canonical-plan-reads.ts",
+      "unchanged": true,
+      "sha256": "70e6e07575180eb55a785ef19b021f7cfc6b73d597da0ff4faa96ad04f22f0b9"
+    },
+    {
+      "file": "lib/canonical-plan-templates.ts",
+      "unchanged": true,
+      "sha256": "7beff1cd8dc487c334806d2d7221ba1654b955ef48a765d77bb55bcc04d056ad"
+    },
+    {
+      "file": "lib/canonical-ortho-followups.ts",
+      "unchanged": true,
+      "sha256": "30db2812c7136e3cd5233d43594608cf4c93242aa987b28c42a60289d3f9a78e"
+    },
+    {
+      "file": "lib/canonical-planned-visits.ts",
+      "unchanged": true,
+      "sha256": "2412737812a8b9ce43e37e2610427081a4bbbe7ed56e9b329e192289aef871e2"
+    },
+    {
+      "file": "lib/canonical-shifts.ts",
+      "unchanged": true,
+      "sha256": "e6214eda0e61fd4992ca8b4ea79f1e8152d4c28584d83f87c83ad84bc206bc08"
+    },
+    {
+      "file": "lib/patient-access.ts",
+      "unchanged": true,
+      "sha256": "8e5d576735ecd688650db06b22b1c42d5e9a31600b39a8d7ef54abffca6cc0a2"
+    },
+    {
+      "file": "lib/staff-durable-session.ts",
+      "unchanged": true,
+      "sha256": "0d1f23eb5ba31978fed0ec69bb458895cce913bc1c57f5efd2403c439de1804d"
+    },
+    {
+      "file": "lib/canonical-patient-reads.ts",
+      "unchanged": true,
+      "sha256": "3fcf671f04e9223ea5879315e3d81113c4d79336ae929d34ccb5bc229f73b35f"
+    }
+  ]
+}

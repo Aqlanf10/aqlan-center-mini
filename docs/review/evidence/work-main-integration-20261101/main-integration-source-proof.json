@@ -1,0 +1,2238 @@
+{
+  "workParent": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+  "mainParent": "6a6bdc0cc705874fd4ff6d0f0ddc3fdcd314e9e6",
+  "checks": [
+    {
+      "file": "__tests__/lab-accounting-fx-snapshot.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "a3cbeb4a486d4ad732199743a313f2904db666197b9b02a753b771c43194dfc3"
+    },
+    {
+      "file": "__tests__/lab-accounting-monetary-intent-route.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "577d7e280633bd0db360aa8949916beb20f792b9458f2fae9f05f48b141d57a6"
+    },
+    {
+      "file": "__tests__/migrations.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "30b10e11af3b8df73c4f6e6d21cf825b2d985cd82f0de72eaa64d07d06757e66"
+    },
+    {
+      "file": "__tests__/patient-appointment-history-schema.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "44d8ae623d82d408a37007f469f00da2ab95f8e3ea67f3b8dd4b386a33e71038"
+    },
+    {
+      "file": "__tests__/periodontal-candidate-chain.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "a28e5b61833d829cdc05b708d0cb37eca50bd21b64d2d13d4aee4f9a459b338c"
+    },
+    {
+      "file": "__tests__/periodontal-schema.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "1b59a12bbaf3207dfff42a51199f19225b433dad05cab38b56e1aa2ac5b74e13"
+    },
+    {
+      "file": "__tests__/postgres/_periodontal-fixture.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "3a72d698ba62d6e0455acc51fef6273035634d3afce091cb9cd52056d843a5a3"
+    },
+    {
+      "file": "__tests__/postgres/debt-installments-storage.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "8556cff5f6b87b37b8f6c30ded22ae71e5504b84cc3c39364b392f14c34a148d"
+    },
+    {
+      "file": "__tests__/postgres/hr-composed-backup.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "0fba0f9b4a653074d7a51956490e74a35ee6343bb2bffa5f6a5a43b00169e342"
+    },
+    {
+      "file": "__tests__/postgres/hr-runtime-registration.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "28ffbdc48a0797faefa6fa60f24d2c7c23e2e045d72b90e5678c2640db2afeb2"
+    },
+    {
+      "file": "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "ae67ebfb176d61143898c54e1770548e8b492841cd41440943c05df6bd121fbb"
+    },
+    {
+      "file": "__tests__/postgres/patient-appointment-history-index.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "1553aaa9bf556e21333ff62d1d9b03a5b6f5125b6812f7edab8d883f99e66250"
+    },
+    {
+      "file": "__tests__/postgres/periodontal-restore.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "da5d0a913661427a2e2bb3c48a62774c5acebb667ced2f3285fa2db909a430c1"
+    },
+    {
+      "file": "__tests__/postgres/schema-ownership.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "e0a26d31b1c5c3458a14742af89bb2a0fe835e0a86347018364e268c24784fa7"
+    },
+    {
+      "file": "__tests__/schema-preflight-cli.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "f5edcf4ce7ce0b9fbddf1149d26bc274a327e43e51dbfd0ca13b54073d73e199"
+    },
+    {
+      "file": "__tests__/security-http/hr-temporal-history-ui.test.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "f86290ab703daa79dfdea055f2a93a828962208a3018d84afb9423fd4d688f0c"
+    },
+    {
+      "file": "app/api/lab/[id]/route.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "8e65e31680981e379b60d325fba5d792b91ec8c4a65cc61de05272cffc2bdfc4"
+    },
+    {
+      "file": "app/layout.tsx",
+      "check": "resolved conflict markers absent",
+      "sha256": "e034b1de305bd1d7e8f620ccc39b472922c793005ff7077c347403e9ba81070d"
+    },
+    {
+      "file": "app/login/page.tsx",
+      "check": "resolved conflict markers absent",
+      "sha256": "9cf4f893bca0a8ac1c452cd2649ec689dd90baa45b38e3a83cfe6c516379c6ee"
+    },
+    {
+      "file": "app/print/lab/[id]/page.tsx",
+      "check": "resolved conflict markers absent",
+      "sha256": "8e6b09f32d449c4e9e98eb6b2f3e2b9a0598ec7854de12f4f4ef0852db854114"
+    },
+    {
+      "file": "app/settings/page.tsx",
+      "check": "resolved conflict markers absent",
+      "sha256": "d7f1c3629db3ec96d89ba5b68729b63da2bdf81f9b8f3dbd651c69c235dc5456"
+    },
+    {
+      "file": "components/LabDentalChart.tsx",
+      "check": "resolved conflict markers absent",
+      "sha256": "2c16237b8017f62e34d49a5d755ed31ab3f8e450b142e1980e2083f8a461cfc9"
+    },
+    {
+      "file": "components/PatientLabOrders.tsx",
+      "check": "resolved conflict markers absent",
+      "sha256": "3459ad6c798bb2b28969f3d43152c096f363c843d49cbc702a5b029c94111e04"
+    },
+    {
+      "file": "components/inventory/DoctorCustody.tsx",
+      "check": "resolved conflict markers absent",
+      "sha256": "1b772e30a6c40d10190b5a8ba3266d9e4b3c6a2067ad2f5b6da2bb67bd049045"
+    },
+    {
+      "file": "components/inventory/ProcurementAdministration.tsx",
+      "check": "resolved conflict markers absent",
+      "sha256": "89c1da217ce7901bfbe9f5fabc6af0d4f9c31eb68ec01cb64840db70fcc911da"
+    },
+    {
+      "file": "components/inventory/ProcurementOperations.tsx",
+      "check": "resolved conflict markers absent",
+      "sha256": "5ea5a865d7b0af9e33f06e2fe8ee59410c563b844f7eb40479a3696cead16f8d"
+    },
+    {
+      "file": "docs/DATABASE_MIGRATIONS.md",
+      "check": "resolved conflict markers absent",
+      "sha256": "73e6166e7ff06def7f169d9620b3e7a512a220a09bb975dfd9ab4a197813994f"
+    },
+    {
+      "file": "lib/audit.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "c50ee8d40b041a7e7cf90ce08274a96609971bd6d4858a3ca9a9eec59b3a362c"
+    },
+    {
+      "file": "lib/db.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "a09ebf9c0c08d500970d9ad0444eacc5a679b93756505fad215ba435fdd3df69"
+    },
+    {
+      "file": "lib/fullBackup.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "458a0fbcb1df38299b20c29bc71376336dde5dee7dbbb9da075c6452aaf4e826"
+    },
+    {
+      "file": "lib/restore/staging.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "3a55b317cd9a1ed718c5e530cc863d67fd4110c08852eb6350d466c7abbc3780"
+    },
+    {
+      "file": "lib/settings-definitions.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "045ff32915fe3b408887396b715360d80857f5198bf3a1920663ff8d0dd00c81"
+    },
+    {
+      "file": "schema/current-schema-contract.pg18.json",
+      "check": "resolved conflict markers absent",
+      "sha256": "e1573c94a19d5c443b2fbf1eee922d57108e5e30d70b7a43b79d779ae1ae2182"
+    },
+    {
+      "file": "schema/preflight-disclosure.pg18.json",
+      "check": "resolved conflict markers absent",
+      "sha256": "14b1d2fc209d09f4f375f5dc4a8886d6e88d20149f4b22eb8a1e94c8ccd6a461"
+    },
+    {
+      "file": "scripts/verify-schema-ownership.ts",
+      "check": "resolved conflict markers absent",
+      "sha256": "4a5d717d47860019ecca3313058257a923af74ed2748e557a441e1c428c2c461"
+    },
+    {
+      "file": "migrations/proposals/invoice-archive.sql",
+      "check": "unactivated WORK proposal byte-identical",
+      "sha256": "434ed832c2f3e199643d2d213736cb8bcb935e14c4b373ca170b910a920ba43c"
+    },
+    {
+      "file": "migrations/proposals/invoice-service-additions.sql",
+      "check": "unactivated WORK proposal byte-identical",
+      "sha256": "6a4681990c93fe63a2263f3ceb9617698a39dc310112aecd2d9f4af0cae60413"
+    },
+    {
+      "file": "lib/canonical-appointment-assignment.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "8c3c04a32763b3186879b39908e73238cc4b8401c637f5b282537df91feac527"
+    },
+    {
+      "file": "lib/canonical-appointments.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "b60ed530479f43b25d61b8e796b689ac62b7690dbb6d40487ee57ec21972c7d8"
+    },
+    {
+      "file": "lib/canonical-booking-requests.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "837ed4b9d65ef428cc35b6a4fd9ae8eb0990eec0fa37637fee95d8f5b8de33d0"
+    },
+    {
+      "file": "lib/canonical-ceph-pair-projection.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "e33ebf13f44d302ac07de5863b04b09b6c016643df48395a1477b4f38420506a"
+    },
+    {
+      "file": "lib/canonical-ceph-pair-reads.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "13da8a45b774cfd7363d332b986452c7a0bf644928d3fa4b8ba57f38b8004dbd"
+    },
+    {
+      "file": "lib/canonical-ceph-projection.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "a775c47e4a0190a3c1760f5faa68acde28ea1d06264843ec0143ff9c296d9a71"
+    },
+    {
+      "file": "lib/canonical-ceph-reads.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "e31416667f7b87344ed703e9fbb2a21c001b6b860b8c76e929dc0828ced0c525"
+    },
+    {
+      "file": "lib/canonical-ceph-reference-projection.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "d234a8f0e70a54936bc2f70b17e051b05f05be955e20c9c1a2f9f81b8fc357a0"
+    },
+    {
+      "file": "lib/canonical-ceph-references.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "b6328b385d535590449d6cfca440e7f1e9d13948e1b858e8dad582ec016fd688"
+    },
+    {
+      "file": "lib/canonical-display-notice.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "7b5ef330227bb1f504e8df41a4bf167571514687121d48d53262b938997074e3"
+    },
+    {
+      "file": "lib/canonical-navigation.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "cfceb1ab17ca73662604a3ae01212c9a6e35726169f79f0e2a8a294753d71ded"
+    },
+    {
+      "file": "lib/canonical-next-session.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "3c2cf22afa57c68a91a62637c9c7d25a1ec5a4623494e5f24c98d4516984a39b"
+    },
+    {
+      "file": "lib/canonical-ortho-assessment.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "a8717164ecd01ce833ef25db0f2d78c3ae61aad2f33d4ea1519b748cf10e7b35"
+    },
+    {
+      "file": "lib/canonical-ortho-followup-projection.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "5c88d1b32644dd6419c04a06d3477b370fd6aedc404a2f77b233fd01f9f8f5ef"
+    },
+    {
+      "file": "lib/canonical-ortho-followups.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "30db2812c7136e3cd5233d43594608cf4c93242aa987b28c42a60289d3f9a78e"
+    },
+    {
+      "file": "lib/canonical-ortho-reads.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "2096677bbde02ae2b1511c80dcccfe799cbf4ee726f74a8396f8a610caf57b4a"
+    },
+    {
+      "file": "lib/canonical-ortho-strategy.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "b2de121b1109a672925822b13d5528f2cdcf7640cf196eea5c903483dc5e334f"
+    },
+    {
+      "file": "lib/canonical-patient-http.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "e50e1ac7a0b93fff55bc0915409fe576a02a77513fbd84adddba538bac8d1d49"
+    },
+    {
+      "file": "lib/canonical-patient-reads.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "3fcf671f04e9223ea5879315e3d81113c4d79336ae929d34ccb5bc229f73b35f"
+    },
+    {
+      "file": "lib/canonical-patient-writes.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "5e473ca83ba1ecf6548d06955da8a3d61f1f149bbe539e539392584ad36b1f93"
+    },
+    {
+      "file": "lib/canonical-plan-projection.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "ff4eb0ca0b71c2ed6f7136bf60a274530bc6a4d29cb8a038837dca56fae0af10"
+    },
+    {
+      "file": "lib/canonical-plan-reads.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "70e6e07575180eb55a785ef19b021f7cfc6b73d597da0ff4faa96ad04f22f0b9"
+    },
+    {
+      "file": "lib/canonical-plan-template-projection.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "a7c9161c20634295905457a12ce3394427f1258ef245c76c44cce06cbad688cf"
+    },
+    {
+      "file": "lib/canonical-plan-templates.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "7beff1cd8dc487c334806d2d7221ba1654b955ef48a765d77bb55bcc04d056ad"
+    },
+    {
+      "file": "lib/canonical-planned-visits.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "2412737812a8b9ce43e37e2610427081a4bbbe7ed56e9b329e192289aef871e2"
+    },
+    {
+      "file": "lib/canonical-provider-blocks.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "23037b64cd748b1b502947fb07d1847b80e1e8fd3ea064ae93049ef31adc8bb8"
+    },
+    {
+      "file": "lib/canonical-read-snapshot.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "7321dbd8af7a2412003bc315c384195277c7f8fe0c4ebdb63837c81c3ae0bb93"
+    },
+    {
+      "file": "lib/canonical-recall.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "112cae78a9bebd6c75a159876ea8fd1efd8364491066ce4986ab2bfa51350834"
+    },
+    {
+      "file": "lib/canonical-record-reads.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "22464a29a5ca4364fd3a3e47f1c7552ef31f46382f076a4202d2f68c4c9d90c2"
+    },
+    {
+      "file": "lib/canonical-route.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "af578cbcc3b13ea7a2f4806dd9e4158ed1cdb03cadb9e8da7d0d6a0d2d8089b0"
+    },
+    {
+      "file": "lib/canonical-settings.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "810de22667701a69cd85552d72c799ab9ed26ee849d109540ba5c615a8e9f3b2"
+    },
+    {
+      "file": "lib/canonical-shifts.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "e6214eda0e61fd4992ca8b4ea79f1e8152d4c28584d83f87c83ad84bc206bc08"
+    },
+    {
+      "file": "lib/canonical-staff-directory.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "90a25fb77f7b3b12be78142e1ce2fc3c1c5be43a560e8f32c6e81d1515c5925f"
+    },
+    {
+      "file": "lib/canonical-visits.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "e0c440fd611f96a22f5879f815c1a24ea53ea1e8e2b3545f39f0dd380dae68a2"
+    },
+    {
+      "file": "lib/canonical-waiting-list.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "bbb7850a4755d7122246705ba29cada423413c7e104b7230340c72c0c9da75af"
+    },
+    {
+      "file": "lib/inventory-domain/canonical-operation.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "b528212686499b0edf6ad11733ee0e788bf11f6c2ae1fbfec3a3b015a2f96be5"
+    },
+    {
+      "file": "lib/inventory-domain/canonical-procurement-transport.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "084a1a1be9e4306d6a1f01fc17effdf9411d40bf178238ea68d85ce2bf781956"
+    },
+    {
+      "file": "lib/staff-account-editor.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "2101dc6c904136f459a6c6fd34ac10d7ed9364e0622669e6ef5e0cfb533bd2a2"
+    },
+    {
+      "file": "lib/staff-authenticated-identity.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "797ca61a535db5593ad0cdd3175a76aef8288e0713fb4e01ff4af485262ddc46"
+    },
+    {
+      "file": "lib/staff-authority-lifecycle.d.mts",
+      "check": "WORK protections byte-identical",
+      "sha256": "4394f35a6b241033f4fa219acc785d19f15c77d6c40f215adbe37641f9a0f139"
+    },
+    {
+      "file": "lib/staff-authority-lifecycle.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "baaf4e3678a3b2b24499cee2736f0882b120f593a49d6f10548af6f0d88f4625"
+    },
+    {
+      "file": "lib/staff-authority-proof-internal.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "c259bbdbefc02d01b0e004e053c1bb487bb637947be32d82eb6f25473b40c96a"
+    },
+    {
+      "file": "lib/staff-authority-schema-proposal.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "94dac921749f634ad856339423b8656f1e19e4c1db9b7b3225d6d605fdebbd55"
+    },
+    {
+      "file": "lib/staff-authority-snapshot.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "17fce84207d5cdfb85a85b217729f0463c14eb5eb4e7be0cc56194a732f678c1"
+    },
+    {
+      "file": "lib/staff-capabilities-legacy.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "7a075ab0994a40842a1c4647881a29527183d4acf0360630827ac00aae594232"
+    },
+    {
+      "file": "lib/staff-capabilities.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "b3647bd3579ae1fe2be4ab7836c900325ffb704e600077c62fcd1e57879a8fd5"
+    },
+    {
+      "file": "lib/staff-capability-catalogue.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "2e6b83691df24db4ef63d941fe48bbb047523285eeeef1bdb986cb100624100d"
+    },
+    {
+      "file": "lib/staff-capability-editor.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "5bde6c85c0c3a87e474e4b404ce6fcdb780249babfc6ee9c00616718d0adbcac"
+    },
+    {
+      "file": "lib/staff-capability-labels.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "e48aa4eb885370e43281d2711bb113b428cbc1be53b94f5669bab3478a8ef7ee"
+    },
+    {
+      "file": "lib/staff-claims-v3-design.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "6278a21ae5173401e67fe5d05044c37589aa936d7b643d560735e37f25b21dbc"
+    },
+    {
+      "file": "lib/staff-durable-issuer.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "15593228c65ff1d7e19b767bcab178309ddf9761dcc8e9cc1015fc07fa0e3107"
+    },
+    {
+      "file": "lib/staff-durable-session.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "0d1f23eb5ba31978fed0ec69bb458895cce913bc1c57f5efd2403c439de1804d"
+    },
+    {
+      "file": "lib/staff-entry-mode.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "4dc42aa36cb060fee20be6dbb937b718d8faa538677734ac8bbb33cdd3882559"
+    },
+    {
+      "file": "lib/staff-identity-substrate-catalogue.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "a051435aaf9f39dc579854851705bcf99f686a36ba782cb330a00bd95c5f77cc"
+    },
+    {
+      "file": "lib/staff-identity-substrate-probe.d.mts",
+      "check": "WORK protections byte-identical",
+      "sha256": "add8e566a09235e92ba1060e3338d5c1bc2e4c460b5c144054655875ae5ec5d4"
+    },
+    {
+      "file": "lib/staff-identity-substrate-probe.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "9ec541a5dc5b3bf4202eb017eb2eed3d85bc5eb682e180b9f1da19f7e644c7aa"
+    },
+    {
+      "file": "lib/staff-identity-substrate-schema.d.mts",
+      "check": "WORK protections byte-identical",
+      "sha256": "f29eb48ee7c1c2660ae53d839b653aee2bb829ab0b29268c6918b8751c6839df"
+    },
+    {
+      "file": "lib/staff-identity-substrate-schema.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "c993c42b3f0f08f268a5e084670c82c649102ef266998bf32bf76fc0430bf99f"
+    },
+    {
+      "file": "lib/staff-identity-substrate.d.mts",
+      "check": "WORK protections byte-identical",
+      "sha256": "3471840f9b6aa51af9d07e9f6aae2b08cb7389b07b3532f082b2b794e8280435"
+    },
+    {
+      "file": "lib/staff-identity-substrate.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "52eb17002a9ba7188dc2d15a89a6230060c0640742e74be04bc9a59b7a0c5097"
+    },
+    {
+      "file": "lib/staff-modules.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "ca872414414c4dfdf49af51417e371472cec2a5f0d2abbf516e31ace7468edb5"
+    },
+    {
+      "file": "lib/staff-operation-runtime.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "3061a0632468afc6b5495ca7581f4c4e351e5d21b47bf7f516632436f108144d"
+    },
+    {
+      "file": "lib/staff-permission-envelope-core.d.mts",
+      "check": "WORK protections byte-identical",
+      "sha256": "9508cedb7e768d9e06469e13ec33096b87c60524cb81aa6cbb35063cbb43cb35"
+    },
+    {
+      "file": "lib/staff-permission-envelope-core.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "8a44e95eb26c94e23c1b967a9e6a45e68dda3a859f25a00e2fdf2843ca375079"
+    },
+    {
+      "file": "lib/staff-permission-envelope.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "13d2b3aa0d3a83946e8da9650b11f2d4366c11e4af9b5954dc275de5011b2eeb"
+    },
+    {
+      "file": "lib/staff-permission-markers.d.mts",
+      "check": "WORK protections byte-identical",
+      "sha256": "2afb86ca617341a9677710cb57391423f9863df7a6c99616bb2892a4293d0a99"
+    },
+    {
+      "file": "lib/staff-permission-markers.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "1ec140ff04eeb8b14219be0979fd3e71b49022ebfce55154e41ce1fe4885be0b"
+    },
+    {
+      "file": "lib/staff-runtime-catalogue.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "7ac1f567eb0a1026ad3701cb583fd9507634b5d39e4fc552866651ae1092e72c"
+    },
+    {
+      "file": "lib/staff-runtime-probe.d.mts",
+      "check": "WORK protections byte-identical",
+      "sha256": "c9909280feb1cb298f0442585093985f82aa7c319739d8346cbea87a2e52c3c5"
+    },
+    {
+      "file": "lib/staff-runtime-probe.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "ebf853746ff3d6ee43c167dfec167b2a7168c4149f522ddde26c552b21619080"
+    },
+    {
+      "file": "lib/staff-runtime-schema.d.mts",
+      "check": "WORK protections byte-identical",
+      "sha256": "536d500ae0ec19909eb4fcc1820ddb264664c65792531ffdb14f7546c4ef8d1e"
+    },
+    {
+      "file": "lib/staff-runtime-schema.mjs",
+      "check": "WORK protections byte-identical",
+      "sha256": "9dda385bd88c937323e886ab1e1e2e5a91072e4e8d0a50a14c37535481e84668"
+    },
+    {
+      "file": "lib/staff-session-admission.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "8e5717542b95b86469c4f941169dd316ef105d9c8ba1a17b89d90f3868c5a289"
+    },
+    {
+      "file": "lib/staff-starting-templates.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "615eadb3cf8a68cfa426d4010b7fe4ae0f6104b2b3a78519104bb5a13f5a0ea4"
+    },
+    {
+      "file": "app/api/display/route.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "94a69696967d7dad817358f726556ef513a5270461756eb87d9b7bd03564146a"
+    },
+    {
+      "file": "app/display/page.tsx",
+      "check": "WORK protections byte-identical",
+      "sha256": "66dc9032f5b912ddafebb58487181e2dc5ac78cf70c794ba90370f684d0665fb"
+    },
+    {
+      "file": "lib/patient-access.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "8e5d576735ecd688650db06b22b1c42d5e9a31600b39a8d7ef54abffca6cc0a2"
+    },
+    {
+      "file": "lib/billing-classification.ts",
+      "check": "WORK protections byte-identical",
+      "sha256": "6def2edfb21c520ed3823dff029b962e8fa8cb2a1d3d7f835452c053a34214e3"
+    },
+    {
+      "file": "package-lock.json",
+      "check": "WORK protections byte-identical",
+      "sha256": "976fa7b4e953cb320f3f60468996b74d498fa5acf048dc3f5a11a5b6f106e7c6"
+    },
+    {
+      "file": "app/api/branding/login-photo/route.ts",
+      "check": "reviewed main component byte-identical; no new canonical admission",
+      "sha256": "0c2779617ce4e65e386535e7b4cfe58ba5ee98848bdc4e3e54d8bf0eff93f6c2"
+    },
+    {
+      "file": "app/api/settings/login-photo/route.ts",
+      "check": "reviewed main component byte-identical; no new canonical admission",
+      "sha256": "ef5e0534274bc14b88fabcf9d275a72831ca884e5e899938bbc790cf39772290"
+    },
+    {
+      "file": "components/settings/LoginPhotoEditor.tsx",
+      "check": "reviewed main component byte-identical; no new canonical admission",
+      "sha256": "f5ec082749f577863b0572e8712e616efa864b2c3f582caf670b875f9ff286cf"
+    },
+    {
+      "file": "lib/restore/login-photo.ts",
+      "check": "reviewed main component byte-identical; no new canonical admission",
+      "sha256": "82d91d8508662016fde94caccb5d91c1e2eeb3cb38e41d396a2954310497d303"
+    }
+  ],
+  "migrations": [
+    {
+      "file": "migrations/0001_baseline_schema.sql",
+      "sha256": "471941f93a5a0964e6c93eb99b819f365b789fa3996a82ce89ff958e7292735c",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0002_confirmation_claim_ttl_index.sql",
+      "sha256": "8e82e58d93157e073a7dcdc3759464d407eb7ee78ab5427a144a4566b865cd41",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0003_payment_idempotency_and_reversal.sql",
+      "sha256": "2d7644b59b5d89129231df9b36fc7813aeae82012f5f870217cc70ca57e39705",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0004_material_rate_history.sql",
+      "sha256": "e12bff312e49c6cb688b528ba74bfd9ae37f8973ab55d13d4b0af4ef1c554256",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0005_financial_append_only.sql",
+      "sha256": "4d1aa4610f59a0ecc2be8de30623412e7d76cce0f4fef55495f7a1a40be001e5",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0006_appointment_lifecycle.sql",
+      "sha256": "ab43d938e78f119fec15612f0cf74ebdb77a0bbc1742830ea7049f037b265738",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0007_appointment_services_and_capacity.sql",
+      "sha256": "ca54ac08747340bf57d9e2db840b5f178cafad9b47735e401da053b06a540fa5",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0008_appointment_chair_and_new_patient_snapshots.sql",
+      "sha256": "d48c166365763e51210b94743716013cb4585116d5be901d3da4fd79d2d9ad38",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0009_waiting_list.sql",
+      "sha256": "5adf1caf65e0d1fafb120ca6804a49a4e235d2cb2020a9367c19349a6ff4bc6c",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0010_waiting_list_completion.sql",
+      "sha256": "e13dbc54a1d3c67901774683f35b58a8f92e2923acac8d0d9d14afabbd188b1e",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0011_appointment_waiting_link.sql",
+      "sha256": "2ed90959cf938aad7f1ca4c463940c365a696791cc194f27b9835144b8b7b3dd",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0012_doctor_commission_history.sql",
+      "sha256": "935aeaa10093f1ecd92cd76d5739374fd0335886def5466acc6cf5f5958f6dc5",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0013_supplier_payment_settlement.sql",
+      "sha256": "5c9b953ec9ed4a0fd37e866fd3680a5dbb8086781dd513e7117485c86a9bece1",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0014_shift_close_expected_difference.sql",
+      "sha256": "9cea77e776682491c68f6b9a276e674721ef93147e0cf9a3a56d8b76c3f73bb5",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0015_saved_reports.sql",
+      "sha256": "11943e35fd386421d8796e01f6a814f24bd2ef0a606b2014e93175026189d7d5",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0016_finance_controls.sql",
+      "sha256": "95f686afd7d4aa3bfa8ad2b08680dbc38e2e33260a0ace30c6b5dfeb69fab12d",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0017_stock_supplier_link.sql",
+      "sha256": "0c2f8d13421709bb10cf1916dc4a815dd587d33297ebff48265c590268dcafe5",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0018_patient_demographics.sql",
+      "sha256": "d3302636a51c81c92facf9abe4cece7d5ec75ee81d919ec4dae75f32e3f0a971",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0019_audit_source.sql",
+      "sha256": "e2d9d1f8a9a1ed5167f747a5e3ff6d07524c972dcae2522476ecfc26d14c1618",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0020_expense_attachments.sql",
+      "sha256": "4eb9e583ef41f50c77bf59b3270d53572ffe58b7361cb9bad97d287932b65401",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0021_patient_referrals.sql",
+      "sha256": "77bf64e5e4add9671de5d6d2cf2ed9053bed97d735f45e6be0ebdb0616bd0956",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0022_patient_referral_source.sql",
+      "sha256": "48eebf1b9bb30967abf0545e7359c66fc5d468ffe1f61738d48a86f8abaf4d2e",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0023_opening_balance_currency.sql",
+      "sha256": "462d20ff9ce81629997d7e496ec16e26512b045ed912fedfd091ce84247f6d72",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0024_legacy_archive.sql",
+      "sha256": "10234599fa312563c48fe358e6ad147edbeeb7bad50e7f97c7955eeaf51c61d1",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0025_messaging_channels.sql",
+      "sha256": "43523ca1f21b789427219c4967d4179b321eebb733d77e8eb08cd047d1ff1d98",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0026_visit_currency.sql",
+      "sha256": "cd39a2d88d68bbadf66db85791cb86ce815e664f1f0123b06ef73c2b5045e68b",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0027_medical_history.sql",
+      "sha256": "9b9c06adda890ec41168c9d7cd89a6def20f9ce6ca990f2bbe3fb2c2248cbf25",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0028_patient_identity.sql",
+      "sha256": "68eb3b3092b2dacf961859220f169fe729cc36a5c006375c97946a5c203048e4",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0029_planned_visit_interval.sql",
+      "sha256": "4b6fdc44c0cc1f5c5e1d6c48c88cc816d3b34e318d65948e5992b111f64a1b40",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0030_party_opening_balances.sql",
+      "sha256": "e458044711fbebcd622e018fa12a86320faec0e5dbd09d634a68e01abe9cd7ba",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0031_journal_line_currency.sql",
+      "sha256": "f39a9a57326316d72a236efdcfd5f05cb370a60bfe484f2ac9641e3abc0dc7d5",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0032_specialty_cases.sql",
+      "sha256": "7573e9db617dbdf7007366e73e52a475cf776a4875c3d43b0198821395e7e19b",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0033_internal_referrals.sql",
+      "sha256": "bdd5c61494323aa77d5de18ea302e0b2da5cb5bc133a610e9dd717e68887faa4",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0034_ortho_legacy_baseline.sql",
+      "sha256": "ddfba160fc16aa0857a07b4fc091435c2510caead9563934108772a636537f47",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0035_commission_case_overrides.sql",
+      "sha256": "4e648eac55cc8188224aada88d5a85d29019852f59c8d8cbbad88d0e01da6603",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0036_visit_clearance.sql",
+      "sha256": "c0593b6ff09fc95e93efd22fb7efa57643210758095d32e6c046143ba0bbbea6",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0037_patient_families.sql",
+      "sha256": "1ef399a1ea6d41cf51bd05889cbf31d16aaddb5ba2b3dfa74b4b82cab218956b",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0038_legacy_balance_arrangements.sql",
+      "sha256": "d2ee64f0b3236d7595de5443c0f05cb06aafcd20064e10a992014d29b2ab6f2e",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0039_ortho_adjustment_billing_decision.sql",
+      "sha256": "1dd2066a86a123dcf778e20cad92ff8fa47a2d4656a40f9ec693b80b6a14274b",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0040_endodontics.sql",
+      "sha256": "14f84d75b397b95fa25e8502d021b626fc38f973532125ffa8754ebeef10b142",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0041_invoice_clinical_linkage.sql",
+      "sha256": "3fb5db8869d1b051fc5b08aa7a25c2c00343df26b590e7e844f4de7f3f6a7337",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0042_legacy_treatment_agreements.sql",
+      "sha256": "32ab5f852a088cff1de7b7f876b0976b2d461b7ef67f9b3793e131773af486c8",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0043_legacy_treatment_coverage.sql",
+      "sha256": "8da7e57a474052dcef35a2269b4613d9a2839121c404130862b0e67dec78296f",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0045_hr_staff.sql",
+      "sha256": "c3ef983b19de9b33eb8d6c4460b8acbfe8a087321eb77252a6aece5b43b78970",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0046_hr_tasks.sql",
+      "sha256": "b56c20c66b7b9616d67b2abc48823d4c27c7935e6da39088f1859eedae9db8ff",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0048_hr_contracts_attendance_leaves.sql",
+      "sha256": "1b5d7a87e0d53d455b73363d0af45c0940c03a9fe10125ab9128eefab85eb241",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0049_hr_payroll_disbursements.sql",
+      "sha256": "7bdeeaf170029c845d56ca21e2836db746040a8490291b8fae3b2d3ad4b01e62",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0050_hr_payroll_integrity.sql",
+      "sha256": "f273b970554c11aca74d65a9926a68f324d47d87d3e2983489715c16d6454075",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0051_ortho_treatment_strategy.sql",
+      "sha256": "44ff94771e962a48fa27d05de941e0c096d19000d66078a6fbe477ae4265157e",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0052_ortho_assessment.sql",
+      "sha256": "92113a0e96c51edc5596508c9b40f742df5bff38b0e80518504034bd74acbae2",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0056_hr_employment_history.sql",
+      "sha256": "cc87396b7d3cd5035c67f1dfa0f2dedbe2ed904a618722b12b833c969cf7c112",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0057_hr_schedule_policy_versions.sql",
+      "sha256": "8e4bf0f0adf3d2284f64bd792b3903958ce6ed62923b4cb0c61ac405b82b8791",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0058_hr_temporal_write_receipts.sql",
+      "sha256": "1c2c0a3582cb5777fe6cf063d0ba5d1bbe04ef6acbbf035382a7fceeb9a6b972",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0059_invoice_debt_installments.sql",
+      "sha256": "875201fa136c6dd2991a08eb17e5b94adfaa912186c17b40141389f7e447582e",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0060_historical_treatment_documents.sql",
+      "sha256": "1fbae0421b58835f4f6614a6371c5531c765a1d06e91e98c6b4db1c17aa8b8e1",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0061_invoice_correction_lineage.sql",
+      "sha256": "52e2b083dd6be4c87f6470c5c2a824364b8373134b50a31afeed3f4edca0bdc7",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0063_invoice_currency_reclassification.sql",
+      "sha256": "19adaec13af17f3e7d78a6656daa4516983a1ac5186e3a55609153146b3119c4",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0064_approved_agreement_principal.sql",
+      "sha256": "aefc040a29c8b887a8eeca073103ce4268a8851b89e0025b406941e48f247655",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0065_inventory_purchase_receipts.sql",
+      "sha256": "4b7c79f4ce7b334e0f052cbd73d7fd2346c91ed5200081551f1a9f0cfd4b7808",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0066_agreement_delta_amendments.sql",
+      "sha256": "28bd13b5ca9f34d9a9010aade759d91fb398b47f30a78433e5e663ce90464dac",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0067_patient_appointment_history_index.sql",
+      "sha256": "4717e0a68ee8ba9aee745000c8561d4b9d6481f48f41c094518fac76c1bdacc6",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0068_collection_attempt_retirements.sql",
+      "sha256": "07864df6fb6fb98742fd35efebcd2f33f23a1b26c90fb7df16f54605cf62aa42",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0069_unpaid_currency_transitions.sql",
+      "sha256": "c11d02aecc5d8644dbec1edea664ecb5ba63f3c21a53c77f06c5bb4007fbc714",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0074_lab_work_intents.sql",
+      "sha256": "d4e3839ca32d053827a67f0b60b3efaddc69850f4c1d062577c541031b93195c",
+      "inWork": true,
+      "inMain": false
+    },
+    {
+      "file": "migrations/0078_agreement_reconciliation.sql",
+      "sha256": "e07a3b1540fe708d9d53c5bb2ba8ca1d733c991ddfe4315392a5b26c596ebf30",
+      "inWork": true,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0079_ortho_followup_coverage.sql",
+      "sha256": "5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99",
+      "inWork": true,
+      "inMain": false
+    },
+    {
+      "file": "migrations/0080_patient_numbering.sql",
+      "sha256": "b2bee7694f0781775bbddeea3715cb16ab701f4ee3fd748785ef1016c0f2e10a",
+      "inWork": true,
+      "inMain": false
+    },
+    {
+      "file": "migrations/0081_invoice_archive.sql",
+      "sha256": "e03d14bb7500c98c806116e251a3b3bbd29db06da53717a074cce93290a430aa",
+      "inWork": true,
+      "inMain": false
+    },
+    {
+      "file": "migrations/0082_invoice_service_additions.sql",
+      "sha256": "df2e093757385a3260012d03271f7abb0d5e6e682644bddce5409ec12dcee214",
+      "inWork": true,
+      "inMain": false
+    },
+    {
+      "file": "migrations/0087_agreement_reminder_metadata.sql",
+      "sha256": "6b1464da6aa1d6969e19afcefe20389e1bac5fe09b803c57c60397915f753644",
+      "inWork": false,
+      "inMain": true
+    },
+    {
+      "file": "migrations/0089_lab_shade_specification.sql",
+      "sha256": "2dcd996f0ffb13a8e79dc98a807845f10e0f1b0447c805c2ed6afaace4f7e5fc",
+      "inWork": false,
+      "inMain": true
+    }
+  ],
+  "sharedMigrations": 64,
+  "historicalSourceHashes": [
+    {
+      "manifest": "docs/review/evidence/work-calendar-ci-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "__tests__/postgres/lab-commission-lineage.test.ts",
+      "sha256": "255db6aed8e08231b5f171651ff152f1a7fa2e259198d842d42daf1c8237cbe9"
+    },
+    {
+      "manifest": "docs/review/evidence/work-calendar-ci-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "__tests__/postgres/performer-commission-reconciliation.test.ts",
+      "sha256": "16b258ac8163f1f0a227503da251077fe97e906cf87ff8313f6a30084413be5e"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "__tests__/canonical-ceph-pair-projection.test.ts",
+      "sha256": "35afaa90a89ac55c3a356b717164bed6f0df1a2b76527135c40627a79668d3a6"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "__tests__/ceph-comparison-record-order.test.ts",
+      "sha256": "bb47e1500a1c13fddf960f4b39ec1aef07798dd941863c55acf9aa4621710928"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "__tests__/fixtures/canonical-ceph-comparison.ts",
+      "sha256": "3b84572af1a72a6f077c7fb11c7602bd67c3bcb23030d770c7057e5e3a241050"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "__tests__/postgres/ceph-canonical-pair.test.ts",
+      "sha256": "465844dd51396e5de8a8b8772ba795ffdcb77213a90f2db4cfec0c7e24c22bcf"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "__tests__/security-http/canonical-ceph-comparison-journey.test.ts",
+      "sha256": "12f21fbfb11376961d12a8e5223d8c1d68a2c13154f5a5aebbe700a7257a53eb"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "__tests__/security-http/ceph-comparison-record-order-http.test.ts",
+      "sha256": "3daafc2b49f90bd8b2ca9723fbbea3df85150b3aa0fd8aa9ddcffa9d9c78eb54"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "app/api/ceph/compare/route.ts",
+      "sha256": "2fb76041e224c6dbc9db7de1b756537a4a8d6b2fac52939ae4a2ca56702b2129"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "app/api/ceph/superimpose/route.ts",
+      "sha256": "bafcb9d95903973436a7d12fa5d4b176d2d20b4874df1cb9b5d6fb7625c82835"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "components/patient/CanonicalCephComparison.tsx",
+      "sha256": "b9fc2c13086afcbbf00f5fcfab963d83b4abb08e1e66a618f22ebc06abf25fb8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "components/patient/CanonicalCephStudies.tsx",
+      "sha256": "54466f0e18b50de7f2bd3909f17143d90adec75f4ad9e0c933e87b194369e908"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "146753c6f96687f31302492c00e0e435afbc8538f580b72d010939b71c30b35c"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "docs/security/staff-cutover/inventory.json",
+      "sha256": "725eb5e6444fa54cd94275e98ef19cc147fc4b966980c86fc6d4c6b70fd09bbf"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "lib/canonical-ceph-pair-projection.ts",
+      "sha256": "e33ebf13f44d302ac07de5863b04b09b6c016643df48395a1477b4f38420506a"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "lib/canonical-ceph-pair-reads.ts",
+      "sha256": "13da8a45b774cfd7363d332b986452c7a0bf644928d3fa4b8ba57f38b8004dbd"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "lib/canonical-record-reads.ts",
+      "sha256": "22464a29a5ca4364fd3a3e47f1c7552ef31f46382f076a4202d2f68c4c9d90c2"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "lib/cephCompare.ts",
+      "sha256": "55af10db33b822fd1a91c206f79332cb0708109ce8db551d49e149f76b8bb6ba"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-comparison-20261101/manifest.json",
+      "revision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+      "file": "lib/db.ts",
+      "sha256": "0a91a81f24a2400493f160c9cb868357d382695a4175f45e36e5bcbcc6f3a2c8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "lib/canonical-ceph-reads.ts",
+      "sha256": "a19dbc12ed58e8e8e22baefb682cf55af802990527f00fc218ab9c98664a7c93"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "lib/canonical-ceph-projection.ts",
+      "sha256": "711321ce6d8940deb72ea8f13b1a6355fc65f8bc8093025a0404fd0ad2da172b"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "lib/canonical-record-reads.ts",
+      "sha256": "ad4983b9b93b2c80c8d37a1d4d8b358606c537c3a6451c97cd2ce0b45825f834"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "app/api/patients/[id]/ceph/route.ts",
+      "sha256": "6caef6b896ab99fc491bd5ee36087415f3b28fcddcca3289e5b480b8f07e6500"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "components/patient/CanonicalCephStudies.tsx",
+      "sha256": "2d63c43c1790c57eef8ad86cc1695a6eb70452148dea44fc40fea56e6fdf6b8a"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "components/patient/CanonicalPatientProfile.tsx",
+      "sha256": "ac093fc804cb7e7b07ea405eede466aef590705b17a985ad1ff493ba72485ffa"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "__tests__/canonical-ceph-projection.test.ts",
+      "sha256": "0455203fd5ab061591f187912b969fcba7406fe8c6397dbc50c009b32ac175c0"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "__tests__/fixtures/canonical-ceph.ts",
+      "sha256": "7391c36fa2dd1ebaefce6167c7d592f6ca1dd6557cbe68c5485c83ea5b40cd5d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "__tests__/postgres/ceph-canonical-list.test.ts",
+      "sha256": "ba57242c3e1c102b35c54161f6f5da5aaa0811719b41209dc529f24d72d882fc"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "__tests__/security-http/canonical-ceph-list-journey.test.ts",
+      "sha256": "3bc761bf3dffbe7a75c68a707551b3e05b74297396773baf5da8fbd742417544"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "431eff7425295caa4e65e62ce474d265f2e9c821181c494ffd512b80749fdda8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-list-20261101/manifest.json",
+      "revision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+      "file": "docs/security/staff-cutover/inventory.json",
+      "sha256": "85d42d8d629d5d52420bb0b467e9b68a1cd3dd38a40713e2db7e1540d33bb2cb"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "lib/canonical-ceph-references.ts",
+      "sha256": "b6328b385d535590449d6cfca440e7f1e9d13948e1b858e8dad582ec016fd688"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "lib/canonical-ceph-reference-projection.ts",
+      "sha256": "d234a8f0e70a54936bc2f70b17e051b05f05be955e20c9c1a2f9f81b8fc357a0"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "lib/staff-operation-runtime.ts",
+      "sha256": "2a1b2770ab7806498c7a99b0ec71d672c50b58fd776e8a6f3a0019ff461b10c5"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "app/api/ceph-reference-sets/route.ts",
+      "sha256": "de8abac44c20c556e97b355d76b1779f2a543cdc6bae2af88f09437e073ca4b6"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "components/patient/CanonicalCephReferences.tsx",
+      "sha256": "5e6ce1c3e9c38f79d1302f7b3f29e00fa6d97dfe041e9cbb053ef46061d767bb"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "components/patient/CanonicalCephStudies.tsx",
+      "sha256": "f7b8ebad0e22e2dfce8dc50cb39dc0565666d07489ce7fa8c50e5c31609468d8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "__tests__/canonical-ceph-reference-projection.test.ts",
+      "sha256": "2634bdbbd4db8d04ca0b43377dec773d4067d3585fddf574d96eb16ecd29c6ac"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "__tests__/ceph-reference-route-compat.test.ts",
+      "sha256": "61c321183886df2fe1654b15833fdd5ff43c4e85ddbb84a101b00eb93bc9a1d0"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "__tests__/fixtures/canonical-ceph-reference.ts",
+      "sha256": "94f900433e321b23f7ccd403771f9657795a12f56ab34eccc501b67866a56a9b"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "__tests__/postgres/ceph-canonical-references.test.ts",
+      "sha256": "59c641717e9713ccf9aa024192776182e71c63f49865ee2c366ae2220aa0abc2"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "__tests__/security-http/canonical-ceph-reference-journey.test.ts",
+      "sha256": "10d372b9de4537dd73fb36e09f8cb010036c0691ebae317087edc6170b576989"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "scripts/audits/staff-cutover-readiness.test.mjs",
+      "sha256": "642a1c8ad77b1f9abb04b55549c0bc1a491ddb43871a5ff478484155e651ad1b"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "8c1c18aaf1a05ddf97c8b338ef2b8c13e74765e33490a4ca4c671c0a674149ef"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-references-20261101/manifest.json",
+      "revision": "55aca0078c2fa5517fc8b752820f961214da833b",
+      "file": "docs/security/staff-cutover/inventory.json",
+      "sha256": "9834ca0a813bf095a642f528b57c3988c5b3bc8889f47042cc17e57348bd55ae"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "lib/canonical-ceph-reads.ts",
+      "sha256": "e31416667f7b87344ed703e9fbb2a21c001b6b860b8c76e929dc0828ced0c525"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "lib/canonical-ceph-projection.ts",
+      "sha256": "a775c47e4a0190a3c1760f5faa68acde28ea1d06264843ec0143ff9c296d9a71"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "lib/canonical-record-reads.ts",
+      "sha256": "40bb8dfe6645a3bd5b733006c22b9b2677e24c05a8be488abef048490afd34b1"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "app/api/ceph/[id]/route.ts",
+      "sha256": "11c52e513d65516ccccdc6ab8f508ab22fa6be27a02d95d7786b54416f8c42c8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "components/patient/CanonicalCephStudy.tsx",
+      "sha256": "85a7fe96f60bd20caef3b1c54014628159b4f972ee7c7fea0b4d4193773a5f8f"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "components/patient/CanonicalCephStudies.tsx",
+      "sha256": "7ead8e4898fc509e397c59e3846c2a69d2c108270d6f21494cea01c9b503cf1e"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "__tests__/canonical-ceph-projection.test.ts",
+      "sha256": "fdbe90405b3d4324f020f5db51f87e50daa76c7301f93fd8b53b557616fbe77f"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "__tests__/postgres/ceph-canonical-study.test.ts",
+      "sha256": "ac3bad6a81ce76f33b8c47d506173b24447b250525975c24254ec1e3130836ec"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "__tests__/security-http/canonical-ceph-study-journey.test.ts",
+      "sha256": "15dab70284cdf27e8d8533bc6692bed4a68f397f7c967968ba5cbbde79cb7aca"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "5490e43565a1bc2ae9a95338f76265bd20a287f43888e20b2ac070f363227b99"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ceph-study-20261101/manifest.json",
+      "revision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+      "file": "docs/security/staff-cutover/inventory.json",
+      "sha256": "d96be5664612a2482f4709eb9b0e8970ae4b3b19aa8965fbd8cb5671ca69c5be"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "__tests__/canonical-ortho-followup-projection.test.ts",
+      "sha256": "4151da7a6ffadad2c299376bf96f48c8dee31d0444925fb946bc8a7082d1c5b7"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "__tests__/fixtures/canonical-ortho-followups.ts",
+      "sha256": "b54cfac8e39d2290f8f7526b09660054bf2781d9c039a6b6b5cf76c3577950d4"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "__tests__/ortho-followup-board-route.test.ts",
+      "sha256": "8cbe07fece4bf32f1f7077f623f20e08ca2b923e2b33d03f883ae5126520b9ca"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "__tests__/ortho-followup-reminder-ui.test.tsx",
+      "sha256": "02f8208164a73c3e790cb87bb03f9f8cd2bf28195f9538d05acf3bb6d0c6a975"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "__tests__/postgres/ortho-canonical-followups.test.ts",
+      "sha256": "34dfb362b98c3d6cdd66b9bb43f71df4922721c369ced5e47b73eb2f7b30fbd6"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "__tests__/security-http/canonical-ortho-followups-journey.test.ts",
+      "sha256": "89c27ef8dac848df841685bb127a0aa26881896bcfc7252ef284523f7dc91687"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "__tests__/staff-session-selection.test.ts",
+      "sha256": "b5627d2b05eed4b6d44496fb4c7d379bd863c5468a23b203170b5836e9c1422f"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "app/api/ortho/followups/route.ts",
+      "sha256": "8328fea6653f373da113880edf0a605d1ee886c1a394459f04adc351417b5d72"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "app/ortho/page.tsx",
+      "sha256": "e0a663d895b7594d87b2bc3768597c59ce56ebd76fd0d9ba91f5ee5589083a93"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "components/CanonicalOrthoFollowups.tsx",
+      "sha256": "9bbfac5b9ba9bfd7d224c9958b683e685f21b78cbf9edddf121c06e7267d50b9"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "docs/security/staff-cutover/M2_PROJECTION_INVENTORY.json",
+      "sha256": "5cb4cfde1cf9a1f389f12e2bd9e076b4cffb1062f6b3497a4b16e82783b07524"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "51681a13895dd613f2b5b701b0a4453d25fff38b4ce2529c5229160eee42a3b0"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "docs/security/staff-cutover/inventory.json",
+      "sha256": "cb82f8e8c7ca663b8fcf5096bf361389bc006ddded7e65d812c2f9242b0f26d3"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "lib/canonical-navigation.ts",
+      "sha256": "cfceb1ab17ca73662604a3ae01212c9a6e35726169f79f0e2a8a294753d71ded"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "lib/canonical-ortho-followup-projection.ts",
+      "sha256": "5c88d1b32644dd6419c04a06d3477b370fd6aedc404a2f77b233fd01f9f8f5ef"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "lib/canonical-ortho-followups.ts",
+      "sha256": "30db2812c7136e3cd5233d43594608cf4c93242aa987b28c42a60289d3f9a78e"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "lib/canonical-record-reads.ts",
+      "sha256": "29db2a58471ccc4122c0ac2b84caadc7bbcb9e7543fc92eff11c9760f8e0812a"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-followups-20261101/manifest.json",
+      "revision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+      "file": "lib/db.ts",
+      "sha256": "09616942c1f36833b0ead1fde832e463d77b2a847f1ff81c92e162cc888fcb06"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "lib/canonical-ortho-strategy.ts",
+      "sha256": "b2de121b1109a672925822b13d5528f2cdcf7640cf196eea5c903483dc5e334f"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "sha256": "de5336cc03a0c1ac4e8af0603cb2d05c8e4fc3f2920f10fb3237c5da863d038d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "lib/canonical-record-reads.ts",
+      "sha256": "91786e7f77b0d12fdaa23e5ffc32dfbfafaf5035254638df7ce9ec6391576395"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "app/api/ortho/[id]/strategy/route.ts",
+      "sha256": "73c48cf35dbb88649b99706e61cb0ce2c51bb51f12404e3a99f0c83c2fe69241"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "components/patient/CanonicalOrthoStrategy.tsx",
+      "sha256": "ec8c9e66b3228c4db684a2cf354008edc0ac79a900a5b8d8d74507d8c1b8ca4e"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "components/patient/CanonicalOrthoDetail.tsx",
+      "sha256": "3b78b16302fef4fa2ba8aa1d4918e339153528c1316fd0ce87eed861854528c5"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "__tests__/fixtures/canonical-ortho-strategy.ts",
+      "sha256": "d6df4dddafef589added5748e053303fcd0236c5bd175ef5ac144a5a536a9e2d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "__tests__/postgres/ortho-canonical-strategy.test.ts",
+      "sha256": "78ac762e9e3b78a8494daa026f1c36fb6fe3ac17e6a6e6b26580453128fe56f9"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "__tests__/security-http/canonical-ortho-strategy-journey.test.ts",
+      "sha256": "623dca36b3a472509ea2b381e193eff0f739001199d4950c32091c9e6bf1969c"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "__tests__/ortho-treatment-strategy-route.test.ts",
+      "sha256": "51009293b493dee07748a243ea55104bd9ecf763ea358652e5ccc79144030022"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "accb615161c1f85f527f3ae146aa82ace1a4bb2b69a4fb74b1057149d028b743"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "docs/security/staff-cutover/M2_PROJECTION_INVENTORY.json",
+      "sha256": "5cb4cfde1cf9a1f389f12e2bd9e076b4cffb1062f6b3497a4b16e82783b07524"
+    },
+    {
+      "manifest": "docs/review/evidence/work-ortho-strategy-20261101/manifest.json",
+      "revision": "1d7524f96a27954e830fd78d00e7a2a08c30f6a0",
+      "file": "docs/security/staff-cutover/inventory.json",
+      "sha256": "7071bf800d0d4c22a066deac58aaf2187cab4a4cb0bb1d351e0871b54ecb4181"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "__tests__/canonical-plan-template-projection.test.ts",
+      "sha256": "229000ea4f508278fd0e8de4482b50e33635909d06f82db651e7fe9e51114c6b"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "__tests__/fixtures/canonical-plan-template-catalog.ts",
+      "sha256": "b3ac7f49eb6a2b8653e2891c3fde89c2f592383e5ab58386cf2b75fe2cd07c30"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "__tests__/postgres/plans-canonical-template-catalog.test.ts",
+      "sha256": "7eab3db30d109314e401e97c339324bf17ba54a96a052e5204b5aa8a4d7c4612"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "__tests__/security-http/canonical-plan-template-catalog-journey.test.ts",
+      "sha256": "9dc210f4a572a6d22a383c823bc6df1379b6b11b19f988bbfdb78c35027fdec8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "app/api/plan-templates/route.ts",
+      "sha256": "d9c73e708401f22d11514b69a9c667fa4a834638b54d932c67c0ac41af830643"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "components/patient/CanonicalClinicalPlans.tsx",
+      "sha256": "7d3b295cd4e3bc100806cef1815782ab7d6d581c2e936247666f7afd01572e7d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "components/patient/CanonicalPlanTemplateCatalog.tsx",
+      "sha256": "d84d5badfb0f35b6748173bdfe0d50da0530a9655f97b4d1052c2c4b433b5cf2"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "docs/security/staff-cutover/M2_PROJECTION_INVENTORY.json",
+      "sha256": "5cb4cfde1cf9a1f389f12e2bd9e076b4cffb1062f6b3497a4b16e82783b07524"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "56e61597741fb062c9fcfa96fb060e35aeb1e9b945f145b69835feda0a7a0ee5"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "docs/security/staff-cutover/inventory.json",
+      "sha256": "6ee42bab1c8f1f32046e53bfa27263d9c9499e6e1f33a0ac3aa2c9dc5026fc02"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "lib/canonical-plan-template-projection.ts",
+      "sha256": "a7c9161c20634295905457a12ce3394427f1258ef245c76c44cce06cbad688cf"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "lib/canonical-plan-templates.ts",
+      "sha256": "7beff1cd8dc487c334806d2d7221ba1654b955ef48a765d77bb55bcc04d056ad"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "lib/staff-operation-runtime.ts",
+      "sha256": "3061a0632468afc6b5495ca7581f4c4e351e5d21b47bf7f516632436f108144d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plan-template-catalog-20261101/manifest.json",
+      "revision": "f931585a92f81794b34954da66627dd2d1023a9a",
+      "file": "scripts/audits/staff-cutover-readiness.test.mjs",
+      "sha256": "7a6cdcd67a9c066120a83e15c34eed70c2fb71f9e97caffe17d5a3ac547e82ce"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "lib/canonical-plan-projection.ts",
+      "sha256": "ff4eb0ca0b71c2ed6f7136bf60a274530bc6a4d29cb8a038837dca56fae0af10"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "lib/canonical-plan-reads.ts",
+      "sha256": "70e6e07575180eb55a785ef19b021f7cfc6b73d597da0ff4faa96ad04f22f0b9"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "lib/canonical-record-reads.ts",
+      "sha256": "cec9ae3d00174e9e3e64ca06b40bbf299eedb2185c51b317db08740d4fe46527"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "app/api/patients/[id]/plans/route.ts",
+      "sha256": "0639c95464d8c24bdd5c14b85a8832c9529fb7c3f05e95cb90020b3ac5f6a786"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "components/patient/CanonicalClinicalPlans.tsx",
+      "sha256": "315ffedcd92507f6b063226fd1131e4a36ed57517c48b55edf6c297d688d1319"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "components/patient/CanonicalPatientProfile.tsx",
+      "sha256": "273c97147776093dcc9f1a3a42bafe17eb936d2a65f136b7b5c3cb72aedace36"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "__tests__/canonical-plan-projection.test.ts",
+      "sha256": "5e647680a21fba2595e925c9ccbff3ff21ea6e369b873da26d2e25e9b90b5888"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "__tests__/fixtures/canonical-clinical-plans.ts",
+      "sha256": "395e0dcf2d2643bdb05ce39090260804002e9241f3424bea665768572518e4fa"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "__tests__/postgres/plans-canonical-clinical.test.ts",
+      "sha256": "ddf477a6eb066ac7ccbd635de8eaa6808824500cc964f93f2578b7dac8729654"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "__tests__/security-http/canonical-plan-clinical-journey.test.ts",
+      "sha256": "e4535f242e3657b419f8fc62f33022e223572f4390f92b43f29a5bbc5a4cbd7f"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "__tests__/plan-payment-visibility.test.ts",
+      "sha256": "b1bd0c18d19acf42018bedf977bbf36938434253cf55de1cb68500d642eb00a8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "__tests__/security-access-scoping.test.ts",
+      "sha256": "c157480578761ece7ad199b19fd8bd2448b4369cae2ea35e369dd2d2744f9935"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "__tests__/postgres/amended-plan-summary-parity.test.ts",
+      "sha256": "c64ea7b90d95b6a15f989892f0782e85c92b2fa8003484dda2a9ccf2740de5ad"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "de40d6553347739c4effe7a742118e75fe9a959ddfe2b1357198839b6497413d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-plans-clinical-20261101/manifest.json",
+      "revision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+      "file": "docs/security/staff-cutover/inventory.json",
+      "sha256": "477bc197a8260abd0e0a84d065143e1da85c760cb238f6a99d9aa81bcc248c6e"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": ".github/workflows/ci.yml",
+      "sha256": "4fe3f22a07e53232b25f3bf34793b73a8805f922439b6f1a0c8d6440be77324d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/ai-chat-contained-confirmation.test.tsx",
+      "sha256": "d105610b08da7092d0aa9a04efbb8e93c0f78636b4a4a71a4e52d97780c11c98"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/appointment-day-context.test.ts",
+      "sha256": "34bf61853f69f34048235908b929233061c2a50de65af0cfd76e872de35c7dcb"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/appointment-waiting-candidates.test.ts",
+      "sha256": "363dd0b7efa5b0fcbbd44343eed50d666cde82b1ff07b6eaba269515f83c8416"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/braces-packaging.test.ts",
+      "sha256": "9a6b7cc940a6ff8d3a7d499deef5eee731453d2c362e622ffd114aa39896d5ea"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/checkout-owner-containment.test.tsx",
+      "sha256": "2d34dc1a3c95a2eb06b9ea7905f61ce033aac382e2f4a8367af6047e04eb3914"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/clinical-lab-command-hook.test.ts",
+      "sha256": "2e597f570419be0166c5af041e885e6e82dad59a483f655ba2657ee16443753e"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/clinical-visit-draft-preservation-audit.test.ts",
+      "sha256": "ab43a4d83b9046f703c49a2700e8170c05b301d7fb417dca0365b8168db5a785"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/clinical-visit-lab-containment.test.tsx",
+      "sha256": "fecf0c7bda7a0a795bea27bc9d0f23ffdf710b04928a328b26fb0388f1a7072e"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/clinical-visit-ortho-entry.test.tsx",
+      "sha256": "818ccb2c2b0a83ce12805fd41d9d28eb31162342df631ee7846eed10f92cc1a8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/clinical-visit-ownership.test.tsx",
+      "sha256": "b2a873b2abe313cf67cae72f1a0c1d82a597168a3d867315c60bc4554fed1a0d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/dependency-resolution-repair.test.ts",
+      "sha256": "b2f77fcc017b2c31c4cbff09f6e805330b6a9cf6a9275196b01fb677a014c30f"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/diagnosis-choices-contract.test.ts",
+      "sha256": "026cca3deea590780ce436228c4584e286e82218102a0904ef03ecf215e0c705"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/environment-parity.test.ts",
+      "sha256": "8ae3697d0212a4a14f927c0e98ea512255636ea256250033bcc6ab005421dca2"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/finance-accounting-projection.test.ts",
+      "sha256": "7bbc88ac2b62272d5bdc74ee119735abcb68a73cc6fc7516d266b59204f95d2d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/finance-shift-loading-audit.test.ts",
+      "sha256": "a07caac6bf74815c0adc0a24c7a165990a994d3ab9cea81ef74ba1543259dd36"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/leadership-read-ui.test.tsx",
+      "sha256": "6a95be51b45b4372a82aeac5ca6f571733ce4283c2365a96c74ea11243afd5c8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/lint-tooling-runtime.test.mjs",
+      "sha256": "7cca6d9d9bdb2f62eb02cf7ca87a0d75807ed9198f60166ec0a45e57420d3a60"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/modern-operations-read-ownership.test.tsx",
+      "sha256": "47f6a37661039a02c646b2007729217a2683bca2d6533aaa8eca14822c00569b"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/modern-patient-panels-runtime.test.tsx",
+      "sha256": "f63ddb5dc8d38656a808b933dc2cbe3b5dcb6710d965ac9ee957a2d597949c76"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/modern-visual-patient-events.test.tsx",
+      "sha256": "a90e7b21fb084a258c37aed7f3e9d3d160c0b57d4978b2fe4dbcf41331dd561d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/nearby-booking-dialog-ui.test.tsx",
+      "sha256": "b5ac8708207208a07eb3ed98cfb8769ed061161f350883a8bd81f8e83ba557c5"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/patient-alert-page.test.tsx",
+      "sha256": "fa3866a366253cb95e89451f906376c6e2c251a9322c74d11327e36ce37cfb4d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/patient-cases-navigation.test.tsx",
+      "sha256": "5a97746e66ed6ab0a7491a2b8fc5ba8a1873597d1ba58a84a8b829ee29b559b6"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/patient-workflow-owner.test.tsx",
+      "sha256": "3b709b948a9fa74c356a5dbe9323c71b094bc4f851a355fa8d4d7e545ac1e565"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/planned-visit-rebooking-ui.test.tsx",
+      "sha256": "0ec00f2dd366f244ac6480d37b6536ed12743c8bfb422b32cca46b86521334ac"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/prescription-patient-context.test.tsx",
+      "sha256": "8dfd5880fcd21c41f68d66a78ca27d58a32b46913d8e9180916e378c6350990b"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/quick-appointment-followup-default.test.ts",
+      "sha256": "8cc928ad49d5c70f7ca9b458effe43601ef75fada9c6605504a18a4b22512a2b"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/quick-appointment-patient-search.test.ts",
+      "sha256": "366660adde940c72ba1047394bd94f380cc575eaea0f60e0306735381952a36d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/quick-appointment-submission.test.ts",
+      "sha256": "4688ad213ee00ccf121f0aa7971bdcc45bc86bde629de0c293cbb89485b3dcc1"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/return-booking-context-ui.test.tsx",
+      "sha256": "6a55d58a215952600656d75e253b055ae90f687c334878a53bdd60ae5ce6d36c"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/reviewed-dependency-overrides.test.mjs",
+      "sha256": "9d378d53516c64c1cecee604f14298ee5753579ecf9b7ccc1a6b4fe124be3d8c"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/reviewed-minimatch-compatibility.test.mjs",
+      "sha256": "ddfce52ac56167d8aba49432e81d465ec0088d2bb7379f8ecde1e5c482350a87"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/use-reference-command-headless.test.ts",
+      "sha256": "07fef15c40f99d5868975d1634b0f6145637012eee2a4dd3a7c3c9c6b1229c18"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/visit-workspace-contract.test.ts",
+      "sha256": "cbbccd8f8f28a89a74b3f4ae0b66cdb3acd9fc989430d8ba9f87aac3cbf0f218"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "__tests__/webceph-records-grid.test.tsx",
+      "sha256": "ab93c29581272e7c5da14b5feaceafcbb8b20b06ccaaf56d8e46bf409cd1340a"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "app/appointments/page.tsx",
+      "sha256": "e47f3d6fd144894a82796af81c4342edb4894b830096cfd989ffbb30c2045068"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "app/patients/[id]/page.tsx",
+      "sha256": "2a6544dcf799a0147f121f97c7d03cd913a6221157b5d7c02d26a1a2eae29773"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "app/settings/users/page.tsx",
+      "sha256": "5180bb98075116faa61a398a88ee8e7a863b9b63d7ae9c5eb66b0e314fba7e81"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/AiStaffChatModal.tsx",
+      "sha256": "d04128e2d1d108594884096e8f8c94a55e43318589a3a74692a6c39cbbfb7962"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/CephTracer.tsx",
+      "sha256": "22eaf1e539611ec8761b2a2ab475105c3b56ab66f38d8c0e074669e4c22a8162"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/ClinicalVisit.tsx",
+      "sha256": "8b4f60e76672449304521ca4ec0aba9f6018f74eaafa7c08b69bcc5e1e55132b"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/ConsentModal.tsx",
+      "sha256": "ab59bba4e570cf1b7daa9124824db916838486cc02a545f44546ffde4e65e725"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/InvoiceCorrection.tsx",
+      "sha256": "e95e4826819c6899bf4e179b9ab7f6be46f49aa6ebd828efda30d9776198fd6a"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/LabReconciliationModal.tsx",
+      "sha256": "4a05ee3495e99c509c61009f3487d0f45cad388171cabb04f0d00b8c92aea420"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/LabWorkDraftFields.tsx",
+      "sha256": "60435c8cf1033411b66081559151c1a6aed95e27e295a020ef8a7c687bba1915"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/OrthoCaseAssessmentV2.tsx",
+      "sha256": "ed057e8fb4f44ad8eecbc483f4fef1664be2bf2d0a8f8350783181b6beb9d487"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/OrthoTreatmentStrategy.tsx",
+      "sha256": "19feece454a7d39c458e2ae3960594b9c90b3f620cd01d178579d30c2ece9283"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/PatientCases.tsx",
+      "sha256": "2ff510b099d1254a122f123c42103c37e9fb533040b2a196b107540c5ad31991"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/PatientCeph.tsx",
+      "sha256": "3c20690b3ad4cfdd738b84305b96d5ff9dc1dafe4da96a9d8f0809e66c5eaaa1"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/PatientDiagnosis.tsx",
+      "sha256": "498c91a93c182c0502d2cf819c90c8e03f23987c9165e5f700a0dfc1008af1c9"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/PatientEndo.tsx",
+      "sha256": "9ac0d00953878ffdfd4acc705436db40c96638c06529fedfcb15fed11652e1bf"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/PatientLabOrders.tsx",
+      "sha256": "02027aebe540384aeaa2bcfa75a94a7c13547788daac8e3cddbc843d733ed901"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/PatientLedger.tsx",
+      "sha256": "9cd067c1b52de83b7633bdb073d704672d40168c802387198584b3158a480e0c"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/PatientOrtho.tsx",
+      "sha256": "1c35a3004cda42bb01d884b0f59400ac5e8e2c52ceea47d084ebe8b680b6b06c"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/PatientPlans.tsx",
+      "sha256": "dcbf983303a9d4966b358d7189c96a76c48448d7aca7e9c2252ce898c8557e4b"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/PatientReferrals.tsx",
+      "sha256": "eb69fabe73b84ebef4c6eb5db8387809c96069fd3a59fa2b5c33fb024d521675"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/WebCephRecordsGrid.tsx",
+      "sha256": "095d2ffdfc939f1272d63c2150025a482c5bf9e250ea0b5fc0c7cce05b5fed56"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/finance/useLabBalanceOverview.ts",
+      "sha256": "ad5bb774124c334fd77fae1db6abb825b941f4c18dc8b40098d8be2fc1d982a3"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/hr/ContractsPanel.tsx",
+      "sha256": "121543dac7e12ae5cad0a7dbf9a021df96ad1cbe63a85757ae9b95e9d1d21740"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/hr/TasksPanel.tsx",
+      "sha256": "70d8fe8974291e25cb261c895a25dabf3e728296de90ed321f8e36557f93d419"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/inventory/InventoryOverview.tsx",
+      "sha256": "dad015b081f71f1f1583a2868032b33f517fd54c991be7961e245eb19e44aad2"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/inventory/useDurablePurchaseAttempt.ts",
+      "sha256": "4439490f767fabd28a8282049a69b545d432212eff2a01727832a41da73dabf8"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/inventory/useInventoryCommand.ts",
+      "sha256": "872ad0a9f24b49a2d17ecf02e8688a6a7232f99c838f35683fbcbc09bd44b8ec"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/inventory/useReferenceCommand.ts",
+      "sha256": "452eeaf27a5f6cf138dbeb09d06dd84d9c6cd8f1ff53e0c79370c547f0dfe509"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/inventory/useSupplierCommand.ts",
+      "sha256": "35b6eca35e0a86b3821299546ed649c7d458127c9630029b0e54b4d6b49770f0"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/leadership/LeadershipOperationalOverview.tsx",
+      "sha256": "811ffb008f5aefb4e5f4e2e981d75074303ab74bce92eccf111526aaa6f4f723"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/leadership/useLeadershipRead.ts",
+      "sha256": "dc601945777920e2b3e71aaf320629bede5885f791b94d22b4351ab849d07bef"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/patient/CanonicalPatientProfile.tsx",
+      "sha256": "fe5c85bbbe55d46bc56cd732114435f22f4f1c9371ce432a56f90b36d0682144"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/patient/PatientAppointmentsPanel.tsx",
+      "sha256": "6cebb1d90251a9727b9dcd5075b5f2a899811c26e324058fb02f13b65adb376d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/patient/PatientNumberEditor.tsx",
+      "sha256": "d24ebde10c23b3147a4b8c61602dd2e9cc66c5ac3fcec0fce23582bce2b4ccd9"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/patient/SummaryTab.tsx",
+      "sha256": "b6cc649774c8f3cf69a5a4fb917c0de6e902a06f30e050644a417816d1da6014"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/patient/TodayVisitTab.tsx",
+      "sha256": "9db8f59936216a405c97151655392a0dfc3011d10f0ca3e5aa7121d0893f2c1d"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/useClinicalLabCommand.ts",
+      "sha256": "ed8cadf56a503fecdd21e9cd218f6d23a0cb15a90e612ffd5e5b2ae65e645c78"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/useNearbyBooking.tsx",
+      "sha256": "3fe20d206d5f9c5bcca9ffeaeccd8f25f5176290ebb51562fde3a22c1f658dea"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "components/useReturnBookingContext.tsx",
+      "sha256": "767cc9eced51b70b24f161ac7fa8b6d92e410412cbce102c35ad2c751099d225"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "eslint.config.mjs",
+      "sha256": "241a2204a3fc48aa58a8dca96b5ee05950f6da8ca1d882f093ba92f65312466f"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "lib/env-contract.ts",
+      "sha256": "171bbfc2f3eaf6db716ca17aa239958df3780a9589f4a0cea409ee03ac9c6cd6"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "package-lock.json",
+      "sha256": "976fa7b4e953cb320f3f60468996b74d498fa5acf048dc3f5a11a5b6f106e7c6"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "package.json",
+      "sha256": "3b3a764f9b4ca43eecdfeb92185991d6bb9e9c52ef068d97427909907c03c2bf"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "scripts/dependency-security/reviewed-overrides.mjs",
+      "sha256": "15f60f746100778445d851dba57e840200b93593f2621b3157d10ca3d164c3e0"
+    },
+    {
+      "manifest": "docs/review/evidence/work-tooling-20261101/manifest.json",
+      "revision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+      "file": "scripts/dependency-security/verify-lint-tooling-runtime.mjs",
+      "sha256": "dd3fa38c0608bfdbf67f6a70396d0ba915884e90ff58dff52c11ce7ad68e6e02"
+    }
+  ],
+  "mapCounts": {
+    "canonical-done": 59,
+    "entry": 4,
+    "excluded": 12,
+    "existing": 285,
+    "owner-only": 23,
+    "self": 3
+  },
+  "limits": [
+    "Static preservation witnesses are not runtime acceptance.",
+    "No new migration allocation or pending M4 activation.",
+    "Docker remains blocked by enforced Alpine network policy."
+  ]
+}

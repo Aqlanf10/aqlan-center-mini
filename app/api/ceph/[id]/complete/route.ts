@@ -1,3 +1,8 @@
+import { CanonicalCephCompleteRefusal, commandCanonicalCephComplete } from "@/lib/canonical-ceph-complete-command";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { NextResponse } from "next/server";
 import { completeCephAnalysis, getCephStudy } from "@/lib/db";
 import { requireSession } from "@/lib/session";
@@ -18,6 +23,20 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const body: unknown = await readJsonBody(_request, JSON_BODY_LIMIT_BYTES);
+      if ([...new URL(_request.url).searchParams.keys()].length) throw new CanonicalCephCompleteRefusal("invalid_ceph_complete", 400, "اعتماد الدراسة لا يقبل مرشحات إضافية.");
+      return NextResponse.json(await commandCanonicalCephComplete(selected.handle, (await context.params).id, body), { headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
+      if (error instanceof CanonicalCephCompleteRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد اعتماد الدراسة. تحقق من السجل الحالي قبل أي طلب جديد.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const { id: raw } = await context.params;

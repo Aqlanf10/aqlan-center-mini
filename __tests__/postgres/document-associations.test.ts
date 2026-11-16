@@ -72,10 +72,9 @@ describe("document association integrity", () => {
       expect(await response.json()).toMatchObject({ patientId: patient });
     }
     expect(storage.writes).toBe(writes + 3);
-    await pool.query("UPDATE visits SET signed_at=NOW() WHERE id=$1", [anotherVisit]);
-    try {
-      expect((await db.recordDocument(documentInput({ visitId: anotherVisit }))).visitId).toBe(anotherVisit);
-    } finally { await pool.query("UPDATE visits SET signed_at=NULL WHERE id=$1", [anotherVisit]); }
+    // Keep signed history immutable and separate from the mutable association fixtures.
+    const { rows: [signedVisit] } = await pool.query("INSERT INTO visits (patient_id,patient_name,status,signed_at) VALUES ($1,'Synthetic signed document visit','done',NOW()) RETURNING id", [patient]);
+    expect((await db.recordDocument(documentInput({ visitId: signedVisit.id }))).visitId).toBe(signedVisit.id);
   });
 
   it("fails closed for an absent patient and malformed direct-caller IDs", async () => {

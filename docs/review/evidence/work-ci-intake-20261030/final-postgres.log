@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 /tmp/aqlan-work-intake-20261030
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  2 passed (2)
+      Tests  12 passed (12)
+   Start at  00:44:12
+   Duration  30.74s (transform 6.33s, setup 0ms, import 7.82s, tests 21.29s, environment 0ms)

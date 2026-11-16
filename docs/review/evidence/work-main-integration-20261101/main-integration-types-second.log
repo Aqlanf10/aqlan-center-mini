@@ -1,0 +1,22 @@
+
+> aqlan-center@0.1.0 typecheck
+> tsc --noEmit
+
+app/print/lab/[id]/page.tsx(183,20): error TS2304: Cannot find name 'selectedTeethCodes'.
+app/print/lab/[id]/page.tsx(185,24): error TS2304: Cannot find name 'selectedTeethCodes'.
+app/print/lab/[id]/page.tsx(185,48): error TS7006: Parameter 'code' implicitly has an 'any' type.
+app/print/lab/[id]/page.tsx(186,38): error TS2304: Cannot find name 'toothMap'.
+app/print/lab/[id]/page.tsx(187,45): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<LabToothRole, LabToothRoleMeta>'.
+app/print/lab/[id]/page.tsx(204,37): error TS2304: Cannot find name 'selectedTeethCodes'.
+components/LabDentalChart.tsx(792,58): error TS2304: Cannot find name 'PRIMARY_FDI_TEETH'.
+components/LabDentalChart.tsx(792,91): error TS2304: Cannot find name 'PRIMARY_FDI_TEETH'.
+components/LabDentalChart.tsx(793,58): error TS2304: Cannot find name 'PRIMARY_FDI_TEETH'.
+components/LabDentalChart.tsx(793,91): error TS2304: Cannot find name 'PRIMARY_FDI_TEETH'.
+components/PatientLabOrders.tsx(230,16): error TS2339: Property 'active' does not exist on type 'LabReadOwner'.
+components/PatientLabOrders.tsx(235,65): error TS2339: Property 'active' does not exist on type 'LabReadOwner'.
+components/PatientLabOrders.tsx(237,49): error TS2339: Property 'active' does not exist on type 'LabReadOwner'.
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

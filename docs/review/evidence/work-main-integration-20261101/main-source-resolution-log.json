@@ -1,0 +1,92 @@
+[
+  {
+    "file": "lib/audit.ts",
+    "conflictBlocks": 1,
+    "before": "0f2a23a99889356ffefffa91ccc81bc08e06ce6b49f29fee5bb5a79fdfea09d9",
+    "after": "c50ee8d40b041a7e7cf90ce08274a96609971bd6d4858a3ca9a9eec59b3a362c"
+  },
+  {
+    "file": "lib/restore/staging.ts",
+    "conflictBlocks": 1,
+    "before": "d8f9f00713a6f2b7687f628c8b21b37fc35f58e3d31993d594cc033946aa958e",
+    "after": "3a55b317cd9a1ed718c5e530cc863d67fd4110c08852eb6350d466c7abbc3780"
+  },
+  {
+    "file": "lib/fullBackup.ts",
+    "conflictBlocks": 2,
+    "before": "17bff2b0d27110a1048e603e8412be2132674b5fa6dc7cdf035dfd98313b9045",
+    "after": "458a0fbcb1df38299b20c29bc71376336dde5dee7dbbb9da075c6452aaf4e826"
+  },
+  {
+    "file": "app/api/lab/[id]/route.ts",
+    "conflictBlocks": 3,
+    "before": "ef9350139276653ee96a33333c86462549870f20094aba2e1c2a33f76734acf8",
+    "after": "8e65e31680981e379b60d325fba5d792b91ec8c4a65cc61de05272cffc2bdfc4"
+  },
+  {
+    "file": "app/settings/page.tsx",
+    "conflictBlocks": 1,
+    "before": "02cd0a029bf290356af6a64c66ea4c40302f4636ea58bc67fd8234d2e592481b",
+    "after": "d7f1c3629db3ec96d89ba5b68729b63da2bdf81f9b8f3dbd651c69c235dc5456"
+  },
+  {
+    "file": "components/LabDentalChart.tsx",
+    "conflictBlocks": 1,
+    "before": "733e93ec3e711556827dbad09501e5ec315d08e27e0524ba6789a9021bd91abd",
+    "after": "ced67f1fa071a47364b0574db56b23892630c5126bc6a37fb6ca731c44d21d85"
+  },
+  {
+    "file": "lib/settings-definitions.ts",
+    "conflictBlocks": 1,
+    "before": "7877f1f189a5585c1b923920f8ec80a028872ff9f6d4b4af55135fda32e31758",
+    "after": "045ff32915fe3b408887396b715360d80857f5198bf3a1920663ff8d0dd00c81"
+  },
+  {
+    "file": "app/login/page.tsx",
+    "conflictBlocks": 1,
+    "before": "e9ffe9f7d6a616163a820d51099a3bbae76b75f5c31b71b8ba5ba33b6a4de120",
+    "after": "9cf4f893bca0a8ac1c452cd2649ec689dd90baa45b38e3a83cfe6c516379c6ee"
+  },
+  {
+    "file": "app/layout.tsx",
+    "conflictBlocks": 1,
+    "before": "13f0193daa7cede93d690bbab7b439568ff4fa7ec7a909226e4116ca144cb797",
+    "after": "8430245ce11fd0fbc9f3e01cf4f82097446d3bf4fa9bc87a7319ec3061ef2b81"
+  },
+  {
+    "file": "components/PatientLabOrders.tsx",
+    "conflictBlocks": 1,
+    "before": "a5ab7334147b6ea1b0694a3b714a0fd615d54b9ba59edb9fcbe6262f33b292e3",
+    "after": "31c41aaf086172bf4cd01dfc7eca4d6a5681fff1db4e6e34fbe5f175fad3acf0"
+  },
+  {
+    "file": "lib/db.ts",
+    "conflictBlocks": 6,
+    "before": "1fb7ef06580bac0d6454b9eea8c59dfee49a91e9367a3ef730559391821f3b0f",
+    "after": "87d3192817cbafe719a345d726b0465e290c2373288dccda88010e1eed9b49d8"
+  },
+  {
+    "file": "app/print/lab/[id]/page.tsx",
+    "conflictBlocks": 4,
+    "before": "93c56d2487b297f65f2fe8750d26cf1ae0a2b4a03dfcb585b8e493e35ea3eb96",
+    "after": "3741a48813df2837f34aba2cf836fc2db031395901b805a6e90b496e5bb9e5dd"
+  },
+  {
+    "file": "components/inventory/DoctorCustody.tsx",
+    "conflictBlocks": 2,
+    "before": "a0921f9904fa9b41f0a270e4282a976c1765257da924a20d72dd278d42287f8b",
+    "after": "1b772e30a6c40d10190b5a8ba3266d9e4b3c6a2067ad2f5b6da2bb67bd049045"
+  },
+  {
+    "file": "components/inventory/ProcurementAdministration.tsx",
+    "conflictBlocks": 3,
+    "before": "e6d3d48717e74014a4fd154b26cf83874f9c86bd2ac8f69e0de3c7a78f1e839c",
+    "after": "89c1da217ce7901bfbe9f5fabc6af0d4f9c31eb68ec01cb64840db70fcc911da"
+  },
+  {
+    "file": "components/inventory/ProcurementOperations.tsx",
+    "conflictBlocks": 3,
+    "before": "7d67093282422a4b15ab067ab5089e6526c4eee6ede36679d386f44712fbc7cd",
+    "after": "5ea5a865d7b0af9e33f06e2fe8ee59410c563b844f7eb40479a3696cead16f8d"
+  }
+]

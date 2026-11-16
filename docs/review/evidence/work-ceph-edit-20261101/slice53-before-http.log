@@ -1,0 +1,40 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ceph-edit-journey.test.ts (1 test | 1 failed) 6794ms
+   × HTTP: scoped analyst edits an observed draft atomically without completing it 363ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-edit-journey.test.ts > HTTP: scoped analyst edits an observed draft atomically without completing it
+AssertionError: expected 401 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 401
+
+ ❯ __tests__/security-http/canonical-ceph-edit-journey.test.ts:25:27
+     23|   const cookie = (await journey.login("own")).cookie, expectedVersion …
+     24|   const response = await patch(cookie, studyId, { expectedVersion, cal…
+     25|   expect(response.status).toBe(200); expect(await response.json()).toE…
+       |                           ^
+     26|   expect((await journey.db.query("SELECT status,mm_per_pixel FROM ceph…
+     27|   expect((await journey.db.query("SELECT final_dx FROM ceph_diagnoses …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  11:38:09
+   Duration  12.08s (transform 228ms, setup 0ms, import 943ms, tests 6.79s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

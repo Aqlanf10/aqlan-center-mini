@@ -1,0 +1,21 @@
+{
+  "baseRevision": "62bd83aea3d4831060152aec25c4caf4cd954c7b",
+  "checks": {
+    "original_completion_sql": true,
+    "legacy_init_commit_audit": true,
+    "legacy_return_projection": true,
+    "legacy_before_prefix": true,
+    "legacy_tail": true,
+    "lib/ceph.ts": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/canonical-ceph-reads.ts": true,
+    "lib/canonical-ceph-edit-command.ts": true,
+    "lib/canonical-ceph-discard-command.ts": true,
+    "lib/canonical-ceph-copy-command.ts": true,
+    "components/CephTracer.tsx": true,
+    "legacy_route_body": true,
+    "migrations": true
+  },
+  "passed": 14,
+  "limits": "Adds only stale retained known measurement refusal and safe lease cleanup to legacy completion; original SQL and engine retained. Canonical transaction audit is atomic; legacy post-commit audit is not claimed atomic."
+}

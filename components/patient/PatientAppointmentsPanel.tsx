@@ -20,7 +20,8 @@ const STATUS: Record<Appointment["status"], { label: string; style: string }> = 
   no_show: { label: "لم يحضر", style: "border-slate-200 bg-slate-100 text-slate-700" },
 };
 type Selection = { view: PatientAppointmentsView; cursor: string | null; previous: (string | null)[] };
-type Owner = { patientId: number; session: ReturnType<typeof useSession>; sessionKey: string; selection: Selection; active: boolean; revision: number; abort: AbortController | null; mutation: AbortController | null; pending: boolean; page: PatientAppointmentsPage | null };
+type Owner = { patientId: number; session: ReturnType<typeof useSession>; sessionKey: string; selection: Selection };
+type OwnerRuntime = { owner: Owner; active: boolean; revision: number; abort: AbortController | null; mutation: AbortController | null; pending: boolean; page: PatientAppointmentsPage | null };
 type State = { owner: Owner; phase: "loading" | "ready" | "error"; page?: PatientAppointmentsPage; message?: string; busy?: boolean };
 
 /** Independent of financial summary loading. All records come from the canonical patient endpoint. */
@@ -35,29 +36,32 @@ export function PatientAppointmentsPanel({ patientId }: { patientId: number }) {
   const selection = savedSelection?.scope === scope ? savedSelection.value : scope.initial;
   const setSelection = useCallback((value: Selection) => saveSelection({ scope, value }), [scope]);
   // Object identity retires even a replacement session with identical claims, and A → B → A.
-  const owner = useMemo<Owner>(() => ({ patientId, session, sessionKey, selection, active: false, revision: 0, abort: null, mutation: null, pending: false, page: null }),
+  const owner = useMemo<Owner>(() => ({ patientId, session, sessionKey, selection }),
     [patientId, session, sessionKey, selection]);
-  const current = useRef<Owner | null>(null);
+  const current = useRef<OwnerRuntime | null>(null);
   const [state, setState] = useState<State | null>(null);
   const ready = state?.owner === owner && state.phase === "ready" ? state : null;
   const error = state?.owner === owner && state.phase === "error" ? state.message : null;
-  const isOwner = useCallback(() => current.current === owner && owner.active && permitted, [owner, permitted]);
+  const isOwner = useCallback(() => current.current?.owner === owner && current.current.active && permitted, [owner, permitted]);
 
   useLayoutEffect(() => {
-    current.current = owner; owner.active = true;
-    return () => { owner.active = false; owner.revision++; owner.page = null; owner.abort?.abort(); owner.mutation?.abort(); if (current.current === owner) current.current = null; };
+    // The render token is immutable; request/mutation bookkeeping belongs to this commit.
+    const runtime: OwnerRuntime = { owner, active: true, revision: 0, abort: null, mutation: null, pending: false, page: null };
+    current.current = runtime;
+    return () => { runtime.active = false; runtime.revision++; runtime.page = null; runtime.abort?.abort(); runtime.mutation?.abort(); if (current.current === runtime) current.current = null; };
   }, [owner]);
 
   const load = useCallback(async (notice?: string): Promise<boolean> => {
-    if (!isOwner() || owner.pending) return false;
-    const revision = ++owner.revision;
-    owner.abort?.abort(); owner.abort = new AbortController(); owner.page = null;
+    const runtime = current.current;
+    if (!isOwner() || !runtime || runtime.pending) return false;
+    const revision = ++runtime.revision;
+    runtime.abort?.abort(); runtime.abort = new AbortController(); runtime.page = null;
     setState({ owner, phase: "loading", message: notice });
-    const live = () => isOwner() && owner.revision === revision;
+    const live = () => current.current === runtime && runtime.active && isOwner() && runtime.revision === revision;
     try {
       const params = new URLSearchParams({ projection: "appointments", view: selection.view });
       if (selection.cursor !== null) params.set("cursor", selection.cursor);
-      const response = await fetch(`/api/patients/${patientId}?${params}`, { cache: "no-store", signal: owner.abort.signal });
+      const response = await fetch(`/api/patients/${patientId}?${params}`, { cache: "no-store", signal: runtime.abort.signal });
       const body: unknown = await response.json().catch(() => null);
       if (!live()) return false;
       if (!response.ok) {
@@ -66,7 +70,7 @@ export function PatientAppointmentsPanel({ patientId }: { patientId: number }) {
       }
       const page = readPatientAppointmentsPage(body, patientId, selection.view, selection.cursor);
       if (!page) throw new Error("تعذّر التحقق من بيانات المواعيد. أعد التحميل.");
-      owner.page = page;
+      runtime.page = page;
       setState({ owner, phase: "ready", page, message: notice });
       return true;
     } catch (error) {
@@ -77,37 +81,40 @@ export function PatientAppointmentsPanel({ patientId }: { patientId: number }) {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const refresh = () => { if (isOwner() && !owner.pending) setSelection({ view: selection.view, cursor: null, previous: [] }); };
+    const refresh = () => { if (isOwner() && !current.current?.pending) setSelection({ view: selection.view, cursor: null, previous: [] }); };
     const visible = () => { if (document.visibilityState === "visible") refresh(); };
     const midnight = window.setInterval(() => {
-      if (owner.page && clinicDateString(new Date(), owner.page.timeZone) !== owner.page.today) refresh();
+      const page = current.current?.page;
+      if (isOwner() && page && clinicDateString(new Date(), page.timeZone) !== page.today) refresh();
     }, 30_000);
     window.addEventListener("focus", refresh); document.addEventListener("visibilitychange", visible);
     return () => { window.clearInterval(midnight); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", visible); };
   }, [isOwner, owner, selection.view, setSelection]);
 
   const page = ready?.page;
-  const currentPage = () => isOwner() && !!page && owner.page === page && !owner.pending;
+  const currentPage = () => isOwner() && !!page && current.current?.page === page && !current.current?.pending;
   const confirmReminder = async (item: Appointment, snapshot: ManualAppointmentReminderSnapshot) => {
     if (!currentPage() || !page?.canRemind || !canRemindPatientRole(session?.role) || snapshot.patientId !== patientId
       || !page.appointments.includes(item) || (item.status !== "booked" && item.status !== "no_show")) return;
-    owner.pending = true; owner.mutation = new AbortController();
+    const runtime = current.current;
+    if (!runtime || runtime.owner !== owner) return;
+    runtime.pending = true; runtime.mutation = new AbortController();
     setState({ owner, phase: "ready", page, busy: true });
     let recorded = false;
     let notice = "لم نتمكن من تأكيد تسجيل التذكير. راجع حالة الموعد بعد التحديث قبل إعادة المحاولة.";
     try {
       const response = await fetch(`/api/appointments/${item.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, signal: owner.mutation.signal,
+        method: "PATCH", headers: { "Content-Type": "application/json" }, signal: runtime.mutation.signal,
         body: JSON.stringify({ action: "reminded", snapshot }),
       });
       const body = await response.json().catch(() => null);
-      if (!isOwner()) return;
+      if (current.current !== runtime || !runtime.active || !isOwner()) return;
       recorded = response.ok && body?.ok === true;
       if (!recorded && typeof body?.message === "string") notice = body.message;
     } catch { /* A lost response is unknown; only a fresh read may show a recorded stamp. */ }
     finally {
-      owner.pending = false;
-      if (isOwner()) await load(recorded ? "سُجّلت إفادتك بالتذكير. هذا ليس إثبات تسليم آلي." : notice);
+      runtime.pending = false;
+      if (current.current === runtime && runtime.active && isOwner()) await load(recorded ? "سُجّلت إفادتك بالتذكير. هذا ليس إثبات تسليم آلي." : notice);
     }
   };
 
@@ -116,12 +123,12 @@ export function PatientAppointmentsPanel({ patientId }: { patientId: number }) {
     <section aria-label="مواعيد المريض" data-testid="patient-appointments-panel" dir="rtl" className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-4 sm:px-5">
         <div><h2 className="text-base font-extrabold text-navy-900">مواعيد المريض</h2><p className="mt-1 text-xs text-slate-500">سجل المواعيد المعتمد، بترتيب الموعد وتوقيت العيادة</p></div>
-        <button type="button" onClick={() => { if (isOwner() && !owner.pending) setSelection({ view: selection.view, cursor: null, previous: [] }); }} disabled={ready?.busy} className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 disabled:opacity-40">تحديث المواعيد</button>
+        <button type="button" onClick={() => { if (isOwner() && !current.current?.pending) setSelection({ view: selection.view, cursor: null, previous: [] }); }} disabled={ready?.busy} className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 disabled:opacity-40">تحديث المواعيد</button>
       </div>
       <div className="flex flex-wrap gap-2 p-4" role="group" aria-label="عرض المواعيد">
         {([ ["upcoming", "اليوم والقادمة"], ["history", "السابقة والمغلقة"] ] as const).map(([view, label]) => (
           <button type="button" key={view} aria-pressed={selection.view === view} disabled={ready?.busy}
-            onClick={() => { if (isOwner() && !owner.pending && selection.view !== view) setSelection({ view, cursor: null, previous: [] }); }}
+            onClick={() => { if (isOwner() && !current.current?.pending && selection.view !== view) setSelection({ view, cursor: null, previous: [] }); }}
             className={`min-h-11 rounded-xl px-4 text-sm font-bold disabled:opacity-40 ${selection.view === view ? "bg-navy-900 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
         ))}
       </div>

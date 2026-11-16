@@ -1,3 +1,4 @@
+import { CommissionLabLineageError, COMMISSION_LAB_LINEAGE_REVIEW } from "@/lib/commission-lab-lineage";
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, commissionDetailReport, commissionReport } from "@/lib/db";
 import { mergeCommissionBalances } from "@/lib/commission-balance";
@@ -90,7 +91,8 @@ export async function GET(request: Request) {
       baseCurrency: isCurrency(base) ? base : "YER",
       isPersonalOnly,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof CommissionLabLineageError) return NextResponse.json(COMMISSION_LAB_LINEAGE_REVIEW, { status: error.status });
     return NextResponse.json({ message: "تعذّر تحميل العمولات." }, { status: 500 });
   }
 }

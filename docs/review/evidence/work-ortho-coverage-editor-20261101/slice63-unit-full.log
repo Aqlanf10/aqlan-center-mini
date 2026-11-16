@@ -1,0 +1,85 @@
+
+ RUN  v4.1.12 /workspace/aqlan-coverage-ui
+
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+stderr | __tests__/canonical-ortho-coverage-clock.test.tsx > Aden midnight: the stored Oct31 22:30Z instant is a Nov1 01:30 clinic decision
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/canonical-ortho-coverage-clock.test.tsx > renders the supplied clinic zone for 2026-10-31T20:59:59.000Z in Asia/Aden
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/canonical-ortho-coverage-clock.test.tsx > renders the supplied clinic zone for 2026-10-31T21:00:00.000Z in Asia/Aden
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+stderr | __tests__/canonical-ortho-coverage-clock.test.tsx > renders the supplied clinic zone for 2026-11-01T02:30:00.000Z in America/New_York
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://react.dev/link/invalid-hook-call for tips about how to debug and fix this problem.
+
+ ❯ __tests__/canonical-ortho-coverage-clock.test.tsx (5 tests | 4 failed) 14ms
+   × Aden midnight: the stored Oct31 22:30Z instant is a Nov1 01:30 clinic decision 9ms
+   × renders the supplied clinic zone for 2026-10-31T20:59:59.000Z in Asia/Aden 1ms
+   × renders the supplied clinic zone for 2026-10-31T21:00:00.000Z in Asia/Aden 1ms
+   × renders the supplied clinic zone for 2026-11-01T02:30:00.000Z in America/New_York 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/canonical-ortho-coverage-clock.test.tsx > Aden midnight: the stored Oct31 22:30Z instant is a Nov1 01:30 clinic decision
+TypeError: Cannot read properties of null (reading 'useMemo')
+ ❯ process.env.NODE_ENV.exports.useMemo node_modules/react/cjs/react.development.js:1251:33
+ ❯ Module.CanonicalOrthoCoverage components/patient/CanonicalOrthoCoverage.tsx:11:22
+      9| export function CanonicalOrthoCoverage({ patientId, caseId, ownerFor }…
+     10|   const regionId = useId();
+     11|   const draftOwner = useMemo(() => ownerFor?.(caseId), [ownerFor, case…
+       |                      ^
+     12|   const [open, setOpen] = useState(false), [refresh, setRefresh] = use…
+     13|   const [feed, setFeed] = useState<Coverage | null>(null), [error, set…
+ ❯ label __tests__/canonical-ortho-coverage-clock.test.tsx:10:30
+ ❯ __tests__/canonical-ortho-coverage-clock.test.tsx:12:97
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/canonical-ortho-coverage-clock.test.tsx > renders the supplied clinic zone for 2026-10-31T20:59:59.000Z in Asia/Aden
+ FAIL  __tests__/canonical-ortho-coverage-clock.test.tsx > renders the supplied clinic zone for 2026-10-31T21:00:00.000Z in Asia/Aden
+ FAIL  __tests__/canonical-ortho-coverage-clock.test.tsx > renders the supplied clinic zone for 2026-11-01T02:30:00.000Z in America/New_York
+TypeError: Cannot read properties of null (reading 'useMemo')
+ ❯ process.env.NODE_ENV.exports.useMemo node_modules/react/cjs/react.development.js:1251:33
+ ❯ Module.CanonicalOrthoCoverage components/patient/CanonicalOrthoCoverage.tsx:11:22
+      9| export function CanonicalOrthoCoverage({ patientId, caseId, ownerFor }…
+     10|   const regionId = useId();
+     11|   const draftOwner = useMemo(() => ownerFor?.(caseId), [ownerFor, case…
+       |                      ^
+     12|   const [open, setOpen] = useState(false), [refresh, setRefresh] = use…
+     13|   const [feed, setFeed] = useState<Coverage | null>(null), [error, set…
+ ❯ label __tests__/canonical-ortho-coverage-clock.test.tsx:10:30
+ ❯ __tests__/canonical-ortho-coverage-clock.test.tsx:17:85
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed | 874 passed (875)
+      Tests  4 failed | 14826 passed (14830)
+   Start at  18:50:41
+   Duration  595.84s (transform 31.39s, setup 0ms, import 147.06s, tests 298.33s, environment 103ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

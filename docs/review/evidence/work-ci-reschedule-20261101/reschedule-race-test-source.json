@@ -1,0 +1,7 @@
+{
+  "productRevision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
+  "test": "__tests__/postgres/appointments-canonical-reschedule.test.ts",
+  "beforeSha256": "4a8e50c43d877b64eea125d8c1fb247501fd6243c1ab9e3337d5cf5b2ac08aba",
+  "afterSha256": "4bc3bb71bbb6a84bed8a9e5d5979287595bdc657c2f5c2857772711d37d0b732",
+  "result": "9/9 native PG; product unchanged; deterministic real day-lock barrier and separate sequential-intent witness"
+}

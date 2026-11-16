@@ -1,0 +1,10 @@
+{
+  "buildId": "eqWf8RRpV3s3dsfu9bI_O",
+  "buildSource": "1b0a98d580c68eb28fd3163fb134d925a8abe3b1",
+  "targetBase": "f5ff01a2c132f2ad3cacc4f10168c76441f5d6c3",
+  "unchangedAdmissionFiles": [
+    "app/api/ortho/[id]/route.ts",
+    "lib/canonical-ortho-lifecycle-command.ts"
+  ],
+  "qualification": "Frozen60 build used only for direct HTTP existing plan-link held branch witness; no modified build claims"
+}

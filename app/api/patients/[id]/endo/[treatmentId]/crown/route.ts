@@ -1,6 +1,7 @@
 import { canAccessPatient } from "@/lib/patient-access";
 import { visibleEndoTreatment } from "@/lib/endodontics-response";
 import { NextResponse } from "next/server";
+import { canonicalEndoRoute, commandCanonicalEndoCrown } from "@/lib/canonical-endo";
 import { setEndoCrown, ENDO_CROWN_MESSAGE } from "@/lib/endodontics-db";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
 
@@ -17,6 +18,9 @@ const optionalId = (raw: unknown): { ok: true; value: number | null } | { ok: fa
  * سُجِّل «التاج بعد اكتماله» في اعتماديات الخطة نفسها. الطبيب والمدير؛ والخطة تحترم صلاحية تعديلها.
  */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string; treatmentId: string }> }) {
+  /* M2 slice 77: clinical.visits.document inside the scope, the clinician link or the owner; plan links need clinical.plans.edit. */
+  const canonical = await canonicalEndoRoute(request, async (handle, body) => { const { id, treatmentId } = await params; return commandCanonicalEndoCrown(handle, id, treatmentId, body); }, "تعذّر حفظ قرار التاج. أعد المحاولة.");
+  if (canonical) return canonical;
   const { id, treatmentId: rawTreatment } = await params;
   const patientId = idOf(id);
   const treatmentId = idOf(rawTreatment);

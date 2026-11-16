@@ -3,11 +3,21 @@ import { requireSession } from "@/lib/session";
 import { financeAccessFor } from "@/lib/finance-permissions";
 import { canViewMoney } from "@/lib/roles";
 import { listTreatmentFinancialReferences } from "@/lib/treatment-financial-context-db";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalTreatmentFinancialContext } from "@/lib/canonical-patient-account";
 
 export const dynamic = "force-dynamic";
 
 /** Same visibility boundary as patient invoices; a clinical deep link grants no financial permission. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 88: finance.patient-ledger.view inside the patient scope, one snapshot.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalTreatmentFinancialContext(selected.handle, Number((await context.params).id)), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر التحقق من المراجع المالية؛ راجع السجل المالي قبل التحصيل."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canViewMoney(session.role)) return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });

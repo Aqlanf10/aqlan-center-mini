@@ -1,0 +1,10 @@
+{
+  "buildId": "HNDShlDXqTsjImfnhWjyV",
+  "witness": "browser approval succeeds but list retains draft heading; same HTTP proof requires completed heading",
+  "files": {
+    "components/patient/CanonicalCephComplete.tsx": "4aeda249fe769f743ea48a250eec8e6cdd8f47be7db0b3c526105fd54efefed6",
+    "components/patient/CanonicalCephStudy.tsx": "98cbf7c572a8039c9bfcc76c783fefa3282d221e2676c25125141c54a0e0574e",
+    "components/patient/CanonicalCephStudies.tsx": "881c2e6842405ea3dd996f2bb1342471665408e58cd856787cedbe97474e5bb3",
+    "__tests__/security-http/canonical-ceph-complete-journey.test.ts": "519d2c34de80c24b2a3d299b6e4fd878309a0fb4f207712271bb9146a33e5372"
+  }
+}

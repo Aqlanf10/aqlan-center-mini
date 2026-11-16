@@ -1,0 +1,21 @@
+{
+  "baseRevision": "ddc6a2124eacfabcd9fecaee5f3945a72149cbea",
+  "frozenFor": "full PostgreSQL and production build; HTTP test-only additions remain outside product/PG inputs",
+  "sha256": {
+    "__tests__/canonical-ortho-decision-command.test.ts": "f333400bd85da17717b4f7727446617502b8725a2bf3512b006de8a71640f6d0",
+    "__tests__/canonical-ortho-decisions-projection.test.ts": "d36e1aa6e09d4d493116def3a0d78fc29bbb1e0a9b9ee16bd9768f063767ed13",
+    "__tests__/postgres/ortho-canonical-decisions.test.ts": "7c4db2011c95f4ac35c03c6d709a2be69186ad5ce2973f0576a68b411cead39f",
+    "__tests__/postgres/ortho-decision-canonical-command.test.ts": "816b3d499e8796790aadc124769ba817d4094fd1f8f3ce71c71953e793b1bc41",
+    "app/api/ortho/adjustments/[id]/billing-decision/route.ts": "d39898e13da902407d815499f11b974809280b891521d4a6339028f87a064ebc",
+    "components/CanonicalOrthoDecisionEditor.tsx": "cf169ed98c0ff3933fa35a2750da032a9ca8f3745b3e7907639ea264c4d15801",
+    "components/CanonicalOrthoPendingDecisions.tsx": "fb900a6d6ec50fb1ce2bf89b381a6c52b2aeeb549cbfbeec2275cce214187d33",
+    "lib/canonical-ortho-decision-command.ts": "dc7168edf46cb3577df74f894ddb564533df4720fa3b607a437a51e6f60c8081",
+    "lib/canonical-ortho-decision-version.ts": "d9500c32a11e3718dcfe9b9858c5c6eeb762096f5e12d132258d57deab46d688",
+    "lib/canonical-ortho-decisions-projection.ts": "3b8af394065f0026a06fc3cb0a37cbe4c5bd53c6a869e51c2f4fa11a8bcec02e",
+    "lib/canonical-ortho-decisions.ts": "9063534afdaee0eafa0dd1b6fb628cf2ca48129bf22a27bb7b2c39396ffe793e",
+    "lib/canonical-read-snapshot.ts": "663fea91421dfd32627ee9208a12d4046dfee76acc3f5fe14d76875b849a4d5b",
+    "lib/db.ts": "34f044ddfbb2ac7866c49f029bbf87571a0372f7135874a78be5bb4e13866ace",
+    "lib/staff-operation-runtime.ts": "f63825c63d527429dccd91bbddf49655b968c2588b974a2dc3e4412241d64184",
+    "scripts/audits/staff-cutover-readiness.test.mjs": "9fa097bb68868884ab66595fafbaaa9a7497edfeaf6c3867d5f457f958633891"
+  }
+}

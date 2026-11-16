@@ -306,10 +306,14 @@ describe("standalone orthodontic regimen continuity in the real RTL form", () =>
       await f.save.click();
       expect(await elasticClass.evaluate((element) => (element as HTMLSelectElement).validity.valueMissing)).toBe(true);
       expect(f.writes).toEqual([]);
-      await elasticClass.selectOption(width === 1280 ? "class_ii" : "none"); await f.submit();
+      await elasticClass.selectOption(width === 1280 ? "class_ii" : "none");
+      await f.save.click();
+      await f.page.getByRole("alert").filter({ hasText: "وثّق ما تم في جلسة التقويم" }).waitFor();
+      expect(f.writes).toEqual([]);
+      await f.note.fill("مراجعة اليوم دون تغيير"); await f.submit();
       expect(f.writes[0]).toMatchObject(width === 1280
-        ? { elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", done: "" }
-        : { elastics: "none", elasticNote: "", done: "" });
+        ? { elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", done: "مراجعة اليوم دون تغيير" }
+        : { elastics: "none", elasticNote: "", done: "مراجعة اليوم دون تغيير" });
       f.assertSafe(); expect(await storedState(target.patientId)).toEqual(before);
     } finally { await f.context.close(); }
   });
@@ -321,7 +325,11 @@ describe("standalone orthodontic regimen continuity in the real RTL form", () =>
       expect(await f.form.getByLabel("صنف المطاطات", { exact: true }).inputValue()).toBe("none");
       expect(await f.form.getByLabel("أسابيع حتى الشدّة القادمة", { exact: true }).inputValue()).toBe("8");
       expect(await f.form.getByTestId("adjustment-baseline-elastics").count()).toBe(0);
-      await f.submit(); expect(f.writes[0]).toMatchObject({ elastics: "none", elasticNote: "", nextWeeks: 8, done: "" });
+      await f.save.click();
+      await f.page.getByRole("alert").filter({ hasText: "وثّق ما تم في جلسة التقويم" }).waitFor();
+      expect(f.writes).toEqual([]);
+      await f.note.fill("مراجعة اليوم دون تغيير");
+      await f.submit(); expect(f.writes[0]).toMatchObject({ elastics: "none", elasticNote: "", nextWeeks: 8, done: "مراجعة اليوم دون تغيير" });
       f.assertSafe(); expect(await storedState(target.patientId)).toEqual(before);
     } finally { await f.context.close(); }
   });

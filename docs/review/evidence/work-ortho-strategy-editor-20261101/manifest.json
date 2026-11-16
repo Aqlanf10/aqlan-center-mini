@@ -1,0 +1,113 @@
+{
+  "format": "work-ortho-strategy-editor-v1",
+  "preparedAt": "2026-11-01T15:56:39.995315+00:00",
+  "baseRevision": "dc77d4a453c92a1f73a2e6da2d938788fb13d667",
+  "assessmentUnmountFix": "2040a46a71081a5c78e00854bf1e8f93c720b9f5",
+  "buildId": "8rud9Vg2t4DBvpQ76A7Qo",
+  "acceptance": {
+    "focusedUnitMap": {
+      "passed": 323,
+      "files": 8
+    },
+    "focusedPostgreSQL": {
+      "passed": 86,
+      "files": 4
+    },
+    "HTTPChromium": {
+      "distinctCases": 86,
+      "files": 7,
+      "firstFinalBuildRun": {
+        "passed": 84,
+        "failed": 2
+      },
+      "affectedFilesCorrectedRun": {
+        "passed": 20,
+        "files": 2
+      },
+      "qualification": "Not a single 86-pass run. Two deliberate stale-response witnesses awaited unconsumed response.finished(); corrected to header arrival plus owner idle with identical draft/retry/DB assertions. No product change or timeout increase between runs."
+    },
+    "typeBuildTargetedLint": "passed",
+    "fullUnit": {
+      "passed": 14731,
+      "files": 869,
+      "evidence": "combined batch report will pin original full log"
+    },
+    "fullPostgreSQLRuntime": "running; not accepted in this focused report",
+    "exactHeadCI": "not published",
+    "independentReview": "pending"
+  },
+  "before": {
+    "editRead": "actual slice57 build rejects valid canonical edit=1 with400; after200 under fresh independent authority",
+    "emptyReceipt": "actual browser commit succeeded but strict receipt confirmation failed; targeted PG failed before confirming an actually empty stored link set",
+    "detailUnmount": "strategy and assessment detail-only close/refresh allowed stale reply settlement; real browser before failures and corrected witnesses retained",
+    "retiredOwner": "two unit cases failed because inactive uncertain owners blocked navigation; active-owner guard restores intended retirement"
+  },
+  "failedAttempts": [
+    "First HTTP81pass3fail/84 demonstrated empty-link receipt mismatch. Strict matcher unchanged.",
+    "First focused PG70pass1fail/71 in3files: resolved problem fixture omitted resolved_at; corrected fixture only. A fourth requested path did not exist and was not counted.",
+    "First assessment-only unseeded filter could not load a saved revision; seeded before run is the causal witness.",
+    "First map command also collected copied .next/standalone tests:18pass2fail; corrected source-only exclusion10/2 and final323/8.",
+    "Intermediate and first builds are separately pinned; only8rud is final.",
+    "Final first HTTP84pass2fail/86 and diagnostic8pass1fail/9 waited an intentionally unconsumed reply; affected corrected20/20."
+  ],
+  "limits": [
+    "Exact in-memory draft and explicit identical retry; no automatic resend, reload persistence or universal SPA interception guarantee.",
+    "No new clinical bridge, problem creation, plan mutation, financial changes, migrations or fabricated identity/grants.",
+    "Default read projection and all nonempty plan links retain independent visibility. Empty-set confirmation is command receipt only; legacy option defaults false.",
+    "Full combined gates, CI and independent review are separate; inventory NOT_READY and Docker/schema/operational blockers remain."
+  ],
+  "sourceSha256": {
+    "app/api/ortho/[id]/strategy/route.ts": "7abffe28b0aee27e07a5a7a91680a8816dbcec8504f2ec58cd499b4f1240f2b7",
+    "components/OrthoTreatmentStrategy.tsx": "34fb75b5e1ac5f28d388dabd35eaa1874b30a9bb49315c576e1e989ebdaba670",
+    "components/PatientOrtho.tsx": "afe5358d91556b5b5ac0b8334b2c562401b88630d1ac01c02265dc4a23c0561e",
+    "components/patient/CanonicalOrthoAssessment.tsx": "cee616e21c3e20ade41384761053f61f4979465c437c4b2188f493a327437989",
+    "components/patient/CanonicalOrthoCases.tsx": "2befc04695ee96f339e467edd7ee125b99ffc26fc38d8d45dffb80fac37c4984",
+    "components/patient/CanonicalOrthoDetail.tsx": "690d096a54a338c9281c163881e0ba065aa1ee5db2bba1ebff2c2768082bc171",
+    "components/patient/CanonicalOrthoStrategy.tsx": "a7b11cb01e07e05268d96bc4c7e1d56e6b662a2f6034b2bd00fd52a9933cedcd",
+    "lib/canonical-ortho-strategy-command.ts": "986f44d355e7551277bfb5d64a753bdad42397b6e083bca14dfacfde59ac281b",
+    "lib/canonical-ortho-strategy.ts": "be1c49174051cbc963db5149767817d5077f65181d650d3da0031700a056298a",
+    "lib/ortho-treatment-strategy-store.ts": "98e7b0319b0a6432bb002828b2b79a2398210e9468342fcf572114df407cb483",
+    "lib/canonical-ortho-strategy-owner.ts": "b554a9d8768a68e7c3693672fb367d54e6f53c3b8acce6787267d94be91003dd",
+    "lib/ortho-draft-lifetime.ts": "e4e738d8c34300375ba86477bec295a6ae98259be2cdc3bbbd659227cb71410f",
+    "__tests__/canonical-ortho-strategy-owner.test.ts": "6a612e8aae988fe6a7695286f1498fb3f8ac86e5a4d1215baf612f86bafeb047",
+    "__tests__/postgres/ortho-strategy-canonical-editor.test.ts": "0285ea7771079544a67d777f5c7e364d8ff71aa41272a5a595a14c5c62974183",
+    "__tests__/security-http/canonical-ortho-strategy-editor-journey.test.ts": "0c25eee1d605e0d75da256b4007991d4f5e975477ca2d2fed8dd36b8c3b14d54"
+  },
+  "evidenceSha256": {
+    "canonical-strategy-editor-saved-390.png": "4e75d522fb95db5a1e6e465d93ca231fd89556c5b850930fd224a837927eeb8d",
+    "slice58-assessment-detail-before-seeded.log": "0ee8a94de468151a91b41d4ded307749abb25d86070b443e1ef9a2259471478c",
+    "slice58-assessment-detail-before.log": "a1258e63b32d298d733e53e0321744d6d833206a7ee22f1c31bc440d82e60710",
+    "slice58-assessment-diagnostic.log": "916c50aaf3bb068b4fcffd0140bd4de3e3d760f4073eeae13dbc22d45e5dd7af",
+    "slice58-before-build-provenance.json": "c372aa30676f370b20e5637fdd7dd8ecd91ee1f28be6c7566e0e14570384a633",
+    "slice58-build-corrected.log": "aa1e89843af0072c926fb43c88326cc59c2773e41cf58790e48b2dec0a05e8b0",
+    "slice58-build-final.log": "0874690b3d18595ab6c8d0c95f2aa0eb2871f83833d9bf1c25a2e66b23363782",
+    "slice58-build-first.log": "b4459832f7e03c72b57fe9154fecc36399deeaca7f1b40a7b41058ecb427023b",
+    "slice58-design.md": "8f8eed509b6bfebc98e0228552cb8630ffd4b7dad8c2d7f26a18cc75aec105c5",
+    "slice58-detail-before.log": "6656bc32472cab3130858a7faeeed8331838e7736ceb9b064a05c81f5b19308c",
+    "slice58-first-product-freeze.json": "39c1512f894b1bfd726e3952316f15f2f924e8e3b1ce5fff81ed0e1afddae689",
+    "slice58-http-before.log": "ce62d2069d7758b3872f876d3f4df1a5f9013894e952b6f11f8d96527811c34e",
+    "slice58-http-final.log": "421eb9386bdc12968275d41dc201a474b50f98aa96dab276a67ebe591ae7fddc",
+    "slice58-http-first.log": "2fbf85fa99e8075025b15c9bda6d4caf28511f42d6fd432d4611029fa8657060",
+    "slice58-http-idle-boundary.log": "bbd815074a70b72234dc6f95b0e0aa2799ced6bd91458054fae5abf0dae0fcc0",
+    "slice58-intermediate-product-freeze.json": "9967db8581d8c67775f1c3a04e87a4ac5c60b2c30c10b59d962e0cd095666050",
+    "slice58-inventory-build.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice58-inventory-corrected.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice58-inventory-final.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice58-lint-corrected.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice58-lint-first.log": "26a94c8b35b2bef43fd485ec4e5e0932ebaa605dd9e8325bb271e932bdeca317",
+    "slice58-map-guards-source.log": "7f0bb0a3c18f098834e59af5f102519e14df5ce395f789faeec34a2e48425fdb",
+    "slice58-map-guards.log": "98a031da062b5b3985e7e90ab8c7c08e7aee1262ae9327a353e752894487335a",
+    "slice58-pg-corrected.log": "5948e5b54c51bb98405e6ebf43b4107c19a4f42fe8adc1ead027c3068cd31b6b",
+    "slice58-pg-first.log": "f679cb2f12a4016e241781bc3ef714e077f368ad70e2169d31146d045028a30d",
+    "slice58-pg-receipt-fixed.log": "6a8be531f24150e9af1f15e988f9aff8f884cef4c34ca31a1ee6fa83b0cdb4f1",
+    "slice58-product-freeze.json": "d42495e423f0280e07d866941bd9a6680aade3d201801d3bbe4b2e6035e645b6",
+    "slice58-receipt-before.log": "5cb9aa51efc51f361209197f385df7ec1a1184677ab0be70a8a2ee680457e91e",
+    "slice58-retired-owner-before.log": "d36ef9cfa52797bda500603cbe554f16b3f59723f5b4f10941d96c8fa23f37d8",
+    "slice58-source-proof.json": "cb15099615cf45092b16dd2bd002c5b23dc8ccdf4f00b1f05a88a4e831fc15bc",
+    "slice58-tsc-expanded.log": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+    "slice58-tsc-first.log": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+    "slice58-unit-final.log": "d28c118115b20836447e76de0646c70e37e8f293d9eef9c5827dfd22da9f2e7b",
+    "slice58-unit-first.log": "b9990b55e5c9d497e5c68912524b8f7639f2d74a69ff80a923a900605b609e39",
+    "slice58-unit-receipt-fixed.log": "b05760dcbae27b7eacfe8352bb0fe82e20f0b39d30de4fc65b8ca6b24ec344a3"
+  }
+}

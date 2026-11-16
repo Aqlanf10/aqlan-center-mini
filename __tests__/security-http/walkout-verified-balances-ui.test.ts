@@ -107,6 +107,12 @@ describe("built patient walkout verifies balances for reception", () => {
         expect(isTreatmentFinancialContext(body, patientId)).toBe(true);
         await json(route, body);
       }
+      // Exact read-only owner lookup: synthetic walkout has no verified care
+      // context, so booking remains unavailable without inventing authority.
+      else if (method === "GET" && path === `/api/patients/${patientId}/return-booking-context`
+        && url.search === `?kind=visit&sourceId=${visitId}`) {
+        await json(route, { ok: false, code: "return_source_missing", message: "اختر الحالة المقصودة قبل حجز موعد المراجعة." }, 409);
+      }
       else if (path === `/api/patients/${patientId}/legacy`) await json(route, { treatments: [], orphanPayments: [] });
       else if (path === `/api/patients/${patientId}/legacy-treatments`) await json(route, { agreements: [], canVoid: false });
       else if (path === "/api/services") await json(route, []);
@@ -145,7 +151,13 @@ describe("built patient walkout verifies balances for reception", () => {
         if (fault === "amount") (body.checkout.current as { YER: unknown }).YER = "0";
         if (fault === "foreign") body.patientId++;
         await json(route, body);
-      } else if (path === `/api/patients/${patientId}/historical-documents`) await json(route, { documents: [] });
+      }
+      // Exact independent Account sibling: the invoice archive list re-reads with every ledger
+      // refresh. Keep readiness pending: no archive ownership, ready state or permission is invented.
+      else if (method === "GET" && path === "/api/invoices/archive" && url.search === `?patientId=${patientId}`) {
+        await json(route, { readiness: "migration_pending", invoices: [], archivedInvoices: [] });
+      }
+      else if (path === `/api/patients/${patientId}/historical-documents`) await json(route, { documents: [] });
       else if (path === `/api/patients/${patientId}/debt-repayments`) await json(route, { patientId, arrangements: [], targets: [] });
       else if (path === "/api/visits/readiness") await json(route, { visit: null });
       else if (path === "/api/visits") await json(route, []);

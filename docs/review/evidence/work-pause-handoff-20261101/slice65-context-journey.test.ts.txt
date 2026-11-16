@@ -1,0 +1,25 @@
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
+const GRANTS = { "clinical.ortho.view": true, "clinical.ortho.edit": true, "clinical.plans.view": true, "clinical.plans.edit": true };
+const ACCOUNTS = {
+  owner: { username: "canon-linkctx-owner", password: "Canon#LinkContextOwner1", role: "admin", display: "مالك تجريبي" },
+  own: { username: "canon-linkctx-own", password: "Canon#LinkContextOwn1", role: "doctor", doctor: true, patientScope: "own", display: "طبيب تجريبي", grants: GRANTS },
+  clinical: { username: "canon-linkctx-clinical", password: "Canon#LinkContextClinical1", role: "admin", patientScope: "all", display: "سريري فقط", grants: { "clinical.ortho.view": true, "clinical.ortho.edit": true } },
+  none: { username: "canon-linkctx-none", password: "Canon#LinkContextNone1", role: "doctor", doctor: true, patientScope: "none", display: "بلا نطاق", grants: GRANTS },
+} as const;
+let journey: CanonicalJourney<keyof typeof ACCOUNTS>, patientId: number, caseId: number, planId: number;
+beforeAll(async () => {
+  journey = await openCanonicalJourney({ portOffset: 102, secret: "canonical-linkcontext-secret-0123456789", accounts: ACCOUNTS, ownerKey: "owner", async seed() {} });
+  patientId = (await journey.db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-LINKCTX','SYN context patient',$1) RETURNING id", [journey.parties.own])).rows[0].id;
+  caseId = (await journey.db.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id", [patientId])).rows[0].id;
+  planId = (await journey.db.query("INSERT INTO treatment_plans(patient_id,title,total_minor,base_currency) VALUES($1,'SYN selectable plan',12345,'YER') RETURNING id", [patientId])).rows[0].id;
+}, 300000);
+afterAll(async () => { await journey?.close(); }, 60000);
+it("HTTP: explicit plan-link context admits the independently authorized picker only", async () => {
+  const cookie = (await journey.login("own")).cookie;
+  const ordinary = await journey.api(`/api/ortho/${caseId}`, cookie); expect(ordinary.status).toBe(200);
+  const response = await journey.api(`/api/ortho/${caseId}?planLink=1`, cookie); expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toContain("no-store");
+  expect(await response.json()).toMatchObject({ projection: "ortho-plan-link-context", patientId, caseId, currentPlan: null, canEdit: true, plans: [{ id: planId, title: "SYN selectable plan", status: "active" }] });
+  expect(await journey.ddlLog()).toEqual([]);
+});

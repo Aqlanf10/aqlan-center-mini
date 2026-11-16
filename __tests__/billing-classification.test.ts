@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyOrthoAdjustment, classifyPlanSession, effectiveAdjustmentClass, isOutsideContractDecision } from "../lib/billing-classification";
+import { classifyOrthoAdjustment, classifyPlanSession, effectiveAdjustmentClass, isOutsideContractDecision, zeroDueReason } from "../lib/billing-classification";
 
 describe("billing classification", () => {
   it("keeps BILL-1 plan sessions on their agreement source", () => {
@@ -12,9 +12,9 @@ describe("billing classification", () => {
     expect(classifyOrthoAdjustment({ ...legacy, financialMode: "opening_balance", openingCurrencies: ["YER"] }))
       .toBe("LEGACY_INCLUDED");
     expect(classifyOrthoAdjustment({ ...legacy, financialMode: "opening_balance", openingCurrencies: [] }))
-      .toBe("OUTSIDE_CONTRACT");
+      .toBe("REVIEW_REQUIRED");
     expect(classifyOrthoAdjustment({ ...legacy, financialMode: "opening_balance", openingCurrencies: ["YER", "USD"] }))
-      .toBe("OUTSIDE_CONTRACT");
+      .toBe("REVIEW_REQUIRED");
     expect(classifyOrthoAdjustment({ ...legacy, financialMode: "prepaid_included", openingCurrencies: [] }))
       .toBe("LEGACY_INCLUDED");
   });
@@ -22,28 +22,45 @@ describe("billing classification", () => {
   it("never calls a clinical-only adjustment newly billed", () => {
     const input = { legacy: true, openingCurrencies: ["YER"], fundedPlan: false };
     expect(classifyOrthoAdjustment({ ...input, financialMode: "per_session" })).toBe("OUTSIDE_CONTRACT");
-    expect(classifyOrthoAdjustment({ ...input, financialMode: "installments" })).toBe("OUTSIDE_CONTRACT");
+    expect(classifyOrthoAdjustment({ ...input, financialMode: "installments" })).toBe("REVIEW_REQUIRED");
     expect(classifyOrthoAdjustment({ ...input, financialMode: "installments", fundedPlan: true }))
       .toBe("INCLUDED");
     expect(classifyOrthoAdjustment({ ...input, legacy: false, financialMode: "opening_balance" }))
-      .toBe("OUTSIDE_CONTRACT");
+      .toBe("REVIEW_REQUIRED");
   });
 
   it("(P1-B) a new orthodontic package: adjustments are included only while an agreement funds the case", () => {
     const fresh = { legacy: false, financialMode: null, openingCurrencies: [] };
     expect(classifyOrthoAdjustment({ ...fresh, fundedPlan: true })).toBe("INCLUDED");
-    expect(classifyOrthoAdjustment({ ...fresh, fundedPlan: false })).toBe("OUTSIDE_CONTRACT");
+    expect(classifyOrthoAdjustment({ ...fresh, fundedPlan: false })).toBe("REVIEW_REQUIRED");
     /* رصيدٌ سابق لا يغطّي حالةً جديدة — التغطية من الاتفاق وحده. */
-    expect(classifyOrthoAdjustment({ ...fresh, openingCurrencies: ["YER"], fundedPlan: false })).toBe("OUTSIDE_CONTRACT");
+    expect(classifyOrthoAdjustment({ ...fresh, openingCurrencies: ["YER"], fundedPlan: false })).toBe("REVIEW_REQUIRED");
   });
 
-  it("(P1-C) the decision resolves only an outside-contract adjustment", () => {
+  it("the per-visit decision resolves explicit exclusion or unresolved coverage, never an included snapshot", () => {
     expect(effectiveAdjustmentClass("OUTSIDE_CONTRACT", null)).toBe("OUTSIDE_CONTRACT");
     expect(effectiveAdjustmentClass("OUTSIDE_CONTRACT", "billed")).toBe("NEW_BILLABLE");
     expect(effectiveAdjustmentClass("OUTSIDE_CONTRACT", "no_charge")).toBe("NO_CHARGE");
     expect(effectiveAdjustmentClass("LEGACY_INCLUDED", "no_charge")).toBe("LEGACY_INCLUDED");
     expect(effectiveAdjustmentClass("INCLUDED", "billed")).toBe("INCLUDED");
+    expect(effectiveAdjustmentClass("REVIEW_REQUIRED", null)).toBe("REVIEW_REQUIRED");
+    expect(effectiveAdjustmentClass("REVIEW_REQUIRED", "no_charge")).toBe("NO_CHARGE");
     expect(isOutsideContractDecision("billed")).toBe(true);
     expect(isOutsideContractDecision("maybe")).toBe(false);
+  });
+});
+
+
+describe("truthful zero-due coverage", () => {
+  const prepaid = [{ classification: "INCLUDED" as const, amountMinor: 0, planLinked: true }];
+  it("preserves pending adjustment alongside prepaid work without changing amounts", () => {
+    const before = JSON.stringify(prepaid);
+    expect(zeroDueReason(prepaid, "OUTSIDE_CONTRACT")).toContain("معلّق");
+    expect(zeroDueReason(prepaid, "OUTSIDE_CONTRACT")).not.toContain("اتفاق الأقساط");
+    expect(JSON.stringify(prepaid)).toBe(before);
+  });
+  it("does not infer installments from included work", () => {
+    expect(zeroDueReason(prepaid, null)).not.toContain("أقساط");
+    expect(zeroDueReason([], "INCLUDED")).not.toContain("أقساط");
   });
 });

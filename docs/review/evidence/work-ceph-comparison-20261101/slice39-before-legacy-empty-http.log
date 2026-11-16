@@ -1,0 +1,52 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ceph-comparison-record-order-http.test.ts -t never replaces
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ceph-comparison-record-order-http.test.ts (3 tests | 1 failed | 2 skipped) 795ms
+   × legacy comparison never replaces missing approved measurements with today's computed values 59ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ceph-comparison-record-order-http.test.ts > legacy comparison never replaces missing approved measurements with today's computed values
+AssertionError: expected [ { code: 'SNA', …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "code": "SNA",
++     "mean": 82,
++     "name": "SNA — موضع الفك الأعلى",
++     "unit": "°",
++     "value": 45,
++   },
++ ]
+
+ ❯ __tests__/security-http/ceph-comparison-record-order-http.test.ts:30:70
+     28|   expect(response.status).toBe(200); const body = await response.json(…
+     29|   const saved = [body.before, body.after].find(study => Number(study.i…
+     30|   expect(saved.status).toBe("completed"); expect(saved.measurements).t…
+       |                                                                      ^
+     31|   expect((await db.query("SELECT count(*)::int n FROM ceph_measurement…
+     32| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 skipped (3)
+   Start at  03:35:17
+   Duration  4.61s (transform 16ms, setup 0ms, import 41ms, tests 795ms, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

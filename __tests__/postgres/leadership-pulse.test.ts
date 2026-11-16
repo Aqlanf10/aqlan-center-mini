@@ -1,4 +1,4 @@
-import {afterAll,beforeAll,beforeEach,expect,it,vi} from "vitest";
+import {afterAll,beforeEach,expect,it,vi} from "vitest";
 import {assertRealPostgresUrl,dropPublicSchema,stubPostgresEnv} from "./_setup";
 import {validatePostgresTestTarget} from "./_safe-target";
 import {readLeadershipPulse} from "../../lib/leadership-pulse-db";
@@ -6,8 +6,12 @@ assertRealPostgresUrl();const target=validatePostgresTestTarget({...process.env}
 const db=await import("../../lib/db");const q=async(sql:string,params:unknown[]=[]) => (await db.getPool().query(sql,params)).rows;
 let admin:number,other:number,patient:number;
 const read=(view:"day"|"tasks"="day",page=0,day="2026-10-25")=>readLeadershipPulse(db.getPool(),{view,page,day},"Asia/Aden",{role:"admin",userId:admin});
-beforeAll(async()=>{await dropPublicSchema(target.testUrl.toString());await db.ensureSchema();const users=await q("INSERT INTO users(username,display_name,password_hash,role) VALUES ('pulse-admin','Synthetic admin','unused','admin'),('pulse-other','Synthetic other','unused','doctor') RETURNING id");[admin,other]=users.map(r=>Number(r.id));});
-beforeEach(async()=>{await q("TRUNCATE visits,appointments,patients,hr_tasks RESTART IDENTITY CASCADE");patient=Number((await q("INSERT INTO patients(patient_number,full_name) VALUES ('SYN-PULSE','Synthetic pulse patient') RETURNING id"))[0].id);});
+beforeEach(async()=>{
+ await db.resetPoolForTesting();await dropPublicSchema(target.testUrl.toString());await db.ensureSchema();
+ const users=await q("INSERT INTO users(username,display_name,password_hash,role) VALUES ('pulse-admin','Synthetic admin','unused','admin'),('pulse-other','Synthetic other','unused','doctor') RETURNING id");
+ [admin,other]=users.map(r=>Number(r.id));
+ patient=Number((await q("INSERT INTO patients(patient_number,full_name) VALUES ('SYN-PULSE','Synthetic pulse patient') RETURNING id"))[0].id);
+});
 afterAll(async()=>{await db.resetPoolForTesting();});
 it("honors clinic midnight, current visit states, separate appointment cancellation and exact page count",async()=>{
  await q(`INSERT INTO visits(patient_name,patient_id,status,arrived_at) VALUES ('Inside',$1,'waiting','2026-10-24T21:00:00Z'),('Outside',$1,'waiting','2026-10-24T20:59:59Z'),('Done',$1,'done','2026-10-25T12:00:00Z')`,[patient]);

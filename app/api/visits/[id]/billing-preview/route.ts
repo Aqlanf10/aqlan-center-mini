@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { ClinicalPlanConflict, previewVisitBilling, visitPatientOf } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalVisitBillingPreview } from "@/lib/canonical-visit-money";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +13,13 @@ export const dynamic = "force-dynamic";
  * لا يقبل مدخلًا يغيّر المبلغ: الصفر يأتي من قواعد الفوترة وحدها.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // M2 slice 89 (owner decisions G4-1, G4-4, G4-6): the groups by grant, one snapshot.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalVisitBillingPreview(selected.handle, (await context.params).id), { headers: NO_STORE }); }
+    catch (error) { return canonicalPatientReadFailure(error, "تعذّر حساب معاينة الاستحقاق."); }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const visitId = Number((await context.params).id);

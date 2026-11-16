@@ -1,3 +1,5 @@
+import type { SessionPayload } from "../../lib/auth";
+import { seedLegacyStaffAdmin, signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 import { parseDoctorCommissionConfig, validateDoctorCommissionConfigInput, type DoctorCommissionConfig } from "../../lib/doctor-permissions";
@@ -13,6 +15,8 @@ import { parseDoctorCommissionConfig, validateDoctorCommissionConfigInput, type 
  * الحالات الثلاث الأولى هي إعادة إنتاجٍ حرفية لما أثبته تدقيق الجاهزية:
  *   ١٨٬٠٠٠ بدل ١٢٬٠٠٠ · اختفاء ٢٬٧٦٠ · تحوّل ٢٬٧٦٠ إلى ٣٬٤٥٠.
  */
+
+let staffAdmin: SessionPayload;
 
 assertRealPostgresUrl();
 stubPostgresEnv();
@@ -124,7 +128,7 @@ async function lab(input: {
 async function doctorUser(partyId: number, username: string): Promise<number> {
   const user = await createStaffUser({
     username, displayName: username, passwordHash: "x", role: "doctor", partyId,
-  });
+  }, undefined, signedLegacyStaffProof(staffAdmin));
   return user.id;
 }
 
@@ -147,6 +151,7 @@ beforeEach(async () => {
   await resetPoolForTesting();
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  staffAdmin = await seedLegacyStaffAdmin("owner");
   const [shift] = await q<{ id: number }>(
     `INSERT INTO cashier_shifts (opened_by) VALUES ('p01') RETURNING id`,
   );
@@ -188,7 +193,7 @@ describe("إعادة إنتاج عيوب تدقيق الجاهزية (يجب أ�
         calculationMode: "percentage", defaultPercent: 35, categoryRates: {}, fixedAmountPerVisitMinor: 0,
         deductLabCost: true, deductMaterialCost: false, basis: "collected_cash", effectiveDate: "", rateHistory: [],
       },
-    }, { actor: "owner" });
+    }, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
 
     const after = row(await report(), b);
     expect(after, "الطبيب ب اختفى من التقرير").toBeDefined();
@@ -244,7 +249,7 @@ describe("الحالات ١–١٨: صحة المحرّك", () => {
         calculationMode: "percentage", defaultPercent: 50, categoryRates: {}, fixedAmountPerVisitMinor: 0,
         deductLabCost: true, deductMaterialCost: false, basis: "collected_cash", effectiveDate: "", rateHistory: [],
       },
-    }, { actor: "owner" });
+    }, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
     const p = await patient();
     const at = NOW_ISO();
     const { invoiceId } = await visitInvoice({ patientId: p, currency: "YER", at, items: [{ doctorId: a, amount: 10000 }, { doctorId: b, amount: 10000 }] });
@@ -268,10 +273,10 @@ describe("الحالات ١–١٨: صحة المحرّك", () => {
           calculationMode: "percentage", defaultPercent: percent, categoryRates: {}, fixedAmountPerVisitMinor: 0,
           deductLabCost: false, deductMaterialCost: false, basis: "invoiced", effectiveDate: "", rateHistory: [],
         },
-      }, { actor: "owner" });
+      }, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
       expect(row(await report(), b)).toEqual(before);
     }
-    await updateUser(userA, { clearCommissionConfig: true }, { actor: "owner" });
+    await updateUser(userA, { clearCommissionConfig: true }, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
     expect(row(await report(), b)).toEqual(before);
   });
 
@@ -419,7 +424,7 @@ describe("الحالات ١–١٨: صحة المحرّك", () => {
         calculationMode: "by_category", defaultPercent: 33, categoryRates: { ortho: 40 }, fixedAmountPerVisitMinor: 0,
         deductLabCost: true, deductMaterialCost: false, basis: "collected_cash", effectiveDate: "", rateHistory: [],
       },
-    }, { actor: "owner", actorRole: "admin", reason: "نسب التخصص" });
+    }, { actor: "owner", actorRole: "admin", reason: "نسب التخصص" }, signedLegacyStaffProof(staffAdmin));
     const audits = await q<{ actor: string; actor_role: string; details: Record<string, unknown> }>(
       `SELECT actor, actor_role, details FROM audit_log
         WHERE action = 'doctor.commission.update' AND entity = 'party' AND entity_id = $1 ORDER BY id`,
@@ -471,7 +476,7 @@ describe("سلامة السجل الزمني", () => {
 
     // The existing fixture helpers own these rows. The real writer creates
     // baseline + advanced history; no stored history is updated or deleted.
-    await updateUser(user, { commissionConfig: config }, { actor: "owner" });
+    await updateUser(user, { commissionConfig: config }, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
     const prefix = await history();
     expect(prefix).toHaveLength(2);
     expect(prefix[1]).toMatchObject({ source: "advanced", config: { serviceRates: expectedRates } });
@@ -488,7 +493,7 @@ describe("سلامة السجل الزمني", () => {
       const checked = validateDoctorCommissionConfigInput(JSON.parse(JSON.stringify(editor)));
       expect(checked.ok).toBe(true);
       if (!checked.ok) throw new Error(checked.message);
-      const saved = await updateUser(user, { commissionConfig: checked.value }, { actor: "owner" });
+      const saved = await updateUser(user, { commissionConfig: checked.value }, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
       expect(await history()).toEqual(prefix);
       expect(saved?.commissionConfig?.serviceRates).toEqual(expectedRates);
       expect(Object.prototype.hasOwnProperty.call(saved?.commissionConfig, "customServiceRates")).toBe(explicitEmpty);
@@ -498,7 +503,7 @@ describe("سلامة السجل الزمني", () => {
     const current = (await db.listUsers()).find((entry) => entry.id === user);
     if (!current?.commissionConfig) throw new Error("Owned doctor config missing");
     await updateUser(user, { commissionConfig: { ...current.commissionConfig, defaultPercent: 27.5 } },
-      { actor: "owner", reason: "intentional roundtrip change" });
+      { actor: "owner", reason: "intentional roundtrip change" }, signedLegacyStaffProof(staffAdmin));
     const after = await history();
     expect(after).toHaveLength(prefix.length + 1);
     expect(after.slice(0, prefix.length)).toEqual(prefix);
@@ -526,11 +531,11 @@ describe("سلامة السجل الزمني", () => {
         calculationMode: "percentage", defaultPercent: 60, categoryRates: {}, fixedAmountPerVisitMinor: 0,
         deductLabCost: true, deductMaterialCost: false, basis: "collected_cash", effectiveDate: "", rateHistory: [],
       },
-    }, { actor: "owner" });
+    }, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
     const p = await patient();
     const { invoiceId } = await visitInvoice({ patientId: p, currency: "YER", at: NOW_ISO(), items: [{ doctorId: d, amount: 10000 }] });
     await pay({ patientId: p, invoiceId, amount: 5000, currency: "YER" });
-    await updateUser(user, { clearCommissionConfig: true }, { actor: "owner" });
+    await updateUser(user, { clearCommissionConfig: true }, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
     await pay({ patientId: p, invoiceId, amount: 5000, currency: "YER" });
     // النصف الأول بـ٦٠٪ (3,000) والثاني بعد الإزالة بنسبة الجهة ٢٠٪ (1,000).
     expect(row(await report(), d)?.earnedMinor).toBe(4000);
@@ -547,8 +552,8 @@ describe("سلامة السجل الزمني", () => {
         calculationMode: "percentage", defaultPercent: 90, categoryRates: {}, fixedAmountPerVisitMinor: 0,
         deductLabCost: true, deductMaterialCost: false, basis: "collected_cash", effectiveDate: "", rateHistory: [],
       },
-    });
-    await db.linkUserDoctor(user.id, d, { actor: "owner" });
+    }, undefined, signedLegacyStaffProof(staffAdmin));
+    await db.linkUserDoctor(user.id, d, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
     expect(row(await report(), d)?.earnedMinor).toBe(2500);
   });
 

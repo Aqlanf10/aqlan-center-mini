@@ -34,6 +34,10 @@ function RoleSelect({ value, onChange, disabled, label }: {
   );
 }
 
+function newRequestKey(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}-family`;
+}
+
 async function send(url: string, method: string, body?: unknown): Promise<FamilyView> {
   const response = await fetch(url, {
     method, headers: body === undefined ? undefined : { "Content-Type": "application/json" },
@@ -61,6 +65,9 @@ export function PatientFamilyPanel({ patientId, patientName, patientPhone }: {
   const [guarantorPatient, setGuarantorPatient] = useState<number | null>(null);
   const [guarantorName, setGuarantorName] = useState("");
   const [guarantorPhone, setGuarantorPhone] = useState("");
+  /* One key per opened create form: a double press or a retry after a lost response
+     never creates a second family (the canonical server keeps a receipt; legacy ignores it). */
+  const [createKey, setCreateKey] = useState(newRequestKey);
 
   const load = useCallback(async () => {
     try {
@@ -185,7 +192,7 @@ export function PatientFamilyPanel({ patientId, patientName, patientPhone }: {
               <div className="flex flex-wrap gap-1.5">
                 <button type="button" disabled={busy} onClick={() => {
                   const last = patientName.trim().split(/\s+/).at(-1) ?? "";
-                  setName(last ? `عائلة ${last}` : ""); setRole(null); setMode(mode === "create" ? "idle" : "create");
+                  setName(last ? `عائلة ${last}` : ""); setRole(null); setCreateKey(newRequestKey()); setMode(mode === "create" ? "idle" : "create");
                 }} className="rounded-lg bg-navy-800 px-3 py-1.5 text-xs font-bold text-white">إنشاء عائلة</button>
                 <button type="button" disabled={busy} onClick={() => { setRole(null); setQuery(""); setFamilyHits([]); setMode(mode === "join" ? "idle" : "join"); }}
                   className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold text-navy-800">ربط بعائلة قائمة</button>
@@ -201,7 +208,7 @@ export function PatientFamilyPanel({ patientId, patientName, patientPhone }: {
             className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-xs" />
           <RoleSelect label="صلة المريض" value={role} onChange={setRole} disabled={busy} />
           <button type="button" disabled={busy || !name.trim()}
-            onClick={() => void run(() => send("/api/families", "POST", { name, members: [{ patientId, role }] }))}
+            onClick={() => void run(() => send("/api/families", "POST", { requestKey: createKey, name, members: [{ patientId, role }] }))}
             className="rounded-lg bg-brand-orange px-3 py-1 text-xs font-bold text-white disabled:opacity-50">حفظ</button>
         </div>
       ) : null}

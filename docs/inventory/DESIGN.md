@@ -57,3 +57,34 @@ Reuse native buttons/links, existing ReportPrintHeader, SessionProvider and JSON
 ## Do's and Don'ts
 
 Keep quantity/debt/cash effects distinct. Preserve clinic stock during doctor transfers. Show missing/estimated cost states. Do not fabricate figures or create patient consumption from unexplained package differences. Sharp/contaminated items are disposed safely; never request return or waste retrieval. No automatic wage deduction or disciplinary debt.
+
+## Reference setup workspace
+
+The first-use setup page uses a restrained enterprise workspace inside the existing
+clinic shell: a compact command bar, leading-side section navigation, a searchable
+reference table and a contextual inline editor. The established inventory variables
+in `components/inventory/inventory.module.css` remain the token owner; scoped
+`reference-setup.module.css` adds layout only. IBM Plex Arabic, clinic logo, blue
+structure and orange next-action accents remain unchanged. Phone layout stacks the
+workspace without imposing a fixed shell height.
+
+| Capability | Canonical owner | Source of truth | Allowed variants | Verification |
+|---|---|---|---|---|
+| Select/Listbox | Native select in InventoryReferenceSetup | Existing inventory forms and this contract | OS-owned popup, app-owned labels | Keyboard/open-popup component check; operational check blocked on canonical authority |
+| Form | InventoryReferenceSetup contextual editor | ReferenceInput and reference-validation | Item, package, location, limit | Validation tests; explicit saved draft and pending command states |
+| CRUD | Reference setup service and existing inventory lifecycle | Immutable versions, central authorization seam | Create and append revision only | Synthetic-authority PG tests; no claim of operational authorization |
+| Toast | Existing inventory inline status/alert regions | Confirmed acknowledgement only | Status, refusal, uncertain | Exact result identity/digest checks |
+| Scrollbar | Existing app/browser document and native overflow | Natural scrolling; no hidden scrollbar | Table overflow only | Narrow viewport check; no global scrollbar redesign in this slice |
+
+Setup has no delete or opening-balance action. Package/base-unit history is fixed;
+approval limits append revisions and cannot enable self-approval. Local drafts are
+explicitly recoverable for seven days under the server-provided realm/subject;
+pending commands are separate durable records with no automatic expiry. Neither
+403/409 nor a changed generation clears them. A readiness observation shows its
+timestamp and unavailable counts distinctly and never exposes an activation button.
+
+The canonical authority adapter is currently unbound and production setup is closed.
+Injected synthetic-authority tests prove core contracts only. Historical lookup
+also remains held if original numeric actor/username remapped: the existing journal
+uses those exact original keys, and no identity rewriting or inferred restore
+continuity is supported. Open-flow browser acceptance requires the central adapter.

@@ -27,9 +27,10 @@ beforeAll(async () => {
   const { rows: [patient] } = await db.query<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name, created_at) VALUES ($1, 'مريض كشف تاريخي اصطناعي', $2) RETURNING id`, [patientNumber, date("2026-01-01")]);
   patientId = patient.id;
-  await db.query(`INSERT INTO patient_opening_balances (patient_id, currency, amount_minor, as_of_date, created_by)
-    VALUES ($1, 'YER', 100, '2026-01-01', 'synthetic-asof'), ($1, 'SAR', 1000, '2026-01-01', 'synthetic-asof'),
-           ($1, 'USD', 300, '2026-10-01', 'synthetic-asof')`, [patientId]);
+  await db.query(`INSERT INTO patient_opening_balances (patient_id, currency, amount_minor, as_of_date, created_by, updated_at)
+    VALUES ($1, 'YER', 100, '2026-01-01', 'synthetic-asof', '2026-01-01T09:00:00+03:00'),
+           ($1, 'SAR', 1000, '2026-01-01', 'synthetic-asof', '2026-01-01T09:00:00+03:00'),
+           ($1, 'USD', 300, '2026-10-01', 'synthetic-asof', '2026-10-01T09:00:00+03:00')`, [patientId]);
   const { rows: [shift] } = await db.query<{ id: number }>(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd, status)
     VALUES ('synthetic-asof', 0, 0, 0, 'closed') RETURNING id`);
   const invoiceIds: number[] = [];
@@ -93,14 +94,17 @@ describe("patient statement cutoff on the built app", () => {
       const printErrors: string[] = [];
       context.on("page", (opened) => opened.on("pageerror", (error) => printErrors.push(error.message)));
       const popupPromise = page.waitForEvent("popup"); await official.click(); const print = await popupPromise;
-      await print.locator(".sheet-report").waitFor();
-      const sheet = print.locator(".sheet-report");
+      await print.locator(".patient-statement-document").waitFor();
+      const sheet = print.locator(".patient-statement-document");
       const text = await sheet.innerText();
-      for (const expected of [patientNumber, "30/09/2026", "جميع العملات", formatMoney(700, "YER"), formatMoney(2650, "SAR"), `دفعة ${formatMoney(400, "SAR")}`]) expect(text).toContain(expected);
+      for (const expected of [patientNumber, "2026-09-30", "رصيد الفترة حسب العملة", formatMoney(700, "YER"), formatMoney(2650, "SAR"), "صافي المدفوعات", formatMoney(400, "SAR"), `استرداد — ASOF-R-${stamp}-2`, formatMoney(50, "SAR")]) expect(text).toContain(expected);
       expect(text).not.toContain("SYN-ASOF-FUTURE");
-      expect(await sheet.locator("tfoot tr td").last().innerText()).toBe("");
+      // The patient copy has opening/closing totals, never a sum of running balances.
+      expect(await sheet.locator("tfoot").count()).toBe(0);
+      expect(text).toContain("رصيد أول الفترة");
+      expect(text).toContain("رصيد آخر الفترة");
       await print.emulateMedia({ media: "print" });
-      expect(await sheet.locator("tfoot tr td").last().innerText()).toBe("");
+      expect(await sheet.locator("tfoot").count()).toBe(0);
       await sheet.screenshot({ path: ".settings-ui-artifacts/patient-statement-cutoff-print.png" });
       expect(errors).toEqual([]);
       expect(printErrors).toEqual([]);

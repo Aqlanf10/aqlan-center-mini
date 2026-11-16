@@ -1,0 +1,11 @@
+{
+  "exit": 0,
+  "seconds": 912.87,
+  "buildId": "kjAZTJfRtOflAgY_0Na6p",
+  "sourceSha256": "f148a0128bbd37940951a4ce086445d9c048018b39aab77dcb7b992dcaa55932",
+  "proofExactlyIdentical": true,
+  "fileCount": 10722,
+  "traceCount": 741,
+  "manifestCount": 86,
+  "baselineSeconds": 1485.24
+}

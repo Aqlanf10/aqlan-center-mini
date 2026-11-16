@@ -1,0 +1,224 @@
+{
+  "schema": 1,
+  "syntheticOnly": true,
+  "preparedAtUtc": "2026-10-30T23:33:40.067583+00:00",
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "branch": "feat/work-recovery-followup-20261027",
+  "baseCommit": "2174bf7710c0bbbcd3f3bd7c08317507d369d3d1",
+  "baseCI": {
+    "runId": 41138354140,
+    "status": "completed",
+    "conclusion": "success",
+    "source": "parent acceptance and preceding final handoff"
+  },
+  "readiness": "NOT_READY",
+  "inventorySourceDigest": "5bab4b28cdb1200dccc436cb6485f0bd699e65edfac584de8dbb5bd5d0d69e7a",
+  "mapCounts": {
+    "total": 383,
+    "canonical-done": 49,
+    "entry": 4,
+    "excluded": 12,
+    "existing": 295,
+    "owner-only": 20,
+    "self": 3
+  },
+  "inventoryCounts": {
+    "routeMethods": 416,
+    "pages": 97
+  },
+  "environment": {
+    "node": "22.23.3",
+    "postgres": "18.4",
+    "browser": "system Chromium 151.0.7922.173",
+    "database": "owned loopback synthetic databases only"
+  },
+  "results": {
+    "postgres": {
+      "passed": 97,
+      "files": 5,
+      "exit": 0,
+      "newTests": 24
+    },
+    "httpBrowser": {
+      "passed": 33,
+      "files": 3,
+      "exit": 0,
+      "newTests": 8,
+      "ddlStatements": 0
+    },
+    "unitAll": {
+      "passed": 13398,
+      "files": 798,
+      "exit": 0
+    },
+    "mapGuards": {
+      "passed": 10,
+      "files": 2,
+      "exit": 0
+    },
+    "buildExit": 0,
+    "typecheckExit": 0,
+    "eslintAllExit": 0,
+    "eslintExistingWarnings": 209,
+    "eslintFocusedWarnings": 0,
+    "moneyGuardExit": 0,
+    "bodyGuardExit": 0,
+    "inventoryVerifyExit": 0
+  },
+  "baselineExpectedRed": {
+    "file": "baseline-http.log",
+    "assertion": "authorized canonical account: patient file GET 200; case detail GET 401 instead of 200"
+  },
+  "diagnosticRun": {
+    "file": "map-guards.log",
+    "cause": "initial focused command selected stale generated standalone test copy; final command excludes generated .next only"
+  },
+  "receiptSourceUnchanged": {
+    "lib/receipt-provenance-db.ts": "88d5a290b4297d803240c1e060cad8e9a3b7dd3bac1a5e6d078d0612dc1f5c10",
+    "lib/receipt-provenance.ts": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b"
+  },
+  "limits": [
+    "One GET clinical representation only; no independent plan/funding/images/visit payload or converted writers.",
+    "Latest 100 native adjustments with hasMore; progress counts all adjustments in the same scoped case.",
+    "Full PostgreSQL and HTTP suites deferred to final-head CI.",
+    "Existing logout cookie-copy limitation in HANDOFF remains outside this slice; no new logout-revocation claim.",
+    "No durable idempotency added; slice28 recovery/storage limitations remain.",
+    "Actual waiting-room audio quality is still unverified."
+  ],
+  "finalHeadCI": "Confirm exact published head and all four terminal gates after push; see final delivery.",
+  "sources": [
+    {
+      "path": "app/api/ortho/[id]/route.ts",
+      "sha256": "06bedbd64e16e1a394c3370e8fd919da567acf6056755cda689a5704443ba77f"
+    },
+    {
+      "path": "components/patient/CanonicalOrthoCases.tsx",
+      "sha256": "d968a6406338e6fbe9bc18a696152dafb9a0bb0f24b1de9e61323e8b498459c3"
+    },
+    {
+      "path": "components/patient/CanonicalOrthoDetail.tsx",
+      "sha256": "53e553719b81b88f5af408d925e63308d5846dd48cae98e712549fb3a91e6d9a"
+    },
+    {
+      "path": "lib/db.ts",
+      "sha256": "ca59467d9f3424c0eab870564606eb438c30bb253d786d459e92510edbeb07c7"
+    },
+    {
+      "path": "lib/ortho.ts",
+      "sha256": "3de5722f2d1d696ed0d61cba0dcad6fe6bda87d67785f930001b98722b7c393b"
+    },
+    {
+      "path": "lib/canonical-record-reads.ts",
+      "sha256": "c521c845057f2718a987e86ced53421fd7612f74b2a95c5debff67f8f9c8e726"
+    },
+    {
+      "path": "lib/canonical-ortho-reads.ts",
+      "sha256": "2096677bbde02ae2b1511c80dcccfe799cbf4ee726f74a8396f8a610caf57b4a"
+    },
+    {
+      "path": "__tests__/postgres/ortho-canonical-detail.test.ts",
+      "sha256": "d66c74767cee0b56e35f5c1c24802fdae5ffcc761548eddba54f84ab294eb9fe"
+    },
+    {
+      "path": "__tests__/security-http/canonical-ortho-detail-journey.test.ts",
+      "sha256": "621e33a6ecc521bfaddca5fd1b8b5071928a2938ef1f90eb3d4a2ae2270cf554"
+    },
+    {
+      "path": "docs/security/staff-cutover/HANDOFF.md",
+      "sha256": "dc9647c8a811810d375c3532549de1a7f8b3a5b9a3ad82fb49652e42dd1d714e"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json",
+      "sha256": "37bdeeadf98c2662b94a2bd140b7f13da0720caa35be5ab62d7721624be474da"
+    },
+    {
+      "path": "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md",
+      "sha256": "de55d5404b7fdd882519bc5e89a96f9c2d15fe33e129e53c3f17ff0ba7071931"
+    },
+    {
+      "path": "docs/security/staff-cutover/inventory.json",
+      "sha256": "10382209ce40adc23cc52eac5fc66b32020df54154db75f2af544ccb6a554b1f"
+    },
+    {
+      "path": "docs/review/work-ortho-detail-slice30-20261030.md",
+      "sha256": "a44ac8ced60e9723686fa12115e3998eb5f3b61761810f31a77b50cc3ad9e66a"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "baseline-http.log",
+      "sha256": "f806a04dc9a57bcce90fafbae6725015f72e7a5b75249b03c127388290af1baa",
+      "bytes": 1650
+    },
+    {
+      "path": "postgres-final.log",
+      "sha256": "1b7a50b0526646872f9de66604f6b79599801dcd7fcddf2e046a0581a3f8ef59",
+      "bytes": 542
+    },
+    {
+      "path": "http-final.log",
+      "sha256": "3cc9bed7e2974f0e00809cb663158cea3cd39524f6fffca79238d2fe2269ce20",
+      "bytes": 629
+    },
+    {
+      "path": "unit-all.log",
+      "sha256": "4b9c4344d6b296aaa21f2bf5445baa684057614e2cd1cd9df9c578e17d5294f5",
+      "bytes": 569
+    },
+    {
+      "path": "map-guards-final.log",
+      "sha256": "20882779973172daf391c187dc606c8191be9f172b3663a18419911c1642eda6",
+      "bytes": 431
+    },
+    {
+      "path": "map-guards.log",
+      "sha256": "307dd327ba2981904a9c73ab075db9ead01141094a2c94117d1c3c65331224b8",
+      "bytes": 4122
+    },
+    {
+      "path": "typecheck-final.log",
+      "sha256": "45342ca54fc3787657ce6eb4dbe6d4510cbf68d24318d44416c0176ab31ebf4b",
+      "bytes": 208
+    },
+    {
+      "path": "lint-all.log",
+      "sha256": "5839fac45ad2badba08e25a850f2d15938dd6e63de2cf144b0d217754f36b5a0",
+      "bytes": 58889
+    },
+    {
+      "path": "lint-focused.log",
+      "sha256": "45342ca54fc3787657ce6eb4dbe6d4510cbf68d24318d44416c0176ab31ebf4b",
+      "bytes": 208
+    },
+    {
+      "path": "build.log",
+      "sha256": "3492e69ce80a6fbfecc3fd23a2e3e45f58802758ed9b3fd74886c36eb63934f7",
+      "bytes": 13583
+    },
+    {
+      "path": "money-guard.log",
+      "sha256": "22f23b17dc7db132f17b8f5c1660da5cf0dd509c6b30e14079250c01f50aba49",
+      "bytes": 1843
+    },
+    {
+      "path": "body-guard.log",
+      "sha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "bytes": 197
+    },
+    {
+      "path": "inventory-verify.log",
+      "sha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "bytes": 329
+    },
+    {
+      "path": "legacy-body-proof.json",
+      "sha256": "184602a8f4b6c8615cd42283e3ab37f4c0c35852a40eb804ae23591d3b4daa59",
+      "bytes": 371
+    },
+    {
+      "path": "ortho-detail-390.png",
+      "sha256": "3f84e456a6493b4ba8f88a956a19f6ab8114767ab44aa364d8a9250ac2bff8cf",
+      "bytes": 132362
+    }
+  ]
+}

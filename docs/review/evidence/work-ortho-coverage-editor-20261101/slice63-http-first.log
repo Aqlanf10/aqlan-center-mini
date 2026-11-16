@@ -1,0 +1,103 @@
+
+ RUN  v4.1.12 /workspace/aqlan-coverage-ui
+
+[security-http] الخادم جاهز على http://127.0.0.1:14917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts (12 tests | 3 failed) 72603ms
+   × browser: actual cross-tab journal arbitration blocks a second differing intent 14598ms
+   × browser: source cancellation keeps the terminal refusal pending until explicit exact PUT proof 3216ms
+   × browser: a delayed old source response cannot restore choices after grant withdrawal 32762ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts > browser: actual cross-tab journal arbitration blocks a second differing intent
+AssertionError: expected { revisions: +0, rejections: +0, …(1) } to deeply equal { revisions: 1, rejections: +0, …(1) }
+
+- Expected
++ Received
+
+  {
+-   "audits": 1,
++   "audits": 0,
+    "rejections": 0,
+-   "revisions": 1,
++   "revisions": 0,
+  }
+
+ ❯ __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts:50:920
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts > browser: source cancellation keeps the terminal refusal pending until explicit exact PUT proof
+AssertionError: expected { revisions: +0, rejections: +0, …(1) } to deeply equal { revisions: +0, rejections: 1, …(1) }
+
+- Expected
++ Received
+
+  {
+-   "audits": 1,
+-   "rejections": 1,
++   "audits": 0,
++   "rejections": 0,
+    "revisions": 0,
+  }
+
+ ❯ __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts:56:514
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts > browser: a delayed old source response cannot restore choices after grant withdrawal
+TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event "response"
+ ❯ __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts:60:720
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: "route.fetch: Request context disposed.
+Call log:
+[2m  - → POST http://127.0.0.1:15016/api/ortho/9/followup-coverage?patientId=9[22m
+[2m    - user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36[22m
+[2m    - accept: */*[22m
+[2m    - accept-encoding: gzip,deflate,br[22m
+[2m    - accept-language: ar[22m
+[2m    - content-type: application/json[22m
+[2m    - cookie: aqlan_flow_session=[REDACTED_SYNTHETIC_EXPIRED_COOKIE][22m
+[2m    - origin: http://127.0.0.1:15016[22m
+[2m    - sec-ch-ua: "Chromium";v="151", "Not=A?Brand";v="99"[22m
+[2m    - sec-ch-ua-mobile: ?0[22m
+[2m    - sec-ch-ua-platform: "Linux"[22m
+[2m    - content-length: 385[22m
+" while running route callback.
+Consider awaiting `await page.unrouteAll({ behavior: 'ignoreErrors' })`
+before the end of the test to ignore remaining routes in flight.
+ ❯ __tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts:50:395
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { log: [ '  - → POST http://127.0.0.1:15016/api/ortho/9/followup-coverage?patientId=9', '    - user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36', '    - accept: */*', '    - accept-encoding: gzip,deflate,br', '    - accept-language: ar', '    - content-type: application/json', '    - cookie: aqlan_flow_session=[REDACTED_SYNTHETIC_EXPIRED_COOKIE]', '    - origin: http://127.0.0.1:15016', '    - sec-ch-ua: "Chromium";v="151", "Not=A?Brand";v="99"', '    - sec-ch-ua-mobile: ?0', '    - sec-ch-ua-platform: "Linux"', '    - content-length: 385' ] }
+This error originated in "__tests__/security-http/canonical-ortho-coverage-editor-journey.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "browser: unavailable durable storage refuses before the first write". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  3 failed | 39 passed (42)
+     Errors  1 error
+   Start at  18:08:10
+   Duration  128.61s (transform 2.40s, setup 0ms, import 3.43s, tests 119.59s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

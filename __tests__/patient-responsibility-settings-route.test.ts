@@ -1,0 +1,14 @@
+import { beforeEach, expect, it, vi } from "vitest";
+const deps = vi.hoisted(() => ({ session: vi.fn(), settings: vi.fn() }));
+vi.mock("../lib/session", () => ({ requireSession: deps.session }));
+vi.mock("../lib/patient-responsibility-settings", () => ({ patientResponsibilitySettings: deps.settings, ResponsibilityError: class extends Error {} }));
+import { GET, PATCH } from "../app/api/patients/[id]/responsibility/route";
+import { apiRouteVerdict } from "../lib/http-permissions";
+const context = { params: Promise.resolve({ id: "19" }) };
+const body = { kind: "ortho", sourceId: 3, expectedSourceFingerprint: "a".repeat(64), doctorId: 7, reason: "Synthetic transfer" };
+const request = () => new Request("http://localhost/api/patients/19/responsibility?kind=ortho&sourceId=3", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+beforeEach(() => { vi.clearAllMocks(); deps.session.mockResolvedValue({ userId: 1, username: "synthetic", role: "admin" }); deps.settings.mockResolvedValue({ doctorId: 7 }); });
+it("passes exact patient/source and authenticated actor, never body authority", async () => { expect((await PATCH(request(), context)).status).toBe(200); expect(deps.settings).toHaveBeenCalledWith({ patientId: 19, kind: "ortho", sourceId: 3 }, { userId: 1, username: "synthetic", role: "admin" }, { expectedSourceFingerprint: body.expectedSourceFingerprint, doctorId: 7, reason: body.reason }); });
+it.each(["doctor", "reception", "assistant", "cashier"])("blocks %s from both settings reads and writes", async role => { deps.session.mockResolvedValue({ role }); expect((await PATCH(request(), context)).status).toBe(403); expect((await GET(request(), context)).status).toBe(403); expect(deps.settings).not.toHaveBeenCalled(); });
+it("blocks anonymous requests", async () => { deps.session.mockResolvedValue(null); expect((await PATCH(request(), context)).status).toBe(401); expect(deps.settings).not.toHaveBeenCalled(); });
+it("registers admin-only API verbs", () => { for (const method of ["GET", "PATCH"]) expect(apiRouteVerdict("/api/patients/19/responsibility", method)).toMatchObject({ access: ["admin"] }); });

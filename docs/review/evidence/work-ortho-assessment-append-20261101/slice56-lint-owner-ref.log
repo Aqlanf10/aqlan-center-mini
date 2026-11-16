@@ -1,0 +1,11 @@
+
+/workspace/aqlan-ortho-decisions/components/patient/CanonicalOrthoCases.tsx
+  23:88  warning  The ref value 'assessments.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'assessments.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+✖ 1 problem (0 errors, 1 warning)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

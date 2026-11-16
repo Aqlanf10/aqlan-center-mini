@@ -1,0 +1,51 @@
+
+ RUN  v4.1.12 <worktree>
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ✓ __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance through existing authorized read routes > adds separate privacy-minimal provenance while retaining permissions, face values and stored origin links 1388ms
+ ✓ __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps the recorded face amount when optional provenance is absent or malformed, then recovers 5971ms
+stdout | __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+SYNTHETIC_RECEIPT_PROVENANCE_DIAGNOSTIC_V1 BEGIN {"scope":"receipt-provenance","file":"receipt-provenance-reversal-failed.pdf","mime":"application/pdf","bytes":223349,"sha256":"85763c3cf7c95c1fb2bbbed986936c04a5a941cde855e2296795795c8efbcd23","chunks":73,"synthetic":true,"acceptance":false,"diagnosticOnly":true,"runId":"unavailable","checkoutSha":"unavailable"}
+SYNTHETIC_RECEIPT_PROVENANCE_DIAGNOSTIC_V1 END {"scope":"receipt-provenance","file":"receipt-provenance-reversal-failed.pdf","mime":"application/pdf","bytes":223349,"sha256":"85763c3cf7c95c1fb2bbbed986936c04a5a941cde855e2296795795c8efbcd23","chunks":73,"synthetic":true,"acceptance":false,"diagnosticOnly":true,"runId":"unavailable","checkoutSha":"unavailable"}
+
+ × __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels 8918ms
+   → PDF signature receipt fragments violate exact glyph geometry
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built finance shift read state > keeps unknown through initial failure then recovers from the visible retry, network=false 1128ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built finance shift read state > keeps unknown through initial failure then recovers from the visible retry, network=true 1151ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built finance shift read state > preserves accountant read-only controls after a confirmed open read 907ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > keeps unknown through initial failure then recovers from the visible retry, network=false 933ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > keeps unknown through initial failure then recovers from the visible retry, network=true 918ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > preserves accountant read-only controls after a confirmed open read 841ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built cash form draft identity across real GET refreshes > keeps opening balances mounted, hidden and unfocusable until the same confirmed-closed snapshot recovers 1265ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built cash form draft identity across real GET refreshes > preserves same-shift expense/count drafts and resets them only when a different shift is confirmed 2213ms
+ ✓ __tests__/security-http/canonical-shifts-journey.test.ts > HTTP: exact grants control writes; role labels and adjacent read grants do not authorize opening or closing 1208ms
+ ✓ __tests__/security-http/canonical-shifts-journey.test.ts > HTTP: untrusted bodies, cross-origin writes, and stale sessions have no effect 172ms
+ ✓ __tests__/security-http/shift-close-http.test.ts > إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب > GET يعرض الدرج بالقاعدة الواحدة (نقدٌ فقط) 32ms
+ ✓ __tests__/security-http/shift-close-http.test.ts > إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب > معدودٌ مخالف بلا سبب ⇒ 409 برسالة تكشف الفرق وتطلب سببه، والوردية تبقى مفتوحة 17ms
+ ✓ __tests__/security-http/shift-close-http.test.ts > إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب > مع السبب ⇒ يُقفَل، ويُدقَّق بالمعدود والمتوقَّع والفرق والسبب 19ms
+ ✓ __tests__/security-http/shift-close-http.test.ts > إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب > تقرير الإقفال (Z) يُطبع للاستقبال ولا يُفتح للطبيب 77ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+Error: PDF signature receipt fragments violate exact glyph geometry
+ ❯ assertReceiptPrintPdfSignature __tests__/helpers/print-pdf-glyphs.ts:120:11
+    118|     || Math.abs(right.yMin - left.yMin) > 2 || gap < 0 || gap > 0.5
+    119|     || merged.text !== expectedLabel) {
+    120|     throw new Error("PDF signature receipt fragments violate exact gly…
+       |           ^
+    121|   }
+    122|   // Neither input words nor their geometry change. The unchanged shar…
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:338:9
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:247:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 16 passed (17)
+   Start at  02:22:20
+   Duration  46.47s (transform 361ms, setup 0ms, import 1.14s, tests 36.41s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

@@ -1,0 +1,150 @@
+{
+  "base": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+  "checks": [
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "fail",
+      "sha256": "e7793f1950ae9844f56c77e31b78d23bb62cea267c6d958ae326c47c29e413eb",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "checked",
+      "sha256": "de42faa0ce9c12d73325ed48670098407f94a842bc8c74d8613cfa6a415a49c9",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "validOwner",
+      "sha256": "49fe3520c940731fa6f308b2588a7256d02b607beee6558d91809b377cc3ab61",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "scopeOf",
+      "sha256": "816556b7720b93e5d0f54ad8858659f38b325a8c1b9e913be2219b01168c0427",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "authorize",
+      "sha256": "e16a0ec18c4531c962fd6a666af813533f619c5aadf50800845ac442bac87209",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "assertUnexpired",
+      "sha256": "cef4121b36cc70b84afb6f91e1fc02cb1fce664bda20972ed99ed9efa7e9a440",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "lockOwner",
+      "sha256": "721e5bb4e764f4791d30db21f4c71fd4a3b4fbad3977dc4b7522f63333cde80e",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "fingerprint",
+      "sha256": "83bdecd5a37586eaa68b018fe5ab35cc4137770682199ddcd69978822dcb8491",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "decode",
+      "sha256": "419d7ad9e330dea9c97bbbd46a30d41acda140beed60807292ac15bda3b48ede",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "historyEntry",
+      "sha256": "b8996dbcbf10b0d6b7b4372d21179dfd5c899b5a2b31affd94373e3c55747b4a",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "validatedHistory",
+      "sha256": "11d2e1a41f1278a9eb17a631043fa516db49eac15178b2f1cfdeef9a80c8220d",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "requirePlanLinks",
+      "sha256": "f44f7634b3e7fe97ffb13b3faea77ab44db7629acddb71750a2f25ea1c3d80d9",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "lockReferences",
+      "sha256": "fda75e5b9505630be3eaa604dd8810ffec6aea1d7720328644200e92c4d969b6",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "canonicalContext",
+      "sha256": "d84b192488c88e622b68345d27b3eb3fe03f7f4893dc11647f12fd5f745542be",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "transaction",
+      "sha256": "1939260225fdc160b6c4e9b310934118bb88804c24c0c540353d56eb15589db6",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "getOrthoTreatmentStrategy",
+      "sha256": "3f59569b4de69ea99945371c9d859395ac68719195eb61641162e63c9e0e51e6",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-treatment-strategy-store.ts",
+      "function": "appendOrthoTreatmentStrategy",
+      "sha256": "71e4425ddfd5122a19366887e4d4887b30ec7562980da95c36771a2f3b856e7e",
+      "unchanged": true
+    },
+    {
+      "file": "app/api/ortho/[id]/strategy/route.ts",
+      "function": "scope",
+      "sha256": "5c2dc2545ce327bbc29e3d993b8df5f0a2eed53a704ebee21c14cf2e0fbdc233",
+      "unchanged": true
+    },
+    {
+      "file": "app/api/ortho/[id]/strategy/route.ts",
+      "function": "GET",
+      "sha256": "ac40b95e0adb27e83e9c122c8d5e97e867c15b1430cd4420ecbe6cc03d1ff0f3",
+      "unchanged": true
+    },
+    {
+      "file": "app/api/ortho/[id]/strategy/route.ts",
+      "function": "POST",
+      "sha256": "02363fe6f2e35a01719f7188ace55f644a924e89a8452d1e0ac7f82c3860aaf4",
+      "unchanged": true
+    },
+    {
+      "file": "lib/canonical-ortho-assessment.ts",
+      "sha256": "a8717164ecd01ce833ef25db0f2d78c3ae61aad2f33d4ea1519b748cf10e7b35",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-assessment-store.ts",
+      "sha256": "dc13e538d0e3618df6713a5feb7643b4ed1483c1b7d3c2de8264943c6738b3fa",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-assessment-versioned-sources.ts",
+      "sha256": "f5f9dd9e5523e7a65aec0aa3f6f210054829802a9cae0329c2783e1a1a361ed8",
+      "unchanged": true
+    },
+    {
+      "file": "lib/staff-authority-proof-internal.ts",
+      "sha256": "c259bbdbefc02d01b0e004e053c1bb487bb637947be32d82eb6f25473b40c96a",
+      "unchanged": true
+    },
+    {
+      "file": "lib/db.ts",
+      "sha256": "ca59467d9f3424c0eab870564606eb438c30bb253d786d459e92510edbeb07c7",
+      "unchanged": true
+    }
+  ]
+}

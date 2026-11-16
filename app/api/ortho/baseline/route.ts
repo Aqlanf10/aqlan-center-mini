@@ -42,7 +42,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await recordOrthoBaseline({
-      ...draft.value, responsibleDoctorId, patientId, actor: session.username, actorRole: session.role,
+      ...draft.value, responsibleDoctorId, patientId, admittedSession: session, actor: session.username, actorRole: session.role,
     });
     if (!result.ok) {
       const messages = {

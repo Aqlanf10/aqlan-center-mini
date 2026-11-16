@@ -22,6 +22,17 @@ export interface SessionInfo {
   role: Role | string;
   displayName?: string;
   permissions?: DoctorPermissions | null;
+  /** جلسة الهوية الموحّدة: القائمة إسقاطٌ لقدراتها الحالية، والخادم يقرّر كل عملية. */
+  canonical?: boolean;
+  isOwner?: boolean;
+  capabilities?: string[];
+  /** نطاق السجلات الحالي (عرضٌ للقائمة فقط؛ الخادم يفرضه في كل قراءة). */
+  patientScope?: "none" | "own" | "all";
+  appointmentScope?: "none" | "own" | "all";
+}
+
+function recordScope(value: unknown): "none" | "own" | "all" {
+  return value === "own" || value === "all" ? value : "none";
 }
 
 export const PRESET_USERS: Record<string, SessionInfo> = {
@@ -123,13 +134,25 @@ export function SessionProvider({ value, children }: {
             displayName?: string;
             role?: string;
             permissions?: DoctorPermissions | null;
+            canonical?: boolean;
+            isOwner?: boolean;
+            capabilities?: unknown;
+            patientScope?: unknown;
+            appointmentScope?: unknown;
           };
           if (me?.username && me?.role) {
             setSessionState({
               username: me.username,
               displayName: me.displayName,
               role: me.role,
-              permissions: me.permissions ?? null,
+              permissions: me.canonical ? null : me.permissions ?? null,
+              ...(me.canonical === true ? {
+                canonical: true,
+                isOwner: me.isOwner === true,
+                capabilities: Array.isArray(me.capabilities) ? me.capabilities.filter((c): c is string => typeof c === "string") : [],
+                patientScope: recordScope(me.patientScope),
+                appointmentScope: recordScope(me.appointmentScope),
+              } : {}),
             });
           } else {
             setSessionState(null);

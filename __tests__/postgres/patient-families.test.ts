@@ -314,10 +314,12 @@ describe("PAT-4 families — merge, delete and reset keep working", () => {
     expect(await familyIdOfPatient(member)).toBe(created.family.id);
   });
 
-  it("clinic reset wipes the families table", async () => {
+  it("clinic reset refuses to erase issued patient identities and preserves families", async () => {
     expect(Number((await q<{ n: string }>(`SELECT count(*)::text AS n FROM patient_families`))[0].n)).toBeGreaterThan(0);
-    const result = await resetClinicData({ actor: "owner", actorRole: "admin" }, async () => ({ ok: true, backupId: null }));
-    expect(result.ok).toBe(true);
-    expect(Number((await q<{ n: string }>(`SELECT count(*)::text AS n FROM patient_families`))[0].n)).toBe(0);
+    const before = await q("SELECT to_jsonb(f) AS row FROM patient_families f ORDER BY id");
+    let backupCalled = false;
+    await expect(resetClinicData({ actor: "owner", actorRole: "admin" }, async () => { backupCalled = true; return { ok: true, backupId: null }; })).rejects.toMatchObject({ name: "ProtectedPatientNumberHistoryError" });
+    expect(backupCalled).toBe(false);
+    expect(await q("SELECT to_jsonb(f) AS row FROM patient_families f ORDER BY id")).toEqual(before);
   });
 });

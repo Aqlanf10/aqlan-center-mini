@@ -1,0 +1,10 @@
+{
+  "base": "3acfee5d867afda56e0e9c6ad8255cea91c5fbac",
+  "buildId": "kjAZTJfRtOflAgY_0Na6p",
+  "files": {
+    "app/api/ortho/[id]/followup-coverage/route.ts": "3d44da189225d581b344fc9aa8e4552166e8cd0211c1357d7a67af186b291902",
+    "lib/canonical-ortho-coverage-status.ts": "e7d6f3f292e670cfdd5b16aa9d572f78dac2c174b31746d365e46da1acbf07ac",
+    "lib/ortho-followup-coverage-db.ts": "9a39822c6f0dcf13a9673257121befe33f9ffcd97c8f2ab8054fe59a4e65c08e",
+    "lib/staff-operation-runtime.ts": "0e3033b8bcd2766aa237dfd7b667b8dc06a3752da521a4c7670aa92953ba6a89"
+  }
+}

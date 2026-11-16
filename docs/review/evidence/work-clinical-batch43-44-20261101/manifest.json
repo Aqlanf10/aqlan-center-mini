@@ -1,0 +1,54 @@
+{
+  "format": "work-clinical-batch43-44-v1",
+  "sourceRevision": "520a895b57ae3f66baab1e3d588c6cddbb7268a8",
+  "buildId": "mauR3Fy9PaqVr2c6JI6zx",
+  "results": {
+    "fullUnit": {
+      "passed": 14370,
+      "files": 852
+    },
+    "fullPostgres": {
+      "passed": 5093,
+      "files": 395
+    },
+    "fullLint": {
+      "errors": 0,
+      "warnings": 345
+    },
+    "preflight": "passed, 71 immutable migrations",
+    "environment": "passed",
+    "moneyGuard": "passed",
+    "bodyGuard": "passed",
+    "runtimeBraces": {
+      "files": 10000,
+      "traces": 372
+    },
+    "runtimeLintTooling": {
+      "traces": 741,
+      "manifests": 86
+    },
+    "exactHeadCI": "not published at this evidence checkpoint",
+    "actualDocker": "blocked by existing Alpine destination refusal"
+  },
+  "sourceSha256": {
+    "lib/db.ts": "7edefe9bbf957334d7c1616cf0ef56cde2f8ca90812c13a1c06d898b22d243e6",
+    "lib/canonical-case-status-command.ts": "f2344c6881c601938c4b2eeb043e5a2cf494d3275ab665f9830c54663e1c8810",
+    "lib/canonical-problem-status-command.ts": "4d6ce6eae55504d05e9acbb84450eed6536aebc1e2f6f3e7d561352bf2368fbd",
+    "lib/canonical-patient-reads.ts": "3fcf671f04e9223ea5879315e3d81113c4d79336ae929d34ccb5bc229f73b35f",
+    "package.json": "47f0949c69781cb41dc0849e4eceba5b6e7969a7e8e0862542c227910ba175ba",
+    "package-lock.json": "976fa7b4e953cb320f3f60468996b74d498fa5acf048dc3f5a11a5b6f106e7c6"
+  },
+  "artifacts": {
+    "batch43-44-body.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "batch43-44-braces-runtime.log": "e440e55905e72a4d0a1d5bbaee682589e301b230ce58885fe41fd7011ce4f9c1",
+    "batch43-44-environment.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "batch43-44-lint-full.log": "231f738bd10e3cf6a1b867cc5a2d5f4c4221a3d0fc9ea48443e1a3f4e3101469",
+    "batch43-44-lint-runtime.log": "aae26dfa17ee7371fc52b9445dc47d6f72e2e2dc2c610e9841f25c83e0637b40",
+    "batch43-44-money.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "batch43-44-pg-full.log": "f45bfa65e11cfc4027f5530991af7999ac7c23c900fafce4a5073307d5545669",
+    "batch43-44-preflight.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "batch43-44-unit-full.log": "5c69ebb23ea2d58be74aed7d380d81784ca23c5b430407a42e06cce93b9c4787",
+    "lint-tooling-runtime-proof.json.gz": "ed37fd436e92fe529b9e55642d01f8adf384e4f4c8d9992cd1893b00d3b9da45",
+    "runtime-proof.json.gz": "644a625186d132c03b87bf88cca61e0ff015b3f71be5ef93222ed60358bb2484"
+  }
+}

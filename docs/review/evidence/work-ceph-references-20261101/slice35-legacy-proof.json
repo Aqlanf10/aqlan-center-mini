@@ -1,0 +1,62 @@
+{
+  "base": "52773b4ddac2cbab2e56beb555a7d1a77d15ec5b",
+  "checks": [
+    {
+      "file": "app/api/ceph-reference-sets/route.ts",
+      "function": "GET legacy suffix",
+      "sha256": "4607cd2267ffc8dda6d85add533dab7a2c3d132095392e75bcb67056f8637615",
+      "unchanged": true
+    },
+    {
+      "file": "lib/canonical-ceph-reads.ts",
+      "sha256": "e31416667f7b87344ed703e9fbb2a21c001b6b860b8c76e929dc0828ced0c525",
+      "unchanged": true
+    },
+    {
+      "file": "lib/canonical-ceph-projection.ts",
+      "sha256": "a775c47e4a0190a3c1760f5faa68acde28ea1d06264843ec0143ff9c296d9a71",
+      "unchanged": true
+    },
+    {
+      "file": "lib/canonical-ortho-assessment.ts",
+      "sha256": "a8717164ecd01ce833ef25db0f2d78c3ae61aad2f33d4ea1519b748cf10e7b35",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-assessment-store.ts",
+      "sha256": "dc13e538d0e3618df6713a5feb7643b4ed1483c1b7d3c2de8264943c6738b3fa",
+      "unchanged": true
+    },
+    {
+      "file": "lib/ortho-assessment-versioned-sources.ts",
+      "sha256": "f5f9dd9e5523e7a65aec0aa3f6f210054829802a9cae0329c2783e1a1a361ed8",
+      "unchanged": true
+    },
+    {
+      "file": "lib/staff-authority-proof-internal.ts",
+      "sha256": "c259bbdbefc02d01b0e004e053c1bb487bb637947be32d82eb6f25473b40c96a",
+      "unchanged": true
+    },
+    {
+      "file": "lib/staff-capability-catalogue.ts",
+      "sha256": "2e6b83691df24db4ef63d941fe48bbb047523285eeeef1bdb986cb100624100d",
+      "unchanged": true
+    },
+    {
+      "file": "lib/hr-payroll.ts",
+      "sha256": "df5db4921d350ccf7c71e64acc07b124fbe6d8689739cf3dace2b7aa93584a4d",
+      "unchanged": true
+    },
+    {
+      "file": "lib/db.ts",
+      "sha256": "ca59467d9f3424c0eab870564606eb438c30bb253d786d459e92510edbeb07c7",
+      "unchanged": true
+    },
+    {
+      "file": "lib/staff-operation-runtime.ts",
+      "allowedDifference": "clinical.xrays.view added exactly to both closed action lists; all other bytes unchanged",
+      "priorSha256": "df6199368011bc14209fecdba21fddf7ab088ae00227077a029f826a68b76a56",
+      "afterSha256": "2a1b2770ab7806498c7a99b0ec71d672c50b58fd776e8a6f3a0019ff461b10c5"
+    }
+  ]
+}

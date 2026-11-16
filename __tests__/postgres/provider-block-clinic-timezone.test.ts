@@ -144,15 +144,16 @@ describe("configured clinic-zone day boundaries", () => {
 
   it("includes both repeated midnights, keeping the first midnight's end exclusive", async () => {
     const readBlocks = await readerForClinic("America/Havana");
-    // 2026-11-01 repeats 00:00: the first is 04:00Z, the second is 05:00Z.
-    await block("ends-at-first-midnight", "2026-11-01T03:30:00Z", "2026-11-01T04:00:00Z");
-    await block("first-midnight", "2026-11-01T04:00:00Z", "2026-11-01T04:15:00Z");
-    await block("ends-at-second-midnight", "2026-11-01T04:30:00Z", "2026-11-01T05:00:00Z");
-    await block("second-midnight", "2026-11-01T05:00:00Z", "2026-11-01T05:15:00Z");
-    await block("next-midnight", "2026-11-02T05:00:00Z", "2026-11-02T05:15:00Z");
+    // 2025-11-02 repeats 00:00: the first is 04:00Z, the second is 05:00Z. A past transition is
+    // fixed in every tz database; 2026-11-01 stopped repeating in tzdata 2026f (Cuba stays on -04).
+    await block("ends-at-first-midnight", "2025-11-02T03:30:00Z", "2025-11-02T04:00:00Z");
+    await block("first-midnight", "2025-11-02T04:00:00Z", "2025-11-02T04:15:00Z");
+    await block("ends-at-second-midnight", "2025-11-02T04:30:00Z", "2025-11-02T05:00:00Z");
+    await block("second-midnight", "2025-11-02T05:00:00Z", "2025-11-02T05:15:00Z");
+    await block("next-midnight", "2025-11-03T05:00:00Z", "2025-11-03T05:15:00Z");
     for (const session of ["UTC", "Asia/Aden", "America/Havana"]) {
       await sessionZone(session);
-      expect((await readBlocks(PROVIDER, "2026-11-01", client)).map((row) => row.reason))
+      expect((await readBlocks(PROVIDER, "2025-11-02", client)).map((row) => row.reason))
         .toEqual(["first-midnight", "ends-at-second-midnight", "second-midnight"]);
     }
   });

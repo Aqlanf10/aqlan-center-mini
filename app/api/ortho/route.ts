@@ -7,6 +7,9 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalOrthoPatientFilter, readCanonicalOrthoCases } from "@/lib/canonical-ortho-reads";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +31,14 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const patientId = canonicalOrthoPatientFilter(new URL(request.url).searchParams);
+      return NextResponse.json(await readCanonicalOrthoCases(selected.handle, patientId), { headers: NO_STORE });
+    } catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل حالات التقويم."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);

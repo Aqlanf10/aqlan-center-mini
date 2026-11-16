@@ -7,11 +7,50 @@ import { settingDefinition } from "@/lib/settings-definitions";
 import { canManageCategory, denialMessage, roleCan } from "@/lib/settings-permissions";
 import { validateSettingSet, validateTypedSetting } from "@/lib/settings-validate";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { staffAdmissionRefusal } from "@/lib/staff-capability-editor";
+import { CanonicalSettingsRefusal, commandCanonicalSettingsWrite, parseCanonicalSettingsReset, parseCanonicalSettingsUpdate, readCanonicalSettings } from "@/lib/canonical-settings";
+import type { VerifiedDurableSession } from "@/lib/staff-durable-session";
 
 export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+
+/**
+ * Canonical identity (owner decision 5; lib/canonical-settings.ts). A canonical cookie
+ * never falls back to the legacy session or role: the read is one owning snapshot
+ * admitted by `settings.view`; PATCH and the reset POST are one admitted transaction
+ * per batch with every key's requirement proved (per-key policy), the CAS, the writes
+ * and their audit rows together. Same request and response shapes as the legacy path,
+ * plus `__canWrite` (the keys this account may change now). Never cached.
+ */
+const NO_STORE = { "Cache-Control": "private, no-store" } as const;
+function canonicalFailure(error: unknown, fallback: string) {
+  if (error instanceof CanonicalSettingsRefusal) {
+    return NextResponse.json({
+      code: error.code, message: error.message,
+      ...(error.key === undefined ? {} : { key: error.key }),
+      ...(error.currentUpdatedAt === undefined ? {} : { currentUpdatedAt: error.currentUpdatedAt }),
+    }, { status: error.status, headers: NO_STORE });
+  }
+  const refusal = staffAdmissionRefusal(error);
+  if (refusal) return NextResponse.json({ code: refusal.code, message: refusal.message }, { status: refusal.status, headers: NO_STORE });
+  return NextResponse.json({ message: fallback }, { status: 500, headers: NO_STORE });
+}
+async function canonicalWrite(request: Request, handle: VerifiedDurableSession, mode: "update" | "reset") {
+  let body: unknown;
+  try { body = await readJsonBody(request, SETTINGS_BODY_LIMIT_BYTES); } catch (error) {
+    const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+  }
+  try {
+    const write = mode === "update" ? parseCanonicalSettingsUpdate(body) : parseCanonicalSettingsReset(body);
+    return NextResponse.json(await commandCanonicalSettingsWrite(handle, write), { headers: NO_STORE });
+  } catch (error) {
+    return canonicalFailure(error, mode === "update" ? "تعذّر حفظ الإعدادات. أعد المحاولة." : "تعذّرت الإعادة إلى الافتراضي.");
+  }
+}
 
 /**
  * حمولة القراءة: القيم الآمنة، وطوابعُها، وحالات الأسرار — من لقطةٍ واحدة.
@@ -45,6 +84,12 @@ async function settingsSnapshot(extra: Record<string, unknown> = {}) {
  * أنه لم يمحُ عمل غيره. والسرّ لا تُعاد قيمته أبدًا — تُعاد حالته وحدها.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalSettings(selected.handle), { headers: NO_STORE }); }
+    catch (error) { return canonicalFailure(error, "تعذّر تحميل الإعدادات."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!roleCan(session.role, "settings.view")) {
@@ -64,6 +109,9 @@ export async function GET() {
  * الصرف. والمقفل (ثابت نظام) يُرفض حتى للمدير — انظر docs/SYSTEM_INVARIANTS.md.
  */
 export async function PATCH(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalWrite(request, selected.handle, "update");
   const session = await requireSession();
   if (!session) return denied();
 
@@ -148,6 +196,9 @@ export async function PATCH(request: Request) {
  * بمجرد ضغط «إعادة الافتراضي».
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalWrite(request, selected.handle, "reset");
   const session = await requireSession();
   if (!session) return denied();
 

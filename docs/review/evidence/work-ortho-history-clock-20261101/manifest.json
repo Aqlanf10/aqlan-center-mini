@@ -1,0 +1,62 @@
+{
+  "format": "work-ortho-history-clock-v1",
+  "baseRevision": "c65faea593ba0091b7bc173dbb055193931ab012",
+  "sourceCommitStatus": "Source SHA256 pinned below; exact source revision to be recorded in the batch evidence after commit.",
+  "buildId": "Chpd2GcxS6DtKukI0zRmm",
+  "acceptance": {
+    "before": {
+      "failed": 2,
+      "reason": "Actual rendered assessment/strategy labels truncated UTC before the existing clinic formatter was passed through"
+    },
+    "expandedWitness": {
+      "passed": 6,
+      "zones": [
+        "Asia/Aden",
+        "America/New_York",
+        "legacy-no-zone"
+      ]
+    },
+    "unitGuards": {
+      "passed": 47,
+      "files": 5
+    },
+    "PG": {
+      "passed": 80,
+      "files": 3
+    },
+    "HTTPChromium": {
+      "passed": 21,
+      "files": 3
+    },
+    "typeBuildTargetedLint": "passed; 0 lint errors, one existing shared-widget effect warning",
+    "runtime": "running separately for this final build",
+    "fullCombinedPG": "running on c65, product server/SQL unchanged by this display-only follow-up",
+    "fullFinalUnit": "pending",
+    "exactHeadCI": "unpublished",
+    "independentReview": "pending"
+  },
+  "sourceSha256": {
+    "__tests__/canonical-ortho-history-clock.test.tsx": "59ec82f174cc07220e5f606e4ce52a3b517023e0e7def6956712768c56581414",
+    "__tests__/fixtures/canonical-ortho-assessment.ts": "809ab103cd0a2a55f3a574301c1fc494cb64f120a00e3989265c12f0898cadb9",
+    "__tests__/fixtures/canonical-ortho-strategy.ts": "c3e253b1b5b6ece32e6e2ba18601d39bc0a2c05b5468ef199208d119bdcc5b02",
+    "__tests__/security-http/canonical-ortho-assessment-journey.test.ts": "f11bdbf5ee1796e5498e1a13f40f3314b85f54f4753c4b4749f5c3ce85ba8f48",
+    "__tests__/security-http/canonical-ortho-strategy-journey.test.ts": "dca705f77d6bfd472985edc9104e0100b6b771e596d9da1097704bafe18d71ae",
+    "components/OrthoCaseAssessmentV2.tsx": "933d3d274e3857403c26eae0bb3c171649c23bfe6b52d185d7d6f4d8bbc4443c",
+    "components/OrthoTreatmentStrategy.tsx": "55f5b93541e2564aeaaedaa8674697dbbe9b72fa676505b5291f0684ad65ab71",
+    "components/patient/CanonicalOrthoAssessment.tsx": "633e4d5a41cc67d62db795071f7ad56993f2fc493cd85e732b3d89f01b53bed2",
+    "components/patient/CanonicalOrthoDetail.tsx": "fd0a5a4199576a7dbcb981c6a48517d1d536f4546c482ac8c284ec1509f7ea16",
+    "components/patient/CanonicalOrthoStrategy.tsx": "f690bf330646d342a060100bc197c7c0f63c80686508f6808c0d9d1982931c23",
+    "docs/security/staff-cutover/inventory.json": "4b0d6739a88b5627311d733edffcdc64a5166d09f1f0a6383fa958fec25d1872"
+  },
+  "artifacts": {
+    "after.log": "1a16550b9cc88c3d4ba16b26c2d0a79ce98f105781232aa80b439b9bf67f6822",
+    "before.log": "efa2966eec4cccf9780190a09d15bbb19947ba9c56708299f53eff6bd95ebdb3",
+    "build.log": "6a5f7d509a3073b26572140475e735454ee11d5d4a85878537923c092a68873f",
+    "http.log": "f803ee1c82404e0fc029b95c809a2d4ddd0811cdd5105471426b4b05da2113e0",
+    "inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "lint.log": "f0252d02cdfb6cdf315e67a7b13ff38263523a6aa4742fdc8de23177a9d1995f",
+    "pg.log": "2b05cec1334bc7d26d3b6f4f71732d7dbb420102c06a8cefba5c3ef721854616",
+    "tsc.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "unit-guards.log": "4871c98fab7f08d3b5557086a429d057b22e64993903a8434506c75d921a2ed9"
+  }
+}

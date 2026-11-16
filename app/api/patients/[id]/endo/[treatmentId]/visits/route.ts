@@ -1,5 +1,6 @@
 import { visibleEndoTreatment } from "@/lib/endodontics-response";
 import { NextResponse } from "next/server";
+import { canonicalEndoRoute, commandCanonicalEndoVisit } from "@/lib/canonical-endo";
 import { checkEndoVisitDraft } from "@/lib/endodontics";
 import { saveEndoVisit, SAVE_ENDO_VISIT_MESSAGE, type SaveEndoVisitRefusal } from "@/lib/endodontics-db";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
@@ -17,6 +18,9 @@ const STATUS: Record<SaveEndoVisitRefusal, number> = {
  * (التصحيح بملحق)؛ والمحاولة المعادة بالمحتوى نفسه تنجح بلا أثرٍ ثانٍ.
  */
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string; treatmentId: string }> }) {
+  /* M2 slice 77: clinical.visits.document inside the scope, the clinician link (the treating party) or the owner. */
+  const canonical = await canonicalEndoRoute(request, async (handle, body) => { const { id, treatmentId } = await params; return commandCanonicalEndoVisit(handle, id, treatmentId, body); }, "تعذّر حفظ سجل علاج الجذور. أعد المحاولة.");
+  if (canonical) return canonical;
   const { id, treatmentId: rawTreatment } = await params;
   const patientId = idOf(id);
   const treatmentId = idOf(rawTreatment);

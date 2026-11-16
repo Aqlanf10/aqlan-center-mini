@@ -7,12 +7,39 @@ import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { toWhatsAppNumber } from "@/lib/reminders";
 
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { CanonicalLabDirectoryRefusal, commandCanonicalLaboratoryCreate, readCanonicalLaboratories } from "@/lib/canonical-lab-directory";
 export const dynamic = "force-dynamic";
+
+const SESSION_ENDED = "انتهت الجلسة. سجّل الدخول من جديد.";
+/** M2 slice 70a: the canonical branch of a lab-directory request — never the legacy session. */
+async function canonicalDirectory(run: (handle: import("@/lib/staff-durable-session").VerifiedDurableSession) => Promise<unknown>, fallback: string, status = 200): Promise<NextResponse | null> {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: SESSION_ENDED }, { status: 401, headers: NO_STORE });
+  if (selected.kind !== "canonical") return null;
+  try {
+    return NextResponse.json(await run(selected.handle), { status, headers: NO_STORE });
+  } catch (error) {
+    if (error instanceof CanonicalLabDirectoryRefusal) return NextResponse.json({ code: error.code, message: error.message, ...(error.field ? { field: error.field } : {}) }, { status: error.status, headers: NO_STORE });
+    return canonicalPatientReadFailure(error, fallback);
+  }
+}
+async function canonicalBody(request: Request): Promise<Record<string, unknown> | NextResponse> {
+  try {
+    const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    return (body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+  } catch (error) {
+    return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+  }
+}
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET() {
+  const canonical = await canonicalDirectory(handle => readCanonicalLaboratories(handle), "تعذّر تحميل بيانات المختبرات.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   try {
@@ -25,6 +52,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if ((await selectRequestStaffEnvelope()).kind === "canonical") {
+    const body = await canonicalBody(request);
+    if (body instanceof NextResponse) return body;
+    return (await canonicalDirectory(handle => commandCanonicalLaboratoryCreate(handle, body), "تعذّر حفظ بيانات المختبر.", 201))!;
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

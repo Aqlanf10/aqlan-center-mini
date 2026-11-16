@@ -2,8 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ session: vi.fn(), buildReport: vi.fn(), getPatient: vi.fn(),
+const mocks = vi.hoisted(() => ({ session: vi.fn(), buildReport: vi.fn(), loadDocument: vi.fn(), getPatient: vi.fn(),
   patientLedger: vi.fn(), getSettingsSafe: vi.fn(), patientPlanCurrencies: vi.fn(), listPatientPlans: vi.fn() }));
+vi.mock("@/lib/patient-statement-build", () => ({ loadPatientStatementDocument: mocks.loadDocument }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
 vi.mock("@/lib/reports", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/reports")>(), buildReport: mocks.buildReport }));
 vi.mock("@/lib/db", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/db")>(),
@@ -11,7 +12,7 @@ vi.mock("@/lib/db", async (importOriginal) => ({ ...await importOriginal<typeof 
   patientPlanCurrencies: mocks.patientPlanCurrencies, listPatientPlans: mocks.listPatientPlans,
   // The current print reads the same sources in one snapshot; here it composes the same mocks.
   patientStatementSnapshot: async (id: number, today: string) => ({ ledger: await mocks.patientLedger(id),
-    planCurrencies: await mocks.patientPlanCurrencies(id), plans: await mocks.listPatientPlans(id, today), historicalAgreements: [] }) }));
+    planCurrencies: await mocks.patientPlanCurrencies(id), plans: await mocks.listPatientPlans(id, today), historicalAgreements: [], statementEvidence: { invoiceCorrections: [], invoiceCancellations: [], paymentCorrections: [], openingHistory: [], allocationEffectiveAt: {} } }) }));
 vi.mock("@/components/PrintHeader", () => ({ PrintHeader: ({ title }: { title: string }) => createElement("h1", null, title), PrintFooter: () => null }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
 import StatementPage from "../app/print/statement/[id]/page";
@@ -21,7 +22,7 @@ import { DataTable } from "../components/reports/shared";
 import { applyReportView, moneyTotalsByCurrency, EMPTY_REPORT_VIEW } from "../lib/report-view";
 import { formatMoney } from "../lib/money";
 import type { ReportResult } from "../lib/reports-types";
-import { ReportInputError } from "../lib/reports";
+import { StatementInputError } from "../lib/patient-statement-options";
 
 function run(query?: Record<string, string | string[] | undefined>, id = "17") {
   return StatementPage({ params: Promise.resolve({ id }), ...(query ? { searchParams: Promise.resolve(query) } : {}) });
@@ -34,30 +35,33 @@ beforeEach(() => {
   mocks.patientLedger.mockResolvedValue({ invoices: [], payments: [], openings: [] });
   mocks.patientPlanCurrencies.mockResolvedValue(new Map());
   mocks.listPatientPlans.mockResolvedValue([]);
+  mocks.loadDocument.mockResolvedValue({ patient: { name: "Synthetic patient", number: "SYN-17" },
+    title: "كشف حساب — كشف فترة", subtitle: "من 2026-09-01 إلى 2026-09-30", generatedAt: "synthetic", clinic: { name: "مركز اصطناعي" },
+    sections: [{ title: "رصيد الفترة حسب العملة", columns: ["العملة", "رصيد أول الفترة", "رصيد آخر الفترة"],
+      rows: [["ريال يمني", "100 ر.ي", "700 ر.ي"], ["ريال سعودي", "1.00 ر.س", "0.50 ر.س"]] }], notices: [], treatments: [] });
   mocks.buildReport.mockResolvedValue({ report: "patient-statement", title: "كشف حساب المريض", subtitle: "Synthetic patient — SYN-17",
     periodLabel: "من فتح الملف حتى 30/09/2026", from: "2026-09-01", to: "2026-09-30", baseCurrency: "YER",
     filtersLabel: "جميع العملات", kpis: [], rows: [], columns: [] });
 });
 
 describe("existing statement print with an explicit cutoff", () => {
-  it("keeps its existing role gate before any report or patient reads", async () => {
+  it("keeps its existing role gate before any patient document reads", async () => {
     for (const role of ["doctor", "assistant", null]) {
       mocks.session.mockResolvedValue(role ? { role, username: "synthetic", permissions: { canViewPatientPayments: true } } : null);
       await expect(run({ to: "2026-09-30" })).rejects.toThrow();
     }
-    expect(mocks.buildReport).not.toHaveBeenCalled();
+    expect(mocks.loadDocument).not.toHaveBeenCalled();
     expect(mocks.patientLedger).not.toHaveBeenCalled();
     expect(mocks.getPatient).not.toHaveBeenCalled();
   });
 
-  it.each(["admin", "reception", "cashier", "accountant"])("preserves existing %s access to one patient and uses the canonical report", async (role) => {
+  it.each(["admin", "reception", "cashier", "accountant"])("preserves existing %s access to one patient and uses the patient-safe document", async (role) => {
     mocks.session.mockResolvedValue({ role, username: "synthetic", userId: 1 });
     const html = renderToStaticMarkup(await run({ from: "2026-09-01", to: "2026-09-30", patientId: "17", currency: "SAR", doctorId: "92" }));
-    expect(mocks.buildReport).toHaveBeenCalledWith("patient-statement", expect.objectContaining({ patientId: 17,
-      preset: "custom", from: "2026-09-01", to: "2026-09-30", currency: "all", doctorId: null, patientStatus: "all" }));
-    expect(html).toContain("30/09/2026");
+    expect(mocks.loadDocument).toHaveBeenCalledWith(17, { type: "period", from: "2026-09-01", to: "2026-09-30" });
+    expect(html).toContain("2026-09-30");
     expect(html).toContain("SYN-17");
-    expect(html).toContain("جميع العملات");
+    expect(html).toContain("رصيد الفترة حسب العملة");
     expect(mocks.patientLedger).not.toHaveBeenCalled();
     expect(mocks.listPatientPlans).not.toHaveBeenCalled();
   });
@@ -69,19 +73,19 @@ describe("existing statement print with an explicit cutoff", () => {
     { patientId: "18", to: "2026-09-30" }, { patientId: ["17"], to: "2026-09-30" },
   ])("fails closed for malformed or conflicting query %j", async (query) => {
     await expect(run(query)).rejects.toThrow();
-    expect(mocks.buildReport).not.toHaveBeenCalled();
+    expect(mocks.loadDocument).not.toHaveBeenCalled();
     expect(mocks.patientLedger).not.toHaveBeenCalled();
   });
 
   it("accepts a real leap day and a cutoff without a lower-bound filter", async () => {
     await run({ to: "2024-02-29" });
-    expect(mocks.buildReport).toHaveBeenCalledWith("patient-statement", expect.objectContaining({ from: "2024-02-29", to: "2024-02-29" }));
+    expect(mocks.loadDocument).toHaveBeenCalledWith(17, { type: "period", from: "2024-02-29", to: "2024-02-29" });
   });
 
   it("retains the current all-history statement when no cutoff was supplied", async () => {
     const html = renderToStaticMarkup(await run());
     expect(html).toContain("Synthetic patient");
-    expect(mocks.buildReport).not.toHaveBeenCalled();
+    expect(mocks.loadDocument).not.toHaveBeenCalled();
     expect(mocks.patientLedger).toHaveBeenCalledWith(17);
     expect(mocks.patientPlanCurrencies).toHaveBeenCalledWith(17);
     expect(mocks.listPatientPlans).toHaveBeenCalledWith(17, expect.any(String));
@@ -102,8 +106,9 @@ describe("existing statement print with an explicit cutoff", () => {
         { currency: "SAR", description: "Opening", debitMinor: 100, creditMinor: 0, balanceMinor: 100 },
         { currency: "SAR", description: "Payment", debitMinor: 0, creditMinor: 50, balanceMinor: 50 },
       ] };
-    mocks.buildReport.mockResolvedValue(result);
-    const html = renderToStaticMarkup(await run({ to: "2026-09-30" }));
+    // The internal report renderer retains its independent running-balance contract.
+    const html = renderToStaticMarkup(createElement(PrintableReportDocument, { result, settings: SETTING_DEFAULTS,
+      generatedAt: "synthetic", generatedBy: "synthetic" }));
     expect(html).toContain(formatMoney(700, "YER"));
     expect(html).toContain(formatMoney(50, "SAR"));
     expect(html).toContain("report-total-row");
@@ -140,7 +145,7 @@ describe("existing statement print with an explicit cutoff", () => {
   });
 
   it("maps missing patient report input to 404, without falling back to a current statement", async () => {
-    mocks.buildReport.mockRejectedValue(new ReportInputError("المريض غير موجود."));
+    mocks.loadDocument.mockRejectedValue(new StatementInputError("المريض غير موجود."));
     await expect(run({ to: "2026-09-30" })).rejects.toThrow();
     expect(mocks.patientLedger).not.toHaveBeenCalled();
   });
@@ -227,12 +232,12 @@ describe("current patient statement explains stored treatment and discounts", ()
         kind: "refund", amountMinor: 500, baseAmountMinor: 70000 })], openings: [] };
     mocks.patientLedger.mockResolvedValue(ledger);
     const html = renderToStaticMarkup(await run());
-    expect(html).toContain("عكس سند SYN-REC-1");
+    expect(html).not.toContain("عكس سند");
     expect(html).toContain("استرداد");
     for (const payment of ledger.payments) expect(html).toContain(payment.receiptNumber);
     expect(html).toContain(formatMoney(13500, "SAR"));
     expect(html).toContain(formatMoney(17000, "USD"));
-    expect(html).toContain("صافي المحصّل بعد الاستردادات وعكس السندات");
+    expect(html).toContain("صافي المدفوع");
     expect(ledgerBalancesByCurrency(17, ledger, new Map()).SAR.dueMinor).toBe(13500);
     expect(ledgerBalancesByCurrency(17, ledger, new Map()).USD.dueMinor).toBe(17000);
   });
@@ -240,7 +245,7 @@ describe("current patient statement explains stored treatment and discounts", ()
   it("does not interpret note wording as a correction or silently remove refunds", () => {
     expect(statementPaymentLabel(statementPayment({ note: "تصحيح السند" }), [])).toBe("دفعة");
     expect(statementPaymentLabel(statementPayment({ kind: "refund", note: "تصحيح السند" }), [])).toBe("استرداد");
-    expect(statementPaymentLabel(statementPayment({ kind: "refund", reversalOfId: 99 }), [])).toBe("عكس سند سابق");
+    expect(statementPaymentLabel(statementPayment({ kind: "refund", reversalOfId: 99 }), [])).toBe("استرداد");
   });
 
   it("keeps long RTL treatment rows in a splittable table with repeated invoice identity and headings", async () => {

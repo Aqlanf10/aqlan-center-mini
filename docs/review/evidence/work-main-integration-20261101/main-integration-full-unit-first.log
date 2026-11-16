@@ -1,0 +1,256 @@
+
+> aqlan-center@0.1.0 test
+> vitest run --exclude .next/**
+
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ __tests__/unified-print-presentation.test.tsx (13 tests | 1 failed) 119ms
+     × retains current patient statement rows, source currency and totals 6ms
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+ ❯ __tests__/patient-numbering-schema.test.ts (3 tests | 1 failed) 27ms
+   × registers exact 0080 bytes between reconciliation and invoice actions alongside separately reviewed 0079 25ms
+ ❯ __tests__/ortho-followup-coverage-schema.test.ts (2 tests | 1 failed) 31ms
+   × registers exact reviewed 0079 bytes without changing adjacent migrations or adopting proposal tables 29ms
+ ❯ scripts/audits/m2-route-capability-map.test.mjs (4 tests | 2 failed) 28ms
+   × every staff route held for canonical admission has exactly one map entry 11ms
+   × every request-body branch has its own requirement; neighbouring branches never share by default 6ms
+ ❯ __tests__/treatment-financial-context.test.ts (18 tests | 1 failed) 21ms
+     × qualifies the full-package caveat without overriding specific adjustment coverage 8ms
+ ❯ __tests__/lab-clinical-persistence.test.ts (22 tests | 22 failed) 53ms
+     × explicitly fixes saved crown roles for denture work and audits without touching money 39ms
+     × allows explicit tooth correction on a funded order without changing the saved doctor or lab 1ms
+     × accepts an exact valid no-op without update or audit 0ms
+     × rejects stale observed clinical values without writing 0ms
+     × rejects an expired real patient-access session 0ms
+     × denies a doctor who cannot access this patient through the real ownership gate 0ms
+     × denies a nonclinical role before opening a transaction 0ms
+     × returns not_found for a missing order 6ms
+     × blocks changing a financially implicated lab: cost 1ms
+     × blocks changing a financially implicated lab: payable 0ms
+     × blocks changing a financially implicated lab: linked 0ms
+     × blocks doctor reattribution with financial history: cost 0ms
+     × blocks doctor reattribution with financial history: payable 0ms
+     × blocks doctor reattribution with financial history: linked 0ms
+     × blocks doctor reattribution with financial history: invoice 0ms
+     × allows unfinanced canonical active lab correction, but rejects an altered name 0ms
+     × does not guess a role correction or reinterpret a legacy colour 0ms
+     × requires an active newly assigned doctor 0ms
+     × preserves unchanged inactive doctor while correcting other fields 0ms
+     × rolls back the clinical update if atomic audit insertion fails 0ms
+   × allows other corrections while retaining missing legacy doctor even with financial links 0ms
+   × retains financial guards for legacy tracking-only settlement/reversal history 0ms
+ ❯ __tests__/settings-capabilities.test.ts (4 tests | 1 failed) 13ms
+     × classifies every defined setting key exactly once, and nothing else 9ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 29 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > explicitly fixes saved crown roles for denture work and audits without touching money
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > allows explicit tooth correction on a funded order without changing the saved doctor or lab
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > accepts an exact valid no-op without update or audit
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > rejects stale observed clinical values without writing
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > rejects an expired real patient-access session
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > denies a doctor who cannot access this patient through the real ownership gate
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > denies a nonclinical role before opening a transaction
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > returns not_found for a missing order
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > blocks changing a financially implicated lab: cost
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > blocks changing a financially implicated lab: payable
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > blocks changing a financially implicated lab: linked
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > blocks doctor reattribution with financial history: cost
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > blocks doctor reattribution with financial history: payable
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > blocks doctor reattribution with financial history: linked
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > blocks doctor reattribution with financial history: invoice
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > allows unfinanced canonical active lab correction, but rejects an altered name
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > does not guess a role correction or reinterpret a legacy colour
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > requires an active newly assigned doctor
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > preserves unchanged inactive doctor while correcting other fields
+ FAIL  __tests__/lab-clinical-persistence.test.ts > actual lab clinical writer with synthetic SQL boundaries > rolls back the clinical update if atomic audit insertion fails
+ FAIL  __tests__/lab-clinical-persistence.test.ts > allows other corrections while retaining missing legacy doctor even with financial links
+ FAIL  __tests__/lab-clinical-persistence.test.ts > retains financial guards for legacy tracking-only settlement/reversal history
+Error: LEGACY_STAFF_AUTHORITY_SCHEMA_HELD
+ ❯ refuse lib/legacy-staff-schema.mjs:11:31
+
+ ❯ readFootprint lib/legacy-staff-schema.mjs:23:95
+ ❯ readStaffEntryMode lib/legacy-staff-schema.mjs:41:12
+ ❯ lib/db.ts:425:9
+ ❯ __tests__/lab-clinical-persistence.test.ts:31:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/29]⎯
+
+ FAIL  __tests__/ortho-followup-coverage-schema.test.ts > registers exact reviewed 0079 bytes without changing adjacent migrations or adopting proposal tables
+AssertionError: expected [ Array(7) ] to deeply equal [ Array(5) ]
+
+- Expected
++ Received
+
+@@ -2,6 +2,8 @@
+    "0078",
+    "0079",
+    "0080",
+    "0081",
+    "0082",
++   "0087",
++   "0089",
+  ]
+
+ ❯ __tests__/ortho-followup-coverage-schema.test.ts:11:63
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/29]⎯
+
+ FAIL  __tests__/patient-numbering-schema.test.ts > registers exact 0080 bytes between reconciliation and invoice actions alongside separately reviewed 0079
+AssertionError: expected [ Array(7) ] to deeply equal [ Array(5) ]
+
+- Expected
++ Received
+
+@@ -2,6 +2,8 @@
+    "0078",
+    "0079",
+    "0080",
+    "0081",
+    "0082",
++   "0087",
++   "0089",
+  ]
+
+ ❯ __tests__/patient-numbering-schema.test.ts:10:75
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/29]⎯
+
+ FAIL  __tests__/settings-capabilities.test.ts > per-key settings write policy (M2, Dot 6480538845 item 1) > classifies every defined setting key exactly once, and nothing else
+AssertionError: expected [ 'ai.clinical_external', …(71) ] to deeply equal [ 'ai.clinical_external', …(74) ]
+
+- Expected
++ Received
+
+@@ -15,12 +15,10 @@
+    "clinic.day_end",
+    "clinic.day_start",
+    "clinic.lead_doctor",
+    "clinic.lead_doctor_credentials",
+    "clinic.lead_doctor_title",
+-   "clinic.login_photo_asset",
+-   "clinic.login_photo_visible",
+    "clinic.name",
+    "clinic.phone",
+    "clinic.shift2_end",
+    "clinic.shift2_start",
+    "clinical.medical_history_review_months",
+@@ -50,11 +48,10 @@
+    "finance.rate_max_age_days",
+    "finance.reception_adds_opening_balance",
+    "followup.proposal_days",
+    "inventory.expiry_soon_days",
+    "lab.default_days",
+-   "lab.patient_identity_mode",
+    "messaging.consent_mode",
+    "ops.follow_up_lookback_days",
+    "ops.late_tolerance_minutes",
+    "ops.require_clearance_before_call",
+    "ops.wait_critical_minutes",
+
+ ❯ __tests__/settings-capabilities.test.ts:9:53
+      7|   it("classifies every defined setting key exactly once, and nothing e…
+      8|     const defined = SETTING_DEFINITIONS.map(definition => definition.k…
+      9|     expect(Object.keys(SETTING_KEY_CLASSES).sort()).toEqual(defined);
+       |                                                     ^
+     10|   });
+     11|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/29]⎯
+
+ FAIL  __tests__/treatment-financial-context.test.ts > read-only treatment financial references > qualifies the full-package caveat without overriding specific adjustment coverage
+AssertionError: expected 'REVIEW_REQUIRED' to be 'OUTSIDE_CONTRACT' // Object.is equality
+
+Expected: "OUTSIDE_CONTRACT"
+Received: "REVIEW_REQUIRED"
+
+ ❯ __tests__/treatment-financial-context.test.ts:47:75
+     45|     const input = { legacy: true, financialMode: null, openingCurrenci…
+     46|     expect(classifyOrthoAdjustment({ ...input, legacyAgreement: true }…
+     47|     expect(classifyOrthoAdjustment({ ...input, legacyAgreement: false …
+       |                                                                           ^
+     48|     // Copy contract only: UI lifecycle/classifier rendering is separa…
+     49|     // by legacy-onboarding-checklist-refresh.test.tsx, including unre…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/29]⎯
+
+ FAIL  __tests__/unified-print-presentation.test.tsx > unified print actual-route synthetic presentation > retains current patient statement rows, source currency and totals
+StatementProjectionError: تعذّر التحقق من تفاصيل كشف الحساب. يلزم مراجعة البيانات قبل إصدار الكشف.
+ ❯ Module.StatementPage app/print/statement/[id]/page.tsx:82:33
+     80|   const base = CLINIC_BASE_CURRENCY;
+     81|   const balances = ledgerBalancesByCurrency(id, ledger, planCurrencies…
+     82|   if (!statementEvidence) throw new StatementProjectionError();
+       |                                 ^
+     83|   const patientView = projectPatientStatement({ patientId: id, ledger,…
+     84|   if (!historicalAgreements) throw new Error("Current statement requir…
+ ❯ __tests__/unified-print-presentation.test.tsx:85:103
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/29]⎯
+
+ FAIL  scripts/audits/m2-route-capability-map.test.mjs > every staff route held for canonical admission has exactly one map entry
+AssertionError: held routes without a map entry
++ actual - expected
+
++ [
++   'GET /api/settings/login-photo',
++   'PATCH /api/settings/login-photo',
++   'POST /api/settings/login-photo'
++ ]
+- []
+
+
+- Expected
++ Received
+
+- []
++ [
++   "GET /api/settings/login-photo",
++   "PATCH /api/settings/login-photo",
++   "POST /api/settings/login-photo",
++ ]
+
+ ❯ scripts/audits/m2-route-capability-map.test.mjs:16:10
+     14|   const mapped = map.map(key).sort();
+     15|   assert.equal(new Set(mapped).size, mapped.length, "duplicate map ent…
+     16|   assert.deepEqual(held.filter(k => !mapped.includes(k)), [], "held ro…
+       |          ^
+     17|   const known = new Set(inventory.routes.map(key));
+     18|   assert.deepEqual(mapped.filter(k => !known.has(k)), [], "map entries…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/29]⎯
+
+ FAIL  scripts/audits/m2-route-capability-map.test.mjs > every request-body branch has its own requirement; neighbouring branches never share by default
+AssertionError: PATCH /api/lab/[id] has no rule for action=update_clinical
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ scripts/audits/m2-route-capability-map.test.mjs:49:42
+     47|       assert.ok(entry.branches, `${key(entry)} branches on ${discrimin…
+     48|       assert.equal(entry.branches.discriminator, discriminator, `${key…
+     49|       for (const value of values) assert.ok(value in entry.branches.va…
+       |                                          ^
+     50|     }
+     51|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/29]⎯
+
+
+ Test Files  7 failed | 840 passed (847)
+      Tests  29 failed | 14235 passed (14264)
+   Start at  04:15:05
+   Duration  463.63s (transform 22.68s, setup 0ms, import 98.37s, tests 260.89s, environment 80ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

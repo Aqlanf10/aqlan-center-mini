@@ -1,0 +1,25 @@
+
+> aqlan-center@0.1.0 lint
+> eslint .
+
+
+Oops! Something went wrong! :(
+
+ESLint: 10.14.0
+
+Error: ENOENT: no such file or directory, scandir '/workspace/aqlan-assessment-final/.preflight-build-486wg4'
+    at async Object.readdir (node:internal/fs/promises:955:18)
+    at async NodeHfsImpl.list (file:///workspace/aqlan-assessment-final/node_modules/@humanfs/node/src/node-hfs.js:304:19)
+    at async NodeHfs.<anonymous> (file:///workspace/aqlan-assessment-final/node_modules/@humanfs/core/src/hfs.js:560:21)
+    at async NodeHfs.<anonymous> (file:///workspace/aqlan-assessment-final/node_modules/@humanfs/core/src/hfs.js:604:6)
+    at async NodeHfs.walk (file:///workspace/aqlan-assessment-final/node_modules/@humanfs/core/src/hfs.js:614:3)
+    at async globSearch (/workspace/aqlan-assessment-final/node_modules/eslint/lib/eslint/eslint-helpers.js:366:20)
+    at async Promise.allSettled (index 0)
+    at async globMultiSearch (/workspace/aqlan-assessment-final/node_modules/eslint/lib/eslint/eslint-helpers.js:457:18)
+    at async Promise.all (index 0)
+    at async findFiles (/workspace/aqlan-assessment-final/node_modules/eslint/lib/eslint/eslint-helpers.js:637:25)
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

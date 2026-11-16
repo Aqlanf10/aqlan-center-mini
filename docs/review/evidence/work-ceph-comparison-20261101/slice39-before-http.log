@@ -1,0 +1,46 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/canonical-ceph-comparison-journey.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ceph-comparison-journey.test.ts (2 tests | 2 failed) 4862ms
+   × HTTP: a scoped canonical imaging reader can read the saved-study compare contract 247ms
+   × HTTP: a scoped canonical imaging reader can read the saved-study superimpose contract 126ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-comparison-journey.test.ts > HTTP: a scoped canonical imaging reader can read the saved-study compare contract
+ FAIL  __tests__/security-http/canonical-ceph-comparison-journey.test.ts > HTTP: a scoped canonical imaging reader can read the saved-study superimpose contract
+AssertionError: expected 401 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 401
+
+ ❯ __tests__/security-http/canonical-ceph-comparison-journey.test.ts:21:27
+     19|   const session = await journey.login("own"); expect(session.status).t…
+     20|   const response = await journey.api(`/api/ceph/${endpoint}?first=${id…
+     21|   expect(response.status).toBe(200);
+       |                           ^
+     22| });
+     23|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  03:19:36
+   Duration  9.43s (transform 126ms, setup 0ms, import 519ms, tests 4.86s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

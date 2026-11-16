@@ -55,6 +55,8 @@ function domain<T>(name: string, dependencies: Record<string, unknown>): T {
   const output: Record<string, unknown> = {};
   const load = (name: string) => {
     if (name === "./endodontics-db") return { hasMeaningfulEndoVisit: async () => false };
+    // This legacy performer protocol intentionally exercises an installation without the optional lab proposal.
+    if (name === "./lab-work-intent-db") return { labWorkIntentSupported: async () => false };
     throw new Error(`Unexpected dependency in isolated domain protocol: ${name}`);
   };
   // Private helpers use the same exact-source extraction as exported domain functions.
@@ -137,6 +139,10 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
   dependencies.phoneLookupForms = domain("phoneLookupForms", { toWhatsAppNumber });
   dependencies.lockVisitPatientFirst = domain("lockVisitPatientFirst", dependencies);
   dependencies.saveClinicalNotes = domain("saveClinicalNotes", dependencies);
+  // M2 slice 85: the legacy save wraps its exact body (setVisitProceduresOn) in its own transaction.
+  dependencies.setVisitProceduresOn = domain("setVisitProceduresOn", dependencies);
+  // M2 slice 86: the legacy sign wraps its exact locked body (signClinicalVisitLockedOn) in its own transaction.
+  dependencies.signClinicalVisitLockedOn = domain("signClinicalVisitLockedOn", dependencies);
   return { state: () => structuredClone(state), query, writeEffects, dependencies,
     save: domain<(input: Record<string, unknown>) => Promise<boolean>>("setVisitProcedures", dependencies),
     sign: domain<(input: Record<string, unknown>) => Promise<{ reason: string | null; invoiceId: number | null }>>("signClinicalVisit", dependencies),

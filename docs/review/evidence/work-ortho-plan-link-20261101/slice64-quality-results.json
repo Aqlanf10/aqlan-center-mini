@@ -1,0 +1,37 @@
+[
+  {
+    "gate": "lint",
+    "exit": 0,
+    "seconds": 303.43
+  },
+  {
+    "gate": "body",
+    "exit": 0,
+    "seconds": 0.65
+  },
+  {
+    "gate": "environment",
+    "exit": 0,
+    "seconds": 1.39
+  },
+  {
+    "gate": "money",
+    "exit": 0,
+    "seconds": 1.19
+  },
+  {
+    "gate": "preflight",
+    "exit": 0,
+    "seconds": 1.57
+  },
+  {
+    "gate": "runtime-braces",
+    "exit": 0,
+    "seconds": 214.7
+  },
+  {
+    "gate": "runtime-tooling",
+    "exit": 0,
+    "seconds": 636.28
+  }
+]

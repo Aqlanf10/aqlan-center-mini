@@ -22,7 +22,7 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  reactHooks.configs["recommended-latest"],
+  reactHooks.configs.flat["recommended-latest"],
   {
     /* إضافةُ Next مسجَّلةٌ لسببٍ واحد: ملفاتٌ في المستودع تحمل تعطيلًا سطريًّا
        لقاعدةٍ منها، وقاعدةٌ غير معرَّفة تُعدّ خطأً في ESLint 9. تسجيلها يجعل

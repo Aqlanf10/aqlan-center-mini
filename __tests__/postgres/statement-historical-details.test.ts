@@ -154,7 +154,7 @@ describe("historical agreement details in the current printed statement", () => 
     expect(totalRow(table, "المبلغ المتبقي")).toBe(formatMoney(300000, "YER"));
     // Canonical balances unchanged: nothing billed or collected now; the opening counted once.
     expect(summary(html, "إجمالي المفوتر")).toEqual([formatMoney(0, "YER")]);
-    expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(0, "YER")]);
+    expect(summary(html, "صافي المدفوع")).toEqual([formatMoney(0, "YER")]);
     expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(300000, "YER")]);
     expect(summary(html, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(300000, "YER"))]);
     expect(html).toContain("لا دفعات");
@@ -181,7 +181,7 @@ describe("historical agreement details in the current printed statement", () => 
     // Each movement contributes once: one final amount due for the currency.
     expect(summary(html, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(270000, "YER"))]);
     expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(300000, "YER")]);
-    expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(30000, "YER")]);
+    expect(summary(html, "صافي المدفوع")).toEqual([formatMoney(30000, "YER")]);
     expect(html).toContain(receipt.receiptNumber);
     // The history is never a receipt: exactly two current receipts, both real.
     expect((await q("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1", [examplePatient]))[0]).toEqual({ n: 2 });
@@ -197,7 +197,7 @@ describe("historical agreement details in the current printed statement", () => 
     expect(agreementTable(html, "document", first.id)).toContain(formatMoney(150000, "YER"));
     expect(totalRow(agreementTable(html, "document", second.id), "المبلغ المتبقي")).toBe(formatMoney(300000, "YER"));
     expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(450000, "YER")]);
-    expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(25000, "YER")]);
+    expect(summary(html, "صافي المدفوع")).toEqual([formatMoney(25000, "YER")]);
     expect(summary(html, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(425000, "YER"))]);
     // Current collections are never repeated or allocated under each agreement.
     expect(html.match(/<td colSpan="5">المبلغ المتبقي<\/td>/g)).toHaveLength(2);
@@ -218,7 +218,7 @@ describe("historical agreement details in the current printed statement", () => 
     expect(totalRow(agreementTable(html, "document", document.id), "المبلغ المتبقي")).toBe(formatMoney(100000, "YER"));
     expect(html).toContain("CURRENT-INVOICE-LINE");
     expect(summary(html, "إجمالي المفوتر")).toEqual([formatMoney(55000, "YER")]);
-    expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(15000, "YER")]);
+    expect(summary(html, "صافي المدفوع")).toEqual([formatMoney(15000, "YER")]);
     expect(html).toContain("الفواتير وتفاصيل العلاج");
     expect(summary(html, "الرصيد الحالي").join(" ")).toContain(formatMoney(100000 + 55000 - 15000, "YER"));
   });
@@ -283,11 +283,11 @@ describe("historical agreement details in the current printed statement", () => 
     // The SAR balance has no stored treatment detail: said once, nothing inferred; its own opening line stays.
     expect(html).toContain('data-undetailed-currency="SAR"');
     expect(html).toContain("الرصيد السابق (ريال سعودي) بلا تفاصيل علاج مسجلة.");
-    expect(html).toContain("Synthetic imported balance");
+    expect(html).not.toContain("Synthetic imported balance"); // Internal opening-note text never leaves the patient copy.
     expect(totalRow(agreementTable(html, "document", document.id), "المبلغ المتبقي")).toBe(formatMoney(50000, "YER"));
     // Separate currency buckets in the canonical summary: YER then SAR, never mixed.
     expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(50000, "YER"), formatMoney(12345, "SAR")]);
-    expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(0, "YER"), formatMoney(2345, "SAR")]);
+    expect(summary(html, "صافي المدفوع")).toEqual([formatMoney(0, "YER"), formatMoney(2345, "SAR")]);
     expect(summary(html, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(50000, "YER")), expect.stringContaining(formatMoney(10000, "SAR"))]);
   });
 
@@ -355,7 +355,7 @@ describe("one coherent snapshot and fail-closed reads", () => {
     const table = agreementTable(after, "document", document.id);
     expect(totalRow(table, "المدفوع من قبل")).toBe(formatMoney(50000, "YER"));
     expect(summary(after, "رصيد افتتاحي")).toEqual([formatMoney(50000, "YER")]);
-    expect(summary(after, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(7000, "YER")]);
+    expect(summary(after, "صافي المدفوع")).toEqual([formatMoney(7000, "YER")]);
     expect(summary(after, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(43000, "YER"))]);
   });
 

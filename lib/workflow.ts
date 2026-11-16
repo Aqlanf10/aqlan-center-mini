@@ -126,8 +126,11 @@ export function sessionPriceNote(
   rule: BillingRule,
   sessionIndex: number,
   sessionCount: number,
+  coverage?: { financialReviewRequired?: boolean; prebilled?: boolean; includedByAgreement?: boolean },
 ): string {
   const ofTotal = `جلسة ${sessionIndex} من ${sessionCount}`;
+  if (coverage?.financialReviewRequired) return `${ofTotal} — مصدر التغطية يحتاج مراجعة؛ لا يُستنتج استحقاق جديد من قاعدة الجلسات وحدها.`;
+  if (coverage?.prebilled || coverage?.includedByAgreement) return `${ofTotal} — مشمولة بمصدر مالي مسجّل؛ لا فاتورة جديدة لهذه الجلسة. رصيد الاتفاق السابق لا يتغير.`;
   if (rule === "on_start") {
     return sessionIndex === 1
       ? `${ofTotal} — البند يُفوتر كاملًا عند بدئه.`

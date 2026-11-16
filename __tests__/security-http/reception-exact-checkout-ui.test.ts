@@ -82,6 +82,12 @@ describe("exact reception checkout on the built patient workspace", () => {
           idempotencyKey: request.headers()["idempotency-key"] }); return; // Canonical synthetic acknowledgement; never a real payment write.
       }
       if (!["GET", "HEAD", "OPTIONS"].includes(method)) { unexpected.push(`${method} ${path}`); await route.abort(); return; }
+      // Checkout mounts a read-only return-booking owner. These synthetic visits
+      // have no canonical care source; never fabricate a responsible doctor.
+      if (method === "GET" && path === `/api/patients/${patientId}/return-booking-context`
+        && [firstId, secondId].some(id => url.search === `?kind=visit&sourceId=${id}`)) {
+        await json(route, { ok: false, code: "return_source_missing", message: "اختر الحالة المقصودة قبل حجز موعد المراجعة." }, 409); return;
+      }
       if (path === `/api/patients/${patientId}/workflow`) { await json(route, workflow()); return; }
       if (path === `/api/patients/${patientId}`) { await json(route, { patient, visits: [], appointments: [] }); return; }
       const visit = path.match(/^\/api\/visits\/(\d+)\/walkout$/);

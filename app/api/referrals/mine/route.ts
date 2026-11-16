@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { findUserByUsername, myClinicalWork } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { canonicalReferralRoute, readCanonicalMyReferrals } from "@/lib/canonical-referrals";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,9 @@ export const dynamic = "force-dynamic";
  * ومرضاي اليوم مع سياق إحالتهم.
  */
 export async function GET() {
+  /* M2 slice 73: the clinician link's lists inside the patient scope; one owning snapshot. */
+  const canonical = await canonicalReferralRoute(null, handle => readCanonicalMyReferrals(handle), "تعذّر تحميل الإحالات.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (session.role !== "doctor" && session.role !== "admin") {

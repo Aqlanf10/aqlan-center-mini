@@ -8,7 +8,7 @@ import { ROLES } from "../lib/roles";
 import { STAFF_CAPABILITIES, type StaffCapabilityDocument } from "../lib/staff-capability-catalogue";
 
 const profile = (overrides: Partial<StaffCapabilityDocument> = {}): StaffCapabilityDocument => ({
-  schemaVersion: 1, revision: 1, patientScope: "none", appointmentScope: "none", grants: {}, ...overrides,
+  schemaVersion: 2, confirmation: "owner", revision: 1, patientScope: "none", appointmentScope: "none", grants: {}, ...overrides,
 });
 
 describe("raw staff permission envelope classification (inert)", () => {
@@ -94,7 +94,7 @@ describe("raw staff permission envelope classification (inert)", () => {
   });
 
   it.each([
-    profile({ schemaVersion: 2 as 1 }), { ...profile(), canAddPatient: true },
+    profile({ schemaVersion: 1 as 2 }), profile({ confirmation: "confirmed" as "owner" }), { ...profile(), canAddPatient: true },
     { ...profile(), isOwner: true }, profile({ revision: 0 }), profile({ revision: 1.5 }),
     profile({ revision: Number.MAX_SAFE_INTEGER + 1 }), profile({ patientScope: "today" as "none" }),
     profile({ grants: { "staff.permissions.edit": true } }), profile({ grants: { unknown: true } as never }),

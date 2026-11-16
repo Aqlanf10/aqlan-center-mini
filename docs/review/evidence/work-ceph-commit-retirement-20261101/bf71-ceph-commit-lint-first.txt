@@ -1,0 +1,1 @@
+First targeted lint failed one react-hooks/globals error at fixture line31: transition callback registered by assigning an outer variable during render. Moved registration/cleanup into a layout effect; no linter rule disabled, test assertion or production code changed by this fixture correction.

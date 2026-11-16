@@ -1,0 +1,7 @@
+{
+  "checkedAt": "2026-11-01T17:18:46.690892+00:00",
+  "workHead": "aa2388b06da30856f0fae31c9acd48a6bb60942e",
+  "result": "No existing candidate image workflow admits WORK. No workflow_dispatch entry found. Candidate jobs pin older integration refs or specific older PRs; current WORK runs are skipped, not image proof.",
+  "action": "Read-only workflow inspection. No workflow changed, no alternate branch used, no Alpine retry or destination-policy workaround.",
+  "blocker": "Actual Docker remains unverified. A separately reviewed permitted CI job for the exact WORK head would be needed; not automatically fabricated or enabled here."
+}

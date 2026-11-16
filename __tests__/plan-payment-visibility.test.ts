@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TreatmentPlan } from "../lib/db";
 import { planProgress } from "../lib/plans";
 import { withoutPlanPayments } from "../lib/plan-payment-projection";
+// This suite exercises the unchanged legacy branch; canonical admission has separate HTTP/PG coverage.
+vi.mock("@/lib/staff-session-admission", () => ({ selectRequestStaffEnvelope: async () => ({ kind: "legacy" }) }));
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), user: vi.fn(), owns: vi.fn(), todayVisit: vi.fn(),

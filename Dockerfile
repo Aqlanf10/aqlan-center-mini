@@ -1,4 +1,4 @@
-# صورة النشر — ثلاث مراحل، لا يخرج منها إلا ما يلزم التشغيل.
+# صورة النشر — أداة بناء مثبتة ومراحل معزولة، لا يخرج منها إلا ما يلزم التشغيل.
 #
 # عقد Node (TD-02): الصورة 22 هنا هي نفسها في CI (setup-node) وفي package.json engines
 # و‎`.nvmrc`‏ — يفحص تطابقها الأربعة آليًا __tests__/environment-parity.test.ts.
@@ -7,8 +7,12 @@
 # ويتغيّر تخمينه بترقية المنصة. وبناءٌ يتغيّر وحده تحت عيادة تعمل ليس بناءً — هذا
 # الملف يجعل الصورة نفسها تخرج اليوم وبعد سنة، وعلى جهازي كما على المنصة.
 
+# Build dependency resolution matches CI; runtime stage remains independent.
+FROM node:22-alpine AS toolchain
+RUN npm install -g npm@11.21.1
+
 # ── الاعتماديات ──────────────────────────────────────────────────────────────
-FROM node:22-alpine AS deps
+FROM toolchain AS deps
 WORKDIR /app
 # `npm ci` لا `npm install`: يبني من القفل حرفيًا، فلا تتسلّل ترقية صامتة إلى نشرة
 # إنتاج بين ليلة وضحاها.
@@ -19,7 +23,7 @@ COPY vendor/braces-3.0.3-local.tgz ./vendor/braces-3.0.3-local.tgz
 RUN npm ci
 
 # ── البناء ───────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM toolchain AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
@@ -27,6 +31,7 @@ COPY . .
 RUN npm run build
 RUN npm run build:preflight
 RUN node scripts/verify-braces-runtime.mjs
+RUN node scripts/dependency-security/verify-lint-tooling-runtime.mjs
 
 # ── التشغيل ──────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner

@@ -1,3 +1,5 @@
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalPatientWorkflow } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, getSettings, patientWorkflow } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
@@ -26,6 +28,9 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
  * بلا أرصدة — إخفاء الزر في الشاشة ليس منعًا (المواصفة §٣٦).
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 6): projection by grant and scope, never by role label.
+  const canonical = await canonicalPatientGet((await context.params).id, readCanonicalPatientWorkflow, "تعذّر تحميل ملخص المريض.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

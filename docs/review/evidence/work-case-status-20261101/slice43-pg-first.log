@@ -1,0 +1,28 @@
+
+ RUN  v4.1.12 /workspace/aqlan-next-clinical
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/specialty-cases.test.ts (10 tests | 10 skipped) 1116ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/specialty-cases.test.ts [ __tests__/postgres/specialty-cases.test.ts ]
+error: no schema has been selected to create in
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ lib/db.ts:2138:5
+
+ ❯ __tests__/postgres/specialty-cases.test.ts:37:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  62 passed | 10 skipped (72)
+   Start at  06:38:50
+   Duration  26.74s (transform 3.10s, setup 0ms, import 4.65s, tests 21.01s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

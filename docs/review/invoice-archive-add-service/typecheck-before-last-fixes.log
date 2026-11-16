@@ -1,0 +1,11 @@
+
+> aqlan-center@0.1.0 typecheck
+> tsc --noEmit
+
+__tests__/postgres/invoice-add-service.test.ts(152,11): error TS2739: Type '{ serviceId: number; serviceName: string; category: string; toothCode: number; quantity: number; unitPriceMinor: number; billingRule: "on_completion"; sessionCount: number; }' is missing the following properties from type 'PlanItemDraft': surfaces, note
+components/InvoiceAddService.tsx(45,46): error TS2322: Type 'unknown' is not assignable to type 'Currency'.
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

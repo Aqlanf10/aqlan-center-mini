@@ -1,11 +1,13 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickAppointmentModal } from "../components/QuickAppointmentModal";
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic-reception", role: "reception" }) }));
 
 // Exercise the real component's rendered handlers and state across renders.
-// This repository has no DOM unit-test dependency. Effects are intentionally
-// excluded here; the built-app browser journey covers actual clicks and dialogs.
-const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0 }));
+// This repository has no DOM unit-test dependency. Passive effects are intentionally
+// excluded here; layout ownership is committed before handlers; the built-app browser journey covers actual clicks and dialogs.
+const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
+  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(), pending: [] as (() => void)[] }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   function slot(initial: unknown) {
@@ -13,10 +15,17 @@ vi.mock("react", async (original) => {
     if (!(index in hooks.values)) hooks.values[index] = initial;
     return index;
   }
+  const same = (a?: readonly unknown[], b?: readonly unknown[]) => !!a && !!b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+  const memo = (fn: () => unknown, deps?: readonly unknown[]) => { const i = slot(undefined), old = hooks.memos.get(i);
+    if (old && same(old.deps, deps)) return old.value;
+    const value = fn(); hooks.memos.set(i, { deps, value }); return value; };
+  const layout = (fn: () => void | (() => void), deps?: readonly unknown[]) => { const i = slot(undefined), old = hooks.effects.get(i);
+    if (old && same(old.deps, deps)) return;
+    hooks.pending.push(() => { old?.cleanup?.(); hooks.effects.set(i, { deps, cleanup: fn() || undefined }); }); };
   return {
     ...react,
     useId: () => "quick-appointment",
-    useEffect: () => {},
+    useEffect: () => {}, useLayoutEffect: layout, useMemo: memo, useCallback: (fn: unknown, deps?: readonly unknown[]) => memo(() => fn, deps),
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? initial() : initial);
       return [hooks.values[index], (value: unknown) => {
@@ -40,7 +49,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 const response = (status: number, body: unknown) => ({
-  ok: status >= 200 && status < 300, status, json: async () => body,
+  ok: status >= 200 && status < 300, status, json: async () => body, clone: () => ({ json: async () => body }),
 });
 const onClose = vi.fn();
 const onSuccess = vi.fn();
@@ -48,6 +57,7 @@ const fetchMock = vi.fn();
 function render(patientId?: number) {
   hooks.cursor = 0;
   const tree = QuickAppointmentModal({ patientId, isOpen: true, onClose, onSuccess });
+  hooks.pending.splice(0).forEach(effect => effect());
   const all = elements(tree);
   return {
     tree,
@@ -88,12 +98,12 @@ function changeField(id: string, value: string) {
 const writes = (url: string) => fetchMock.mock.calls.filter(([target]) => target === url);
 
 beforeEach(() => {
-  hooks.values = [];
+  hooks.values = []; hooks.memos.clear(); hooks.effects.clear(); hooks.pending = [];
   hooks.cursor = 0;
   vi.clearAllMocks();
   vi.stubGlobal("fetch", fetchMock);
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { hooks.effects.forEach(effect => effect.cleanup?.()); vi.unstubAllGlobals(); });
 
 describe("quick booking owns the complete patient-create and appointment request", () => {
   it("locks before a slow patient create and ignores same-tick or later repeated submission", async () => {
@@ -235,4 +245,32 @@ describe("quick booking owns the complete patient-create and appointment request
     await enterNewPatient().submit();
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
+  it.each([false, true])("requires explicit nearby-booking decision (confirm=%s) without losing the new-patient draft", async confirm => {
+    const warning = { kind: "nearby_patient_appointments", message: "للمريض موعد قائم قريب", canOverride: false,
+      confirmationToken: "scoped-token", nearbyAppointments: [{ id: 10, scheduledDate: "2030-01-16", scheduledTime: "16:00", doctorName: "طبيب تجريبي" }] };
+    fetchMock.mockResolvedValueOnce(response(201, { id: 91001 }))
+      .mockResolvedValueOnce(response(409, warning));
+    if (confirm) fetchMock.mockResolvedValueOnce(response(201, {}));
+    enterNewPatient(); changeField("date", "2030-01-15"); changeField("time", "17:00"); changeField("note", "مسودة محفوظة");
+    const pending = render().submit();
+    let dialog: Element | undefined;
+    await vi.waitFor(() => { dialog = render().all.find(node => node.props.warning === warning); expect(dialog).toBeTruthy(); });
+    expect(writes("/api/appointments")).toHaveLength(1);
+    (dialog!.props.onDecision as (value: boolean) => void)(confirm); await pending;
+    expect(writes("/api/patients")).toHaveLength(1);
+    expect(writes("/api/appointments")).toHaveLength(confirm ? 2 : 1);
+    if (confirm) {
+      const original = JSON.parse(writes("/api/appointments")[0][1].body);
+      expect(JSON.parse(writes("/api/appointments")[1][1].body)).toEqual({ ...original, nearbyAppointmentConfirmation: "scoped-token" });
+      expect(onSuccess).toHaveBeenCalledTimes(1);
+    } else {
+      expect(onClose).not.toHaveBeenCalled(); expect(onSuccess).not.toHaveBeenCalled();
+      const form = render();
+      expect(form.find(node => node.props.id === "quick-appointment-date").props.value).toBe("2030-01-15");
+      expect(form.find(node => node.props.id === "quick-appointment-time").props.value).toBe("17:00");
+      expect(form.find(node => node.props.id === "quick-appointment-note").props.value).toBe("مسودة محفوظة");
+      expectControlGroup(form, false);
+    }
+  });
+
 });

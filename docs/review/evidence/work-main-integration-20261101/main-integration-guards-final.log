@@ -1,0 +1,27 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs (0 test)
+ ❯ .next/standalone/scripts/audits/m2-route-capability-map.test.mjs (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .next/standalone/scripts/audits/m2-route-capability-map.test.mjs [ .next/standalone/scripts/audits/m2-route-capability-map.test.mjs ]
+Error: Cannot find module '/workspace/aqlan-main-reconcile/.next/standalone/scripts/audits/m2-route-capability-map.test.mjs'
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs [ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs ]
+Error: Cannot find module '/workspace/aqlan-main-reconcile/.next/standalone/scripts/audits/staff-cutover-readiness.test.mjs'
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 4 passed (6)
+      Tests  45 passed (45)
+   Start at  04:42:03
+   Duration  11.64s (transform 938ms, setup 0ms, import 4.10s, tests 6.40s, environment 12ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

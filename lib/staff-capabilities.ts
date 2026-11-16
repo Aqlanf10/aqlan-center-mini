@@ -86,7 +86,8 @@ export function hasStaffCapability(access: ResolvedStaffAccess, capability: unkn
   if (!state || !isStaffCapability(capability)) return false;
   // Administrative authority never manufactures a clinical identity.
   if (capability === "finance.commissions.view-own" && state.subject.clinicianPartyId === null) return false;
-  return access.isOwner || state.document.grants[capability] === true;
+  // A document the owner has not confirmed grants nothing (STAFF_CAPABILITY_CONFIRMATIONS).
+  return access.isOwner || (state.document.confirmation === "owner" && state.document.grants[capability] === true);
 }
 
 export function canPerformOwnerOperation(access: ResolvedStaffAccess, operation: OwnerOnlyOperation | string): boolean {
@@ -97,7 +98,7 @@ export type StaffRecordConstraint = Readonly<{ kind: "none" } | { kind: "all" } 
 function scopeConstraint(access: ResolvedStaffAccess, kind: "patientScope" | "appointmentScope"): StaffRecordConstraint {
   const state = accessStates.get(access);
   if (!state) return Object.freeze({ kind: "none" });
-  const scope = access.isOwner ? "all" : state.document[kind];
+  const scope = access.isOwner ? "all" : state.document.confirmation === "owner" ? state.document[kind] : "none";
   if (scope === "all") return Object.freeze({ kind: "all" });
   if (scope === "own" && state.subject.clinicianPartyId !== null) {
     return Object.freeze({ kind: "own", clinicianPartyId: state.subject.clinicianPartyId });
@@ -124,7 +125,7 @@ export function staffAuthorizationFingerprint(access: ResolvedStaffAccess): stri
   const { subject, document, owner } = state;
   const material = [STAFF_AUTHORIZATION_POLICY_VERSION, subject.userId, subject.role, subject.isActive,
     subject.clinicianPartyId, owner?.ownerUserId ?? null, owner?.bindingVersion ?? null,
-    document.schemaVersion, document.revision, document.patientScope, document.appointmentScope,
+    document.schemaVersion, document.revision, document.confirmation, document.patientScope, document.appointmentScope,
     STAFF_CAPABILITIES.filter((key) => document.grants[key] === true)];
   return `staff-v1:${createHash("sha256").update(JSON.stringify(material)).digest("hex")}`;
 }
@@ -173,9 +174,15 @@ export function validateStaffCapabilityChange(input: {
   if (input.actor.userId === input.target.userId) return refused("self-permission-change");
   if (input.target.isOwner || actor.owner?.ownerUserId === input.target.userId) return refused("protected-owner");
   if (!hasStaffCapability(input.actor, "staff.permissions.edit")) return refused("permission-management-denied");
+  // Initial grants are the owner's decision: a delegated editor maintains only accounts
+  // the owner has already confirmed, and never confirms one itself.
+  if (!input.actor.isOwner && target.document.confirmation !== "owner") return refused("initial-owner-confirmation-required");
   if (input.expectedRevision !== target.document.revision) return refused("stale-revision");
   const next = parseStaffCapabilityDocument(input.nextDocument);
   if (!next.ok) return refused(next.reason);
+  // Every save results in a confirmed document: the owner's save is the confirmation;
+  // a delegate can only save an already confirmed one.
+  if (next.value.confirmation !== "owner") return refused("invalid-confirmation");
   if (next.value.revision !== target.document.revision + 1) return refused("revision-must-increment");
   if (!withinDelegableAuthority(input.actor, target.document) || !withinDelegableAuthority(input.actor, next.value)) {
     return refused("outside-delegable-authority");
@@ -195,5 +202,41 @@ export function validateStaffMaintenance(actor: ResolvedStaffAccess, target: Res
   if (target.isOwner || actorState.owner?.ownerUserId === target.userId) return refused("protected-owner");
   if (!hasStaffCapability(actor, `staff.${operation}`)) return refused("maintenance-denied");
   if (!withinDelegableAuthority(actor, targetState.document)) return refused("outside-delegable-authority");
+  return { ok: true };
+}
+
+/** One account save (review 6507696166 item 2) maps to these operations; each needs its own authority. */
+export type StaffAccountOperation = "profile.edit" | "accounts.disable" | "staff.role.change" | "staff.clinician-link.change" | "staff.credentials.reset";
+export interface StaffAccountTarget {
+  readonly userId: number;
+  /** From the same locked control row as the actor's proof. */
+  readonly ownerUserId: number;
+  readonly isOwner: boolean;
+  /** Stored document; read for the delegation bound only. An administrative target grants nothing. */
+  readonly document: StaffCapabilityDocument;
+}
+/**
+ * Pure preflight for an account save against an ADMINISTRATIVE target, which may be
+ * inactive and is therefore never a ResolvedStaffAccess. The batch rule: every
+ * operation must be allowed or the whole save is refused. The protected owner is never a
+ * target; an actor never changes its own account here (no self-deactivation, no
+ * self-reset, no self-link); a delegate stays within its own authority; the role label,
+ * the clinician link and credentials are the owner's operations. A role label never
+ * grants (resolveStaffCapabilities ignores it).
+ */
+export function validateStaffAccountChange(actor: ResolvedStaffAccess, target: StaffAccountTarget, operations: readonly StaffAccountOperation[]): StaffChangeDecision {
+  const actorState = accessStates.get(actor);
+  if (!actorState || actor.status !== "allowed" || !validId(target?.userId)) return refused("invalid-access");
+  if (!actorState.owner) return refused("owner-context-missing");
+  if (actorState.owner.ownerUserId !== target.ownerUserId) return refused("owner-context-mismatch");
+  if (operations.length === 0) return refused("no-account-change");
+  if (actor.userId === target.userId) return refused("self-staff-maintenance");
+  if (target.isOwner || target.userId === actorState.owner.ownerUserId) return refused("protected-owner");
+  for (const operation of operations) {
+    if (operation === "profile.edit" || operation === "accounts.disable") {
+      if (!hasStaffCapability(actor, `staff.${operation}`)) return refused("maintenance-denied");
+    } else if (!canPerformOwnerOperation(actor, operation)) return refused("owner-operation-required");
+  }
+  if (!withinDelegableAuthority(actor, target.document)) return refused("outside-delegable-authority");
   return { ok: true };
 }

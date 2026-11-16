@@ -1,0 +1,53 @@
+{
+  "format": "work-coverage-clinic-date-v1",
+  "baseRevision": "1990b9666961e23a4e15dccd5919d868f6be2dc2",
+  "buildId": "3O5pamdhHK7F_fGZsx2Da",
+  "witness": {
+    "before": {
+      "failed": 1,
+      "deselected": 4,
+      "actual": "2026-10-31",
+      "expected": "الأحد 01/11/2026"
+    },
+    "afterUnitAndGuards": {
+      "passed": 40,
+      "files": 4
+    },
+    "afterPostgres": {
+      "passed": 25,
+      "files": 1
+    },
+    "afterHTTPBrowser": {
+      "passed": 11,
+      "files": 1
+    }
+  },
+  "typeBuildTargetedLint": "passed",
+  "independentReview": "pending",
+  "exactHeadCI": "pending publication",
+  "storageAndBusinessDates": "unchanged",
+  "inventory": "regenerated; remains NOT_READY",
+  "sourceSha256": {
+    "components/patient/CanonicalOrthoCoverage.tsx": "7a446a7bb792d109bec7baebaf3ead814f538ed64059db72e3428fb1581a22a5",
+    "lib/canonical-ortho-coverage.ts": "9f42ef6f92d87d819ba8b8d0f117151f5c3de5b0f0c75d0cbfe71261b3ed7146",
+    "lib/canonical-ortho-coverage-projection.ts": "32c4dc51e2703e1a77d1f491ef3d03edf423412325b2d83542cc3c017eae3da4",
+    "__tests__/canonical-ortho-coverage-clock.test.tsx": "623a87d31cd26ad261f247d7b78129bb5815b6cb9b3af6fe5bae6152a5e39755",
+    "__tests__/canonical-ortho-coverage-projection.test.ts": "f758d20dd2ac3310304dc00645f882b86add3c91aa3bf00e9b20aa3e4a099c10",
+    "__tests__/fixtures/canonical-ortho-coverage.ts": "9307a99307e940fe85c39ece91ebb9910f49514f4d62c3af3ca45dd23cebfaa1",
+    "__tests__/postgres/ortho-canonical-coverage.test.ts": "7e8c8cf2ba5d3ba2d18fb3ecfe5ee405f6caa6fcbe2b5a198a66e39b09f43bee",
+    "__tests__/security-http/canonical-ortho-coverage-journey.test.ts": "355d4fda913c3b38153ef3d97562786fd2b9d61d2e3f4a86f5b1ff38c1ed15b2",
+    "docs/security/staff-cutover/inventory.json": "30e935781d62324b4a1a4e3d5d84ca6d186d417f32d201a8a97cace6b78fe175"
+  },
+  "artifacts": {
+    "coverage-clock-after-unit.log": "99187babdd40dcc492a49feab7d568628f33017b22e09f64069f94bf80161412",
+    "coverage-clock-before.log": "bf214d58e56b8499f25d44cf67ab575559a818abed4f3d768b5a87603d30be0a",
+    "coverage-clock-build.log": "f9fd0f7665ce2bd00d9db6c57f8b8edfea2784d68a88bfd84e8ba3333235d1dc",
+    "coverage-clock-http.log": "36f9c3fb71b1b93aeea64c6f98aa7de00cafc4c1018938a1d1c18ab77e473765",
+    "coverage-clock-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "coverage-clock-lint.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "coverage-clock-pg.log": "6b75a91910db1a8979efe08d83f8e5c3f13633fe5b94ce8f7b0782a959d887b5",
+    "coverage-clock-tsc-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "coverage-clock-unit-guards.log": "85c5323a3b9d3162e3bb350e4f1164186f54636d2cf145cea354009f31c852c8",
+    "ortho-coverage-clinic-midnight-390.png": "ae116f65f541ae97628ffa7f054574354ac4dfdb3a5277fbca41a170d92ea866"
+  }
+}

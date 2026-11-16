@@ -1,0 +1,14 @@
+
+ RUN  v4.1.12 /workspace/aqlan-coverage-ui
+
+
+ Test Files  4 passed (4)
+      Tests  67 passed (67)
+   Start at  18:20:47
+   Duration  3.90s (transform 2.22s, setup 0ms, import 2.79s, tests 295ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,10 @@
+npm error Missing script: "ci:scan:money"
+npm error
+npm error Did you mean one of these?
+npm error   npm run ci:scan:body # run the "ci:scan:body" package script
+npm error   npm run scan:money # run the "scan:money" package script
+npm error
+npm error To see a list of scripts, run:
+npm error   npm run
+npm error Log files were not written due to an error writing to the directory: /home/agent/.npm/_logs
+npm error You can rerun the command with `--loglevel=verbose` to see the logs in your terminal

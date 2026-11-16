@@ -93,6 +93,7 @@ function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: 
   const canBill = session?.role === "admin" || session?.role === "reception";
 
   const [suppliersError, setSuppliersError] = useState(false);
+  const [suppliers, setSuppliers] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
   useEffect(() => {
     if (!canBill) return;
     let alive = true;
@@ -146,7 +147,6 @@ function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: 
   /* (P2-10) مورّد الشراء: اختياره يولّد فاتورته في المستحقات مع الإدخال نفسه. */
   const [supplierId, setSupplierId] = useState("");
   const [supplierDue, setSupplierDue] = useState("");
-  const [suppliers, setSuppliers] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
   /* قيمة المخزون للمدير وحده: ما في الرفّ من مال — مشتقّة لا مخزّنة. */
   const [valuePanel, setValuePanel] = useState<{
     totalMinor: number | null;

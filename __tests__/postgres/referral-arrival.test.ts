@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+let responsibilityFixtureSequence = 0;
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
@@ -131,7 +133,7 @@ describe("(REF-2) appointment outcomes on a scheduled referral", () => {
 describe("(REF-2) arrival and sign-off progress", () => {
   it("arrival moves scheduled → arrived and the opened visit carries the referral's case", async () => {
     const p = await patient("P-R2-AR");
-    const endoCase = await createClinicalCase({
+    const endoCase = await createClinicalCase({ admittedSession: await responsibilityAdminFixture("referral-arrival-responsibility-" + (++responsibilityFixtureSequence)),
       patientId: p, specialty: "endodontics", title: "علاج جذور 21", site: "21", problem: null,
       responsiblePartyId: endodontist, orthoCaseId: null, actor: "dr-aqlan",
     });
@@ -160,7 +162,7 @@ describe("(REF-2) arrival and sign-off progress", () => {
 
   it("a visit in the referral's case signed only by another doctor does not progress it", async () => {
     const p = await patient("P-R2-OD");
-    const endoCase = await createClinicalCase({
+    const endoCase = await createClinicalCase({ admittedSession: await responsibilityAdminFixture("referral-arrival-responsibility-" + (++responsibilityFixtureSequence)),
       patientId: p, specialty: "endodontics", title: "علاج جذور 11", site: "11", problem: null,
       responsiblePartyId: endodontist, orthoCaseId: null, actor: "dr-aqlan",
     });
@@ -181,11 +183,11 @@ describe("(REF-2) arrival and sign-off progress", () => {
 describe("(REF-2) acceptance journey «محمد أحمد»", () => {
   it("ortho case → internal referral blocking it → schedule → arrive → sign root canal → complete → acknowledge", async () => {
     const p = await patient("P-R2-MA");
-    const ortho = await createClinicalCase({
+    const ortho = await createClinicalCase({ admittedSession: await responsibilityAdminFixture("referral-arrival-responsibility-" + (++responsibilityFixtureSequence)),
       patientId: p, specialty: "orthodontics", title: "تقويم ثابت", site: null, problem: null,
       responsiblePartyId: orthodontist, orthoCaseId: null, actor: "dr-aqlan",
     });
-    const endo = await createClinicalCase({
+    const endo = await createClinicalCase({ admittedSession: await responsibilityAdminFixture("referral-arrival-responsibility-" + (++responsibilityFixtureSequence)),
       patientId: p, specialty: "endodontics", title: "علاج جذور 21", site: "21", problem: null,
       responsiblePartyId: endodontist, orthoCaseId: null, actor: "dr-aqlan",
     });
@@ -310,7 +312,7 @@ describe("(REF-2) acceptance journey «محمد أحمد»", () => {
 describe("(REF-3) banner and next step stay precise", () => {
   it("a scheduled referral does not put its banner on an unrelated visit in the same case (other doctor, not arrived)", async () => {
     const p = await patient("P-R3-UNREL");
-    const endo = await createClinicalCase({
+    const endo = await createClinicalCase({ admittedSession: await responsibilityAdminFixture("referral-arrival-responsibility-" + (++responsibilityFixtureSequence)),
       patientId: p, specialty: "endodontics", title: "علاج جذور 11", site: "11", problem: null,
       responsiblePartyId: endodontist, orthoCaseId: null, actor: "dr-aqlan",
     });

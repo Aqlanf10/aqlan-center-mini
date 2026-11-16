@@ -1,0 +1,44 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/canonical-ceph-reference-journey.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-assessment-final
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ceph-reference-journey.test.ts (1 test | 1 failed) 4475ms
+   × HTTP: imaging grant reads the reference catalogue without a legacy session or patient scope 212ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-reference-journey.test.ts > HTTP: imaging grant reads the reference catalogue without a legacy session or patient scope
+AssertionError: expected 401 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 401
+
+ ❯ __tests__/security-http/canonical-ceph-reference-journey.test.ts:28:27
+     26|   expect(session.status).toBe(200);
+     27|   const response = await journey.api("/api/ceph-reference-sets", sessi…
+     28|   expect(response.status).toBe(200);
+       |                           ^
+     29|   expect(await response.json()).toMatchObject({ projection: "ceph-refe…
+     30|   expect((await journey.api(`/api/patients/${ids.patient}/ceph`, sessi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  01:15:45
+   Duration  8.82s (transform 129ms, setup 0ms, import 521ms, tests 4.48s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

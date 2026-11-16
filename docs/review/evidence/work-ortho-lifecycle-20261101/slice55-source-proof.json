@@ -1,0 +1,20 @@
+{
+  "baseRevision": "16999f9c093ba4194503e3e32d7c966881c647b2",
+  "checks": {
+    "setOrthoPhaseInTransaction_original_sql": true,
+    "setRetainerInTransaction_original_sql": true,
+    "close_original_sql_except_WHERE_indentation": true,
+    "legacy_prefix_unchanged": true,
+    "legacy_tail_unchanged": true,
+    "legacy_POST_unchanged": true,
+    "legacy_PATCH_body_unchanged": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/ortho-followup-coverage-db.ts": true,
+    "lib/canonical-ortho-assessment.ts": true,
+    "canComplete_original_domain": true,
+    "migrations_unchanged": true
+  },
+  "passed": 12,
+  "firstProofAttempt": "Exact close SQL check differed only by two indentation spaces before WHERE; explicitly normalized this exact whitespace, no SQL predicate or value changed.",
+  "limits": "Only native clinical lifecycle branches admitted. Legacy wrappers retain original state SQL/domain; canonical audit is atomic. planId stays held and PATCH is not counted fully converted."
+}

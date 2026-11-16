@@ -1,0 +1,28 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-canonical-assessment.test.ts (26 tests | 26 skipped) 859ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-canonical-assessment.test.ts [ __tests__/postgres/ortho-canonical-assessment.test.ts ]
+error: duplicate key value violates unique constraint "ortho_cases_one_open"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ episode __tests__/postgres/ortho-canonical-assessment.test.ts:29:19
+
+ ❯ __tests__/postgres/ortho-canonical-assessment.test.ts:42:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  26 skipped (26)
+   Start at  00:43:40
+   Duration  3.63s (transform 1.78s, setup 0ms, import 2.21s, tests 859ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

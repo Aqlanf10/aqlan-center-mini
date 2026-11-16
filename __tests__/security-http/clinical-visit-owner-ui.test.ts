@@ -172,6 +172,9 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean; holdR
     });
     else if (path === `${patientPath}/family`) await json(route, { family: null, canEdit: false });
     else if (path === `${patientPath}/intake-history`) await json(route, { forms: [] });
+    // This unrelated clinical fixture models capability availability, not lab commands.
+    // Keep the exact read local; every unlisted request still fails the fixture.
+    else if (method === "GET" && path === "/api/lab/work-intents/capability" && !url.search) await json(route, { supported: true });
     else if (path === "/api/services") await json(route, services);
     else if (path === "/api/parties") await json(route, [{ id: doctorId, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);

@@ -1,0 +1,31 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-lifecycle
+
+[security-http] الخادم جاهز على http://127.0.0.1:7917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts (9 tests | 1 failed | 7 skipped) 10604ms
+   × browser: detail-only unmount keeps an unacknowledged assessment receipt until explicit identical replay 5275ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts > browser: detail-only unmount keeps an unacknowledged assessment receipt until explicit identical replay
+TimeoutError: locator.waitFor: Timeout 2500ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-ortho-assessment').getByRole('button', { name: 'التحقق بإعادة نفس طلب الحفظ', exact: true }) to be visible[22m
+
+ ❯ __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts:201:237
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 7 skipped (9)
+   Start at  15:31:22
+   Duration  15.28s (transform 150ms, setup 0ms, import 553ms, tests 10.60s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

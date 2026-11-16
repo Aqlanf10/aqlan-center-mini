@@ -1,0 +1,13 @@
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+page.evaluate: ReferenceError: __name is not defined
+    at eval (eval at evaluate (:311:30), <anonymous>:1:82)
+    at UtilityScript.evaluate (<anonymous>:313:16)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+    at <anonymous> (/workspace/reviews/work-batch-20261101/print-lab-spacing-probe.mts:16:26) {
+  log: []
+}
+
+Node.js v22.23.3

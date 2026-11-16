@@ -1,0 +1,71 @@
+{
+  "format": "work-ortho-strategy-append-v1",
+  "baseRevision": "177825e508d3d21078dde4798fae791063195db6",
+  "preparedAt": "2026-11-01T15:05:08.700945+00:00",
+  "buildId": "1MgY7wIDuGln87vYnj4UN",
+  "acceptance": {
+    "PG": {
+      "firstRun": {
+        "passed": 70,
+        "files": 3
+      },
+      "expandedCommandRun": {
+        "passed": 27,
+        "files": 1
+      },
+      "distinctCases": 71,
+      "qualification": "The expanded run adds one detached-history bridge witness; not a single71-case execution."
+    },
+    "unitMap": {
+      "passed": 36,
+      "files": 2
+    },
+    "HTTPChromium": {
+      "passed": 25,
+      "files": 4
+    },
+    "typeBuildTargetedLint": "passed; original TS control-flow narrowing failure and corrected run retained",
+    "fullCombinedGates": "pending subsequent coherent batch",
+    "exactHeadCI": "not published",
+    "independentReview": "pending",
+    "finalMapInventoryGuards": {
+      "passed": 10,
+      "files": 2
+    }
+  },
+  "before": "Actual prior7f build: authorized canonical GET200, valid strategy POST401vs201. Relevant inputs identical at local56 base; not labeled a full56 rebuild.",
+  "scope": "Server command only. Default GET/reader UI remains unchanged. Explicit editor admission/shared lifetime belongs to next58.",
+  "limits": [
+    "No legacy resource-budget policy change. Oversized legacy strategy histories still require adoption resolution; canonical commands cannot exceed accepted read limits.",
+    "Server receipt is immutable and same-actor scoped; no browser/editor recovery claim from an API-only contract.",
+    "No main merge, deployment, live data/settings, migration, treatment or financial effects.",
+    "Inventory NOT_READY and wider image/schema/integration/operational acceptance remain open."
+  ],
+  "sourceSha256": {
+    "__tests__/canonical-ortho-strategy-command.test.ts": "c570c77d557258e236202112e2372b16c127e901ffd2f57d049370c48e5d08c6",
+    "__tests__/postgres/ortho-strategy-canonical-command.test.ts": "b2e48f96ec30e4f9ea061159df33320c3f072a15b66dafead5bff548ce570ee7",
+    "__tests__/security-http/canonical-ortho-strategy-command-journey.test.ts": "45b881c380045dafd1b274444e5c220b2fe71af20544110ba775058558634be0",
+    "__tests__/security-http/canonical-ortho-strategy-journey.test.ts": "f5a646a5cc18482400eebb1d2571211dc0745030b27f5b9e0818b0b70fe2ef23",
+    "app/api/ortho/[id]/strategy/route.ts": "a3f156ccb458106d1fbfcdbe1658b72007b24edbd5637bde0dc776db7a6266ad",
+    "lib/canonical-ortho-strategy-command.ts": "e8de0cae1e7bd05345ed08451d42990f07c4814eda38fd519786eeb0c3ef31b8",
+    "lib/ortho-treatment-strategy-store.ts": "4e0174ffa6ef8e0ce2b6ed76054112e35ef873afd9b3c49b191d516f83a4bae5"
+  },
+  "evidenceSha256": {
+    "slice57-before-build-provenance.json": "b6868c7ee7386151417e8a11cd6e016e2a0413eafea056c476ae081f399b6fa3",
+    "slice57-build-first.log": "5a4b1cea16f670141cae9a1059a4f9b2d397cca22913c291523f785c5c7fcb34",
+    "slice57-design.md": "b9daa186116ea7215292fc0e0459b58e0af6b19921a1125bb052c530e570cf92",
+    "slice57-final-map-guards.log": "e476c45dde52517582dc66e3e6b9427b8eb9b16dd2fb712379f6eac9eb344bec",
+    "slice57-http-before.log": "dcef3b7476f3d33f02b479c1eecc87f9e128d8741880706764063163452e26fd",
+    "slice57-http-first.log": "ca9ef6c6909b65a5a5449ce41301f5851406ad3a771cdfe04eb0c8c7274114e3",
+    "slice57-inventory-build.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice57-inventory-final.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice57-lint-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice57-pg-command-expanded.log": "e1d96f2dfda3ccbc089849d4dc6d6955e268d6e9bfcba8f9eeec7929000b6a3e",
+    "slice57-pg-first.log": "4de1f56a2e89baeb70a8d69c88127f8daf29738c1e0b10757a4206db7999eb11",
+    "slice57-product-freeze.json": "514e31b57969d87e91e9d0f2d3b4db74352ccb4abbef12fb4cc8ccec568ed8d0",
+    "slice57-source-proof.json": "9310a194deb68aae7c77bf9f1beaba0356d0e3b65695ed0938f566f748281200",
+    "slice57-tsc-corrected.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice57-tsc-first.log": "9076fd9bacd0dbe16ba6d264bacc80da8f0dd95e051700c7594127e5910ed413",
+    "slice57-unit-first.log": "b743b9b8e740d3cf0b6f316e6225ef1233e81ee396c6c3c92558a870bbf76538"
+  }
+}
