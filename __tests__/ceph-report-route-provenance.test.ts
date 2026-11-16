@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { transformSync } from "esbuild";
 import { describe, it } from "vitest";
 import * as view from "../lib/ceph-report-view";
+import * as layout from "../lib/ceph-report-layout";
 
 /** Execute the actual TSX page with isolated read-only dependencies and a JSX
  * tree collector. These are route-logic tests, not React/Next/browser/DB tests. */
@@ -37,7 +38,9 @@ function load(relative: string, dependencies: Record<string, unknown>): Record<s
   new Function("require", "module", "exports", "h", "fragment", code)(require, module, module.exports, h, fragment);
   return module.exports;
 }
-const tracing = load("components/CephReportTracing.tsx", { "@/lib/ceph-report-view": view });
+const tracing = load("components/CephReportTracing.tsx", { "@/lib/ceph-report-view": view, "@/lib/ceph-report-layout": layout });
+const measurements = load("components/CephReportMeasurements.tsx", { "@/lib/ceph-report-layout": layout, "@/components/PrintDocument": { PrintTableFrame: ({ children }: Record<string, unknown>) => children } });
+const reportStyle = load("components/CephReportStyle.tsx", {});
 const points = (offset = 0) => [
   { code: "S", x: 10 + offset, y: 20 }, { code: "N", x: 40 + offset, y: 15 },
   { code: "A", x: 45 + offset, y: 55 }, { code: "Me", x: 38 + offset, y: 90 },
@@ -59,7 +62,8 @@ async function render(study = fixture(), options: { authorized?: boolean; logged
   const children = ({ children }: Record<string, unknown>) => children;
   const dependencies = {
     "@/components/CephSavedCompletionEvidence": { CephSavedCompletionEvidence: () => null },
-    "@/components/CephReportTracing": tracing, "@/lib/ceph-report-view": view,
+    "@/components/CephReportTracing": tracing,
+    "@/components/CephReportMeasurements": measurements, "@/components/CephReportStyle": reportStyle, "@/lib/ceph-report-view": view,
     "@/components/PrintDocument": { PrintMetadata: children, PrintTableFrame: children },
     "@/components/CephDraftReferenceEvidence": { CephDraftReferenceEvidence: () => null },
     "@/components/CephScientificContext": { CephScientificContext: () => null },
@@ -149,4 +153,21 @@ describe("actual report page source selection and lifecycle", () => {
     const result = await render(data); assert.equal(result.nodes.filter(node => node.type === "svg").length, 0);
     assert.doesNotMatch(result.text, /NaN|Infinity/);
   });
+  it("keeps the clinical flow before an optional technical appendix", async () => {
+    const result = await render(completed());
+    const appendix = result.nodes.find(node => node.type === "details");
+    assert.ok(appendix); assert.equal(appendix.props.open, undefined);
+    assert.equal(appendix.props["data-testid"], "ceph-report-audit-appendix");
+    const tracingIndex = result.nodes.findIndex(node => node.props["data-testid"] === "ceph-report-tracing");
+    const tableIndex = result.nodes.findIndex(node => node.props["data-testid"] === "ceph-report-measurements");
+    const diagnosisIndex = result.nodes.findIndex(node => node.props["aria-label"] === "التشخيص وملاحظات الطبيب");
+    assert.ok(tracingIndex < tableIndex && tableIndex < diagnosisIndex);
+    assert.ok(diagnosisIndex < result.nodes.indexOf(appendix));
+    assert.match(text(appendix), /Image SHA-256|مصادر الحساب/);
+  });
+  it("does not mislabel the database patient ID as the public file number", async () => {
+    const result = await render();
+    assert.match(result.text, /معرّف المريض/); assert.doesNotMatch(result.text, /رقم الملف/);
+  });
+
 });
