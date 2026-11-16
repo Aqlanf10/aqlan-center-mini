@@ -731,7 +731,7 @@ describe("Patient Portal Complete End-to-End Policies, Clinical Views, Announcem
         patientId: mainPatientId,
         visitId: signedVisit.id,
         diagnosis: "وصفة مبطلة",
-        notes: null,
+        notes: "",
         instructionsLang: "ar",
         prescribingDoctorName: "د. منصور الاصطناعي",
         prescribingDoctorPartyId: doctorPartyId,
@@ -1117,11 +1117,20 @@ describe("Patient Portal Complete End-to-End Policies, Clinical Views, Announcem
     // فحص مسار عهدة الرسائل المحذوفة المدقّقة
     const msg = await insertMessage({
       senderType: "patient",
+      senderUserId: null,
       senderPatientId: mainPatientId,
-      senderName: "سلوى علي الاصطناعية",
       recipientType: "staff_all",
+      recipientUserId: null,
+      recipientPatientId: null,
       kind: "text",
       body: "رسالة اصطناعية تُحذف من الواجهة وتبقى في العهدة الآمنة",
+      voiceMime: null,
+      voiceData: null,
+      voiceMs: null,
+      fileName: null,
+      fileMime: null,
+      fileSize: null,
+      fileData: null,
     });
     const delRes = await deletePatientMessage(mainPatientId, msg.id);
     expect(delRes.ok).toBe(true);
