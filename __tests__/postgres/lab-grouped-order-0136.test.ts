@@ -27,24 +27,33 @@ afterAll(async () => { await db.resetPoolForTesting(); });
 const TEETH = [14, 15, 24, 25, 26];
 type Pricing = { unitMinor: number; currency: string } | null;
 
-/** One crown service, one lab, one lab service; an optional dated price rule for that lab and service. */
-async function world(pricing: Pricing, doctors = 1) {
+/** One crown service mapped in settings to one lab service (owner 6932010630 item 1); one lab with an optional
+ * dated price for that lab service. `mapped = false` leaves the clinic service without a lab-service mapping. */
+async function world(pricing: Pricing, doctors = 1, mapped = true) {
   const [patient] = await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic grouped patient') RETURNING id", [`GLO-${randomUUID()}`]);
   const doctorIds: number[] = [];
   for (let i = 0; i < doctors; i++) doctorIds.push((await q("INSERT INTO parties(name,kind,commission_percent) VALUES($1,'doctor',30) RETURNING id", [`Synthetic grouped doctor ${i} ${randomUUID()}`]))[0].id);
   const [service] = await q("INSERT INTO services(name,category,price_minor,is_active,price_configured) VALUES($1,'crown',1000,TRUE,TRUE) RETURNING id", [`Synthetic grouped crown ${randomUUID()}`]);
   const [lab] = await q("INSERT INTO parties(name,kind,currency) VALUES($1,'lab','YER') RETURNING id", [`Synthetic grouped lab ${randomUUID()}`]);
   const [labService] = await q("INSERT INTO lab_services(name,code,category,tooth_scope,requires_shade) VALUES($1,$2,'prostho','single_tooth',TRUE) RETURNING id", [`Synthetic zirconia crown ${randomUUID()}`, `SYN-${randomUUID()}`]);
+  if (mapped) await q("UPDATE services SET lab_service_id=$2 WHERE id=$1", [service.id, labService.id]);
   if (pricing) await q("INSERT INTO lab_pricing_rules(party_id,lab_service_id,cost_minor,cost_currency,effective_from,created_by) VALUES($1,$2,$3,$4,'2020-01-01','synthetic')", [lab.id, labService.id, pricing.unitMinor, pricing.currency]);
   return { patientId: patient.id as number, doctorIds, serviceId: service.id as number, labId: lab.id as number, labServiceId: labService.id as number };
 }
 
-/** The short entry: one lab, one shade, optional instructions, for every selected tooth. */
-function grouped(w: Awaited<ReturnType<typeof world>>, teeth = TEETH, labServiceFor: (tooth: number) => number = () => w.labServiceId,
+/** A clinic crown service mapped in settings to the given lab service. */
+async function mappedService(labServiceId: number) {
+  const [service] = await q("INSERT INTO services(name,category,price_minor,is_active,price_configured,lab_service_id) VALUES($1,'crown',1000,TRUE,TRUE,$2) RETURNING id", [`Synthetic mapped crown ${randomUUID()}`, labServiceId]);
+  return service.id as number;
+}
+
+/** The short entry: one lab, one shade, optional instructions, for every selected tooth. The lab service is never
+ * chosen here: it comes from each line's clinic service mapping. */
+function grouped(w: Awaited<ReturnType<typeof world>>, teeth = TEETH, serviceFor: (tooth: number) => number = () => w.serviceId,
   intentId = randomUUID(), memberIds = teeth.map(() => randomUUID())) {
   return teeth.map((tooth, index) => ({
-    serviceId: w.serviceId, doctorId: w.doctorIds[index % w.doctorIds.length], quantity: 1, price: "1000", sessions: 1, toothCode: tooth, episodeTeeth: [tooth],
-    labWork: { intentId, memberId: memberIds[index], expectedRevision: 0, groupKind: "grouped", labServiceId: labServiceFor(tooth), instructions: "حواف رفيعة",
+    serviceId: serviceFor(tooth), doctorId: w.doctorIds[index % w.doctorIds.length], quantity: 1, price: "1000", sessions: 1, toothCode: tooth, episodeTeeth: [tooth],
+    labWork: { intentId, memberId: memberIds[index], expectedRevision: 0, groupKind: "grouped", instructions: "حواف رفيعة",
       prescription: { partyId: w.labId, shade: "A2", stumpShade: "", toothNumbers: "", dueDate: "2026-12-01", impressionType: "physical", priority: "normal" } },
   }));
 }
@@ -96,7 +105,8 @@ describe("0136 grouped lab order from one invoice entry", () => {
     const w = await world({ unitMinor: 200, currency: "YER" });
     const [premium] = await q("INSERT INTO lab_services(name,code,category,tooth_scope,requires_shade) VALUES($1,$2,'prostho','single_tooth',TRUE) RETURNING id", [`Synthetic emax ${randomUUID()}`, `SYN-${randomUUID()}`]);
     await q("INSERT INTO lab_pricing_rules(party_id,lab_service_id,cost_minor,cost_currency,effective_from,created_by) VALUES($1,$2,350,'YER','2020-01-01','synthetic')", [w.labId, premium.id]);
-    const priced = await save(w, grouped(w, TEETH, tooth => tooth < 20 ? premium.id : w.labServiceId)); // 14,15 at 350; 24,25,26 at 200
+    const premiumCrown = await mappedService(premium.id);
+    const priced = await save(w, grouped(w, TEETH, tooth => tooth < 20 ? premiumCrown : w.serviceId)); // 14,15 at 350; 24,25,26 at 200
     expect(await orders(w.patientId)).toEqual([expect.objectContaining({ cost: 1300, currency: "YER", pricing_state: "rule" })]);
     expect(await q("SELECT tooth_code, unit_cost_minor::int AS unit, unit_cost_currency AS currency FROM lab_work_members WHERE intent_id=$1 ORDER BY tooth_code", [priced.labWork![0].intentId]))
       .toEqual([{ tooth_code: 14, unit: 350, currency: "YER" }, { tooth_code: 15, unit: 350, currency: "YER" }, { tooth_code: 24, unit: 200, currency: "YER" }, { tooth_code: 25, unit: 200, currency: "YER" }, { tooth_code: 26, unit: 200, currency: "YER" }]);
@@ -104,11 +114,15 @@ describe("0136 grouped lab order from one invoice entry", () => {
     const mixed = await world({ unitMinor: 200, currency: "YER" });
     const [foreign] = await q("INSERT INTO lab_services(name,code,category,tooth_scope,requires_shade) VALUES($1,$2,'prostho','single_tooth',TRUE) RETURNING id", [`Synthetic imported ${randomUUID()}`, `SYN-${randomUUID()}`]);
     await q("INSERT INTO lab_pricing_rules(party_id,lab_service_id,cost_minor,cost_currency,effective_from,created_by) VALUES($1,$2,50,'SAR','2020-01-01','synthetic')", [mixed.labId, foreign.id]);
-    const result = await save(mixed, grouped(mixed, TEETH, tooth => tooth === 14 ? foreign.id : mixed.labServiceId));
+    const importedCrown = await mappedService(foreign.id);
+    const result = await save(mixed, grouped(mixed, TEETH, tooth => tooth === 14 ? importedCrown : mixed.serviceId));
     expect(result.labWork).toHaveLength(1);
     expect(result.labWork![0]).toMatchObject({ pricing: { state: "mixed_currency" } });
     expect(await orders(mixed.patientId)).toEqual([expect.objectContaining({ cost: null, pricing_state: "mixed_currency", payable_id: null })]);
     expect(await payables(mixed.patientId)).toEqual([]);
+    // Owner 6932010630 item 3: shown in their own currencies, never summed or converted.
+    expect(await q("SELECT tooth_code, unit_cost_minor::int AS unit, unit_cost_currency AS currency FROM lab_work_members WHERE intent_id=$1 ORDER BY tooth_code", [result.labWork![0].intentId]))
+      .toEqual([{ tooth_code: 14, unit: 50, currency: "SAR" }, ...[15, 24, 25, 26].map(tooth_code => ({ tooth_code, unit: 200, currency: "YER" }))]);
   });
 
   it("T2+T9: saving again with the same key (a lost response) returns the same receipt and adds no order or payable", async () => {
@@ -137,6 +151,27 @@ describe("0136 grouped lab order from one invoice entry", () => {
     expect(await orders(w.patientId)).toEqual([expect.objectContaining({ cost: null, pricing_state: "missing_rule", payable_id: null })]);
     expect(await payables(w.patientId)).toEqual([]);
     expect(await report(w.doctorIds[0])).toMatchObject({ accruedMinor: 1500, labCostMinor: 0 });
+  });
+
+  it("T5b: entering the missing price later makes one payable; saving the invoice again duplicates nothing and keeps the entered cost", async () => {
+    const w = await world(null);
+    const items = grouped(w), key = `glo-late-${randomUUID()}`;
+    const result = await save(w, items, key);
+    const orderId = result.labWork![0].orderId;
+    await db.updateLabOrderAccounting(orderId, { costMinor: 900, costCurrency: "YER", exchangeRate: 1, actor: actor.username, actorRole: actor.role });
+    expect(await orders(w.patientId)).toEqual([expect.objectContaining({ cost: 900, currency: "YER", pricing_state: "manual" })]);
+    await save(w, items, key);
+    expect(await orders(w.patientId)).toEqual([expect.objectContaining({ cost: 900, pricing_state: "manual" })]);
+    expect(await payables(w.patientId)).toEqual([{ amount: 900, currency: "YER" }]);
+  });
+
+  it("T5c: a clinic service without a lab-service mapping saves the invoice with one pending order, never a computed zero", async () => {
+    const w = await world({ unitMinor: 200, currency: "YER" }, 1, false);
+    const result = await save(w, grouped(w));
+    expect(result.invoice.id).toBeGreaterThan(0);
+    expect(result.labWork![0]).toMatchObject({ pricing: { state: "missing_mapping" } });
+    expect(await orders(w.patientId)).toEqual([expect.objectContaining({ cost: null, pricing_state: "missing_mapping", payable_id: null })]);
+    expect(await payables(w.patientId)).toEqual([]);
   });
 
   it("T6: a rule in another currency is stored as is — never converted — and the commission reports it as not deducted", async () => {
