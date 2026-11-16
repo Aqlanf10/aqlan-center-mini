@@ -15151,7 +15151,7 @@ export async function commissionReport(
       {
         overrideAt,
         participationAt,
-        onHeld: detail ? (held) => (detail.heldParticipations ??= []).push({ ...held, patientId }) : undefined,
+        onUnderReview: detail ? (line) => (detail.underReviewParticipations ??= []).push({ ...line, patientId }) : undefined,
         sink: detail ? (line) => detail.lines.push({ ...line, invoiceCreatedAt: new Date(line.invoiceCreatedAt).toISOString(), patientId }) : undefined,
       },
     ));
@@ -30663,7 +30663,7 @@ export async function removePlanItemDependency(input: RemovePlanDependencyInput)
 
 import {
   RULE_SOURCE_LABEL, resolveLegacyServiceRateNames,
-  type CaseOverrideRow, type CommissionRuleSource, type HeldParticipationShare,
+  type CaseOverrideRow, type CommissionRuleSource, type ParticipationUnderReviewShare,
 } from "./commission";
 import { CATEGORY_LABEL } from "./services-catalog";
 
@@ -30684,8 +30684,8 @@ export interface CommissionDetailCollector {
   unallocatedMaterials: UnallocatedMaterial[];
   serviceRateFindings: ServiceRateFinding[];
   invoiceClinicDate: Map<number, string>;
-  /** Lines of a shared case whose split is not approved: held, paid to nobody (owner decision 2026-11-11, point 3). */
-  heldParticipations?: Array<HeldParticipationShare & { patientId: number }>;
+  /** Lines of a case whose participation decision is pending: paid to the line doctor, under review (owner #483 6905003552). */
+  underReviewParticipations?: Array<ParticipationUnderReviewShare & { patientId: number }>;
 }
 
 export const UNALLOCATED_MATERIAL_REASON: Record<UnallocatedMaterial["reason"], string> = {
@@ -30856,6 +30856,8 @@ export interface CommissionDetailReport {
   lines: CommissionDetailLineView[];
   unallocatedMaterials: Array<UnallocatedMaterial & { patientName: string | null; reasonLabel: string }>;
   serviceRateFindings: Array<ServiceRateFinding & { doctorName: string }>;
+  /** Lines of cases whose participation decision is pending: paid to their line doctor, to be re-split on approval. */
+  underReviewParticipations: Array<ParticipationUnderReviewShare & { patientId: number }>;
 }
 
 export interface CommissionDetailFilter {
@@ -30950,6 +30952,8 @@ export async function commissionDetailReport(
     serviceRateFindings: collector.serviceRateFindings
       .filter((finding) => filter.doctorId == null || finding.doctorId === filter.doctorId)
       .map((finding) => ({ ...finding, doctorName: doctorName.get(finding.doctorId) ?? "—" })),
+    underReviewParticipations: (collector.underReviewParticipations ?? [])
+      .filter((line) => (filter.doctorId == null || line.lineDoctorId === filter.doctorId) && (filter.currency == null || line.currency === filter.currency)),
   };
 }
 
