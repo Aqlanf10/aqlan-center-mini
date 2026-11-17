@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authedGet, authedMutation, harness } from "./_server";
+import { parseSyntheticInvoiceNumber } from "./synthetic-invoice-number";
 
 /**
  * (P3-1) بادئة رقم الفاتورة من شاشة الإعدادات — على التطبيق المبني.
@@ -41,7 +42,7 @@ describe("P3-1 — بادئة الفاتورة من الإعدادات", () => {
     expect(response.status).toBe(400);
     const body = await response.json() as { message: string };
     expect(body.message).toContain("حروف لاتينية كبيرة");
-    expect(await newInvoiceNumber()).toMatch(/^INV-\d{5}$/);
+    expect(parseSyntheticInvoiceNumber(await newInvoiceNumber(), "INV") !== null).toBe(true);
   });
 
   it("بادئة الفاتورة لا تساوي بادئة سند القبض", async () => {
@@ -59,8 +60,12 @@ describe("P3-1 — بادئة الفاتورة من الإعدادات", () => {
     const before = await newInvoiceNumber();
     expect((await patchSettings({ "documents.invoice_prefix": "FAC" })).status).toBe(200);
     const after = await newInvoiceNumber();
-    expect(after).toMatch(/^FAC-\d{5}$/);
-    expect(Number(after.replace(/\D/g, ""))).toBe(Number(before.replace(/\D/g, "")) + 1);
+    const beforeSequence = parseSyntheticInvoiceNumber(before, "INV");
+    const afterSequence = parseSyntheticInvoiceNumber(after, "FAC");
+    expect(beforeSequence !== null).toBe(true);
+    expect(afterSequence !== null).toBe(true);
+    if (beforeSequence === null || afterSequence === null) return;
+    expect(afterSequence === beforeSequence + 1n).toBe(true);
   });
 
   it("مراجعة: بادئة الفاتورة القديمة لا تُعطى لسند القبض — 400 برسالة عربية", async () => {
