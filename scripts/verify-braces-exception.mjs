@@ -9,24 +9,51 @@ import { inspectInstalledBraces, sha256 } from "./dependency-security/installed-
 import { runAuditJson, preserveRawAudit } from "./dependency-security/audit-process.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+
+// Labels are fixed literals: neither URLs, response bodies/headers nor error
+// messages from a remote service belong in CI diagnostics.
+function officialEndpoint(url) {
+  if (url === `https://api.github.com/advisories/${PIN.ghsa}`) return "advisory";
+  if (url === "https://api.github.com/advisories?ecosystem=npm&affects=braces%403.0.3&per_page=100") return "matching";
+  if (url === "https://registry.npmjs.org/braces") return "registry";
+  return "other";
+}
+function httpFailure(status) {
+  if (status === 403 || status === 404 || status === 429) return `http_${status}`;
+  if (Number.isInteger(status) && status >= 500 && status < 600) return "http_5xx";
+  if (Number.isInteger(status) && status >= 300 && status < 400) return "redirect_status";
+  return "http_other";
+}
 export async function fetchOfficialJson(url, fetchImpl = fetch) {
-  const response = await fetchImpl(url, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Cache-Control": "no-cache", "User-Agent": "aqlan-scoped-braces-verifier" }, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30_000) });
-  invariant(response.ok && response.url === url, `official lookup failed: ${url}`);
-  invariant(!/rel="next"/.test(response.headers.get("link") ?? ""), "official advisory result pagination unexpected");
-  invariant(/json/.test(response.headers.get("content-type") ?? ""), "official endpoint returned non-JSON");
-  const length = response.headers.get("content-length");
-  invariant(length === null || Number(length) <= 4 * 1024 * 1024, "official response too large");
-  const reader = response.body.getReader();
-  const chunks = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.length;
-    if (size > 4 * 1024 * 1024) { await reader.cancel(); throw new Error("Official response exceeded limit"); }
-    chunks.push(Buffer.from(value));
+  const signal = AbortSignal.timeout(30_000);
+  let failureReason;
+  const rejectLookup = reason => { failureReason = reason; throw new Error(); };
+  try {
+    const response = await fetchImpl(url, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Cache-Control": "no-cache", "User-Agent": "aqlan-scoped-braces-verifier" }, cache: "no-store", redirect: "error", signal });
+    if (!response.ok) rejectLookup(httpFailure(response.status));
+    if (response.url !== url) rejectLookup("url_mismatch");
+    if (/rel="next"/.test(response.headers.get("link") ?? "")) rejectLookup("pagination");
+    if (!/json/.test(response.headers.get("content-type") ?? "")) rejectLookup("non_json");
+    const length = response.headers.get("content-length");
+    if (length !== null && !(Number(length) <= 4 * 1024 * 1024)) rejectLookup("too_large");
+    const reader = response.body.getReader();
+    const chunks = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 4 * 1024 * 1024) { await reader.cancel(); rejectLookup("too_large"); }
+      chunks.push(Buffer.from(value));
+    }
+    try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+    catch { rejectLookup("invalid_json"); }
+  } catch {
+    // Fetch's redirect:error failures are not reliably distinguishable from
+    // network failures. Never present a guessed cause as an observed fact.
+    const reason = failureReason ?? (signal.aborted ? "timeout" : "transport_or_protocol");
+    throw new Error(`BRACES_EXCEPTION_REJECTED: official lookup failed: endpoint=${officialEndpoint(url)} reason=${reason}`);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 /** Taken BEFORE both audits run; verification requires the installation to be byte-identical afterwards. */
