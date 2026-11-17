@@ -9,3 +9,11 @@ Targeted synthetic/mock verification: 12/12 Vitest cases passed, including the a
 **Reporter boundary:** the existing CI workflow and Vitest reporter remain unchanged. Because the original error is rethrown, Vitest may separately display its original synthetic error text. This branch guarantees only that the added notice is allowlisted; it does not sanitize the reporter, assertion output, or raw local JSON report. Do not infer the cause of an existing CI failure from a source-location annotation or this classification alone.
 
 A previous test-only cherry-pick `d74e514ec24ece44f94fe5f6f35d69ab2813604b` corrects the synthetic fresh HR fixture's expected migration list while preserving its full list and adding the 0079 source hash and absence checks. Its browser/HTTP journey was **not run** as part of this checkpoint; the diagnostic cases above do not imply it passed.
+
+## Fixed phase observation
+
+CI run `44066900172` on `70a4600757975afc137b549f0133d9edb648af64` reported a coverage-command source location that combines fixture seed, case-id assignment, and an update. No original fixture classification notice was visible. This checkpoint does not infer which operation failed or why.
+
+The test-only journey now wraps its existing operations in their original order: `seed` includes the fixture call and case-id assignment; `update` includes the same existing update call. On a failure the phase wrapper emits only `phase=seed` or `phase=update` as a fixed notice using `process.stdout.write` and rethrows the identical original value. It never reads or prints the thrown value and adds no query or timer. One notice per phase may be emitted by each loaded module instance; a failed write cannot replace the original failure. Missing output is not proof that a phase succeeded, and the default Vitest reporter can still separately print the rethrown synthetic error.
+
+Synthetic Vitest checks passed **20/20** across the existing classifier/wiring tests and the phase tests. They check actual journey wiring, order, successful return identity, both failing phases, fixed-only output, stdout routing, hostile error objects, writer failure, absence of an added timer, and the per-phase cap. They use mocks, not PostgreSQL or a browser. The current checkpoint has not run the built-app HTTP journey or full CI; the unchanged HR browser test remains unrun here.
