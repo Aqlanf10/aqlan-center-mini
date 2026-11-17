@@ -41,10 +41,8 @@ function currentSessionForUser(payload: SessionPayload, user: StaffUser | null):
  * دور/credential version) يجري بعدها بـSELECT قرائي مباشر بلا ensureSchema —
  * فلا يصل مسار النسخ أبدًا إلى أي DDL ضمني.
  */
-export async function readSessionPayload(): Promise<SessionPayload | null> {
+export async function readSessionPayloadFromTransport(cookieToken: string | undefined, readAuthorization: () => Promise<string | null>): Promise<SessionPayload | null> {
   try {
-    const store = await cookies();
-    const cookieToken=store.get(SESSION_COOKIE)?.value;
     const envelope=readSignedSessionEnvelope(cookieToken);
     // A genuinely signed canonical/obsolete cookie is selected but not eligible
     // for legacy auth. It must not silently fall through to a legacy Bearer.
@@ -56,8 +54,7 @@ export async function readSessionPayload(): Promise<SessionPayload | null> {
   }
 
   try {
-    const headerList = await headers();
-    const authHeader = headerList.get("authorization");
+    const authHeader = await readAuthorization();
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.slice(7).trim();
       const session = readSessionToken(token);
@@ -68,6 +65,19 @@ export async function readSessionPayload(): Promise<SessionPayload | null> {
   }
 
   return null;
+}
+
+export async function readSessionPayload(): Promise<SessionPayload | null> {
+  let token: string | undefined;
+  try { token = (await cookies()).get(SESSION_COOKIE)?.value; } catch { /* no request */ }
+  return readSessionPayloadFromTransport(token, async () => (await headers()).get("authorization"));
+}
+
+/** Pages API transport uses the same signed-token precedence and live user checks. */
+export async function requireSessionFromTransport(cookieToken: string | undefined, authorization: string | null): Promise<SessionPayload | null> {
+  const payload = await readSessionPayloadFromTransport(cookieToken, async () => authorization);
+  if (!payload?.credentialVersion) return null;
+  try { return await currentSession(payload); } catch { return null; }
 }
 
 export async function requireSession(client?: DbClient): Promise<SessionPayload | null> {

@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import ts from 'typescript';
 import { fileURLToPath } from 'node:url';
+import { discoverPagesApi } from './pages-api-inventory.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const reportPath = 'docs/security/staff-cutover/inventory.json';
 const nonStaffClasses = new Set(['public','portal','webhook','internal']);
@@ -42,7 +43,7 @@ function constants(file) {
  }
  return result;
 }
-const helpers=['requireSession','requireSessionStrict','readSessionPayload','readSessionToken','findUserByUsername','withLegacyStaffReadOnlySnapshot','revalidateSessionInTransaction','requireBackupAdminSession','requireBackupAdmin','readVerifiedDurableSession','withStaffOperation','assertStaffOperation'];
+const helpers=['requireSession','requireSessionStrict','readSessionPayload','readSessionToken','findUserByUsername','withLegacyStaffReadOnlySnapshot','revalidateSessionInTransaction','requireSessionFromTransport','requireBackupAdminSession','requireBackupAdmin','readVerifiedDurableSession','withStaffOperation','assertStaffOperation'];
 function evidence(file) {
  const source=read(file);
  return helpers.flatMap(symbol=>source.split('\n').flatMap((line,i)=>new RegExp(`\\b${symbol}\\b`).test(line)?[{symbol,line:i+1}]:[]));
@@ -73,10 +74,11 @@ return function buildInventory() {
  const matrix=constants('lib/http-permissions.ts').HTTP_PERMISSIONS;
  const proxy=constants('proxy.ts');
  const discovery=discoverEntries(walk('app'));
- const files=discovery.supported;
- const sourceIssues=discovery.unsupported.map(file=>({file,reason:'unsupported entry filename',classification:'unknown'}));
+ const pagesApi=discoverPagesApi(root);
+ const files=[...discovery.supported,...pagesApi.entries.map(entry=>entry.file)].sort();
+ const sourceIssues=[...discovery.unsupported.map(file=>({file,reason:'unsupported entry filename',classification:'unknown'})),...pagesApi.issues];
  const routes=[];const mismatches=[];
- const allRouteFiles=files.filter(f=>entryKind(f)==='route');
+ const allRouteFiles=discovery.supported.filter(f=>entryKind(f)==='route');
  const routeMap={};
  for(const file of allRouteFiles) {
   const route=routeOf(file);
@@ -84,8 +86,12 @@ return function buildInventory() {
   else routeMap[route]=file;
   if(!methods(file).length)sourceIssues.push({file,reason:'no recognized explicit HTTP exports',classification:'unknown'});
  }
+ for(const entry of pagesApi.entries) {
+  if(Object.hasOwn(routeMap,entry.route))sourceIssues.push({file:entry.file,reason:'duplicate route pathname',classification:'unknown'});
+  else routeMap[entry.route]=entry.file;
+ }
  for(const route of [...new Set([...Object.keys(matrix),...Object.keys(routeMap)])].sort()) {
-  const file=routeMap[route];const exported=file?methods(file):[];
+  const file=routeMap[route];const page=pagesApi.entries.find(entry=>entry.file===file);const exported=page?Object.keys(page.methods).sort():file?methods(file):[];
   for(const method of [...new Set([...Object.keys(matrix[route]??{}),...exported])].sort()) {
    const access=matrix[route]?.[method]??null;
    const nonApi=!route.startsWith('/api/');
@@ -96,15 +102,15 @@ return function buildInventory() {
    routes.push({route,method,file:file??null,httpAccess:access,classification,workflow:family(route),boundary:method==='GET'||method==='HEAD'?'read-snapshot-required-if-staff':'transaction-or-external-effect-boundary-required-if-staff',reason:mismatch?'matrix/export mismatch':nonApi?'Non-API route outside HTTP_PERMISSIONS; explicit proxy/handler review required':auth?'Public transport exemption is staff entry, not canonical admission':Array.isArray(access)?'Legacy staff proxy/session; no reviewed canonical route acceptance':access==='shared-media'?'Mixed portal/staff admission: staff branch held; separate portal branch requires independent regression':nonStaffClasses.has(access)?'Non-staff transport class; this is not a claim of marker-bearing runtime acceptance':'Unrecognized HTTP access class; review required',directHelperEvidence:file?evidence(file):[]});
   }
  }
- const pages=files.filter(f=>entryKind(f)==='page').map(file=> {
+ const pages=discovery.supported.filter(f=>entryKind(f)==='page').map(file=> {
   const route=routeOf(file);const publicPath=proxy.PUBLIC_PATHS.includes(route)||route.startsWith('/portal/');
   return {route,file,classification:['/login','/setup'].includes(route)?'staff-legacy-held':publicPath?'public-separate-portal':route.startsWith('/print/')?'unknown':'staff-legacy-held',workflow:family(route),reason:publicPath?'Proxy public page; root layout still has legacy session dependencies, marker-bearing regression unproved':'Staff or print surface; proxy/root layout and data authorization require migration',directHelperEvidence:evidence(file)};
  });
- const sourceFiles=[...walk('app'),...walk('components'),...walk('lib'),'proxy.ts'].filter(isSourceFile);
- const directCanonicalReferences=sourceFiles.filter(f=>/^(app|components)\//.test(f)).flatMap(file=>evidence(file).filter(e=>['readVerifiedDurableSession','withStaffOperation','assertStaffOperation'].includes(e.symbol)).map(e=>({file,...e})));
- const legacyReferences=sourceFiles.filter(f=>/^(app|components)\//.test(f)).map(file=>({file,evidence:evidence(file).filter(e=>!['readVerifiedDurableSession','withStaffOperation','assertStaffOperation'].includes(e.symbol))})).filter(e=>e.evidence.length);
+ const sourceFiles=[...walk('app'),...walk('components'),...walk('lib'),...(fs.existsSync(path.join(root,'pages'))?walk('pages'):[]),'proxy.ts'].filter(isSourceFile);
+ const directCanonicalReferences=sourceFiles.filter(f=>/^(app|components|pages)\//.test(f)).flatMap(file=>evidence(file).filter(e=>['readVerifiedDurableSession','withStaffOperation','assertStaffOperation'].includes(e.symbol)).map(e=>({file,...e})));
+ const legacyReferences=sourceFiles.filter(f=>/^(app|components|pages)\//.test(f)).map(file=>({file,evidence:evidence(file).filter(e=>!['readVerifiedDurableSession','withStaffOperation','assertStaffOperation'].includes(e.symbol))})).filter(e=>e.evidence.length);
  const count=rows=>Object.fromEntries(['public-separate-portal','staff-legacy-held','canonical-ready','unknown'].map(k=>[k,rows.filter(r=>r.classification===k).length]));
- return {formatVersion:2,baseCommit:'74b82cea27d407626fb3c5e691bf68e6defb4598',readiness:'NOT_READY',readinessMeaning:'Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.',scope:'All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.',sourceDigest:hash(sourceFiles.sort().map(f=>`${f}\0${hash(read(f))}`).join('\n')),runtimeActions:constants('lib/staff-operation-runtime.ts').actions,summary:{routeMethods:routes.length,routeClassifications:count(routes),pages:pages.length,pageClassifications:count(pages),legacyReferenceFiles:legacyReferences.length,canonicalDirectReferences:directCanonicalReferences.length},sourceEntries:files,sourceIssues,matrixExportMismatches:mismatches,canonicalDirectReferences:directCanonicalReferences,legacyReferenceFiles:legacyReferences,layouts:files.filter(f=>entryKind(f)==='layout').map(file=>({file,directHelperEvidence:evidence(file)})),routes,pages};
+ return {formatVersion:2,baseCommit:'74b82cea27d407626fb3c5e691bf68e6defb4598',readiness:'NOT_READY',readinessMeaning:'Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.',scope:'All explicit app route HTTP exports and fixed Pages API dispatch tables and matrix entries; all app page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.',sourceDigest:hash(sourceFiles.sort().map(f=>`${f}\0${hash(read(f))}`).join('\n')),runtimeActions:constants('lib/staff-operation-runtime.ts').actions,summary:{routeMethods:routes.length,routeClassifications:count(routes),pages:pages.length,pageClassifications:count(pages),legacyReferenceFiles:legacyReferences.length,canonicalDirectReferences:directCanonicalReferences.length},sourceEntries:files,sourceIssues,matrixExportMismatches:mismatches,canonicalDirectReferences:directCanonicalReferences,legacyReferenceFiles:legacyReferences,layouts:files.filter(f=>entryKind(f)==='layout').map(file=>({file,directHelperEvidence:evidence(file)})),routes,pages};
 }
 }
 export function buildInventory(rootDir=root) { return inventoryReader(rootDir)(); }

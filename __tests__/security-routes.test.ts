@@ -19,7 +19,7 @@ vi.mock("@/lib/portal-server", () => ({ requirePortalSession: mocks.portal }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.staff }));
 vi.mock("@/lib/files", () => ({ readFileByKey: mocks.bytes }));
 import { GET as checkinGet, POST as checkinPost } from "../app/api/checkin/route";
-import { GET as documentGet } from "../app/api/documents/[id]/route";
+import { GET as documentGet } from "../lib/document-route-app";
 import { POST as login } from "../app/api/auth/login/route";
 import { canAccessPatient } from "../lib/patient-access";
 import { GET as clinicalGet, POST as clinicalPost } from "../app/api/visits/[id]/clinical/route";

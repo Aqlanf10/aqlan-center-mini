@@ -14,7 +14,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/files", () => ({ readFileByKey: vi.fn() }));
 import { GET as list } from "@/app/api/ortho/route";
 import { GET as detail } from "@/app/api/ortho/[id]/route";
-import { GET as download } from "@/app/api/documents/[id]/route";
+import { GET as download } from "@/lib/document-route-app";
 import { proxy } from "@/proxy";
 import { requireSession } from "@/lib/session";
 import {
