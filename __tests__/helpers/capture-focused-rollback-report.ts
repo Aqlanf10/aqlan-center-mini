@@ -73,4 +73,3 @@ export async function captureFocusedRollbackReport(env: NodeJS.ProcessEnv): Prom
   const output = path.join(root, `focused-rollback-report-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}.json`);
   await writeFile(output, safe, { flag: 'wx', mode: 0o600 });
 }
-
