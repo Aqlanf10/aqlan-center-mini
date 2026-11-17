@@ -300,6 +300,10 @@ it("standalone HTTP restores old and fresh synthetic archives and rejects traver
   const invalidVolume = join(directory, "synthetic-invalid-volume"), invalidBackupDir = join(invalidVolume, "backups");
   await mkdir(backupStateDir(invalidBackupDir), { recursive: true });
   await mkdir(join(invalidVolume, "documents"), { recursive: true });
+  const invalidStage = join(backupStateDir(invalidBackupDir), "restore-drill-current");
+  await mkdir(invalidStage, { recursive: true });
+  const priorStageBytes = Buffer.from("synthetic-prior-stage-must-remain");
+  await writeFile(join(invalidStage, "synthetic-prior-document.txt"), priorStageBytes);
   const validatedInvalid = validateBackupArchive(parseTarBytes(gunzipSync(invalidArchive)), { documentsDir: join(invalidVolume, "documents") });
   expect(validatedInvalid.ok).toBe(true);
   if (!validatedInvalid.ok) throw new Error("synthetic inconsistent archive failed structural validation");
@@ -323,5 +327,10 @@ it("standalone HTTP restores old and fresh synthetic archives and rejects traver
   expect(await invalid.json()).toMatchObject({ok:false, reason:"archive-integrity-mismatch"});
   expect((await fixture.invalidTarget.query("SELECT to_regclass('public.synthetic_restore_sentinel') IS NOT NULL AS present")).rows).toEqual([{present:true}]);
   expect((await fixture.invalidTarget.query("SELECT value FROM synthetic_restore_sentinel")).rows).toEqual([{value:"synthetic-must-remain"}]);
+  expect(await readFile(join(invalidStage, "synthetic-prior-document.txt"))).toEqual(priorStageBytes);
   expect(await snapshots(fixture.archiveTarget)).toEqual(before);
+  expect((await fixture.archiveTarget.query("SELECT version,name,checksum,applied_at::text,adopted FROM schema_migrations WHERE version='0079'")).rows)
+    .toEqual((await fixture.source.query("SELECT version,name,checksum,applied_at::text,adopted FROM schema_migrations WHERE version='0079'")).rows);
+  expect(await readFile(join(directory, "preserved-old-stage", documentKey))).toEqual(documentBytes);
+  expect(await readFile(join(freshStage, documentKey))).toEqual(documentBytes);
 }, 300000);
