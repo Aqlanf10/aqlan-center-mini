@@ -1,0 +1,11 @@
+# Synthetic coverage fixture classification — WIP
+
+This test-only diagnostic is based on `c6e28bdb45111c9a3cad93d4798cb7347161d955`. It does not enable migration 0079, change production code, alter daily adjustment steps, or remove any existing assertion. The shared fixture executes its previous body unchanged; the wrapper emits a bounded fixed notice only after a failure and rethrows the identical original value.
+
+The classifier compares only own primitive data properties: a single exact synthetic lineage-error message maps to `lineage_unavailable`; every other message maps to `other`. An allowlisted PostgreSQL code is emitted as a fixed literal, with all other values mapped to `other`. Proxies are not inspected, property getters are not invoked, and the notice contains no original message, stack, SQL, names, or database values. This classification is an observation, not proof of the cause or the database state. At most 32 notices are emitted per process; an emitter failure cannot replace the original thrown value. There are **no added database queries or timers**, including after a failed fixture.
+
+Targeted synthetic/mock verification: 12/12 Vitest cases passed, including the actual fixture wrapper, same-value rethrow, exact and near-match messages, allowlisted and injected codes, hostile getters and proxies, reporter failure, the notice cap, and absence of extra fixture queries and timers. These are unit and wiring tests with synthetic mocks; no PostgreSQL, hosted browser, or full CI result is claimed.
+
+**Reporter boundary:** the existing CI workflow and Vitest reporter remain unchanged. Because the original error is rethrown, Vitest may separately display its original synthetic error text. This branch guarantees only that the added notice is allowlisted; it does not sanitize the reporter, assertion output, or raw local JSON report. Do not infer the cause of an existing CI failure from a source-location annotation or this classification alone.
+
+A previous test-only cherry-pick `d74e514ec24ece44f94fe5f6f35d69ab2813604b` corrects the synthetic fresh HR fixture's expected migration list while preserving its full list and adding the 0079 source hash and absence checks. Its browser/HTTP journey was **not run** as part of this checkpoint; the diagnostic cases above do not imply it passed.
