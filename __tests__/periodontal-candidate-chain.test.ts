@@ -13,12 +13,13 @@ const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sq
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
   it("accepts the exact composed 0066–0069 chain and reviewed branch variants, retaining sentinel 9000", async () => {
     const files = await loadMigrationFiles();
-    expect(files).toHaveLength(76);
-    expect(files[75]).toMatchObject({ version: "0136", filename: "0136_grouped_lab_orders.sql" });
-    expect(files[72]).toMatchObject({ version: "0128", filename: "0128_expense_commands.sql" });
-    expect(files[73]).toMatchObject({ version: "0129", filename: "0129_shift_opening_reviews.sql" });
-    expect(files[74]).toMatchObject({ version: "0133", filename: "0133_expense_request_retirements.sql" });
-    expect(files[71]).toMatchObject({ version: "0126", filename: "0126_commission_case_participations.sql" });
+    expect(files).toHaveLength(80);
+    expect(files[79]).toMatchObject({ version: "0136", filename: "0136_grouped_lab_orders.sql" });
+    expect(files[78]).toMatchObject({ version: "0133", filename: "0133_expense_request_retirements.sql" });
+    expect(files[77]).toMatchObject({ version: "0129", filename: "0129_shift_opening_reviews.sql" });
+    expect(files[76]).toMatchObject({ version: "0128", filename: "0128_expense_commands.sql" });
+    expect(files[75]).toMatchObject({ version: "0126", filename: "0126_commission_case_participations.sql" });
+    expect(files.slice(71,75).map(file => file.filename)).toEqual(["0090_booking_request_preferences.sql", "0091_prescribing_doctor_identity.sql", "0092_prescribing_doctor_snapshot.sql", "0093_prescription_issuance_commands.sql"]);
     expect(files[70]).toMatchObject({ version: "0089", filename: "0089_lab_shade_specification.sql" });
     expect(files[69]).toMatchObject({ version: "0087", filename: "0087_agreement_reminder_metadata.sql" });
     expect(files[68]).toMatchObject({ version: "0082", filename: "0082_invoice_service_additions.sql" });
@@ -38,7 +39,7 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(periodontalCandidateMigrationVersion(files.slice(0,61))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,60))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0067"))).toBe("9000");
-    expect(periodontalCandidateMigrationVersion(files.filter(file => !["0066", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0126", "0128", "0129", "0133", "0136"].includes(file.version)))).toBe("9000");
+    expect(periodontalCandidateMigrationVersion(files.filter(file => !["0066", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0090", "0091", "0092", "0093", "0126", "0128", "0129", "0133", "0136"].includes(file.version)))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,59))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,58))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,57))).toBe("9000");

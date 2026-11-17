@@ -1,3 +1,5 @@
+import type { DbClient } from "./db";
+
 /**
  * إعادة الضبط — مسح البيانات التجريبية وإبقاء الإعداد (قرار المالك).
  *
@@ -168,6 +170,16 @@ export class ProtectedOrthoFollowupHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد تسجيل قرارات أو نتائج طلبات تغطية التقويم؛ يجب الاحتفاظ بمفاتيح الطلبات وقرارات التغطية وأدلة الزيارات الموقعة. لم يُمسح شيء."); this.name = "ProtectedOrthoFollowupHistoryError"; }
 }
 
+/** Durable Rx commands are retained clinical history, never a wipe target. */
+export class ProtectedPrescriptionHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد إصدار وصفات بمفاتيح محفوظة. لم يُمسح شيء؛ يجب الاحتفاظ بالوصفات وسجل إصدارها."); this.name = "ProtectedPrescriptionHistoryError"; }
+}
+export async function assertNoPrescriptionIssuanceHistory(client: Pick<DbClient, "query">): Promise<void> {
+  await client.query("LOCK TABLE prescription_issuance_commands IN EXCLUSIVE MODE");
+  const { rows: [history] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM prescription_issuance_commands) AS exists");
+  if (!history || history.exists) throw new ProtectedPrescriptionHistoryError();
+}
+
 /** Durable lab source identity and terminal outcomes are never erased. */
 export const LAB_HISTORY_TABLES = ["lab_order_member_prices", "lab_prescription_source_memberships", "lab_work_commands", "lab_work_members", "lab_work_intents"] as const;
 export class ProtectedLabHistoryError extends Error {
@@ -175,6 +187,7 @@ export class ProtectedLabHistoryError extends Error {
 }
 
 export const RESET_KEEP_TABLES = [
+  "prescription_issuance_commands",
   ...LAB_HISTORY_TABLES,
   "lab_work_intent_schema",
   ...ORTHO_FOLLOWUP_HISTORY_TABLES,

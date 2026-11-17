@@ -12,12 +12,20 @@ describe("per-key settings write policy (M2, Dot 6480538845 item 1)", () => {
   it("delegable classes use catalogue capabilities; authority, integration and backup are owner-only", () => {
     for (const [cls, requirement] of Object.entries(SETTING_WRITE_REQUIREMENT)) {
       if ("capability" in requirement) {
-        expect(["operational", "finance"]).toContain(cls);
+        expect(["operational", "finance", "medicationCatalog"]).toContain(cls); // owner decision 6839071994
         expect(STAFF_CAPABILITIES).toContain(requirement.capability);
       } else {
         expect(["authority", "integration", "backup"]).toContain(cls);
       }
     }
+  });
+
+  it("requires the dedicated medication grant and retains the settings read prerequisite", () => {
+    expect(SETTING_KEY_CLASSES["clinical.medication_catalog"].class).toBe("medicationCatalog");
+    expect(SETTING_WRITE_REQUIREMENT.medicationCatalog).toEqual({ capability: "clinical.medication-catalog.manage" });
+    expect(settingBatchRequirement(["clinical.medication_catalog", "clinic.chairs"])).toEqual({
+      ok: true, capabilities: ["clinical.medication-catalog.manage", "settings.operational.edit"], ownerOnly: [],
+    });
   });
 
   it("known authority, integration and backup keys never fall to the operational class", () => {

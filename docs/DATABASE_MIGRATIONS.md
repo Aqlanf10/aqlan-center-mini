@@ -591,7 +591,7 @@ Neither this listing nor passing unit tests alone authorizes Production rollout.
 
 ### 0081_invoice_archive.sql / 0082_invoice_service_additions.sql
 
-Local activation candidate: immutable documentary archive events/refusals and separate dated service-addition receipts/refusals. Runtime registers exact migration bytes under the common migration lock; no baseline adoption;0079 is the separately reviewed routine orthodontic coverage migration and0080 is the separately reviewed patient-numbering migration below. Archive never changes financial/clinical rows; adding service creates a separate invoice through existing financial/clinical authority.
+Local activation candidate: immutable documentary archive events/refusals and separate dated service-addition receipts/refusals. Runtime registers exact migration bytes under the common migration lock; no baseline adoption. Historical 0079 evidence is retained but is not activated on a new database; 0080 is the separately reviewed patient-numbering migration below. Archive never changes financial/clinical rows; adding service creates a separate invoice through existing financial/clinical authority.
 
 All four evidence tables are protected reset history: any row refuses reset before backup; empty tables participate under EXCLUSIVE locks and READ COMMITTED-only empty TRUNCATE guards. Backup restores archive versions in order and invoice items before addition receipts. Historical actor status and subsequent source cancellation do not invalidate restore; current authorization remains enforced by command writers.
 
@@ -603,8 +603,7 @@ Local patient-file numbering activation: new generated files start at P-07000 or
 above the sequence/current/retired high-water. Existing numbers are never mass
 rewritten. Explicit admin edits retain stable patient IDs and immutable aliases;
 normalized current/retired ownership is enforced, including official restore.
-Runtime/file SQL bytes and checksum must match;0079 is separately registered routine orthodontic coverage.0081/0082
-may already be locally registered before this migration is added.
+Runtime/file SQL bytes and checksum must match. Historical 0079 evidence is retained without installing it on a fresh database. 0081/0082 may already be locally registered before this migration is added.
 
 Predeployment `--patient-numbering-readiness` is a mandatory count-only read-only
 gate: ambiguous historical aliases block release and require separate reviewed
@@ -614,22 +613,19 @@ is not a Production readiness claim.
 
 ### 0079_ortho_followup_coverage.sql
 
-Local activation of explicit routine-adjustment coverage revisions and durable
-exact-command refusal receipts. An ordinary invoice alone does not imply covered
-followups. Current source applicability is checked separately from immutable
-historical decisions; signed visits carry exact adjustment/revision manifests.
-Existing signed history cannot acquire a new proof or have its proof rewritten.
-Patient reassignment preserves recorded ownership and requires current-source
-review, not retrospective financial or clinical mutation.
+This file remains an immutable historical source, but fresh migration and runtime
+bootstrap do not activate it. If an existing database has the exact historical
+registry entry and schema footprint, those records, decisions, signed manifests,
+checksums and guard functions remain in place; absence on a fresh database is
+not repaired by applying 0079. A mismatched or unregistered historical footprint
+is refused rather than adopted or deleted.
 
-Numbered and runtime SQL are byte-identical and registered by checksum. Prior
-migration files remain unchanged. An exact registered 0080/0081/0082 database may
-apply missing 0079 as an additive migration; pre-existing unregistered proposal
-tables are refused, not adopted. Both coverage history tables are protected from
-populated reset and restore with their guards enabled. Migration-driven populated
-SQL/full-archive replay, upgrade, ownership and local UI evidence are required;
-local activation does not authorize Production deployment.
-
+Archive restore uses the historical source only when the archive establishes
+the exact corresponding registration and footprint. The protected historical
+coverage tables and signed proof remain read/restore evidence; no new coverage
+decision or change to daily adjustment steps is introduced by this cut. Prior
+migration SQL remains unchanged. Local synthetic verification is not production
+rollout authorization.
 
 ## Local laboratory identity reservation (2026-10-26)
 
@@ -666,6 +662,42 @@ use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
 
+### 0090_booking_request_preferences.sql
+
+Adds nullable request key and hash plus non-null JSONB preferences (defaulting to
+an empty object) to `booking_requests`. A partial unique index prevents reuse of
+a non-null request key. Existing requests retain their original fields and meaning;
+no clinical values are inferred from the new default.
+
+### 0091_prescribing_doctor_identity.sql
+
+Adds nullable `prescriptions.prescribing_doctor_party_id` for the issuing doctor's
+identity. Existing prescriptions are not assigned an inferred doctor.
+
+### 0092_prescribing_doctor_snapshot.sql
+
+Adds nullable `prescriptions.prescribing_doctor_name` for the saved prescriber
+name. Existing prescriptions retain a null snapshot rather than receiving a
+rewritten historical name.
+
+### 0093_prescription_issuance_commands.sql
+
+Adds `prescription_issuance_commands`, a durable issuance receipt keyed by UUID,
+including actor, patient, optional visit, payload fingerprint and the resulting
+prescription. The deferred completeness trigger requires the final prescription to
+match the command's actor, patient and visit before commit. Updates cannot rewrite
+a completed receipt, deletes are rejected, and truncation is rejected when the
+receipt table is populated. The reservation, prescription and audit are intended
+to commit in the same transaction; there is no timeout-based command reclamation.
+
+The numbered files and checksum-checked runtime extensions are validated against
+their published lineage before application. Invalid or unregistered registry or
+schema state is refused. These are additive local branch changes; keep existing
+records and migration registry entries during application rollback or restore.
+The extracted branch remains WIP: the documented local tests are not approval to
+apply these migrations to a live database or a substitute for exact-head CI and
+full upgrade/restore acceptance.
+
 ### 0126_commission_case_participations.sql
 
 Adds one additive, append-only table, `commission_case_participations`, for the
@@ -680,11 +712,42 @@ indexes, and a trigger refuses every UPDATE and DELETE.
 No existing table, column or published migration is changed, and nothing is
 backfilled: a case without a decision is paid as before. Numbered and
 checksum-checked runtime SQL use identical bytes. The number was verified free on
-every active branch; numbers 0090–0125 belong to other lines and are not filled
-here. Decisions commit with their audit row in one transaction under the case row
+every active branch at allocation. Numbers 0090–0093 are present in this
+extracted branch; the remaining gaps 0094–0125 are not filled here. Decisions commit with their audit row in one transaction under the case row
 lock. Rollback of application code must not delete the table or migration
 registry history. Exact-head CI and Staging verification remain required before
 Production rollout.
+
+### 0128_expense_commands.sql
+
+Adds a unique optional request key and its fingerprint to expense vouchers, plus
+an explicit split between drawer cash and an owner-private source. The owner's
+funding account is captured on the voucher so later setting changes do not rewrite
+its accounting history. Existing vouchers retain NULL in the added columns; their
+whole amount remains attributable to the drawer. No historical vouchers are
+backfilled. SQL checks and an append-only guard protect the recorded source and
+request identity. The application serializes drawer outflows and refuses an amount
+exceeding available cash. See `docs/finance/EXPENSE_COMMANDS_0128.md`.
+
+### 0129_shift_opening_reviews.sql
+
+Adds `shift_opening_reviews` and `shift_opening_corrections` to retain and review
+opening-count differences, with constrained and audited correction history. The
+blind opening records the new count before an unauthorized opener can see the
+previous close or difference. The review and correction do not themselves post a
+cash movement or rewrite the prior close. Existing shifts are not backfilled.
+See `docs/finance/SHIFT_OPENING_REVIEWS_0129.md`.
+
+### 0133_expense_request_retirements.sql
+
+Adds the append-only `expense_request_retirements` ledger and a transaction-locked
+request-key fence shared with expense creation. A saved voucher prevents retirement;
+a committed retirement prevents a late send of the same actor and fingerprint
+from creating a voucher. No old expense or request is rewritten, and the ledger is
+preserved through clinic reset. See `docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md`.
+
+The numbered files and their runtime SQL remain checksum-checked; their history and
+existing records must be retained when application code is changed or restored.
 
 ### 0136_grouped_lab_orders.sql
 
@@ -703,7 +766,7 @@ No row is rewritten and no data is removed. The published 0074 trigger functions
 not redefined; the price snapshots reuse its append-only guard and are protected by
 the clinic reset like the rest of lab history. Numbered and checksum-checked runtime
 SQL use identical bytes. The number was reserved for this work (6907274207) and
-verified free; numbers between 0126 and 0136 belong to other lines and are not filled
-here. Rollback of application code must not delete the columns, the table or migration
+verified free; the separately allocated financial migrations 0128, 0129 and 0133
+are documented above. Rollback of application code must not delete the columns, the table or migration
 registry history. Exact-head CI and Staging verification remain required before
 Production rollout.

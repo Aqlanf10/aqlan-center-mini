@@ -27,12 +27,13 @@ import type { StaffCapability } from "./staff-capability-catalogue";
  * `forReview` marks classifications the owner should confirm (they do not widen access:
  * each is the narrowest class that keeps today's legitimate editors).
  */
-export type SettingWriteClass = "operational" | "finance" | "authority" | "integration" | "backup";
+export type SettingWriteClass = "operational" | "finance" | "medicationCatalog" | "authority" | "integration" | "backup";
 export type OwnerOnlySettingOperation = "settings.security.change" | "settings.integrations.change" | "clinic.backup.manage";
 
 export const SETTING_WRITE_REQUIREMENT: Readonly<Record<SettingWriteClass, { readonly capability: StaffCapability } | { readonly ownerOnly: OwnerOnlySettingOperation }>> = Object.freeze({
   operational: Object.freeze({ capability: "settings.operational.edit" }),
   finance: Object.freeze({ capability: "settings.finance.edit" }),
+  medicationCatalog: Object.freeze({ capability: "clinical.medication-catalog.manage" }),
   authority: Object.freeze({ ownerOnly: "settings.security.change" }),
   integration: Object.freeze({ ownerOnly: "settings.integrations.change" }),
   backup: Object.freeze({ ownerOnly: "clinic.backup.manage" }),
@@ -71,6 +72,7 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   "clinical.phrases_complaint": k("operational"), "clinical.phrases_exam": k("operational"),
   "clinical.phrases_diagnosis": k("operational"), "clinical.phrases_next": k("operational"),
   "plans.specialty_templates": k("operational"), "ortho.adjustment_service_ids": k("finance"),
+  "clinical.medication_catalog": k("medicationCatalog"),
   "clinical.medical_history_review_months": k("operational"), "documents.max_megabytes": k("operational"),
   "inventory.expiry_soon_days": k("operational"),
   // Finance.

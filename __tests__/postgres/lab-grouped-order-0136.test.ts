@@ -14,6 +14,7 @@ import { DEFAULT_SPECIALTY_TEMPLATES } from "../../lib/specialty-templates";
 const target = validatePostgresTestTarget(process.env); stubPostgresEnv();
 const db = await import("../../lib/db");
 const invoiceWriter = await import("../../lib/invoice-linkage-db");
+const participation = await import("../../lib/commission-participation-db");
 const q = async (sql: string, values: unknown[] = []) => (await db.getPool().query(sql, values)).rows;
 let actor: SessionPayload;
 
@@ -222,6 +223,30 @@ describe("0136 grouped lab order from one invoice entry", () => {
     const result = await save(w, grouped(w));
     await db.updateLabOrderAccounting(result.labWork![0].orderId, { costMinor: 900, costCurrency: "YER", exchangeRate: 1, actor: actor.username, actorRole: actor.role });
     expect(await report(w.doctorIds[0])).toMatchObject({ accruedMinor: 1230, labCostMinor: 900, labCostNotDeductedCount: 0 });
+  });
+
+  it("pending participation pays both line doctors while mixed-currency manual lab cost remains undeducted", async () => {
+    const w = await world({ unitMinor: 200, currency: "YER" }, 2);
+    const [foreign] = await q("INSERT INTO lab_services(name,code,category,tooth_scope,requires_shade) VALUES($1,$2,'prostho','single_tooth',TRUE) RETURNING id", [`Synthetic foreign ${randomUUID()}`, `SYN-${randomUUID()}`]);
+    await q("INSERT INTO lab_pricing_rules(party_id,lab_service_id,cost_minor,cost_currency,effective_from,created_by) VALUES($1,$2,50,'SAR','2020-01-01','synthetic')", [w.labId, foreign.id]);
+    const service = await mappedService(foreign.id);
+    const saved = await save(w, grouped(w, [14, 15], tooth => tooth === 14 ? service : w.serviceId));
+    const orderId = saved.labWork![0].orderId;
+    await db.updateLabOrderAccounting(orderId, { costMinor: 900, costCurrency: "YER", exchangeRate: 1, actor: actor.username, actorRole: actor.role });
+    const cases = await q("SELECT DISTINCT pi.case_id, ii.doctor_id FROM invoice_items ii JOIN plan_items pi ON pi.id=ii.plan_item_id WHERE ii.invoice_id=$1 ORDER BY ii.doctor_id", [saved.invoice.id]);
+    expect(cases).toHaveLength(2);
+    expect(cases.every(item => item.case_id > 0)).toBe(true);
+    const before = { orders: await orders(w.patientId), payables: await payables(w.patientId), prices: await q("SELECT * FROM lab_order_member_prices WHERE lab_order_id=$1 ORDER BY member_id", [orderId]) };
+    for (const item of cases) {
+      const pending = await participation.decideCaseParticipation({ caseId: item.case_id, status: "pending", participants: [], source: "centre_decision", reason: "Synthetic pending review", expectedHeadId: null, actor: { username: actor.username, userId: actor.userId!, role: actor.role } });
+      expect(pending.ok).toBe(true);
+    }
+    for (const doctor of w.doctorIds) {
+      expect(await report(doctor)).toMatchObject({ accruedMinor: 300, labCostMinor: 0, labCostNotDeductedCount: 1 });
+      const detail = await db.commissionDetailReport("2020-01-01", "2999-12-31", { doctorId: doctor });
+      expect(detail.underReviewParticipations).toEqual([expect.objectContaining({ invoiceId: saved.invoice.id, caseId: cases.find(item => item.doctor_id === doctor)!.case_id, lineDoctorId: doctor })]);
+    }
+    expect({ orders: await orders(w.patientId), payables: await payables(w.patientId), prices: await q("SELECT * FROM lab_order_member_prices WHERE lab_order_id=$1 ORDER BY member_id", [orderId]) }).toEqual(before);
   });
 
   it("concurrent identical submissions commit one invoice, one order and one payable", async () => {

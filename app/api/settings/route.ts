@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { MEDICATION_CATALOG_KEY } from "@/lib/medication-catalog";
+import { canManageMedicationCatalog } from "@/lib/medication-catalog-access";
 import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getSettings, readStoredSettings, saveSettingsAudited } from "@/lib/db";
+import { findUserByUsername, getSettings, readStoredSettings, saveSettingsAudited } from "@/lib/db";
 import { ALL_SETTING_KEYS, SETTING_DEFAULTS, withDefaults, type SettingKey } from "@/lib/settings";
 import { settingDefinition } from "@/lib/settings-definitions";
 import { canManageCategory, denialMessage, roleCan } from "@/lib/settings-permissions";
@@ -125,7 +127,9 @@ export async function PATCH(request: Request) {
     const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
-  const source = (body ?? {}) as Record<string, unknown>;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  const source = body as Record<string, unknown>;
+  if (MEDICATION_CATALOG_KEY in source && source.__expectedActor !== session.username) return NextResponse.json({ message: "تغيّرت الجلسة؛ حدّث دليل الأدوية قبل الحفظ." }, { status: 409 });
   const expectedRaw = (source.__versions ?? null) as Record<string, unknown> | null;
   const reason = typeof source.__reason === "string" ? source.__reason : null;
 
@@ -142,8 +146,8 @@ export async function PATCH(request: Request) {
     const definition = settingDefinition(key);
     if (!definition) return NextResponse.json({ message: "مفتاح غير معروف.", key }, { status: 400 });
     if (OWNER_ONLY_SETTING_KEYS.has(key)) return NextResponse.json({ message: OWNER_ONLY_REFUSAL, key }, { status: 403 });
-    if (!canManageCategory(session.role, definition.category)) {
-      return NextResponse.json({ message: denialMessage(definition.category), key }, { status: 403 });
+    if (key === MEDICATION_CATALOG_KEY ? !canManageMedicationCatalog(await findUserByUsername(session.username).catch(() => null)) : !canManageCategory(session.role, definition.category)) {
+      return NextResponse.json({ message: key === MEDICATION_CATALOG_KEY ? "تعديل دليل الأدوية يحتاج صلاحية «تعديل دليل الأدوية» من المدير." : denialMessage(definition.category), key }, { status: 403 });
     }
     const problem = validateTypedSetting(key, raw);
     if (problem) return NextResponse.json({ message: problem, key }, { status: 400 });
@@ -175,6 +179,7 @@ export async function PATCH(request: Request) {
     const result = await saveSettingsAudited({
       values, expected, reason,
       actor: session.username, actorRole: session.role,
+      ...(MEDICATION_CATALOG_KEY in values ? { session } : {}),
     });
     if (!result.ok && "problem" in result) {
       return NextResponse.json({ message: result.problem }, { status: 400 });
@@ -187,7 +192,8 @@ export async function PATCH(request: Request) {
       }, { status: 409 });
     }
     return await settingsSnapshot({ __changed: result.changed });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && /^MEDICATION_CATALOG_(AUTHORITY_REQUIRED|SESSION_EXPIRED)$/.test(error.message)) return NextResponse.json({ message: "تغيّرت صلاحية الجلسة؛ أعد تسجيل الدخول قبل تعديل دليل الأدوية." }, { status: 403 });
     return NextResponse.json({ message: "تعذّر حفظ الإعدادات. أعد المحاولة." }, { status: 500 });
   }
 }
@@ -213,11 +219,13 @@ export async function POST(request: Request) {
     const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
-  const source = (body ?? {}) as Record<string, unknown>;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  const source = body as Record<string, unknown>;
   if (source.action !== "reset") {
     return NextResponse.json({ message: "إجراء غير معروف." }, { status: 400 });
   }
   const keys = Array.isArray(source.keys) ? source.keys.filter((k): k is string => typeof k === "string") : [];
+  if (keys.includes(MEDICATION_CATALOG_KEY) && source.__expectedActor !== session.username) return NextResponse.json({ message: "تغيّرت الجلسة؛ حدّث دليل الأدوية قبل الحفظ." }, { status: 409 });
   if (keys.length === 0) return NextResponse.json({ message: "حدّد المفاتيح." }, { status: 400 });
 
   const values: Record<string, string> = {};
@@ -256,6 +264,7 @@ export async function POST(request: Request) {
       values, expected, mode: "reset",
       reason,
       actor: session.username, actorRole: session.role,
+      ...(MEDICATION_CATALOG_KEY in values ? { session } : {}),
     });
     if (!result.ok && "problem" in result) {
       return NextResponse.json({ message: result.problem }, { status: 400 });
@@ -268,7 +277,8 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
     return await settingsSnapshot({ __changed: result.changed });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && /^MEDICATION_CATALOG_(AUTHORITY_REQUIRED|SESSION_EXPIRED)$/.test(error.message)) return NextResponse.json({ message: "تغيّرت صلاحية الجلسة؛ أعد تسجيل الدخول قبل تعديل دليل الأدوية." }, { status: 403 });
     return NextResponse.json({ message: "تعذّرت الإعادة إلى الافتراضي." }, { status: 500 });
   }
 }

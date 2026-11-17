@@ -1,3 +1,8 @@
+import { currentClinicalActor, assertClinicalActorUnexpired, ClinicalMutationAuthorityError } from "./clinical-mutation-authority";
+import { querySavedPrescriptionHistory } from "./prescription-history";
+import { MEDICATION_CATALOG_KEY, EMPTY_MEDICATION_CATALOG, parseMedicationCatalog, catalogTransitionProblem } from "./medication-catalog";
+import { encodePrescriptionPrintCursor, type PrescriptionPrintCursor } from "./prescription-print-pagination";
+import { assertNoPrescriptionIssuanceHistory } from "./clinic-reset";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { clearAccountLoginLimits, consumeSharedLoginLimits, consumeStaffAccountLimit } from "./login-limit-storage";
 import { STAFF_AUTHORITY_COLUMNS, STAFF_AUTHORITY_RELATIONS, readStaffEntryMode } from "./legacy-staff-schema.mjs";
@@ -106,6 +111,8 @@ import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "./ortho-followup-coverage-schema";
+import { PRESCRIPTION_LINEAGE_MIGRATIONS } from "./prescription-migration-lineage";
+import { PRESCRIPTION_ISSUANCE_MIGRATIONS } from "./prescription-issuance-migration";
 import { GROUPED_LAB_ORDER_SQL } from "./grouped-lab-order-schema";
 import { comparableGroupedLabWeights, splitGroupedLabCost } from "./grouped-lab-cost-split";
 import { ENDODONTICS_SQL } from "./endodontics-schema";
@@ -2142,6 +2149,8 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0082", name: "invoice_service_additions", filename: "0082_invoice_service_additions.sql", sql: INVOICE_SERVICE_ADDITIONS_SQL, checksum: checksumOf(INVOICE_SERVICE_ADDITIONS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_LINEAGE_MIGRATIONS);
+    await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_ISSUANCE_MIGRATIONS);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0126", name: "commission_case_participations", filename: "0126_commission_case_participations.sql", sql: COMMISSION_CASE_PARTICIPATIONS_SQL, checksum: checksumOf(COMMISSION_CASE_PARTICIPATIONS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0136", name: "grouped_lab_orders", filename: "0136_grouped_lab_orders.sql", sql: GROUPED_LAB_ORDER_SQL, checksum: checksumOf(GROUPED_LAB_ORDER_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
@@ -2765,6 +2774,8 @@ export async function linkVisitToPatientOn(client: DbClient, visitId: number, pa
   // to another patient's visit or silently transfer diagnoses during relinking.
   // The visit lock serializes this check with the chart writer's FOR SHARE.
   if (visits[0].patient_id !== patientId) {
+    const { rows: commands } = await client.query("SELECT 1 FROM prescription_issuance_commands WHERE visit_id=$1 LIMIT 1", [visitId]);
+    if (commands[0]) return { ok: false, message: "الزيارة مرتبطة بوصفات صادرة بمفاتيح محفوظة؛ لا يمكن نقلها إلى ملف آخر أو تغيير ارتباطها الأصلي." };
     const { rows: chartRecords } = await client.query(
       `SELECT 1 FROM tooth_conditions WHERE visit_id = $1 LIMIT 1`, [visitId],
     );
@@ -2907,24 +2918,33 @@ export async function finishVisitWith(client: DbClient, id: number, actor?: Visi
  */
 export async function deleteVisit(
   id: number,
-  context: { actor: string; actorRole?: string | null; reason?: string | null },
-): Promise<{ ok: boolean; reason?: "not_found" | "signed" | "invoiced" | "lab_linked" }> {
+  context: { session: import("./auth").SessionPayload; patientId: number | null; reason?: string | null },
+): Promise<{ ok: boolean; reason?: "not_found" | "signed" | "invoiced" | "has_prescription_history" | "lab_linked" | "session_expired" | "forbidden" | "scope_changed" }> {
+  if (!context?.session) return {ok:false,reason:"session_expired"};
+  if (context.patientId !== null && (!Number.isSafeInteger(context.patientId) || context.patientId <= 0)) return {ok:false,reason:"scope_changed"};
   await ensureSchema();
   const client = await getPool().connect();
-  let audit: AuditInput;
   try {
     await client.query("BEGIN");
-    const result = await deleteVisitOn(client, id, context);
-    if (!result.ok) { await client.query("ROLLBACK"); return result; }
+    if (context.patientId !== null) await client.query('SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE',[context.patientId]);
+    const currentActor = await currentClinicalActor(context.session, client);
+    if (currentActor.role !== 'admin') throw new ClinicalMutationAuthorityError(403, 'حذف الزيارات للمدير وحده.');
+    const result = await deleteVisitOn(client, id, {
+      actor: currentActor.username, actorRole: currentActor.role, reason: context.reason ?? null,
+      expectedPatientId: context.patientId,
+    });
+    if (!result.ok) { await client.query("ROLLBACK"); return { ok: false, reason: result.reason }; }
+    await insertAuditRow(client, result.audit);
+    assertClinicalActorUnexpired(currentActor);
     await client.query("COMMIT");
-    audit = result.audit;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
+    if (error instanceof ClinicalMutationAuthorityError) return {ok:false,reason:error.status === 401 ? 'session_expired' : 'forbidden'};
+    if ((error as {code?:string}).code === '55P03') return {ok:false,reason:'scope_changed'};
     throw error;
   } finally {
     client.release();
   }
-  await recordAudit(audit);
   return { ok: true };
 }
 
@@ -2937,8 +2957,8 @@ export async function deleteVisit(
 export async function deleteVisitOn(
   client: DbClient,
   id: number,
-  context: { actor: string; actorRole?: string | null; reason?: string | null },
-): Promise<{ ok: false; reason: "not_found" | "signed" | "invoiced" | "lab_linked" } | { ok: true; audit: AuditInput }> {
+  context: { actor: string; actorRole?: string | null; reason?: string | null; expectedPatientId?: number | null },
+): Promise<{ ok: false; reason: "not_found" | "scope_changed" | "signed" | "invoiced" | "lab_linked" | "has_prescription_history" } | { ok: true; audit: AuditInput }> {
   const { rows: rowsV } = await client.query<{
     id: number; patient_id: number | null; patient_name: string; status: string;
     arrived_at: Date; signed_at: Date | null; invoice_id: number | null; note: string | null;
@@ -2951,6 +2971,7 @@ export async function deleteVisitOn(
     return { ok: false, reason: "not_found" };
   }
   const current = rowsV[0];
+  if (context.expectedPatientId !== undefined && current.patient_id !== context.expectedPatientId) return { ok: false, reason: "scope_changed" };
   const snapshot = {
     id: current.id, patientId: current.patient_id, patientName: current.patient_name,
     status: current.status, arrivedAt: current.arrived_at, note: current.note,
@@ -2962,6 +2983,8 @@ export async function deleteVisitOn(
   if (current.invoice_id) {
     return { ok: false, reason: "invoiced" };
   }
+  const { rows: commands } = await client.query("SELECT 1 FROM prescription_issuance_commands WHERE visit_id=$1 LIMIT 1", [id]);
+  if (commands[0]) return { ok: false, reason: "has_prescription_history" };
   const labApi: typeof import("./lab-work-intent-db") = await import("./lab-work-intent-db");
   if (await labApi.labWorkIntentSupported(client)) {
     const linked = await client.query(`SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1
@@ -5620,7 +5643,7 @@ export async function findPatientIdByNumber(patientNumber: string): Promise<numb
 
 export type PatientMergeResult =
   | { ok: true; moved: Record<string, number>; target: Patient }
-  | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "conflict"; counts?: Record<string, number> };
+  | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "source_has_prescription_history" | "conflict"; counts?: Record<string, number> };
 
 /**
  * (P2-7) دمج ملفٍّ مكرَّر (المصدر) في الملف الأصلي (الهدف) — معاملةٌ واحدة.
@@ -5707,6 +5730,10 @@ export async function mergeDuplicatePatientOn(
         ...(footprint.collection_attempts > 0 ? { collectionAttempts: footprint.collection_attempts } : {}) },
     };
   }
+
+  const { rows: [prescriptionHistory] } = await client.query<{ count: number }>(
+    "SELECT count(*)::int AS count FROM prescription_issuance_commands WHERE patient_id=$1", [sourceId]);
+  if (prescriptionHistory.count > 0) return { ok: false, reason: "source_has_prescription_history", counts: { prescriptionCommands: prescriptionHistory.count } };
 
   /* كل عمودٍ يشير إلى patients(id) بمفتاحٍ أجنبي — من فهرس القاعدة نفسها. */
   const { rows: references } = await client.query<{ tbl: string; col: string }>(
@@ -8809,9 +8836,14 @@ export async function getSettingsInTransaction(
   return readSettings(client, options);
 }
 
+export async function getPrescriptionPrintSettings(): Promise<SettingsMap> {
+  await ensureSchema();
+  return readSettings(getPool(), { preserveClinicIdentity: true });
+}
+
 async function readSettings(
   executor: Pick<DbClient, "query">,
-  options: { requireStoredExchangeRates?: boolean } = {},
+  options: { requireStoredExchangeRates?: boolean; preserveClinicIdentity?: boolean } = {},
 ): Promise<SettingsMap> {
   const { rows } = await executor.query<{ key: string; value: string }>(
     `SELECT key, value FROM settings`,
@@ -8819,6 +8851,9 @@ async function readSettings(
   const stored: Record<string, string> = {};
   for (const row of rows) stored[row.key] = row.value;
   const settings = withDefaults(stored);
+  if (options.preserveClinicIdentity) {
+    for (const key of ["clinic.name", "clinic.lead_doctor", "clinic.lead_doctor_title", "clinic.lead_doctor_credentials", "clinic.phone", "clinic.address"] as const) settings[key] = stored[key] ?? "";
+  }
   if (options.requireStoredExchangeRates) {
     // Financial snapshots must not mistake display defaults for configured FX.
     // Preserve the raw rates from this same SELECT, including missing/blank values.
@@ -8850,6 +8885,7 @@ export async function getSettingsSafe(): Promise<SettingsMap> {
  * يمسح أقسامًا أخرى. والمفاتيح المجهولة تُرفض قبل الوصول إلى هنا.
  */
 export async function saveSettings(values: Partial<Record<SettingKey, string>>): Promise<SettingsMap> {
+  if (MEDICATION_CATALOG_KEY in values) throw new Error("MEDICATION_CATALOG_AUDITED_WRITE_REQUIRED");
   await ensureSchema();
   const entries = ALL_SETTING_KEYS
     .filter((key) => values[key] !== undefined)
@@ -8963,9 +8999,10 @@ export interface SettingsWriteInput {
   /** الطابع المتوقَّع لكل مفتاح: نصٌّ للمخزَّن، و`null` لِما لم يُخزَّن بعد. */
   expected?: Readonly<Record<string, string | null>>;
   reason?: string | null;
+  catalogAuthority?: (client: DbClient) => Promise<boolean>;
 }
 export type SettingsWriteCore =
-  | { ok: true; changed: string[]; audits: { key: string; details: Record<string, unknown> }[] }
+  | { ok: true; changed: string[]; audits: { key: string; details: Record<string, unknown> }[]; catalogWrite: boolean }
   | { ok: false; conflict: SettingsWriteConflict }
   | { ok: false; problem: string };
 
@@ -8993,6 +9030,14 @@ export async function writeSettingsInTransaction(client: DbClient, input: Settin
     [keys],
   );
   const stored = new Map(rows.map((row) => [row.key, row]));
+  const catalogWrite = keys.includes(MEDICATION_CATALOG_KEY);
+  if (catalogWrite) {
+    if (!input.catalogAuthority || !await input.catalogAuthority(client) || !input.expected || !(MEDICATION_CATALOG_KEY in input.expected) || !input.reason?.trim()) throw new Error("MEDICATION_CATALOG_AUTHORITY_REQUIRED");
+    const before = parseMedicationCatalog(stored.get(MEDICATION_CATALOG_KEY)?.value ?? EMPTY_MEDICATION_CATALOG);
+    const after = parseMedicationCatalog(input.values[MEDICATION_CATALOG_KEY]);
+    const problem = !before.ok || !after.ok ? "دليل الأدوية غير صالح." : catalogTransitionProblem(before.value, after.value);
+    if (problem) return { ok: false, problem };
+  }
 
   if (input.expected) {
     for (const key of keys) {
@@ -9034,10 +9079,11 @@ export async function writeSettingsInTransaction(client: DbClient, input: Settin
       details: settingAuditDetails({ definition, before, after, reason: input.reason, previouslyStored: !!current }),
     });
   }
-  return { ok: true, changed, audits };
+  return { ok: true, changed, audits, catalogWrite };
 }
 
 export async function saveSettingsAudited(input: SettingsWriteInput & {
+  session?: import("./auth").SessionPayload;
   actor: string;
   actorRole?: string | null;
   mode?: "update" | "reset";
@@ -9051,12 +9097,17 @@ export async function saveSettingsAudited(input: SettingsWriteInput & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const result = await writeSettingsInTransaction(client, input);
+    const result = await writeSettingsInTransaction(client, { ...input, catalogAuthority: input.session ? async q => {
+      const current = await (await import("./session")).revalidateSessionInTransaction(input.session!, q);
+      if (!current || current.username !== input.actor || current.role !== input.actorRole) return false;
+      const user = await findUserByUsername(current.username, q);
+      return !!user && user.id === current.userId && user.role === current.role && (await import("./medication-catalog-access")).canManageMedicationCatalog(user);
+    } : undefined });
     if (!result.ok) {
       await client.query("ROLLBACK");
       return result;
     }
-    if (input.transactionalAudit) {
+    if (input.transactionalAudit || result.catalogWrite) {
       for (const entry of result.audits) {
         await insertAuditRow(client, {
           action: input.mode === "reset" ? SETTINGS_AUDIT_RESET : SETTINGS_AUDIT_UPDATE,
@@ -9065,11 +9116,12 @@ export async function saveSettingsAudited(input: SettingsWriteInput & {
         });
       }
     }
+    if (result.catalogWrite && (!input.session || !await (await import("./session")).revalidateSessionInTransaction(input.session, client))) throw new Error("MEDICATION_CATALOG_SESSION_EXPIRED");
     await client.query("COMMIT");
 
     invalidateSettingsCache();
     /* التدقيق بعد الإتمام: صفُّ تدقيقٍ لتغييرٍ تراجع أسوأ من غياب الصفّ. */
-    for (const entry of input.transactionalAudit ? [] : result.audits) {
+    for (const entry of input.transactionalAudit || result.catalogWrite ? [] : result.audits) {
       await recordAudit({
         action: input.mode === "reset" ? SETTINGS_AUDIT_RESET : SETTINGS_AUDIT_UPDATE,
         entity: SETTINGS_AUDIT_ENTITY,
@@ -15425,7 +15477,7 @@ export async function commissionReport(
       {
         overrideAt,
         participationAt,
-        onHeld: detail ? (held) => (detail.heldParticipations ??= []).push({ ...held, patientId }) : undefined,
+        onUnderReview: detail ? (line) => (detail.underReviewParticipations ??= []).push({ ...line, patientId }) : undefined,
         sink: detail ? (line) => detail.lines.push({ ...line, invoiceCreatedAt: new Date(line.invoiceCreatedAt).toISOString(), patientId }) : undefined,
       },
     ));
@@ -26283,6 +26335,8 @@ import {
 } from "./prescription";
 
 export interface PrescriptionRecord {
+  prescribingDoctorName?: string | null;
+  prescribingDoctorPartyId?: number | null;
   id: number;
   patientId: number;
   visitId: number | null;
@@ -26301,6 +26355,8 @@ export interface PrescriptionRecord {
 }
 
 interface PrescriptionRow {
+  prescribing_doctor_name: string | null;
+  prescribing_doctor_party_id: number | null;
   id: number; patient_id: number; visit_id: number | null; diagnosis: string | null;
   notes: string | null; instructions_lang: string; items: unknown; status: string;
   void_reason: string | null; voided_by: string | null; voided_at: Date | null;
@@ -26308,6 +26364,8 @@ interface PrescriptionRow {
 }
 
 const toPrescription = (row: PrescriptionRow): PrescriptionRecord => ({
+  prescribingDoctorName: row.prescribing_doctor_name ?? null,
+  prescribingDoctorPartyId: row.prescribing_doctor_party_id ?? null,
   id: row.id,
   patientId: row.patient_id,
   visitId: row.visit_id,
@@ -26326,7 +26384,7 @@ const toPrescription = (row: PrescriptionRow): PrescriptionRecord => ({
 });
 
 const PRESCRIPTION_COLUMNS = `id, patient_id, visit_id, diagnosis, notes, instructions_lang,
-       items, status, void_reason, voided_by, voided_at, created_by, doctor_party_id, created_at`;
+       items, status, void_reason, voided_by, voided_at, created_by, doctor_party_id, prescribing_doctor_name, prescribing_doctor_party_id, created_at`;
 
 /**
  * يحفظ الوصفة كوثيقة — مجمّدة لحظة إصدارها.
@@ -26338,31 +26396,35 @@ export async function savePrescription(
   draft: PrescriptionDraft,
   actor: string,
   doctorPartyId?: number | null,
+  client?: DbClient,
 ): Promise<PrescriptionRecord> {
-  await ensureSchema();
-  const { rows } = await getPool().query<PrescriptionRow>(
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<PrescriptionRow>(
     `INSERT INTO prescriptions
-       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by, doctor_party_id)
-     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7, $8::int)
+       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by, doctor_party_id, prescribing_doctor_name, prescribing_doctor_party_id)
+     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7, $8::int, $9, $10::int)
      RETURNING ${PRESCRIPTION_COLUMNS}`,
     [draft.patientId, draft.visitId, draft.diagnosis, draft.notes,
       draft.instructionsLang, JSON.stringify(draft.items), actor,
-      Number.isInteger(doctorPartyId) && (doctorPartyId as number) > 0 ? doctorPartyId : null],
+      Number.isInteger(doctorPartyId) && (doctorPartyId as number) > 0 ? doctorPartyId : null,
+      draft.prescribingDoctorName || null, draft.prescribingDoctorPartyId ?? null],
   );
   const record = toPrescription(rows[0]);
-  void recordAudit({
+  const audit: AuditInput = {
     action: "prescription.create", entity: "prescription", entityId: record.id,
     entityLabel: `وصفة للمريض #${record.patientId}`,
-    details: { المريض: record.patientId, الأدوية: record.items.map((item) => item.name).join("، ") },
+    details: { نسخة_ربط_المالك: draft.ownerAuthority?.bindingVersion ?? null, بصمة_صلاحية_المالك: draft.ownerAuthority?.fingerprint ?? null, معرف_الطبيب_الواصف: record.prescribingDoctorPartyId ?? null, معرف_المصدر: record.doctorPartyId, الطبيب_المدون: record.prescribingDoctorName ?? null, المريض: record.patientId, الأدوية: record.items.map((item) => item.name).join("، ") },
     actor,
-  });
+  };
+  if (client) await insertAuditRow(client, audit);
+  else void recordAudit(audit);
   return record;
 }
 
-export async function getPrescription(id: number): Promise<PrescriptionRecord | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<PrescriptionRow>(
-    `SELECT ${PRESCRIPTION_COLUMNS} FROM prescriptions WHERE id = $1`,
+export async function getPrescription(id: number, client?: DbClient): Promise<PrescriptionRecord | null> {
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<PrescriptionRow>(
+    `SELECT ${PRESCRIPTION_COLUMNS} FROM prescriptions WHERE id = $1${client ? " FOR SHARE NOWAIT" : ""}`,
     [id],
   );
   return rows[0] ? toPrescription(rows[0]) : null;
@@ -26380,6 +26442,32 @@ export async function listPatientPrescriptions(
     [patientId, limit],
   );
   return rows.map(toPrescription);
+}
+
+/** Minimal print picker; scope/status and exact microsecond keyset precede limit. */
+export async function listSavedPrescriptionPrints(patientId: number, visitId: number | null = null, cursor: PrescriptionPrintCursor | null = null): Promise<{
+  prescriptions: { id: number; visitId: number | null; createdAt: string; prescribingDoctorName: string | null }[];
+  nextCursor: string | null;
+}> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; visit_id: number | null; created_at: Date; cursor_created_at: string; prescribing_doctor_name: string | null }>(
+    `SELECT id, visit_id, created_at, prescribing_doctor_name,
+      to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at
+      FROM prescriptions WHERE patient_id=$1 AND status='active' AND ($2::int IS NULL OR visit_id=$2::int)
+      AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::int))
+      ORDER BY created_at DESC, id DESC LIMIT 51`, [patientId, visitId, cursor?.createdAt ?? null, cursor?.id ?? null],
+  );
+  const page = rows.slice(0, 50), last = page.at(-1);
+  return {
+    prescriptions: page.map(row => ({ id: row.id, visitId: row.visit_id, createdAt: row.created_at.toISOString(), prescribingDoctorName: row.prescribing_doctor_name })),
+    nextCursor: rows.length > 50 && last ? encodePrescriptionPrintCursor({ patientId, visitId, id: last.id, createdAt: last.cursor_created_at }) : null,
+  };
+}
+
+/** Clinical history is authorized separately from the minimal reception picker. */
+export async function listSavedPrescriptionHistory(patientId: number, visitId: number | null = null, cursor: PrescriptionPrintCursor | null = null) {
+  await ensureSchema();
+  return querySavedPrescriptionHistory(getPool(), patientId, visitId, cursor, CLINIC_TIME_ZONE);
 }
 
 /**
@@ -30037,6 +30125,7 @@ export async function resetClinicData<F>(
       const { rows: [attemptHistory] } = await client.query<{ exists: boolean }>(
         `SELECT ${COLLECTION_ATTEMPT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (attemptHistory.exists) throw new ProtectedCollectionAttemptHistoryError();
+      await assertNoPrescriptionIssuanceHistory(client);
       await client.query(`LOCK TABLE ${LAB_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
       const { rows: [labHistory] } = await client.query<{ exists: boolean }>(
         `SELECT ${LAB_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
@@ -30079,7 +30168,7 @@ export async function resetClinicData<F>(
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
       const emptyInventorySuffix = emptyInventoryTables.length ? `, ${emptyInventoryTables.join(", ")}` : "";
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")}, ${INVOICE_ACTION_HISTORY_TABLES.join(", ")}, ${LAB_HISTORY_TABLES.join(", ")}${followupTables.length ? ", " + followupTables.join(", ") : ""}${emptyInventorySuffix} RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, prescription_issuance_commands, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")}, ${INVOICE_ACTION_HISTORY_TABLES.join(", ")}, ${LAB_HISTORY_TABLES.join(", ")}${followupTables.length ? ", " + followupTables.join(", ") : ""}${emptyInventorySuffix} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }
@@ -30943,7 +31032,7 @@ export async function removePlanItemDependency(input: RemovePlanDependencyInput)
 
 import {
   RULE_SOURCE_LABEL, resolveLegacyServiceRateNames,
-  type CaseOverrideRow, type CommissionRuleSource, type HeldParticipationShare,
+  type CaseOverrideRow, type CommissionRuleSource, type ParticipationUnderReviewShare,
 } from "./commission";
 import { CATEGORY_LABEL } from "./services-catalog";
 
@@ -30964,8 +31053,8 @@ export interface CommissionDetailCollector {
   unallocatedMaterials: UnallocatedMaterial[];
   serviceRateFindings: ServiceRateFinding[];
   invoiceClinicDate: Map<number, string>;
-  /** Lines of a shared case whose split is not approved: held, paid to nobody (owner decision 2026-11-11, point 3). */
-  heldParticipations?: Array<HeldParticipationShare & { patientId: number }>;
+  /** Lines of a case whose participation decision is pending: paid to the line doctor, under review (owner #483 6905003552). */
+  underReviewParticipations?: Array<ParticipationUnderReviewShare & { patientId: number }>;
 }
 
 export const UNALLOCATED_MATERIAL_REASON: Record<UnallocatedMaterial["reason"], string> = {
@@ -31136,6 +31225,8 @@ export interface CommissionDetailReport {
   lines: CommissionDetailLineView[];
   unallocatedMaterials: Array<UnallocatedMaterial & { patientName: string | null; reasonLabel: string }>;
   serviceRateFindings: Array<ServiceRateFinding & { doctorName: string }>;
+  /** Lines of cases whose participation decision is pending: paid to their line doctor, to be re-split on approval. */
+  underReviewParticipations: Array<ParticipationUnderReviewShare & { patientId: number }>;
 }
 
 export interface CommissionDetailFilter {
@@ -31230,6 +31321,10 @@ export async function commissionDetailReport(
     serviceRateFindings: collector.serviceRateFindings
       .filter((finding) => filter.doctorId == null || finding.doctorId === filter.doctorId)
       .map((finding) => ({ ...finding, doctorName: doctorName.get(finding.doctorId) ?? "—" })),
+    underReviewParticipations: (collector.underReviewParticipations ?? [])
+      .filter((pending) => lines.some((line) => line.invoiceId === pending.invoiceId && line.caseId === pending.caseId
+        && line.patientId === pending.patientId && line.doctorId === pending.lineDoctorId && line.currency === pending.currency
+        && line.category === pending.category)),
   };
 }
 

@@ -17,9 +17,10 @@ vi.mock("@/lib/patient-access", () => ({ canAccessPatient: async () => true }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null, ReprintMark: () => null }));
 vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", printCount: async () => 0,
   getSettingsSafe: async () => SETTING_DEFAULTS,
+  getPrescriptionPrintSettings: async () => SETTING_DEFAULTS,
   patientAppointmentsFrom: async () => [{ id: 1, patientId: 2, scheduledDate: "2031-01-04", scheduledTime: "09:30", status: "booked" }],
   getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
-  getPrescription: async () => ({ id: 11, patientId: 1, createdBy: "SYN-SAVED-CLINICIAN", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: [{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }] }),
+  getPrescription: async () => ({ id: 11, patientId: 1, createdBy: "SYN-SAVED-CLINICIAN", prescribingDoctorName: "SYN-SAVED-CLINICIAN", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: [{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }] }),
   getLabOrderById: async () => dispatchOrder({ labName: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456", serviceName: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", workType: "SYNTHETIC-DISPATCH-SERVICE-1234567890123" }),
   getPayment: async () => ({ id: 1, receiptNumber: "SYN-PROV-ORIGINAL-BHGFBCDEFABCD", patientName: "SYNTHETIC-RECEIPT-PROVENANCE", invoiceId: 1, kind: "payment", amountMinor: 50000, currency: "YER", method: "cash", createdBy: "SYNTHETIC-SIGNER", createdAt: "2000-03-02T22:00:00.000Z" }),
 }));
@@ -55,12 +56,12 @@ describe("native compact print regression witnesses", () => {
     const prescription = kind.startsWith("prescription-");
     const node = kind === "patient-card" ? await PatientCardPage({ params: Promise.resolve({ id: "2" }) }) : prescription
       ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(kind === "prescription-saved"
-        ? { rx: "11", diagnosis: "SYN-URL-TAMPER" }
+        ? { rx: "11", doctorName: "SYN-URL-TAMPER", date: "1900-01-01", lang: "ar" }
         : { draft: "1", lang: "both", diagnosis: "SYN-DRAFT-DIAGNOSIS", items: JSON.stringify([{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }]) }) })
       : await (kind === "receipt" ? ReceiptPage : LabPage)({ params: Promise.resolve({ id: "1" }) });
     const body = renderToStaticMarkup(<><PrintDocumentWatermark /><div className="print-root">{node}</div></>);
     const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
-    const css = globalCss + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + (kind === "lab" ? labCss() : "");
+    const css = globalCss + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + (kind === "lab" ? labCss() : "") + (prescription ? readFileSync(resolve("app/print/prescription/[id]/prescription.css"), "utf8") : "");
     if (kind === "lab") expect(css).toContain(`.${labStyles.sheet} .${labStyles.labIdentity} { display: block; line-height: 1.8; }`);
     const output = resolve(".settings-ui-artifacts/unified-print");
     mkdirSync(output, { recursive: true });
@@ -112,6 +113,7 @@ describe("native compact print regression witnesses", () => {
         }
         if (prescription) {
           expect(text).not.toContain("SYN-URL-TAMPER");
+          if (kind === "prescription-saved") expect(text).not.toContain("1900-01-01");
           expect(text.includes("DRAFT")).toBe(kind === "prescription-draft");
         }
       }

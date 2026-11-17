@@ -28,7 +28,8 @@ const TODAY = new Date().toISOString().slice(0, 10);
 
 beforeAll(async () => {
   await ensureSchema();
-  await openShift({ openedBy: "footprint-test", opening: { YER: 0, SAR: 0, USD: 0 } });
+  // The 0128 drawer limit requires actual synthetic cash before recording expenses.
+  expect(await openShift({ openedBy: "footprint-test", opening: { YER: 10000, SAR: 0, USD: 0 } })).not.toBeNull();
 }, 60000);
 
 afterAll(async () => {
@@ -154,11 +155,12 @@ describe("حارس الأثر المالي المركزي (P1-FINAL-1)", () => {
     // صرفٌ مرتبط بالالتزام: السجل الذي كان الحذف القديم سيفصله بصمت
     const payableId = order!.payableId ?? null;
     expect(payableId).not.toBeNull();
-    const { expense } = await recordExpense({
+    const { expense, reason } = await recordExpense({
       category: "lab" as never, partyId: null, payeeText: null,
       amountMinor: 2500, currency: "YER", baseCurrency: "YER", exchangeRate: 1,
       payableId, note: null, createdBy: "test",
     });
+    expect(reason).toBeNull();
     expect(expense).not.toBeNull();
 
     const result = await deletePatientCascade(patientId, { actor: "admin" });

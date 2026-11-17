@@ -1,3 +1,4 @@
+import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
 import { NextResponse } from "next/server";
 import { listPatientPrescriptions, prescribedBefore } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -31,11 +32,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const [prescriptions, suggestions] = await Promise.all([
+    const [prescriptions, suggestions, prescriberOptions] = await Promise.all([
       listPatientPrescriptions(patientId),
       prescribedBefore(patientId),
+      prescriptionPrescriberOptions(session),
     ]);
-    return NextResponse.json({ prescriptions, suggestions });
+    return NextResponse.json({ prescriptions, suggestions, prescriberOptions });
   } catch {
     return NextResponse.json({ message: "تعذّرت قراءة الوصفات." }, { status: 500 });
   }

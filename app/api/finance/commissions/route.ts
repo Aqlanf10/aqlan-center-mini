@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     if (params.get("detail") === "1") {
       if (isPersonalOnly && ownPartyId === null) {
         return NextResponse.json({
-          from: start, to: end, rows: [], lines: [], unallocatedMaterials: [], serviceRateFindings: [],
+          from: start, to: end, rows: [], lines: [], unallocatedMaterials: [], serviceRateFindings: [], underReviewParticipations: [],
           baseCurrency: base, isPersonalOnly,
         });
       }

@@ -105,6 +105,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       }
     : session
       ? {
+          userId: session.userId,
           username: session.username,
           role: session.role,
           displayName: user?.displayName || session.username,

@@ -72,6 +72,7 @@ export type SettingKey =
   | "clinical.phrases_exam"
   | "clinical.phrases_diagnosis"
   | "clinical.phrases_next"
+  | "clinical.medication_catalog"
   | "messaging.consent_mode"
   | "plans.specialty_templates"
   | "reminders.auto_template"
@@ -206,6 +207,7 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "messaging.consent_mode": "opt_out",
   // (SPEC-T2) قوالب الخطط حسب التخصص بصيغة JSON — فارغٌ يعني القوالب الجاهزة في الشيفرة.
   "plans.specialty_templates": "",
+  "clinical.medication_catalog": '{"schemaVersion":1,"entries":[]}',
   "reminders.auto_template": "appointment_reminder",
   "reminders.auto_language": "ar",
   // (P2-11 — قرار المالك) المزوّد الخارجي للمهام الإدارية فقط: النص السريري وتحليل

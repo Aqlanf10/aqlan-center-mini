@@ -483,8 +483,8 @@ export function discountGroupKey(group: { doctorId?: number | null; serviceId?: 
  * of the line's base (after the invoice discount; laboratory and material costs are split in the
  * same proportion and deducted by each participant's own policy). Nobody receives the whole
  * percentage, the parts of the base add up to the line exactly, and the result does not depend on
- * which doctor is recorded on the line. While a shared case has no approved split it is `pending`:
- * its commission is held for review and paid to no one.
+ * which doctor is recorded on the line. A `pending` decision is a review marker only (owner #483
+ * 6905003552): the line is paid to its recorded doctor as with no decision, and listed as under review.
  */
 export interface CaseParticipant { doctorId: number; shareBp: number }
 export interface CaseParticipation {
@@ -541,18 +541,18 @@ export function splitShareByParticipation(share: DoctorShareItem, participation:
   }));
 }
 
-export type HeldParticipationShare = { invoiceId: number; caseId: number; lineDoctorId: number; currency: Currency; amountMinor: number };
+export type ParticipationUnderReviewShare = { invoiceId: number; caseId: number; lineDoctorId: number; currency: Currency; amountMinor: number; category: string | null };
 
 /**
  * The shares an invoice actually pays commission on (owner decision 2026-11-11, point 3): a line
- * of a case with an approved split becomes one share per participant; a line of a shared case
- * without an approved, complete split is held (reported through `onHeld`, paid to nobody); every
+ * of a case with an approved split becomes one share per participant; a line of a case whose
+ * decision is pending stays with its recorded doctor and is reported through `onUnderReview`; every
  * other line is unchanged. One function for the engine and for every reader of the same shares.
  */
 export function effectiveDoctorShares(
   invoice: Pick<CommissionInvoice, "id" | "createdAt" | "currency" | "doctorShares">,
   participationAt?: CaseParticipationResolver,
-  onHeld?: (held: HeldParticipationShare) => void,
+  onUnderReview?: (line: ParticipationUnderReviewShare) => void,
 ): DoctorShareItem[] {
   if (!participationAt) return invoice.doctorShares;
   const shares: DoctorShareItem[] = [];
@@ -560,7 +560,14 @@ export function effectiveDoctorShares(
     const participation = line.caseId ? participationAt(line.caseId, invoice.createdAt) : undefined;
     if (!participation) { shares.push(line); continue; }
     if (participation.status !== "approved" || caseParticipationProblem(participation.participants) !== null) {
-      onHeld?.({ invoiceId: invoice.id, caseId: line.caseId!, lineDoctorId: line.doctorId, currency: invoice.currency, amountMinor: line.amountMinor });
+      // Owner #483 6905003552: a pending decision holds nothing. The line stays with its recorded doctor,
+      // exactly as with no decision, and is reported as under review.
+      // A record marked approved whose shares do not add up is a storage fault the database check forbids;
+      // it is never paid on. Only a pending decision keeps the line with its doctor.
+      if (participation.status === "pending") {
+        onUnderReview?.({ invoiceId: invoice.id, caseId: line.caseId!, lineDoctorId: line.doctorId, currency: invoice.currency, amountMinor: line.amountMinor, category: line.category ?? null });
+        shares.push(line);
+      }
       continue;
     }
     shares.push(...splitShareByParticipation(line, participation));
@@ -632,8 +639,8 @@ export interface CommissionEngineOptions {
   sink?: CommissionDetailSink;
   /** (Owner decision 2026-11-11, point 3) the approved split of a shared case at a given time. */
   participationAt?: CaseParticipationResolver;
-  /** Called for every line share of a shared case that has no approved split: held, paid to no one. */
-  onHeld?: (held: { invoiceId: number; caseId: number; lineDoctorId: number; currency: Currency; amountMinor: number }) => void;
+  /** Called for every line share of a case whose participation decision is pending: paid to its line doctor, under review. */
+  onUnderReview?: (line: ParticipationUnderReviewShare) => void;
 }
 
 /**
@@ -670,7 +677,7 @@ export function commissionForPatientAtEventTime(
     byCurrency[currency].earnedMinor += earned;
     result.set(doctorId, byCurrency);
   };
-  const { overrideAt, sink, participationAt, onHeld } = options;
+  const { overrideAt, sink, participationAt, onUnderReview } = options;
   const overrideFor = (doctorId: number, share: DoctorShareItem, atIso: string) =>
     overrideAt && (share.caseId || share.planId) ? overrideAt(doctorId, share, atIso) : undefined;
 
@@ -687,7 +694,7 @@ export function commissionForPatientAtEventTime(
     if (include && !include(invoice)) continue;
     const covering = chunksByInvoice.get(invoice.id) ?? [];
 
-    const shares = effectiveDoctorShares(invoice, participationAt, onHeld);
+    const shares = effectiveDoctorShares(invoice, participationAt, onUnderReview);
 
     for (const share of shares) {
       // (تصحيح ٣) حصة بعملةٍ تخالف فاتورتها = فساد بيانات يُقال لا يُدار.
