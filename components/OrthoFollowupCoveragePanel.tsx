@@ -174,7 +174,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
       {read?<>
         <p>{read.current?`${read.current.decision==="included"?"آخر قرار: مشمولة":"آخر قرار: غير مشمولة"} · المراجعة ${read.current.version} · ${read.current.createdBy}`:"لم يُسجل نطاق صريح للمتابعات بعد."}</p>
         {read.current&&!read.applicable?<p role="alert" className="text-amber-900">مصدر القرار السابق تغيّر أو يحتاج مراجعة؛ لا تُعدّ المتابعات مشمولة تلقائيًا.</p>:null}
-        {!read.enabled?<p>الميزة لم تُفعّل في قاعدة البيانات بعد؛ لا تنشئ اتفاق أقساط أو فاتورة بديلة.</p>:!read.canEdit?<p>الحالة مغلقة. السجل للقراءة، ولا يتغير نطاق متابعات جديدة.</p>:null}
+        {!read.enabled?<p>الميزة لم تُفعّل في قاعدة البيانات بعد؛ لا تنشئ اتفاق أقساط أو فاتورة بديلة.</p>:!read.canEdit?<p>السجل للقراءة والتحقق من الطلبات السابقة؛ تسجيل قرارات جديدة متوقف.</p>:null}
         {read.enabled&&read.canEdit?<fieldset disabled={busy||recoveryBlocked||otherPending||!journal||!!journalError} className="space-y-2">
           <label className="block">مصدر الاتفاق المثبت لهذه الحالة
             <select aria-label="مصدر تغطية المتابعات" value={selected} onChange={e=>{changeDraft({selected:e.target.value});setConfirmed(false);}} className="mt-1 min-h-11 w-full rounded-lg border bg-white p-2">

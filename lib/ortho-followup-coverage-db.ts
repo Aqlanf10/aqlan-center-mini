@@ -1,7 +1,7 @@
 import { caseSiteFits, validateLineSite } from "./invoice-clinical-linkage";
 import { createHash } from "node:crypto";
 import type { SessionPayload } from "./auth";
-import { ensureSchema, getPool, insertAuditRow, PLAN_ITEM_PREBILLED_SQL, PLAN_ITEM_FINANCIAL_REVIEW_SQL,
+import { ensureSchema, getPool, PLAN_ITEM_PREBILLED_SQL, PLAN_ITEM_FINANCIAL_REVIEW_SQL,
   PLAN_ITEM_LEGACY_LINEAGE_SQL, usesSharedLocalDatabaseConnection, type DbClient } from "./db";
 import { revalidateSessionInTransaction } from "./session";
 import { canAccessPatient } from "./patient-access";
@@ -126,7 +126,7 @@ export async function readFollowupCoverage(input:{session:SessionPayload;patient
     const enabled=await followupCoverageAvailable(db);
     const head=enabled?await currentHead(db,input.orthoCaseId):null;
     const sources=await sourceRows(db,input.patientId,input.orthoCaseId);
-    return {patientId:input.patientId,orthoCaseId:input.orthoCaseId,enabled,canEdit:enabled&&["active","retention"].includes(found[0].status),current:head?project(head):null,
+    return {patientId:input.patientId,orthoCaseId:input.orthoCaseId,enabled,canEdit:false,current:head?project(head):null,
       applicable:!!head&&sources.some(r=>r.valid&&matches(r,sourceOf(head))&&hash(r.snapshot)===head.source_fingerprint),
       sources:sources.filter(r=>r.valid).map(choice)};
   },usesSharedLocalDatabaseConnection());
@@ -225,7 +225,7 @@ export async function appendFollowupCoverageWith(client:DbClient,input:{patientI
     if(!await followupCoverageAvailable(client))fail(503,"coverage_not_ready","تسجيل نطاق المتابعات لم يُفعّل بعد؛ لا تغيّر الاتفاق أو تنشئ فاتورة بديلة.");
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["ortho-followup-command:"+command.commandId]);
     await hooks?.assertCurrent();
-    const caseStatus=await owner(client,currentPatientId,input.orthoCaseId,true);
+    await owner(client,currentPatientId,input.orthoCaseId,true);
     await hooks?.assertCurrent();
     const requestFingerprint=hash({patientId:input.patientId,orthoCaseId:input.orthoCaseId,actorUserId:actor.userId,command});
     const replay=await terminalReceipt(client,command,requestFingerprint,hooks?.bounded===true);
@@ -234,38 +234,9 @@ export async function appendFollowupCoverageWith(client:DbClient,input:{patientI
       if(replay.state==="rejected")return replay;
       return {state:"committed",ok:true,replayed:true,revision:replay.revision};
     }
-    const reject=async(code:FollowupCoverageRejection["code"],message:string):Promise<FollowupCoverageAppendOutcome>=>{
-      const row=(await client.query<StoredRejection>(`INSERT INTO ortho_followup_coverage_rejections
-        (command_id,request_fingerprint,patient_id,ortho_case_id,actor_user_id,command,code,message,actor)
-        VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9) RETURNING *`,
-        [command.commandId,requestFingerprint,input.patientId,input.orthoCaseId,actor.userId,JSON.stringify(command),code,message,actor.username])).rows[0];
-      await insertAuditRow(client,{action:"ortho.followup_coverage.append",entity:"ortho_case",entityId:input.orthoCaseId,
-        actor:actor.username,actorRole:actor.role,details:{outcome:"rejected",commandId:command.commandId,patientId:input.patientId,code,requestFingerprint}});
-      await hooks?.assertCurrent();
-      return {state:"rejected",rejection:projectRejection(row)};
-    };
-    if(currentPatientId!==input.patientId)return reject("source_changed","تغيّر مالك الحالة؛ راجع الربط قبل اعتماد قرار جديد.");
-    if(!["active","retention"].includes(caseStatus))return reject("case_closed","الحالة مغلقة؛ لا يتغير نطاق المتابعات الجديدة لها.");
-    const head=hooks?.bounded ? await boundedCurrentHead(client,input.patientId,input.orthoCaseId) : await currentHead(client,input.orthoCaseId);
-    if((head?String(head.id):null)!==command.expectedRevisionId)return reject("stale_coverage","تغيّر نطاق المتابعات منذ فتح الشاشة؛ أعد التحميل وراجع القرار.");
-    if(hooks?.bounded){
-      // A supplied foreign item/plan must not acquire locks outside the admitted
-      // patient. Recheck the same native fingerprint again after source locks.
-      const observed=(await boundedSourceRows(client,input.patientId,input.orthoCaseId)).find(r=>matches(r,command.source));
-      if(!observed?.valid||hash(observed.snapshot)!==command.expectedSourceFingerprint)return reject("source_changed","تغيّر مصدر الاتفاق أو لم تعد هويته مثبتة؛ راجع الفاتورة والربط قبل الاعتماد.");
-    }
-    if(!await lockSource(client,command.source,hooks?.bounded===true))return reject("source_changed","تغيّر مصدر الاتفاق أو لم تعد هويته مثبتة؛ راجع الفاتورة والربط قبل الاعتماد.");
-    const source=(await (hooks?.bounded ? boundedSourceRows(client,input.patientId,input.orthoCaseId) : sourceRows(client,input.patientId,input.orthoCaseId))).find(r=>matches(r,command.source));
-    if(!source?.valid||hash(source.snapshot)!==command.expectedSourceFingerprint)return reject("source_changed","تغيّر مصدر الاتفاق أو لم تعد هويته مثبتة؛ راجع الفاتورة والربط قبل الاعتماد.");
-    if(!source)throw new Error("Coverage source missing after validation");
-    const {rows:[saved]}=await client.query<Stored>(`INSERT INTO ortho_followup_coverage_revisions
-      (patient_id,ortho_case_id,clinical_case_id,plan_id,plan_item_id,invoice_id,version,supersedes_revision_id,scope,decision,source_fingerprint,source_snapshot,reason,actor_user_id,created_by,command_id,request_fingerprint)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'routine_adjustments',$9,$10,$11::jsonb,$12,$13,$14,$15,$16) RETURNING ${columns}`,
-      [input.patientId,input.orthoCaseId,source.clinicalCaseId,source.planId,source.planItemId,source.invoiceId,(head?.version??0)+1,head?.id??null,command.decision,command.expectedSourceFingerprint,JSON.stringify(source.snapshot),command.reason,actor.userId,actor.username,command.commandId,requestFingerprint]);
-    await insertAuditRow(client,{action:"ortho.followup_coverage.append",entity:"ortho_case",entityId:input.orthoCaseId,actor:actor.username,actorRole:actor.role,
-      details:{before:head?project(head):null,after:project(saved),scope:"routine_adjustments",reason:command.reason}});
-    await hooks?.assertCurrent();
-    return {state:"committed",ok:true,replayed:false,revision:project(saved)};
+    // Retired authoring: unresolved historical commands must never create either
+    // a decision or a refusal tombstone. Keep their local journal for review.
+    fail(409,"coverage_authoring_retired","تسجيل قرارات تغطية جديدة متوقف؛ تحقّق من نتيجة الطلب الأصلي دون إنشاء بديل.");
 }
 export async function appendFollowupCoverage(input:CoverageCommandInput){
   const command=exactCommand(input);

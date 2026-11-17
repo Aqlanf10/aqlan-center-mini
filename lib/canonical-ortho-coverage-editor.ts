@@ -18,7 +18,7 @@ export function readCanonicalCoverageEditor(session:VerifiedDurableSession,patie
   if(!found)throw new CanonicalPatientReadRefusal("patient_not_found","لا يوجد مريض بهذا الرقم ضمن مرضاك.");
   const saved=await readFollowupCoverageSnapshotWith(q,patientId,caseId),h=saved.current;
   const result:CanonicalCoverageEditor={projection:"ortho-followup-coverage-editor",patientId,orthoCaseId:caseId,enabled:saved.enabled,
-   canEdit:saved.enabled&&["active","retention"].includes(found.status),applicable:saved.applicable,
+   canEdit:false,applicable:saved.applicable,
    current:h?{id:h.id,version:h.version,decision:h.decision,reason:h.reason,createdAt:h.createdAt,createdBy:h.createdBy}:null,
    sources:saved.sources.map(projectCoverageSource)};
   if(!isCanonicalCoverageEditor(result,patientId,caseId))throw new Error("STAFF_READ_READ_FAILED");return result;
