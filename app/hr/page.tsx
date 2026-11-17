@@ -40,7 +40,7 @@ export default function HrPage() {
 }
 function HrPageView() {
   const session = useSession();
-  const searchParams = useSearchParams(), router = useRouter();
+  const searchParams = useSearchParams()!, router = useRouter();
   const query = searchParams.toString();
   const requestedTab = searchParams.get('tab') as HrTab;
   const hydrated = useSyncExternalStore(subscribeHydration, clientHydrated, serverHydrated);

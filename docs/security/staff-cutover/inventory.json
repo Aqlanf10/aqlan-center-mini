@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and fixed Pages API dispatch tables and matrix entries; all app page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "e26bb541470d9051a583270b1e6108349746b682ae0075e70be1636ea616bdde",
+  "sourceDigest": "31e912c078b952dd3913ffb82002ec999b89217ae7846c1c4ba7fc6396889cc9",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -126,7 +126,6 @@
     "app/api/checkin/route.ts",
     "app/api/display/notice/route.ts",
     "app/api/display/route.ts",
-    "app/api/documents/[id]/route.ts",
     "app/api/executive/operations/route.ts",
     "app/api/executive/pulse/route.ts",
     "app/api/executive/route.ts",
@@ -469,7 +468,8 @@
     "app/visits/[id]/clinical/page.tsx",
     "app/visits/[id]/page.tsx",
     "app/visits/page.tsx",
-    "app/waiting-list/page.tsx"
+    "app/waiting-list/page.tsx",
+    "pages/api/documents/[id].ts"
   ],
   "sourceIssues": [],
   "matrixExportMismatches": [],
@@ -884,23 +884,6 @@
         {
           "symbol": "requireSession",
           "line": 81
-        }
-      ]
-    },
-    {
-      "file": "app/api/documents/[id]/route.ts",
-      "evidence": [
-        {
-          "symbol": "requireSession",
-          "line": 10
-        },
-        {
-          "symbol": "requireSession",
-          "line": 48
-        },
-        {
-          "symbol": "requireSession",
-          "line": 103
         }
       ]
     },
@@ -4552,6 +4535,19 @@
           "line": 12
         }
       ]
+    },
+    {
+      "file": "pages/api/documents/[id].ts",
+      "evidence": [
+        {
+          "symbol": "requireSessionFromTransport",
+          "line": 8
+        },
+        {
+          "symbol": "requireSessionFromTransport",
+          "line": 25
+        }
+      ]
     }
   ],
   "layouts": [
@@ -5570,7 +5566,7 @@
     {
       "route": "/api/documents/[id]",
       "method": "DELETE",
-      "file": "app/api/documents/[id]/route.ts",
+      "file": "pages/api/documents/[id].ts",
       "httpAccess": [
         "admin"
       ],
@@ -5580,23 +5576,19 @@
       "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
       "directHelperEvidence": [
         {
-          "symbol": "requireSession",
-          "line": 10
+          "symbol": "requireSessionFromTransport",
+          "line": 8
         },
         {
-          "symbol": "requireSession",
-          "line": 48
-        },
-        {
-          "symbol": "requireSession",
-          "line": 103
+          "symbol": "requireSessionFromTransport",
+          "line": 25
         }
       ]
     },
     {
       "route": "/api/documents/[id]",
       "method": "GET",
-      "file": "app/api/documents/[id]/route.ts",
+      "file": "pages/api/documents/[id].ts",
       "httpAccess": [
         "admin",
         "reception",
@@ -5608,16 +5600,12 @@
       "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
       "directHelperEvidence": [
         {
-          "symbol": "requireSession",
-          "line": 10
+          "symbol": "requireSessionFromTransport",
+          "line": 8
         },
         {
-          "symbol": "requireSession",
-          "line": 48
-        },
-        {
-          "symbol": "requireSession",
-          "line": 103
+          "symbol": "requireSessionFromTransport",
+          "line": 25
         }
       ]
     },
