@@ -271,8 +271,9 @@ async function priceGroupedOrder(client:DbClient,intent:IntentRow,orderId:number
   const priced:Priced[]=[];
   for(const member of [...members].sort((a,b)=>a.tooth_code-b.tooth_code||a.id.localeCompare(b.id))){
     const mapped=(await client.query<{lab_service_id:number|null}>("SELECT lab_service_id FROM services WHERE id=$1",[member.service_id])).rows[0]?.lab_service_id??null;
-    if(mapped===null||partyId===null){priced.push({member,labServiceId:null,ruleId:null,unit:null,currency:null,state:"missing_mapping"});continue;}
-    const rule=await db.resolveLabOrderPriceWith(client,partyId,mapped,today);
+    if(mapped===null){priced.push({member,labServiceId:null,ruleId:null,unit:null,currency:null,state:"missing_mapping"});continue;}
+    // A draft saved before a lab is chosen has no price yet: pending, never a guessed lab.
+    const rule=partyId===null?null:await db.resolveLabOrderPriceWith(client,partyId,mapped,today);
     priced.push(rule?{member,labServiceId:mapped,ruleId:rule.ruleId,unit:rule.costMinor,currency:rule.costCurrency,state:"rule"}
       :{member,labServiceId:mapped,ruleId:null,unit:null,currency:null,state:"missing_rule"});
   }
@@ -290,9 +291,13 @@ async function priceGroupedOrder(client:DbClient,intent:IntentRow,orderId:number
     const total=priced.reduce((sum,row)=>sum+row.unit!,0);
     if(!Number.isSafeInteger(total))fail("lab_price_invalid");
     if(total>0){
-      const {resolveAutomaticLabPrice}=await import("./lab-order-pricing");const {CLINIC_BASE_CURRENCY}=await import("./money");
-      const auto=resolveAutomaticLabPrice({costMinor:total,costCurrency:currencies[0],quantity:1,baseCurrency:CLINIC_BASE_CURRENCY,settings:await db.getSettings()});
-      await db.updateLabOrderAccountingOn(client,orderId,{costMinor:auto.costMinor,costCurrency:auto.costCurrency,exchangeRate:auto.exchangeRate},
+      const {resolveAutomaticLabPrice,LabOrderPricingConflict}=await import("./lab-order-pricing");const {CLINIC_BASE_CURRENCY}=await import("./money");
+      let auto:ReturnType<typeof resolveAutomaticLabPrice>|null=null;
+      try{auto=resolveAutomaticLabPrice({costMinor:total,costCurrency:currencies[0],quantity:1,baseCurrency:CLINIC_BASE_CURRENCY,settings:await db.getSettings()});}
+      catch(error){if(!(error instanceof LabOrderPricingConflict))throw error;}
+      // No trustworthy rate for the ledger snapshot: the invoice still saves and the cost stays pending (owner item 2/3).
+      if(!auto)state="currency_mismatch";
+      else await db.updateLabOrderAccountingOn(client,orderId,{costMinor:auto.costMinor,costCurrency:auto.costCurrency,exchangeRate:auto.exchangeRate},
         {actor:{username:actor.username,role:actor.role},canAccessPatientMoney:null});
     }
   }

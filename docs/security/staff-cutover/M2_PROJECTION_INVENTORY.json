@@ -241,6 +241,7 @@
  "/api/services": [
   "canHandleMoney(",
   "canViewMoney(",
+  "isAdmin(",
   "permissions?.canViewServicePrices",
   "role === \"doctor\""
  ],

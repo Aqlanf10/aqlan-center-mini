@@ -174,6 +174,15 @@ describe("0136 grouped lab order from one invoice entry", () => {
     expect(await payables(w.patientId)).toEqual([]);
   });
 
+  it("T5d: a grouped entry saved before a lab is chosen keeps one pending order (missing_rule), never a guessed lab", async () => {
+    const w = await world({ unitMinor: 200, currency: "YER" });
+    const items = grouped(w).map(item => ({ ...item, labWork: { ...item.labWork, prescription: { ...item.labWork.prescription, partyId: null as unknown as number } } }));
+    const result = await save(w, items);
+    expect(result.labWork![0]).toMatchObject({ pricing: { state: "missing_rule" } });
+    expect(await orders(w.patientId)).toEqual([expect.objectContaining({ cost: null, pricing_state: "missing_rule", payable_id: null })]);
+    expect(await payables(w.patientId)).toEqual([]);
+  });
+
   it("T6: a rule in another currency is never converted: the cost stays pending, each tooth keeps its price in that currency, no payable", async () => {
     const w = await world({ unitMinor: 50, currency: "SAR" });
     const result = await save(w, grouped(w));

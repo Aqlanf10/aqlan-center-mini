@@ -685,3 +685,25 @@ here. Decisions commit with their audit row in one transaction under the case ro
 lock. Rollback of application code must not delete the table or migration
 registry history. Exact-head CI and Staging verification remain required before
 Production rollout.
+
+### 0136_grouped_lab_orders.sql
+
+Additive support for one lab order covering any number of selected crown or veneer
+teeth, from either jaw, entered once on an invoice (owner #483 6930647956,
+6931868779, 6932010630; contract `docs/review/grouped-lab-order-0136-contract-20261117.md`).
+It widens `lab_work_intents.group_kind` to admit `grouped`, adds optional
+`lab_work_intents.instructions` (grouped only, frozen once the order exists),
+`services.lab_service_id` (the settings mapping from a clinic service to a lab
+service), `lab_orders.pricing_state`, and the append-only table
+`lab_order_member_prices` holding each tooth's lab service, rule, unit price and
+currency. A missing mapping or price, or a foreign or mixed currency, leaves the cost
+pending; nothing is converted or computed as zero.
+
+No row is rewritten and no data is removed. The published 0074 trigger functions are
+not redefined; the price snapshots reuse its append-only guard and are protected by
+the clinic reset like the rest of lab history. Numbered and checksum-checked runtime
+SQL use identical bytes. The number was reserved for this work (6907274207) and
+verified free; numbers between 0126 and 0136 belong to other lines and are not filled
+here. Rollback of application code must not delete the columns, the table or migration
+registry history. Exact-head CI and Staging verification remain required before
+Production rollout.
