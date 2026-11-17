@@ -5,7 +5,7 @@ export default defineConfig({
   ...base,
   test: {
     ...base.test,
-    include: ["__tests__/postgres/standalone-real-restore.witness.ts", "__tests__/postgres/standalone-0090-restore.witness.ts"],
+    include: ["__tests__/postgres/standalone-real-restore.witness.ts", "__tests__/postgres/standalone-0090-restore.witness.ts", "__tests__/postgres/pg-sequence-mechanics.witness.ts"],
     globalSetup: ["__tests__/postgres/_standalone-restore-witness-setup.ts"],
   },
 });
