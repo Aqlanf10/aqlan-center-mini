@@ -49,6 +49,15 @@ test("rejects an existing chunk with bytes different from its build original", (
   await put(`${shipped}/chunks/ssr/synthetic.js`, "different synthetic chunk\n");
   await assert.rejects(assembleStandaloneEntryChunks(root), /shipped chunk differs from build/);
 }));
+test("rejects a symlinked build map and a conflicting existing shipped map", () => fixture(async ({root, put, build, shipped}) => {
+  const map = path.join(root, build, "chunks/ssr/synthetic.js.map");
+  await rm(map); await symlink("synthetic.js", map);
+  await assert.rejects(assembleStandaloneEntryChunks(root), /non-regular path/);
+  await rm(map); await writeFile(map, '{"version":3,"sources":[],"mappings":""}');
+  await put(`${shipped}/chunks/ssr/synthetic.js.map`, '{"version":3,"sources":["different"],"mappings":""}');
+  await assert.rejects(assembleStandaloneEntryChunks(root), /shipped map differs from build/);
+  await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), {code:"ENOENT"});
+}));
 test("rejects symlinked source files and destination files", () => fixture(async ({root, build, shipped}) => {
   const source = path.join(root, build, "chunks/ssr/synthetic.js");
   await rm(source); await symlink("synthetic.js.map", source);
