@@ -6,6 +6,8 @@ restore path describes its target as isolated. The experiment intentionally
 uses a second connection to demonstrate what an unverified isolation promise
 would fail to protect. A collision in this synthetic experiment would not by
 itself prove that a correctly isolated target violates its existing contract.
+The actor's separate SQL requests are intentionally non-cooperating; this test
+does not establish that normal `createPatient` separates allocation from INSERT.
 
 Each of two cases (`is_called=false` and `is_called=true`) creates a unique
 source and target database on the guarded CI PostgreSQL 18 service. Guards run
@@ -21,12 +23,13 @@ target allocator returns in an earlier autocommit query; the allocator then
 attempts its separate later INSERT after replay. This models a previously
 issued ID outside a live transaction, not all possible application flows. If
 replay reports success, the test verifies the restored patient fields and
-classifies the later INSERT as either the exact synthetic primary-key collision
-or success; unexpected errors fail with a fixed message. If replay rejects,
+classifies the exact synthetic primary-key collision. Unexpected success or
+any other error is unclassified and fails with a fixed message. If replay rejects,
 only the existing exact nonempty-target refusal is recognized: it must first
 preserve target table data, sequence state, archive and stage marker, after
-which the reserved INSERT must succeed. Unrecognized failures remain red and
-are never reported as safe rejection. All emitted labels are fixed; IDs and
+which the reserved INSERT must succeed with `RETURNING` and a matching persisted
+actor row. Unrecognized failures remain red and are never reported as safe
+rejection. All emitted labels are fixed; IDs and
 database messages are not printed.
 
 The test retains its synthetic databases, archive, intent/identity files and

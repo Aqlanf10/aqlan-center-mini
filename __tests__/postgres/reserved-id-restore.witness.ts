@@ -116,7 +116,9 @@ it.each([{state:'uncalled',start:'75000',called:false},{state:'called',start:'74
       const attempt=await allocator.query("INSERT INTO patients(id,patient_number,full_name) VALUES($1,'SYNTHETIC-ALLOCATOR','SYNTHETIC ACTOR')",[reserved])
         .then(()=>({kind:'inserted' as const}),error=>({kind:error?.code==='23505' && error?.constraint==='patients_pkey'?'duplicate' as const:'unclassified' as const}));
       if(attempt.kind==='duplicate') console.log('SYNTHETIC_RESERVED_ID_COLLISION_AFTER_ACCEPTED_REPLAY');
-      else if(attempt.kind==='inserted') console.log('SYNTHETIC_RESERVED_ID_INSERTED_AFTER_ACCEPTED_REPLAY');
+      // With the restored row and unchanged primary-key semantics, this result
+      // cannot be accepted without investigating rewriting/constraint drift.
+      else if(attempt.kind==='inserted') throw new Error('SYNTHETIC_RESERVED_INSERT_SUCCESS_UNCLASSIFIED');
       else throw new Error('SYNTHETIC_RESERVED_INSERT_OUTCOME_UNCLASSIFIED');
     }else{
       expect(result.readyForCutover).toBe(false);
@@ -125,8 +127,10 @@ it.each([{state:'uncalled',start:'75000',called:false},{state:'called',start:'74
       expect(after.last_value===reservedSeq.last_value && after.is_called===reservedSeq.is_called).toBe(true);
       expect(sha(await readFile(markerPath))===sha(marker)).toBe(true);
       if(!knownNonEmptyRefusal(result)) throw new Error('SYNTHETIC_REPLAY_REJECTION_UNCLASSIFIED');
-      const inserted=await allocator.query("INSERT INTO patients(id,patient_number,full_name) VALUES($1,'SYNTHETIC-ALLOCATOR','SYNTHETIC ACTOR')",[reserved]);
-      expect(inserted.rowCount).toBe(1);
+      const inserted=await allocator.query("INSERT INTO patients(id,patient_number,full_name) VALUES($1,'SYNTHETIC-ALLOCATOR','SYNTHETIC ACTOR') RETURNING id::text,patient_number,full_name",[reserved]);
+      expect(inserted.rowCount===1 && inserted.rows[0]?.id===reserved && inserted.rows[0]?.patient_number==='SYNTHETIC-ALLOCATOR' && inserted.rows[0]?.full_name==='SYNTHETIC ACTOR').toBe(true);
+      const actual=(await rows(fixture.target.pool)).filter(row=>row.id===reserved);
+      expect(sha(Buffer.from(JSON.stringify(actual)))===sha(Buffer.from(JSON.stringify(inserted.rows)))).toBe(true);
       console.log('SYNTHETIC_KNOWN_REFUSAL_THEN_RESERVED_INSERT');
     }
     const afterTarget=await rows(fixture.target.pool);
