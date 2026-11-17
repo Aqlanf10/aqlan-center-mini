@@ -126,7 +126,8 @@ export function classifyExpenseAnswer(status: number, redirected: boolean, paylo
   const body = payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
   if ((status === 200 || status === 201) && body && Number.isSafeInteger(body.id) && (body.id as number) > 0
     && typeof body.voucherNumber === "string" && body.voucherNumber.length > 0) return "saved";
-  if (status >= 400 && status < 500 && body?.requestKeyState === "unused") return "refused";
+  // 0133: "retired" is final (the request's retirement committed); "unused" proves only the moment checked.
+  if (status >= 400 && status < 500 && (body?.requestKeyState === "unused" || body?.requestKeyState === "retired")) return "refused";
   return "unknown";
 }
 
@@ -163,8 +164,34 @@ export async function sendExpenseAttempt(storage: StorageLike | null, attempt: E
     payload = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
   } catch { payload = null; }
   let answer = classifyExpenseAnswer(response.status, response.redirected, payload);
-  // A refusal proves the key empty only if no other send of it exists (review #483 6883224187).
-  if (answer === "refused" && priorSends > 0) answer = "unknown";
+  // A refusal proves the key empty only if no other send of it exists (review #483 6883224187), unless
+  // the server retired the request (0133), which no later send can undo.
+  if (answer === "refused" && priorSends > 0 && payload?.requestKeyState !== "retired") answer = "unknown";
   if (answer !== "unknown") settleExpenseAttempt(storage, attempt.key);
   return { answer, status: response.status, payload };
+}
+
+/**
+ * 0133 (docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md §2.1): end an unknown attempt for good. The server
+ * binds the retirement to the exact body and key that were sent; afterwards no send of that request can
+ * write. Settled only on a committed retirement or on the voucher already saved under the key.
+ */
+export async function retireExpenseAttempt(storage: StorageLike | null, attempt: ExpenseAttempt, transport: typeof fetch = fetch):
+  Promise<{ answer: "retired" | "saved" | "unknown"; status: number | null; payload: Record<string, unknown> | null }> {
+  let response: Response;
+  try {
+    response = await transport("/api/expenses/attempts/retire", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: attempt.key, body: attempt.body }) });
+  } catch {
+    return { answer: "unknown", status: null, payload: null };
+  }
+  let payload: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = await response.json();
+    payload = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+  } catch { payload = null; }
+  if (response.redirected || response.status !== 200 || !payload) return { answer: "unknown", status: response.status, payload };
+  if (payload.requestKeyState === "retired") { settleExpenseAttempt(storage, attempt.key); return { answer: "retired", status: 200, payload }; }
+  if (classifyExpenseAnswer(200, false, payload) === "saved") { settleExpenseAttempt(storage, attempt.key); return { answer: "saved", status: 200, payload }; }
+  return { answer: "unknown", status: response.status, payload };
 }

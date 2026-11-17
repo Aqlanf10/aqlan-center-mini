@@ -1,5 +1,5 @@
 import "server-only";
-import { expenseRequestKeyIsUnused, getPool, getSettingsWith, ratesFromSettings, recordExpenseOn, type Expense } from "./db";
+import { expenseRequestKeyIsUnused, getPool, getSettingsWith, ratesFromSettings, recordExpenseOn, retireExpenseRequestWith, retireRefusedExpenseRequest, type Expense, type ExpenseRequestBinding, type ExpenseRequestRetirement } from "./db";
 import { parseExpenseRequest, refusalStatus } from "./expense-request";
 import { expenseRequestHash } from "./expense-request-hash";
 import { ownerFundingAccountProblem, parseExpensePaymentSplit } from "./expense-payment-split";
@@ -33,7 +33,9 @@ export class CanonicalExpenseRefusal extends Error {
   constructor(readonly code: string, readonly status: 400 | 403 | 404 | 409, message: string,
     readonly quote: SettlementQuote | null = null,
     /** Checked under the key's lock inside this operation: nothing is recorded under the request key. */
-    readonly keyUnused = false) {
+    readonly keyUnused = false,
+    /** 0133: the request's retirement committed after this refusal's rollback (or it was retired before). */
+    readonly keyState: "retired" | null = null) {
     super(message); this.name = "CanonicalExpenseRefusal";
   }
 }
@@ -47,33 +49,38 @@ export interface CanonicalExpenseCommand {
 
 export async function commandCanonicalExpenseCreate(session: VerifiedDurableSession, command: CanonicalExpenseCommand,
   pool = getPool()): Promise<{ expense: Expense; replayed: boolean }> {
-  return withStaffOperation(pool, session, ACTION, async (client, handle) => {
-    try { return await create(client, handle); } catch (error) {
-      if (error instanceof CanonicalExpenseRefusal && !error.keyUnused && error.code !== "expense_request_conflict"
-        && await expenseRequestKeyIsUnused(command.requestKey, client)) {
-        throw new CanonicalExpenseRefusal(error.code, error.status, error.message, error.quote, true);
+  let binding: ExpenseRequestBinding | null = null;
+  try {
+    return await withStaffOperation(pool, session, ACTION, async (client, handle) => {
+      try { return await create(client, handle); } catch (error) {
+        if (error instanceof CanonicalExpenseRefusal && !error.keyUnused && error.code !== "expense_request_conflict"
+          && error.code !== "expense_request_retired" && await expenseRequestKeyIsUnused(command.requestKey, client)) {
+          throw new CanonicalExpenseRefusal(error.code, error.status, error.message, error.quote, true);
+        }
+        throw error;
       }
-      throw error;
-    }
-  });
-  async function create(client: Parameters<Parameters<typeof withStaffOperation>[3]>[0], handle: Parameters<Parameters<typeof withStaffOperation>[3]>[1]) {
-    const held = await staffOperationCapabilities(client, handle, ACTION, [ACTION, "finance.fx.manage", "finance.payables.record"] as const);
-    const owner = await staffOperationIsProtectedOwner(client, handle, ACTION);
-    if (!owner && !held.has(ACTION)) throw new Error("STAFF_OPERATION_CAPABILITY_DENIED");
-    const identity = await staffOperationIdentity(client, handle, ACTION);
-    const settings = await getSettingsWith(client);
-    const rates = ratesFromSettings(settings);
-
-    const parsed = parseExpenseRequest(command.source, rates, {
-      rateOverride: owner || held.has("finance.fx.manage"), prepayment: owner || held.has("finance.payables.record"),
     });
-    if (!parsed.ok) throw new CanonicalExpenseRefusal("invalid_expense", parsed.status as 400 | 403 | 409, parsed.message);
-    const request = parsed.value;
-    const split = parseExpensePaymentSplit(command.source, request.amountMinor, request.currency);
-    if (!split.ok) throw new CanonicalExpenseRefusal("invalid_payment_split", 400, split.message);
+  } catch (error) {
+    if (!(error instanceof CanonicalExpenseRefusal)) throw error;
+    if (error.code === "expense_request_retired") {
+      throw new CanonicalExpenseRefusal(error.code, error.status, error.message, error.quote, false, "retired");
+    }
+    // 0133: the operation is rolled back; retire this exact request in its own transaction. "retired" is
+    // reported only after that commit, so no late send of the request can write a voucher afterwards.
+    if (error.keyUnused && binding) {
+      const keyState = await retireRefusedExpenseRequest(binding);
+      // Not retired (error, saved meanwhile, conflict): nothing about the key is claimed; the screen stays unknown.
+      throw new CanonicalExpenseRefusal(error.code, error.status, error.message, error.quote, keyState === "retired", keyState ?? null);
+    }
+    throw error;
+  }
+  async function create(client: OperationClient, handle: OperationHandle) {
+    const f = await fingerprint(client, handle, command);
+    binding = { key: command.requestKey, hash: f.hash, actor: f.identity.username };
+    const { request, split, identity, owner, settings, rates } = f;
 
     let accountCode: string | null = null;
-    if (split.value.ownerPrivateMinor > 0) {
+    if (split.ownerPrivateMinor > 0) {
       if (!owner) {
         throw new CanonicalExpenseRefusal("owner_private_requires_owner", 403,
           "الدفع من المصدر الخاص للمالك وحده؛ لم يُسجَّل شيء. سجّل المصروف من الدرج، أو يسجّله المالك بنفسه.");
@@ -94,11 +101,6 @@ export async function commandCanonicalExpenseCreate(session: VerifiedDurableSess
       }
     }
 
-    const hash = expenseRequestHash(identity.username, request, {
-      source: split.value.ownerPrivateMinor === 0 ? "drawer" : split.value.drawerMinor === 0 ? "owner_private" : "drawer_and_owner_private",
-      drawerMinor: split.value.drawerMinor, ownerPrivateMinor: split.value.ownerPrivateMinor,
-      ownerPrivateReason: split.value.ownerPrivateReason,
-    });
     const result = await recordExpenseOn(client, {
       category: request.category, partyId: request.partyId, payeeText: request.payeeText,
       amountMinor: request.amountMinor, currency: request.currency, baseCurrency: CLINIC_BASE_CURRENCY,
@@ -106,8 +108,8 @@ export async function commandCanonicalExpenseCreate(session: VerifiedDurableSess
       createdBy: identity.username, actorRole: identity.role, rates,
       payableExchangeRate: request.payableExchangeRate, rateOverrideReason: request.rateOverrideReason,
       prepaymentReason: request.prepaymentReason, expectedQuote: request.expectedQuote,
-      request: { key: command.requestKey, hash },
-      paymentSplit: { ...split.value, ownerUserId: split.value.ownerPrivateMinor > 0 ? identity.userId : null, accountCode },
+      request: { key: command.requestKey, hash: f.hash },
+      paymentSplit: { ...split, ownerUserId: split.ownerPrivateMinor > 0 ? identity.userId : null, accountCode },
     }, rates);
     if (result.reason) {
       throw new CanonicalExpenseRefusal(result.reason, refusalStatus(result.reason) as 400 | 404 | 409,
@@ -116,4 +118,54 @@ export async function commandCanonicalExpenseCreate(session: VerifiedDurableSess
     if (!result.expense) throw new Error("Canonical expense create returned no voucher");
     return { expense: result.expense, replayed: result.replayed === true };
   }
+}
+
+type OperationClient = Parameters<Parameters<typeof withStaffOperation>[3]>[0];
+type OperationHandle = Parameters<Parameters<typeof withStaffOperation>[3]>[1];
+
+/**
+ * The admitted actor and the request's 0128 fingerprint, computed exactly as the create computes them.
+ * Shared by the create and the retirement (0133), so a retirement binds to the same request it fences.
+ */
+async function fingerprint(client: OperationClient, handle: OperationHandle, command: CanonicalExpenseCommand) {
+  const held = await staffOperationCapabilities(client, handle, ACTION, [ACTION, "finance.fx.manage", "finance.payables.record"] as const);
+  const owner = await staffOperationIsProtectedOwner(client, handle, ACTION);
+  if (!owner && !held.has(ACTION)) throw new Error("STAFF_OPERATION_CAPABILITY_DENIED");
+  const identity = await staffOperationIdentity(client, handle, ACTION);
+  const settings = await getSettingsWith(client);
+  const rates = ratesFromSettings(settings);
+  const parsed = parseExpenseRequest(command.source, rates, {
+    rateOverride: owner || held.has("finance.fx.manage"), prepayment: owner || held.has("finance.payables.record"),
+  });
+  if (!parsed.ok) throw new CanonicalExpenseRefusal("invalid_expense", parsed.status as 400 | 403 | 409, parsed.message);
+  const request = parsed.value;
+  const split = parseExpensePaymentSplit(command.source, request.amountMinor, request.currency);
+  if (!split.ok) throw new CanonicalExpenseRefusal("invalid_payment_split", 400, split.message);
+  const hash = expenseRequestHash(identity.username, request, {
+    source: split.value.ownerPrivateMinor === 0 ? "drawer" : split.value.drawerMinor === 0 ? "owner_private" : "drawer_and_owner_private",
+    drawerMinor: split.value.drawerMinor, ownerPrivateMinor: split.value.ownerPrivateMinor,
+    ownerPrivateReason: split.value.ownerPrivateReason,
+  });
+  return { held, owner, identity, settings, rates, request, split: split.value, hash };
+}
+
+/**
+ * 0133 (docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md §2.1): the sender ends an unknown request for good.
+ * Same admission as the create; the body is the exact body that was sent, fingerprinted the same way. A
+ * body that no longer parses cannot be bound, so nothing is retired. Commits with the operation.
+ */
+export async function commandCanonicalRetireExpenseRequest(session: VerifiedDurableSession,
+  command: CanonicalExpenseCommand, pool = getPool()): Promise<ExpenseRequestRetirement> {
+  return withStaffOperation(pool, session, ACTION, async (client, handle) => {
+    let f: Awaited<ReturnType<typeof fingerprint>>;
+    try { f = await fingerprint(client, handle, command); } catch (error) {
+      if (error instanceof CanonicalExpenseRefusal) {
+        throw new CanonicalExpenseRefusal("expense_retirement_unproven", 409,
+          "تعذّر ربط هذا الطلب ببياناته الحالية، فلم يُنهَ. يبقى معلّقًا؛ تحقّق منه أو راجع سجل الصرف قبل أي تسجيل جديد.");
+      }
+      throw error;
+    }
+    return retireExpenseRequestWith(client, { key: command.requestKey, hash: f.hash, actor: f.identity.username },
+      { actorRole: f.identity.role });
+  });
 }

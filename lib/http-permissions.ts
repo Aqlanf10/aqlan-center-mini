@@ -126,6 +126,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/expenses": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ["admin", "reception", "cashier"], DELETE: ADMIN },
   "/api/expenses/[id]/attachments": { GET: ["admin", "reception", "cashier", "accountant"], POST: ["admin", "reception", "cashier"] },
   "/api/expenses/quote": { POST: ["admin", "reception", "cashier"] },
+  // (0133) إنهاء طلب صرف مجهول النتيجة نهائيًا — صلاحية إنشاء الصرف نفسها.
+  "/api/expenses/attempts/retire": { POST: ["admin", "reception", "cashier"] },
   "/api/export": { GET: ADMIN },
   "/api/families": { GET: FRONT_DESK, POST: FRONT_DESK },
   "/api/families/[id]": { GET: CLINIC, PATCH: FRONT_DESK },

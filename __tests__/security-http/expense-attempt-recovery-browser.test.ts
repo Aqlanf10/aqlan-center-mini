@@ -95,10 +95,11 @@ describe("petty expense on the cash screen", () => {
     } finally { await context.close(); }
   });
 
-  // Review #483 6883224187: the first send leaves the page and its connection drops; the server has not
-  // seen it yet. A retry is refused ("nothing recorded under the key" — true only at that moment). The
-  // first request then arrives and writes the voucher. The page must never have declared the refusal final.
-  it("a first send still on its way: a later refusal stays unresolved, and the late voucher is confirmed once", async () => {
+  // Review #483 6883224187 and 0133: the first send leaves the page and its connection drops; the server has
+  // not seen it yet. A retry is refused for the drawer and the server retires that exact request (committed
+  // after the refusal's rollback), so the page may treat the refusal as final. The first request then
+  // arrives late and writes nothing: no voucher, no drawer movement, no audit.
+  it("a first send still on its way: the retry's refusal retires the request, and the late first request writes nothing", async () => {
     const note = `SYN-REC-INFLIGHT-${++serial}-${Date.now()}`;
     const { context, page } = await open("admin");
     try {
@@ -117,18 +118,20 @@ describe("petty expense on the cash screen", () => {
       await save(page);
       await uncertain(page);
       await count(pending(page), 1);
+      const key = firstHeaders!["idempotency-key"];
+      expect(key).toBeTruthy();
       expect(await evidence(note)).toEqual({ vouchers: 0, audits: 0, drawerOut: 0 });
-      // The retry of the same key reaches the server and is refused for the drawer, key unused at that moment.
+      // The retry of the same key reaches the server: refused for the drawer and retired.
       const refused = page.waitForResponse((r) => r.url().endsWith("/api/expenses") && r.request().method() === "POST");
       await pending(page).getByRole("button", { name: "تحقّق" }).click();
       const answer = await refused;
       expect(answer.status()).toBe(409);
-      expect(await answer.json()).toMatchObject({ code: "exceeds_drawer_cash", requestKeyState: "unused" });
-      // Not final: the attempt stays, with the reason and the warning; no "proved not recorded".
-      await expect.poll(() => page.getByTestId("pending-expense-attempts").innerText(), { timeout: 15_000 }).toMatch(/قد يكون سُجّل/);
-      expect(await page.getByTestId("pending-expense-attempts").innerText()).not.toMatch(/ثبت أنه لم يُسجَّل/);
-      await count(pending(page), 1);
-      // Cash arrives in the drawer, then the first request finally reaches the server and writes the voucher.
+      expect(answer.request().headers()["idempotency-key"]).toBe(key);
+      expect(await answer.json()).toMatchObject({ code: "exceeds_drawer_cash", requestKeyState: "retired" });
+      expect((await db.query("SELECT count(*)::int AS n FROM expense_request_retirements WHERE idempotency_key = $1", [key])).rows)
+        .toEqual([{ n: 1 }]);
+      await count(pending(page), 0); // final: the server proved no send of this request can write any more
+      // Cash arrives, then the first request finally reaches the server: it writes nothing.
       const { rows: [{ id: patientId }] } = await db.query<{ id: number }>(
         "INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض اصطناعي للتعافي') RETURNING id", [`SYN-REC-P-${serial}`]);
       await db.query(`INSERT INTO payments (receipt_number, patient_id, shift_id, kind, amount_minor, currency, base_amount_minor, method, created_by)
@@ -136,12 +139,9 @@ describe("petty expense on the cash screen", () => {
         [`SYN-REC-TOPUP-${serial}`, patientId, Number(amount) * 2]);
       const headers = Object.fromEntries(Object.entries(firstHeaders!).filter(([name]) => !/^(host|content-length|connection)$/i.test(name)));
       const late = await fetch(`${baseUrl}/api/expenses`, { method: "POST", headers, body: firstBody! });
-      expect(late.status).toBe(201);
-      expect(await evidence(note)).toMatchObject({ vouchers: 1, audits: 1 });
-      // Verifying the same pending attempt now confirms that one voucher; nothing new is written.
-      await pending(page).getByRole("button", { name: "تحقّق" }).click();
-      await count(pending(page), 0);
-      expect(await evidence(note)).toEqual({ vouchers: 1, audits: 1, drawerOut: Number(amount) });
+      expect(late.status).toBe(409);
+      expect(await late.json()).toMatchObject({ code: "expense_request_retired", requestKeyState: "retired" });
+      expect(await evidence(note)).toEqual({ vouchers: 0, audits: 0, drawerOut: 0 });
     } finally { await context.close(); }
   });
 
@@ -250,6 +250,46 @@ describe("petty expense on the cash screen", () => {
 });
 
 describe("bill payment on the supplier page", () => {
+  // 0133 on the second screen: the bill payment's only send never got an answer. The user ends it for good;
+  // the request the server has not seen yet then arrives and writes nothing; the bill is not settled.
+  it("an unanswered bill payment ended for good: the late request writes nothing and the bill stays open", async () => {
+    const description = `SYN-REC-BILL-RETIRE-${++serial}-${Date.now()}`;
+    const { rows: [{ id: payableId }] } = await db.query<{ id: number }>(`INSERT INTO payables (party_id, category, description, amount_minor, currency, base_currency, exchange_rate, base_amount_minor, created_by)
+      VALUES ($1, 'supplier', $2, 50, 'YER', 'YER', 1, 50, 'syn-expense-recovery') RETURNING id`, [supplierId, description]);
+    const { context, page } = await open("admin");
+    try {
+      await page.goto(`${baseUrl}/finance/parties/${supplierId}`, { waitUntil: "networkidle" });
+      const row = page.locator("li", { hasText: description });
+      await row.getByRole("button", { name: "سداد" }).click();
+      await page.getByLabel("المبلغ المدفوع").fill("20");
+      await page.getByRole("button", { name: /معاينة/ }).click();
+      let firstHeaders: Record<string, string> | null = null, firstBody: string | null = null, held = false;
+      await page.route("**/api/expenses", async (route: Route) => {
+        if (held || route.request().method() !== "POST") return route.continue();
+        held = true; firstHeaders = await route.request().allHeaders(); firstBody = route.request().postData();
+        await route.abort("connectionreset");
+      });
+      await page.getByRole("button", { name: /تأكيد/ }).click();
+      await uncertain(page);
+      await count(pending(page), 1);
+      // No second voucher can come from a new key while the attempt is unknown: the same entry reuses it.
+      const retire = page.waitForResponse((r) => r.url().endsWith("/api/expenses/attempts/retire"));
+      await pending(page).getByRole("button", { name: "أنهِ هذا الطلب نهائيًا" }).click();
+      const ended = await retire;
+      expect(ended.status()).toBe(200);
+      expect(await ended.json()).toEqual({ requestKeyState: "retired" });
+      expect(JSON.parse(ended.request().postData()!)).toMatchObject({ key: firstHeaders!["idempotency-key"], body: firstBody });
+      await count(pending(page), 0);
+      const headers = Object.fromEntries(Object.entries(firstHeaders!).filter(([name]) => !/^(host|content-length|connection)$/i.test(name)));
+      const late = await fetch(`${baseUrl}/api/expenses`, { method: "POST", headers, body: firstBody! });
+      expect(late.status).toBe(409);
+      expect((await late.json()).code).toBe("expense_request_retired");
+      const paid = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM expenses WHERE payable_id = $1", [payableId]);
+      expect(paid.rows[0]).toEqual({ n: 0 });
+      expect((await db.query("SELECT count(*)::int AS n FROM audit_log WHERE action = 'expense.create' AND details::text LIKE $1", [`%${description}%`])).rows[0].n).toBe(0);
+    } finally { await context.close(); }
+  });
+
   it("a lost confirmation, then confirming again: the bill is settled once", async () => {
     const description = `SYN-REC-BILL-${++serial}-${Date.now()}`;
     const { rows: [{ id: payableId }] } = await db.query<{ id: number }>(`INSERT INTO payables (party_id, category, description, amount_minor, currency, base_currency, exchange_rate, base_amount_minor, created_by)

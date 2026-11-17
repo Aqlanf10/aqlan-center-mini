@@ -23,6 +23,7 @@ export type AuditAction =
   | "payment.correct"
   | "expense.create"
   | "shift.open" | "shift.close"
+  | "expense.request_retire"
   | "patient.create" | "patient.update" | "patient.number.change" | "patient.numbering.configure"
   /* (P2-7) دمج ملفٍّ مكرَّر في الملف الأصلي. */
   | "patient.merge"
@@ -199,6 +200,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "payment.correct": "تصحيح سند قبض",
   "payment.idempotent_replay": "إعادة طلب مالي بمفتاح الإعادة",
   "expense.create": "سند صرف",
+  "expense.request_retire": "إنهاء طلب صرف معلّق نهائيًا دون سند",
   "shift.open": "فتح وردية",
   "shift.close": "إغلاق وردية وجرد",
   "patient.create": "إضافة مريض",
