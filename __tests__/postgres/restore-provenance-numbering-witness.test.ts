@@ -107,20 +107,32 @@ it.each([false, true])('rejects a synthetic unknown 0090 archive with booking ro
 it('preserves source and synthetic documents while checking the 12-case allocator replay matrix', async () => {
   const fixture = await ownedPair();
   try {
+    const catalog = await loadMigrationFiles();
+    const sourceMigrated = await migrate(fixture.source.pool,{apply:true,files:catalog});
+    const migrated = await migrate(fixture.target.pool,{apply:true,files:catalog});
+    for (const result of [sourceMigrated,migrated]) {
+      expect(result.appliedVersions).toContain('0080'); expect(result.appliedVersions).not.toContain('0079');
+    }
     await fixture.source.pool.query('CREATE TABLE synthetic_source_witness(value text NOT NULL)');
     await fixture.source.pool.query("INSERT INTO synthetic_source_witness VALUES ('SYNTHETIC SOURCE')");
-    await fixture.source.pool.query('CREATE SEQUENCE patient_number_seq');
+    const sourcePatient = (await fixture.source.pool.query("INSERT INTO patients(patient_number,full_name) VALUES ('P-27001','SYNTHETIC SOURCE') RETURNING id")).rows[0].id;
+    const targetPatient = (await fixture.target.pool.query("INSERT INTO patients(patient_number,full_name) VALUES ('P-07001','SYNTHETIC TARGET') RETURNING id")).rows[0].id;
     await fixture.source.pool.query("SELECT setval('patient_number_seq',31000,true)");
     const sourceBefore = (await fixture.source.pool.query('SELECT value FROM synthetic_source_witness')).rows;
     const sourceSequence = (await fixture.source.pool.query('SELECT last_value::text,is_called FROM patient_number_seq')).rows;
-    const sourceDoc = path.join(fixture.directory,'source-document.txt'), targetDoc = path.join(fixture.directory,'target-document.txt');
+    const sourceDir=path.join(fixture.directory,'source-documents'), targetDir=path.join(fixture.directory,'target-documents');
+    await mkdir(sourceDir); await mkdir(targetDir);
+    const sourceDoc = path.join(sourceDir,'synthetic-document.txt'), targetDoc = path.join(targetDir,'synthetic-document.txt');
     const sourceBytes = Buffer.from('SYNTHETIC SOURCE DOCUMENT'), targetBytes = Buffer.from('SYNTHETIC TARGET DOCUMENT');
     await writeFile(sourceDoc,sourceBytes); await writeFile(targetDoc,targetBytes);
-    const catalog = await loadMigrationFiles();
-    const migrated = await migrate(fixture.target.pool,{apply:true,files:catalog});
-    expect(migrated.appliedVersions).toContain('0080'); expect(migrated.appliedVersions).not.toContain('0079');
-    await fixture.target.pool.query("INSERT INTO patients(patient_number,full_name) VALUES ('P-07001','SYNTHETIC TARGET')");
+    for (const [pool,patient,bytes] of [[fixture.source.pool,sourcePatient,sourceBytes],[fixture.target.pool,targetPatient,targetBytes]] as const)
+      await pool.query("INSERT INTO patient_documents(patient_id,kind,title,mime_type,size_bytes,sha256,storage_key,uploaded_by) VALUES ($1,'xray','synthetic','image/png',$2,$3,'synthetic-document.txt','synthetic')",[patient,bytes.length,digest(bytes)]);
     const targetRows = (await fixture.target.pool.query('SELECT patient_number,full_name FROM patients ORDER BY patient_number')).rows;
+    const sourceRows = (await fixture.source.pool.query('SELECT patient_number,full_name FROM patients ORDER BY patient_number')).rows;
+    const documents = async (pool: Pool) => (await pool.query('SELECT patient_id::text,storage_key,sha256,size_bytes::int AS size_bytes FROM patient_documents ORDER BY id')).rows;
+    const sourceDocuments = await documents(fixture.source.pool), targetDocuments = await documents(fixture.target.pool);
+    expect(sourceDocuments).toEqual([{patient_id:String(sourcePatient),storage_key:'synthetic-document.txt',sha256:digest(sourceBytes),size_bytes:sourceBytes.length}]);
+    expect(targetDocuments).toEqual([{patient_id:String(targetPatient),storage_key:'synthetic-document.txt',sha256:digest(targetBytes),size_bytes:targetBytes.length}]);
     for (const current of [9000,10000,11000]) for (const currentCalled of [false,true]) for (const backupCalled of [false,true]) {
       await fixture.target.pool.query("SELECT setval('patient_number_seq',$1::bigint,$2)",[String(current),currentCalled]);
       const replay=patientNumberSequenceRestoreSql('10000',backupCalled);
@@ -133,6 +145,8 @@ it('preserves source and synthetic documents while checking the 12-case allocato
       expect((await fixture.target.pool.query('SELECT aqlan_allocate_patient_number() AS number')).rows[0].number).toBe(`P-${expectedValue+(expectedCalled?1:0)}`);
     }
     expect((await fixture.target.pool.query('SELECT patient_number,full_name FROM patients ORDER BY patient_number')).rows).toEqual(targetRows);
+    expect((await fixture.source.pool.query('SELECT patient_number,full_name FROM patients ORDER BY patient_number')).rows).toEqual(sourceRows);
+    expect(await documents(fixture.source.pool)).toEqual(sourceDocuments); expect(await documents(fixture.target.pool)).toEqual(targetDocuments);
     expect((await fixture.source.pool.query('SELECT value FROM synthetic_source_witness')).rows).toEqual(sourceBefore);
     expect((await fixture.source.pool.query('SELECT last_value::text,is_called FROM patient_number_seq')).rows).toEqual(sourceSequence);
     for (const db of [fixture.source,fixture.target])
