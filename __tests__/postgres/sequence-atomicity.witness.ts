@@ -63,6 +63,11 @@ async function sequence(pool:Pool, name:'patients_id_seq'|'patient_number_seq'):
 }
 const next = (s:Seq) => BigInt(s.last_value)+(s.is_called ? 1n : 0n);
 const same = (a:Seq,b:Seq) => a.last_value===b.last_value && a.is_called===b.is_called;
+async function deadline<T>(promise:Promise<T>,message:string,ms:number):Promise<T> {
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  try { return await Promise.race([promise,new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(new Error(message)),ms);})]); }
+  finally { if(timer) clearTimeout(timer); }
+}
 
 async function makeArchive(source:Pool, fail:boolean) {
   const client = await source.connect(), blocks:Buffer[] = [];
@@ -214,9 +219,15 @@ it('preserves a nonempty target when the existing guard refuses replay',async()=
 it('does not regress a concurrently allocated sequence value during replay',async()=>{
   const fixture=await ownedPair();
   const blocker = new Client({connectionString:fixture.target.url.toString(),ssl:false});
+  const allocator = new Client({connectionString:fixture.target.url.toString(),ssl:false});
   let held=false;
   try {
     await prepare(fixture,true);
+    // Only this freshly created, identity-checked synthetic DB gets a timeout;
+    // it bounds a stuck replay connection without changing any product setting.
+    const adminIdentity=(await fixture.admin.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=$1',[fixture.target.name])).rows[0];
+    expect(adminIdentity?.oid===fixture.target.identity.oid && adminIdentity?.owner===fixture.target.identity.owner).toBe(true);
+    await fixture.admin.query(`ALTER DATABASE "${fixture.target.name}" SET statement_timeout = '75s'`);
     const archive=await makeArchive(fixture.source.pool,false);
     const archivePath=path.join(fixture.directory,'synthetic-concurrent.tar.gz'); await writeFile(archivePath,archive);
     const stage=path.join(fixture.directory,'concurrent-stage'), markerPath=path.join(stage,'synthetic-stage-marker');
@@ -226,22 +237,29 @@ it('does not regress a concurrently allocated sequence value during replay',asyn
     // retains the helper trigger as evidence in its newly created database.
     await fixture.target.pool.query(`CREATE FUNCTION synthetic_pause_replay() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id=75000 THEN PERFORM pg_advisory_xact_lock(473019::bigint); END IF; RETURN NEW; END $$`);
     await fixture.target.pool.query('CREATE TRIGGER synthetic_pause_replay BEFORE INSERT ON patients FOR EACH ROW EXECUTE FUNCTION synthetic_pause_replay()');
+    const config=(await fixture.target.pool.query("SELECT seqincrement::text AS increment,seqcache::text AS cache,seqcycle AS cycle FROM pg_sequence WHERE seqrelid='public.patients_id_seq'::regclass")).rows[0];
+    expect(config?.increment==='1' && config?.cache==='1' && config?.cycle===false).toBe(true);
     const beforeData=await dataDigest(fixture.target.pool), beforeSource=await patients(fixture.source.pool);
     const originalTarget=await patients(fixture.target.pool);
     const beforeSeq=await sequence(fixture.target.pool,'patients_id_seq'), beforeNumber=await sequence(fixture.target.pool,'patient_number_seq');
-    await blocker.connect(); await blocker.query('SELECT pg_advisory_lock(473019::bigint)'); held=true;
+    await blocker.connect(); await allocator.connect();
+    for (const client of [blocker,allocator]) {
+      const identity=(await client.query("SELECT oid::text,datdba::text AS owner,(SELECT oid::text FROM pg_roles WHERE rolname=current_user) AS current_role FROM pg_database WHERE datname=current_database()")).rows[0];
+      expect(identity.oid===fixture.target.identity.oid && identity.owner===fixture.target.identity.owner && identity.current_role===fixture.target.identity.owner).toBe(true);
+    }
+    await blocker.query('SELECT pg_advisory_lock(473019::bigint)'); held=true;
     const restore = stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage,allowNonEmptyTarget:true})
       .then(result=>({kind:'returned' as const,result}),()=>({kind:'thrown' as const}));
     let completed=false;
     void restore.then(()=>{completed=true;},()=>{completed=true;});
-    const deadline=Date.now()+30000;
+    const barrierDeadline=Date.now()+30000;
     try {
       let reached=false;
       for (;;) {
         const waiting=(await fixture.target.pool.query("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND classid=0 AND objid=473019 AND NOT granted) AS waiting")).rows[0].waiting;
         if (waiting) { reached=true; break; }
         if (completed) break;
-        if (Date.now()>deadline) throw new Error('Synthetic replay did not reach concurrency barrier');
+        if (Date.now()>barrierDeadline) throw new Error('Synthetic replay did not reach concurrency barrier');
         await new Promise(resolve=>setTimeout(resolve,50));
       }
       if (!reached) {
@@ -260,9 +278,24 @@ it('does not regress a concurrently allocated sequence value during replay',asyn
         }
         throw new Error('SYNTHETIC_EARLY_REPLAY_OUTCOME_UNCLASSIFIED');
       }
-      const allocated=(await fixture.target.pool.query("SELECT nextval('patients_id_seq')::text AS value")).rows[0].value as string;
+      // A transactional fix may hold an exclusive sequence lock and correctly
+      // block nextval. Start it asynchronously and release the replay barrier
+      // once it has either completed or demonstrably waits for that sequence.
+      const allocate=allocator.query("SELECT nextval('patients_id_seq')::text AS value")
+        .then(result=>({kind:'value' as const,value:result.rows[0].value as string}),()=>({kind:'error' as const}));
+      let allocationDone=false;
+      void allocate.then(()=>{allocationDone=true;});
+      const allocationDeadline=Date.now()+30000;
+      while (!allocationDone) {
+        const waiting=(await fixture.target.pool.query("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='relation' AND relation='public.patients_id_seq'::regclass AND NOT granted) AS waiting")).rows[0].waiting;
+        if (waiting) { console.log('SYNTHETIC_ALLOCATION_WAITS_FOR_SEQUENCE'); break; }
+        if (Date.now()>allocationDeadline) throw new Error('SYNTHETIC_ALLOCATION_WAIT_UNCLASSIFIED');
+        await new Promise(resolve=>setTimeout(resolve,50));
+      }
       await blocker.query('SELECT pg_advisory_unlock(473019::bigint)'); held=false;
-      const observation=await restore;
+      const [allocation,observation]=await deadline(Promise.all([allocate,restore]),'SYNTHETIC_CONCURRENT_COMPLETION_TIMEOUT',40000);
+      if (allocation.kind==='error') throw new Error('SYNTHETIC_ALLOCATION_ERROR_UNCLASSIFIED');
+      const allocated=allocation.value;
       if (observation.kind==='thrown') throw new Error('SYNTHETIC_CONCURRENT_REPLAY_EXCEPTION_UNCLASSIFIED');
       const result=observation.result;
       if (result.ok) {
@@ -287,5 +320,5 @@ it('does not regress a concurrently allocated sequence value during replay',asyn
       if(held){await blocker.query('SELECT pg_advisory_unlock(473019::bigint)').catch(()=>{}); held=false;}
       await restore.catch(()=>{});
     }
-  } finally { await blocker.end().catch(()=>{}); await fixture.close(); }
+  } finally { await blocker.end().catch(()=>{}); await allocator.end().catch(()=>{}); await fixture.close(); }
 },180_000);
