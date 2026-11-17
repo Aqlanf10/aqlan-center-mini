@@ -32,7 +32,9 @@ export async function fetchOfficialJson(url, fetchImpl = fetch) {
     const response = await fetchImpl(url, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Cache-Control": "no-cache", "User-Agent": "aqlan-scoped-braces-verifier" }, cache: "no-store", redirect: "error", signal });
     if (!response.ok) rejectLookup(httpFailure(response.status));
     if (response.url !== url) rejectLookup("url_mismatch");
-    if (/rel="next"/.test(response.headers.get("link") ?? "")) rejectLookup("pagination");
+    // Fail closed on every nonempty Link: rel parameters admit multiple valid
+    // spellings, and even a non-pagination Link will conservatively block.
+    if ((response.headers.get("link") ?? "") !== "") rejectLookup("pagination");
     if (!/json/.test(response.headers.get("content-type") ?? "")) rejectLookup("non_json");
     const length = response.headers.get("content-length");
     if (length !== null && !(Number(length) <= 4 * 1024 * 1024)) rejectLookup("too_large");

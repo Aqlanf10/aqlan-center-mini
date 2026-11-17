@@ -43,6 +43,27 @@ describe("official lookup failures remain closed and safely classified", () => {
       .rejects.toThrow("official lookup failed: endpoint=advisory reason=timeout");
   });
 
+  it.each([
+    '<https://example.invalid/next>; rel="next"',
+    '<https://example.invalid/next>; rel=next',
+    '<https://example.invalid/next>; ReL="NeXt"',
+    '<https://example.invalid/first>; rel="prev next"',
+    '<https://example.invalid/help>; rel="help"',
+    secret,
+  ])("rejects every nonempty Link without exposing its content", async link => {
+    const result = response(matching, "{}", { headers: { "content-type": "application/json", link } });
+    const message = await fetchOfficialJson(matching, async () => result).then(() => "unexpected-success", error => error.message);
+    expect(message).toBe("BRACES_EXCEPTION_REJECTED: official lookup failed: endpoint=matching reason=pagination");
+    expect(message).not.toContain(link);
+    expect(message).not.toContain(secret);
+  });
+
+  it("accepts valid JSON with a missing or empty Link", async () => {
+    for (const headers of [{ "content-type": "application/json" }, { "content-type": "application/json", link: "" }]) {
+      expect(await fetchOfficialJson(matching, async () => response(matching, "[]", { headers }))).toEqual([]);
+    }
+  });
+
   it("never inspects a hostile thrown value or its accessors", async () => {
     const trap = vi.fn(() => { throw new Error(secret); });
     const hostile = new Proxy({}, { get: trap, getPrototypeOf: trap, getOwnPropertyDescriptor: trap });
