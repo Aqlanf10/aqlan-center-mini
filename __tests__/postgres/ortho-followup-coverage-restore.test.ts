@@ -170,7 +170,7 @@ it("restores a fresh archive without activating 0079 and refuses an inconsistent
     const inconsistent = await stagedRestore({ archivePath: inconsistentPath, targetUrl: isolated.archiveTarget.options.connectionString!, stagingDir: join(directory, 'inconsistent-documents') });
     expect(inconsistent.ok).toBe(false); expect(inconsistent.readyForCutover).toBe(false);
     expect(inconsistent.errors.length).toBeGreaterThan(0);
-    expect((await isolated.archiveTarget.query("SELECT count(*)::int AS n FROM patients")).rows[0].n).toBe(0);
+    expect((await isolated.archiveTarget.query("SELECT to_regclass('public.patients') AS name")).rows[0].name).toBeNull();
     expect((await isolated.archiveTarget.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows[0].name).toBeNull();
   } finally { await isolated.close(); }
 }, 180000);
