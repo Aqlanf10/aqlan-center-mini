@@ -7,7 +7,7 @@ import { PATIENT_APPOINTMENT_HISTORY_SQL } from "../../lib/patient-appointment-h
 import { compareDetailedSchemaCatalogs, projectDetailedSchemaReadOnly } from "../../lib/schema-manifest";
 import { classifyOpenFindings, parseOpenFindingsManifest } from "../../lib/schema-ownership-open-findings";
 import openFindings from "../../schema/schema-ownership-open-findings.pg18.json";
-import { RESET_KEEP_TABLES, RESET_WIPE_TABLES } from "../../lib/clinic-reset";
+import { ORTHO_FOLLOWUP_HISTORY_TABLES, RESET_KEEP_TABLES, RESET_WIPE_TABLES } from "../../lib/clinic-reset";
 
 let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 let files: MigrationFile[], index: MigrationFile;
@@ -97,13 +97,16 @@ it("serializes numbered/runtime racers and retries idempotently on a populated 0
   const competitor = new Pool({ connectionString: pool.options.connectionString!, ssl: false });
   try {
     const [runtime, numbered] = await Promise.all([applyRuntimeMigrationFiles(pool, [index]), migrate(competitor, { apply: true, files })]);
-    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0126", "0128", "0129", "0133", "0136"]);
+    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0074", "0078", "0080", "0081", "0082", "0087", "0089", "0126", "0128", "0129", "0133", "0136"]);
   } finally { await competitor.end(); }
   const oid = (await pool.query("SELECT 'appointments_patient_history_idx'::regclass::oid AS oid")).rows;
   expect(await applyRuntimeMigrationFiles(pool, [index])).toEqual([]);
   expect((await migrate(pool, { apply: true, files })).appliedVersions).toEqual([]);
   expect((await pool.query("SELECT 'appointments_patient_history_idx'::regclass::oid AS oid")).rows).toEqual(oid);
   expect(await registry(pool)).toEqual(expectedRegistry()); expectOnlyNumberingVersionAdded(before, await rows(pool));
+  expect(files.find(file => file.version === "0079")?.checksum).toBe("5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99");
+  expect((await pool.query("SELECT version FROM schema_migrations WHERE version='0079'")).rows).toEqual([]);
+  expect((await pool.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows).toEqual([{ name: null }]);
 });
 
 it("upgrades through actual runtime and fresh runtime with the exact index, no financial or patient row changes", async () => {
@@ -125,7 +128,11 @@ it("upgrades through actual runtime and fresh runtime with the exact index, no f
 it("adds no reset ownership, and keeps patient history, index and registry through protected reset refusal", async () => {
   await runtimeAt(fixture.sqlTarget);
   const tables = (await fixture.sqlTarget.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows.map(row => row.tablename);
-  expect([...RESET_KEEP_TABLES, ...RESET_WIPE_TABLES].sort()).toEqual(tables);
+  expect([...ORTHO_FOLLOWUP_HISTORY_TABLES].sort()).toEqual(["ortho_followup_coverage_rejections", "ortho_followup_coverage_revisions"]);
+  expect(RESET_KEEP_TABLES).toEqual(expect.arrayContaining([...ORTHO_FOLLOWUP_HISTORY_TABLES]));
+  const resetTables = [...RESET_KEEP_TABLES, ...RESET_WIPE_TABLES].sort();
+  expect(resetTables.filter(table => !tables.includes(table))).toEqual([...ORTHO_FOLLOWUP_HISTORY_TABLES].sort());
+  expect(tables.filter(table => !resetTables.includes(table))).toEqual([]);
   const prior = await catalog(fixture.sqlTarget), registration = await registry(fixture.sqlTarget);
   const patients = (await fixture.sqlTarget.query("SELECT to_jsonb(p) AS row FROM patients p ORDER BY id")).rows;
   const appointments = (await fixture.sqlTarget.query("SELECT to_jsonb(a) AS row FROM appointments a ORDER BY id")).rows;
@@ -140,3 +147,21 @@ it("adds no reset ownership, and keeps patient history, index and registry throu
   expect(await catalog(fixture.sqlTarget)).toEqual(prior); expect(await registry(fixture.sqlTarget)).toEqual(registration);
   expect((await fixture.sqlTarget.query("SHOW session_replication_role")).rows[0].session_replication_role).toBe("origin");
 });
+
+it("retains historic 0079 tables in reset ownership and leaves appointments and index unchanged", async () => {
+  const pool = fixture.source, before = await rows(pool), beforeIndex = await catalog(pool), beforeRegistry = await registry(pool);
+  const historical = await migrate(pool, { apply: true, files, historical0079: true });
+  expect(historical.appliedVersions).toEqual(["0079"]);
+  expect(await rows(pool)).toEqual(before);
+  expect(await catalog(pool)).toEqual(beforeIndex);
+  expect(await registry(pool)).toEqual(beforeRegistry);
+  const tables = (await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows.map(row => row.tablename);
+  expect([...RESET_KEEP_TABLES, ...RESET_WIPE_TABLES].sort()).toEqual(tables);
+  expect(RESET_KEEP_TABLES).toEqual(expect.arrayContaining([...ORTHO_FOLLOWUP_HISTORY_TABLES]));
+  await runtimeAt(pool);
+  expect(await rows(pool)).toEqual(before);
+  expect(await catalog(pool)).toEqual(beforeIndex);
+  expect(await registry(pool)).toEqual(beforeRegistry);
+  expect((await pool.query("SELECT version,checksum,adopted FROM schema_migrations WHERE version='0079'")).rows)
+    .toEqual([{ version: "0079", checksum: "5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99", adopted: false }]);
+}, 180_000);

@@ -28,12 +28,24 @@ describe("0051/0052 registration on a real fresh main/HR/finance predecessor", (
     expect(await registry()).toEqual(before);
   });
 
-  it("serializes a real CLI/runtime race on separate connections without duplicate registration", async () => {
+  it.each(["fresh", "historical"])("serializes the CLI/runtime race without duplicate registration on a %s 0079 history", async history => {
+    if (history === "historical") {
+      const result = await migrate(fixture.source, { apply: true, files: files.filter(file => !["0051", "0052"].includes(file.version)), historical0079: true });
+      expect(result.appliedVersions).toEqual(["0079"]);
+      await fixture.source.query("UPDATE schema_migrations SET applied_at='2025-03-04T05:06:07.123456Z' WHERE version='0079'");
+    }
+    const historyBefore = (await fixture.source.query("SELECT version,name,checksum,adopted,applied_at::text FROM schema_migrations WHERE version='0079'")).rows;
+    expect(historyBefore).toHaveLength(history === "historical" ? 1 : 0);
+    const patient = (await fixture.source.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-REGISTRATION','Synthetic retained patient') RETURNING id,patient_number,full_name")).rows;
     const competitor = new Pool({ connectionString: fixture.source.options.connectionString!, ssl: false });
     try {
       const [runtimeResult, cli] = await Promise.all([applyOrthoAssessmentRuntime(fixture.source), migrate(competitor, { apply: true, files })]);
       expect([...runtimeResult, ...cli.appliedVersions].sort()).toEqual(["0051", "0052"]);
-      expect((await registry()).map(row => row.version)).toEqual(files.map(file => file.version));
+      expect((await registry()).map(row => row.version)).toEqual(files.filter(file => history === "historical" || file.version !== "0079").map(file => file.version));
+      expect((await fixture.source.query("SELECT version,name,checksum,adopted,applied_at::text FROM schema_migrations WHERE version='0079'")).rows).toEqual(historyBefore);
+      expect((await fixture.source.query("SELECT id,patient_number,full_name FROM patients WHERE patient_number='SYN-REGISTRATION'")).rows).toEqual(patient);
+      const footprint = (await fixture.source.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows[0].name;
+      expect(footprint).toBe(history === "historical" ? "ortho_followup_coverage_revisions" : null);
       expect(await applyOrthoAssessmentRuntime(competitor)).toEqual([]);
     } finally { await competitor.end(); }
   });
