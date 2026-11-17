@@ -41,6 +41,6 @@ for (const [name,url,extra] of [
 test('safe synthetic URI reaches missing-file branch (positive ordering control)', () => {
   const outcome = invoke(good);
   assert.equal(outcome.status, 1);
-  assert.match(outcome.stderr, /DO-NOT-CREATE-PATIENT-ARCHIVE/);
-  assert.doesNotMatch(outcome.stderr, /PG_CLIENT_CONSTRUCTOR_CALLED/);
+  assert.match(outcome.stderr, /RESTORE_SOURCE_READ_FAILED/);
+  assert.doesNotMatch(outcome.stderr, /PG_CLIENT_CONSTRUCTOR_CALLED|DO-NOT-CREATE-PATIENT-ARCHIVE/);
 });

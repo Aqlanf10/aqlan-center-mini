@@ -41,9 +41,15 @@ try {
   process.exit(2);
 }
 
+let text;
+try {
+  text = readFileSync(file, "utf8");
+} catch {
+  console.error("تعذّرت قراءة ملف الاستعادة: RESTORE_SOURCE_READ_FAILED");
+  process.exit(1);
+}
 let sql;
 try {
-  const text = readFileSync(file, "utf8");
   // Restore protocol R1: a canonical source needs the staged restore and its hold.
   if (isCanonicalSourceSql(text)) {
     console.error("هذه نسخة من قاعدة بهوية موحّدة. استعادتها تمر بالاستعادة المرحلية مع حجز الاستعادة، لا بهذا الأمر.");
