@@ -36,15 +36,17 @@ The observer identifies the replay connection by a fixed synthetic
 rolls back the actor **before** waiting for a blocked replay. A fixed known
 numbering-busy error or the existing exact nonempty guard may be classified as
 refusal; any other error, unexpected early success, timeout or thrown error is
-an unclassified failure. A successful replay is accepted only after the actor
-rollback and an observed wait, with the selected source/target patients
-verified. This deliberately does not assume that a generic SQLSTATE or every
-lock timeout means the patient-number guard fired. For a waiting replay, the
-test records whether it had already finished *before issuing* actor rollback;
-it does not infer server lock state from the order of JavaScript callbacks
-relative to the rollback response. An observed wait is bounded to the named
+an unclassified failure. For an accepted success the test requires an observed
+actor-blocked wait and a JavaScript snapshot showing replay had not completed
+before the rollback request; it then awaits both the rollback response and the
+replay result and verifies selected source/target patients. This does not prove
+the order in which the server completed replay and sent its rollback response.
+The test does not assume that a generic SQLSTATE or every lock timeout means
+the patient-number guard fired. An observed wait is bounded to the named
 synthetic replay and the verified actor PID; it does not identify which table
-or advisory lock caused the wait.
+or advisory lock caused the wait. The fixed `application_name` is appended to
+this synthetic target URL only; a separate target guard under development may
+reject that option, so compatibility with it is not claimed without testing.
 
 The test checks that neither the already allocated number nor the retired
 number is allocated again, that the target next candidate and policy-derived
@@ -64,7 +66,11 @@ changes error presentation; composing the branches requires a reviewed stable
 reason that distinguishes this specific guard from unrelated PostgreSQL lock
 errors. The witness does not authorize restoring raw error messages.
 
-No PostgreSQL, HTTP endpoint, Next build or CI ran on this new witness yet.
+Focused TypeScript and ESLint checks used the current checkout with this test's
+files and the base guard overlaid in memory; they passed but are not a complete
+project typecheck. Nine pure synthetic refusal-classifier checks and 26 alias
+checks passed in memory. No PostgreSQL, HTTP endpoint, Next build or CI ran on
+this new witness yet.
 Its actor rollback and subsequent allocation are intentional mutations only to
 the freshly created synthetic target. They do not prove recovery, policy or
 concurrency safety for other paths, all caches, external sessions, 0090, or

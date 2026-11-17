@@ -173,7 +173,7 @@ it('keeps a pending synthetic patient allocation and retired floor from being re
     if(waited)console.log('SYNTHETIC_REPLAY_WAITED_FOR_ALLOCATOR_ACTOR');
     if(finishedBeforeRollback && recognized==='BUSY')console.log('SYNTHETIC_REPLAY_BUSY_WHILE_ACTOR_OPEN');
     if(finishedBeforeRollback && recognized==='NONEMPTY')console.log('SYNTHETIC_NONEMPTY_GUARD_WHILE_ACTOR_OPEN');
-    if(waited && !finishedBeforeRollback && result?.ok)console.log('SYNTHETIC_REPLAY_SUCCEEDED_AFTER_ACTOR_ROLLBACK');
+    if(waited && !finishedBeforeRollback && result?.ok)console.log('SYNTHETIC_REPLAY_SUCCESS_AFTER_OBSERVED_WAIT_AND_ROLLBACK_REQUEST');
 
     const afterReplay=await sequence(fixture.target.pool),afterFloor=await floor(fixture.target.pool);
     expect(next(afterReplay)>=next(afterAllocation)).toBe(true);
