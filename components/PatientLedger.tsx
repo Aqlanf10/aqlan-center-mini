@@ -1882,16 +1882,9 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
             if(exactProof?.labWorkOrderId)return <LabWorkOrderLink key={`${member.key}:${exactProof.labWorkOrderId}`} orderId={exactProof.labWorkOrderId} patientId={patientId} disabled={busy||commandLocked} onChanged={()=>setPreviewRetry(value=>value+1)}/>;
             if(exactProof?.labWork&&!member.labWork)return <p key={member.key} role="status" className="text-xs">هذا العمل مرتبط بمسوّدة مختبر محفوظة؛ تُحفظ هويتها الأصلية مع الفاتورة.</p>;
             if(!member.labWork && (!labWorkSupported || !labWorkForCategory(category??null)))return null;
-            if(member.labWork?.groupKind==="grouped"){
-              const intentId=member.labWork.intentId;
-              const members=rows.filter(one=>one.labWork?.intentId===intentId);
-              if(members[0]?.key!==member.key)return <p key={member.key} role="status" className="mt-2 text-xs text-sky-900" data-testid={`grouped-lab-member-${member.toothCode}`}>ضمن طلب المختبر الواحد — سن {member.toothCode}</p>;
-              return <GroupedLabEntry key={member.key} value={member.labWork} teeth={members.map(one=>one.toothCode).filter((tooth):tooth is number=>tooth!==null)}
-                disabled={busy || commandLocked || !labWorkSupported}
-                onChange={next=>{ if(!canEditRows.current())return; setRows(current=>current.map(one=>one.labWork?.intentId!==intentId?one
-                  :{...one,labWork:{...one.labWork,prescription:next.prescription,...(next.instructions.trim()?{instructions:next.instructions}:{instructions:undefined})}})); }}
-                onDissolve={member.labWork.expectedRevision===0?()=>{ if(canEditRows.current())setRows(current=>current.map(one=>one.labWork?.intentId===intentId?{...one,labWork:undefined}:one)); }:undefined}/>;
-            }
+            // 0136: a grouped tooth shows one line under its own row; the single entry is rendered once below.
+            if(member.labWork?.groupKind==="grouped")return key!==row.key?null
+              :<p key={member.key} role="status" className="mt-2 text-xs text-sky-900" data-testid={`grouped-lab-member-${member.toothCode}`}>ضمن طلب المختبر الواحد — سن {member.toothCode}</p>;
             return member.labWork ? <LabWorkDraftFields key={member.key} value={member.labWork} workLabel={serviceOf(member.serviceId)?.name??"عمل المختبر"} sourceTooth={member.toothCode}
               disabled={busy || commandLocked || !labWorkSupported} onChange={next => changeLabWork(member.key,next)} onRetire={()=>retireLabMember(member)}
               bridgeChoices={rows.filter(other=>other.key!==member.key&&other.labWork?.groupKind==="bridge"&&other.labWork.expectedRevision===0&&other.labWork.intentId!==member.labWork?.intentId)
@@ -1994,6 +1987,15 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
         </div>;
       })}
 
+      {[...new Set(rows.filter(row => row.labWork?.groupKind === "grouped").map(row => row.labWork!.intentId))].map(intentId => {
+        // 0136: ONE short entry per grouped order, whatever the number of teeth or display groups.
+        const members = rows.filter(row => row.labWork?.intentId === intentId), first = members[0].labWork!;
+        return <GroupedLabEntry key={intentId} value={first} teeth={members.map(one => one.toothCode).filter((tooth): tooth is number => tooth !== null)}
+          disabled={busy || commandLocked || !labWorkSupported}
+          onChange={next => { if (!canEditRows.current()) return; setRows(current => current.map(one => one.labWork?.intentId !== intentId ? one
+            : { ...one, labWork: { ...one.labWork, prescription: next.prescription, ...(next.instructions.trim() ? { instructions: next.instructions } : { instructions: undefined }) } })); }}
+          onDissolve={first.expectedRevision === 0 ? () => { if (canEditRows.current()) setRows(current => current.map(one => one.labWork?.intentId === intentId ? { ...one, labWork: undefined } : one)); } : undefined}/>;
+      })}
       {(() => {
         // 0136 (owner #483 6930647956, 6931868779): any number of crown/veneer teeth, from either jaw → one lab order.
         if (historical || !labWorkSupported || !(formSession?.role === "admin" || formSession?.role === "doctor")) return null;
