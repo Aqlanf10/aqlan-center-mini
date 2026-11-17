@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { observeSyntheticPdfReferenceFailure } from "../fixtures/receipt-pdf-reference-diagnostic";
 import { Client } from "pg";
 import { chromium, type Browser, type Page } from "playwright";
 import { execFileSync } from "node:child_process";
@@ -332,7 +333,10 @@ describe("receipt provenance on real built pages and native A6 paper", () => {
         expect(text).toContain(spec.payment.receiptNumber);
         expect(text).toContain(patientName);
         expect(text).toContain(spec.payment.amountMinor.toLocaleString("en-US"));
-        for (const reference of spec.references) expect(text).toContain(reference.receiptNumber);
+        for (const reference of spec.references) {
+          if (!text.includes(reference.receiptNumber)) observeSyntheticPdfReferenceFailure(spec.scene, text, reference.receiptNumber);
+          expect(text).toContain(reference.receiptNumber);
+        }
         for (const word of spec.title.split(" ")) expect(paper.words.some(actual => matchesPrintPdfWord(actual.text, word))).toBe(true);
         assertPrintPdfHeader(paper, header);
         assertReceiptPrintPdfSignature(paper, signature);
