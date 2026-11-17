@@ -27,6 +27,12 @@ writer. The general migrator historically compared checksums without requiring
 matching names, so refusing a different name is a conservative compatibility
 hold, not a finding that the source is corrupt. Older/malformed or differently
 named ledgers require review without resetting the target.
+The check deliberately accepts a known recorded subset, including a ledger
+containing only 0079; it does not establish that the source schema's complete
+migration history is represented. The older strict 0079 parser also refuses
+columnless or reordered 0079 rows even when their values might be valid. Those
+compatibility boundaries are not evidence of corruption or of complete
+historical support.
 
 The guarded parser accepts the application's writer-style literal `INSERT`
 tuples, its three numeric relationship-fixup `UPDATE` forms, and its two
