@@ -40,6 +40,7 @@ it("preserves exact historical receipts and rejects new or simultaneous requests
  await expect(command.commandCanonicalFollowupCoverage(owner,p,s.ortho,refused)).rejects.toMatchObject({code:"stale_coverage"});
  const projection=await editor.readCanonicalCoverageEditor(owner,p,s.ortho);expect(projection).toMatchObject({enabled:true,canEdit:false,current:{decision:"included"}});expect(projection.current).not.toHaveProperty("commandId");
  await expect(status.readCanonicalCoverageCommandStatus(denied,p,s.ortho,c)).rejects.toThrow();
+ await expect(command.commandCanonicalFollowupCoverage(denied,p,s.ortho,c)).rejects.toThrow();
  const fresh={...c,commandId:randomUUID(),expectedRevisionId:historical.state==="committed"?historical.revision.id:null};
  const results=await Promise.allSettled([command.commandCanonicalFollowupCoverage(owner,p,s.ortho,fresh),command.commandCanonicalFollowupCoverage(owner,p,s.ortho,fresh)]);
  expect(results).toHaveLength(2);for(const r of results){expect(r.status).toBe("rejected");if(r.status==="rejected")expect(r.reason).toMatchObject({code:"coverage_authoring_retired"});}

@@ -5,6 +5,7 @@ import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
 import { waitForBlockedBy, capabilityDocument } from "./_canonical-ready-fixture";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
+import { applyRuntimeMigrationFiles, loadMigrationFiles } from "../../lib/migrations";
 vi.mock("server-only", () => ({}));
 assertRealPostgresUrl(); stubPostgresEnv(); vi.stubEnv("SESSION_SECRET", "synthetic-coverage-secret-0123456789abcdef");
 const db = await import("../../lib/db"), minimal = await import("../../lib/canonical-ortho-coverage"), reads = await import("../../lib/canonical-ortho-coverage-editor"), store = await import("../../lib/ortho-followup-coverage-db");
@@ -25,14 +26,16 @@ let base: Awaited<ReturnType<typeof seedCanonicalCoverage>>;
 const episode = (patientId = ids.own, save = true) => seedCanonicalCoverage(fx.pool, { patientId, actorId: fx.ids.owner, doctorId: fx.parties.own!, save });
 const read = async (key: Key, f = base) => reads.readCanonicalCoverageEditor(await fx.session(key), f.patient, f.ortho);
 beforeAll(async () => {
-  fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner"); side = new Pool({ connectionString: fx.pool.options.connectionString, max: 3 });
+  fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner");
+  const historical=(await loadMigrationFiles()).find(file=>file.version==='0079');if(!historical)throw new Error('Historical 0079 artifact missing');
+  await applyRuntimeMigrationFiles(fx.pool,[historical]); side = new Pool({ connectionString: fx.pool.options.connectionString, max: 3 });
   for (const key of ["own", "outside"] as const) ids[key] = (await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,$1,$2) RETURNING id", [`SYN-CED-${key}`, key === "own" ? fx.parties.own! : null])).rows[0].id;
   base = await episode();
   await fx.pool.query("UPDATE ortho_cases SET status='active' WHERE id=$1",[base.ortho]);
 }, 180_000);
 afterAll(async () => { await side?.end(); await fx?.close(); });
 it.each(["owner","own","all"]as const)("%s reads the complete minimal explicit source choice",async key=>{
- const result=await read(key);expect(result).toMatchObject({projection:"ortho-followup-coverage-editor",patientId:base.patient,orthoCaseId:base.ortho,enabled:true,canEdit:true,applicable:true,current:{id:base.revision},sources:[base.source]});
+ const result=await read(key);expect(result).toMatchObject({projection:"ortho-followup-coverage-editor",patientId:base.patient,orthoCaseId:base.ortho,enabled:true,canEdit:false,applicable:true,current:{id:base.revision},sources:[base.source]});
  expect(Object.keys(result).sort()).toEqual(["applicable","canEdit","current","enabled","orthoCaseId","patientId","projection","sources"]);expect(Object.keys(result.current!).sort()).toEqual(["createdAt","createdBy","decision","id","reason","version"]);expect(JSON.stringify(result)).not.toMatch(/250000|snapshot|commandId|tooth|private clinical|private plan|phone|medical|requestFingerprint/);
 });
 it.each(["finance.invoices.view","clinical.plans.view","clinical.ortho.view"]as const)("%s is independent of agreement management; ordinary decision reading stays available",async grant=>{
@@ -44,7 +47,7 @@ it("missing, foreign and mismatched owner references remain indistinguishable",a
 });
 it.each(["completed","cancelled"]as const)("%s preserves the record but refuses future editing",async status=>{const s=await episode();await fx.pool.query("UPDATE ortho_cases SET status=$1 WHERE id=$2",[status,s.ortho]);expect(await read("owner",s)).toMatchObject({enabled:true,canEdit:false,current:{id:s.revision},sources:[s.source]});});
 it("one fenced RR read-only snapshot contains case state, source fingerprint and authority",async()=>{
- const patient=(await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-CED-SNAPSHOT','SYN snapshot patient',$1) RETURNING id",[fx.parties.own])).rows[0].id;const s=await episode(patient);await fx.pool.query("UPDATE ortho_cases SET status='active' WHERE id=$1",[s.ortho]);const original=store.readFollowupCoverageSnapshotWith,spy=vi.spyOn(store,"readFollowupCoverageSnapshotWith").mockImplementationOnce(async(q,p,c)=>{expect((await q.query("SHOW transaction_isolation")).rows[0].transaction_isolation).toBe("repeatable read");expect((await q.query("SHOW transaction_read_only")).rows[0].transaction_read_only).toBe("on");await side.query("UPDATE ortho_cases SET status='completed' WHERE id=$1",[s.ortho]);await side.query("UPDATE invoices SET total_minor=260000 WHERE id=$1",[s.invoice]);return original(q,p,c);});try{expect(await read("own",s)).toMatchObject({canEdit:true,applicable:true,sources:[s.source]});}finally{spy.mockRestore();}const next=await read("own",s);expect(next).toMatchObject({canEdit:false,applicable:false});expect(next.sources[0].fingerprint).not.toBe(s.source.fingerprint);
+ const patient=(await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-CED-SNAPSHOT','SYN snapshot patient',$1) RETURNING id",[fx.parties.own])).rows[0].id;const s=await episode(patient);await fx.pool.query("UPDATE ortho_cases SET status='active' WHERE id=$1",[s.ortho]);const original=store.readFollowupCoverageSnapshotWith,spy=vi.spyOn(store,"readFollowupCoverageSnapshotWith").mockImplementationOnce(async(q,p,c)=>{expect((await q.query("SHOW transaction_isolation")).rows[0].transaction_isolation).toBe("repeatable read");expect((await q.query("SHOW transaction_read_only")).rows[0].transaction_read_only).toBe("on");await side.query("UPDATE ortho_cases SET status='completed' WHERE id=$1",[s.ortho]);await side.query("UPDATE invoices SET total_minor=260000 WHERE id=$1",[s.invoice]);return original(q,p,c);});try{expect(await read("own",s)).toMatchObject({canEdit:false,applicable:true,sources:[s.source]});}finally{spy.mockRestore();}const next=await read("own",s);expect(next).toMatchObject({canEdit:false,applicable:false});expect(next.sources[0].fingerprint).not.toBe(s.source.fingerprint);
 });
 it("disabled substrate and absent head remain distinct without implicit initialization",async()=>{const s=await episode(ids.own,false);expect(await read("owner",s)).toMatchObject({enabled:true,current:null,applicable:false});await fx.pool.query("ALTER TABLE visits DISABLE TRIGGER ortho_followup_visit_manifest");try{expect(await read("owner",s)).toMatchObject({enabled:false,canEdit:false,current:null,applicable:false,sources:[]});}finally{await fx.pool.query("ALTER TABLE visits ENABLE TRIGGER ortho_followup_visit_manifest");}});
 it("all persisted money, signed history and audit stay unchanged; one lease and no legacy wrapper",async()=>{
