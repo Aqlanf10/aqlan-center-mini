@@ -30953,7 +30953,9 @@ export async function commissionDetailReport(
       .filter((finding) => filter.doctorId == null || finding.doctorId === filter.doctorId)
       .map((finding) => ({ ...finding, doctorName: doctorName.get(finding.doctorId) ?? "—" })),
     underReviewParticipations: (collector.underReviewParticipations ?? [])
-      .filter((line) => (filter.doctorId == null || line.lineDoctorId === filter.doctorId) && (filter.currency == null || line.currency === filter.currency)),
+      .filter((pending) => lines.some((line) => line.invoiceId === pending.invoiceId && line.caseId === pending.caseId
+        && line.patientId === pending.patientId && line.doctorId === pending.lineDoctorId && line.currency === pending.currency
+        && line.category === pending.category)),
   };
 }
 

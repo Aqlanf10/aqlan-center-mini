@@ -153,6 +153,10 @@ describe("the commission report follows the decision in force", () => {
     expect([await earned(a.partyId), await earned(b.partyId)]).toEqual([40_000, 0]);
     const detail = await db.commissionDetailReport("1970-01-01", FAR, { doctorId: a.partyId, currency: null, category: null });
     expect(detail.underReviewParticipations).toEqual([expect.objectContaining({ caseId: c.caseId, invoiceId: c.invoiceId, lineDoctorId: a.partyId, amountMinor: 100_000 })]);
+    const otherDoctor = await db.commissionDetailReport("1970-01-01", FAR, { doctorId: b.partyId });
+    expect(otherDoctor.underReviewParticipations).toEqual([]);
+    const otherCategory = await db.commissionDetailReport("1970-01-01", FAR, { category: "orthodontics" });
+    expect(otherCategory.underReviewParticipations).toEqual([]);
     const approved = await decide(c.caseId, "approved", [[a.partyId, 5_000], [b.partyId, 5_000]], pending.record.id, "equal");
     if (!approved.ok) throw new Error("fixture");
     expect([await earned(a.partyId), await earned(b.partyId)]).toEqual([20_000, 15_000]);

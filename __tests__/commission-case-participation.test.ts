@@ -99,7 +99,8 @@ describe("a pending decision holds nothing (owner #483 6905003552)", () => {
     for (const parts of [[[A, 6_000], [B, 3_000]], [[A, 6_000], [B, 5_000]]] as [number, number][][]) {
       const { of, held } = run([invoice([line(100_000)], 100_000)], [paid(1, 100_000)], policies({ [A]: plain(40), [B]: plain(30) }), approved(parts));
       expect(of(A).earnedMinor + of(B).earnedMinor).toBe(0);
-      expect(held).toHaveLength(1);
+      // Corrupt approved data is held, but must not be presented as a paid pending decision.
+      expect(held).toHaveLength(0);
     }
   });
 });
