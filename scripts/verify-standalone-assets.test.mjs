@@ -76,3 +76,12 @@ test("rejects an output from a different build", async (t) => {
   await put(shipped, ".next/BUILD_ID", "different-build-id\n");
   await rejects(verifyStandaloneAssets(source, shipped), "BUILD_ID_MISMATCH");
 });
+
+test("the build verifies standalone assets after completing chunk assembly", async () => {
+  const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  const build = pkg.scripts.build;
+  assert.equal(typeof build, "string");
+  const assembled = build.indexOf("node scripts/assemble-standalone-entry-chunks.mjs");
+  const verified = build.indexOf("node scripts/verify-standalone-assets.mjs");
+  assert.ok(assembled >= 0 && verified > assembled);
+});
