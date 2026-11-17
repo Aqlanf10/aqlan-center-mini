@@ -14,6 +14,8 @@ import { fullBackupBlocks } from '../../lib/fullBackup';
 import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { stagedRestore } from '../../lib/restore/staging';
 import { parseTarBytes } from '../../lib/restore/archive';
+import { classifyPatientReplayRefusal } from '../helpers/synthetic-patient-replay-refusal';
+import { validatePendingReplayAliases } from '../helpers/synthetic-pending-replay-aliases';
 
 const sha=(data:Uint8Array)=>createHash('sha256').update(data).digest('hex');
 type Seq={last_value:string;is_called:boolean};
@@ -31,6 +33,7 @@ async function withDeadline<T>(promise:Promise<T>,ms:number):Promise<T>{
 
 async function ownedPair(){
   validateStandaloneWitnessEnvironment(process.env);
+  validatePendingReplayAliases(process.env);
   validateOperationalVerificationEnvironment(process.env);
   const checked=validatePostgresTestTarget(process.env);
   const admin=new Client({connectionString:checked.maintenanceUrl.toString(),ssl:false});
@@ -74,14 +77,6 @@ async function fixedRows(pool:Pool,table:'patient_numbering_policy'|'retired_pat
   return (await pool.query(`SELECT to_jsonb(t)::text AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;
 }
 
-function refusal(result:Awaited<ReturnType<typeof stagedRestore>>):'BUSY'|'NONEMPTY'|'UNKNOWN'{
-  if(result.ok || result.readyForCutover || result.validationErrors.length!==0 || result.errors.length!==1)return 'UNKNOWN';
-  const error=result.errors[0];
-  if(error==='فشل تطبيق بيانات الاستعادة على الهدف المعزول: patient numbering busy; refresh and retry')return 'BUSY';
-  if(/^الهدف ليس فارغًا \([1-9]\d* جدولًا\)\. الاستعادة فوق بيانات قائمة مرفوضة افتراضًا — إن كان المقصود فعلًا فمرّر allowNonEmptyTarget بوعي كامل\.$/u.test(error))return 'NONEMPTY';
-  return 'UNKNOWN';
-}
-
 it('keeps a pending synthetic patient allocation and retired floor from being reused across replay',async()=>{
   const fixture=await ownedPair();
   const actor=new Client({connectionString:fixture.target.url.toString(),ssl:false});
@@ -101,6 +96,10 @@ it('keeps a pending synthetic patient allocation and retired floor from being re
     // Verify the exact created database name/OID/owner and caller before either
     // explicit setval; no externally supplied database is mutated.
     await fixture.verify(fixture.source);await fixture.verify(fixture.target);
+    for(const db of [fixture.source,fixture.target]){
+      const privileges=(await db.pool.query("SELECT has_sequence_privilege('public.patient_number_seq','USAGE') AS can_use,has_sequence_privilege('public.patient_number_seq','SELECT') AS can_read,has_sequence_privilege('public.patient_number_seq','UPDATE') AS can_update")).rows[0];
+      expect(privileges.can_use===true && privileges.can_read===true && privileges.can_update===true).toBe(true);
+    }
     await fixture.source.pool.query("SELECT setval('patient_number_seq',9000,false)");
     await fixture.target.pool.query("SELECT setval('patient_number_seq',10000,true)");
     const sourceSeq=await sequence(fixture.source.pool);
@@ -113,6 +112,8 @@ it('keeps a pending synthetic patient allocation and retired floor from being re
     const retired=await fixedRows(fixture.target.pool,'retired_patient_numbers');
     const history=await fixedRows(fixture.target.pool,'schema_migrations');
     expect(beforeFloor>next(beforeSeq)).toBe(true);
+    const minimum=(await fixture.target.pool.query('SELECT minimum_next::text AS value FROM patient_numbering_policy WHERE singleton')).rows[0].value as string;
+    expect(BigInt(minimum)>next(beforeSeq) && 13000n>next(beforeSeq)).toBe(true);
 
     const client=await fixture.source.pool.connect(),blocks:Buffer[]=[];
     try{for await(const block of fullBackupBlocks({source:client,readDocument:async()=>{throw new Error('No synthetic document expected');}}))blocks.push(Buffer.from(block));}
@@ -136,10 +137,13 @@ it('keeps a pending synthetic patient allocation and retired floor from being re
     await actor.connect();
     const actorIdentity=(await actor.query("SELECT current_database() AS name,oid::text,datdba::text AS owner,(SELECT oid::text FROM pg_roles WHERE rolname=current_user) AS role,current_setting('transaction_isolation') AS isolation,pg_backend_pid() AS pid FROM pg_database WHERE datname=current_database()")).rows[0];
     expect(actorIdentity.name===fixture.target.name && actorIdentity.oid===fixture.target.identity.oid && actorIdentity.owner===fixture.target.identity.owner && actorIdentity.role===fixture.target.identity.owner && actorIdentity.isolation==='read committed').toBe(true);
+    expect((await actor.query("SELECT has_function_privilege('public.aqlan_allocate_patient_number()','EXECUTE') AS allowed")).rows[0].allowed).toBe(true);
     await actor.query('BEGIN');actorOpen=true;
     const allocated=(await actor.query('SELECT aqlan_allocate_patient_number() AS value')).rows[0].value as string;
     expect(allocated==='P-13001').toBe(true);
     const allocatedNumber=BigInt(allocated.slice(2));
+    const locks=(await fixture.target.pool.query("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1::int AND locktype='advisory' AND mode='ExclusiveLock' AND granted) AS exclusive_held, EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1::int AND locktype='advisory' AND mode='ShareLock' AND granted) AS shared_held",[actorIdentity.pid])).rows[0];
+    expect(locks.exclusive_held===true && locks.shared_held===true).toBe(true);
     const afterAllocation=await sequence(fixture.target.pool),floorAfterAllocation=await floor(fixture.target.pool);
     expect(next(afterAllocation)>=next(beforeSeq) && floorAfterAllocation>allocatedNumber).toBe(true);
 
@@ -149,8 +153,8 @@ it('keeps a pending synthetic patient allocation and retired floor from being re
     expect(replayUrl.hostname===fixture.target.url.hostname && replayUrl.port===fixture.target.url.port && replayUrl.pathname===fixture.target.url.pathname && replayUrl.username===fixture.target.url.username).toBe(true);
     replay=stagedRestore({archivePath,targetUrl:replayUrl.toString(),stagingDir:stage,allowNonEmptyTarget:true})
       .then(result=>({kind:'returned' as const,result}),()=>({kind:'thrown' as const}));
-    let finished=false,finishedWhileActorOpen=false;
-    void replay.then(()=>{finishedWhileActorOpen=actorOpen;finished=true;});
+    let finished=false;
+    void replay.then(()=>{finished=true;});
     const until=Date.now()+30000;let waited=false,waitTimedOut=false;
     for(;;){
       if(finished)break;
@@ -165,11 +169,11 @@ it('keeps a pending synthetic patient allocation and retired floor from being re
     await actor.query('ROLLBACK');actorOpen=false;
     const observation=await withDeadline(replay,40000);
     const result=observation.kind==='returned'?observation.result:undefined;
-    const recognized=result && !result.ok?refusal(result):'UNKNOWN';
+    const recognized=result && !result.ok?classifyPatientReplayRefusal(result):'UNKNOWN';
     if(waited)console.log('SYNTHETIC_REPLAY_WAITED_FOR_ALLOCATOR_ACTOR');
-    if((finishedBeforeRollback || finishedWhileActorOpen) && recognized==='BUSY')console.log('SYNTHETIC_REPLAY_BUSY_WHILE_ACTOR_OPEN');
-    if((finishedBeforeRollback || finishedWhileActorOpen) && recognized==='NONEMPTY')console.log('SYNTHETIC_NONEMPTY_GUARD_WHILE_ACTOR_OPEN');
-    if(!finishedBeforeRollback && !finishedWhileActorOpen && result?.ok)console.log('SYNTHETIC_REPLAY_SUCCEEDED_AFTER_ACTOR_ROLLBACK');
+    if(finishedBeforeRollback && recognized==='BUSY')console.log('SYNTHETIC_REPLAY_BUSY_WHILE_ACTOR_OPEN');
+    if(finishedBeforeRollback && recognized==='NONEMPTY')console.log('SYNTHETIC_NONEMPTY_GUARD_WHILE_ACTOR_OPEN');
+    if(waited && !finishedBeforeRollback && result?.ok)console.log('SYNTHETIC_REPLAY_SUCCEEDED_AFTER_ACTOR_ROLLBACK');
 
     const afterReplay=await sequence(fixture.target.pool),afterFloor=await floor(fixture.target.pool);
     expect(next(afterReplay)>=next(afterAllocation)).toBe(true);
@@ -188,7 +192,7 @@ it('keeps a pending synthetic patient allocation and retired floor from being re
     const afterRows=await patientRows(fixture.target.pool);
     expect(stableHash(afterRows.filter(row=>row.id==='300'))===stableHash(targetRows)).toBe(true);
     if(result?.ok){
-      expect(waited && !finishedBeforeRollback && !finishedWhileActorOpen && result.readyForCutover).toBe(true);
+      expect(waited && !finishedBeforeRollback && result.readyForCutover).toBe(true);
       expect(stableHash(afterRows.filter(row=>row.id==='75000'))===stableHash(sourceRows)).toBe(true);
     }else{
       expect(stableHash(afterRows)===stableHash(targetRows)).toBe(true);

@@ -5,8 +5,13 @@ It adds a synthetic PostgreSQL CI witness; it is not a product fix, a policy
 change, or evidence about a real database. The existing allocator witnesses
 remain unchanged, and this branch does not combine or prove the 0090 guard.
 
-The standalone environment guard runs before connection. Global setup connects
-to the configured dedicated CI service database; the fixture connects to its
+The standalone environment guard runs before connection. Global setup requires
+the exact dedicated CI `TEST_DATABASE_URL` and `DATABASE_URL` and connects to
+that service; the fixture additionally rejects alternate POSTGRES/SOURCE alias
+URLs unless absent or exactly equal before its own first connection. A loopback
+address and environment variables are not a cryptographic proof against a
+local tunnel; the witness must run only on its dedicated GitHub CI service.
+The fixture connects to its
 maintenance `postgres` database only to create fresh, randomly named databases.
 Intent files are retained before creation; after creation OID and owner are
 saved, compared with the creating role and verified from each target connection
@@ -34,7 +39,12 @@ refusal; any other error, unexpected early success, timeout or thrown error is
 an unclassified failure. A successful replay is accepted only after the actor
 rollback and an observed wait, with the selected source/target patients
 verified. This deliberately does not assume that a generic SQLSTATE or every
-lock timeout means the patient-number guard fired.
+lock timeout means the patient-number guard fired. For a waiting replay, the
+test records whether it had already finished *before issuing* actor rollback;
+it does not infer server lock state from the order of JavaScript callbacks
+relative to the rollback response. An observed wait is bounded to the named
+synthetic replay and the verified actor PID; it does not identify which table
+or advisory lock caused the wait.
 
 The test checks that neither the already allocated number nor the retired
 number is allocated again, that the target next candidate and policy-derived
