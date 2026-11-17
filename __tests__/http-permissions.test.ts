@@ -13,6 +13,7 @@ import {
 import { restrictedRouteAllowed } from "@/lib/role-routes";
 import { ROLES } from "@/lib/roles";
 import { canReadReceptionHandoff } from "@/lib/reception-handoff";
+import { discoverPagesApi } from "../scripts/audits/pages-api-inventory.mjs";
 
 /**
  * (TD-04 / TD-REG-006) حارس مصفوفة صلاحيات HTTP — الجزء الثابت.
@@ -48,10 +49,16 @@ function exportedMethods(source: string): HttpMethod[] {
   return HTTP_METHODS.filter((name) => found.has(name));
 }
 
-const ROUTES = routeFiles().map((file) => {
+const appRoutes = routeFiles().map((file) => {
   const source = readFileSync(file, "utf8");
   return { file, pattern: patternOf(file), methods: exportedMethods(source), source };
 });
+const pagesDiscovery = discoverPagesApi(ROOT);
+const ROUTES = [...appRoutes, ...pagesDiscovery.entries.map(entry => ({
+  file: join(ROOT, entry.file), pattern: entry.route,
+  methods: HTTP_METHODS.filter(name => Object.hasOwn(entry.methods, name)),
+  source: readFileSync(join(ROOT,entry.file),"utf8"),
+}))];
 
 const proxySource = readFileSync(join(ROOT, "proxy.ts"), "utf8");
 
@@ -82,6 +89,8 @@ describe("TD-04: المصفوفة تغطي كل مسار API وكل فعل — �
   it("كل route.ts له مدخل، وكل مدخل له route.ts", () => {
     const onDisk = ROUTES.map((route) => route.pattern).sort();
     const registered = Object.keys(HTTP_PERMISSIONS).sort();
+    expect(pagesDiscovery.issues).toEqual([]);
+    expect(new Set(onDisk).size).toBe(onDisk.length);
     expect(onDisk.filter((pattern) => !registered.includes(pattern))).toEqual([]);
     expect(registered.filter((pattern) => !onDisk.includes(pattern))).toEqual([]);
     expect(onDisk.length).toBeGreaterThan(150);
@@ -160,7 +169,7 @@ describe("TD-04: المصفوفة والباب متفقان", () => {
 });
 
 describe("TD-04: كل مسار طاقم يستدعي حارسًا معروفًا", () => {
-  const GUARDS = /\b(requireSession|requireSessionStrict|readSessionPayload|guardPatient|familyWriter|requireBackupAdminReadOnly|requireBackupAdminSession)\(/;
+  const GUARDS = /\b(requireSession|requireSessionFromTransport|requireSessionStrict|readSessionPayload|guardPatient|familyWriter|requireBackupAdminReadOnly|requireBackupAdminSession)\(/;
 
   it("لا مسار طاقم بلا حارس جلسة في ملفه", () => {
     const unguarded = ROUTES.filter((route) => {

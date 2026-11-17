@@ -17,6 +17,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { discoverPagesApi } from "./audits/pages-api-inventory.mjs";
 
 const API_DIR = join(process.cwd(), "app", "api");
 
@@ -47,7 +48,9 @@ function walk(dir, out = []) {
 }
 
 const offenders = [];
-const files = statSync(API_DIR) ? walk(API_DIR) : [];
+const pages = discoverPagesApi(process.cwd());
+const files = [...(statSync(API_DIR) ? walk(API_DIR) : []), ...pages.entries.map(entry => join(process.cwd(),entry.file))];
+for (const issue of pages.issues) offenders.push(`${issue.file}: ${issue.reason}`);
 
 for (const file of files) {
   const rel = relative(process.cwd(), file).replaceAll("\\", "/");

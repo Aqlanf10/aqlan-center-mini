@@ -76,6 +76,39 @@ test('all supported entry/source formats are inventoried; future formats are exp
  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
 
+test('Pages API dispatch and app/Pages collisions are classified without dropping matrix methods',async()=>{
+ const fs=await import('node:fs');const os=await import('node:os');const path=await import('node:path');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'staff-inventory-pages-'));
+ const write=(file,text)=>{fs.mkdirSync(path.dirname(path.join(root,file)),{recursive:true});fs.writeFileSync(path.join(root,file),text);};
+ try {
+  fs.mkdirSync(path.join(root,'components'));
+  write('lib/http-permissions.ts','export const HTTP_PERMISSIONS = {"/api/documents/[id]": { GET: ["admin"], DELETE: ["admin"] }};');
+  write('lib/staff-operation-runtime.ts','const actions = new Set(["staff.view"]);');
+  write('proxy.ts','const PUBLIC_PATHS = new Set([]);');
+  write('app/page.tsx','export default function Page() { return null; }');
+  write('lib/document-core.ts','export async function documentGet() {}\nexport async function documentDelete() {}');
+  write('pages/api/documents/[id].ts', `import {definePagesApi} from '@/lib/pages-api'; import {documentGet,documentDelete} from '@/lib/document-core';
+export const config={api:{bodyParser:false}};
+async function execute(req,res,method,handler) { return handler(null,res); }
+export default definePagesApi({GET:async(req,res)=>execute(req,res,'GET',documentGet),DELETE:async(req,res)=>execute(req,res,'DELETE',documentDelete)});`);
+  let report=buildInventory(root);
+  assert.deepEqual(report.sourceIssues,[]); assert.deepEqual(report.matrixExportMismatches,[]);
+  assert.deepEqual(report.routes.map(r=>[r.route,r.method,r.file]),[['/api/documents/[id]','DELETE','pages/api/documents/[id].ts'],['/api/documents/[id]','GET','pages/api/documents/[id].ts']]);
+  assert.equal(report.readiness,'NOT_READY');
+  const digest=report.sourceDigest;
+  write('pages/api/documents/[id].ts',fs.readFileSync(path.join(root,'pages/api/documents/[id].ts'),'utf8')+'\n// changed');
+  assert.notEqual(buildInventory(root).sourceDigest,digest);
+  const pageFile=path.join(root,'pages/api/documents/[id].ts');
+  const valid=fs.readFileSync(pageFile,'utf8');
+  fs.writeFileSync(pageFile,valid.replace('DELETE:async(req,res)=>execute(req,res,\'DELETE\',documentDelete)',"DELETE:async(req,res)=>execute(req,res,'DELETE',documentDelete),PUT:async(req,res)=>execute(req,res,'PUT',documentDelete)"));
+  assert.ok(buildInventory(root).matrixExportMismatches.some(m=>m.method==='PUT'&&m.route==='/api/documents/[id]'));
+  fs.writeFileSync(pageFile,valid);
+  write('app/api/documents/[id]/route.ts','export async function GET() {}\nexport async function DELETE() {}');
+  report=buildInventory(root);
+  assert.ok(report.sourceIssues.some(i=>i.reason==='duplicate route pathname'&&i.classification==='unknown'));
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
 // Two cold whole-repository scans measured 7.65s together locally. Bound each
 // child to 8s/64KiB and only this integration case to 20s; no assertions skipped.
 test('CLI drift success and explicit NOT_READY failure are intentional, not exceptions',async()=>{
