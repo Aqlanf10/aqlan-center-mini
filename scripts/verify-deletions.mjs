@@ -60,11 +60,11 @@ const number = () => "DL-" + Date.now().toString().slice(-8) + Math.floor(Math.r
 
 async function seed() {
   await ensureSchema();
-  // وردية مفتوحة — القبض والصرف لا يمرّان بلاها.
+  // وردية اصطناعية ممولة — رحلات الصرف أدناه تحتاج نقدًا فعليًا في الدرج.
   await pool.query(`UPDATE cashier_shifts SET status = 'closed', closed_at = NOW() WHERE status = 'open'`);
   await pool.query(
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
-     SELECT 'فحص', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`,
+     SELECT 'فحص', 100000, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`,
   );
 }
 
@@ -443,12 +443,23 @@ async function journeyDeleteVisit() {
 async function journeyVoidExpense() {
   console.log("\n── ٦: إبطال سند الصرف — قيدٌ معاكس لا حذف، والمقفلة والمسدِّدة تُمنعان ──");
 
+  const expenseCountBeforeRefusal = await countRows("SELECT COUNT(*)::text AS count FROM expenses");
+  const excessive = await recordExpense({
+    category: "other", partyId: null, payeeText: "صرف اصطناعي يتجاوز النقد",
+    amountMinor: 1000000, currency: "YER", baseCurrency: BASE,
+    exchangeRate: 1, payableId: null, note: null, createdBy: "فحص",
+  });
+  check("الصرف الذي يتجاوز نقد الدرج يُرفض دون إضافة سند", excessive.reason === "exceeds_drawer_cash"
+    && excessive.expense === null && await countRows("SELECT COUNT(*)::text AS count FROM expenses") === expenseCountBeforeRefusal,
+  `reason=${excessive.reason}`);
+
   const voucher = await recordExpense({
     category: "other", partyId: null, payeeText: "صرف خاطئ",
     amountMinor: 4000, currency: "YER", baseCurrency: BASE,
     exchangeRate: 1, payableId: null, note: "سند إبطال", createdBy: "فحص",
   });
-  check("السند سُجّل في وردية مفتوحة", voucher.expense !== null && voucher.reason === null);
+  check("السند سُجّل في وردية مفتوحة", voucher.expense !== null && voucher.reason === null, `reason=${voucher.reason}`);
+  if (!voucher.expense || voucher.reason !== null) throw new Error(`Synthetic expense creation failed: ${voucher.reason}`);
   const original = voucher.expense;
 
   /* الإبطال بلا سبب مرفوض: «أُبطل ولا أحد يعرف لماذا» ثغرةٌ في المراجعة لا ميزة. */
@@ -522,8 +533,9 @@ async function journeyVoidExpense() {
     amountMinor: 6000, currency: "YER", baseCurrency: BASE,
     exchangeRate: 1, payableId: payableRow.rows[0].id, note: null, createdBy: "فحص",
   });
-  check("سداد الالتزام سُجّل بلقطته", settling.expense?.payableSettledMinor === 6000,
+  check("سداد الالتزام سُجّل بلقطته", settling.reason === null && settling.expense?.payableSettledMinor === 6000,
     `settled=${settling.expense?.payableSettledMinor} reason=${settling.reason}`);
+  if (!settling.expense || settling.reason !== null) throw new Error(`Synthetic payable settlement failed: ${settling.reason}`);
   const corrected = await voidExpense(settling.expense.id, {
     actor: "المدير", actorRole: "admin", reason: "تصحيح سداد خاطئ",
   });
@@ -539,6 +551,8 @@ async function journeyVoidExpense() {
     amountMinor: 1500, currency: "YER", baseCurrency: BASE,
     exchangeRate: 1, payableId: null, note: null, createdBy: "فحص",
   });
+  check("سند الوردية التي ستقفل سُجّل", inClosed.expense !== null && inClosed.reason === null, `reason=${inClosed.reason}`);
+  if (!inClosed.expense || inClosed.reason !== null) throw new Error(`Synthetic closing expense failed: ${inClosed.reason}`);
   const openShiftRow = await db.getOpenShift();
   await db.closeShift({
     id: openShiftRow.id, closedBy: "المدير",
