@@ -15,6 +15,15 @@ export interface MigrationFile {
 
 
 export const BASELINE_VERSION = "0001";
+export const HISTORICAL_0079_SHA256 = "5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99";
+
+/** The default production catalogue retains its published historical contract. */
+export function assertHistorical0079Source(files: MigrationFile[]): void {
+  const file = files.find(item => item.version === "0079");
+  if (!file || file.name !== "ortho_followup_coverage" || file.filename !== "0079_ortho_followup_coverage.sql"
+    || file.checksum !== HISTORICAL_0079_SHA256 || checksumOf(file.sql) !== HISTORICAL_0079_SHA256)
+    throw new Error("HISTORICAL_0079_SOURCE_MISSING_OR_MISMATCH");
+}
 
 const MIGRATION_FILENAME_PATTERN = /^(\d{4})_([a-z0-9_]+)\.sql$/;
 
@@ -60,5 +69,6 @@ export async function loadMigrationFiles(dir?: string): Promise<MigrationFile[]>
   if (versions.size !== files.length) {
     throw new Error("إصدارات هجرات مكررة — الترتيب الحتمي مكسور.");
   }
+  if (dir === undefined) assertHistorical0079Source(files);
   return files;
 }
