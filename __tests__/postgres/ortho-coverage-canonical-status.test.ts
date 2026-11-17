@@ -5,13 +5,14 @@ import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
 import { capabilityDocument, waitForBlockedBy } from "./_canonical-ready-fixture";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
+import { applyRuntimeMigrationFiles, loadMigrationFiles } from "../../lib/migrations";
 import type { FollowupCoverageCommand } from "../../lib/ortho-followup-coverage";
 vi.mock("server-only",()=>({}));assertRealPostgresUrl();stubPostgresEnv();vi.stubEnv("SESSION_SECRET","canonical-coverage-status-secret-0123456789");
 const db=await import("../../lib/db"),status=await import("../../lib/canonical-ortho-coverage-status"),native=await import("../../lib/ortho-followup-coverage-db");
 const GRANTS={"finance.agreements.manage":true,"finance.patient-ledger.view":true};
 const ACCOUNTS={owner:{username:"SYN-CST-OWNER",role:"admin"},own:{username:"SYN-CST-OWN",role:"doctor",doctor:true,patientScope:"own",grants:GRANTS},all:{username:"SYN-CST-ALL",role:"reception",patientScope:"all",grants:GRANTS},none:{username:"SYN-CST-NONE",role:"admin",patientScope:"none",grants:GRANTS},unlinked:{username:"SYN-CST-UNLINKED",role:"doctor",patientScope:"own",grants:GRANTS},read:{username:"SYN-CST-READ",role:"admin",patientScope:"all",grants:{"clinical.ortho.view":true}}}as const;
 type Key=keyof typeof ACCOUNTS;let fx:CanonicalInventoryDatabase<Key>,side:Pool,sequence=0;
-beforeAll(async()=>{fx=await openCanonicalInventoryDatabase(db,ACCOUNTS,"owner");side=new Pool({connectionString:fx.pool.options.connectionString,max:4});},180000);
+beforeAll(async()=>{fx=await openCanonicalInventoryDatabase(db,ACCOUNTS,"owner");const historical=(await loadMigrationFiles()).find(file=>file.version==='0079');if(!historical)throw new Error('Historical 0079 artifact missing');await applyRuntimeMigrationFiles(fx.pool,[historical]);side=new Pool({connectionString:fx.pool.options.connectionString,max:4});},180000);
 afterAll(async()=>{await side?.end();await fx?.close();});
 async function scenario(owned=true){
  const patient=(await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'SYN patient',$2) RETURNING id",[`SYN-CST-${++sequence}`,owned?fx.parties.own:null])).rows[0].id;

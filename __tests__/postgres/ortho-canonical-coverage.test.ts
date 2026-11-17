@@ -5,6 +5,7 @@ import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
 import { waitForBlockedBy, capabilityDocument } from "./_canonical-ready-fixture";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
+import { applyRuntimeMigrationFiles, loadMigrationFiles } from "../../lib/migrations";
 vi.mock("server-only", () => ({}));
 assertRealPostgresUrl(); stubPostgresEnv(); vi.stubEnv("SESSION_SECRET", "synthetic-coverage-secret-0123456789abcdef");
 const db = await import("../../lib/db"), reads = await import("../../lib/canonical-ortho-coverage"), store = await import("../../lib/ortho-followup-coverage-db");
@@ -25,7 +26,9 @@ let base: Awaited<ReturnType<typeof seedCanonicalCoverage>>;
 const episode = (patientId = ids.own, save = true) => seedCanonicalCoverage(fx.pool, { patientId, actorId: fx.ids.owner, doctorId: fx.parties.own!, save });
 const read = async (key: Key, f = base) => reads.readCanonicalOrthoCoverage(await fx.session(key), f.patient, f.ortho);
 beforeAll(async () => {
-  fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner"); side = new Pool({ connectionString: fx.pool.options.connectionString, max: 3 });
+  fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner");
+  const historical=(await loadMigrationFiles()).find(file=>file.version==='0079');if(!historical)throw new Error('Historical 0079 artifact missing');
+  await applyRuntimeMigrationFiles(fx.pool,[historical]); side = new Pool({ connectionString: fx.pool.options.connectionString, max: 3 });
   for (const key of ["own", "outside"] as const) ids[key] = (await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,$1,$2) RETURNING id", [`SYN-COV-${key}`, key === "own" ? fx.parties.own! : null])).rows[0].id;
   base = await episode();
 }, 180_000);

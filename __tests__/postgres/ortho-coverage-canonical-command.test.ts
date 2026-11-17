@@ -1,17 +1,27 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { Pool } from "pg";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
 import { capabilityDocument, waitForBlockedBy } from "./_canonical-ready-fixture";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
+import { applyRuntimeMigrationFiles, loadMigrationFiles } from "../../lib/migrations";
 import type { FollowupCoverageCommand } from "../../lib/ortho-followup-coverage";
 vi.mock("server-only",()=>({}));assertRealPostgresUrl();stubPostgresEnv();vi.stubEnv("SESSION_SECRET","canonical-coverage-command-secret-0123456789");
-const db=await import("../../lib/db"),status=await import("../../lib/canonical-ortho-coverage-status"),native=await import("../../lib/ortho-followup-coverage-db"),canonical=await import("../../lib/canonical-ortho-coverage-command");
+const db=await import("../../lib/db"),status=await import("../../lib/canonical-ortho-coverage-status"),native=await import("./_historical-followup-coverage-writer"),canonical=await import("./_historical-canonical-coverage-command");
+// Writer tests below exercise the immutable historical authoring contract only.
+// The retired current writer is independently covered by ortho-coverage-retired-writer.test.ts.
+it("pins historical canonical adapter to its published source after test-only import relocation",()=>{
+ const fixture=readFileSync(new URL("./_historical-canonical-coverage-command.ts",import.meta.url),"utf8").split("\n").slice(1).join("\n")
+  .replace('from "./_historical-followup-coverage-writer"','from "./ortho-followup-coverage-db"')
+  .replaceAll('from "../../lib/','from "./');
+ expect(createHash("sha256").update(fixture).digest("hex")).toBe("c911b5feb4fb1f98e091eab0424aed29cfd392dd2aa9bc2a834b958b2d509fcc");
+});
 const GRANTS={"finance.agreements.manage":true,"finance.patient-ledger.view":true};
 const ACCOUNTS={owner:{username:"SYN-CAP-OWNER",role:"admin"},own:{username:"SYN-CAP-OWN",role:"doctor",doctor:true,patientScope:"own",grants:GRANTS},all:{username:"SYN-CAP-ALL",role:"reception",patientScope:"all",grants:GRANTS},none:{username:"SYN-CAP-NONE",role:"admin",patientScope:"none",grants:GRANTS},unlinked:{username:"SYN-CAP-UNLINKED",role:"doctor",patientScope:"own",grants:GRANTS},read:{username:"SYN-CAP-READ",role:"admin",patientScope:"all",grants:{"clinical.ortho.view":true}}}as const;
 type Key=keyof typeof ACCOUNTS;let fx:CanonicalInventoryDatabase<Key>,side:Pool,sequence=0;
-beforeAll(async()=>{fx=await openCanonicalInventoryDatabase(db,ACCOUNTS,"owner");side=new Pool({connectionString:fx.pool.options.connectionString,max:4});},180000);
+beforeAll(async()=>{fx=await openCanonicalInventoryDatabase(db,ACCOUNTS,"owner");const historical=(await loadMigrationFiles()).find(file=>file.version==='0079');if(!historical)throw new Error('Historical 0079 artifact missing');await applyRuntimeMigrationFiles(fx.pool,[historical]);side=new Pool({connectionString:fx.pool.options.connectionString,max:4});},180000);
 afterAll(async()=>{await side?.end();await fx?.close();});
 async function scenario(owned=true){
  const patient=(await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'SYN patient',$2) RETURNING id",[`SYN-CAP-${++sequence}`,owned?fx.parties.own:null])).rows[0].id;
