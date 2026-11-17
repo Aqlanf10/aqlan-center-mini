@@ -92,6 +92,21 @@ describe("patient appointment panel lifecycle", () => {
     expect(fetchMock.mock.calls.filter(call => call[1].method === "PATCH")).toHaveLength(0);
     if (mode === "logout") { hooks.session = before; render(); expect(text(render())).not.toContain("Synthetic doctor"); }
   });
+  it("leaves committed reminders live when a different-patient render is abandoned", async () => {
+    render(); await resolve(0, payload());
+    const retained = reminder().props.onConfirmed as (value: ReturnType<typeof snapshot>) => Promise<void>;
+    const committedValues = hooks.values.slice();
+    hooks.cursor = 0;
+    const speculative = PatientAppointmentsPanel({ patientId: 32 });
+    expect(elements(speculative).some(node => node.type === AppointmentReminder)).toBe(false);
+    expect(requests).toHaveLength(1);
+    hooks.values = committedValues; hooks.pending = [];
+    const pending = retained(snapshot());
+    expect(requests).toHaveLength(2);
+    await resolve(1, { ok: true });
+    await resolve(2, payload()); await pending;
+    expect(text(render())).toContain("سُجّلت إفادتك");
+  });
   it("fences old callbacks after refresh and unmount", async () => {
     render(); await resolve(0, payload()); const old = reminder(); click("تحديث المواعيد");
     await (old.props.onConfirmed as (s: ReturnType<typeof snapshot>) => Promise<void>)(snapshot()); expect((old.props.isCurrent as () => boolean)()).toBe(false);
@@ -112,6 +127,33 @@ describe("patient appointment panel lifecycle", () => {
     await resolve(1, { ok: true }); expect(requests).toHaveLength(3); expect(reminder()).toBeUndefined(); expect(text(render())).not.toContain("سُجّلت إفادتك");
     await resolve(2, { ...payload(), appointments: [{ ...appointment(), reminderSentAt: "2026-10-22T06:01:00Z" }] }); await pending;
     expect((reminder().props.item as { reminderSentAt: string }).reminderSentAt).toBe("2026-10-22T06:01:00Z"); expect(text(render())).toContain("سُجّلت إفادتك");
+  });
+  it.each([
+    ["تحديث المواعيد", "upcoming"],
+    ["السابقة والمغلقة", "history"],
+  ])("blocks captured %s before the busy render and releases it after reminder settlement", async (label, view) => {
+    render(); await resolve(0, payload());
+    const control = button(label);
+    const onClick = control.props.onClick as () => void;
+    const onConfirmed = reminder().props.onConfirmed as (s: ReturnType<typeof snapshot>) => Promise<void>;
+    expect(control.props.disabled).toBeFalsy();
+    const pending = onConfirmed(snapshot());
+    // Invoke the enabled render's callback before React can commit its disabled state.
+    onClick();
+    expect(requests).toHaveLength(2);
+    render();
+    expect(requests).toHaveLength(2);
+    expect(fetchMock.mock.calls[1][1].signal.aborted).toBe(false);
+    expect(reminder().props.busy).toBe(true);
+    expect(button("اليوم والقادمة").props["aria-pressed"]).toBe(true);
+    await resolve(1, { ok: true });
+    expect(requests).toHaveLength(3);
+    await resolve(2, payload()); await pending;
+    expect(text(render())).toContain("سُجّلت إفادتك");
+    expect(button(label).props.disabled).toBeFalsy();
+    onClick(); render();
+    expect(requests).toHaveLength(4);
+    expect(fetchMock.mock.calls[3][0]).toBe(`/api/patients/31?projection=appointments&view=${view}`);
   });
   it("does not claim success on write or refresh failure, and allows a fresh retry", async () => {
     render(); await resolve(0, payload()); const pending = confirm();
