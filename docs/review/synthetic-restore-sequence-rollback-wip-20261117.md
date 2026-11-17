@@ -22,11 +22,15 @@ failure without re-exposing database messages. PostgreSQL and full CI have not
 been run for this amendment; the high-water assertion may expose a regression
 and must not be weakened if it fails.
 
-The inherited CI-only fixture destroys its own identity-checked synthetic
-databases and staging directory during cleanup. Its temporary databases and
-files are therefore not retained as evidence after runner teardown. The
-creation-time name/OID/owner are checked again before the sequence mutation and
-after replay; existing external databases and evidence are not selected.
+In focused CI retain-only mode, the fixture closes connections without dropping
+its owned synthetic databases or removing the witness directory. It records the
+creation-time identity for each database in a distinct exclusively-created
+file, and checks name/OID/owner again before the sequence mutation and after
+replay. Original default cleanup remains for ordinary tests. The application's
+`fullBackupBlocks` removes its own internal temporary staging directory while
+forming the archive, before the final witness archive is written. Unless a
+safe artifact capture succeeds, the retained databases and files still vanish
+when the hosted runner and its PostgreSQL service are destroyed.
 
 The separate focused CI job provisions its own PostgreSQL 18 service. Its
 Vitest setup checks the dedicated loopback URL, CI markers, original aliases

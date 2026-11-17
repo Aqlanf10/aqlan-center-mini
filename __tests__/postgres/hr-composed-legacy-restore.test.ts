@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,11 +13,14 @@ import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { tarGzBytes } from '../helpers/backup-tar';
 import { SYNTHETIC_DUPLICATE_PATIENT_ID, SYNTHETIC_DUPLICATE_PATIENT_SQL } from '../helpers/restore-late-constraint';
 import { nextSequenceCandidate } from '../helpers/restore-sequence-observation';
+import { closeRestoreEvidence } from '../helpers/restore-evidence-cleanup';
+import { validateFocusedRollbackWitnessEnvironment } from './_focused-rollback-witness-guard';
 
 vi.mock('next/headers', () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 
 let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 let directory: string, archive: Buffer;
+let retainEvidence = false;
 
 async function applicationRows(pool: Pool) {
   const tables = (await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename<>'schema_migrations' ORDER BY tablename")).rows;
@@ -34,8 +37,20 @@ async function sequenceCandidates(pool: Pool) {
   };
 }
 beforeAll(async () => {
-  fixture = await openBackupTimestampFixture({ ...process.env });
-  directory = await mkdtemp(join(tmpdir(), 'hr-composed-legacy-restore-'));
+  retainEvidence = process.env.SYNTHETIC_LATE_ROLLBACK_WITNESS === '1';
+  if (retainEvidence) {
+    validateFocusedRollbackWitnessEnvironment(process.env);
+    directory = await mkdtemp(join(process.env.SYNTHETIC_WITNESS_ROOT!, 'hr-composed-legacy-restore-'));
+    fixture = await openBackupTimestampFixture({ ...process.env }, {
+      retainOwned: true,
+      onOwned: async identity => {
+        await writeFile(join(directory, `identity-${identity.name}.json`), JSON.stringify(identity), { flag: 'wx' });
+      },
+    });
+  } else {
+    fixture = await openBackupTimestampFixture({ ...process.env });
+    directory = await mkdtemp(join(tmpdir(), 'hr-composed-legacy-restore-'));
+  }
   // Actual PR326 migration chain, with no HR schema or manually installed receipt table.
   await migrate(fixture.source, { apply: true, files: (await loadMigrationFiles()).filter(file => file.version <= '0043') });
   await fixture.source.query("INSERT INTO patients(id,patient_number,full_name) VALUES(75000,'LEGACY-SYNTHETIC','Synthetic legacy patient')");
@@ -48,7 +63,7 @@ beforeAll(async () => {
   await writeFile(join(directory, 'legacy.tar.gz'), archive);
 });
 afterAll(async () => {
-  try { await fixture?.close(); } finally { if (directory) await rm(directory, { recursive: true, force: true }); }
+  await closeRestoreEvidence({ close: fixture?.close, directory, retain: retainEvidence });
 });
 
 it('restores the actual pre-HR archive on the current migration chain without inventing employee history', async () => {

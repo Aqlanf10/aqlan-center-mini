@@ -7,7 +7,8 @@ export function validateFocusedRollbackWitnessEnvironment(env: NodeJS.ProcessEnv
   const database = 'postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable';
   if (env.GITHUB_ACTIONS !== 'true' || env.CI !== 'true' || !/^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? '')
       || env.SYNTHETIC_LATE_ROLLBACK_WITNESS !== '1' || env.TEST_DATABASE_URL !== database
-      || env.DATABASE_URL !== database || !env.GITHUB_WORKSPACE || !path.isAbsolute(env.GITHUB_WORKSPACE)) {
+      || env.DATABASE_URL !== database || !env.GITHUB_WORKSPACE || !path.isAbsolute(env.GITHUB_WORKSPACE)
+      || !env.RUNNER_TEMP || !path.isAbsolute(env.RUNNER_TEMP) || env.SYNTHETIC_WITNESS_ROOT !== env.RUNNER_TEMP) {
     throw new Error('Focused rollback witness requires its dedicated GitHub CI synthetic service.');
   }
   for (const key of ['POSTGRES_URL', 'POSTGRES_PRISMA_URL', 'POSTGRES_URL_NON_POOLING', 'SOURCE_DATABASE_URL'] as const) {

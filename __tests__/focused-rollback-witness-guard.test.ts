@@ -5,6 +5,7 @@ import { validateFocusedRollbackWitnessEnvironment } from './postgres/_focused-r
 const valid: NodeJS.ProcessEnv = {
   NODE_ENV: 'test', GITHUB_ACTIONS: 'true', CI: 'true', GITHUB_RUN_ID: '12345',
   GITHUB_WORKSPACE: '/tmp/synthetic-workspace', SYNTHETIC_LATE_ROLLBACK_WITNESS: '1',
+  RUNNER_TEMP: '/tmp/synthetic-runner', SYNTHETIC_WITNESS_ROOT: '/tmp/synthetic-runner',
   DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable',
   TEST_DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable',
 };
@@ -16,6 +17,7 @@ describe('focused rollback synthetic target guard', () => {
   it.each([
     { GITHUB_ACTIONS: 'false' }, { CI: 'false' }, { GITHUB_RUN_ID: 'local' },
     { GITHUB_WORKSPACE: 'relative' }, { SYNTHETIC_LATE_ROLLBACK_WITNESS: '0' },
+    { RUNNER_TEMP: 'relative' }, { SYNTHETIC_WITNESS_ROOT: '/tmp/other' },
     { DATABASE_URL: 'postgresql://ci:ci@example.com/aqlan_p1_test' },
     { TEST_DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable' },
     { TEST_DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?host=example.com' },

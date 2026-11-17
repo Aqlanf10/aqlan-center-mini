@@ -3,6 +3,7 @@ import { Client, Pool } from "pg";
 import { assertPostgresMajorOrThrow, postgresMajorFromVersionNum } from "../../lib/env-contract";
 import { validateOperationalVerificationEnvironment } from "../../lib/verification-target-policy.mjs";
 import { validatePostgresTestTarget } from "./_safe-target";
+import { validateFocusedRollbackWitnessEnvironment } from "./_focused-rollback-witness-guard";
 
 const NAME = /^aqlan_backup_precision_[a-f0-9]{32}(?![\s\S])/;
 type Identity = { name: string; oid: string; owner: string };
@@ -21,7 +22,14 @@ export function assertBackupTimestampFixtureIdentity(expected: Identity, actual:
 }
 
 /** CI-only fixture. No reset of a supplied database, app globals or migrations. */
-export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv) {
+export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv, options: {
+  retainOwned?: boolean;
+  onOwned?: (identity: Readonly<Identity>) => Promise<void>;
+} = {}) {
+  if (options.retainOwned) {
+    validateFocusedRollbackWitnessEnvironment(environment);
+    if (!options.onOwned) throw new Error("Retained backup fixture requires identity recording.");
+  }
   // Check original aliases, classifications and Railway markers before connecting.
   const target = validateBackupTimestampFixtureTarget(environment);
   const admin = new Client({ connectionString: target.maintenanceUrl.toString(), ssl: false });
@@ -35,6 +43,9 @@ export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv)
     for (const database of [...owned].reverse()) {
       try {
         await database.pool?.end();
+        // Focused CI retains all its newly created synthetic databases for the
+        // lifetime of the runner; never delete evidence in this mode.
+        if (options.retainOwned) continue;
         if (!database.identity) throw new Error("New backup fixture identity unavailable; cleanup requires review.");
         const { rows } = await admin.query<Identity>(
           "SELECT datname AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=$1", [database.name]);
@@ -73,6 +84,7 @@ export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv)
       const { rows: [empty] } = await pool.query<{ count: number }>(
         "SELECT COUNT(*)::int AS count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'");
       if (empty.count !== 0) throw new Error("Backup timestamp fixture must be pristine.");
+      if (options.retainOwned) await options.onOwned!(Object.freeze({ ...rows[0] }));
       // Hand callers an immutable copy for pre-write identity rechecks.
       return { pool, identity: Object.freeze({ ...rows[0] }) };
     };

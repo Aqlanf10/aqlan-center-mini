@@ -1194,6 +1194,7 @@ jobs:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
           TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
           SYNTHETIC_LATE_ROLLBACK_WITNESS: '1'
+          SYNTHETIC_WITNESS_ROOT: ${{ runner.temp }}
           SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
           CLINIC_TIME_ZONE: Asia/Aden
         run: npx vitest run --config vitest.config.focused-rollback-witness.mts
