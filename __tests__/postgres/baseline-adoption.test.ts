@@ -60,12 +60,18 @@ describe("مجسّ توافق خط الأساس (P1-FIX-1) — PostgreSQL حقي
     const { pool, client } = await withFreshP0Database("aqlan_p1_probe_ok");
     databases.push("aqlan_p1_probe_ok");
     try {
+      const before = (await client.query("SELECT id,patient_number,full_name FROM patients ORDER BY id")).rows;
       const result = await migrate(pool, { apply: true, files });
       expect(result.adoptedBaseline).toBe(true);
       expect(result.appliedVersions).toContain(BASELINE_VERSION);
       for (const file of files) {
-        expect(result.appliedVersions).toContain(file.version);
+        if (file.version === "0079") expect(result.appliedVersions).not.toContain(file.version);
+        else expect(result.appliedVersions).toContain(file.version);
       }
+      expect(files.find(file => file.version === "0079")?.checksum).toBe("5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99");
+      expect((await client.query("SELECT version FROM schema_migrations WHERE version='0079'")).rows).toEqual([]);
+      expect((await client.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows).toEqual([{ name: null }]);
+      expect((await client.query("SELECT id,patient_number,full_name FROM patients ORDER BY id")).rows).toEqual(before);
 
       // البيانات بقيت — الاعتماد لم يمس صفًّا
       const { rows } = await client.query<{ n: number }>(
