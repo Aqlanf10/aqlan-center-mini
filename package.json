@@ -11,7 +11,7 @@
     "backfill:image-size": "tsx scripts/backfill-image-size.mts",
     "backup": "node scripts/backup.mjs",
     "backup:full": "node --import tsx scripts/backup-full.mts",
-    "build": "next build && node scripts/assemble-standalone-entry-chunks.mjs",
+    "build": "npm run build:preflight && next build && node scripts/assemble-standalone-entry-chunks.mjs && node scripts/verify-standalone-assets.mjs && node scripts/preflight-build-seal.mjs --create",
     "ci:audit": "node --import tsx scripts/ci-audit.mjs",
     "ci:scan:body": "node scripts/scan-raw-body-parsers.mjs",
     "scan:money": "node --import tsx scripts/scan-money-aggregation.mjs",

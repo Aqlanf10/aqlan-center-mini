@@ -42,6 +42,12 @@ const nextConfig: NextConfig = {
    */
   output: "standalone",
 
+  // Dynamic migration reads are not inferred once broad tracing is disabled.
+  // Include the catalogue explicitly; source provenance stays in preflight.
+  outputFileTracingIncludes: {
+    "/**": ["./migrations/[0-9][0-9][0-9][0-9]_*.sql"],
+  },
+
   /**
    * The backup/restore filesystem traces can discover project-root files that
    * are never imported by the application. Keep only this temporary, CI-only
