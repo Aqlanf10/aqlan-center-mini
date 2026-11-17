@@ -4,3 +4,11 @@ export function knownNonEmptyRefusal(result:{ok:boolean;readyForCutover:boolean;
   return !result.ok && !result.readyForCutover && result.validationErrors.length===0
     && result.errors.length===1 && known.test(result.errors[0]);
 }
+
+
+/** Only the precise synthetic late primary-key failure proves replay got there. */
+export function knownLateDuplicate(result:{ok:boolean;readyForCutover:boolean;validationErrors:readonly unknown[];errors:readonly string[]}) {
+  const known='فشل تطبيق بيانات الاستعادة على الهدف المعزول: duplicate key value violates unique constraint "patients_pkey"';
+  return !result.ok && !result.readyForCutover && result.validationErrors.length===0
+    && result.errors.length===1 && result.errors[0]===known;
+}

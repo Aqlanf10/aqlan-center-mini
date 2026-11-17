@@ -1,5 +1,11 @@
 # Synthetic sequence rollback and concurrency witness — WIP
 
+**Recovery snapshot:** Work on this witness was interrupted. The concurrency
+test still waits synchronously for `nextval` before releasing its barrier; a
+correct implementation that blocks allocation on the sequence could deadlock
+this witness. Do not run or push this snapshot until the barrier is repaired
+and the complete diff independently reviewed. No PostgreSQL run is claimed.
+
 This test-only branch starts at `1ad9e1d433ac14ab90a3767dafe48cdd8e6ac1a6`.
 It is an investigative witness, not a product fix or a release candidate. The
 current source appears to lower an existing serial high-water using `setval`

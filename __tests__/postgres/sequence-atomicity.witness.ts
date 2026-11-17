@@ -15,7 +15,7 @@ import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { stagedRestore } from '../../lib/restore/staging';
 import { parseTarBytes } from '../../lib/restore/archive';
 import { tarGzBytes } from '../helpers/backup-tar';
-import { knownNonEmptyRefusal } from '../helpers/synthetic-sequence-refusal';
+import { knownLateDuplicate, knownNonEmptyRefusal } from '../helpers/synthetic-sequence-refusal';
 
 const sha = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 const marker = 'SYNTHETIC_SEQUENCE_ATOMICITY';
@@ -146,7 +146,7 @@ it.each([
     expect(before.last_value==='100000' && before.is_called===called).toBe(true);
     const result = await stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage,allowNonEmptyTarget:true});
     const knownRefusal=knownNonEmptyRefusal(result);
-    const lateFailure=outcome==='failure' && !result.ok && result.errors.some(error=>error.includes('patients_pkey'));
+    const lateFailure=outcome==='failure' && knownLateDuplicate(result);
     if (outcome==='failure') expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.readyForCutover).toBe(false);
@@ -178,9 +178,36 @@ it.each([
     expect(sha(await readFile(markerPath))===sha(stageMarker)).toBe(true);
     const identity=await dbIdentity(fixture.target.pool);
     expect(identity.oid===fixture.target.identity.oid && identity.owner===fixture.target.identity.owner).toBe(true);
-    if (knownRefusal) console.log('SYNTHETIC_KNOWN_NONEMPTY_REFUSAL_STATE_PRESERVED');
+    if (knownRefusal) {
+      console.log('SYNTHETIC_KNOWN_NONEMPTY_REFUSAL_STATE_PRESERVED');
+      throw new Error(outcome==='failure'?'SYNTHETIC_LATE_ROLLBACK_NOT_EXERCISED':'SYNTHETIC_VALID_REPLAY_NOT_EXERCISED');
+    }
     else if (lateFailure) console.log('SYNTHETIC_LATE_DUPLICATE_REACHED_STATE_PRESERVED');
     else if (!result.ok) throw new Error('SYNTHETIC_REPLAY_FAILURE_UNCLASSIFIED');
+  } finally { await fixture.close(); }
+},180_000);
+
+it('preserves a nonempty target when the existing guard refuses replay',async()=>{
+  const fixture=await ownedPair();
+  try {
+    await prepare(fixture,false);
+    const archive=await makeArchive(fixture.source.pool,false);
+    const archivePath=path.join(fixture.directory,'synthetic-refusal.tar.gz'); await writeFile(archivePath,archive);
+    const stage=path.join(fixture.directory,'refusal-stage'), markerPath=path.join(stage,'synthetic-stage-marker');
+    const stageMarker=Buffer.from('synthetic-refusal-stage-retained');
+    await mkdir(stage,{recursive:true}); await writeFile(markerPath,stageMarker);
+    const beforeData=await dataDigest(fixture.target.pool), beforeSource=await patients(fixture.source.pool);
+    const beforeSeq=await sequence(fixture.target.pool,'patients_id_seq'), beforeNumber=await sequence(fixture.target.pool,'patient_number_seq');
+    const result=await stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage,allowNonEmptyTarget:false});
+    expect(knownNonEmptyRefusal(result)).toBe(true);
+    expect(await dataDigest(fixture.target.pool)===beforeData).toBe(true);
+    expect(same(await sequence(fixture.target.pool,'patients_id_seq'),beforeSeq)).toBe(true);
+    expect(same(await sequence(fixture.target.pool,'patient_number_seq'),beforeNumber)).toBe(true);
+    expect(sha(Buffer.from(JSON.stringify(await patients(fixture.source.pool))))===sha(Buffer.from(JSON.stringify(beforeSource)))).toBe(true);
+    expect(sha(await readFile(archivePath))===sha(archive)).toBe(true);
+    expect(sha(await readFile(markerPath))===sha(stageMarker)).toBe(true);
+    const identity=await dbIdentity(fixture.target.pool);
+    expect(identity.oid===fixture.target.identity.oid && identity.owner===fixture.target.identity.owner).toBe(true);
   } finally { await fixture.close(); }
 },180_000);
 
