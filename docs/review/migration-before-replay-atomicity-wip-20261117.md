@@ -60,3 +60,21 @@ implementation change is proposed here.
 Local status: a focused in-memory TypeScript check and ESLint lintText passed;
 the check uses the current checkout with the base witness guard overlaid and is
 not a full-project typecheck. No PostgreSQL, HTTP, build, or CI ran on this test.
+
+## CI observation on the exact witness revision
+
+On commit `9fca96b59b279e03d3b6818e835709b0ff04d676`, the synthetic standalone
+job in [CI 44108200039](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/44108200039)
+ran this witness successfully (1/1) and emitted the fixed classification
+`SYNTHETIC_REGISTRY_0080_MATCHED_AND_POLICY_TABLE_PRESENT`. The previously
+registered rows and selected patient fields, the synthetic source's selected
+patient fields, both archive bytes, the stage marker and target OID/owner
+passed the specified comparisons. This establishes only those observations on
+the disposable synthetic service, not preservation of all data or metadata.
+
+The same job failed overall: the inherited sequence witness had five failing
+cases (four serial regressions and the concurrent serial regression) and one
+passing nonempty-target refusal. Thus neither this job nor the full CI is
+claimed green. This result concerns direct staged restore to an explicitly
+allowed nonempty synthetic target; it is not evidence about an admin reset or
+any real database.
