@@ -1,0 +1,7 @@
+# Coverage browser and portal boundary — separate evaluation
+
+This is an independent evaluation branch based on the combined coverage witness composition, plus the isolated portal-intake browser-boundary fix `f844e6ed88a927f1fb54c55acea3a5174fa8b5e1`. It is not the same source as the combined coverage-only branch, a merge, or a deployment candidate.
+
+The staff cutover source inventory was regenerated for the two changed browser imports. Its only JSON difference was `sourceDigest`; the classifications and `NOT_READY` state remained unchanged. The two staff-inventory/capability-map suites and the portal browser-boundary suite passed **12/12** on evaluation source head `b0915e0c0633b8e27b22b8bb72c01cb23b7485b2`.
+
+On that same source head, the previously failing mixed `browser and HTTP: revocation...` test passed **1 selected; 46 filtered out**, using an untracked local Next Webpack development-server harness and isolated synthetic PostgreSQL fixture. This result belongs to the evaluation branch only; it does not change the combined coverage-only branch's recorded **30 passed / 1 failed / 16 filtered out** result. It is consistent with the separate prior `node:crypto` development-bundle diagnosis, but the failed mixed run itself did not capture its response and the cause of that timeout is not independently proved. The full built-app browser/HTTP suite and the other filtered-out tests remain unverified.
