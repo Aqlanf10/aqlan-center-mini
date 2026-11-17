@@ -217,7 +217,12 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
     expect(sql.match(/^INSERT INTO periodontal_sites /gm)).toHaveLength(42);
     expect(sql).toContain("pg_get_serial_sequence('periodontal_records', 'id')");
     expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledExactlyOnceWith();
-    expect(restored.migrationsApplied).toEqual(candidateFiles.map((file) => file.version));
+    // This archive was created on a fresh runtime where retired 0079 is absent.
+    // Keep its file in the exact catalogue, but do not activate it on restore.
+    expect(candidateFiles.some(file => file.version === "0079")).toBe(true);
+    expect(restored.migrationsApplied).toEqual(candidateFiles.filter(file => file.version !== "0079").map(file => file.version));
+    expect((await pool().query("SELECT version FROM schema_migrations WHERE version='0079'")).rows).toEqual([]);
+    expect((await pool().query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows).toEqual([{ name: null }]);
     expect(restored.verification).toMatchObject({ criticalProbeOk: true, migrationConsistent: true });
     expect(restored).toMatchObject({ documentsRestored: 1, documentsVerified: 1, readyForCutover: true });
     expect(await readFile(path.join(stagingDir, DOCUMENT_KEY))).toEqual(documentBytes);
