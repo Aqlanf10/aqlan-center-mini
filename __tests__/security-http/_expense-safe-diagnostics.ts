@@ -1,6 +1,17 @@
 /** Fixed, bounded diagnostics only: never print response bodies, URLs, identities or error text. */
+import { appendFileSync } from 'node:fs';
 type Emit = (message: string) => void;
-const emitNotice: Emit = message => console.log(message);
+export function persistDiagnostic(filename: string | undefined, message: string, append = appendFileSync): void {
+  if (!filename) return;
+  try { append(filename, `${message}\n`, { encoding: 'utf8', mode: 0o600 }); }
+  catch { /* Diagnostics must never change the original test result. */ }
+}
+const emitNotice: Emit = message => {
+  // GitHub may not recognize workflow commands embedded in Vitest's reporter
+  // output. A separate CI step validates and emits these bounded lines.
+  persistDiagnostic(process.env.FINANCE_CI_DIAGNOSTICS_PATH, message);
+  console.log(message);
+};
 const safelyEmit = (emit: Emit, message: string): void => { try { emit(message); } catch { /* Preserve the test result. */ } };
 const statuses = new Set([200, 201, 400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504]);
 const count = (value: unknown): string => Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 10 ? String(value) : 'other';

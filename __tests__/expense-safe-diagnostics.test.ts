@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { diagnoseCount, diagnoseReload, diagnoseRetryStatus } from './security-http/_expense-safe-diagnostics';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { diagnoseCount, diagnoseReload, diagnoseRetryStatus, persistDiagnostic } from './security-http/_expense-safe-diagnostics';
 
 const secret = 'PRIVATE_SYNTHETIC::error file=leak\nhttps://example.invalid/secret';
 
@@ -50,5 +53,31 @@ describe('bounded expense CI diagnostics', () => {
     await expect(diagnoseCount(async () => 2, 1, async read => { await read(); throw original; }, broken)).rejects.toBe(original);
     await expect(diagnoseReload(async () => { throw original; }, broken)).rejects.toBe(original);
     expect(() => diagnoseRetryStatus(500, broken)).not.toThrow();
+  });
+  it('persists only the provided bounded line without changing failure behavior', () => {
+    const calls: unknown[][] = [];
+    const append: typeof import('node:fs').appendFileSync = (...args) => { calls.push(args); };
+    const line = '::notice::FINANCE_CI_DIAG COUNT actual=2 expected=1';
+    persistDiagnostic('/synthetic/runner-temp/diagnostic', line, append);
+    expect(calls).toEqual([['/synthetic/runner-temp/diagnostic', `${line}\n`, { encoding: 'utf8', mode: 0o600 }]]);
+    persistDiagnostic(undefined, line, append);
+    expect(calls).toHaveLength(1);
+    const broken: typeof import('node:fs').appendFileSync = () => { throw new Error(secret); };
+    expect(() => persistDiagnostic('/synthetic/unwritable', line, broken)).not.toThrow();
+  });
+  it('hands an actual bounded diagnostic to the subsequent CI step', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'finance-diag-synthetic-'));
+    const filename = path.join(directory, 'notices.txt');
+    const previous = process.env.FINANCE_CI_DIAGNOSTICS_PATH;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      process.env.FINANCE_CI_DIAGNOSTICS_PATH = filename;
+      diagnoseRetryStatus(503);
+      expect(readFileSync(filename, 'utf8')).toBe('::notice::FINANCE_CI_DIAG RETRY status=503\n');
+    } finally {
+      if (previous === undefined) delete process.env.FINANCE_CI_DIAGNOSTICS_PATH;
+      else process.env.FINANCE_CI_DIAGNOSTICS_PATH = previous;
+      log.mockRestore();
+    }
   });
 });

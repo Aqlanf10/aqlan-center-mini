@@ -360,8 +360,13 @@ jobs:
       - name: HTTP security integration tests
         env:
           HR_EVIDENCE_DIR: /tmp/hr-evidence
+          FINANCE_CI_DIAGNOSTICS_PATH: ${{ runner.temp }}/finance-ci-diagnostics-${{ matrix.shard }}.txt
         # Raw JSON stays runner-local. Preserve Vitest's original exit status.
         run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-security-raw.json --includeTaskLocation --shard=${{ matrix.shard }}/2
+
+      - name: Emit bounded finance test diagnostics
+        if: always()
+        run: node scripts/emit-finance-ci-diagnostics.mjs "${{ runner.temp }}/finance-ci-diagnostics-${{ matrix.shard }}.txt"
 
       - name: Sanitize security HTTP test locations
         if: always()
