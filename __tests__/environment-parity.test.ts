@@ -669,7 +669,15 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     const witness = jobSource.get("standalone_restore_witness")!;
     const final = jobSource.get("required_completion")!;
     expect(http).toMatch(/needs:\s*\[quality\]/);
-    expect(witness).toMatch(/needs:\s*\[quality\]/);
+    // Diagnostic WIP: run independently, while the aggregate still requires
+    // both quality and the witness to succeed.
+    expect(witness).not.toMatch(/^\s+needs:/m);
+    expect(witness).toContain("image: postgres:18-alpine");
+    expect(witness).toContain("55472:5432");
+    expect(witness).toContain("SYNTHETIC_PRESERVE_EVIDENCE: \"1\"");
+    expect(witness).toContain("run: npm run build");
+    expect(witness).toContain("node scripts/verify-braces-runtime.mjs");
+    expect(witness).toContain("node scripts/dependency-security/verify-lint-tooling-runtime.mjs");
     expect(witness).toContain("npx vitest run --config vitest.config.standalone-restore-witness.mts");
     expect(witness).toContain("node scripts/preflight-build-seal.mjs --verify");
     expect(witness).not.toMatch(/continue-on-error|passWithNoTests|allowFailure/);

@@ -1108,7 +1108,6 @@ jobs:
   # either of the existing HTTP security shards from starting or completing.
   standalone_restore_witness:
     name: Synthetic standalone restore witness
-    needs: [quality]
     runs-on: ubuntu-latest
     timeout-minutes: 75
     services:
