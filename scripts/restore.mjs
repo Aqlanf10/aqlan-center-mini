@@ -48,7 +48,11 @@ try {
     console.error("هذه نسخة من قاعدة بهوية موحّدة. استعادتها تمر بالاستعادة المرحلية مع حجز الاستعادة، لا بهذا الأمر.");
     process.exit(2);
   }
-  sql = prepareBackupSql(text).dataSql;
+  const prepared = prepareBackupSql(text, { inspectHistorical0079: true });
+  if (prepared.historical0079) {
+    throw new Error("Historical 0079 backup requires full archive restore to preserve its registry and timestamp.");
+  }
+  sql = prepared.dataSql;
 } catch (error) {
   console.error(`الملف ناقص أو غير مدعوم: ${error.message}`);
   process.exit(1);

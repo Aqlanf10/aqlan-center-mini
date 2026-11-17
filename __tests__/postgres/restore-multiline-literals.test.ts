@@ -38,7 +38,9 @@ beforeAll(async () => {
   fixture = await openBackupTimestampFixture({ ...process.env });
   directory = await mkdtemp(join(tmpdir(), 'restore-multiline-'));
   const files = await loadMigrationFiles();
-  registry = files.map(({ version, name, checksum }) => ({ version, name, checksum }));
+  // 0079 remains in the source catalogue solely to validate historical
+  // installations. A new database must not register the retired migration.
+  registry = files.filter(file => file.version !== '0079').map(({ version, name, checksum }) => ({ version, name, checksum }));
   await migrate(fixture.source, { apply: true, files });
   for (const [index, note] of payloads.entries()) {
     await fixture.source.query(
