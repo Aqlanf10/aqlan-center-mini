@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { verifyStandaloneAssets } from "./verify-standalone-assets.mjs";
@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const historical = await readFile(path.join(root, "migrations/0079_ortho_followup_coverage.sql"));
 async function fixture(t) {
   const dir = await mkdtemp(path.join(tmpdir(), "standalone-assets-synthetic-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.onTestFinished(() => rm(dir, { recursive: true, force: true }));
   const source = path.join(dir, "source"), shipped = path.join(dir, "standalone");
   const files = {
     "lib/preflight-provenance.ts": 'export const PREFLIGHT_SOURCE_FILES = ["lib/preflight-provenance.ts", "lib/example.ts"] as const;',
