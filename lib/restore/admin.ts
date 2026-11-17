@@ -1,7 +1,8 @@
 import path from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 import { Client } from "pg";
-import { sslForConnection, parseDatabaseHost } from "../db-tls";
+import { assertNoAmbientPgOptions, assertNoRuntimeTargetCollision, parseRestoreIdentity } from "./target-identity.mjs";
+import { createRestoreClientSnapshot, restoreConfigFromSnapshot, type RestoreClientSnapshot } from "./client-config";
 import { classifyDbTarget } from "../db-target";
 import { readBackupHistory } from "../backupHistory";
 import {
@@ -48,22 +49,16 @@ export interface RestoreDrillState {
   errorCode: string | null;
 }
 
-function sameDatabaseTarget(first: string, second: string): boolean {
-  const a = parseDatabaseHost(first);
-  const b = parseDatabaseHost(second);
-  if (!a || !b) return first.trim() === second.trim();
-  return a.host === b.host && a.port === b.port && a.database === b.database;
-}
-
 /**
  * هدف الاستعادة التجريبية لا يأتي من DATABASE_URL الإنتاجي أبدًا.
  * يلزم URL مستقل + تصنيف staging/test + إعلان أنه هدف مخصص قابل للمسح.
  */
 export function restoreDrillAvailability(
   env: EnvironmentLike = process.env,
+  ambient: EnvironmentLike = process.env,
 ): RestoreDrillAvailability {
-  const targetUrl = env.RESTORE_DRILL_DATABASE_URL?.trim() ?? "";
-  if (!targetUrl) return { available: false, targetEnvironment: null, reason: "missing-target" };
+  const targetUrl = env.RESTORE_DRILL_DATABASE_URL ?? "";
+  if (!targetUrl.trim()) return { available: false, targetEnvironment: null, reason: "missing-target" };
 
   const classification = env.RESTORE_DRILL_DATABASE_ENVIRONMENT?.trim().toLowerCase() ?? "";
   if (!classification) {
@@ -76,14 +71,18 @@ export function restoreDrillAvailability(
     return { available: false, targetEnvironment: classification, reason: "target-not-dedicated" };
   }
 
-  const target = classifyDbTarget(targetUrl, { ...process.env, ...env, DATABASE_ENVIRONMENT: classification });
+  let identity;
+  try {
+    assertNoAmbientPgOptions(ambient, env);
+    identity = parseRestoreIdentity(targetUrl, { target:true });
+    assertNoRuntimeTargetCollision(identity, ambient, env);
+  } catch (error) {
+    return { available:false, targetEnvironment:classification,
+      reason:error instanceof Error && error.message === "RESTORE_TARGET_COLLISION" ? "production-collision" : "unsafe-classification" };
+  }
+  const target = classifyDbTarget(identity.connectionString, { ...ambient, ...env, DATABASE_ENVIRONMENT: classification } as unknown as NodeJS.ProcessEnv);
   if (!target.allowsRestoreFull || (target.environment !== "staging" && target.environment !== "test")) {
     return { available: false, targetEnvironment: classification, reason: "unsafe-classification" };
-  }
-
-  const productionUrl = env.DATABASE_URL?.trim() ?? "";
-  if (productionUrl && sameDatabaseTarget(targetUrl, productionUrl)) {
-    return { available: false, targetEnvironment: classification, reason: "production-collision" };
   }
 
   return { available: true, targetEnvironment: classification, reason: null };
@@ -102,8 +101,12 @@ async function writeRestoreDrillState(backupDir: string, state: RestoreDrillStat
 }
 
 /** الهدف مخصص صراحةً للـdrill؛ يمسح قبل كل تشغيل كي تبقى التجربة قابلة للتكرار. */
-async function resetDedicatedTarget(targetUrl: string): Promise<void> {
-  const client = new Client({ connectionString: targetUrl, ssl: sslForConnection(targetUrl) });
+async function resetDedicatedTarget(snapshot: RestoreClientSnapshot): Promise<void> {
+  // Re-check current application aliases in the same synchronous turn as Client
+  // construction. URL aliases can otherwise change while archive I/O is pending.
+  const identity = parseRestoreIdentity(snapshot.targetUrl, { target:true });
+  assertNoRuntimeTargetCollision(identity, process.env);
+  const client = new Client(restoreConfigFromSnapshot(snapshot, snapshot.targetUrl));
   try {
     await client.connect();
     await client.query("DROP SCHEMA IF EXISTS public CASCADE");
@@ -143,8 +146,9 @@ export async function runAdminRestoreDrill(input: {
   actor: string;
   env?: EnvironmentLike;
 }): Promise<AdminRestoreDrillResult> {
-  const env = input.env ?? process.env;
-  const availability = restoreDrillAvailability(env);
+  const env = { ...(input.env ?? process.env) };
+  const ambient = { ...process.env };
+  const availability = restoreDrillAvailability(env, ambient);
   if (!availability.available || !availability.targetEnvironment) {
     return { ok: false, reason: availability.reason ?? "unsafe-classification" };
   }
@@ -191,6 +195,12 @@ export async function runAdminRestoreDrill(input: {
     return { ok: false, reason: "archive-integrity-mismatch" };
   }
 
+  let targetSnapshot: RestoreClientSnapshot;
+  try {
+    targetSnapshot = createRestoreClientSnapshot(env.RESTORE_DRILL_DATABASE_URL!);
+    restoreConfigFromSnapshot(targetSnapshot, targetSnapshot.targetUrl);
+  }
+  catch { return { ok:false, reason:"unsafe-classification" }; }
   await rm(stagingDir, { recursive: true, force: true });
   await mkdir(stagingDir, { recursive: true });
 
@@ -212,13 +222,13 @@ export async function runAdminRestoreDrill(input: {
   await writeRestoreDrillState(input.backupDir, running);
 
   try {
-    const targetUrl = env.RESTORE_DRILL_DATABASE_URL!.trim();
-    await resetDedicatedTarget(targetUrl);
+    await resetDedicatedTarget(targetSnapshot);
     const result = await stagedRestore({
       archivePath,
       archiveSnapshot,
       migrationFilesSnapshot,
-      targetUrl,
+      targetUrl: targetSnapshot.targetUrl,
+      targetSnapshot,
       stagingDir,
       allowNonEmptyTarget: false,
     });

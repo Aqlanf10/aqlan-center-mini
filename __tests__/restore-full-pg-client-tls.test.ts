@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client } from 'pg';
 import { validatedRestoreFullTarget } from '../scripts/security/restore-full-target-guard.mjs';
-import { restoreClientConfigFor } from '../lib/restore/client-config';
+import { restoreClientConfigFor, createRestoreClientSnapshot, restoreConfigFromSnapshot } from '../lib/restore/client-config';
+import { parseRestoreIdentity } from '../lib/restore/target-identity.mjs';
 
 const REMOTE = 'pg-staging.example.invalid';
 const REMOTE_INPUT =
@@ -15,6 +16,8 @@ type ObservedPgClient = {
   connectionParameters: {
     host: string;
     database: string;
+    port: number | string;
+    user: string;
     ssl: false | {
       rejectUnauthorized?: boolean;
       ca?: string[] | string | Buffer;
@@ -89,5 +92,60 @@ describe('restore:full effective node-postgres TLS configuration (without connec
     const actualClient = new Client(restoreClientConfigFor(local.connectionString));
     expect(actualConnectionParameters(actualClient).host).toBe('127.0.0.1');
     expect(actualConnectionParameters(actualClient).ssl).toBe(false);
+  });
+});
+
+
+describe('restore target identity has no parser overrides or inherited defaults', () => {
+  it.each([
+    'postgresql://synthetic:synthetic@127.0.0.1:5432/db',
+    'postgresql://synthetic%40user:synthetic@127.0.0.1:5433/db_name',
+    'postgresql://synthetic:synthetic@localhost:5432/db?sslmode=disable',
+    'postgresql://synthetic@127.0.0.1:5432/db',
+  ])('matches the pg Client effective identity without opening a socket', value => {
+    const expected=parseRestoreIdentity(value,{target:true});
+    const effective=actualConnectionParameters(new Client(restoreClientConfigFor(value)));
+    expect(effective.host).toBe(expected.host);
+    expect(String(effective.port)).toBe(expected.port);
+    expect(effective.user).toBe(expected.user);
+    expect(effective.database).toBe(expected.database);
+  });
+  it.each([
+    'postgresql://synthetic:synthetic@127.0.0.1:5432/db?host=remote.invalid',
+    'postgresql://synthetic:synthetic@127.0.0.1:5432/db?%68ost=remote.invalid',
+    'postgresql://synthetic:synthetic@127.0.0.1:5432/db?port=9999',
+    'postgresql://synthetic:synthetic@127.0.0.1/db',
+    'postgresql://synthetic:synthetic@127.0.0.1:5432/',
+    'postgresql://127.0.0.1:5432/db',
+    'postgresql://synthetic:synthetic@%2Ftmp:5432/db',
+    'postgresql://synthetic%00:synthetic@127.0.0.1:5432/db',
+    'postgresql://synthetic:synthetic%0d%0a@127.0.0.1:5432/db',
+  ])('refuses a noncanonical target before constructing pg', value => {
+    expect(() => restoreClientConfigFor(value)).toThrow();
+  });
+  it.each(['PGHOST','PGPORT','PGDATABASE','PGUSER','PGOPTIONS','PGSSLMODE'])('refuses inherited %s', key => {
+    vi.stubEnv(key,'synthetic-override');
+    expect(() => restoreClientConfigFor('postgresql://synthetic:synthetic@127.0.0.1:5432/db')).toThrow('RESTORE_TARGET_AMBIENT_PG_OPTION');
+  });
+  it('rejects forged or redirected snapshots and freezes validated configuration', () => {
+    const snapshot=createRestoreClientSnapshot('postgresql://synthetic:synthetic@127.0.0.1:5432/db');
+    expect(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.config)).toBe(true);
+    expect(() => restoreConfigFromSnapshot({...snapshot},snapshot.targetUrl)).toThrow('RESTORE_TARGET_SNAPSHOT_INVALID');
+    expect(() => restoreConfigFromSnapshot(snapshot,'postgresql://synthetic:synthetic@127.0.0.1:5432/other')).toThrow('RESTORE_TARGET_SNAPSHOT_INVALID');
+  });
+  it('rechecks aliases before each use of an issued snapshot', () => {
+    const snapshot=createRestoreClientSnapshot('postgresql://synthetic:synthetic@127.0.0.1:5432/db');
+    vi.stubEnv('POSTGRES_URL','postgresql://different:synthetic@localhost:5432/db');
+    expect(() => restoreConfigFromSnapshot(snapshot,snapshot.targetUrl)).toThrow('RESTORE_TARGET_COLLISION');
+  });
+  it('does not accept an unverified TLS decision for a loopback alias spelling', () => {
+    vi.stubEnv('PGSSL_ROOT_CERT_PEM', undefined); vi.stubEnv('PGSSL_ROOT_CERT', undefined);
+    expect(() => restoreClientConfigFor('postgresql://synthetic:synthetic@localhost.:5432/db')).toThrow('RESTORE_TLS_VERIFICATION_REQUIRED');
+  });
+  it('pins the actual local client endpoint and forbids remote TLS downgrade with ?host', () => {
+    const config=restoreClientConfigFor('postgresql://synthetic:synthetic@127.0.0.1:5432/db?sslmode=disable');
+    const actual=new Client(config); const effective=actualConnectionParameters(actual);
+    expect(effective.host).toBe('127.0.0.1'); expect(effective.database).toBe('db'); expect(effective.ssl).toBe(false);
+    expect(() => restoreClientConfigFor('postgresql://synthetic:synthetic@127.0.0.1:5432/db?host=remote.invalid')).toThrow();
   });
 });

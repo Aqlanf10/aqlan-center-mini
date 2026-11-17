@@ -4,7 +4,7 @@ import path from "node:path";
 import { Client } from "pg";
 import { loadMigrationFiles, migrate, migrationStatus, type MigrationFile } from "../migrations";
 import { parseDatabaseHost } from "../db-tls";
-import { restoreClientConfigFor } from "./client-config";
+import { restoreClientConfigFor, restoreConfigFromSnapshot, type RestoreClientSnapshot } from "./client-config";
 import { readTarGzEntries, type ParsedArchive } from "./archive";
 import { validateBackupArchive, type ValidationOk } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
@@ -40,6 +40,8 @@ export interface StagedRestoreOptions {
   /** Admin drill's locally loaded catalogue, validated before target reset. */
   migrationFilesSnapshot?: MigrationFile[];
   targetUrl: string;
+  /** Internal, validated snapshot reused by the admin pre-reset path. */
+  targetSnapshot?: RestoreClientSnapshot;
   stagingDir: string;
   /** يرفض الهدف غير الفارغ افتراضًا — لا استعادة فوق بيانات بلا علم صريح. */
   allowNonEmptyTarget?: boolean;
@@ -189,7 +191,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     return result;
   }
 
-  const client = new Client(restoreClientConfigFor(options.targetUrl));
+  const client = new Client(options.targetSnapshot
+    ? restoreConfigFromSnapshot(options.targetSnapshot, options.targetUrl)
+    : restoreClientConfigFor(options.targetUrl));
   try {
     await client.connect();
 

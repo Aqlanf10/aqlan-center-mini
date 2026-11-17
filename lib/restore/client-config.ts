@@ -1,37 +1,33 @@
 import type { ClientConfig } from 'pg';
 import { sslForConnection } from '../db-tls';
+import { assertNoAmbientPgOptions, assertNoRuntimeTargetCollision, parseRestoreIdentity } from './target-identity.mjs';
 
-/**
- * The configuration sent to the ACTUAL pg.Client by stagedRestore.
- * A PG connection-string sslmode query can replace the ssl object passed here.
- * restore:full therefore passes a validated canonical URL with no sslmode
- * for remote staging, keeping the CA and server identity verification intact.
- */
-export function restoreClientConfigFor(url: string): ClientConfig {
-  const parsed = new URL(url);
-  const hostname = parsed.hostname;
-  const localHost = hostname === '127.0.0.1' || hostname === '[::1]' || hostname === 'localhost';
+export interface RestoreClientSnapshot { readonly targetUrl:string; readonly config:ClientConfig }
+const issued = new WeakSet<object>();
 
-  // A connection-string SSL query may replace an explicitly supplied
-  // verified TLS object during pg.Client construction. Never permit such a
-  // query for a remote restore, even when called outside the restore:full CLI.
-  if (!localHost && [...parsed.searchParams].some(([key]) =>
-    ['sslmode', 'ssl', 'sslrootcert', 'sslcert', 'sslkey'].includes(key.toLowerCase())
-  )) {
-    throw new Error('RESTORE_TLS_UNSAFE_QUERY: remote SSL options must not override verified TLS configuration.');
-  }
+/** Snapshot validated effective identity and TLS before any administrative reset. */
+export function createRestoreClientSnapshot(url:string): RestoreClientSnapshot {
+  assertNoAmbientPgOptions(process.env);
+  const identity=parseRestoreIdentity(url,{target:true});
+  let ssl: ReturnType<typeof sslForConnection>;
+  try { ssl=sslForConnection(identity.connectionString); }
+  catch { throw new Error('RESTORE_TLS_CONFIGURATION_INVALID'); }
+  if ((ssl === false && !identity.local) || (ssl !== false && (ssl.rejectUnauthorized !== true || !ssl.ca || (Array.isArray(ssl.ca) && ssl.ca.length === 0))))
+    throw new Error('RESTORE_TLS_VERIFICATION_REQUIRED: a trusted CA is mandatory for remote restores.');
+  const tls=ssl === false ? false : Object.freeze({ ...ssl, ...(ssl.ca ? {ca:Object.freeze([...ssl.ca]) as unknown as string[]} : {}), ...(identity.local ? {} : {servername:identity.host}) });
+  const config:ClientConfig=Object.freeze({connectionString:identity.connectionString,ssl:tls});
+  const result=Object.freeze({targetUrl:identity.connectionString,config});
+  issued.add(result); return result;
+}
 
-  const ssl = sslForConnection(url);
-  // Unlike ordinary read-only connections, a medical-record restore must
-  // never accept encrypted-but-unverified remote TLS.
-  if (!localHost) {
-    if (ssl === false || ssl.rejectUnauthorized !== true ||
-        !ssl.ca || (Array.isArray(ssl.ca) && ssl.ca.length === 0)) {
-      throw new Error('RESTORE_TLS_VERIFICATION_REQUIRED: a trusted CA is mandatory for remote restores.');
-    }
-    // Explicit SNI and server identity target. Leave checkServerIdentity
-    // unset so Node TLS performs its standard hostname verification.
-    return { connectionString: url, ssl: { ...ssl, servername: hostname } };
-  }
-  return { connectionString: url, ssl };
+/** Reject ambient pg overrides immediately before constructing either Client. */
+export function restoreConfigFromSnapshot(snapshot:RestoreClientSnapshot, url:string):ClientConfig {
+  assertNoAmbientPgOptions(process.env);
+  if (!issued.has(snapshot) || snapshot.targetUrl !== url) throw new Error('RESTORE_TARGET_SNAPSHOT_INVALID');
+  assertNoRuntimeTargetCollision(parseRestoreIdentity(snapshot.targetUrl, { target:true }), process.env);
+  return snapshot.config;
+}
+export function restoreClientConfigFor(url:string):ClientConfig {
+  const snapshot=createRestoreClientSnapshot(url);
+  return restoreConfigFromSnapshot(snapshot,snapshot.targetUrl);
 }

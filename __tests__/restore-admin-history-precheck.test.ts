@@ -11,13 +11,14 @@ import { parseTarBytes } from '../lib/restore/archive';
 import { validateBackupArchive } from '../lib/restore/validate';
 import { prepareBackupSql } from '../lib/restore/sql.mjs';
 
-const target = vi.hoisted(() => ({ connect: vi.fn(), query: vi.fn(), end: vi.fn() }));
-vi.mock('pg', () => ({ Client: class { connect = target.connect; query = target.query; end = target.end; } }));
+const target = vi.hoisted(() => ({ connect: vi.fn(), query: vi.fn(), end: vi.fn(), constructed: vi.fn() }));
+vi.mock('pg', () => ({ Client: class { constructor(config:unknown) { target.constructed(config); } connect = target.connect; query = target.query; end = target.end; } }));
 import { backupStateDir } from '../lib/backupVolume';
 import { upsertBackupHistoryRecord } from '../lib/backupHistory';
 import { runAdminRestoreDrill } from '../lib/restore/admin';
 import * as staging from '../lib/restore/staging';
 import { readTarGzSnapshot } from '../lib/restore/archive';
+import * as catalog from '../lib/restore/migration-catalog';
 
 const hash = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 const id = 'production-backup-20261117-010203-001-abcde123-abcdef12.tar.gz';
@@ -25,8 +26,8 @@ const environment = { DATABASE_URL:'postgres://source:synthetic@source.invalid:5
   RESTORE_DRILL_DATABASE_URL:'postgres://target:synthetic@target.invalid:5432/dedicated_test',
   RESTORE_DRILL_DATABASE_ENVIRONMENT:'test', RESTORE_DRILL_DEDICATED_TARGET:'true' };
 
-beforeEach(() => { vi.clearAllMocks(); target.connect.mockRejectedValue(new Error('unexpected target connection')); target.end.mockResolvedValue(undefined); });
-afterEach(() => { vi.restoreAllMocks(); });
+beforeEach(() => { vi.stubEnv('PGSSL_ROOT_CERT_PEM', '-----BEGIN CERTIFICATE-----\nSYNTHETIC-NO-NETWORK-CA\n-----END CERTIFICATE-----'); vi.clearAllMocks(); target.connect.mockRejectedValue(new Error('unexpected target connection')); target.end.mockResolvedValue(undefined); });
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe('administrative restore validation precedes target changes', () => {
   it.each(['wrong-name','invalid-time','missing-fields'])('rejects inconsistent baseline metadata (%s) before reset', async kind => {
@@ -158,8 +159,103 @@ describe('administrative restore validation precedes target changes', () => {
     const result = await runAdminRestoreDrill({backupDir:backups,backupId:id,actor:'synthetic',env:environment});
     expect(result).toMatchObject({ok:true,readyForCutover:true});
     expect(restore).toHaveBeenCalledOnce();
-    const snapshot = restore.mock.calls[0][0].archiveSnapshot;
+    const call = restore.mock.calls[0][0];
+    const snapshot = call.archiveSnapshot;
     expect(Buffer.from(snapshot!.entries.get('database.sql')!.data)).toEqual(sql);
+    expect(target.constructed).toHaveBeenCalledOnce();
+    expect(call.targetSnapshot?.config).toBe(target.constructed.mock.calls[0][0]);
+    expect(call.targetUrl).toBe(call.targetSnapshot?.targetUrl);
     expect(await readFile(archivePath,'utf8')).toBe('replacement synthetic bytes');
   });
+});
+
+
+describe('administrative effective target identity guard', () => {
+  const valid = { DATABASE_URL:'postgresql://prod:synthetic@prod.invalid:5432/clinic',
+    RESTORE_DRILL_DATABASE_URL:'postgresql://restore:synthetic@restore.invalid:5432/restore_drill',
+    RESTORE_DRILL_DATABASE_ENVIRONMENT:'test', RESTORE_DRILL_DEDICATED_TARGET:'true' };
+  const unsafeTargets = [
+    'postgresql://restore:synthetic@127.0.0.1:5432/restore_drill?host=prod.invalid',
+    'postgresql://restore:synthetic@127.0.0.1:5432/restore_drill?%68ost=prod.invalid',
+    'postgresql://restore:synthetic@127.0.0.1:5432/restore_drill?port=5555',
+    'postgresql://restore:synthetic@127.0.0.1:5432/restore_drill?dbname=clinic',
+    'postgresql://restore:synthetic@127.0.0.1:5432/restore_drill?sslmode=disable&sslmode=disable',
+    'postgresql://restore:synthetic@restore.invalid:5432/restore_drill?sslrootcert=/synthetic/no-read',
+    'postgresql://restore:synthetic@restore.invalid/restore_drill',
+    'postgresql://restore:synthetic@restore.invalid:5432/',
+    'postgresql://restore.invalid:5432/restore_drill',
+    'postgresql://restore:synthetic@%2Ftmp:5432/restore_drill',
+    'postgresql://restore%00:synthetic@restore.invalid:5432/restore_drill',
+    'postgresql://restore:synthetic%0d%0a@restore.invalid:5432/restore_drill',
+  ];
+  async function checkRefusal(env:Record<string,string>, reason='unsafe-classification') {
+    const directory=await mkdtemp(path.join(tmpdir(),'synthetic-target-guard-'));
+    try {
+      const stage=path.join(backupStateDir(directory),'restore-drill-current'); await mkdir(stage,{recursive:true});
+      await writeFile(path.join(stage,'prior.txt'),'SYNTHETIC PRIOR');
+      await writeFile(path.join(directory,id),'SYNTHETIC ARCHIVE');
+      const result=await runAdminRestoreDrill({backupDir:directory,backupId:id,actor:'synthetic',env});
+      expect(result).toEqual({ok:false,reason}); expect(target.constructed).not.toHaveBeenCalled();
+      expect(target.connect).not.toHaveBeenCalled(); expect(target.query).not.toHaveBeenCalled();
+      expect(await readFile(path.join(stage,'prior.txt'),'utf8')).toBe('SYNTHETIC PRIOR');
+      expect(await readFile(path.join(directory,id),'utf8')).toBe('SYNTHETIC ARCHIVE');
+    } finally {await rm(directory,{recursive:true,force:true});}
+  }
+  it.each(unsafeTargets)('refuses ambiguous target before stage removal or Client', async url => {
+    await checkRefusal({...valid,RESTORE_DRILL_DATABASE_URL:url});
+  });
+  it.each(['DATABASE_URL','POSTGRES_URL','POSTGRES_PRISMA_URL','POSTGRES_URL_NON_POOLING'])('rejects collision against %s even with a different user', async alias => {
+    await checkRefusal({...valid,[alias]:'postgresql://different:synthetic@restore.invalid:5432/restore_drill'}, 'production-collision');
+  });
+  it.each(['PGHOST','PGHOSTADDR','PGPORT','PGDATABASE','PGUSER','PGPASSWORD','PGSERVICE','PGOPTIONS','PGSSLMODE','PGSSLROOTCERT','PGAPPNAME'])('rejects ambient %s before stage removal or Client', async key => {
+    vi.stubEnv(key,'synthetic-ambient-override'); await checkRefusal(valid);
+  });
+  it('checks the real process aliases in addition to the provided environment', async () => {
+    vi.stubEnv('POSTGRES_URL','postgresql://different:synthetic@restore.invalid:5432/restore_drill');
+    await checkRefusal(valid, 'production-collision');
+  });
+  it('rejects ambiguous configured source aliases', async () => {
+    await checkRefusal({...valid,POSTGRES_URL:'postgresql://prod:synthetic@elsewhere.invalid:5432/clinic?host=restore.invalid'});
+  });
+  it('treats literal loopback spellings as the same target', async () => {
+    await checkRefusal({...valid,DATABASE_URL:'postgresql://prod:synthetic@localhost:5432/clinic',RESTORE_DRILL_DATABASE_URL:'postgresql://restore:synthetic@127.0.0.1:5432/clinic'}, 'production-collision');
+  });
+  it.each(['PGHOST','POSTGRES_URL'])('rechecks changed %s after archive reading before removing the prior stage', async key => {
+    const directory=await mkdtemp(path.join(tmpdir(),'synthetic-guard-race-'));
+    try {
+      const backups=path.join(directory,'backups'), stage=path.join(backupStateDir(backups),'restore-drill-current');
+      await mkdir(stage,{recursive:true}); await writeFile(path.join(stage,'prior.txt'),'SYNTHETIC PRIOR');
+      const sql=Buffer.from('BEGIN;\nCOMMIT;\n');
+      const manifest={format:'aqlan-full-backup',version:1,createdAt:'2026-01-01T00:00:00.000Z',databaseSha256:hash(sql),documents:[]};
+      const archive=tarGzBytes([{name:'database.sql',data:sql},{name:'manifest.json',data:Buffer.from(JSON.stringify(manifest))}]);
+      await writeFile(path.join(backups,id),archive);
+      await upsertBackupHistoryRecord(backups,{backupId:id,createdAt:'2026-01-01T00:00:00.000Z',triggerType:'manual',archiveSha256:hash(archive),archiveBytes:archive.length,databaseSha256:hash(sql),documentCount:0,status:'verified',replicationStatus:'none',destinations:[]});
+      const actual=catalog.createRestoreMigrationSnapshot;
+      const spy=vi.spyOn(catalog,'createRestoreMigrationSnapshot').mockImplementation(async () => {
+        const snapshot=await actual();
+        vi.stubEnv(key,key==='PGHOST' ? 'synthetic-override' : 'postgresql://other:synthetic@restore.invalid:5432/restore_drill');
+        return snapshot;
+      });
+      expect(await runAdminRestoreDrill({backupDir:backups,backupId:id,actor:'synthetic',env:valid})).toEqual({ok:false,reason:'unsafe-classification'});
+      expect(spy).toHaveBeenCalledOnce(); expect(target.constructed).not.toHaveBeenCalled(); expect(target.query).not.toHaveBeenCalled();
+      expect(await readFile(path.join(stage,'prior.txt'),'utf8')).toBe('SYNTHETIC PRIOR');
+      expect(await readFile(path.join(backups,id))).toEqual(archive);
+    } finally {await rm(directory,{recursive:true,force:true});}
+  });
+});
+
+it.each(['override','alias'])('staged direct invocation rejects a target %s before constructing a client', async kind => {
+  const directory=await mkdtemp(path.join(tmpdir(),'synthetic-staged-target-'));
+  try {
+    const sql=Buffer.from('BEGIN;\nCOMMIT;\n');
+    const manifest={format:'aqlan-full-backup',version:1,createdAt:'2026-01-01T00:00:00.000Z',databaseSha256:hash(sql),documents:[]};
+    const archive=tarGzBytes([{name:'database.sql',data:sql},{name:'manifest.json',data:Buffer.from(JSON.stringify(manifest))}]);
+    const file=path.join(directory,'synthetic.tar.gz'), stage=path.join(directory,'stage');
+    await writeFile(file,archive); await mkdir(stage); await writeFile(path.join(stage,'prior.txt'),'SYNTHETIC PRIOR');
+    if (kind === 'alias') vi.stubEnv('POSTGRES_URL','postgresql://different:synthetic@localhost:5432/db');
+    const targetUrl=kind === 'alias' ? 'postgresql://x:y@127.0.0.1:5432/db' : 'postgresql://x:y@127.0.0.1:5432/db?host=remote.invalid';
+    await expect(staging.stagedRestore({archivePath:file,targetUrl,stagingDir:stage})).rejects.toThrow(kind === 'alias' ? 'RESTORE_TARGET_COLLISION' : 'RESTORE_TARGET_UNSAFE_QUERY');
+    expect(target.constructed).not.toHaveBeenCalled(); expect(target.connect).not.toHaveBeenCalled();
+    expect(await readFile(path.join(stage,'prior.txt'),'utf8')).toBe('SYNTHETIC PRIOR');
+  } finally {await rm(directory,{recursive:true,force:true});}
 });
