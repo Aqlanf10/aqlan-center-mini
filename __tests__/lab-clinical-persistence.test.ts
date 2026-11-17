@@ -27,7 +27,8 @@ beforeEach(async () => {
   boundary.end.mockResolvedValue(undefined); await resetPoolForTesting();
   boundary.poolQuery.mockImplementation(async (sql: string) => ({ rows: sql.includes("AS markers")
     ? [{ markers: "0", users_kind: null, parties_kind: null }] : [], rowCount: 0 }));
-  boundary.query.mockImplementation(async (sql: string) => ({ rows: sql.includes("AS present") ? [{ present: false }] : [] }));
+  boundary.query.mockImplementation(async (sql: string) => ({ rows: sql.includes("AS column_types")
+    ? [{ tables: 0, columns: 0, column_types: 0, triggers: 0 }] : sql.includes("AS present") ? [{ present: false }] : [] }));
   boundary.connect.mockResolvedValue({ query: boundary.query, release: boundary.release });
   await ensureSchema();
   boundary.poolQuery.mockClear(); boundary.query.mockClear(); boundary.connect.mockClear(); boundary.release.mockClear();
