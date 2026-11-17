@@ -1,0 +1,7 @@
+# Synthetic 0136 registry and trigger verification — WIP
+
+The earlier laboratory run failed two migration-registry expectations: the actual synthetic registry included `0136`, while those expectations stopped at `0126`. The WIP tests retain the complete registry comparison, verify the historical `0126` entry, and check the exact name, SQL checksum and adoption state of `0136`. They also inspect the synthetic PostgreSQL catalog and exercise the member-price append-only trigger by attempting an UPDATE and DELETE against a newly created synthetic member price and comparing the retained row.
+
+The PostgreSQL 18 job passed in [CI 44063061015](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/44063061015) on exact head `1ce79a4426f2bf1cc4f669f359073a1139128f51`. The log reports 474 passing test files, including 15 grouped-laboratory tests, six debt-storage tests and four HR-registration tests. Schema contract generation, ownership characterization and operational verification also completed successfully. These checks use synthetic data; the test fixtures run on isolated CI databases and clean up their own temporary fixture databases.
+
+This verifies the tested ordinary UPDATE/DELETE behavior and registry, not every possible schema change, replica mode, TRUNCATE or concurrent access. At the time this report was written, both HTTP shards for that run were still in progress. A passing PostgreSQL job is not a passing full CI or approval to merge or deploy. This documentation-only successor has not itself been tested.
