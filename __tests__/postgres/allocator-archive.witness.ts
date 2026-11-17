@@ -164,3 +164,53 @@ it('checks the 12 historical high-water SQL replay cases on a separately owned t
     for (const db of [fixture.source,fixture.target]) expect((await fixture.admin.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=$1',[db.name])).rows).toEqual([db.identity]);
   } finally { await fixture.close(); }
 },180_000);
+
+it.each([
+  { scenario:'policy above sequence', minimum:12000, retired:'P-07000', called:false, next:'12000', allocated:'P-12000' },
+  { scenario:'retired number above sequence', minimum:8000, retired:'P-13000', called:true, next:'13001', allocated:'P-13001' },
+] as const)('restores an archive where $scenario determines the next number', async ({minimum,retired,called,next,allocated}) => {
+  const fixture = await ownedPair();
+  try {
+    await migrate(fixture.source.pool,{apply:true,files:await loadMigrationFiles()});
+    const patient = (await fixture.source.pool.query("INSERT INTO patients(patient_number,full_name) VALUES('P-00123','SYNTHETIC ARCHIVE FLOOR') RETURNING id")).rows[0];
+    await fixture.source.pool.query('INSERT INTO patient_numbering_policy(singleton,minimum_next,version) VALUES(true,$1,1)',[minimum]);
+    await fixture.source.pool.query('INSERT INTO retired_patient_numbers(patient_number,patient_id) VALUES($1,$2)',[retired,patient.id]);
+    await fixture.source.pool.query("SELECT setval('patient_number_seq',9000,$1)",[called]);
+    const bytes = Buffer.from('SYNTHETIC ARCHIVE FLOOR DOCUMENT'), key = storageKeyOf(bytes.toString());
+    const sourceFile = path.join(fixture.directory,'source-document');
+    await writeFile(sourceFile,bytes);
+    await fixture.source.pool.query("INSERT INTO patient_documents(patient_id,kind,title,mime_type,size_bytes,sha256,storage_key,uploaded_by) VALUES($1,'other','SYNTHETIC FLOOR','image/png',$2,$3,$4,'synthetic')",[patient.id,bytes.length,sha256Of(bytes),key]);
+    const before = await snapshot(fixture.source.pool), sourceSequence = await sequence(fixture.source.pool);
+    expect(sourceSequence).toEqual({last_value:'9000',is_called:called});
+    expect((await fixture.source.pool.query('SELECT aqlan_patient_number_next()::text AS next')).rows[0].next).toBe(next);
+    const client = await fixture.source.pool.connect(), blocks: Buffer[] = [];
+    try {
+      for await (const block of fullBackupBlocks({source:client,readDocument:async requested => {
+        if (requested !== key) throw new Error('Unexpected synthetic document key');
+        return readFile(sourceFile);
+      }})) blocks.push(Buffer.from(block));
+    } finally { client.release(); }
+    const archive = gzipSync(Buffer.concat(blocks)), archivePath = path.join(fixture.directory,'synthetic-floor.tar.gz');
+    await writeFile(archivePath,archive);
+    const stage = path.join(fixture.directory,'restored-documents');
+    expect((await fixture.admin.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=$1',[fixture.target.name])).rows).toEqual([fixture.target.identity]);
+    const restored = await stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage});
+    expect(restored).toMatchObject({ok:true,errors:[],validationErrors:[],readyForCutover:true,documentsRestored:1,documentsVerified:1});
+    expect(await snapshot(fixture.target.pool)).toEqual(before);
+    expect(await sequence(fixture.target.pool)).toEqual(sourceSequence);
+    expect((await fixture.target.pool.query('SELECT aqlan_patient_number_next()::text AS next')).rows[0].next).toBe(next);
+    expect(await readFile(path.join(stage,key))).toEqual(bytes);
+    const number = (await fixture.target.pool.query('SELECT aqlan_allocate_patient_number() AS number')).rows[0].number;
+    expect(number).toBe(allocated);
+    await fixture.target.pool.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'SYNTHETIC AFTER RESTORE')",[number]);
+    expect((await fixture.target.pool.query('SELECT count(*)::int AS count FROM patients WHERE patient_number=$1',[allocated])).rows[0].count).toBe(1);
+    expect(await sequence(fixture.target.pool)).toEqual({last_value:next,is_called:true});
+    const after = await snapshot(fixture.target.pool);
+    for (const table of tables.filter(table => table !== 'patients')) expect(after[table]).toEqual(before[table]);
+    expect(await readFile(path.join(stage,key))).toEqual(bytes);
+    expect(await snapshot(fixture.source.pool)).toEqual(before);
+    expect(await sequence(fixture.source.pool)).toEqual(sourceSequence);
+    expect(await readFile(sourceFile)).toEqual(bytes);
+    expect(await readFile(archivePath)).toEqual(archive);
+  } finally { await fixture.close(); }
+},180_000);
