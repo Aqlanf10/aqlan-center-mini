@@ -21,6 +21,18 @@ establish the state of any production or patient database.
   registry fields, selected patient rows, stage marker, two archive hashes,
   and target OID/owner. It did not check every target table or the source
   registry. The standalone job still failed on the five sequence cases.
+- [CI 44113745713](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/44113745713)
+  at `df3531956cc93ce7b0735d18f08f29e93702dc47` ran the separate reserved-ID
+  witness successfully (2/2): in both `is_called` states, an independent SQL
+  actor reserved an ID, staged legacy replay was accepted on the owned
+  nonempty target, and that actor's later insert hit `23505` on `patients_pkey`.
+  This deliberately noncooperating actor is not proof that the usual
+  `createPatient` journey separates allocation from its INSERT. The witness
+  compared the restored source row before the actor attempted insertion, and
+  then rechecked the original target row, source, stage, archive and target
+  identity; it did not recompare the restored row after the attempt or every
+  target table on the accepted branch. Its standalone job failed overall on
+  the five inherited sequence cases; no complete CI success is claimed.
 - [CI 44107894203](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/44107894203)
   at `09a63c25a64da905b0f38c0d9e11223c19f7b8fa` passed its standalone job:
   12/12 tests across three files, including eight isolated PostgreSQL 18
@@ -41,6 +53,12 @@ legacy, noncanonical `allowNonEmptyTarget` route; canonical source restores
 require an empty target. The admin drill is distinct: after source precheck it
 resets its designated target before staged restore and passes the nonempty
 override as false. No claim is made that admin keeps its pre-reset target.
+The current `targetTableCount` reads `information_schema.tables` in `public`;
+visibility and scope limitations mean that count alone cannot establish that
+an entire target database is empty or isolated. Failed replay after migration
+on a fresh target may also leave a partial schema, while document staging is
+performed after database commit and may fail independently; neither is limited
+to the nonempty-target scenario.
 `scripts/restore.mjs` separately executes `dataSql` with `setval`; on this
 revision its target guard restricts it to local synthetic fixture targets, so
 do not describe it as an observed production entry point. It still needs
