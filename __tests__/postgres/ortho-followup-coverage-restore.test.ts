@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
+import { gzipSync, gunzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
 import { fullBackupBlocks } from "../../lib/fullBackup";
@@ -11,6 +12,9 @@ import { stagedRestore } from "../../lib/restore/staging";
 import { prepareBackupSql } from "../../lib/restore/sql.mjs";
 import type { FollowupCoverageCommand } from "../../lib/ortho-followup-coverage";
 import type { SessionPayload } from "../../lib/auth";
+import { applyRuntimeMigrationFiles, loadMigrationFiles, migrate } from "../../lib/migrations";
+import { parseTarBytes } from "../../lib/restore/archive";
+import { tarGzBytes } from "../helpers/backup-tar";
 
 // Registered runtime bootstrap and migration-driven full archive restoration.
 // All targets are newly owned, identity-verified synthetic PostgreSQL databases.
@@ -25,6 +29,9 @@ const q = async (sql: string, args: unknown[] = []) => (await db.getPool().query
 async function activate(pool: Pool) {
   process.env.DATABASE_URL = pool.options.connectionString!;
   await db.resetPoolForTesting(); await db.ensureSchema();
+  const historical = (await loadMigrationFiles()).find(file => file.version === '0079');
+  if (!historical) throw new Error('Missing exact historical 0079');
+  await applyRuntimeMigrationFiles(pool, [historical]);
   expect((await pool.query("SELECT version,adopted FROM schema_migrations WHERE version='0079'")).rows).toEqual([{version:"0079",adopted:false}]);
 }
 async function snapshots(pool: Pool) {
@@ -40,6 +47,7 @@ beforeAll(async () => {
   process.env.SKIP_SEED = "true";
   db = await import("../../lib/db"); coverage = await import("../../lib/ortho-followup-coverage-db");
   await activate(fixture.source);
+  await fixture.source.query("UPDATE schema_migrations SET applied_at='2025-03-04T05:06:07.123456Z' WHERE version='0079'");
   initialReset = await db.resetClinicData({ actor: "synthetic-empty-reset", actorRole: "admin" }, async () => {
     emptyBackupCalls++; return { ok: true as const, backupId: "synthetic-empty-reset" };
   });
@@ -127,7 +135,40 @@ it("migration-driven full archive restoration preserves committed and refused co
   const result=await stagedRestore({archivePath:join(directory,"synthetic-followup.tar.gz"),targetUrl:fixture.archiveTarget.options.connectionString!,stagingDir:join(directory,"documents")});
   expect(result).toMatchObject({ok:true,errors:[],validationErrors:[]});
   expect(result.migrationsApplied).toContain('0079');
+  expect((await fixture.archiveTarget.query("SELECT applied_at::text FROM schema_migrations WHERE version='0079'")).rows)
+    .toEqual((await fixture.source.query("SELECT applied_at::text FROM schema_migrations WHERE version='0079'")).rows);
   process.env.DATABASE_URL=fixture.archiveTarget.options.connectionString!;
   await db.resetPoolForTesting();
   await verify(fixture.archiveTarget);
 });
+it("restores a fresh archive without activating 0079 and refuses an inconsistent old archive", async () => {
+  const isolated = await openBackupTimestampFixture(process.env);
+  try {
+    await migrate(isolated.source, { apply: true });
+    await isolated.source.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-FRESH-0079','Synthetic fresh restore')");
+    const client = await isolated.source.connect(), blocks: Uint8Array[] = [];
+    try { for await (const block of fullBackupBlocks({ source: client })) blocks.push(block); }
+    finally { client.release(); }
+    const freshPath = join(directory, 'fresh-without-0079.tar.gz');
+    await writeFile(freshPath, gzipSync(Buffer.concat(blocks)));
+    const fresh = await stagedRestore({ archivePath: freshPath, targetUrl: isolated.sqlTarget.options.connectionString!, stagingDir: join(directory, 'fresh-documents') });
+    expect(fresh.errors).toEqual([]); expect(fresh.ok).toBe(true);
+    expect(fresh.migrationsApplied).not.toContain('0079');
+    expect((await isolated.sqlTarget.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows[0].name).toBeNull();
+    expect((await isolated.sqlTarget.query("SELECT patient_number FROM patients WHERE patient_number='SYN-FRESH-0079'")).rows).toHaveLength(1);
+
+    const old = parseTarBytes(gunzipSync(await (await import('node:fs/promises')).readFile(join(directory, 'synthetic-followup.tar.gz'))));
+    const original = Buffer.from(old.entries.get('database.sql')!.data).toString('utf8');
+    const stripped = original.replace(/^INSERT INTO schema_migrations \("version", "name", "checksum", "applied_at", "adopted"\) VALUES \('0079'.*\);\n/m, '');
+    expect(stripped).not.toBe(original);
+    const faultySql = Buffer.from(stripped), manifest = JSON.parse(Buffer.from(old.entries.get('manifest.json')!.data).toString('utf8'));
+    manifest.databaseSha256 = createHash('sha256').update(faultySql).digest('hex'); manifest.databaseBytes = faultySql.length;
+    const inconsistentPath = join(directory, 'inconsistent-without-registry.tar.gz');
+    await writeFile(inconsistentPath, tarGzBytes(old.order.map(name => ({ name, data: name === 'database.sql' ? faultySql : name === 'manifest.json' ? Buffer.from(JSON.stringify(manifest)) : old.entries.get(name)!.data }))));
+    const inconsistent = await stagedRestore({ archivePath: inconsistentPath, targetUrl: isolated.archiveTarget.options.connectionString!, stagingDir: join(directory, 'inconsistent-documents') });
+    expect(inconsistent.ok).toBe(false); expect(inconsistent.readyForCutover).toBe(false);
+    expect(inconsistent.errors.length).toBeGreaterThan(0);
+    expect((await isolated.archiveTarget.query("SELECT count(*)::int AS n FROM patients")).rows[0].n).toBe(0);
+    expect((await isolated.archiveTarget.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows[0].name).toBeNull();
+  } finally { await isolated.close(); }
+}, 180000);

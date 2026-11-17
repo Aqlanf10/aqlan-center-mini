@@ -169,6 +169,16 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     return result; // لا استعادة قاعدة أصلًا (P1.12)
   }
 
+  // Inspect source history before touching the target. Only the exact original
+  // registered 0079 contract authorizes installing its historical schema.
+  let prepared: ReturnType<typeof prepareBackupSql> & { historical0079: { appliedAt: string } | null };
+  try {
+    prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true });
+  } catch (error) {
+    result.errors.push(`تعذّر التحقق من سجل هجرات النسخة: ${error instanceof Error ? error.message : String(error)}`);
+    return result;
+  }
+
   const client = new Client(restoreClientConfigFor(options.targetUrl));
   try {
     await client.connect();
@@ -207,21 +217,29 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     const migrationFiles = await loadMigrationFiles();
     const migrationPool = clientAsPool(client);
     try {
-      const migrationRun = await migrate(migrationPool, { apply: true, files: migrationFiles });
+      const migrationRun = await migrate(migrationPool, { apply: true, files: migrationFiles,
+        ...(prepared.historical0079 ? { historical0079: true as const } : {}) });
       result.migrationsApplied = migrationRun.appliedVersions;
       if (options.installUnregisteredProposals) await options.installUnregisteredProposals(client);
 
     // ── الخطوة ٤: بيانات SQL — مع استبعاد صفوف تسجيل الهجرات نفسها:
     // حالة الهجرات في الهدف تُعرَّف بما طبَّقته الخطوة ٣ (الملفات الحالية)، لا
     // بلقطة النسخة — فتُستعاد نسخة قديمة على كود أحدث فتظل حالة المخطط صحيحة.
-    const sqlText = Buffer.from(validated.sql).toString("utf8");
-      const prepared = prepareBackupSql(sqlText);
       result.skippedMigrationRecordLines = prepared.skippedMigrationRecordLines;
       result.sqlRowsStatementLines = prepared.sqlRowsStatementLines;
       const dataSql = prepared.dataSql;
       await client.query("SET standard_conforming_strings = on");
       await client.query("BEGIN");
       try {
+        if (prepared.historical0079) {
+          // Preserve the source timestamp at PostgreSQL precision in the same
+          // transaction as the restored rows, without accepting source SQL.
+          const updated = await client.query(
+            "UPDATE schema_migrations SET applied_at=$1::timestamptz WHERE version='0079' AND name='ortho_followup_coverage' AND checksum=$2 AND adopted=FALSE",
+            [prepared.historical0079.appliedAt, "5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99"],
+          );
+          if (updated.rowCount !== 1) throw new Error("historical_0079_registry_mismatch");
+        }
         // R2: the replay is an authority-changing writer of this target: lifecycle fence first.
         if (canonicalSource) await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [staffLifecycleLockKey("public")]);
         const cyclicKeys = await nonDeferrableCyclicForeignKeys(client);
