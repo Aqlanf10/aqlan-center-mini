@@ -66,12 +66,22 @@ changes error presentation; composing the branches requires a reviewed stable
 reason that distinguishes this specific guard from unrelated PostgreSQL lock
 errors. The witness does not authorize restoring raw error messages.
 
+On `36c919aae074711595d6758afe246953ad034dd3`,
+[CI 44118171703](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/44118171703)
+failed in the standalone build's TypeScript check: pure alias test objects
+were passed as `NodeJS.ProcessEnv`, whose project environment type required
+`NODE_ENV`. The PostgreSQL witness did not start. This
+follow-up narrows the helper's input to a read-only string/undefined record;
+the exact-alias validation and assertions are unchanged. The prior in-memory
+compiler check used a different checkout and did not detect the build's type.
+
 Focused TypeScript and ESLint checks used the current checkout with this test's
-files and the base guard overlaid in memory; they passed but are not a complete
-project typecheck. Two standalone Vitest unit files passed (2/2), with nine
+files and the base guard overlaid in memory, including Next's `global.d.ts`;
+they passed but are not a complete project typecheck. Two standalone Vitest unit files passed (2/2), with nine
 synthetic refusal checks and 26 alias checks; the copied harness files were
 compared byte-for-byte and no database environment variables were passed.
-No PostgreSQL, HTTP endpoint, Next build or CI ran on this new witness yet.
+No PostgreSQL or HTTP endpoint test ran for this witness; CI for this follow-up
+has not yet run.
 Its actor rollback and subsequent allocation are intentional mutations only to
 the freshly created synthetic target. They do not prove recovery, policy or
 concurrency safety for other paths, all caches, external sessions, 0090, or
