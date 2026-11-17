@@ -21,9 +21,9 @@ async function fixture() {
   validateOperationalVerificationEnvironment(process.env);
   const checked=validatePostgresTestTarget(process.env);
   const admin=new Client({connectionString:checked.maintenanceUrl.toString(),ssl:false});
-  await admin.connect();
   let pool:Pool|undefined;
   try {
+    await admin.connect();
     assertPostgres18VersionNum((await admin.query("SELECT current_setting('server_version_num') AS n")).rows[0].n);
     const name=`aqlan_schema_ownership_target_${randomUUID().replaceAll('-','')}`;
     validateGeneratedDatabaseName(name);
@@ -45,7 +45,7 @@ async function fixture() {
       expect(row?.name===name && row?.oid===identity.oid && row?.owner===identity.owner && row?.role===identity.owner && row?.isolation==='read committed').toBe(true);
     }
     await verify(pool);
-    return {admin,pool,url,name,identity,directory,verify,async close(){await pool!.end();await admin.end();}};
+    return {admin,pool,url,name,identity,directory,verify,async close(){try{await pool!.end();}finally{await admin.end();}}};
   } catch(error){await pool?.end().catch(()=>{});await admin.end().catch(()=>{});throw error;}
 }
 

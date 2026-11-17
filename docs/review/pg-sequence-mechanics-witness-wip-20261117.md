@@ -22,9 +22,12 @@ verifies name/OID/owner/current role, and records its identity in a unique
 temporary directory. A statement timeout is configured only on that newly
 created database before the test connections. Connections are closed but no
 database or evidence file is removed; CI's disposable runner and database
-service are ephemeral and this is not an external-retention guarantee. No
-patient data, existing database, production service, staging deployment, or
-unrelated local database is accessed by the witness.
+service are ephemeral and this is not an external-retention guarantee. The
+guarded global setup reads the version in `aqlan_p1_test`; the fixture uses the
+same isolated service's `postgres` maintenance database to create a new owned
+database. Neither existing service database is reset or used for application
+data. No patient data, production service, staging deployment, or unrelated
+local database is accessed by the witness.
 
 Even a green result would establish only the tested PostgreSQL 18 behavior,
 not a production-safe concurrency fence. Existing backends can hold cached
