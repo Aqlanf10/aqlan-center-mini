@@ -91,6 +91,16 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   // Snapshot the current schema-owned seed before replay; it must survive exactly,
   // while none of the archived application rows may survive the late failure.
   await migrate(fixture.archiveTarget, { apply: true });
+  // This fixture creates and identity-checks each database itself. Re-read its
+  // identity immediately before touching a sequence and again after replay.
+  const identitySql = 'SELECT datname AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=current_database()';
+  const identityBefore = (await fixture.archiveTarget.query<{ name: string; oid: string; owner: string }>(identitySql)).rows[0];
+  const expectedName = decodeURIComponent(new URL(fixture.archiveTarget.options.connectionString!).pathname.slice(1));
+  expect(/^aqlan_backup_precision_[a-f0-9]{32}$/.test(identityBefore.name) && identityBefore.name === expectedName).toBe(true);
+  const originalSequences = await sequenceCandidates(fixture.archiveTarget);
+  // Never lower even the owned synthetic target while preparing this witness.
+  expect(originalSequences.patientId <= 100001n).toBe(true);
+  await fixture.archiveTarget.query("SELECT setval('patients_id_seq', 100000, true)");
   // The archived source row must be inserted before the injected duplicate;
   // otherwise this would not exercise rollback after replay has begun.
   expect((await fixture.archiveTarget.query('SELECT EXISTS(SELECT 1 FROM patients WHERE id=$1) AS present', [SYNTHETIC_DUPLICATE_PATIENT_ID])).rows[0].present).toBe(false);
@@ -103,6 +113,17 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   expect(result.errors.join(' ')).toContain('duplicate key value violates unique constraint "patients_pkey"');
   expect(await applicationRows(fixture.archiveTarget)).toEqual(beforeReplay);
   const sequencesAfter = await sequenceCandidates(fixture.archiveTarget);
+  const identityAfter = (await fixture.archiveTarget.query<{ name: string; oid: string; owner: string }>(identitySql)).rows[0];
+  expect(identityAfter.name === identityBefore.name && identityAfter.oid === identityBefore.oid && identityAfter.owner === identityBefore.owner).toBe(true);
+  const files = await loadMigrationFiles();
+  expect(files.find(file => file.version === '0079')?.checksum).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');
+  const registryAfter = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
+  expect(registryAfter).toEqual(registryBefore);
+  expect(registryAfter.map(row => row.version)).toEqual(files.filter(file => file.version !== '0079').map(file => file.version));
+  expect((await fixture.archiveTarget.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows).toEqual([{name:null}]);
+  expect((await fixture.archiveTarget.query("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgenabled <> 'O'")).rows).toEqual([]);
+  expect((await fixture.archiveTarget.query('SHOW session_replication_role')).rows[0].session_replication_role).toBe('origin');
+  // Run these last, so a sequence regression cannot hide the row/registry checks.
   for (const key of ['patientId', 'patientNumber'] as const) {
     // setval is not transactional. Notice any advancement without printing values;
     // an increase is evidence, not a decision that it is acceptable policy.
@@ -112,12 +133,4 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
     }
     expect(sequencesAfter[key] >= sequencesBefore[key]).toBe(true);
   }
-  const files = await loadMigrationFiles();
-  expect(files.find(file => file.version === '0079')?.checksum).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');
-  const registryAfter = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
-  expect(registryAfter).toEqual(registryBefore);
-  expect(registryAfter.map(row => row.version)).toEqual(files.filter(file => file.version !== '0079').map(file => file.version));
-  expect((await fixture.archiveTarget.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows).toEqual([{name:null}]);
-  expect((await fixture.archiveTarget.query("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgenabled <> 'O'")).rows).toEqual([]);
-  expect((await fixture.archiveTarget.query('SHOW session_replication_role')).rows[0].session_replication_role).toBe('origin');
 });
