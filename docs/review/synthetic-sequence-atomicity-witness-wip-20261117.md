@@ -48,8 +48,9 @@ barrier is reached, the next-candidate floor must remain above the concurrent
 allocation. The allocator runs asynchronously; the barrier is released after
 allocation completes or a sequence-lock wait is observed, so a transactional
 fix may block the allocator without deadlocking the witness. A fixed completion
-deadline and a statement timeout set only on the owned disposable target bound
-unexpected hangs. This is a safety witness, not a policy that concurrent replay must
+deadline bounds the paired promise wait, and a statement timeout is set only on
+the owned disposable target; neither guarantees a bound on every Node or cleanup
+hang. This is a safety witness, not a policy that concurrent replay must
 succeed. Neither this test nor a `GREATEST` expression
 alone proves correctness under all races,
 sequence caches, unusual increment settings, or backend failures.

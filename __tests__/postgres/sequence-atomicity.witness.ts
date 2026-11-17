@@ -63,6 +63,9 @@ async function sequence(pool:Pool, name:'patients_id_seq'|'patient_number_seq'):
 }
 const next = (s:Seq) => BigInt(s.last_value)+(s.is_called ? 1n : 0n);
 const same = (a:Seq,b:Seq) => a.last_value===b.last_value && a.is_called===b.is_called;
+function change(before:Seq,after:Seq) {
+  return next(after)<next(before)?'REGRESSED':next(after)>next(before)?'ADVANCED':same(before,after)?'UNCHANGED':'STATE_CHANGED_SAME_CANDIDATE';
+}
 async function deadline<T>(promise:Promise<T>,message:string,ms:number):Promise<T> {
   let timer:ReturnType<typeof setTimeout>|undefined;
   try { return await Promise.race([promise,new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(new Error(message)),ms);})]); }
@@ -152,6 +155,10 @@ it.each([
     const result = await stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage,allowNonEmptyTarget:true});
     const knownRefusal=knownNonEmptyRefusal(result);
     const lateFailure=outcome==='failure' && knownLateDuplicate(result);
+    const after = await sequence(fixture.target.pool,'patients_id_seq'), afterNumber = await sequence(fixture.target.pool,'patient_number_seq');
+    if (lateFailure) console.log('SYNTHETIC_LATE_DUPLICATE_REACHED');
+    console.log(`SYNTHETIC_ID_SEQUENCE_${change(before,after)}`);
+    console.log(`SYNTHETIC_PATIENT_SEQUENCE_${change(beforeNumber,afterNumber)}`);
     if (outcome==='failure') expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.readyForCutover).toBe(false);
@@ -165,7 +172,6 @@ it.each([
       expect(sha(Buffer.from(JSON.stringify(target)))===sha(Buffer.from(JSON.stringify(beforeRows)))).toBe(true);
       expect(sha(Buffer.from(JSON.stringify(restored)))===sha(Buffer.from(JSON.stringify(sourceRows)))).toBe(true);
     }
-    const after = await sequence(fixture.target.pool,'patients_id_seq'), afterNumber = await sequence(fixture.target.pool,'patient_number_seq');
     // A failed isolated replay must not change value or is_called. On success,
     // do not decide whether a gap is acceptable: report state changes without
     // numbers and independently forbid regression of either next candidate.
@@ -307,7 +313,9 @@ it('does not regress a concurrently allocated sequence value during replay',asyn
         expect(result.readyForCutover).toBe(false);
         expect(await dataDigest(fixture.target.pool)===beforeData).toBe(true);
       }
-      expect(next(await sequence(fixture.target.pool,'patients_id_seq'))>BigInt(allocated)).toBe(true);
+      const afterSeq=await sequence(fixture.target.pool,'patients_id_seq');
+      console.log(next(afterSeq)>BigInt(allocated)?'SYNTHETIC_CONCURRENT_SEQUENCE_NOT_REGRESSED':'SYNTHETIC_CONCURRENT_SEQUENCE_REGRESSED');
+      expect(next(afterSeq)>BigInt(allocated)).toBe(true);
       if (!result.ok) expect(same(await sequence(fixture.target.pool,'patient_number_seq'),beforeNumber)).toBe(true);
       expect(sha(Buffer.from(JSON.stringify(await patients(fixture.source.pool))))===sha(Buffer.from(JSON.stringify(beforeSource)))).toBe(true);
       expect(sha(await readFile(archivePath))===sha(archive)).toBe(true);
