@@ -3,6 +3,9 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
+import { applyRuntimeMigrationFiles, loadMigrationFiles } from "../../lib/migrations";
+import { readVerifiedDurableSession } from "../../lib/staff-durable-session";
+import { commandCanonicalFollowupCoverage as historicAuthor } from "../postgres/_historical-canonical-coverage-command";
 import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
 import type { FollowupCoverageCommand } from "../../lib/ortho-followup-coverage";
 const GRANTS={"finance.agreements.manage":true,"finance.patient-ledger.view":true,"finance.invoices.view":true,"clinical.plans.view":true,"clinical.ortho.view":true};
@@ -14,17 +17,27 @@ const ACCOUNTS={
  read:{username:"canon-ceditor-read",password:"Canon#AppendRead1",role:"admin",display:"قارئ تجريبي",patientScope:"all",grants:{"clinical.ortho.view":true}},
 }as const;
 let journey:CanonicalJourney<keyof typeof ACCOUNTS>,patientId:number,caseId:number,command:FollowupCoverageCommand,sequence=0;
-beforeAll(async()=>{journey=await openCanonicalJourney({portOffset:99,secret:"canonical-coverage-editor-0123456789abcdef",accounts:ACCOUNTS,ownerKey:"owner",async seed(){}});},300000);
+const SECRET="canonical-coverage-editor-0123456789abcdef";
+let previousSecret:string|undefined;
+beforeAll(async()=>{
+ previousSecret=process.env.SESSION_SECRET;process.env.SESSION_SECRET=SECRET;
+ journey=await openCanonicalJourney({portOffset:99,secret:SECRET,accounts:ACCOUNTS,ownerKey:"owner",async seed(pool){
+  const historical=(await loadMigrationFiles()).find(file=>file.version==="0079");
+  if(!historical)throw new Error("Synthetic historical 0079 source missing");
+  await applyRuntimeMigrationFiles(pool,[historical]);
+  expect((await pool.query("SELECT version,name,checksum,adopted FROM schema_migrations WHERE version='0079'")).rows).toEqual([{version:historical.version,name:historical.name,checksum:historical.checksum,adopted:false}]);
+ }});
+},300000);
 beforeEach(async()=>{
  patientId=(await journey.db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'مريض تجريبي',$2) RETURNING id",["SYN-CAPPEND-"+(++sequence),journey.parties.own])).rows[0].id;
  const seeded=await seedCanonicalCoverage(journey.db,{patientId,actorId:journey.ids.own,doctorId:journey.parties.own!,save:false});caseId=seeded.ortho;await journey.db.query("UPDATE ortho_cases SET status='active' WHERE id=$1",[caseId]);
  const {fingerprint,invoiceNumber:_invoice,serviceName:_service,...source}=seeded.source;
  command={schemaVersion:1,commandId:randomUUID(),expectedRevisionId:null,source,expectedSourceFingerprint:fingerprint,scope:"routine_adjustments",decision:"included",reason:"SYN explicit synthetic coverage"};
 });
-afterAll(async()=>{await journey?.close();},60000);
+afterAll(async()=>{try{await journey?.close();}finally{if(previousSecret===undefined)delete process.env.SESSION_SECRET;else process.env.SESSION_SECRET=previousSecret;}},60000);
 const path=()=>`/api/ortho/${caseId}/followup-coverage?patientId=${patientId}`;
-it("HTTP: explicitly admitted source editor context is separate from the minimal saved-decision read",async()=>{
- const cookie=(await journey.login("own")).cookie;expect((await journey.api(path(),cookie)).status).toBe(200);const response=await journey.api(path()+"&edit=1",cookie);expect(response.status).toBe(200);expect(await response.json()).toMatchObject({projection:"ortho-followup-coverage-editor",canEdit:true,sources:[{patientId,orthoCaseId:caseId}]});
+it("HTTP: explicitly admitted historical source context stays read-only and separate from the minimal saved-decision read",async()=>{
+ const cookie=(await journey.login("own")).cookie;expect((await journey.api(path(),cookie)).status).toBe(200);const response=await journey.api(path()+"&edit=1",cookie);expect(response.status).toBe(200);expect(await response.json()).toMatchObject({projection:"ortho-followup-coverage-editor",canEdit:false,sources:[{patientId,orthoCaseId:caseId}]});
 });
 const editPath=()=>path()+"&edit=1";
 const facts=async()=>(await journey.db.query("SELECT (SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoices i) invoices,(SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoice_items i) lines,(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM payments p) payments,(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM treatment_plans p) plans,(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM plan_items p) items")).rows;
@@ -32,6 +45,21 @@ const counts=async()=>(await journey.db.query("SELECT (SELECT count(*)::int FROM
 it.each(["finance.invoices.view","clinical.plans.view","clinical.ortho.view"]as const)("HTTP: editor source %s is independent; minimal decision reading survives",async grant=>{
  const original=(await journey.db.query("SELECT permissions FROM users WHERE id=$1",[journey.ids.all])).rows[0].permissions,stale=(await journey.login("all")).cookie;
  try{await journey.db.query("UPDATE users SET permissions=jsonb_set(jsonb_set(permissions::jsonb,'{revision}','2'),ARRAY['grants',$1],'false')::text WHERE id=$2",[grant,journey.ids.all]);expect((await journey.api(editPath(),stale)).status).toBe(401);const cookie=(await journey.login("all")).cookie;expect((await journey.api(editPath(),cookie)).status).toBe(403);expect((await journey.api(path(),cookie)).status).toBe(200);expect(await counts()).toEqual({revisions:0,rejections:0,audits:0});}finally{await journey.db.query("UPDATE users SET permissions=$1 WHERE id=$2",[original,journey.ids.all]);}
+});
+it("HTTP: genuine historical decision stays readable while new authoring is retired",async()=>{
+ const login=await journey.login("own");expect(login.status).toBe(200);
+ const session=readVerifiedDurableSession(decodeURIComponent(login.cookie.slice(login.cookie.indexOf("=")+1)));
+ if(!session)throw new Error("Synthetic durable login unavailable");
+ const authored=await historicAuthor(session,patientId,caseId,command,journey.db);
+ expect(authored).toMatchObject({ok:true,replayed:false,revision:{commandId:command.commandId,decision:"included",createdBy:ACCOUNTS.own.username}});
+ const before=await facts(),beforeCounts=await counts();expect(beforeCounts).toEqual({revisions:1,rejections:0,audits:1});
+ const editor=await journey.api(editPath(),login.cookie);expect(editor.status).toBe(200);
+ const view=await editor.json();expect(view).toMatchObject({projection:"ortho-followup-coverage-editor",enabled:true,canEdit:false,current:{id:authored.revision.id,decision:"included"},sources:[{patientId,orthoCaseId:caseId}]});
+ expect(view.current).not.toHaveProperty("commandId");expect(JSON.stringify(view)).not.toMatch(/250000|source_snapshot|request_fingerprint/);
+ const fresh={...command,commandId:randomUUID(),expectedRevisionId:authored.revision.id,decision:"excluded"};
+ const blocked=await journey.api(path(),login.cookie,{method:"POST",body:JSON.stringify(fresh)});expect(blocked.status).toBe(409);expect(await blocked.json()).toMatchObject({code:"coverage_authoring_retired"});
+ const status=await journey.api(path(),login.cookie,{method:"PUT",body:JSON.stringify(fresh)});expect(status.status).toBe(200);expect(await status.json()).toEqual({state:"unresolved"});
+ expect(await facts()).toEqual(before);expect(await counts()).toEqual(beforeCounts);expect(await journey.ddlLog()).toEqual([]);
 });
 it("HTTP: explicit source context rejects unknown/duplicate queries, command query widening and out-of-scope patients",async()=>{
  const cookie=(await journey.login("own")).cookie;for(const suffix of["&edit=0","&edit=1&edit=1","&edit=1&force=1"])expect((await journey.api(path()+suffix,cookie)).status).toBe(400);for(const method of["POST","PUT"])expect((await journey.api(editPath(),cookie,{method,body:JSON.stringify(command)})).status).toBe(400);await journey.db.query("UPDATE patients SET primary_doctor_id=NULL WHERE id=$1",[patientId]);expect((await journey.api(editPath(),cookie)).status).toBe(404);expect(await counts()).toEqual({revisions:0,rejections:0,audits:0});
