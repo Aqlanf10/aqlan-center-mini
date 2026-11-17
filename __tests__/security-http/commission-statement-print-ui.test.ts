@@ -534,6 +534,34 @@ describe("لوحة تفصيل العمولة — ملكية الطلبات وع�
     return page;
   }
 
+  it("يُظهر قرار المشاركة المعلّق في لوحة الطبيب وكشفه دون إظهاره لطبيب أو تخصص آخر", async () => {
+    const [service] = await q<{ id: number }>("INSERT INTO services(name,category) VALUES($1,'implant') RETURNING id", [`SYN pending ${stamp}`]);
+    const patientId = await patient(`SYN pending commission ${stamp}`);
+    const kase = await caseWithPlanItem(patientId, "implantology", `SYN pending case ${stamp}`, service.id);
+    const invoiceId = await work({ patientId, doctorId: doctorS, day: 14, amount: 21_000, serviceId: service.id, planItemId: kase.planItemId, paid: 21_000 });
+    await q(`INSERT INTO commission_case_participations(case_id,status,participants,source,reason,decided_by,decided_at)
+      VALUES($1,'pending','[]'::jsonb,'centre_decision','SYN review','SYN admin','2023-02-15 12:00+03')`, [kase.caseId]);
+    type Pending = { invoiceId: number; lineDoctorId: number; caseId: number };
+    const own = await api<{ underReviewParticipations: Pending[] }>(`/api/finance/commissions?detail=1&from=${FROM}&to=${TO}&doctorId=${doctorS}`);
+    expect(own.underReviewParticipations).toEqual(expect.arrayContaining([expect.objectContaining({ invoiceId, caseId: kase.caseId, lineDoctorId: doctorS })]));
+    const other = await api<{ underReviewParticipations: Pending[] }>(`/api/finance/commissions?detail=1&from=${FROM}&to=${TO}&doctorId=${doctorB}`);
+    expect(other.underReviewParticipations.some(line => line.invoiceId === invoiceId)).toBe(false);
+    const wrongCategory = await api<{ underReviewParticipations: Pending[] }>(`/api/finance/commissions?detail=1&from=${FROM}&to=${TO}&doctorId=${doctorS}&specialty=ortho`);
+    expect(wrongCategory.underReviewParticipations.some(line => line.invoiceId === invoiceId)).toBe(false);
+    const page = await openPanel();
+    const print = await openAs("admin", statementPath(doctorS));
+    try {
+      await expect.poll(() => panel(page).getByText("قرار المشاركة قيد المراجعة", { exact: true }).count()).toBeGreaterThan(0);
+      const row = print.locator(`[data-statement-line][data-invoice="${invoiceId}"]`);
+      await row.waitFor();
+      expect(await row.innerText()).toContain("قرار المشاركة قيد المراجعة");
+      expect(await row.getAttribute("data-amount")).toBe("21000");
+      const pdf = await print.pdf({ preferCSSPageSize: true, printBackground: true });
+      const text = execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
+      expect(text).toContain("قرار المشاركة قيد المراجعة");
+    } finally { await page.context().close(); await print.context().close(); }
+  }, 120_000);
+
   it("ردٌّ متأخر لطبيبٍ سابق لا يظهر تحت طبيبٍ اختير بعده، ولا تبقى سطورٌ قديمة أثناء التحميل", async () => {
     const page = await openPanel();
     try {
