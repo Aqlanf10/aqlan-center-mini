@@ -666,6 +666,42 @@ use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
 
+### 0090_booking_request_preferences.sql
+
+Adds nullable request key and hash plus non-null JSONB preferences (defaulting to
+an empty object) to `booking_requests`. A partial unique index prevents reuse of
+a non-null request key. Existing requests retain their original fields and meaning;
+no clinical values are inferred from the new default.
+
+### 0091_prescribing_doctor_identity.sql
+
+Adds nullable `prescriptions.prescribing_doctor_party_id` for the issuing doctor's
+identity. Existing prescriptions are not assigned an inferred doctor.
+
+### 0092_prescribing_doctor_snapshot.sql
+
+Adds nullable `prescriptions.prescribing_doctor_name` for the saved prescriber
+name. Existing prescriptions retain a null snapshot rather than receiving a
+rewritten historical name.
+
+### 0093_prescription_issuance_commands.sql
+
+Adds `prescription_issuance_commands`, a durable issuance receipt keyed by UUID,
+including actor, patient, optional visit, payload fingerprint and the resulting
+prescription. The deferred completeness trigger requires the final prescription to
+match the command's actor, patient and visit before commit. Updates cannot rewrite
+a completed receipt, deletes are rejected, and truncation is rejected when the
+receipt table is populated. The reservation, prescription and audit are intended
+to commit in the same transaction; there is no timeout-based command reclamation.
+
+The numbered files and checksum-checked runtime extensions are validated against
+their published lineage before application. Invalid or unregistered registry or
+schema state is refused. These are additive local branch changes; keep existing
+records and migration registry entries during application rollback or restore.
+The extracted branch remains WIP: the documented local tests are not approval to
+apply these migrations to a live database or a substitute for exact-head CI and
+full upgrade/restore acceptance.
+
 ### 0126_commission_case_participations.sql
 
 Adds one additive, append-only table, `commission_case_participations`, for the
@@ -680,8 +716,8 @@ indexes, and a trigger refuses every UPDATE and DELETE.
 No existing table, column or published migration is changed, and nothing is
 backfilled: a case without a decision is paid as before. Numbered and
 checksum-checked runtime SQL use identical bytes. The number was verified free on
-every active branch; numbers 0090–0125 belong to other lines and are not filled
-here. Decisions commit with their audit row in one transaction under the case row
+every active branch at allocation. Numbers 0090–0093 are present in this
+extracted branch; the remaining gaps 0094–0125 are not filled here. Decisions commit with their audit row in one transaction under the case row
 lock. Rollback of application code must not delete the table or migration
 registry history. Exact-head CI and Staging verification remain required before
 Production rollout.
