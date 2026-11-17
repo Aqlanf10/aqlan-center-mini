@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ROLES, ROLE_HINT, ROLE_LABEL, type Role } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
 import {
@@ -19,6 +19,7 @@ import {
 import { toInputAmount } from "@/lib/money";
 import { CommissionCategoryEditor } from "@/components/settings/CommissionCategoryEditor";
 import { financeAccessFor, type FinanceAccess } from "@/lib/finance-permissions";
+import { useSession } from "@/components/SessionProvider";
 
 interface ClinicServiceItem {
   id: number;
@@ -59,6 +60,11 @@ const EMPTY_SPECIAL_RATE = {
 };
 
 export default function UsersAndDoctorsPage() {
+  const session = useSession();
+  const principalKey = session?.userId && session.username ? JSON.stringify([session.userId, session.username, session.role, session.permissions]) : null;
+  const principalOwner = useMemo(() => principalKey ? { key: principalKey } : null, [principalKey]);
+  const editorPrincipal = useRef<object | null>(null);
+  const livePrincipal = useRef<object | null>(null);
   const [users, setUsers] = useState<StaffAccount[]>([]);
   const [clinicServices, setClinicServices] = useState<ClinicServiceItem[]>([]);
   const [doctorParties, setDoctorParties] = useState<DoctorParty[]>([]);
@@ -75,6 +81,10 @@ export default function UsersAndDoctorsPage() {
   const [activeEditorTab, setActiveEditorTab] = useState<"basic" | "permissions" | "commission">("basic");
 
   const editorOwner = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    livePrincipal.current = principalOwner;
+    return () => { livePrincipal.current = null; editorPrincipal.current = null; editorOwner.current = null; };
+  }, [principalOwner]);
 
   // State for adding a new special service rate
   const [newSpecialRate, setNewSpecialRate] = useState({ ...EMPTY_SPECIAL_RATE });
@@ -292,6 +302,7 @@ export default function UsersAndDoctorsPage() {
     const commissionBaseline = parseDoctorCommissionConfig(user.commissionConfig);
     const owner = {};
     editorOwner.current = owner;
+    editorPrincipal.current = principalOwner;
     setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
     setEditingUser(user);
     setActiveEditorTab(user.role === "doctor" || user.role === "reception" || user.role === "cashier" || user.role === "accountant" ? initialTab : "basic");
@@ -366,6 +377,10 @@ export default function UsersAndDoctorsPage() {
   const handleSaveEdit = async () => {
     const owner = editForm.owner;
     if (!editingUser || !owner || editorOwner.current !== owner) return;
+    const baselinePermissions = parseDoctorPermissions(editingUser.permissions, editingUser.role);
+    const changesPrescriptionGrants = editForm.permissions.canManageMedicationCatalog !== baselinePermissions.canManageMedicationCatalog
+      || editForm.permissions.canPrintSavedPrescriptions !== baselinePermissions.canPrintSavedPrescriptions;
+    if (changesPrescriptionGrants && (!principalOwner || livePrincipal.current !== principalOwner || editorPrincipal.current !== principalOwner)) return;
     // Identity records explicit financial interaction, including entering the
     // same displayed number. Basic/permission changes retain the baseline.
     const editsCommission = editForm.role === "doctor"
@@ -1110,6 +1125,18 @@ export default function UsersAndDoctorsPage() {
               )}
               {activeEditorTab === "permissions" && editForm.role !== "cashier" && editForm.role !== "accountant" && (
                 <div className="space-y-4">
+                  {editForm.role === "doctor" && <label className="flex gap-3 rounded-xl border p-4">
+                    <input type="checkbox" checked={editForm.permissions.canManageMedicationCatalog === true}
+                      disabled={!principalOwner}
+                      onChange={event => { if (principalOwner && livePrincipal.current === principalOwner && editorPrincipal.current === principalOwner && editorOwner.current === editForm.owner) setEditForm(current => ({ ...current, permissions: { ...current.permissions, canManageMedicationCatalog: event.target.checked } })); }} />
+                    <span>تعديل دليل الأدوية وجرعاته الافتراضية — لا يغيّر وصفات المرضى المحفوظة</span>
+                  </label>}
+                  {editForm.role === "reception" && <label className="flex gap-3 rounded-xl border p-4">
+                    <input type="checkbox" checked={editForm.permissions.canPrintSavedPrescriptions === true}
+                      disabled={!principalOwner}
+                      onChange={event => { if (principalOwner && livePrincipal.current === principalOwner && editorPrincipal.current === principalOwner && editorOwner.current === editForm.owner) setEditForm(current => ({ ...current, permissions: { ...current.permissions, canPrintSavedPrescriptions: event.target.checked } })); }} />
+                    <span>إعادة طباعة الوصفات المحفوظة الفاعلة فقط — دون إنشاء أو تعديل أو إبطال</span>
+                  </label>}
                   {/* Security Notice */}
                   <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3.5 text-blue-900 shadow-xs">
                     <div className="flex items-start gap-2.5">

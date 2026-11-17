@@ -39,6 +39,19 @@ it("missing/copied proof cannot create a user, doctor party, history or audit",a
  await expect(db.createStaffUser({username:`${prefix}_copy`,displayName:`${prefix} copy`,passwordHash:"x",role:"doctor"},{actor:username},{evidence:{...genuine.evidence}})).rejects.toThrow("SIGNED_EVIDENCE_REQUIRED");
  expect(await counts()).toEqual(before);
 });
+it("a catalogue grant requires a current authenticated administrator and keeps revoked writes out",async()=>{
+ const before=await db.findUserByUsername(`${prefix}_doctor`);if(!before?.permissions)throw new Error('Synthetic doctor permissions missing');
+ const changed={...before.permissions,canManageMedicationCatalog:true};
+ await expect(db.updateUser(targetId,{permissions:changed},{actor:username})).rejects.toThrow('SIGNED_EVIDENCE_REQUIRED');
+ const granted=await db.updateUser(targetId,{permissions:changed},{actor:username},auth());
+ expect(granted?.permissions?.canManageMedicationCatalog).toBe(true);
+ const proof=auth();
+ await db.getPool().query('UPDATE users SET is_active=false WHERE id=$1',[actorId]);
+ try {
+  await expect(db.updateUser(targetId,{permissions:{...changed,canManageMedicationCatalog:false}},{actor:username},proof)).rejects.toThrow('ACTOR_REVOKED');
+  expect((await db.findUserByUsername(`${prefix}_doctor`))?.permissions?.canManageMedicationCatalog).toBe(true);
+ } finally { await db.getPool().query('UPDATE users SET is_active=true WHERE id=$1',[actorId]); }
+});
 it("raw canonical target is refused by lookup and actual legacy writer",async()=>{
  await db.getPool().query("UPDATE users SET permissions=$1 WHERE id=$2",[canonical,targetId]);
  try{

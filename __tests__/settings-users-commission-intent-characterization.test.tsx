@@ -10,6 +10,8 @@ type Hooks = { values: unknown[]; cursor: number; changed: boolean; mounted: boo
   effects: Map<number, { deps?: readonly unknown[]; cleanup?: () => void; layout: boolean }>;
   memos: Map<number, { deps?: readonly unknown[]; value: unknown }>; pending: Array<() => void>; layout: Array<() => void> };
 const runtime = vi.hoisted(() => ({ current: null as Hooks | null }));
+const principal = vi.hoisted(() => ({ session: { userId: 9, username: 'synthetic-admin', role: 'admin', permissions: null } }));
+vi.mock('../components/SessionProvider', () => ({ useSession: () => principal.session }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   const same = (a?: readonly unknown[], b?: readonly unknown[]) => !!a && !!b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
@@ -42,6 +44,7 @@ function render(): ReactNode {
     if (++rounds > 25) throw new Error("Actual page did not settle");
     hooks.cursor = 0; hooks.changed = false; runtime.current = hooks;
     tree = UsersAndDoctorsPage(); runtime.current = null;
+    hooks.layout.splice(0).forEach((effect) => effect());
     hooks.pending.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
   return tree;
@@ -74,6 +77,7 @@ const partyPercent = 20;
 const at = "2026-10-04T12:00:00.000Z";
 const share = { category: "rct" };
 beforeEach(() => {
+  principal.session = { userId: 9, username: 'synthetic-admin', role: 'admin', permissions: null };
   hooks = { values: [], cursor: 0, changed: false, mounted: true, lateUpdates: 0,
     effects: new Map(), memos: new Map(), pending: [], layout: [] };
   rawConfig = null; patchReply = null; secondAccount = false; writes.splice(0); fetchMock.mockReset();
@@ -135,6 +139,27 @@ function deferred<T>() {
 }
 
 describe("actual doctor editor financial intent", () => {
+  it("records the dedicated catalogue grant for the current editor and not a finance change", async () => {
+    await ready(); open(); click(namedButton("الصلاحيات"));
+    const label = find(node => node.type === "label" && text(node).includes("تعديل دليل الأدوية"));
+    const input = nodes(label).find(node => node.type === "input" && node.props.type === "checkbox");
+    if (!input) throw new Error("Missing catalogue grant control");
+    change(input, true); await click(button(saveLabel)); await ready();
+    expect(writes).toHaveLength(1);
+    expect(writes[0].body.permissions).toMatchObject({ canManageMedicationCatalog: true });
+    omitted();
+  });
+  it("retires a captured catalogue grant and save after a principal change and return", async () => {
+    await ready(); open(); click(namedButton("الصلاحيات"));
+    const label = find(node => node.type === "label" && text(node).includes("تعديل دليل الأدوية"));
+    const input = nodes(label).find(node => node.type === "input" && node.props.type === "checkbox");
+    if (!input) throw new Error("Missing catalogue grant control");
+    change(input, true); const save = button(saveLabel);
+    principal.session = { userId: 10, username: 'synthetic-other', role: 'admin', permissions: null }; render();
+    principal.session = { userId: 9, username: 'synthetic-admin', role: 'admin', permissions: null }; render();
+    change(input, false); await click(save); await ready();
+    expect(writes).toEqual([]);
+  });
   it("truly omits financial fields on a Basic name edit despite projected30 and rawNULL ordinary20", async () => {
     expect(resolvePolicyForShare({ percent: partyPercent, config: rawConfig }, at, share).percent).toBe(20);
     expect(parseDoctorCommissionConfig(rawConfig).defaultPercent).toBe(30);

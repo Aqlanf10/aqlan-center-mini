@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "4a90f5aea69017ba8b581044bbd2ecdac6aa331fd6911529309d7e0459a41e98",
+  "sourceDigest": "3bd850a6cf5216e18d3b30aacba9c4fed0f834ee31a54dea81be9c1a8d805e96",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -76,21 +76,21 @@
     "patients.history.correct"
   ],
   "summary": {
-    "routeMethods": 422,
+    "routeMethods": 424,
     "routeClassifications": {
       "public-separate-portal": 25,
-      "staff-legacy-held": 388,
+      "staff-legacy-held": 390,
       "canonical-ready": 0,
       "unknown": 9
     },
-    "pages": 97,
+    "pages": 98,
     "pageClassifications": {
       "public-separate-portal": 4,
-      "staff-legacy-held": 68,
+      "staff-legacy-held": 69,
       "canonical-ready": 0,
       "unknown": 25
     },
-    "legacyReferenceFiles": 250,
+    "legacyReferenceFiles": 252,
     "canonicalDirectReferences": 0
   },
   "sourceEntries": [
@@ -250,6 +250,7 @@
     "app/api/patients/[id]/photo/route.ts",
     "app/api/patients/[id]/plans/route.ts",
     "app/api/patients/[id]/prescriptions/route.ts",
+    "app/api/patients/[id]/prescriptions/saved/route.ts",
     "app/api/patients/[id]/problems/route.ts",
     "app/api/patients/[id]/referrals/route.ts",
     "app/api/patients/[id]/responsibility/route.ts",
@@ -291,6 +292,7 @@
     "app/api/portal/messages/route.ts",
     "app/api/portal/statement/route.ts",
     "app/api/prescriptions/[id]/void/route.ts",
+    "app/api/prescriptions/commands/[key]/route.ts",
     "app/api/prescriptions/route.ts",
     "app/api/print-log/route.ts",
     "app/api/problems/[id]/route.ts",
@@ -456,6 +458,7 @@
     "app/settings/laboratories/page.tsx",
     "app/settings/laboratories/services/page.tsx",
     "app/settings/material-rates/page.tsx",
+    "app/settings/medications/page.tsx",
     "app/settings/messaging/page.tsx",
     "app/settings/page.tsx",
     "app/settings/patient-numbering/page.tsx",
@@ -2685,11 +2688,32 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 5
+          "line": 6
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 17
+        }
+      ]
+    },
+    {
+      "file": "app/api/patients/[id]/prescriptions/saved/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 4
+        },
+        {
+          "symbol": "requireSession",
+          "line": 11
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 7
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 30
         }
       ]
     },
@@ -3207,23 +3231,36 @@
       ]
     },
     {
+      "file": "app/api/prescriptions/commands/[key]/route.ts",
+      "evidence": [
+        {
+          "symbol": "readSessionPayload",
+          "line": 2
+        },
+        {
+          "symbol": "readSessionPayload",
+          "line": 7
+        }
+      ]
+    },
+    {
       "file": "app/api/prescriptions/route.ts",
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 47
+          "line": 50
         },
         {
           "symbol": "findUserByUsername",
-          "line": 4
+          "line": 7
         },
         {
           "symbol": "findUserByUsername",
-          "line": 53
+          "line": 56
         }
       ]
     },
@@ -3232,11 +3269,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 21
         }
       ]
     },
@@ -3783,19 +3820,27 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 93
+          "line": 95
         },
         {
           "symbol": "requireSession",
-          "line": 115
+          "line": 117
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 208
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 6
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 143
         }
       ]
     },
@@ -4441,11 +4486,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 58
+          "line": 49
         }
       ]
     },
@@ -11258,11 +11303,43 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 5
+          "line": 6
         },
         {
           "symbol": "requireSession",
-          "line": 16
+          "line": 17
+        }
+      ]
+    },
+    {
+      "route": "/api/patients/[id]/prescriptions/saved",
+      "method": "GET",
+      "file": "app/api/patients/[id]/prescriptions/saved/route.ts",
+      "httpAccess": [
+        "admin",
+        "reception",
+        "doctor"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "patient-clinical",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 4
+        },
+        {
+          "symbol": "requireSession",
+          "line": 11
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 7
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 30
         }
       ]
     },
@@ -12617,19 +12694,19 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 47
+          "line": 50
         },
         {
           "symbol": "findUserByUsername",
-          "line": 4
+          "line": 7
         },
         {
           "symbol": "findUserByUsername",
-          "line": 53
+          "line": 56
         }
       ]
     },
@@ -12665,6 +12742,29 @@
       ]
     },
     {
+      "route": "/api/prescriptions/commands/[key]",
+      "method": "GET",
+      "file": "app/api/prescriptions/commands/[key]/route.ts",
+      "httpAccess": [
+        "admin",
+        "doctor"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "other-review-required",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "readSessionPayload",
+          "line": 2
+        },
+        {
+          "symbol": "readSessionPayload",
+          "line": 7
+        }
+      ]
+    },
+    {
       "route": "/api/print-log",
       "method": "POST",
       "file": "app/api/print-log/route.ts",
@@ -12682,11 +12782,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 8
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 21
         }
       ]
     },
@@ -13384,19 +13484,27 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 93
+          "line": 95
         },
         {
           "symbol": "requireSession",
-          "line": 115
+          "line": 117
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 208
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 6
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 143
         }
       ]
     },
@@ -13416,19 +13524,27 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 93
+          "line": 95
         },
         {
           "symbol": "requireSession",
-          "line": 115
+          "line": 117
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 208
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 6
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 143
         }
       ]
     },
@@ -13448,19 +13564,27 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 9
+          "line": 11
         },
         {
           "symbol": "requireSession",
-          "line": 93
+          "line": 95
         },
         {
           "symbol": "requireSession",
-          "line": 115
+          "line": 117
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 208
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 6
+        },
+        {
+          "symbol": "findUserByUsername",
+          "line": 143
         }
       ]
     },
@@ -16058,11 +16182,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 58
+          "line": 49
         }
       ]
     },
@@ -16333,6 +16457,14 @@
     {
       "route": "/settings/material-rates",
       "file": "app/settings/material-rates/page.tsx",
+      "classification": "staff-legacy-held",
+      "workflow": "other-review-required",
+      "reason": "Staff or print surface; proxy/root layout and data authorization require migration",
+      "directHelperEvidence": []
+    },
+    {
+      "route": "/settings/medications",
+      "file": "app/settings/medications/page.tsx",
       "classification": "staff-legacy-held",
       "workflow": "other-review-required",
       "reason": "Staff or print surface; proxy/root layout and data authorization require migration",

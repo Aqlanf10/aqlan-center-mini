@@ -4226,6 +4226,22 @@
   "note": "Read of prescriptions limited to prescribers (current behaviour: admin, doctor)."
  },
  {
+  "route": "/api/patients/[id]/prescriptions/saved",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.prescriptions.write"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Legacy-session admission only; canonical route remains held. Patient scope and current role are enforced by the handler."
+ },
+ {
   "route": "/api/patients/[id]/problems",
   "method": "GET",
   "legacyRoles": [
@@ -5083,6 +5099,21 @@
   "scope": "patient",
   "status": "existing",
   "note": ""
+ },
+ {
+  "route": "/api/prescriptions/commands/[key]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.prescriptions.write"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Legacy-session admission only; canonical route remains held. Patient scope and current role are enforced by the handler."
  },
  {
   "route": "/api/prescriptions/[id]/void",

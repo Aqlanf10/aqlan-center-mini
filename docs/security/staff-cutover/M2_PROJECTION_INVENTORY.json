@@ -178,6 +178,10 @@
   "isAdmin(",
   "role !== \"doctor\""
  ],
+ "/api/patients/[id]/prescriptions/saved": [
+  "role === \"admin\"",
+  "role === \"doctor\""
+ ],
  "/api/patients/[id]/statement": [
   "canViewMoney(",
   "financeAccess",
@@ -218,6 +222,10 @@
  ],
  "/api/plans/proposals": [
   "canViewMoney("
+ ],
+ "/api/prescriptions/commands/[key]": [
+  "role !== \"admin\"",
+  "role !== \"doctor\""
  ],
  "/api/referrals/mine": [
   "role !== \"admin\"",
