@@ -14,6 +14,7 @@ import { stagedRestore } from "./staging";
 import { readTarGzSnapshot } from "./archive";
 import { validateBackupArchive } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
+import { loadMigrationFiles } from "../migration-files";
 
 export const RESTORE_DRILL_STATE_FILE = "restore-drill-state.json";
 
@@ -166,6 +167,7 @@ export async function runAdminRestoreDrill(input: {
 
   const stagingDir = path.join(backupStateDir(input.backupDir), "restore-drill-current");
   let archiveSnapshot: Awaited<ReturnType<typeof readTarGzSnapshot>>["archive"];
+  let migrationFilesSnapshot: Awaited<ReturnType<typeof loadMigrationFiles>>;
   try {
     // One immutable read supplies both verification and restoration. Otherwise
     // replacing the on-disk archive between precheck and reset could invalidate
@@ -182,7 +184,9 @@ export async function runAdminRestoreDrill(input: {
     }
     // Reject a forged, missing or contradictory historical 0079 record BEFORE
     // reset; stagedRestore rechecks this same snapshot before its own writes.
-    prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true });
+    migrationFilesSnapshot = await loadMigrationFiles();
+    if (!Array.isArray(migrationFilesSnapshot) || !migrationFilesSnapshot.length) throw new Error("Restore migration catalogue unavailable.");
+    prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true, migrationFiles: migrationFilesSnapshot });
   } catch {
     return { ok: false, reason: "archive-integrity-mismatch" };
   }
@@ -213,6 +217,7 @@ export async function runAdminRestoreDrill(input: {
     const result = await stagedRestore({
       archivePath,
       archiveSnapshot,
+      migrationFilesSnapshot,
       targetUrl,
       stagingDir,
       allowNonEmptyTarget: false,

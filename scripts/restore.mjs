@@ -3,6 +3,7 @@ import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
 import { isCanonicalSourceSql, prepareBackupSql } from "../lib/restore/sql.mjs";
+import { loadRestoreMigrationChecksums } from "../lib/restore/migration-provenance.mjs";
 import { finalizeRestoredStaffIdentityInTransaction } from "../lib/staff-authority-lifecycle.mjs";
 import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
 
@@ -48,7 +49,7 @@ try {
     console.error("هذه نسخة من قاعدة بهوية موحّدة. استعادتها تمر بالاستعادة المرحلية مع حجز الاستعادة، لا بهذا الأمر.");
     process.exit(2);
   }
-  const prepared = prepareBackupSql(text, { inspectHistorical0079: true });
+  const prepared = prepareBackupSql(text, { inspectHistorical0079: true, migrationFiles: await loadRestoreMigrationChecksums() });
   if (prepared.historical0079) {
     throw new Error("Historical 0079 backup requires full archive restore to preserve its registry and timestamp.");
   }

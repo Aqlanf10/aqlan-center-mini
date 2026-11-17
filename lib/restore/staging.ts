@@ -2,7 +2,7 @@ import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { Client } from "pg";
-import { loadMigrationFiles, migrate, migrationStatus } from "../migrations";
+import { loadMigrationFiles, migrate, migrationStatus, type MigrationFile } from "../migrations";
 import { parseDatabaseHost } from "../db-tls";
 import { restoreClientConfigFor } from "./client-config";
 import { readTarGzEntries, type ParsedArchive } from "./archive";
@@ -36,6 +36,8 @@ export interface StagedRestoreOptions {
   archivePath: string;
   /** Already-read snapshot, revalidated here; avoids re-reading a mutable archive. */
   archiveSnapshot?: ParsedArchive;
+  /** Admin drill's locally loaded catalogue, validated before target reset. */
+  migrationFilesSnapshot?: MigrationFile[];
   targetUrl: string;
   stagingDir: string;
   /** يرفض الهدف غير الفارغ افتراضًا — لا استعادة فوق بيانات بلا علم صريح. */
@@ -174,8 +176,11 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   // Inspect source history before touching the target. Only the exact original
   // registered 0079 contract authorizes installing its historical schema.
   let prepared: ReturnType<typeof prepareBackupSql> & { historical0079: { appliedAt: string } | null };
+  let migrationFiles: MigrationFile[];
   try {
-    prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true });
+    migrationFiles = options.migrationFilesSnapshot ?? await loadMigrationFiles();
+    if (!Array.isArray(migrationFiles) || !migrationFiles.length) throw new Error("Restore migration catalogue unavailable.");
+    prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true, migrationFiles });
   } catch (error) {
     result.errors.push(`تعذّر التحقق من سجل هجرات النسخة: ${error instanceof Error ? error.message : String(error)}`);
     return result;
@@ -216,7 +221,6 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     // ── الخطوة ٣: المخطط من نظام الهجرات (بلا بذور أبدًا) — قاعدة فارغة.
     // كل فشل من هنا فصاعدًا يُبلَّغ نتيجةً (ok=false + errors) لا استثناءً يُرمى —
     // فالسطر الذي يُفشله يهمّ من يشغّل الاستعادة، والهدف المعزول يُتخلّص منه بأمان.
-    const migrationFiles = await loadMigrationFiles();
     const migrationPool = clientAsPool(client);
     try {
       const migrationRun = await migrate(migrationPool, { apply: true, files: migrationFiles,

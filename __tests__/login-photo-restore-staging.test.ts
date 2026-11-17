@@ -15,7 +15,8 @@ vi.mock("pg", () => ({ Client: class {
   }
 } }));
 vi.mock("../lib/migrations", () => ({
-  loadMigrationFiles: async () => [], migrate: async () => ({ appliedVersions: [] }),
+  loadMigrationFiles: async () => [{ version: "0001", name: "baseline_schema", filename: "0001_baseline_schema.sql", sql: "synthetic", checksum: "a".repeat(64) }],
+  migrate: async () => ({ appliedVersions: [] }),
   migrationStatus: async () => ({ probe: { ok: true, missing: [] }, consistent: true }),
 }));
 vi.mock("../lib/restore/client-config", () => ({ restoreClientConfigFor: () => ({}) }));

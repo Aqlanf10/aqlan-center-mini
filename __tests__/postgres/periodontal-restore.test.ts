@@ -307,11 +307,12 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
   it("refuses a nonempty target by default without changing records, audit or files", async () => {
     const before = await state();
     const documentBefore = await readFile(path.join(stagingDir, DOCUMENT_KEY));
+    expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(1);
     const result = await stagedRestore({ archivePath, targetUrl: fixture!.url, stagingDir });
     expect(result).toMatchObject({ ok: false, readyForCutover: false, validationErrors: [], migrationsApplied: [], documentsRestored: 0 });
     expect(result.errors.join(" ")).toContain("الهدف ليس فارغًا");
     expect(await state()).toEqual(before);
     expect(await readFile(path.join(stagingDir, DOCUMENT_KEY))).toEqual(documentBefore);
-    expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(2);
   });
 });
