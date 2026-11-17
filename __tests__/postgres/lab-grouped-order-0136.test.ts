@@ -7,6 +7,8 @@ import { validatePostgresTestTarget } from "./_safe-target";
 import { dropPublicSchema, stubPostgresEnv } from "./_setup";
 import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import { parseInvoiceCommand, invoiceCommandFingerprint, invoiceCatalogRequestFingerprint } from "../../lib/invoice-template";
+import { clinicalLabOrder } from "../../lib/canonical-lab-reads";
+import { toLabDispatchExternal } from "../../lib/lab";
 import { DEFAULT_SPECIALTY_TEMPLATES } from "../../lib/specialty-templates";
 
 const target = validatePostgresTestTarget(process.env); stubPostgresEnv();
@@ -192,6 +194,38 @@ describe("0136 grouped lab order from one invoice entry", () => {
     expect(await q("SELECT DISTINCT unit_cost_minor::int AS unit, unit_cost_currency AS currency FROM lab_order_member_prices WHERE lab_order_id=$1", [result.labWork![0].orderId]))
       .toEqual([{ unit: 50, currency: "SAR" }]);
     expect(await report(w.doctorIds[0])).toMatchObject({ accruedMinor: 1500, labCostMinor: 0 });
+  });
+
+  it("manual total never weights different currencies; authorized read preserves each price and dispatch excludes private fields", async () => {
+    const w = await world({ unitMinor: 200, currency: "YER" }, 2);
+    const [foreign] = await q("INSERT INTO lab_services(name,code,category,tooth_scope,requires_shade) VALUES($1,$2,'prostho','single_tooth',TRUE) RETURNING id", [`Synthetic foreign ${randomUUID()}`, `SYN-${randomUUID()}`]);
+    await q("INSERT INTO lab_pricing_rules(party_id,lab_service_id,cost_minor,cost_currency,effective_from,created_by) VALUES($1,$2,50,'SAR','2020-01-01','synthetic')", [w.labId, foreign.id]);
+    const service = await mappedService(foreign.id);
+    const saved = await save(w, grouped(w, [14, 36], tooth => tooth === 14 ? service : w.serviceId));
+    await db.updateLabOrderAccounting(saved.labWork![0].orderId, { costMinor: 900, costCurrency: "YER", exchangeRate: 1, actor: actor.username, actorRole: actor.role });
+    for (const doctor of w.doctorIds) expect(await report(doctor)).toMatchObject({ labCostMinor: 0, labCostNotDeductedCount: 1 });
+    expect(await payables(w.patientId)).toEqual([{ amount: 900, currency: "YER" }]);
+    const [order] = await db.listLabOrders({ patientId: w.patientId });
+    expect(order.members?.map(m => m.toothCode)).toEqual([14, 36]);
+    expect(order.memberPrices).toEqual([expect.objectContaining({ unitCostMinor: 50, currency: "SAR" }), expect.objectContaining({ unitCostMinor: 200, currency: "YER" })]);
+    const clinical = clinicalLabOrder(order);
+    expect(clinical.members).toEqual(order.members);
+    expect(clinical).not.toHaveProperty("memberPrices");
+    const dispatch = toLabDispatchExternal({ ...order, details: "SYNTHETIC-PRIVATE-NOTE", note: "SYNTHETIC-PRIVATE-NOTE" });
+    expect(JSON.stringify(dispatch)).not.toContain("SYNTHETIC-PRIVATE-NOTE");
+    expect(dispatch).not.toHaveProperty("memberPrices");
+    expect(dispatch).not.toHaveProperty("members");
+  });
+
+  it("concurrent identical submissions commit one invoice, one order and one payable", async () => {
+    const w = await world({ unitMinor: 200, currency: "YER" }, 2);
+    const items = grouped(w), key = `glo-race-${randomUUID()}`;
+    const results = await Promise.all([save(w, items, key), save(w, items, key)]);
+    const replay = await save(w, items, key);
+    for (const result of results) expect(result.invoice.id).toBe(replay.invoice.id);
+    expect(await orders(w.patientId)).toHaveLength(1);
+    expect(await payables(w.patientId)).toHaveLength(1);
+    expect(await q("SELECT id FROM invoices WHERE patient_id=$1", [w.patientId])).toHaveLength(1);
   });
 
   it("T11: a grouped entry refuses a member with more than one unit and writes nothing", async () => {

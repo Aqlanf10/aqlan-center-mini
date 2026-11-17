@@ -16,3 +16,16 @@ export function splitGroupedLabCost(costMinor: number, members: readonly { docto
   withDoctor.forEach((member, index) => byDoctor.set(member.doctorId, (byDoctor.get(member.doctorId) ?? 0) + raw[index]));
   return [...byDoctor].map(([doctorId, part]) => ({ doctorId, costMinor: part })).filter((part) => part.costMinor > 0);
 }
+
+/** A monetary weight is usable only when every known price uses the order's currency.
+ * Partial prices cannot safely stand in for missing members. All-missing preserves the
+ * existing equal-weight rule; mixed or mismatched currencies are held for review. */
+export function comparableGroupedLabWeights(
+  members: readonly { doctorId: number | null; weight: string | number | null; currency: string | null }[],
+  costCurrency: string | null,
+): { doctorId: number | null; weight: string | number }[] | null {
+  const known = members.filter(member => member.weight !== null);
+  if (known.length === 0) return members.map(member => ({ doctorId: member.doctorId, weight: 0 }));
+  if (!costCurrency || known.length !== members.length || known.some(member => member.currency !== costCurrency)) return null;
+  return members.map(member => ({ doctorId: member.doctorId, weight: member.weight! }));
+}

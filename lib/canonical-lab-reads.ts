@@ -29,7 +29,7 @@ export class CanonicalLabReadRefusal extends Error {
 }
 
 const CLINICAL_KEYS = Object.freeze([
-  "id", "patientId", "patientName", "patientNumber", "patientPhone", "labName", "labPhone", "partyId", "labServiceId", "serviceName",
+  "members", "id", "patientId", "patientName", "patientNumber", "patientPhone", "labName", "labPhone", "partyId", "labServiceId", "serviceName",
   "workType", "details", "toothNumbers", "shade", "shadeSpecification", "shadeSpecificationWarning", "stumpShade", "priority", "impressionType",
   "sentDate", "dueDate", "status", "receivedAt", "deliveredAt", "doctorId", "doctorName", "visitId", "toothCode", "source",
   "qualityCheck", "qualityNotes", "remakeOriginalId", "remakeReason", "technicianName", "note", "createdAt",

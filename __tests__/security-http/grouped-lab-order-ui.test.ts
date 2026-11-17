@@ -82,6 +82,18 @@ it("teeth from both jaws, one short entry → one priced lab order with one memb
     await page.screenshot({ path: `${evidence}/1-grouped-priced-1280.png`, fullPage: true });
     expect(await ordersOf(patient)).toEqual([expect.objectContaining({ cost: 600, pricing_state: "rule", members: 3, payables: 1 })]);
     expect(await page.getByTestId("grouped-lab-pricing-warning").count()).toBe(0);
+    await page.goto(`${baseUrl}/lab`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "لم تُرسل بعد", exact: true }).click();
+    const details = page.getByRole("table", { name: "أنواع وأسعار أسنان طلب المختبر" }).filter({ hasText: `تاج تجميع اصطناعي ${stamp}` });
+    await details.waitFor({ timeout: 30_000 });
+    for (const tooth of TEETH) expect(await details.textContent()).toContain(String(tooth));
+    expect(await details.textContent()).toContain("YER");
+    expect(await details.textContent()).toContain(`زيركون اصطناعي ${stamp}`);
+    const hidden = await fetch(`${baseUrl}/api/lab?patientId=${patient}`, { headers: { Cookie: h.sessions.doctorA.cookie } });
+    expect(hidden.status).toBe(200);
+    const payload = await hidden.json();
+    expect(payload.orders[0].members).toHaveLength(3);
+    expect(payload.orders[0]).not.toHaveProperty("memberPrices");
     expect(errors).toEqual([]);
   } finally { await context.close(); }
 }, 180_000);

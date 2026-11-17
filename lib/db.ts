@@ -103,7 +103,7 @@ import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "./ortho-followup-coverage-schema";
 import { GROUPED_LAB_ORDER_SQL } from "./grouped-lab-order-schema";
-import { splitGroupedLabCost } from "./grouped-lab-cost-split";
+import { comparableGroupedLabWeights, splitGroupedLabCost } from "./grouped-lab-cost-split";
 import { ENDODONTICS_SQL } from "./endodontics-schema";
 import { INVOICE_LINKAGE_SQL } from "./invoice-linkage-schema";
 import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
@@ -6523,7 +6523,25 @@ export async function listLabOrdersWith(q: Pick<DbClient, "query">, filters: {
       ${limitClause}`,
     params,
   );
-  return rows.map(toLabOrder);
+  const orders = rows.map(toLabOrder);
+  if (orders.length) {
+    // Bounded by the already authorized order IDs; never widen patient scope.
+    const members = await q.query<{ order_id: number; member_id: string; tooth_code: number; service_name: string; lab_service_name: string | null; unit_cost_minor: string | null; unit_cost_currency: LabOrder["costCurrency"]; state: string }>(
+      `SELECT mp.lab_order_id AS order_id, m.id AS member_id, m.tooth_code, s.name AS service_name, ls.name AS lab_service_name,
+              mp.unit_cost_minor, mp.unit_cost_currency, mp.state
+         FROM lab_order_member_prices mp
+         JOIN lab_work_members m ON m.id=mp.member_id
+         JOIN services s ON s.id=m.service_id
+         LEFT JOIN lab_services ls ON ls.id=mp.lab_service_id
+        WHERE mp.lab_order_id=ANY($1::int[]) ORDER BY mp.lab_order_id,m.tooth_code,m.id`, [orders.map(order => order.id)]);
+    for (const order of orders) {
+      const own = members.rows.filter(member => member.order_id === order.id);
+      if (!own.length) continue;
+      order.members = own.map(member => ({ memberId: member.member_id, toothCode: member.tooth_code, serviceName: member.service_name, labServiceName: member.lab_service_name }));
+      order.memberPrices = own.map(member => ({ memberId: member.member_id, unitCostMinor: member.unit_cost_minor === null ? null : Number(member.unit_cost_minor), currency: member.unit_cost_currency ?? null, state: member.state }));
+    }
+  }
+  return orders;
 }
 
 /** أمر مختبر واحد بالمعرف — لشاشة التتبع وتاريخ الأحداث (المختبرات V2). */
@@ -14906,14 +14924,14 @@ export async function commissionReport(
   if (invoiceById.size > 0) {
     const { rows: labRows } = await pool.query<{
       lab_order_id: number; invoice_ids: number[]; doctor_id: number | null; cost_minor: string; cost_currency: string | null;
-      member_split: { doctorId: number | null; weight: string | number }[] | null;
+      member_split: { doctorId: number | null; weight: string | number | null; currency: string | null }[] | null;
     }>(
       `SELECT l.id AS lab_order_id, COALESCE(aliases.invoice_ids, ARRAY[v.invoice_id]) AS invoice_ids,
               COALESCE(l.doctor_id, v.doctor_id) AS doctor_id, l.cost_minor, l.cost_currency, members.split AS member_split
          FROM lab_orders l
          LEFT JOIN LATERAL (
            -- 0136: a grouped order spanning several doctors carries its members' doctors and price weights.
-           SELECT json_agg(json_build_object('doctorId', m.doctor_id, 'weight', COALESCE(mp.unit_cost_minor, 0)) ORDER BY m.tooth_code, m.id) AS split
+           SELECT json_agg(json_build_object('doctorId', m.doctor_id, 'weight', mp.unit_cost_minor, 'currency', mp.unit_cost_currency) ORDER BY m.tooth_code, m.id) AS split
              FROM lab_work_intents wi
              JOIN lab_work_members m ON m.intent_id = wi.id AND m.retired_revision IS NULL
              LEFT JOIN lab_order_member_prices mp ON mp.lab_order_id = l.id AND mp.member_id = m.id
@@ -14941,9 +14959,19 @@ export async function commissionReport(
       // correction preserves cancelled-original aliases. Never multiply cost by joins.
       const ids = row.invoice_ids.filter((id) => id !== null);
       if (ids.length > 1) throw new CommissionLabLineageError(row.lab_order_id);
-      const parts = row.doctor_id !== null ? [{ doctorId: row.doctor_id, costMinor: toMinor(row.cost_minor) }]
-        : splitGroupedLabCost(toMinor(row.cost_minor), row.member_split ?? []);
       const candidates = ids.map((id) => invoiceById.get(id)).filter((invoice): invoice is CommissionInvoice => Boolean(invoice));
+      const weights = row.member_split === null ? null : comparableGroupedLabWeights(row.member_split, row.cost_currency);
+      if (row.member_split !== null && weights === null) {
+        for (const doctorId of new Set(row.member_split.map(member => member.doctorId).filter((id): id is number => id !== null))) {
+          for (const invoice of candidates) {
+            const key = `${doctorId}:${invoice.currency}:${invoice.id}`;
+            labNotDeducted.set(key, (labNotDeducted.get(key) ?? 0) + 1);
+          }
+        }
+        continue;
+      }
+      const parts = weights !== null ? splitGroupedLabCost(toMinor(row.cost_minor), weights)
+        : row.doctor_id !== null ? [{ doctorId: row.doctor_id, costMinor: toMinor(row.cost_minor) }] : [];
       for (const part of parts) for (const invoice of candidates) {
         const hasShare = invoice.doctorShares.some((share) => share.doctorId === part.doctorId);
         if (!hasShare || row.cost_currency !== invoice.currency) {

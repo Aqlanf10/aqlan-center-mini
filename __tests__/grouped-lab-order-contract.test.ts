@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { normalizeLabWorkGroups, parseLabWorkDraft, type LabWorkSourceRow } from "../lib/lab-work-intent-contract";
 import { validateLabPrescription } from "../lib/lab-prescription-input";
-import { splitGroupedLabCost } from "../lib/grouped-lab-cost-split";
+import { comparableGroupedLabWeights, splitGroupedLabCost } from "../lib/grouped-lab-cost-split";
 import { groupedLabPricingWarning } from "../components/LabWorkDraftFields";
 
 const prescription = { partyId: 7, shade: "A2", stumpShade: "", toothNumbers: "", dueDate: "2026-12-01", impressionType: "physical", priority: "normal" };
@@ -52,6 +52,17 @@ describe("0136 grouped lab contract", () => {
     const uneven = splitGroupedLabCost(1000, [{ doctorId: 1, weight: 0 }, { doctorId: 2, weight: 0 }, { doctorId: 3, weight: 0 }]);
     expect(uneven.reduce((sum, part) => sum + part.costMinor, 0)).toBe(1000);
     expect(splitGroupedLabCost(900, [{ doctorId: null, weight: 5 }])).toEqual([]);
+  });
+
+  it("holds monetary weights with mixed, mismatched or partial currencies", () => {
+    const prices = [{ doctorId: 1, weight: 100, currency: "YER" }, { doctorId: 2, weight: 10, currency: "USD" }];
+    expect(comparableGroupedLabWeights(prices, "YER")).toBeNull();
+    expect(comparableGroupedLabWeights(prices.map(p => ({ ...p, currency: "USD" })), "YER")).toBeNull();
+    expect(comparableGroupedLabWeights([prices[0], { doctorId: 2, weight: null, currency: null }], "YER")).toBeNull();
+    expect(comparableGroupedLabWeights(prices.map(p => ({ ...p, currency: "YER" })), "YER"))
+      .toEqual([{ doctorId: 1, weight: 100 }, { doctorId: 2, weight: 10 }]);
+    expect(comparableGroupedLabWeights(prices.map(p => ({ ...p, weight: null, currency: null })), "YER"))
+      .toEqual([{ doctorId: 1, weight: 0 }, { doctorId: 2, weight: 0 }]);
   });
 
   it("every pending pricing state has an Arabic warning; the priced and manual states have none", () => {

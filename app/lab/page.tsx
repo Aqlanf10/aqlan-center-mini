@@ -1,5 +1,6 @@
 "use client";
 
+import { labOrderOriginLabel } from "@/lib/lab-order-origin";
 import { LabOrderClinicalEditor } from "@/components/LabOrderClinicalEditor";
 import { LabOrderShadeEditor } from "@/components/LabOrderShadeEditor";
 import { LabShadeSelector } from "@/components/LabShadeSelector";
@@ -1067,15 +1068,15 @@ export default function LabPage() {
                       <span className="rounded-lg bg-navy-100 px-2 py-0.5 text-[11px] font-bold text-navy-900">
                         {order.workType}
                       </span>
-                      {/* رحلة المريض V2 (§١٩): طلبٌ من إجراء الزيارة — سنّه ومصدره على البطاقة. */}
+                      {/* رحلة المريض V2 (§١٩): سنّ الطلب ومصدره المثبت على البطاقة. */}
                       {order.toothCode ? (
                         <span className="rounded-lg bg-navy-50 px-2 py-0.5 text-[10px] font-bold text-navy-800">
                           سن {order.toothCode}
                         </span>
                       ) : null}
-                      {order.source === "auto" ? (
+                      {labOrderOriginLabel(order) ? (
                         <span className="rounded-lg bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-800">
-                          من الزيارة
+                          {labOrderOriginLabel(order)}
                         </span>
                       ) : null}
                       {order.shade ? (
@@ -1113,7 +1114,7 @@ export default function LabPage() {
                         }`}
                       >
                         {order.status === "needed"
-                          ? "لم يُرسل بعد — من إجراء الزيارة"
+                          ? "لم يُرسل بعد"
                           : order.status === "in_progress"
                           ? "قيد التصنيع في المعمل"
                           : order.status === "remake"
@@ -1156,12 +1157,21 @@ export default function LabPage() {
                       </div>
                     )}
 
+                    {order.members?.length ? <table className="mt-3 w-full text-xs" aria-label="أنواع وأسعار أسنان طلب المختبر">
+                      <thead><tr><th>السن</th><th>نوع الخدمة</th><th>خدمة المختبر</th>{order.memberPrices ? <th>سعر السن</th> : null}</tr></thead>
+                      <tbody>{order.members.map(member => {
+                        const price = order.memberPrices?.find(value => value.memberId === member.memberId);
+                        return <tr key={member.memberId}><td>{member.toothCode}</td><td>{member.serviceName}</td><td>{member.labServiceName ?? "الربط غير محدد"}</td>
+                          {order.memberPrices ? <td>{price?.unitCostMinor != null && price.currency ? <bdi>{formatAmount(price.unitCostMinor, price.currency)} {price.currency}</bdi> : "التكلفة معلّقة"}</td> : null}</tr>;
+                      })}</tbody>
+                    </table> : null}
+
                     {labToothInputProblem(order.toothNumbers, order.workType) && <p role="status" className="my-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
                       مراجعة بيانات الإرسالية: {labToothInputProblem(order.toothNumbers, order.workType)} لم تُغيّر الأدوار المحفوظة تلقائيًا.
                     </p>}
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
                       {order.status === "needed" ? (
-                        <span>أُنشئ من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله</span>
+                        <span>أكمل بيانات المختبر ثم أرسله</span>
                       ) : (
                         <span>تاريخ الإرسال: {order.sentDate}</span>
                       )}
