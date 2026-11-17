@@ -145,7 +145,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
         if(canonical)draftOwner?.clear();
         ++journalRead.current;announce();await syncJournal();
         if(!current())return;
-        setNotice(receipt?"سُجل نطاق المتابعات القادمة مع المصدر والسبب. الزيارات الموقعة سابقًا لم تتغير.":"ثبت رفض الطلب الأصلي دون حفظ. يمكنك مراجعة المصدر وتأكيد قرار جديد صراحةً.");
+        setNotice(receipt?"سُجل نطاق المتابعات القادمة مع المصدر والسبب. الزيارات الموقعة سابقًا لم تتغير.":"ثبت رفض الطلب الأصلي دون حفظ. السجل متاح للقراءة، وتسجيل قرارات جديدة متوقف.");
         await load();
         if(receipt&&current())onSaved();
       }else setError(response.status===401||response.status===403?"تغيّرت الجلسة أو الصلاحية. الطلب محفوظ؛ عُد بالحساب المصرّح له للتحقق من نتيجته.":UNKNOWN);
