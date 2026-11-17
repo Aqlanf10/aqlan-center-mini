@@ -15,8 +15,12 @@ import { patientNumberSequenceRestoreSql } from '../../lib/patient-numbering-bac
 import { storageKeyOf, sha256Of } from '../helpers/backup-blocks';
 import { fullBackupBlocks } from '../../lib/fullBackup';
 import { stagedRestore } from '../../lib/restore/staging';
+import { validateStandaloneWitnessEnvironment } from './_standalone-restore-witness-guard';
 
 async function ownedPair() {
+  // This witness belongs only to the dedicated, disposable CI service. Check
+  // all aliases even if someone invokes the file with another Vitest config.
+  validateStandaloneWitnessEnvironment(process.env);
   validateOperationalVerificationEnvironment(process.env);
   const checked = validatePostgresTestTarget(process.env);
   const admin = new Client({ connectionString: checked.maintenanceUrl.toString(), ssl: false });
@@ -60,16 +64,29 @@ async function sequence(pool: Pool) {
 }
 
 async function checkMatrix(pool: Pool) {
-  for (const current of [9000,10000,11000]) for (const currentCalled of [false,true]) for (const backupCalled of [false,true]) {
+  // Fixed cases are an independent oracle; do not repeat the restore formula.
+  const cases = [
+    [9000, false, false, '10000', false, 'P-10000'],
+    [9000, false, true,  '10000', true,  'P-10001'],
+    [9000, true,  false, '10000', false, 'P-10000'],
+    [9000, true,  true,  '10000', true,  'P-10001'],
+    [10000,false, false, '10000', false, 'P-10000'],
+    [10000,false, true,  '10000', true,  'P-10001'],
+    [10000,true,  false, '10000', true,  'P-10001'],
+    [10000,true,  true,  '10000', true,  'P-10001'],
+    [11000,false, false, '11000', true,  'P-11001'],
+    [11000,false, true,  '11000', true,  'P-11001'],
+    [11000,true,  false, '11000', true,  'P-11001'],
+    [11000,true,  true,  '11000', true,  'P-11001'],
+  ] as const;
+  for (const [current,currentCalled,backupCalled,value,called,next] of cases) {
     await pool.query("SELECT setval('patient_number_seq',$1::bigint,$2)",[String(current),currentCalled]);
     const sql = patientNumberSequenceRestoreSql('10000',backupCalled);
-    const value = Math.max(current,10000);
-    const called = current>10000 || (current===10000 && currentCalled) || backupCalled;
     for (let pass=0;pass<2;pass++) {
       await pool.query(sql);
       expect(await sequence(pool)).toEqual({last_value:String(value),is_called:called});
     }
-    expect((await pool.query('SELECT aqlan_allocate_patient_number() AS number')).rows[0].number).toBe(`P-${value+(called?1:0)}`);
+    expect((await pool.query('SELECT aqlan_allocate_patient_number() AS number')).rows[0].number).toBe(next);
   }
 }
 
@@ -107,6 +124,7 @@ it('restores an actual synthetic full archive and its patient-document links and
     expect(restored.migrationsApplied).toContain('0080');
     expect(await snapshot(fixture.target.pool)).toEqual(sourceBefore);
     expect(await sequence(fixture.target.pool)).toEqual(sourceSequence);
+    expect((await fixture.target.pool.query('SELECT aqlan_patient_number_next()::text AS next')).rows[0].next).toBe('9001');
     const link = (await fixture.target.pool.query('SELECT d.patient_id,p.patient_number,d.storage_key,d.sha256 FROM patient_documents d JOIN patients p ON p.id=d.patient_id')).rows;
     expect(link).toEqual([{patient_id:patient.id,patient_number:'P-00123',storage_key:key,sha256:sha256Of(bytes)}]);
     expect(await readFile(path.join(stage,key))).toEqual(bytes);
@@ -117,10 +135,7 @@ it('restores an actual synthetic full archive and its patient-document links and
     expect(await snapshot(fixture.target.pool)).toEqual(beforeReplay);
     expect(await sequence(fixture.target.pool)).toEqual(sequenceBeforeReplay);
     expect(await readFile(path.join(stage,key))).toEqual(bytes);
-    // Also exercise #490's matrix on the actual restored target, then recheck links.
-    await checkMatrix(fixture.target.pool);
-    expect(await snapshot(fixture.target.pool)).toEqual(beforeReplay);
-    expect(await readFile(path.join(stage,key))).toEqual(bytes);
+    // Keep the restored target's original sequence and rows as evidence.
     expect(await snapshot(fixture.source.pool)).toEqual(sourceBefore);
     expect(await sequence(fixture.source.pool)).toEqual(sourceSequence);
     expect(await readFile(sourceFile)).toEqual(bytes);
@@ -136,6 +151,16 @@ it('checks the 12 historical high-water SQL replay cases on a separately owned t
     const rows = await snapshot(fixture.target.pool);
     await checkMatrix(fixture.target.pool);
     expect(await snapshot(fixture.target.pool)).toEqual(rows);
+    // Retired aliases and policy can exceed both the restored and target sequence.
+    await fixture.target.pool.query("INSERT INTO patient_numbering_policy(singleton,minimum_next,version) VALUES(true,12000,1)");
+    await fixture.target.pool.query("INSERT INTO retired_patient_numbers(patient_number,patient_id) SELECT 'P-13000',id FROM patients WHERE patient_number='P-00123'");
+    await fixture.target.pool.query("SELECT setval('patient_number_seq',10000,true)");
+    await fixture.target.pool.query(patientNumberSequenceRestoreSql('10000',false));
+    await fixture.target.pool.query(patientNumberSequenceRestoreSql('10000',false));
+    const allocated = (await fixture.target.pool.query('SELECT aqlan_allocate_patient_number() AS number')).rows[0].number;
+    expect(allocated).toBe('P-13001');
+    await fixture.target.pool.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'SYNTHETIC ALLOCATED')",[allocated]);
+    expect((await fixture.target.pool.query("SELECT count(*)::int AS count FROM patients WHERE patient_number='P-13001'")).rows[0].count).toBe(1);
     for (const db of [fixture.source,fixture.target]) expect((await fixture.admin.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=$1',[db.name])).rows).toEqual([db.identity]);
   } finally { await fixture.close(); }
 },180_000);
