@@ -82,11 +82,17 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   // while none of the archived application rows may survive the late failure.
   await migrate(fixture.archiveTarget, { apply: true });
   const beforeReplay = await applicationRows(fixture.archiveTarget);
+  const registryBefore = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
   const result = await stagedRestore({ archivePath: path, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, 'failed-documents'), allowNonEmptyTarget: true });
   expect(result.validationErrors).toEqual([]); expect(result.ok).toBe(false); expect(result.readyForCutover).toBe(false);
   expect(result.errors.join(' ')).toContain('division by zero');
   expect(await applicationRows(fixture.archiveTarget)).toEqual(beforeReplay);
-  expect((await fixture.archiveTarget.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual((await loadMigrationFiles()).map(file => file.version));
+  const files = await loadMigrationFiles();
+  expect(files.find(file => file.version === '0079')?.checksum).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');
+  const registryAfter = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
+  expect(registryAfter).toEqual(registryBefore);
+  expect(registryAfter.map(row => row.version)).toEqual(files.filter(file => file.version !== '0079').map(file => file.version));
+  expect((await fixture.archiveTarget.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows).toEqual([{name:null}]);
   expect((await fixture.archiveTarget.query("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgenabled <> 'O'")).rows).toEqual([]);
   expect((await fixture.archiveTarget.query('SHOW session_replication_role')).rows[0].session_replication_role).toBe('origin');
 });
