@@ -29,6 +29,29 @@ beforeEach(() => { vi.clearAllMocks(); target.connect.mockRejectedValue(new Erro
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('administrative restore validation precedes target changes', () => {
+  it('rejects an impossible 0079 timestamp before reset while preserving the prior synthetic stage', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'synthetic-invalid-0079-time-'));
+    try {
+      const backups=path.join(directory,'backups'), stage=path.join(backupStateDir(backups),'restore-drill-current');
+      await mkdir(stage,{recursive:true}); await writeFile(path.join(stage,'prior.txt'),'SYNTHETIC PRIOR STAGE');
+      const badTime='2026-99-99T77:99:99Z';
+      const checksum='5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99';
+      const record=`INSERT INTO schema_migrations ("version", "name", "checksum", "applied_at", "adopted") VALUES ('0079', 'ortho_followup_coverage', '${checksum}', '${badTime}', FALSE);`;
+      const sql=Buffer.from(`BEGIN;\n${record}\nCOMMIT;\n`);
+      const manifest={format:'aqlan-full-backup',version:1,createdAt:'2026-01-01T00:00:00.000Z',databaseSha256:hash(sql),documents:[]};
+      const archive=tarGzBytes([{name:'database.sql',data:sql},{name:'manifest.json',data:Buffer.from(JSON.stringify(manifest))}]);
+      expect(validateBackupArchive(parseTarBytes(gunzipSync(archive)),{documentsDir:stage}).ok).toBe(true);
+      const catalog=await loadMigrationFiles();
+      try { prepareBackupSql(sql.toString('utf8'),{inspectHistorical0079:true,migrationFiles:catalog}); throw new Error('unexpected acceptance'); }
+      catch(error) { expect((error as Error).message).toBe('Invalid historical 0079 registry record'); expect((error as Error).message).not.toContain(badTime); }
+      await writeFile(path.join(backups,id),archive);
+      await upsertBackupHistoryRecord(backups,{backupId:id,createdAt:'2026-01-01T00:00:00.000Z',triggerType:'manual',archiveSha256:hash(archive),archiveBytes:archive.length,databaseSha256:hash(sql),documentCount:0,status:'verified',replicationStatus:'none',destinations:[]});
+      expect(await runAdminRestoreDrill({backupDir:backups,backupId:id,actor:'synthetic',env:environment})).toEqual({ok:false,reason:'archive-integrity-mismatch'});
+      expect(target.connect).not.toHaveBeenCalled(); expect(target.query).not.toHaveBeenCalled();
+      expect(await readFile(path.join(stage,'prior.txt'),'utf8')).toBe('SYNTHETIC PRIOR STAGE');
+      expect(await readFile(path.join(backups,id))).toEqual(archive);
+    } finally { await rm(directory,{recursive:true,force:true}); }
+  });
   it.each([[[]], [[{version:'0090', name:'synthetic', filename:'0090_synthetic.sql', sql:'synthetic', checksum:'a'.repeat(64)}]]])('refuses an untrusted migration catalogue before opening the staged target', async supplied => {
     const directory = await mkdtemp(path.join(tmpdir(), 'synthetic-empty-catalog-'));
     try {

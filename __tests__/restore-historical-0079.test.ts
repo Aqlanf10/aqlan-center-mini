@@ -17,6 +17,25 @@ describe('historical coverage evidence in writer backup SQL', () => {
     expect(prepared.historical0079).toEqual({ appliedAt: '2026-01-02T12:34:56.123456+00:00' });
     expect(prepared.dataSql).not.toContain(record);
   });
+  it.each([
+    '2024-02-29T23:59:59.123456Z',
+    '2000-02-29T00:00:00.000001+05:30',
+    '2026-12-31T23:59:59.987654-03',
+    '2026-01-01T00:00:00+0530',
+    '2026-01-01T00:00:00.000001+15:59:59',
+  ])('retains a valid writer timestamp byte-for-byte: %s', appliedAt => {
+    expect(inspect(row({ applied_at:appliedAt })).historical0079).toEqual({appliedAt});
+  });
+  it.each([
+    '2026-99-99T77:99:99Z', '2026-02-29T00:00:00Z', '1900-02-29T00:00:00Z',
+    '0000-01-01T00:00:00Z', '2026-00-01T00:00:00Z', '2026-04-31T00:00:00Z',
+    '2026-01-01T24:00:00Z', '2026-01-01T23:60:00Z', '2026-01-01T23:59:60Z',
+    '2026-01-01T00:00:00+16:00', '2026-01-01T00:00:00+03:60',
+    '2026-01-01T00:00:00+03:00:60', '2026-01-01T00:00:00.1234567Z',
+    '2026-01-01T00:00:00+03:0', '2026-01-01T00:00:00',
+  ])('rejects impossible or non-writer 0079 timestamps: %s', appliedAt => {
+    expect(() => inspect(row({ applied_at:appliedAt }))).toThrow('Invalid historical 0079 registry record');
+  });
   it('does not activate for comments or literal text resembling a ledger record', () => {
     expect(inspect(`-- ${row()}\nINSERT INTO example ("note") VALUES ('0079');`).historical0079).toBeNull();
   });
