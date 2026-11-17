@@ -87,6 +87,20 @@ test("refuses missing, linked, or inline-mapped NFT chunk without partial writes
   await assert.rejects(assembleStandaloneEntryChunks(root), /non-regular path/);
   await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), {code:"ENOENT"});
 }));
+test("refuses a linked NFT and an NFT-only chunk whose map fails either existing guard", () => fixture(async f => {
+  const {root, put, build, shipped} = f;
+  await addNft(f);
+  await put(`${build}/chunks/ssr/nft-only.js`, "module.exports = 1;\n");
+  for (const source of ["node_modules/braces/index.js", "node_modules/%65slint/index.js"]) {
+    await put(`${build}/chunks/ssr/nft-only.js.map`, JSON.stringify({version:3,sources:[source],mappings:""}));
+    await assert.rejects(assembleStandaloneEntryChunks(root), /build source map failed dependency validation/);
+    await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/nft-only.js")), {code:"ENOENT"});
+    await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), {code:"ENOENT"});
+  }
+  const nft = path.join(root, shipped, "app/_global-error/page.js.nft.json");
+  await rm(nft); await symlink("page.js", nft);
+  await assert.rejects(assembleStandaloneEntryChunks(root), /non-regular path/);
+}));
 test("copies only bootstrap-referenced compiled assets, never unrelated application source", () => fixture(async ({root, put, shipped}) => {
   await put("lib/synthetic-private-source.ts", "synthetic source file\n");
   await put(".next/server/chunks/ssr/unreferenced.js", "unreferenced generated chunk\n");
