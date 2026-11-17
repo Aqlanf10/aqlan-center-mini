@@ -71,7 +71,7 @@ export function resolveInsideBase(base: string, relativePath: string): SafePathR
   if (!validated.ok || !validated.resolved) return validated;
 
   const resolvedBase = path.resolve(base);
-  const target = path.resolve(resolvedBase, validated.resolved);
+  const target = path.resolve(/*turbopackIgnore: true*/ resolvedBase, validated.resolved);
   const relative = path.relative(resolvedBase, target);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     return { ok: false, resolved: null, reason: `المسار المحلول يخرج من الأساس: ${relativePath}` };

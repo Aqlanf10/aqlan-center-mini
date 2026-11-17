@@ -43,13 +43,13 @@ export function checksumOf(sql: string): string {
  */
 export async function loadMigrationFiles(dir?: string): Promise<MigrationFile[]> {
   const resolved = dir ?? defaultMigrationsDir();
-  const entries = await readdir(resolved);
+  const entries = await readdir(/*turbopackIgnore: true*/ resolved);
   const files: MigrationFile[] = [];
   for (const filename of entries) {
     const match = MIGRATION_FILENAME_PATTERN.exec(filename);
     if (!match) continue;
     if (filename.startsWith(".")) continue;
-    const sql = await readFile(path.join(resolved, filename), "utf8");
+    const sql = await readFile(/*turbopackIgnore: true*/ path.join(resolved, filename), "utf8");
     files.push({
       version: match[1],
       name: match[2],

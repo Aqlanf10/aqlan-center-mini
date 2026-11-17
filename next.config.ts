@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { HSTS_HEADER, STATIC_SECURITY_HEADERS } from "./lib/csp";
+import { PREFLIGHT_SOURCE_FILES } from "./lib/preflight-provenance";
 
 /**
  * ترويسات الأمن الثابتة على كل المسارات (P2/S2) — من المصدر الواحد
@@ -41,6 +42,12 @@ const nextConfig: NextConfig = {
    * التي لا يقرأها التشغيل أصلًا، فيبطؤ كل نشر وتتّسع مساحة الهجوم بلا مقابل.
    */
   output: "standalone",
+
+  // Dynamic migration paths are not discoverable reliably by the tracer.
+  // Ship the complete migration catalogue and the provenance inputs explicitly.
+  outputFileTracingIncludes: {
+    "/**": ["./migrations/[0-9][0-9][0-9][0-9]_*.sql", ...PREFLIGHT_SOURCE_FILES.map((file) => `./${file}`)],
+  },
 
   /**
    * The backup/restore filesystem traces can discover project-root files that

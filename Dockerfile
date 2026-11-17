@@ -50,6 +50,8 @@ RUN apk add --no-cache su-exec
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Public files must not depend on accidental broad server-file tracing.
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 # Explicitly packaged read-only operator command; never part of server startup.
 COPY --from=builder --chown=nextjs:nodejs /app/.preflight ./preflight
 COPY --chown=root:root docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
