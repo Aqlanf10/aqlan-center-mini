@@ -136,6 +136,19 @@ const REFUSAL_ONLY = {
     sha256: "29db38c8f9146b0ebfd4e5ee400822952da843080ff90eb7ff70ab6a5ef83a02",
   },
 };
+// Exact replay is a successful response, not a refusal-only endpoint. It is a
+// distinct, pinned read-only contract: changes to any production layer require
+// a fresh audit review and the real PostgreSQL no-write/replay tests.
+const REPLAY_ONLY = {
+  "POST /api/ortho/[id]/followup-coverage": {
+    reason: "إعادة إيصال تغطية قديم مطابق بعد التحقق؛ الطلب غير المحسوم يُرفض دون إنشاء قرار أو رفض دائم جديد.",
+    files: {
+      "app/api/ortho/[id]/followup-coverage/route.ts": "5b00fb01da068516e21dabf09010cce0669f1beaeb9769b4009b04c50a4d862a",
+      "lib/ortho-followup-coverage-db.ts": "9a332e80a75d56dd01cd771d08670978fd00e130bb76bea13ba75c795f0d0a05",
+      "lib/canonical-ortho-coverage-command.ts": "c911b5feb4fb1f98e091eab0424aed29cfd392dd2aa9bc2a834b958b2d509fcc",
+    },
+  },
+} as const;
 const audited = auditingLibFunctions();
 const handlers = walk(join(ROOT, "app", "api"), (name) => name === "route.ts").flatMap((file) => {
   const route = `/${relative(join(ROOT, "app"), file).replace(/\\/g, "/").replace(/\/route\.ts$/, "")}`;
@@ -162,15 +175,28 @@ describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
     expect(callsIn('recordExpense({ quoteOnly: flag });')).toContain("recordExpense");
   });
 
-  it("exempts exact coverage status reads but never decision or terminal-refusal writes", () => {
+  it("pins coverage status and retired exact replay without exempting new writes", () => {
     const path = "/api/ortho/[id]/followup-coverage";
     expect(handlers.find(handler => handler.key === `PUT ${path}`)?.audits).toBe(false);
     expect(AUDIT_EXEMPT).toHaveProperty(`PUT ${path}`);
-    expect(handlers.find(handler => handler.key === `POST ${path}`)?.audits).toBe(true);
+    expect(handlers.find(handler => handler.key === `POST ${path}`)?.audits).toBe(false);
     expect(AUDIT_EXEMPT).not.toHaveProperty(`POST ${path}`);
     const route = splitFunctions(readFileSync(join(ROOT, "app/api/ortho/[id]/followup-coverage/route.ts"), "utf8"));
     expect(callsIn(route.get("PUT")!)).toContain("readFollowupCoverageCommandStatus");
     expect(callsIn(route.get("PUT")!)).not.toContain("appendFollowupCoverage");
+    expect(callsIn(route.get("POST")!)).toContain("appendFollowupCoverage");
+    expect(callsIn(route.get("POST")!)).toContain("commandCanonicalFollowupCoverage");
+    const native = splitFunctions(readFileSync(join(ROOT,"lib/ortho-followup-coverage-db.ts"),"utf8"));
+    const append = native.get("appendFollowupCoverageWith")!;
+    expect(append).toContain("terminalReceipt(");
+    expect(append).toContain("coverage_authoring_retired");
+    expect(append.indexOf("terminalReceipt(")).toBeLessThan(append.indexOf("coverage_authoring_retired"));
+    expect(append).not.toMatch(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b/i);
+    for (const contract of Object.values(REPLAY_ONLY)) {
+      expect(contract.reason).toMatch(/[؀-ۿ]/);
+      for (const [file,sha] of Object.entries(contract.files))
+        expect(createHash("sha256").update(readFileSync(join(ROOT,file))).digest("hex")).toBe(sha);
+    }
   });
   it("exempts only the read-only service-addition preview, never its audited POST writer",()=>{
     expect(handlers.find(handler=>handler.key==="PUT /api/invoices/[id]/add-service")?.audits).toBe(false);
@@ -213,8 +239,18 @@ describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
   it("كل فعل كتابة يدقق أو يستثنى بسببه؛ ومسار الرفض يطابق عقده المثبت", () => {
     const refusalOnly = new Map(Object.entries(REFUSAL_ONLY));
     const uncovered = handlers.filter((handler) => !handler.audits && !(handler.key in AUDIT_EXEMPT)
-      && refusalOnly.get(handler.key)?.sha256 !== handler.sha256).map((handler) => handler.key);
+      && refusalOnly.get(handler.key)?.sha256 !== handler.sha256
+      && !(handler.key in REPLAY_ONLY)).map((handler) => handler.key);
     expect(uncovered).toEqual([]);
+  });
+
+  it("تصنيف إعادة الإيصال لا يشمل مسارًا مدققًا أو مستثنى أو مفقودًا", () => {
+    for (const key of Object.keys(REPLAY_ONLY)) {
+      expect(AUDIT_EXEMPT).not.toHaveProperty(key);
+      expect(REFUSAL_ONLY).not.toHaveProperty(key);
+      expect(handlers.filter(handler => handler.key === key)).toHaveLength(1);
+      expect(handlers.find(handler => handler.key === key)?.audits).toBe(false);
+    }
   });
 
   it("لا استثناء ميت: كل استثناء لفعلٍ موجود ولا يُدقَّق", () => {
