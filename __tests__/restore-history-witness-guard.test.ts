@@ -43,7 +43,7 @@ describe('restore history synthetic target guard', () => {
   });
   it('sets runner temp in the witness step rather than an unsupported job-level context', () => {
     const workflow = readFileSync('.github/workflows/restore-history-retained.yml', 'utf8');
-    expect(workflow).not.toMatch(/^      SYNTHETIC_WITNESS_ROOT:/m);
+    expect(workflow).not.toMatch(/^ {6}SYNTHETIC_WITNESS_ROOT:/m);
     expect(workflow).toMatch(/id: witness\n\s+env:\n\s+SYNTHETIC_WITNESS_ROOT: \$\{\{ runner\.temp \}\}/);
   });
 });
