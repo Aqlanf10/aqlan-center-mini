@@ -65,6 +65,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return forbidden();
   }
 
+  const requestsWrite = (body.action === "suggest-landmarks" && Boolean(body.save))
+    || (body.action === "generate-diagnosis" && Boolean(body.saveToDiagnosis));
+  if (requestsWrite && !(await canAccessPatient(session, study.analysis.patientId, "canUploadXrays"))) {
+    return forbidden();
+  }
+
   // 1) خيار اقتراح المعالم الذكي
   if (body.action === "suggest-landmarks") {
     const currentPoints: Partial<Record<LandmarkCode, Pt>> = {};

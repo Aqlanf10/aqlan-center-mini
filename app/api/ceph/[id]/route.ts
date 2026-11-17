@@ -32,8 +32,7 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 const num = (v: unknown): number | null => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -70,7 +69,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
-  const source = (body ?? {}) as Record<string, unknown>;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const source = body as Record<string, unknown>;
+  // Validate the entire payload before any write. Do not silently drop bad points.
+  if (source.landmarks != null) {
+    const codes = new Set<string>();
+    if (!Array.isArray(source.landmarks) || source.landmarks.some((point: unknown) => {
+      if (!point || typeof point !== "object" || Array.isArray(point)) return true;
+      const p = point as Record<string, unknown>;
+      if (!isCephLandmarkCode(p.code) || num(p.x) == null || num(p.y) == null || codes.has(p.code)) return true;
+      if (p.source != null && p.source !== "manual" && p.source !== "suggested") return true;
+      codes.add(p.code);
+      return false;
+    })) return NextResponse.json({ message: "المعالم تحتاج رموزًا صحيحة غير مكررة وإحداثيات رقمية صالحة." }, { status: 400 });
+  }
+  if (source.diagnosis != null) {
+    const d = source.diagnosis;
+    if (typeof d !== "object" || Array.isArray(d) || typeof (d as Record<string, unknown>).finalDx !== "string"
+      || !(d as Record<string, string>).finalDx.trim()) {
+      return NextResponse.json({ message: "الاستنتاج السيفالومتري لا يُترك فارغًا." }, { status: 400 });
+    }
+  }
 
   try {
     // المعايرة: أربعة أرقام ومسافة حقيقية — كلها لا تنقص واحدة.
