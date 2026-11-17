@@ -62,6 +62,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const messages: Record<typeof result.reason, [string, number]> = {
         same_patient: ["لا يُدمج الملف في نفسه.", 400],
         not_found: ["لا يوجد ملف بهذا الرقم.", 404],
+        source_has_prescription_history: ["الملف المكرر مرتبط بوصفات محفوظة؛ لا يمكن نقل سجل إصدارها بالدمج.", 409],
         source_has_financial_history: [
           "الملف المكرر له أثر مالي (دفعات أو حركات مخزون أو رصيد افتتاحي أو سجل مالي سابق، ولو كان مسدّدًا بالكامل). لا يمكن نقل هذه السجلات بالدمج. راجع الملفين واختيار الملف الأساسي قبل المحاولة.",
           409,

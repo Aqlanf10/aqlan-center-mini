@@ -274,8 +274,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; /* لا سبب — ليس شرطًا */ }
 
   try {
-    const result = await deleteVisit(id, { actor: session.username, actorRole: session.role, reason });
+    const result = await deleteVisit(id, { session, patientId: deletable.patientId, reason });
     if (!result.ok) {
+      if (result.reason === "session_expired") return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401});
+      if (result.reason === "forbidden") return NextResponse.json({message:"تغيّرت الصلاحية؛ لم تُحذف الزيارة."},{status:403});
+      if (result.reason === "scope_changed") return NextResponse.json({message:"تغيّر ربط الزيارة بالمريض؛ أعد تحميل الملف."},{status:409});
+      if (result.reason === "has_prescription_history") return NextResponse.json({message:"الزيارة مرتبطة بوصفات محفوظة؛ لا يمكن حذف سجلها."},{status:409});
       if (result.reason === "lab_linked") return NextResponse.json({message:"هذه الزيارة مرتبطة بهوية مختبر دائمة؛ لا تُحذف دون معالجة سريرية صريحة للروابط."},{status:409});
       if (result.reason === "signed") {
         return NextResponse.json(

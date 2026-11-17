@@ -1,0 +1,1289 @@
+{
+  "version": "2026-11-03.topical-manual.1",
+  "checked_on": "2026-11-03",
+  "sources": [
+    {
+      "id": "AAPD25",
+      "title": "AAPD Useful Medications, revision 2025, pp669–677",
+      "url": "https://www.aapd.org/globalassets/media/policies_guidelines/r_usefulmeds25.pdf",
+      "version": "2025",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "ADA_ABX",
+      "title": "ADA dental infection guideline / chairside guide",
+      "url": "https://www.ada.org/-/media/project/ada-organization/ada/ada-org/files/resources/research/ada_chairside_guide_antibiotics_tna.pdf?hash=0611A3DB9B1C2BCC497CF6E91CEA2751&rev=3c99efba951c4ed599324316297ce5ba",
+      "version": "2019 guideline; accessed current ADA resource",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_ABSCESS",
+      "title": "SDCEP dental abscess",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/bacterial-infections/dental-abscess/",
+      "version": "bacterial section updated May 2026",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_APAP",
+      "title": "SDCEP paracetamol",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/odontogenic-pain/analgesics/paracetamol/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_IBU",
+      "title": "SDCEP ibuprofen",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/odontogenic-pain/analgesics/ibuprofen/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_AMOX",
+      "title": "SDCEP amoxicillin",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/bacterial-infections/dental-abscess/first-line-antibiotics/amoxicillin/",
+      "version": "bacterial section May 2026",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_PENV",
+      "title": "SDCEP phenoxymethylpenicillin",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/bacterial-infections/dental-abscess/first-line-antibiotics/phenoxymethylpenicillin/",
+      "version": "bacterial section May 2026",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_METRO",
+      "title": "SDCEP metronidazole",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/bacterial-infections/dental-abscess/first-line-antibiotics/metronidazole/",
+      "version": "bacterial section May 2026",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_CLARI",
+      "title": "SDCEP clarithromycin",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/bacterial-infections/dental-abscess/second-line-antibiotics/clarithromycin/",
+      "version": "bacterial section May 2026",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_ABX_CAUTION",
+      "title": "SDCEP antibiotic cautions",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/supporting-tools/contraindications-cautions/contraindications-cautions-antibiotics/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_ANALGESIC_CAUTION",
+      "title": "SDCEP analgesic cautions",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/supporting-tools/contraindications-cautions/contraindications-cautions-analgesics/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_CHX",
+      "title": "SDCEP chlorhexidine",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/ulceration-inflammation/antimicrobial-mouthwashes/chlorhexidine-mouthwash/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "CHX_LABEL",
+      "title": "Corsodyl 0.2% SmPC, reference product only",
+      "url": "https://www.medicines.org.uk/emc/medicine/23034",
+      "version": "02 July 2026",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_NYST",
+      "title": "SDCEP nystatin",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/fungal-infections/candidosis/nystatin/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "NYST_LABEL",
+      "title": "Nystatin 100000 units/ml SmPC, reference product",
+      "url": "https://www.medicines.org.uk/emc/product/100765/smpc",
+      "version": "22 April 2025",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_MICO",
+      "title": "SDCEP miconazole",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/fungal-infections/candidosis/miconazole/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "MICO_LABEL",
+      "title": "Daktarin 2% oral gel SmPC, reference product",
+      "url": "https://www.medicines.org.uk/emc/medicine/22032",
+      "version": "04 September 2026",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_FLUC",
+      "title": "SDCEP fluconazole",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/fungal-infections/candidosis/fluconazole/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "FLUC_LABEL",
+      "title": "Fluconazole 50mg capsules SmPC",
+      "url": "https://www.medicines.org.uk/emc/product/4437/smpc",
+      "version": "13 March 2024",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "BENZ_LABEL",
+      "title": "Benzydamine 0.15% mouthwash SmPC",
+      "url": "https://www.medicines.org.uk/emc/product/3347/smpc",
+      "version": "10 October 2025",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_F2800",
+      "title": "SDCEP fluoride toothpaste 2800ppm",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/dry-mouth/topical-fluoride/fluoride-toothpaste-2800-ppm/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_F5000",
+      "title": "SDCEP fluoride toothpaste 5000ppm",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/dry-mouth/topical-fluoride/fluoride-toothpaste-5000-ppm/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_FRINSE",
+      "title": "SDCEP sodium fluoride 0.05% rinse",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/dry-mouth/topical-fluoride/fluoride-mouthwash-005/",
+      "version": "live page",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "COAMOX_LABEL",
+      "title": "DailyMed amoxicillin/clavulanate official label",
+      "url": "https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=7870336b-1f49-bcf4-e053-2991aa0af8b7",
+      "version": "label revised July 2018; currently accessible, not claimed most recent manufacturer label",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "FDA_NSAID",
+      "title": "FDA NSAIDs and pregnancy",
+      "url": "https://www.fda.gov/media/142967/download",
+      "version": "2020 safety communication; checked current",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "ADA_PROPH",
+      "title": "ADA antibiotic prophylaxis",
+      "url": "https://www.ada.org/resources/ada-library/oral-health-topics/antibiotic-prophylaxis",
+      "version": "current page referencing AHA2021",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "CLARI_LABEL",
+      "title": "Clarithromycin250mg SmPC",
+      "url": "https://www.medicines.org.uk/emc/medicine/32481",
+      "version": "01 April2026",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "AZITH_LABEL",
+      "title": "Azithromycin250mg SmPC",
+      "url": "https://www.medicines.org.uk/emc/product/2272/smpc",
+      "version": "21 May2026",
+      "checked_on": "2026-11-01",
+      "primary_source": true
+    },
+    {
+      "id": "SD_ABX_REVIEW",
+      "title": "SDCEP bacterial infections review tool",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/supporting-tools/bacterial-infections-review-tool/",
+      "version": "live page; reviewed 2026-11-03",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "SD_ABX_FIRST",
+      "title": "SDCEP first-line antibiotics and patient advice",
+      "url": "https://www.sdcepdentalprescribing.nhs.scot/guidance/bacterial-infections/dental-abscess/first-line-antibiotics/",
+      "version": "live page; reviewed 2026-11-03",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "METRO_400_LABEL",
+      "title": "UK Metronidazole 400 mg tablets SmPC: alcohol precautions",
+      "url": "https://www.medicines.org.uk/emc/product/12817/smpc",
+      "version": "updated 2025-04-30; UK example, not proof of selected local product",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "FLUORIDE_5000_LABEL",
+      "title": "UK Fluoride 5000 ppm toothpaste SmPC",
+      "url": "https://www.medicines.org.uk/emc/product/9575/smpc",
+      "version": "updated2020-10-26; UK example, not selected local product verification",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "FLUORIDE_5000_PIL",
+      "title": "UK Fluoride5000ppm patient leaflet: safe storage and accidental ingestion",
+      "url": "https://www.medicines.org.uk/emc/files/pil.9575.pdf",
+      "version": "revised2020-10; UK example, not selected local product",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    },
+    {
+      "id": "NHS_POISON_FIRST_AID",
+      "title": "NHS poisoning first aid: avoid inducing vomiting",
+      "url": "https://www.nhs.uk/conditions/poisoning/",
+      "version": "reviewed2025-06-12; checked2026-11-03",
+      "checked_on": "2026-11-03",
+      "primary_source": true
+    }
+  ],
+  "profiles": [
+    {
+      "id": "paracetamol-adult-sdcep",
+      "generic_name": "Paracetamol / Acetaminophen",
+      "class_group": "analgesic",
+      "population_reference": "بالغ؛ حد18 سنة نطاق منتج مقترح لا استنتاج من المصدر",
+      "indication_reference": "ألم سني أو بعد إجراء خفيف/متوسط",
+      "dose_basis": "mg/dose",
+      "reference_dose": 1000,
+      "reference_schedule": {
+        "times_per_day": 4,
+        "minimum_interval_hours": 4
+      },
+      "reference_limits": {
+        "mg_per_24h": 4000,
+        "maximum_administrations_24h": 4
+      },
+      "duration_reference": {
+        "example_days": 5,
+        "selection": "أقصر مدة فعالة يحددها الطبيب"
+      },
+      "form_strength_reference": [
+        "tablet 500mg"
+      ],
+      "source_ids": [
+        "SD_APAP",
+        "SD_ANALGESIC_CAUTION"
+      ],
+      "warning_ids": [
+        "apap",
+        "special-populations"
+      ],
+      "notes": "4000 سقف المصدر وليس جرعة افتراضية، وقد يلزم سقف أقل حسب المريض."
+    },
+    {
+      "id": "paracetamol-child-aapd",
+      "generic_name": "Paracetamol / Acetaminophen",
+      "class_group": "analgesic",
+      "population_reference": "أقل من12 سنة؛ الحد الأدنى ونشرة المنتج يحتاجان تحققًا",
+      "indication_reference": "ألم خفيف/متوسط",
+      "dose_basis": "mg/kg/dose",
+      "reference_dose": [
+        10,
+        15
+      ],
+      "reference_schedule": {
+        "interval_hours_range": [
+          4,
+          6
+        ],
+        "as_needed": true
+      },
+      "reference_limits": {
+        "mg_per_kg_24h": 75,
+        "mg_per_24h": 4000,
+        "mg_per_single_dose": null
+      },
+      "duration_reference": null,
+      "form_strength_reference": [
+        "oral liquid: exact concentration required"
+      ],
+      "source_ids": [
+        "AAPD25",
+        "SD_ANALGESIC_CAUTION"
+      ],
+      "warning_ids": [
+        "apap",
+        "pediatric"
+      ],
+      "notes": "لا تُقسم جرعة mg/kg/dose على عدد المرات. عدد الجرعات والسقف المفرد يقرهما الطبيب/النشرة قبل التفعيل."
+    },
+    {
+      "id": "paracetamol-adolescent-sdcep",
+      "generic_name": "Paracetamol / Acetaminophen",
+      "class_group": "analgesic",
+      "population_reference": "12–17 سنة",
+      "indication_reference": "ألم سني",
+      "dose_basis": "mg/dose",
+      "reference_dose": {
+        "12-15_years": [
+          480,
+          750
+        ],
+        "16-17_years": [
+          500,
+          1000
+        ]
+      },
+      "reference_schedule": {
+        "times_per_day": 4,
+        "minimum_interval_hours": 4
+      },
+      "reference_limits": {
+        "maximum_administrations_24h": 4,
+        "derived_mg_24h_upper_by_age": {
+          "12-15": 3000,
+          "16-17": 4000
+        }
+      },
+      "duration_reference": {
+        "example_days": 5
+      },
+      "form_strength_reference": [
+        "500mg tablet",
+        "120mg/5mL",
+        "250mg/5mL"
+      ],
+      "source_ids": [
+        "SD_APAP"
+      ],
+      "warning_ids": [
+        "apap",
+        "pediatric"
+      ],
+      "notes": "حدود اليوم مشتقة من أمثلة المصدر وليست حدًا سمّيًا عامًا."
+    },
+    {
+      "id": "ibuprofen-adult-sdcep",
+      "generic_name": "Ibuprofen",
+      "class_group": "analgesic",
+      "population_reference": "بالغ",
+      "indication_reference": "ألم سني/التهابي أو بعد إجراء",
+      "dose_basis": "mg/dose",
+      "reference_dose": 400,
+      "reference_schedule": {
+        "times_per_day": 4,
+        "minimum_interval_hours": null
+      },
+      "reference_limits": {
+        "example_derived_mg_24h": 1600,
+        "source_possible_escalation_mg_24h": 2400
+      },
+      "duration_reference": {
+        "example_days": 5
+      },
+      "form_strength_reference": [
+        "tablet400mg"
+      ],
+      "source_ids": [
+        "SD_IBU",
+        "FDA_NSAID"
+      ],
+      "warning_ids": [
+        "nsaid",
+        "special-populations"
+      ],
+      "notes": "بعد الطعام إن أمكن؛ لا ترفع مثال1600 إلى2400 تلقائيًا، والفاصل يحتاج نشرة المنتج."
+    },
+    {
+      "id": "ibuprofen-child-sdcep",
+      "generic_name": "Ibuprofen",
+      "class_group": "analgesic",
+      "population_reference": "6أشهر–17سنة؛ الوزن مطلوب لفحص السقف",
+      "indication_reference": "ألم سني",
+      "dose_basis": "age-band mg/dose",
+      "reference_dose": {
+        "6-11_months": 50,
+        "1-3_years": 100,
+        "4-6_years": 150,
+        "7-9_years": 200,
+        "10-11_years": 300,
+        "12-17_years": [
+          300,
+          400
+        ]
+      },
+      "reference_schedule": {
+        "times_per_day_by_age": {
+          "6-11_months": 4,
+          "1-11_years": 3,
+          "12-17_years": 4
+        }
+      },
+      "reference_limits": {
+        "mg_per_kg_24h": 30,
+        "age7plus_absolute_mg_24h": 2400
+      },
+      "duration_reference": {
+        "example_days": 5
+      },
+      "form_strength_reference": [
+        "100mg/5mL",
+        "tablet200mg"
+      ],
+      "source_ids": [
+        "SD_IBU",
+        "FDA_NSAID"
+      ],
+      "warning_ids": [
+        "nsaid",
+        "pediatric"
+      ],
+      "notes": "لا تستبدل سقف30 بسقف40 من مرجع آخر. إذا تجاوزت جرعة الفئة سقف الوزن تُحال للمراجعة ولا تخفض صامتًا."
+    },
+    {
+      "id": "amoxicillin-adult-ada",
+      "generic_name": "Amoxicillin",
+      "class_group": "antibiotic",
+      "population_reference": "بالغ سليم المناعة؛ راجع حدود دليلADA",
+      "indication_reference": "خراج ذروي حاد مع علامات جهازية في نطاق الدليل",
+      "dose_basis": "mg/dose",
+      "reference_dose": 500,
+      "reference_schedule": {
+        "times_per_day": 3
+      },
+      "reference_limits": {
+        "regimen_derived_mg_24h": 1500
+      },
+      "duration_reference": {
+        "range_days": [
+          3,
+          7
+        ],
+        "review_day": 3,
+        "stop": "24ساعة بعد زوال الأعراض بالكامل وفقADA"
+      },
+      "form_strength_reference": [
+        "capsule/tablet500mg"
+      ],
+      "source_ids": [
+        "ADA_ABX",
+        "SD_ABX_CAUTION"
+      ],
+      "warning_ids": [
+        "penicillin",
+        "antibiotic"
+      ],
+      "notes": "لا يدمج شرط التوقف أو المدة معSDCEP."
+    },
+    {
+      "id": "amoxicillin-child-aapd-q8",
+      "generic_name": "Amoxicillin",
+      "class_group": "antibiotic",
+      "population_reference": "أكبر من3أشهر وأقل من40kg؛ عند40kg بالضبط مراجعة النص/النشرة",
+      "indication_reference": "جرعة مرجعية عامة؛ الاستطباب السني والمدة يقرهما الطبيب",
+      "dose_basis": "mg/kg/day",
+      "reference_dose": [
+        20,
+        40
+      ],
+      "reference_schedule": {
+        "interval_hours": 8,
+        "divisions_per_day": 3
+      },
+      "reference_limits": {
+        "mg_per_single_dose": 500
+      },
+      "duration_reference": null,
+      "form_strength_reference": [
+        "suspension: exact strength required"
+      ],
+      "source_ids": [
+        "AAPD25",
+        "SD_ABX_CAUTION"
+      ],
+      "warning_ids": [
+        "penicillin",
+        "antibiotic",
+        "pediatric"
+      ],
+      "notes": "الكمية هنا يومية، تقسم3؛ لا تنقل الجرعة كما هي لكل مرة."
+    },
+    {
+      "id": "amoxicillin-child-aapd-q12",
+      "generic_name": "Amoxicillin",
+      "class_group": "antibiotic",
+      "population_reference": "أكبر من3أشهر وأقل من40kg",
+      "indication_reference": "جرعة مرجعية عامة؛ ليست مدة علاج خراج مفترضة",
+      "dose_basis": "mg/kg/day",
+      "reference_dose": [
+        25,
+        45
+      ],
+      "reference_schedule": {
+        "interval_hours": 12,
+        "divisions_per_day": 2
+      },
+      "reference_limits": {
+        "mg_per_single_dose": 875
+      },
+      "duration_reference": null,
+      "form_strength_reference": [
+        "suspension: exact strength required"
+      ],
+      "source_ids": [
+        "AAPD25",
+        "SD_ABX_CAUTION"
+      ],
+      "warning_ids": [
+        "penicillin",
+        "antibiotic",
+        "pediatric"
+      ],
+      "notes": "مسار مستقل عنq8؛ لا تبديل التكرار وحده."
+    },
+    {
+      "id": "amoxicillin-sdcep",
+      "generic_name": "Amoxicillin",
+      "class_group": "antibiotic",
+      "population_reference": "بالغ؛ وأطفال6أشهر–17سنة",
+      "indication_reference": "خراج سني عند تحقق استطباب المضاد؛ علاج السبب/التصريف أساسي، لا لكل ألم سن",
+      "dose_basis": "age-band mg/dose",
+      "reference_dose": {
+        "adult": 500,
+        "6-11_months": 125,
+        "1-4_years": 250,
+        "5-17_years": 500
+      },
+      "reference_schedule": {
+        "times_per_day": 3
+      },
+      "reference_limits": {
+        "routine_derived_mg_24h": {
+          "adult": 1500,
+          "6-11_months": 375,
+          "1-4_years": 750,
+          "5-17_years": 1500
+        }
+      },
+      "duration_reference": {
+        "range_days": [
+          3,
+          5
+        ],
+        "review_day": 3,
+        "stop": "قرار الطبيب في المراجعة: لا علامات عدوى مستمرة، ألم آخذ بالتحسن، أكل وشرب طبيعيان، ولا علامات خطر؛ عند استمرار العدوى يُقرر إكمال الكورس وإعادة التقييم، وعند علامات الخطر إحالة طارئة. لا إيقاف ذاتي لمجرد غياب الأعراض الجهازية."
+      },
+      "form_strength_reference": [
+        "125mg/5mL",
+        "250mg/5mL",
+        "capsule250/500mg"
+      ],
+      "source_ids": [
+        "SD_AMOX",
+        "SD_ABSCESS",
+        "SD_ABX_CAUTION",
+        "SD_ABX_REVIEW",
+        "SD_ABX_FIRST"
+      ],
+      "warning_ids": [
+        "penicillin",
+        "antibiotic",
+        "pediatric"
+      ],
+      "notes": "مسارUK مستقل. جرعات العدوى الشديدة ليست ضمن الملف؛ يلزم تقييم/إحالة. يفضّلSDCEP البنسلينV لضيق الطيف عندما يلائم."
+    },
+    {
+      "id": "penicillin-v-sdcep",
+      "generic_name": "Phenoxymethylpenicillin (Penicillin V)",
+      "class_group": "antibiotic",
+      "population_reference": "بالغ؛ وأطفال6أشهر–17سنة",
+      "indication_reference": "خراج سني عند تحقق استطباب المضاد؛ علاج السبب/التصريف أساسي، لا لكل ألم سن",
+      "dose_basis": "age-band mg/dose",
+      "reference_dose": {
+        "adult": 500,
+        "6-11_months": 62.5,
+        "1-5_years": 125,
+        "6-11_years": 250,
+        "12-17_years": 500
+      },
+      "reference_schedule": {
+        "times_per_day": 4
+      },
+      "reference_limits": {
+        "routine_derived_mg_24h": {
+          "adult": 2000,
+          "6-11_months": 250,
+          "1-5_years": 500,
+          "6-11_years": 1000,
+          "12-17_years": 2000
+        }
+      },
+      "duration_reference": {
+        "range_days": [
+          3,
+          5
+        ],
+        "review_day": 3,
+        "stop": "قرار الطبيب في المراجعة: لا علامات عدوى مستمرة، ألم آخذ بالتحسن، أكل وشرب طبيعيان، ولا علامات خطر؛ عند استمرار العدوى يُقرر إكمال الكورس وإعادة التقييم، وعند علامات الخطر إحالة طارئة. لا إيقاف ذاتي لمجرد غياب الأعراض الجهازية."
+      },
+      "form_strength_reference": [
+        "tablet250mg",
+        "125mg/5mL",
+        "250mg/5mL"
+      ],
+      "source_ids": [
+        "SD_PENV",
+        "SD_ABX_CAUTION",
+        "SD_ABSCESS",
+        "SD_ABX_REVIEW",
+        "SD_ABX_FIRST"
+      ],
+      "warning_ids": [
+        "penicillin",
+        "antibiotic",
+        "pediatric"
+      ],
+      "notes": "على معدة فارغة قبل الطعام30دقيقة أو بعده بساعتين؛ الشديد خارج الملف."
+    },
+    {
+      "id": "metronidazole-sdcep",
+      "generic_name": "Metronidazole",
+      "class_group": "antibiotic",
+      "population_reference": "بالغ؛ وأطفال1–17سنة",
+      "indication_reference": "خراج مع استطباب مضاد؛ بديل حساسية البنسلين أو إضافة عند حاجة سريرية حسبSDCEP",
+      "dose_basis": "age-band mg/dose",
+      "reference_dose": {
+        "adult": 400,
+        "1-2_years": 50,
+        "3-6_years": 100,
+        "7-9_years": 100,
+        "10-17_years": 200
+      },
+      "reference_schedule": {
+        "times_per_day_by_age": {
+          "adult": 3,
+          "1-2_years": 3,
+          "3-6_years": 2,
+          "7-17_years": 3
+        }
+      },
+      "reference_limits": {
+        "routine_derived_mg_24h": {
+          "adult": 1200,
+          "1-2_years": 150,
+          "3-6_years": 200,
+          "7-9_years": 300,
+          "10-17_years": 600
+        }
+      },
+      "duration_reference": {
+        "range_days": [
+          3,
+          5
+        ],
+        "review_day": 3,
+        "stop": "قرار الطبيب في المراجعة: لا علامات عدوى مستمرة، ألم آخذ بالتحسن، أكل وشرب طبيعيان، ولا علامات خطر؛ عند استمرار العدوى يُقرر إكمال الكورس وإعادة التقييم، وعند علامات الخطر إحالة طارئة. لا إيقاف ذاتي لمجرد غياب الأعراض الجهازية."
+      },
+      "form_strength_reference": [
+        "tablet200/400mg",
+        "200mg/5mL"
+      ],
+      "source_ids": [
+        "SD_METRO",
+        "SD_ABX_CAUTION",
+        "SD_ABX_REVIEW",
+        "SD_ABX_FIRST",
+        "METRO_400_LABEL"
+      ],
+      "warning_ids": [
+        "metronidazole",
+        "antibiotic",
+        "pediatric"
+      ],
+      "notes": "لا تستعير جرعةAAPD لمرض لثوي وتطبقها على كل خراج. أقل من سنة غير مشمول."
+    },
+    {
+      "id": "coamoxiclav-adult-ada-escalation",
+      "generic_name": "Amoxicillin + Clavulanate",
+      "class_group": "antibiotic",
+      "population_reference": "بالغ في نطاقADA",
+      "indication_reference": "عدم الاستجابة للعلاج الأول بعد إعادة التقييم؛ ليس خيارًا روتينيًا أولًا",
+      "dose_basis": "mg components/dose",
+      "reference_dose": {
+        "amoxicillin": 500,
+        "clavulanate": 125
+      },
+      "reference_schedule": {
+        "times_per_day": 3
+      },
+      "reference_limits": {
+        "regimen_derived_mg_24h": {
+          "amoxicillin": 1500,
+          "clavulanate": 375
+        }
+      },
+      "duration_reference": {
+        "reference_days": 7,
+        "review_day": 3,
+        "stop": "وفقADA؛ لا إكمال المدة آليًا بعد زوال الأعراض"
+      },
+      "form_strength_reference": [
+        "tablet500mg/125mg"
+      ],
+      "source_ids": [
+        "ADA_ABX",
+        "COAMOX_LABEL"
+      ],
+      "warning_ids": [
+        "penicillin",
+        "coamoxiclav",
+        "antibiotic"
+      ],
+      "notes": "تحقق من ملاءمة الدليل الكامل والفشل الحقيقي والتصريف قبل التوسيع."
+    },
+    {
+      "id": "coamoxiclav-child-label-q12",
+      "generic_name": "Amoxicillin + Clavulanate",
+      "class_group": "antibiotic",
+      "population_reference": "12 أسبوعًا فأكثر وأقل من 40 kg؛ عند 40 kg فأكثر يُراجع مسار البالغ وفق نشرة المنتج، ولا تحويل تلقائي.",
+      "indication_reference": "نشرة جرعات عامة وليست اعتمادًا سنيًا تلقائيًا",
+      "dose_basis": "amoxicillin mg/kg/day",
+      "reference_dose": [
+        25,
+        45
+      ],
+      "reference_schedule": {
+        "interval_hours": 12,
+        "divisions_per_day": 2
+      },
+      "reference_limits": {
+        "absolute_dose": "not above adult dose for exact selected product/regimen; not yet bound"
+      },
+      "duration_reference": null,
+      "form_strength_reference": [
+        "exact amoxicillin/clavulanate ratio required; not interchangeable"
+      ],
+      "source_ids": [
+        "COAMOX_LABEL"
+      ],
+      "warning_ids": [
+        "penicillin",
+        "coamoxiclav",
+        "antibiotic",
+        "pediatric"
+      ],
+      "notes": "الجرعة على مكوّن الأموكسيسيلين؛ يجب إظهار جرعةالكلافولانات أيضًا. لا تؤخذ نسبة منتج من اسم المادة."
+    },
+    {
+      "id": "azithromycin-adult-ada",
+      "generic_name": "Azithromycin",
+      "class_group": "antibiotic",
+      "population_reference": "بالغ في نطاقADA",
+      "indication_reference": "بديل يختاره الطبيب عند حساسية فورية مناسبة؛ لا استبدال آلي",
+      "dose_basis": "mg/dose",
+      "reference_dose": {
+        "day1": 500,
+        "days2to5": 250
+      },
+      "reference_schedule": {
+        "times_per_day": 1
+      },
+      "reference_limits": {
+        "regimen_mg_24h": {
+          "day1": 500,
+          "later": 250
+        }
+      },
+      "duration_reference": {
+        "total_days": 5
+      },
+      "form_strength_reference": [
+        "tablet; strength verified locally"
+      ],
+      "source_ids": [
+        "ADA_ABX",
+        "AZITH_LABEL"
+      ],
+      "warning_ids": [
+        "macrolide",
+        "antibiotic"
+      ],
+      "notes": "المقاومة والتداخلات تحتاج مراجعة."
+    },
+    {
+      "id": "azithromycin-child-aapd",
+      "generic_name": "Azithromycin",
+      "class_group": "antibiotic",
+      "population_reference": "أطفال/مراهقون؛ أدنى عمر حسب المنتج",
+      "indication_reference": "جرعة عامة مرجعية، يلزم استطباب ومدة محددان",
+      "dose_basis": "mg/kg/dose",
+      "reference_dose": {
+        "day1": [
+          10,
+          12
+        ],
+        "later_days": [
+          5,
+          6
+        ]
+      },
+      "reference_schedule": {
+        "times_per_day": 1
+      },
+      "reference_limits": {
+        "day1_mg_single": 500,
+        "later_mg_single": 250,
+        "later_limit_basis": "سقف بالغ ومبدأAAPD ألا تتجاوز جرعة الطفل جرعة البالغ"
+      },
+      "duration_reference": {
+        "later_days_reference_range": [
+          2,
+          5
+        ],
+        "selected_total_days": null
+      },
+      "form_strength_reference": [
+        "immediate-release suspension; exact strength required"
+      ],
+      "source_ids": [
+        "AAPD25",
+        "AZITH_LABEL"
+      ],
+      "warning_ids": [
+        "macrolide",
+        "antibiotic",
+        "pediatric"
+      ],
+      "notes": "لا تحوّل هذا النطاق إلى كورس افتراضي؛ ممتد التحرر ليس مكافئًا."
+    },
+    {
+      "id": "clarithromycin-sdcep",
+      "generic_name": "Clarithromycin",
+      "class_group": "antibiotic",
+      "population_reference": "بالغ؛ وأطفال1–17سنة ضمن الأوزان المحددة",
+      "indication_reference": "خط ثانٍ بعد فشل الأول أو عدوى شديدة مقيمة سريريًا",
+      "dose_basis": "weight-band mg/dose",
+      "reference_dose": {
+        "adult": 500,
+        "age1to11_weight8to11kg": 62.5,
+        "age1to11_weight12to19kg": 125,
+        "age1to11_weight20to29kg": 187.5,
+        "age1to11_weight30to40kg": 250,
+        "age12to17": [
+          250,
+          500
+        ]
+      },
+      "reference_schedule": {
+        "times_per_day": 2
+      },
+      "reference_limits": {
+        "routine_adult_mg_24h": 1000,
+        "child_ceiling": "مقدار الفئة المحدد ×2، لا استكمال للفجوات بالتخمين"
+      },
+      "duration_reference": {
+        "example_days": 5,
+        "review_day": 3
+      },
+      "form_strength_reference": [
+        "125mg/5mL",
+        "250mg/5mL",
+        "tablet250/500mg"
+      ],
+      "source_ids": [
+        "SD_CLARI",
+        "CLARI_LABEL"
+      ],
+      "warning_ids": [
+        "macrolide",
+        "antibiotic",
+        "pediatric"
+      ],
+      "notes": "لا تقرب وزنًا بين الفئات دون نشرة/قرار طبيب؛ الحالات الشديدة تحتاج تقييم إحالة."
+    },
+    {
+      "id": "chlorhexidine-02-label",
+      "generic_name": "Chlorhexidine digluconate",
+      "class_group": "antiseptic",
+      "population_reference": "12سنة فأكثر؛ الأصغر توصية مختص منفصلة",
+      "indication_reference": "التهاب لثة/مساعدة العناية الفموية حين يتعذر التفريش؛ المدة حسب الاستطباب",
+      "dose_basis": "mL/rinse",
+      "reference_dose": 10,
+      "reference_schedule": {
+        "times_per_day": 2,
+        "rinse_seconds": 60
+      },
+      "reference_limits": {
+        "regimen_mL_24h": 20,
+        "not_systemic_maximum": true
+      },
+      "duration_reference": {
+        "gingivitis": "حوالي شهر وفقالنشرة؛ ليس مدة لكل إجراء",
+        "other_indications": "قراراستطباب منفصل"
+      },
+      "form_strength_reference": [
+        "0.2% w/v mouthwash"
+      ],
+      "source_ids": [
+        "SD_CHX",
+        "CHX_LABEL"
+      ],
+      "warning_ids": [
+        "chlorhexidine"
+      ],
+      "notes": "بصق دون بلع؛ لا تستبدل0.12% مع نفس الحجم والمدة. النشرة المرجعية ليست إثبات تسجيل محلي."
+    },
+    {
+      "id": "nystatin-sdcep-label",
+      "generic_name": "Nystatin",
+      "class_group": "antifungal",
+      "population_reference": "بالغ/طفل؛ الرضع حسبنشرة المنتج والمراجعة",
+      "indication_reference": "داء المبيضات الفموي",
+      "dose_basis": "units/dose",
+      "reference_dose": 100000,
+      "reference_schedule": {
+        "times_per_day": 4
+      },
+      "reference_limits": {
+        "regimen_units_24h": 400000,
+        "not_global_maximum": true
+      },
+      "duration_reference": {
+        "example_days": 7,
+        "continuation": "48ساعة على الأقل بعد زوال الأعراض، ومراجعة إن استمر/ساء"
+      },
+      "form_strength_reference": [
+        "100000units/mL; dose1mL"
+      ],
+      "source_ids": [
+        "SD_NYST",
+        "NYST_LABEL"
+      ],
+      "warning_ids": [
+        "nystatin",
+        "pediatric"
+      ],
+      "notes": "يُبقى ملاصقًا للموضع قبل البلع حسب النشرة. لا يخلط مع نظامAAPD الأمريكي4–6mL، ولا تحول الوحدات إلىmg."
+    },
+    {
+      "id": "miconazole-oralgel-label",
+      "generic_name": "Miconazole",
+      "class_group": "antifungal",
+      "population_reference": "2سنة فأكثر؛ دون ذلك خارج هذا الملف",
+      "indication_reference": "مبيضات فموية موضعية",
+      "dose_basis": "mL/application",
+      "reference_dose": 2.5,
+      "reference_schedule": {
+        "times_per_day": 4,
+        "timing": "بعد الطعام"
+      },
+      "reference_limits": {
+        "regimen_mL_24h": 10,
+        "not_global_maximum": true
+      },
+      "duration_reference": {
+        "continuation": "أسبوع على الأقل بعد اختفاء الأعراض؛ قرارالمدة بعد المراجعة"
+      },
+      "form_strength_reference": [
+        "oralgel20mg/g (2%); mL dosing requires actual product applicator"
+      ],
+      "source_ids": [
+        "MICO_LABEL"
+      ],
+      "warning_ids": [
+        "miconazole"
+      ],
+      "notes": "لا تحولmg/g إلىmg/mL بكثافة مفترضة. لا تطبق جل الفم على مؤخرة الحلق أو حلمة الرضاعة. لا تخلط بالنظام SDCEP ذي مقدارحبة البازلاء7أيام."
+    },
+    {
+      "id": "fluconazole-sdcep",
+      "generic_name": "Fluconazole",
+      "class_group": "antifungal",
+      "population_reference": "بالغ و12–17سنة؛ طفل6أشهر–11سنة",
+      "indication_reference": "مبيضات واسعة/شديدة أو عدم مناسبة/فشل الموضعي",
+      "dose_basis": "phase-specific mg or mg/kg/dose",
+      "reference_dose": {
+        "adult_day1_mg": 200,
+        "adult_later_mg": 100,
+        "child_day1_mg_kg": 6,
+        "child_later_mg_kg": 3
+      },
+      "reference_schedule": {
+        "times_per_day": 1
+      },
+      "reference_limits": {
+        "child_day1_mg": 400,
+        "child_later_mg": 200,
+        "adult_example_day1_mg": 200,
+        "adult_example_later_mg": 100
+      },
+      "duration_reference": {
+        "example_total_days": 7
+      },
+      "form_strength_reference": [
+        "capsule50mg",
+        "suspension50mg/5mL"
+      ],
+      "source_ids": [
+        "SD_FLUC",
+        "FLUC_LABEL"
+      ],
+      "warning_ids": [
+        "fluconazole",
+        "pediatric"
+      ],
+      "notes": "لا تستبدل بجرعاتAAPD6–12mg/kg طوالالمدة؛ هذا مسارSDCEP منفصل ويتطلب ضبطالكلى."
+    },
+    {
+      "id": "benzydamine-rinse-label",
+      "generic_name": "Benzydamine hydrochloride",
+      "class_group": "local-analgesic",
+      "population_reference": "13سنة فأكثر",
+      "indication_reference": "ألم/التهاب فموي موضعي ومنها بعد إجراءات سنية",
+      "dose_basis": "mL/rinse",
+      "reference_dose": 15,
+      "reference_schedule": {
+        "as_needed": true,
+        "interval_hours_range": [
+          1.5,
+          3
+        ]
+      },
+      "reference_limits": {
+        "mg_per_rinse": 22.5,
+        "max_administrations_24h": null
+      },
+      "duration_reference": {
+        "max_unsupervised_days": 7
+      },
+      "form_strength_reference": [
+        "0.15% w/v mouthwash"
+      ],
+      "source_ids": [
+        "BENZ_LABEL"
+      ],
+      "warning_ids": [
+        "benzydamine"
+      ],
+      "notes": "بصق دون بلع؛ لا يفترض16جرعة فياليوم من أقصر فاصل. حد التكرار الفعلي يحتاج إقرارًا؛ ليسبخاخًا. في الحمل لا يستخدم إلا لضرورة واضحة؛ في الرضاعة فقط إذا رأى الطبيب ضرورة."
+    },
+    {
+      "id": "fluoride-toothpaste2800",
+      "generic_name": "Sodium fluoride",
+      "class_group": "caries-prevention",
+      "population_reference": "10سنوات فأكثر",
+      "indication_reference": "خطر تسوس مرتفع/جفاف فم يقيّمه الطبيب",
+      "dose_basis": "cm toothpaste/application",
+      "reference_dose": 1,
+      "reference_schedule": {
+        "times_per_day": 2,
+        "brushing_seconds": 60
+      },
+      "reference_limits": {
+        "regimen_cm_24h": 2,
+        "no_mg_conversion": true
+      },
+      "duration_reference": null,
+      "form_strength_reference": [
+        "0.619% sodium fluoride; 2800ppm fluoride"
+      ],
+      "source_ids": [
+        "SD_F2800"
+      ],
+      "warning_ids": [
+        "fluoride"
+      ],
+      "notes": "يبصق بعد الاستخدام؛ لا ابتلاع؛ المدة والمراجعة يحددهما الطبيب."
+    },
+    {
+      "id": "fluoride-toothpaste5000",
+      "generic_name": "Sodium fluoride",
+      "class_group": "caries-prevention",
+      "population_reference": "16سنة فأكثر",
+      "indication_reference": "خطر تسوس مرتفع/جفاف فم يقيّمه الطبيب",
+      "dose_basis": "cm toothpaste/application",
+      "reference_dose": 2,
+      "reference_schedule": {
+        "times_per_day": 3,
+        "brushing_seconds": 180
+      },
+      "reference_limits": {
+        "regimen_cm_24h": 6,
+        "no_mg_conversion": true
+      },
+      "duration_reference": null,
+      "form_strength_reference": [
+        "1.1% sodium fluoride; 5000ppm fluoride"
+      ],
+      "source_ids": [
+        "SD_F5000",
+        "FLUORIDE_5000_LABEL",
+        "FLUORIDE_5000_PIL",
+        "NHS_POISON_FIRST_AID"
+      ],
+      "warning_ids": [
+        "fluoride"
+      ],
+      "notes": "ليس معجون أطفال عامًا؛ المدة والمراجعة حسبالخطر. يلزم تقييم مجمل مصادر الفلوريد والمنتجات المتزامنة والسواغات والحمل/الرضاعة ونشرة المنتج الفعلي؛ لا تحويل طول الشريط إلىmg."
+    },
+    {
+      "id": "fluoride-rinse005",
+      "generic_name": "Sodium fluoride",
+      "class_group": "caries-prevention",
+      "population_reference": "6سنوات فأكثر وقادر على البصق",
+      "indication_reference": "وقاية تسوس لدى من يحدد الطبيب حاجته",
+      "dose_basis": "mL/rinse",
+      "reference_dose": 10,
+      "reference_schedule": {
+        "times_per_day": 1,
+        "rinse_seconds": 60
+      },
+      "reference_limits": {
+        "regimen_mL_24h": 10,
+        "not_systemic_maximum": true
+      },
+      "duration_reference": null,
+      "form_strength_reference": [
+        "sodiumfluoride0.05% mouthwash"
+      ],
+      "source_ids": [
+        "SD_FRINSE"
+      ],
+      "warning_ids": [
+        "fluoride"
+      ],
+      "notes": "يبصق، ويفضل وقتًا غير وقت التفريش؛ لا ابتلاع."
+    }
+  ],
+  "warnings": {
+    "apap": {
+      "text_ar": "افحص جميع مصادر الباراسيتامول؛ خطر سمية الكبد عند التجاوز. مرض الكبد/سوء التغذية/وزن منخفض أو اختلال الكلى يحتاج مراجعة النشرة وتعديلًا مهنيًا لا تلقائيًا.",
+      "sources": [
+        "SD_ANALGESIC_CAUTION",
+        "AAPD25"
+      ]
+    },
+    "nsaid": {
+      "text_ar": "منع/مراجعة حساسيةNSAIDs أو ربو محرّض بها، قرحة/نزف، جفاف أو قصوركلوي، مضادات التخثر، NSAIDs أخرى/أسبرين. من20أسبوع حمل يتجنب إلا لضرورة يقررها المختص؛ من30أسبوع يتجنب.",
+      "sources": [
+        "SD_IBU",
+        "FDA_NSAID"
+      ]
+    },
+    "penicillin": {
+      "text_ar": "لا عند تفاعل فوري للبنسلين مثل التأق/الشرى؛ قصوركلوي شديد قد يستلزم تعديلًا. تداخلwarfarin يحتاج تدبيرINR، لا بديل حساسية آلي.",
+      "sources": [
+        "SD_ABX_CAUTION"
+      ]
+    },
+    "metronidazole": {
+      "text_ar": "حساسيةnitroimidazole مانع؛ SDCEP يمنع وصفه معwarfarin. تجنب الكحول أثناءه؛ فترة ما بعده حسب نشرةالمنتج. أمراض الكبد/الحمل/الرضاعة تراجع مهنيًا.",
+      "sources": [
+        "SD_ABX_CAUTION"
+      ]
+    },
+    "coamoxiclav": {
+      "text_ar": "الحساسية الخطرة أو تاريخ يرقان ركودي/اختلال كبدي مرتبط به مانع. GFR<30 يستلزم مسارًا آخر؛ قوة875/125 غيرملائمة. النسب والأشكال غيرقابلة للاستبدال التلقائي.",
+      "sources": [
+        "COAMOX_LABEL"
+      ]
+    },
+    "macrolide": {
+      "text_ar": "راجع الحساسية وQT والتداخلات والمرض الكبدي. كلاريثرومايسين يحتاج تعديلًا في القصور الكلوي الشديد ومراجعة منفعة/خطر بالحمل؛ أزيثرومايسين يحتاج حذرًا في مرض الكبد المهم. لا بدائل تلقائية ولا تعديل آلي.",
+      "sources": [
+        "CLARI_LABEL",
+        "AZITH_LABEL"
+      ],
+      "completeness": "تنبيه بحثي غير مكتمل؛ يمنع تفعيل هذهالملفات قبلتدقيق النشرة"
+    },
+    "chlorhexidine": {
+      "text_ar": "حساسية قدتشمل التأق؛ تغير مذاق/تصبغ قابل للمعالجة؛ افصل عن المعجون الأنيوني حسبالنشرة. لا بلع؛ مرجع0.2% لايبرر منتج0.12%.",
+      "sources": [
+        "CHX_LABEL"
+      ]
+    },
+    "nystatin": {
+      "text_ar": "حساسيةالمادة/السواغات، تحقق منالسكر والتركيز وتعليمات المعلق؛ ليس لعلاج عدوى جهازية.",
+      "sources": [
+        "NYST_LABEL"
+      ]
+    },
+    "miconazole": {
+      "text_ar": "موانع بالنشرة: خلل الكبد، warfarin وبعضstatins وأدويةQT/تداخلاتCYP؛ خطر الاختناق. يفضل تجنبه فيالحمل إلابقرارمنفعة/خطر، والرضاعة تتطلب مراجعة.",
+      "sources": [
+        "MICO_LABEL"
+      ]
+    },
+    "fluconazole": {
+      "text_ar": "راجع الكلى والكبد وQT وتداخلاتCYP؛ SDCEP ينصح بعدمإعطائه معwarfarin أوstatins. الحمل يحتاج مراجعةمتخصصة ولااختيارافتراضي.",
+      "sources": [
+        "SD_FLUC",
+        "FLUC_LABEL"
+      ]
+    },
+    "benzydamine": {
+      "text_ar": "حساسيةالمنتج؛ تحقق منالسواغات والكحول، لا يستخدمغسول≤12سنة، لايبلع؛ الحمل/الرضاعة حسبالنشرة. لا يُنصح به عند فرط الحساسية للأسبرين أو مضادات الالتهاب غير الستيرويدية، ويستلزم الحذر عند وجود ربو حالي أو سابق.",
+      "sources": [
+        "BENZ_LABEL"
+      ]
+    },
+    "fluoride": {
+      "text_ar": "منع الابتلاع وفحص القدرةعلىالبصق والعمر والفلوريد منالمصادرالأخرى. ppmأيونالفلوريد ليسهو%فلوريدالصوديوم.",
+      "sources": [
+        "SD_F2800",
+        "SD_F5000",
+        "SD_FRINSE"
+      ]
+    },
+    "antibiotic": {
+      "text_ar": "لا مضاد تلقائي لكلألم/خلع. السبب الموضعي يعالج، ويوثق الاستطباب. صعوبةتنفس/بلع أوانتشارخطير أوإنتان تستدعي إحالةعاجلة، لازيادةجرعةآلية.",
+      "sources": [
+        "SD_ABSCESS",
+        "ADA_ABX"
+      ]
+    },
+    "pediatric": {
+      "text_ar": "العمر والوزن الحاليان والقدرةعلىالبلع/البصق والمنتجالفعلي مطلوبة. حدودالفئة ليستدعوةلاستخدامها عندنقصالمعلومات.",
+      "sources": [
+        "AAPD25"
+      ],
+      "kind": "product-safety-policy"
+    },
+    "special-populations": {
+      "text_ar": "الحمل/الرضاعة والكلى والكبد والجفاف والوزن المنخفض/الهشاشة تحتاجقرارمراجع؛ غيابرايةليسشهادةسلامة. لا تصحيح آلي للجرعات.",
+      "sources": [
+        "SD_ANALGESIC_CAUTION"
+      ],
+      "kind": "product-safety-policy"
+    }
+  }
+}

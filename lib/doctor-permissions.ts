@@ -13,6 +13,9 @@ import { financeAccessFor, type FinanceAccess } from "@/lib/finance-permissions"
  */
 
 export interface DoctorPermissions {
+  canManageMedicationCatalog?: boolean;
+  /** Explicit reception-only access to reprint active saved prescriptions. */
+  canPrintSavedPrescriptions?: boolean;
   financeAccess?: FinanceAccess;
   /** عرض جميع المرضى (افتراضياً: خطأ ❌ — يرى مرضاه وحالاته فقط) */
   canViewAllPatients: boolean;
@@ -79,6 +82,8 @@ export interface DoctorPermissions {
 }
 
 export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
+  canPrintSavedPrescriptions: false,
+  canManageMedicationCatalog: false,
   canViewAllPatients: false,
   canAddPatient: true,
   canEditPatient: true,
@@ -109,6 +114,8 @@ export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
 };
 
 export const ADMIN_PERMISSIONS: DoctorPermissions = {
+  canPrintSavedPrescriptions: true,
+  canManageMedicationCatalog: true,
   canViewAllPatients: true,
   canAddPatient: true,
   canEditPatient: true,
@@ -138,6 +145,8 @@ export const ADMIN_PERMISSIONS: DoctorPermissions = {
 };
 
 export const RECEPTION_PERMISSIONS: DoctorPermissions = {
+  canPrintSavedPrescriptions: false,
+  canManageMedicationCatalog: false,
   canViewAllPatients: true,
   canAddPatient: true,
   canEditPatient: true,

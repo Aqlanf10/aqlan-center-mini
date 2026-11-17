@@ -123,7 +123,7 @@ describe("explicit lab intent lifecycle on PostgreSQL",()=>{
   const v=await visit(),draft=work();
   const procedures=[{...source(draft),labWork:draft,surfaces:null,unitPriceMinor:1000,note:null}];
   await db.setVisitProcedures({visitId:v,procedures,labCommand:{expectedPatientId:patientId,session:actor,requestKey:`actual-guard-${++serial}`,requestHash:"guard"}});
-  expect(await db.deleteVisit(v,{actor:actor.username,actorRole:"admin"})).toMatchObject({ok:false,reason:"lab_linked"});
+  expect(await db.deleteVisit(v,{session:actor,patientId})).toMatchObject({ok:false,reason:"lab_linked"});
   await expect(db.setVisitProcedures({visitId:v,procedures:procedures.map(p=>({...p,labWork:null})),labCommand:{expectedPatientId:patientId,session:actor,requestKey:`actual-strip-${++serial}`,requestHash:"null"}})).rejects.toMatchObject({code:"stripped_lab_identity"});
   expect(await q("SELECT id FROM visit_procedures WHERE visit_id=$1",[v])).toHaveLength(1);
  });

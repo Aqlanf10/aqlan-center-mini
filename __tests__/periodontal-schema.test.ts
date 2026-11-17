@@ -12,12 +12,18 @@ describe("unregistered periodontal SQL source contract (SQL never executed)", ()
   it("does not register schema, a numbered migration, a route or an editor", () => {
     expect(readFileSync("lib/db.ts", "utf8")).not.toContain("PERIODONTAL_SQL");
     const files = readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name));
-    expect(files).toHaveLength(73);
+    expect(files).toHaveLength(77);
     expect(files).toContain("0066_agreement_delta_amendments.sql");
     expect(files).toContain("0067_patient_appointment_history_index.sql");
     expect(files).toContain("0068_collection_attempt_retirements.sql");
     expect(files).toContain("0069_unpaid_currency_transitions.sql");
     expect(files).toContain("0089_lab_shade_specification.sql");
+    expect(files.filter(name => /^009[0-3]_/.test(name)).sort()).toEqual([
+      "0090_booking_request_preferences.sql",
+      "0091_prescribing_doctor_identity.sql",
+      "0092_prescribing_doctor_snapshot.sql",
+      "0093_prescription_issuance_commands.sql",
+    ]);
     expect(files.filter(name => /^005[12]_/.test(name)).sort()).toEqual(["0051_ortho_treatment_strategy.sql", "0052_ortho_assessment.sql"]);
     expect(readdirSync("migrations")).toContain("0061_invoice_correction_lineage.sql");
     expect(readdirSync("migrations").some((name) => name.includes("periodontal"))).toBe(false);

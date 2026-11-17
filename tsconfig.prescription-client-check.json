@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "noEmit": true
+  },
+  "include": [
+    "components/PrescriptionModal.tsx",
+    "components/PrescriptionMedicationPreview.tsx",
+    "components/PrescriptionDoseProfiles.tsx",
+    "components/PrescriptionStaleReferenceNotice.tsx",
+    "components/PrescriptionClinicCatalog.tsx",
+    "components/PrescriptionMedicationLibrary.tsx",
+    "components/SavedPrescriptions.tsx",
+    "components/SavedPrescriptionRow.tsx",
+    "app/settings/medications/page.tsx",
+    "app/settings/page.tsx",
+    "__tests__/prescription-command-client.test.ts",
+    "__tests__/prescription-history-ui.test.tsx",
+    "__tests__/medication-catalog-owner-lifecycle.test.tsx",
+    "components/PwaRegister.tsx"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
