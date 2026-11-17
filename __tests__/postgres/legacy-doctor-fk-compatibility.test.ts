@@ -14,6 +14,7 @@ import {
   type OwnershipHarnessTarget,
 } from "../../scripts/verify-schema-ownership";
 import { validatePostgresTestTarget } from "./_safe-target";
+import { safeFkBackendActivity, type BackendActivity } from "./_fk-backend-diagnostics";
 
 const paths = ["fresh_runtime", "fresh_numbered", "legacy_no_action"] as const;
 const expectedSetNull = "FOREIGN KEY (doctor_id) REFERENCES parties(id) ON DELETE SET NULL";
@@ -102,8 +103,8 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
     created = true;
     const url = new URL(target.testUrl);
     url.pathname = `/${name}`;
-    client = new Client({ connectionString: url.toString(), ssl: false });
-    pool = new Pool({ connectionString: url.toString(), ssl: false });
+    client = new Client({ connectionString: url.toString(), ssl: false, application_name: "synthetic-fk-direct" });
+    pool = new Pool({ connectionString: url.toString(), ssl: false, application_name: "synthetic-fk-pool" });
     await client.connect();
     files = await loadMigrationFiles();
 
@@ -169,8 +170,8 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
         validateGeneratedDatabaseName(name);
         // Every connection belongs to this fixture; do not kill a leaked
         // connection and hide an incomplete operation behind forced cleanup.
-        const remaining = await admin!.query("SELECT pid, state FROM pg_stat_activity WHERE datname = $1", [name]);
-        expect(remaining.rows).toEqual([]);
+        const remaining = await admin!.query<BackendActivity>("SELECT pid, state, backend_type, application_name, wait_event_type FROM pg_stat_activity WHERE datname = $1", [name]);
+        expect(safeFkBackendActivity(remaining.rows)).toEqual([]);
         await admin!.query(`DROP DATABASE "${name}"`);
         expect((await admin!.query("SELECT datname FROM pg_database WHERE datname = $1", [name])).rows).toEqual([]);
       }
