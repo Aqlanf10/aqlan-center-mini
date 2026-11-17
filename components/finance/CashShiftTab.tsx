@@ -10,6 +10,7 @@ import {
   type Currency,
 } from "@/lib/money";
 import { ShiftCloseStatus } from "./ShiftCloseStatus";
+import ShiftOpeningReviews, { type OpeningReviewItem } from "./ShiftOpeningReviews";
 import { ReceiptCorrectionLauncher } from "../ReceiptCorrectionLauncher";
 import { ReceiptProvenance } from "../ReceiptProvenance";
 import { receiptDocumentTitle, receiptProvenanceFor } from "@/lib/receipt-provenance";
@@ -36,6 +37,10 @@ export interface ShiftData {
   difference?: Record<Currency, number> | null;
   differenceReason?: string | null;
   expectedSource?: "stored" | "computed";
+  /** 0129: the opening's differences against the previous close (absent in an older feed). */
+  openingReviews?: OpeningReviewItem[];
+  /** 0129 §8.3: the latest close before the next opening, withheld from this viewer by the server. */
+  sealed?: boolean;
 }
 
 export interface PaymentItem {
@@ -92,7 +97,12 @@ interface CashShiftTabProps {
   /** 0128 (#483 6831365228): only the protected owner on a canonical session may pay part of an expense privately. */
   canPayPrivately?: boolean;
   busy: boolean;
-  onOpenShift: (opening: Record<Currency, string>) => Promise<void>;
+  /** 0129 §8 (blind count): one step; a difference is recorded for review by the server, never refused. */
+  onOpenShift: (opening: Record<Currency, string>) => Promise<"opened" | "failed">;
+  /** 0129: pending opening differences in the clinic and whether the server lets this session review them. */
+  pendingOpeningReviews?: number;
+  canReviewOpening?: boolean;
+  onOpeningReviewed?: () => void;
   onCloseShift: (
     counted: Record<Currency, string>, note: string, differenceReason: string,
   ) => Promise<"closed" | "needs_reason" | "failed">;
@@ -158,9 +168,14 @@ export function CashShiftTab({
   setSpending,
   closing,
   setClosing,
+  pendingOpeningReviews = 0,
+  canReviewOpening = false,
+  onOpeningReviewed,
 }: CashShiftTabProps) {
   // نماذج الإدخال
   const [opening, setOpening] = useState(emptyAmounts);
+  /* (0129) عدٌّ أعمى عند الافتتاح أيضًا: لا يُعرض عدّ الإقفال السابق. إن خالفه الافتتاح أعاد الخادم
+     الفرق وطُلبت ملاحظة؛ يُسجَّل الفرق للمراجعة ولا تُنشأ حركة نقدية. */
   const [counted, setCounted] = useState(emptyAmounts);
   /* (P1-3) جردٌ أعمى: لا يُعرض المتوقَّع ولا الفرق أثناء العدّ. يرسل المحصّل ما عدّه،
      فإن خالف المتوقَّع أعاد الخادم الفرق وطُلب سببه — ولا يُقفَل بلا سبب. */
@@ -271,6 +286,14 @@ export function CashShiftTab({
         </div>
       ) : null}
 
+      {/* (0129) فروق الافتتاح مع الإقفال السابق — ظاهرة حتى تُراجَع، ولا تعطّل العمل. */}
+      <ShiftOpeningReviews
+        openShiftReviews={shift?.openingReviews ?? []}
+        pending={pendingOpeningReviews}
+        canReview={canReviewOpening}
+        onReviewed={() => onOpeningReviewed?.()}
+      />
+
       {/* إذا كان الصندوق مغلقاً: نموذج فتح الوردية */}
       {!shift && !canShift ? (
         <section className="rounded-3xl border border-slate-200 bg-white p-6 text-sm font-bold text-slate-600">
@@ -322,6 +345,10 @@ export function CashShiftTab({
               </label>
             ))}
           </div>
+
+          <p className="mb-4 text-xs font-bold text-slate-500">
+            عُدّ النقد في الدرج وأدخله كما هو؛ يُسجَّل كما أُدخل، وأي فرق عن الإقفال السابق يُحال إلى المراجعة.
+          </p>
 
           <button
             type="button"

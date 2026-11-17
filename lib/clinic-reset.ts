@@ -116,6 +116,9 @@ export const RESET_WIPE_TABLES = [
   "plan_items",
   "clinical_cases",
   "treatment_plans",
+  // (0129) مراجعات فرق افتتاح الوردية — تُمسح مع وردياتها (TRUNCATE لا يطلق حارس الإلحاق فقط)
+  "shift_opening_corrections",
+  "shift_opening_reviews",
   "cashier_shifts",
   "legacy_balance_arrangements",
   "patient_opening_balance_history",

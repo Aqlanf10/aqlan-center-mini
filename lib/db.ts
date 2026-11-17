@@ -18,6 +18,8 @@ import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
 import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "./commission-participation-schema";
 import { EXPENSE_COMMANDS_SQL } from "./expense-commands-schema";
 import { EXPENSE_REQUEST_RETIREMENTS_SQL } from "./expense-request-retirements-schema";
+import { SHIFT_OPENING_REVIEWS_SQL } from "./shift-opening-reviews-schema";
+import { CASHIER_SHIFT_LIFECYCLE_LOCK, detectOpeningDifferences, listOpeningReviewsWith, pendingOpeningReviewCountWith, recordOpeningDifferences, sealedCloseIdWith, sealShiftForViewer, type OpeningReview, type SealedFields } from "./shift-opening-reviews";
 import { loadCaseParticipationsAt } from "./commission-participation-read";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
@@ -74,7 +76,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
-import { withTransaction } from "./transactions";
+import { withIsolation, withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
 import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
@@ -2151,6 +2153,7 @@ export function ensureSchema(): Promise<void> {
     await applyOrthoAssessmentRuntime(getPool());
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0128", name: "expense_commands", filename: "0128_expense_commands.sql", sql: EXPENSE_COMMANDS_SQL, checksum: checksumOf(EXPENSE_COMMANDS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0133", name: "expense_request_retirements", filename: "0133_expense_request_retirements.sql", sql: EXPENSE_REQUEST_RETIREMENTS_SQL, checksum: checksumOf(EXPENSE_REQUEST_RETIREMENTS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0129", name: "shift_opening_reviews", filename: "0129_shift_opening_reviews.sql", sql: SHIFT_OPENING_REVIEWS_SQL, checksum: checksumOf(SHIFT_OPENING_REVIEWS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -9916,6 +9919,10 @@ export interface CashierShift {
   /** المعدود − المتوقَّع (سالب = عجز) — null لوردية مفتوحة. */
   difference: Record<Currency, number> | null;
   differenceReason: string | null;
+  /** 0129: the opening's differences against the previous close (set by the opening and by shift reads that ask for them). */
+  openingReviews?: OpeningReview[];
+  /** 0129 §8.3: only a sealed view of a shift sets this (see `ShiftForViewer`); a full shift never does. */
+  sealed?: never;
 }
 
 interface ShiftRow {
@@ -9993,16 +10000,33 @@ export async function getOpenShiftWith(q: Pick<DbClient, "query">, lock = false)
  * من جهازين في اللحظة نفسها كانتا ستفتحان ورديتين، فتتوزّع دفعات اليوم بينهما ولا
  * يُطابَق أيّهما. والفهرس الفريد على الحالة يمنعها حتى لو فشل هذا الشرط.
  */
-export async function openShift(input: {
-  openedBy: string; opening: Record<Currency, number>;
-}): Promise<CashierShift | null> {
+export interface OpenShiftInput { openedBy: string; opening: Record<Currency, number> }
+export async function openShift(input: OpenShiftInput): Promise<CashierShift | null> {
   await ensureSchema();
-  return openShiftWith(getPool(), input);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    // 0129: serialized with the canonical open/close, so the comparison reads a settled previous close.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [CASHIER_SHIFT_LIFECYCLE_LOCK]);
+    const shift = await openShiftWith(client, input);
+    await client.query("COMMIT");
+    return shift;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
-/** The guarded open on the caller's runner (the unique open-shift index backs it). */
-export async function openShiftWith(q: Pick<DbClient, "query">, input: {
-  openedBy: string; opening: Record<Currency, number>;
-}): Promise<CashierShift | null> {
+/**
+ * The guarded open on the caller's transaction (the unique open-shift index backs it). 0129: after the
+ * insert, the opening is compared per currency with the previous close (docs/finance/SHIFT_OPENING_REVIEWS_0129.md
+ * §2.1, §8.2) and every difference is recorded for review in this same transaction. The count is never
+ * refused for differing (blind count): nothing before the commit depends on the previous close. The comparison
+ * runs after the insert so it reads the close that let the insert succeed. The returned rows are complete;
+ * each route projects them for its viewer.
+ */
+export async function openShiftWith(q: Pick<DbClient, "query">, input: OpenShiftInput): Promise<CashierShift | null> {
   const { rows } = await q.query<ShiftRow>(
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
      SELECT $1, $2, $3, $4
@@ -10010,7 +10034,41 @@ export async function openShiftWith(q: Pick<DbClient, "query">, input: {
      RETURNING id`,
     [input.openedBy, input.opening.YER, input.opening.SAR, input.opening.USD],
   );
-  return rows[0] ? getShiftWith(q, rows[0].id) : null;
+  if (!rows[0]) return null;
+  const id = rows[0].id;
+  const differences = await detectOpeningDifferences(q, id, input.opening);
+  const openingReviews = differences.length ? await recordOpeningDifferences(q, id, differences, input.openedBy) : [];
+  const shift = await getShiftWith(q, id);
+  return shift ? { ...shift, openingReviews } : null;
+}
+
+/** 0129 reads on the pool (the legacy shift screen). */
+export async function listOpeningReviews(filter: { shiftId?: number; pendingOnly?: boolean; limit?: number } = {}): Promise<OpeningReview[]> {
+  await ensureSchema();
+  return listOpeningReviewsWith(getPool(), filter);
+}
+export async function pendingOpeningReviewCount(): Promise<number> {
+  await ensureSchema();
+  return pendingOpeningReviewCountWith(getPool());
+}
+
+/** 0129 §8.3: a shift as one viewer may see it; the latest close is sealed until the next count is fixed. */
+export type ShiftForViewer = CashierShift | (Omit<CashierShift, keyof SealedFields> & SealedFields);
+export async function listShiftsForViewer(viewer: { authorized: boolean }, limit = 30): Promise<ShiftForViewer[]> {
+  await ensureSchema();
+  return withIsolation(getPool(), "REPEATABLE READ", async client => {
+    const shifts = await listShiftsWith(client, limit);
+    const sealed = viewer.authorized ? null : await sealedCloseIdWith(client);
+    return shifts.map(shift => sealShiftForViewer(shift, sealed, viewer.authorized));
+  });
+}
+export async function getShiftForViewer(id: number, viewer: { authorized: boolean }): Promise<ShiftForViewer | null> {
+  await ensureSchema();
+  return withIsolation(getPool(), "REPEATABLE READ", async client => {
+    const shift = await getShiftWith(client, id);
+    if (!shift) return null;
+    return sealShiftForViewer(shift, viewer.authorized ? null : await sealedCloseIdWith(client), viewer.authorized);
+  });
 }
 
 export async function getShift(id: number): Promise<CashierShift | null> {
