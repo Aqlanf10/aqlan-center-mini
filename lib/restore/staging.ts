@@ -72,6 +72,14 @@ export interface StagedRestoreResult {
 }
 
 class RestorePhotoError extends Error {}
+// Only fixed, reviewed diagnostics may cross the restore boundary. A future
+// validator must not accidentally expose source metadata through its message.
+const safePhotoDiagnostics = new Set([
+  "بيانات صورة الدخول المستعادة غير صالحة؛ الاستعادة مرفوضة.",
+  "صورة الدخول المحددة غير موجودة مرة واحدة في الأرشيف؛ الاستعادة مرفوضة.",
+  "صورة الدخول لا تطابق بياناتها المستعادة أو مفتاح الأرشيف؛ الاستعادة مرفوضة.",
+  "محتوى صورة الدخول أو أبعادها لا يطابق البيانات المستعادة؛ الاستعادة مرفوضة.",
+]);
 
 /** pool-محاكٍ حول Client واحد — ليستخدمه نظام الهجرات على اتصال مخصص. */
 function clientAsPool(client: Client) {
@@ -164,7 +172,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   try {
     archive = options.archiveSnapshot ?? await readTarGzEntries(options.archivePath);
   } catch (error) {
-    result.errors.push(`الأرشيف تالف أو مبتر: ${restoreDiagnostic("archive", error)}`);
+    result.errors.push(`تعذّرت قراءة الأرشيف؛ قد يكون تالفًا أو مبترًا: ${restoreDiagnostic("archive", error)}`);
     return result;
   }
   const validated = validateBackupArchive(archive, { documentsDir: options.stagingDir });
@@ -301,7 +309,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     } catch (error) {
       const knownError = error instanceof Error && ["historical_0079_registry_mismatch", "restore_source_identity_present"].includes(error.message) ? error.message : null;
       const diagnostic = restoreDiagnostic(phase, error);
-      result.errors.push(error instanceof RestorePhotoError ? error.message
+      result.errors.push(error instanceof RestorePhotoError ? (safePhotoDiagnostics.has(error.message) ? error.message : "فشل التحقق من صورة الدخول المستعادة.")
         : knownError ?? (error && typeof error === "object" && "code" in error && error.code === "partial_staff_authority_schema"
           ? "partial_staff_authority_schema" : diagnostic.includes("SQLSTATE 23505") ? `اصطدام مفتاح مكرر: ${diagnostic}` : diagnostic));
       return result;
