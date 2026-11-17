@@ -14,7 +14,8 @@ A test-only `installUnregisteredProposals` callback runs after target
 migrations and adds a synthetic trigger and high-water before replay. A
 separate connection controls the trigger's advisory barrier. The actor runs
 `nextval` asynchronously; replay resumes after allocation completes or an
-actual sequence-lock wait is observed. The post-failure sequence state is read
+actual sequence-lock wait by the verified actor PID in the owned database is
+observed. The post-failure sequence state is read
 after both replay and reservation finish; when reservation was blocked, it may
 include a `nextval` which ran after rollback and is not an instantaneous
 snapshot at rollback. After the exact writer-shaped duplicate
@@ -23,8 +24,10 @@ source patient fields, stage, both archives and target identity, then issues an
 actual INSERT with DEFAULT ID and checks `RETURNING`, the persisted actor row,
 all previously present patient rows and the sequence's `last_value`/`is_called`
 after insertion (increment/cache are constrained to one). A fixed marker and
-assertion distinguish whether the returned ID exceeds
-the reserved floor. No numbers or raw database messages are printed.
+assertion distinguish whether the returned ID exceeds the reserved floor and
+whether both the post-failure candidate and the returned ID remain at or above
+the pre-replay floor. The assertions run after the real INSERT so the result is
+observed even when the counter regresses. No numbers or raw database messages are printed.
 
 The fixture uses only a guarded dedicated CI PostgreSQL 18 service. Global
 setup connects to its service database; the fixture connects to its `postgres`

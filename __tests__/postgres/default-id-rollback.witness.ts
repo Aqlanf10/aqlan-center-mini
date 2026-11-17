@@ -131,6 +131,8 @@ it.each([
       const actual=(await client.query("SELECT current_database() AS name,oid::text,datdba::text AS owner,(SELECT oid::text FROM pg_roles WHERE rolname=current_user) AS role,current_setting('transaction_isolation') AS isolation FROM pg_database WHERE datname=current_database()")).rows[0];
       expect(actual.name===identity.name && actual.oid===identity.oid && actual.owner===identity.owner && actual.role===identity.owner && actual.isolation==='read committed').toBe(true);
     }
+    const actorPid=(await actor.query('SELECT pg_backend_pid() AS pid')).rows[0].pid as number;
+    expect(Number.isInteger(actorPid) && actorPid>0).toBe(true);
     await barrier.query('SELECT pg_advisory_lock(473021::bigint)');held=true;
     let prepared:Prepared|undefined;
     // This documented test-only seam runs after migrations but before replay.
@@ -179,7 +181,7 @@ it.each([
       let reservationDone=false;void reserve.then(()=>{reservationDone=true;});
       let blocked=false;const reserveUntil=Date.now()+30000;
       while(!reservationDone){
-        const waiting=(await fixture.target.pool.query("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='relation' AND relation='public.patients_id_seq'::regclass AND NOT granted) AS waiting")).rows[0].waiting;
+        const waiting=(await fixture.target.pool.query("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='relation' AND pid=$1::int AND database=$2::oid AND relation='public.patients_id_seq'::regclass AND NOT granted) AS waiting",[actorPid,identity.oid])).rows[0].waiting;
         if(waiting){blocked=true;break;}
         if(Date.now()>reserveUntil)throw new Error('SYNTHETIC_RESERVATION_WAIT_UNCLASSIFIED');
         await new Promise(resolve=>setTimeout(resolve,50));
@@ -195,7 +197,8 @@ it.each([
       }
       console.log('SYNTHETIC_LATE_DUPLICATE_REACHED');
       const afterFailure=await seq(fixture.target.pool);
-      console.log(next(afterFailure)<next(before.sequence)?'SYNTHETIC_ID_CANDIDATE_REGRESSED_AFTER_FAILURE':'SYNTHETIC_ID_CANDIDATE_NOT_REGRESSED_AFTER_FAILURE');
+      const noRegression=next(afterFailure)>=next(before.sequence);
+      console.log(noRegression?'SYNTHETIC_ID_CANDIDATE_NOT_REGRESSED_AFTER_FAILURE':'SYNTHETIC_ID_CANDIDATE_REGRESSED_AFTER_FAILURE');
       expect(await dataDigest(fixture.target.pool)===before.data).toBe(true);
       expect(await history(fixture.target.pool)===before.history).toBe(true);
       expect(sha(Buffer.from(JSON.stringify(await patients(fixture.target.pool))))===before.rows).toBe(true);
@@ -224,6 +227,9 @@ it.each([
       const finalIdentity=(await fixture.target.pool.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=current_database()')).rows[0];
       expect(finalIdentity.oid===identity.oid && finalIdentity.owner===identity.owner).toBe(true);
       console.log(BigInt(id)>BigInt(reservation.value)?'SYNTHETIC_DEFAULT_ID_ABOVE_RESERVATION':'SYNTHETIC_DEFAULT_ID_AT_OR_BELOW_RESERVATION');
+      console.log(BigInt(id)>=next(before.sequence)?'SYNTHETIC_DEFAULT_ID_AT_OR_ABOVE_PRIOR_FLOOR':'SYNTHETIC_DEFAULT_ID_BELOW_PRIOR_FLOOR');
+      expect(noRegression,'synthetic ID candidate regressed below its pre-replay floor').toBe(true);
+      expect(BigInt(id)>=next(before.sequence),'synthetic default ID fell below its pre-replay floor').toBe(true);
       expect(BigInt(id)>BigInt(reservation.value),'synthetic default ID did not exceed the reservation').toBe(true);
     }finally{
       if(held){await barrier.query('SELECT pg_advisory_unlock(473021::bigint)').catch(()=>{});held=false;}
