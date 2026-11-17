@@ -106,11 +106,14 @@ describe("document association boundary over real authenticated HTTP", () => {
     const download = await authedGet(`/api/documents/${document.id}`, h.sessions.doctorA);
     expect(download.status).toBe(200);
     expect(download.headers.get("content-type")).toBe("image/png");
-    expect(download.headers.get("content-length")).toBe(String(png.length));
+    // Next 16.4.5 deliberately strips response framing headers before streaming.
+    // Verify the received bytes, not a Content-Length header the transport owns.
     expect(download.headers.get("cache-control")).toContain("private");
     expect(download.headers.get("cache-control")).toContain("no-store");
     expect(download.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(Buffer.from(await download.arrayBuffer())).toEqual(png);
+    const receivedBytes = Buffer.from(await download.arrayBuffer());
+    expect(receivedBytes.byteLength).toBe(png.byteLength);
+    expect(receivedBytes).toEqual(png);
     expect((await authedGet(`/api/documents/${document.id}`, h.sessions.doctorB)).status).toBe(403);
   });
 

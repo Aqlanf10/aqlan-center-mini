@@ -55,13 +55,25 @@ describe("daily-clinic spending query on PostgreSQL", () => {
   });
 
   it("keeps both repeated midnight hours in a configured DST timezone", async () => {
+    // Use an observed historical transition: tzdb 2026f cancelled Cuba's
+    // projected 2026-11-01 rollback. Keep the 25-hour assertion, not a
+    // timezone-dependent future prediction (https://www.iana.org/time-zones/releases/2026f).
     await client.query(`INSERT INTO pg_temp.expenses (id,voucher_number,created_at,amount_minor,currency)
       SELECT row_number() OVER ()::int, 'DST-' || row_number() OVER (), instant, 1, 'YER'
-      FROM generate_series('2026-11-01 03:00+00'::timestamptz, '2026-11-02 07:00+00'::timestamptz, interval '30 minute') instant`);
-    const expected = (await client.query("SELECT id FROM pg_temp.expenses WHERE (created_at AT TIME ZONE 'America/Havana')::date = '2026-11-01' ORDER BY created_at,id")).rows;
-    const report = await read("2026-11-01", "America/Havana");
+      FROM generate_series('2025-11-02 03:00+00'::timestamptz, '2025-11-03 07:00+00'::timestamptz, interval '30 minute') instant`);
+    const expected = (await client.query("SELECT id FROM pg_temp.expenses WHERE (created_at AT TIME ZONE 'America/Havana')::date = '2025-11-02' ORDER BY created_at,id")).rows;
+    // Both UTC instants are the same local midnight, and both must survive.
+    const midnights = (await client.query(`SELECT to_char(instant AT TIME ZONE 'America/Havana', 'YYYY-MM-DD HH24:MI') AS wall
+      FROM (VALUES ('2025-11-02 04:00+00'::timestamptz), ('2025-11-02 05:00+00'::timestamptz)) AS fixture(instant)`)).rows;
+    expect(midnights.map((row) => row.wall)).toEqual(['2025-11-02 00:00', '2025-11-02 00:00']);
+    const naive = (await client.query(`SELECT count(*)::int AS count FROM pg_temp.expenses
+      WHERE created_at >= ('2025-11-02'::date::timestamp AT TIME ZONE 'America/Havana')
+        AND created_at < ('2025-11-03'::date::timestamp AT TIME ZONE 'America/Havana')`)).rows;
+    expect(naive[0].count).toBe(48); // Mutation witness: the old range loses one hour.
+    const report = await read("2025-11-02", "America/Havana");
     expect(report.movements.map((row) => row.id)).toEqual(expected.map((row) => row.id));
     expect(report.movements).toHaveLength(50);
+    expect(report.movements.map((row) => row.id)).toEqual(Array.from({ length: 50 }, (_, index) => index + 3));
   });
 
   it("aggregates allocation children without multiplying the native cash amount", async () => {
