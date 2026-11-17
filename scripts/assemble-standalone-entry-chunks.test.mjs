@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { assembleStandaloneEntryChunks, entryChunks } from "./assemble-standalone-entry-chunks.mjs";
 
 async function fixture(run) {
@@ -21,19 +22,53 @@ async function fixture(run) {
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test("copies a referenced build chunk and its map exactly, then is idempotent", () => fixture(async ({root, build, shipped}) => {
+test("copies a referenced build chunk without its source map, then is idempotent", () => fixture(async ({root, build, shipped}) => {
   const result = await assembleStandaloneEntryChunks(root);
-  assert.deepEqual(result.copied, ["server/chunks/ssr/synthetic.js", "server/chunks/ssr/synthetic.js.map"]);
-  for (const name of ["synthetic.js", "synthetic.js.map"]) assert.deepEqual(await readFile(path.join(root, shipped, "chunks/ssr", name)), await readFile(path.join(root, build, "chunks/ssr", name)));
+  assert.deepEqual(result.copied, ["server/chunks/ssr/synthetic.js"]);
+  assert.deepEqual(await readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), await readFile(path.join(root, build, "chunks/ssr/synthetic.js")));
+  await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js.map")), { code: "ENOENT" });
   assert.deepEqual((await assembleStandaloneEntryChunks(root)).copied, []);
 }));
 test("copies only bootstrap-referenced compiled assets, never unrelated application source", () => fixture(async ({root, put, shipped}) => {
   await put("lib/synthetic-private-source.ts", "synthetic source file\n");
   await put(".next/server/chunks/ssr/unreferenced.js", "unreferenced generated chunk\n");
+  await put(".next/server/chunks/ssr/synthetic.js.map", JSON.stringify({version: 3, sources: ["synthetic.ts"], sourcesContent: ["synthetic private source"], mappings: ""}));
   const result = await assembleStandaloneEntryChunks(root);
-  assert.deepEqual(result.copied, ["server/chunks/ssr/synthetic.js", "server/chunks/ssr/synthetic.js.map"]);
+  assert.deepEqual(result.copied, ["server/chunks/ssr/synthetic.js"]);
   await assert.rejects(readFile(path.join(root, ".next/standalone/lib/synthetic-private-source.ts")), { code: "ENOENT" });
+  await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js.map")), { code: "ENOENT" });
   await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/unreferenced.js")), { code: "ENOENT" });
+}));
+test("inspects omitted source maps with both original dependency guards before copying", () => fixture(async ({root, put, build, shipped}) => {
+  const maps = [
+    {version: 3, sources: ["node_modules/braces/index.js"], mappings: ""},
+    {version: 3, sources: ["safe.js"], sourcesContent: ["require('braces')"], mappings: ""},
+    {version: 3, sources: ["node_modules/%65slint/index.js"], mappings: ""},
+    {version: 3, sections: [{offset: {line: 0, column: 0}, map: {version: 3, sources: ["node_modules/minimatch/index.js"], mappings: ""}}]},
+  ];
+  for (const map of maps) {
+    await put(`${build}/chunks/ssr/synthetic.js.map`, JSON.stringify(map));
+    await assert.rejects(assembleStandaloneEntryChunks(root), /build source map failed dependency validation/);
+    await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), { code: "ENOENT" });
+    await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js.map")), { code: "ENOENT" });
+  }
+}));
+test("rejects an inline source map before adding the compiled chunk", () => fixture(async ({root, put, build, shipped}) => {
+  await put(`${build}/chunks/ssr/synthetic.js`, "module.exports = 1;\n//# sourceMappingURL=data:application/json;base64,e30=\n");
+  await assert.rejects(assembleStandaloneEntryChunks(root), /inline source map in entry chunk/);
+  await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), { code: "ENOENT" });
+}));
+test("runs an assembled synthetic entry without shipping its external map", () => fixture(async ({root, put, build, shipped}) => {
+  const runtime = 'const path = require("node:path"); module.exports = () => ({c(name) { require(path.join(__dirname, "../..", name)); }, m() {}});';
+  const chunk = 'global.syntheticEntryRan = true;\n//# sourceMappingURL=synthetic.js.map\n';
+  await put(`${build}/chunks/[turbopack]_runtime.js`, runtime);
+  await put(`${shipped}/chunks/[turbopack]_runtime.js`, runtime);
+  await put(`${build}/chunks/ssr/synthetic.js`, chunk);
+  await assembleStandaloneEntryChunks(root);
+  const entry = path.join(root, shipped, "app/_global-error/page.js");
+  const child = spawnSync(process.execPath, ["--enable-source-maps", "-e", 'require(process.argv[1]); if (!global.syntheticEntryRan) process.exit(1);', entry], {encoding: "utf8"});
+  assert.equal(child.status, 0, child.stderr);
+  await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js.map")), { code: "ENOENT" });
 }));
 test("fails closed on unknown, computed or traversing bootstrap references", () => {
   for (const source of ['R.c(name)', 'R.c("server/chunks/../../outside.js")', 'R.c("/tmp/outside.js")', 'R . c ("server/chunks/a.js")', 'R.c("server/chunks/good.js")\nX.c("server/chunks/missing.js")']) assert.throws(() => entryChunks(source), /STANDALONE_ENTRY_REJECTED/);

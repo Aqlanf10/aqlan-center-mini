@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateRuntimeSourceMap } from "./verify-braces-runtime.mjs";
+import { inspectMap } from "./dependency-security/verify-lint-tooling-runtime.mjs";
 
 const fail = message => { throw new Error(`STANDALONE_ENTRY_REJECTED: ${message}`); };
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -66,8 +68,11 @@ export function entryChunks(source) {
   });
 }
 
-/** Bind entry points to their build versions, then add missing referenced chunks
- * and their available maps. Existing or missing files are never overwritten. */
+/** Bind entry points to their build versions, then add missing referenced JS.
+ * Do not add source maps: they can include the original application source.
+ * Inspect available build maps with the existing security checks regardless,
+ * so omitting a map cannot conceal an otherwise rejected dependency input.
+ * Existing files are never overwritten or removed. */
 export async function assembleStandaloneEntryChunks(projectRoot) {
   const root = path.resolve(projectRoot);
   const build = path.join(root, ".next");
@@ -98,12 +103,22 @@ export async function assembleStandaloneEntryChunks(projectRoot) {
     const original = await checkedFile(build, name);
     const shipped = await checkedFile(standalone, name, true);
     if (shipped && digest(shipped) !== digest(original)) fail(`shipped chunk differs from build: ${name}`);
+    // A data URL embeds the map (and potentially sourcesContent) in the JS.
+    if (!shipped && /[#@]\s*sourceMappingURL\s*=\s*data:/i.test(original.toString("utf8"))) fail("inline source map in entry chunk");
     const map = await checkedFile(build, `${name}.map`, true);
     const shippedMap = await checkedFile(standalone, `${name}.map`, true);
     if (shippedMap && (!map || digest(shippedMap) !== digest(map))) fail(`shipped map differs from build: ${name}`);
+    if (map) {
+      try {
+        const parsed = JSON.parse(map.toString("utf8"));
+        validateRuntimeSourceMap(parsed, "build source map");
+        inspectMap(parsed);
+      } catch {
+        fail("build source map failed dependency validation");
+      }
+    }
     if (!shipped) {
       plan.push({ name, original });
-      if (map && !shippedMap) plan.push({ name: `${name}.map`, original: map });
     }
   }
   for (const { name, original } of plan) {

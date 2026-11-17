@@ -69,7 +69,7 @@ async function inspectAncestorManifests(file, root) {
     directory = path.dirname(directory);
   }
 }
-function inspectMap(map) {
+export function inspectMap(map) {
   // The unchanged braces verifier has already validated shape, indexed maps,
   // external sections and source-content cardinality. This adds identities only.
   for (const value of [map.file, map.sourceRoot, ...(map.sources ?? [])]) {
