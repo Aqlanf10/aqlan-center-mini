@@ -25,6 +25,10 @@ let directory: string, sql: string, actor: SessionPayload;
 let patient: number, mergedPatient: number, ortho: number, visit: number, adjustment: number, invoice: number;
 let firstCommand: FollowupCoverageCommand, rejectedCommand: FollowupCoverageCommand;
 let firstRevision: string, initialReset: unknown, emptyBackupCalls = 0;
+const financialActor = "synthetic-followup-restore";
+const expenseRequest = { key: "syn-restore-expense-key", hash: createHash("sha256").update("synthetic-expense-restore").digest("hex") };
+const retiredRequest = { key: "syn-restore-retired-key", hash: createHash("sha256").update("synthetic-retired-restore").digest("hex"), actor: financialActor };
+let expenseInput: import("../../lib/db").RecordExpenseInput, expenseId: number;
 const originalUrl = process.env.DATABASE_URL, originalSeed = process.env.SKIP_SEED;
 const q = async (sql: string, args: unknown[] = []) => (await db.getPool().query(sql, args)).rows;
 async function activate(pool: Pool) {
@@ -56,6 +60,11 @@ beforeAll(async () => {
   const { sessionCredentialVersion } = await import("../../lib/auth");
   const user = (await q("INSERT INTO users(username,display_name,password_hash,role) VALUES('synthetic-followup-restore','Synthetic restore admin','synthetic-hash','admin') RETURNING id"))[0].id;
   actor = { userId: user, username: "synthetic-followup-restore", role: "admin", expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion("synthetic-hash") };
+  await db.openShift({ openedBy: financialActor, opening: { YER: 1000, SAR: 0, USD: 0 } });
+  expenseInput = { category: "other", partyId: null, payeeText: "Synthetic restore payee", amountMinor: 100, currency: "YER", baseCurrency: "YER", exchangeRate: 1, payableId: null, note: "Synthetic preserved expense", createdBy: financialActor, actorRole: "admin", request: expenseRequest };
+  const createdExpense = await db.recordExpense(expenseInput);
+  expect(createdExpense.reason).toBeNull(); expenseId = createdExpense.expense!.id;
+  expect(await db.retireExpenseRequest(retiredRequest)).toEqual({ state: "retired" });
   patient = (await q("INSERT INTO patients(patient_number,full_name) VALUES('SYN-COVERAGE-RESTORE','Synthetic coverage restore') RETURNING id"))[0].id;
   mergedPatient = (await q("INSERT INTO patients(patient_number,full_name) VALUES('SYN-COVERAGE-MERGED','Synthetic merged identity') RETURNING id"))[0].id;
   const provider = (await db.createParty({name:"Synthetic treating provider",kind:"doctor",phone:null,commissionPercent:0,note:null})).id;
@@ -112,6 +121,9 @@ afterAll(async () => {
 });
 async function verify(pool: Pool) {
   expect(await snapshots(pool)).toEqual(await snapshots(fixture.source));
+  expect(await db.recordExpense(expenseInput)).toMatchObject({ replayed: true, expense: { id: expenseId } });
+  expect(await db.recordExpense({ ...expenseInput, request: { key: retiredRequest.key, hash: retiredRequest.hash } })).toMatchObject({ reason: "expense_request_retired" });
+  expect(await db.retireExpenseRequest(retiredRequest)).toEqual({ state: "retired" });
   // Immutable original command receipts remain reconcilable after current owner
   // reassignment; access is checked against the case's current patient.
   expect(await coverage.readFollowupCoverageCommandStatus({ session: actor, patientId: patient, orthoCaseId: ortho, command: firstCommand })).toMatchObject({ state: "committed", revision: { id: firstRevision, commandId: firstCommand.commandId } });
