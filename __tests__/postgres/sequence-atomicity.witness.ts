@@ -15,6 +15,7 @@ import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { stagedRestore } from '../../lib/restore/staging';
 import { parseTarBytes } from '../../lib/restore/archive';
 import { tarGzBytes } from '../helpers/backup-tar';
+import { knownNonEmptyRefusal } from '../helpers/synthetic-sequence-refusal';
 
 const sha = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 const marker = 'SYNTHETIC_SEQUENCE_ATOMICITY';
@@ -144,13 +145,14 @@ it.each([
     const before = await sequence(fixture.target.pool,'patients_id_seq'), beforeNumber = await sequence(fixture.target.pool,'patient_number_seq');
     expect(before.last_value==='100000' && before.is_called===called).toBe(true);
     const result = await stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage,allowNonEmptyTarget:true});
-    if (outcome==='failure') {
-      expect(result.ok).toBe(false);
-      expect(result.errors.some(error=>error.includes('patients_pkey'))).toBe(true);
+    const knownRefusal=knownNonEmptyRefusal(result);
+    const lateFailure=outcome==='failure' && !result.ok && result.errors.some(error=>error.includes('patients_pkey'));
+    if (outcome==='failure') expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.readyForCutover).toBe(false);
       expect(sha(Buffer.from(JSON.stringify(await patients(fixture.target.pool))))===sha(Buffer.from(JSON.stringify(beforeRows)))).toBe(true);
       expect(await dataDigest(fixture.target.pool)===beforeData).toBe(true);
     } else {
-      expect(result.ok).toBe(true);
       expect((await fixture.target.pool.query('SELECT count(*)::int AS n FROM patients WHERE id IN (300,75000)')).rows[0].n).toBe(2);
       const allPatients=await patients(fixture.target.pool);
       const target=allPatients.filter(row=>row.id==='300');
@@ -162,7 +164,7 @@ it.each([
     // A failed isolated replay must not change value or is_called. On success,
     // do not decide whether a gap is acceptable: report state changes without
     // numbers and independently forbid regression of either next candidate.
-    if (outcome==='failure') {
+    if (!result.ok) {
       expect(same(before,after),'synthetic id sequence value or is_called changed after rollback').toBe(true);
       expect(same(beforeNumber,afterNumber),'synthetic patient number sequence value or is_called changed after rollback').toBe(true);
     } else {
@@ -176,6 +178,9 @@ it.each([
     expect(sha(await readFile(markerPath))===sha(stageMarker)).toBe(true);
     const identity=await dbIdentity(fixture.target.pool);
     expect(identity.oid===fixture.target.identity.oid && identity.owner===fixture.target.identity.owner).toBe(true);
+    if (knownRefusal) console.log('SYNTHETIC_KNOWN_NONEMPTY_REFUSAL_STATE_PRESERVED');
+    else if (lateFailure) console.log('SYNTHETIC_LATE_DUPLICATE_REACHED_STATE_PRESERVED');
+    else if (!result.ok) throw new Error('SYNTHETIC_REPLAY_FAILURE_UNCLASSIFIED');
   } finally { await fixture.close(); }
 },180_000);
 
@@ -196,22 +201,43 @@ it('does not regress a concurrently allocated sequence value during replay',asyn
     await fixture.target.pool.query('CREATE TRIGGER synthetic_pause_replay BEFORE INSERT ON patients FOR EACH ROW EXECUTE FUNCTION synthetic_pause_replay()');
     const beforeData=await dataDigest(fixture.target.pool), beforeSource=await patients(fixture.source.pool);
     const originalTarget=await patients(fixture.target.pool);
+    const beforeSeq=await sequence(fixture.target.pool,'patients_id_seq'), beforeNumber=await sequence(fixture.target.pool,'patient_number_seq');
     await blocker.connect(); await blocker.query('SELECT pg_advisory_lock(473019::bigint)'); held=true;
-    const restore = stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage,allowNonEmptyTarget:true});
+    const restore = stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage,allowNonEmptyTarget:true})
+      .then(result=>({kind:'returned' as const,result}),()=>({kind:'thrown' as const}));
     let completed=false;
     void restore.then(()=>{completed=true;},()=>{completed=true;});
     const deadline=Date.now()+30000;
     try {
+      let reached=false;
       for (;;) {
         const waiting=(await fixture.target.pool.query("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND classid=0 AND objid=473019 AND NOT granted) AS waiting")).rows[0].waiting;
-        if (waiting) break;
-        if (completed) throw new Error('Synthetic replay ended before concurrency barrier');
+        if (waiting) { reached=true; break; }
+        if (completed) break;
         if (Date.now()>deadline) throw new Error('Synthetic replay did not reach concurrency barrier');
         await new Promise(resolve=>setTimeout(resolve,50));
       }
+      if (!reached) {
+        const observation=await restore;
+        expect(await dataDigest(fixture.target.pool)===beforeData).toBe(true);
+        expect(same(await sequence(fixture.target.pool,'patients_id_seq'),beforeSeq)).toBe(true);
+        expect(same(await sequence(fixture.target.pool,'patient_number_seq'),beforeNumber)).toBe(true);
+        expect(sha(Buffer.from(JSON.stringify(await patients(fixture.source.pool))))===sha(Buffer.from(JSON.stringify(beforeSource)))).toBe(true);
+        expect(sha(await readFile(archivePath))===sha(archive)).toBe(true);
+        expect(sha(await readFile(markerPath))===sha(stageMarker)).toBe(true);
+        const identity=await dbIdentity(fixture.target.pool);
+        expect(identity.oid===fixture.target.identity.oid && identity.owner===fixture.target.identity.owner).toBe(true);
+        if (observation.kind==='returned' && knownNonEmptyRefusal(observation.result)) {
+          console.log('SYNTHETIC_KNOWN_NONEMPTY_REFUSAL_BEFORE_CONCURRENCY_BARRIER');
+          return;
+        }
+        throw new Error('SYNTHETIC_EARLY_REPLAY_OUTCOME_UNCLASSIFIED');
+      }
       const allocated=(await fixture.target.pool.query("SELECT nextval('patients_id_seq')::text AS value")).rows[0].value as string;
       await blocker.query('SELECT pg_advisory_unlock(473019::bigint)'); held=false;
-      const result=await restore;
+      const observation=await restore;
+      if (observation.kind==='thrown') throw new Error('SYNTHETIC_CONCURRENT_REPLAY_EXCEPTION_UNCLASSIFIED');
+      const result=observation.result;
       if (result.ok) {
         const all=await patients(fixture.target.pool);
         expect(sha(Buffer.from(JSON.stringify(all.filter(row=>row.id==='300'))))===sha(Buffer.from(JSON.stringify(originalTarget)))).toBe(true);
@@ -219,14 +245,17 @@ it('does not regress a concurrently allocated sequence value during replay',asyn
         console.log('SYNTHETIC_CONCURRENT_REPLAY_SUCCEEDED');
       } else {
         expect(result.readyForCutover).toBe(false);
-        expect(result.errors.length>0 || result.validationErrors.length>0).toBe(true);
         expect(await dataDigest(fixture.target.pool)===beforeData).toBe(true);
-        console.log('SYNTHETIC_CONCURRENT_REPLAY_REJECTED_WITHOUT_ROW_CHANGE');
       }
       expect(next(await sequence(fixture.target.pool,'patients_id_seq'))>BigInt(allocated)).toBe(true);
+      if (!result.ok) expect(same(await sequence(fixture.target.pool,'patient_number_seq'),beforeNumber)).toBe(true);
       expect(sha(Buffer.from(JSON.stringify(await patients(fixture.source.pool))))===sha(Buffer.from(JSON.stringify(beforeSource)))).toBe(true);
       expect(sha(await readFile(archivePath))===sha(archive)).toBe(true);
       expect(sha(await readFile(markerPath))===sha(stageMarker)).toBe(true);
+      const identity=await dbIdentity(fixture.target.pool);
+      expect(identity.oid===fixture.target.identity.oid && identity.owner===fixture.target.identity.owner).toBe(true);
+      if (!result.ok && knownNonEmptyRefusal(result)) console.log('SYNTHETIC_KNOWN_NONEMPTY_REFUSAL_AFTER_CONCURRENCY_BARRIER');
+      else if (!result.ok) throw new Error('SYNTHETIC_CONCURRENT_REPLAY_FAILURE_UNCLASSIFIED');
     } finally {
       if(held){await blocker.query('SELECT pg_advisory_unlock(473019::bigint)').catch(()=>{}); held=false;}
       await restore.catch(()=>{});

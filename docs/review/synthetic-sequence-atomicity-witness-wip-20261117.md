@@ -32,13 +32,14 @@ replay also compares the restored patient fields with the synthetic source.
 
 The fifth scenario adds a synthetic advisory-lock barrier through a trigger
 on a uniquely owned target and advances the ID sequence on another connection
-while replay waits. Both success and an explicit failure are classified using
-fixed messages; success must preserve and restore relevant patient rows, while
-failure must retain target table data. Both must preserve the concurrent
-allocation's next-candidate floor. This is a safety witness, not a policy that
-concurrent replay must succeed. A reported failure with unchanged rows does
-not by itself identify why replay failed or prove general correctness. Neither
-this test nor a `GREATEST` expression
+while replay waits. Success must preserve and restore relevant patient rows;
+the existing, exact nonempty-target rejection is allowed only after checking
+that the rows, stage and sequence state remain safe. A rejection before the
+barrier is reported separately and does not claim that concurrency ran. Any
+other error is unclassified and fails the witness with a fixed message. If the
+barrier is reached, the next-candidate floor must remain above the concurrent
+allocation. This is a safety witness, not a policy that concurrent replay must
+succeed. Neither this test nor a `GREATEST` expression
 alone proves correctness under all races,
 sequence caches, unusual increment settings, or backend failures.
 
@@ -50,7 +51,9 @@ and READ COMMITTED; it does not inspect the replay connection's isolation
 directly. The disposable CI role may be a superuser. The late-failure test on
 this base recognizes `patients_pkey` in an error; integration with the separate
 privacy branch must preserve constraint provenance without exposing raw
-database messages. A future implementation must preserve old archive compatibility,
+database messages. Its existing target-refusal classifier recognizes only the
+current exact error, and must be updated explicitly if a reviewed future policy
+introduces a new stable reason. A future implementation must preserve old archive compatibility,
 avoid leaking SQL/data, address the lock and failure-atomicity contract, and
 be reviewed with synthetic PostgreSQL cases before any use. PostgreSQL's
 `ALTER SEQUENCE ... RESTART` is transactional unlike `setval`, but choosing it
