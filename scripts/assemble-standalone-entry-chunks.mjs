@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, realpath, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateRuntimeSourceMap } from "./verify-braces-runtime.mjs";
@@ -23,10 +24,15 @@ async function checkedFile(base, relative, optional = false) {
     }
     if (stat.isSymbolicLink() || (i + 1 === parts.length ? !stat.isFile() : !stat.isDirectory())) fail(`non-regular path: ${relative}`);
   }
-  return readFile(current);
+  const handle = await open(current, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const [opened, actual, canonical] = await Promise.all([handle.stat(), lstat(current), realpath(current)]);
+    if (!opened.isFile() || !actual.isFile() || actual.isSymbolicLink() || opened.dev !== actual.dev || opened.ino !== actual.ino || canonical !== current) fail("file changed during inspection");
+    return await handle.readFile();
+  } finally { await handle.close(); }
 }
 
-async function entries(base, relative) {
+async function entries(base, relative, suffix = ".js") {
   const result = [];
   const queue = [relative];
   while (queue.length) {
@@ -45,9 +51,9 @@ async function entries(base, relative) {
     if (missing) continue;
     for (const item of await readdir(path.join(base, current), { withFileTypes: true })) {
       const child = `${current}/${item.name}`;
-      if (item.isSymbolicLink()) fail(`entry symlink: ${child}`);
+      if (item.isSymbolicLink()) fail(`non-regular path: ${child}`);
       if (item.isDirectory()) queue.push(child);
-      else if (item.isFile() && child.endsWith(".js")) result.push(child);
+      else if (item.isFile() && child.endsWith(suffix)) result.push(child);
       else if (!item.isFile()) fail(`non-regular entry: ${child}`);
     }
   }
@@ -81,6 +87,8 @@ export async function assembleStandaloneEntryChunks(projectRoot) {
     const stat = await lstat(directory);
     if (!stat.isDirectory() || stat.isSymbolicLink()) fail("invalid build root");
   }
+  const [buildId, shippedId] = await Promise.all([checkedFile(build, "BUILD_ID"), checkedFile(standalone, "BUILD_ID")]);
+  if (!buildId.toString("utf8").trim() || !buildId.equals(shippedId)) fail("build identity mismatch");
   const scripts = [...await entries(standalone, "server/app"), ...await entries(standalone, "server/pages")];
   if (!scripts.length) fail("missing standalone entries");
   const refs = new Set();
@@ -96,6 +104,30 @@ export async function assembleStandaloneEntryChunks(projectRoot) {
     if (digest(shipped) !== digest(original)) fail(`entry differs from build: ${entry}`);
     refs.add(runtime);
     for (const name of names) refs.add(name);
+  }
+  // Next can leave a chunk out of standalone even though a shipped route NFT
+  // names it. Match each shipped NFT to its original before interpreting it;
+  // never copy arbitrary trace inputs, source files or source maps.
+  const traces = await entries(standalone, "server", ".nft.json");
+  for (const trace of traces) {
+    if (!trace.endsWith(".js.nft.json")) fail("unrecognized standalone trace");
+    const entry = trace.slice(0, -".nft.json".length);
+    const [shippedEntry, originalEntry] = await Promise.all([checkedFile(standalone, entry), checkedFile(build, entry)]);
+    if (!shippedEntry.equals(originalEntry)) fail("standalone trace entry differs from build");
+    const [shippedTrace, originalTrace] = await Promise.all([checkedFile(standalone, trace), checkedFile(build, trace)]);
+    if (!shippedTrace.equals(originalTrace)) fail("standalone trace differs from build");
+    let nft;
+    try { nft = JSON.parse(shippedTrace.toString("utf8")); } catch { fail("invalid standalone trace"); }
+    if (!nft || Array.isArray(nft) || typeof nft !== "object" || nft.version !== 1 || !Array.isArray(nft.files) || !nft.files.length) fail("invalid standalone trace");
+    for (const input of nft.files) {
+      if (typeof input !== "string" || !input || input.includes("\\") || input.includes("\0") || path.posix.isAbsolute(input) || /^[A-Za-z]:/.test(input)) fail("invalid standalone trace input");
+      const target = path.resolve(standalone, path.posix.dirname(trace), input);
+      if (!target.startsWith(`${root}${path.sep}`)) fail("standalone trace input escapes project");
+      const relative = path.relative(standalone, target).split(path.sep).join("/");
+      if (!relative.startsWith("server/chunks/ssr/") || !relative.endsWith(".js")) continue;
+      if (!/^server\/chunks\/ssr\/(?:[A-Za-z0-9_@.\[\]~-]+\/)*[A-Za-z0-9_@.\[\]~-]+\.js$/.test(relative) || relative.split("/").some(part => part === "." || part === "..")) fail("unsafe traced chunk path");
+      refs.add(relative);
+    }
   }
   if (!refs.size) fail("no literal entry chunk references");
   const plan = [];

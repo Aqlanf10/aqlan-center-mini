@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -12,6 +12,8 @@ async function fixture(run) {
   const build = ".next/server", shipped = ".next/standalone/.next/server";
   const entry = 'var R=require("../../chunks/[turbopack]_runtime.js")("server/app/_global-error/page.js")\nR.c("server/chunks/ssr/synthetic.js")\nR.m(42)\n';
   try {
+    await put(".next/BUILD_ID", "synthetic-build-id\n");
+    await put(".next/standalone/.next/BUILD_ID", "synthetic-build-id\n");
     await put(`${build}/app/_global-error/page.js`, entry);
     await put(`${shipped}/app/_global-error/page.js`, entry);
     await put(`${build}/chunks/ssr/synthetic.js`, "synthetic chunk bytes\n");
@@ -28,6 +30,62 @@ test("copies a referenced build chunk without its source map, then is idempotent
   assert.deepEqual(await readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), await readFile(path.join(root, build, "chunks/ssr/synthetic.js")));
   await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js.map")), { code: "ENOENT" });
   assert.deepEqual((await assembleStandaloneEntryChunks(root)).copied, []);
+}));
+async function addNft({put, build, shipped}, files = ["../../chunks/ssr/nft-only.js"]) {
+  const contents = JSON.stringify({version: 1, files});
+  await put(`${build}/app/_global-error/page.js.nft.json`, contents);
+  await put(`${shipped}/app/_global-error/page.js.nft.json`, contents);
+}
+test("copies an NFT-only compiled SSR chunk from the matching build without its map", () => fixture(async f => {
+  const {root, put, build, shipped} = f;
+  await addNft(f);
+  await put(`${build}/chunks/ssr/nft-only.js`, "module.exports = 'synthetic traced chunk';\n");
+  await put(`${build}/chunks/ssr/nft-only.js.map`, JSON.stringify({version:3,sources:["synthetic.ts"],sourcesContent:["SYNTHETIC_PRIVATE_SOURCE"],mappings:""}));
+  const tracePath = path.join(root, shipped, "app/_global-error/page.js.nft.json");
+  const traceInput = path.resolve(path.dirname(tracePath), "../../chunks/ssr/nft-only.js");
+  // Match lint-runtime's actual failure mode: realpath on a shipped NFT input.
+  await assert.rejects(realpath(traceInput), {code:"ENOENT"});
+  const result = await assembleStandaloneEntryChunks(root);
+  assert.deepEqual(result.copied, ["server/chunks/ssr/nft-only.js", "server/chunks/ssr/synthetic.js"]);
+  assert.deepEqual(await readFile(path.join(root, shipped, "chunks/ssr/nft-only.js")), await readFile(path.join(root, build, "chunks/ssr/nft-only.js")));
+  assert.equal(await realpath(traceInput), traceInput);
+  await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/nft-only.js.map")), {code:"ENOENT"});
+  assert.deepEqual((await assembleStandaloneEntryChunks(root)).copied, []);
+}));
+test("refuses an NFT input that is absolute, ambiguous or escapes the project before any copy", () => fixture(async f => {
+  const {root, put, build, shipped} = f;
+  for (const input of ["/tmp/escape.js", "C:/outside.js", "..\\escape.js", "bad\0input", "../../../../../../../../outside.js"]) {
+    await addNft(f, [input]);
+    await assert.rejects(assembleStandaloneEntryChunks(root), /STANDALONE_ENTRY_REJECTED/);
+    await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), {code:"ENOENT"});
+  }
+  await put(`${build}/app/_global-error/page.js.nft.json`, "bad json");
+  await put(`${shipped}/app/_global-error/page.js.nft.json`, "bad json");
+  await assert.rejects(assembleStandaloneEntryChunks(root), /invalid standalone trace/);
+}));
+test("refuses a forged NFT, altered trace entry, or mismatched build identity", () => fixture(async f => {
+  const {root, put, build, shipped} = f;
+  await addNft(f);
+  await put(`${shipped}/app/_global-error/page.js.nft.json`, JSON.stringify({version:1,files:["../../chunks/ssr/forged.js"]}));
+  await assert.rejects(assembleStandaloneEntryChunks(root), /standalone trace differs from build/);
+  await addNft(f);
+  await put(`${shipped}/app/_global-error/page.js`, "// altered entry\n");
+  await assert.rejects(assembleStandaloneEntryChunks(root));
+  await put(`${shipped}/app/_global-error/page.js`, f.entry);
+  await put(".next/standalone/.next/BUILD_ID", "different-build\n");
+  await assert.rejects(assembleStandaloneEntryChunks(root), /build identity mismatch/);
+  await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), {code:"ENOENT"});
+}));
+test("refuses missing, linked, or inline-mapped NFT chunk without partial writes", () => fixture(async f => {
+  const {root, put, build, shipped} = f;
+  await addNft(f);
+  await assert.rejects(assembleStandaloneEntryChunks(root));
+  await put(`${build}/chunks/ssr/nft-only.js`, "module.exports = 1;\n//# sourceMappingURL=data:application/json;base64,e30=\n");
+  await assert.rejects(assembleStandaloneEntryChunks(root), /inline source map/);
+  const chunk = path.join(root, build, "chunks/ssr/nft-only.js");
+  await rm(chunk); await symlink("synthetic.js", chunk);
+  await assert.rejects(assembleStandaloneEntryChunks(root), /non-regular path/);
+  await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), {code:"ENOENT"});
 }));
 test("copies only bootstrap-referenced compiled assets, never unrelated application source", () => fixture(async ({root, put, shipped}) => {
   await put("lib/synthetic-private-source.ts", "synthetic source file\n");
