@@ -124,7 +124,7 @@ export function resolveBackupArchivePath(backupDir: string, backupId: string): s
   if (!isValidBackupArchiveId(backupId)) {
     throw new Error("معرّف أرشيف غير صالح — مرفوض قبل أي وصولٍ للقرص.");
   }
-  const resolved = path.resolve(backupDir, backupId);
+  const resolved = path.resolve(/*turbopackIgnore: true*/ backupDir, backupId);
   const relative = path.relative(path.resolve(backupDir), resolved);
   if (relative.startsWith("..") || path.isAbsolute(relative) || relative === "") {
     throw new Error("مسار أرشيف يخرج من مجلد النسخ — مرفوض.");
