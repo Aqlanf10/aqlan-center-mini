@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
 import { applyRuntimeMigrationFiles, loadMigrationFiles } from "../../lib/migrations";
@@ -8,6 +8,7 @@ import { readVerifiedDurableSession } from "../../lib/staff-durable-session";
 import { commandCanonicalFollowupCoverage as historicAuthor } from "../postgres/_historical-canonical-coverage-command";
 import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
 import type { FollowupCoverageCommand } from "../../lib/ortho-followup-coverage";
+import { followupCoverageJournal } from "../../lib/ortho-followup-coverage-recovery";
 const GRANTS={"finance.agreements.manage":true,"finance.patient-ledger.view":true,"finance.invoices.view":true,"clinical.plans.view":true,"clinical.ortho.view":true};
 const ACCOUNTS={
  owner:{username:"canon-ceditor-owner",password:"Canon#AppendOwner1",role:"admin",display:"مالك تجريبي"},
@@ -68,6 +69,49 @@ const region=(page:import("playwright").Page)=>page.getByRole("region",{name:"ن
 async function navigate(page:import("playwright").Page,key:keyof typeof ACCOUNTS="own",login=true){if(login)await journey.browserLogin(page,key);await page.goto(`${journey.baseUrl}/patients/${patientId}`);await page.getByRole("button",{name:"عرض حالات التقويم",exact:true}).click();await page.getByRole("button",{name:"عرض تفاصيل الحالة",exact:true}).click();await region(page).waitFor();}
 async function open(page:import("playwright").Page,key:keyof typeof ACCOUNTS="own",login=true){await navigate(page,key,login);await region(page).getByRole("button",{name:/^نطاق المتابعات الروتينية ضمن الاتفاق/}).click();await region(page).getByLabel("مصدر تغطية المتابعات",{exact:true}).waitFor();}
 async function fill(page:import("playwright").Page,reason="اتفاق تجريبي للمتابعات الروتينية"){const r=region(page);await r.getByLabel("مصدر تغطية المتابعات",{exact:true}).selectOption(`${command.source.invoiceId}:${command.source.planItemId}`);await r.getByLabel("قرار نطاق المتابعات",{exact:true}).selectOption("included");await r.getByLabel("سبب اعتماد نطاق المتابعات",{exact:true}).fill(reason);await r.getByRole("checkbox").check();}
+it.each(["committed","unresolved"] as const)("browser: retained %s command uses only exact status and honors the historical result",async state=>{
+ const login=await journey.login("own");expect(login.status).toBe(200);
+ const session=readVerifiedDurableSession(decodeURIComponent(login.cookie.slice(login.cookie.indexOf("=")+1)));
+ if(!session)throw new Error("Synthetic durable login unavailable");
+ if(state==="committed")expect(await historicAuthor(session,patientId,caseId,command,journey.db)).toMatchObject({ok:true,replayed:false});
+ // Compile and authenticate the real reads before the interactive journey; no
+ // timeout or response is altered by this synthetic dev warm-up.
+ for(const p of [`/api/ortho?patientId=${patientId}`,`/api/ortho/${caseId}`,`${path()}&edit=1`])expect((await journey.api(p,login.cookie)).status).toBe(200);
+ const actor=ACCOUNTS.own.username,scope=JSON.stringify([actor,patientId]);
+ const pending=followupCoverageJournal({actor,patientId,orthoCaseId:caseId,command});
+ const context=await journey.browser.newContext({viewport:{width:390,height:844},locale:"ar"});
+ const requests:{method:string;body:string|null}[]=[];
+ try{
+  const page=await context.newPage();page.on("request",r=>{if(r.url().includes(`/api/ortho/${caseId}/followup-coverage`)&&["POST","PUT"].includes(r.method()))requests.push({method:r.method(),body:r.postData()});});
+  await journey.browserLogin(page,"own");
+  await page.evaluate(async ({scope,pending})=>{
+   const db=await new Promise<IDBDatabase>((resolve,reject)=>{const req=indexedDB.open("aqlan-financial-command-recovery",1);req.onupgradeneeded=()=>req.result.createObjectStore("patient-commands",{keyPath:"scope"});req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+   await new Promise<void>((resolve,reject)=>{const tx=db.transaction("patient-commands","readwrite");tx.objectStore("patient-commands").put({scope,revision:0,command:pending});tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});db.close();
+  },{scope,pending});
+  const readJournal=()=>page.evaluate(async scope=>{
+   const db=await new Promise<IDBDatabase>((resolve,reject)=>{const req=indexedDB.open("aqlan-financial-command-recovery",1);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+   const value=await new Promise<unknown>((resolve,reject)=>{const req=db.transaction("patient-commands","readonly").objectStore("patient-commands").get(scope);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});db.close();return value;
+  },scope);
+  const beforeJournal=await readJournal();expect(beforeJournal).toEqual({scope,revision:0,command:pending});
+  const beforeFacts=await facts(),beforeCounts=await counts();
+  const history=async()=>(await journey.db.query("SELECT (SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM ortho_followup_coverage_revisions r) revisions,(SELECT jsonb_agg(to_jsonb(r) ORDER BY command_id) FROM ortho_followup_coverage_rejections r) rejections,(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM audit_log a WHERE action='ortho.followup_coverage.append') audits")).rows;
+  const beforeHistory=await history();
+  await navigate(page,"own",false);const panel=region(page);
+  const check=panel.getByRole("button",{name:"تحقق من نتيجة الطلب نفسه",exact:true});await check.waitFor();
+  await panel.getByText("السجل للقراءة والتحقق من الطلبات السابقة؛ تسجيل قرارات جديدة متوقف.",{exact:true}).waitFor();
+  expect(await panel.getByRole("button",{name:"اعتماد نطاق المتابعات القادمة",exact:true}).count()).toBe(0);
+  const reply=page.waitForResponse(r=>r.request().method()==="PUT"&&r.url().includes(`/api/ortho/${caseId}/followup-coverage`));
+  await check.click();const response=await reply;expect(response.status()).toBe(200);expect(await response.json()).toMatchObject({state});
+  if(state==="unresolved"){
+   await panel.getByText(/لم تُحسم نتيجة الحفظ/).waitFor();expect(await readJournal()).toEqual(beforeJournal);
+  }else{
+   const hash=createHash("sha256").update(pending.original).digest("hex");
+   await expect.poll(readJournal).toEqual({scope,revision:1,command:null,acknowledged:{key:command.commandId,kind:"ortho-followup-coverage",originalHash:hash}});
+  }
+  expect(requests).toEqual([{method:"PUT",body:JSON.stringify(command)}]);
+  expect(await facts()).toEqual(beforeFacts);expect(await counts()).toEqual(beforeCounts);expect(await history()).toEqual(beforeHistory);expect(await journey.ddlLog()).toEqual([]);
+ }finally{await context.close();}
+},180000);
 it.each(["owner","own"]as const)("browser: %s explicitly selects source and scope; 390px editor keeps money unchanged",async key=>{
  const context=await journey.browser.newContext({viewport:{width:390,height:844},locale:"ar"});try{const page=await context.newPage();await open(page,key);const r=region(page);expect(await r.getByRole("button",{name:"اعتماد نطاق المتابعات القادمة",exact:true}).isDisabled()).toBe(true);expect(await r.getByLabel("مصدر تغطية المتابعات",{exact:true}).inputValue()).toBe("");const before=await facts();await fill(page);if(key==="owner"&&process.env.HR_EVIDENCE_DIR){mkdirSync(process.env.HR_EVIDENCE_DIR,{recursive:true});await r.screenshot({path:join(process.env.HR_EVIDENCE_DIR,"canonical-coverage-editor-390.png")});}expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);await r.getByRole("button",{name:"اعتماد نطاق المتابعات القادمة",exact:true}).click();await r.getByText("سُجل نطاق المتابعات القادمة مع المصدر والسبب. الزيارات الموقعة سابقًا لم تتغير.",{exact:true}).waitFor();expect(await counts()).toEqual({revisions:1,rejections:0,audits:1});expect(await facts()).toEqual(before);}finally{await context.close();}
 });
