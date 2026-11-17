@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authedGet, authedMutation, harness } from "./_server";
+import { makeInvoiceDiagnosticEmitter } from "./invoice-number-diagnostic";
 
 /**
  * (P3-1) بادئة رقم الفاتورة من شاشة الإعدادات — على التطبيق المبني.
@@ -9,6 +10,7 @@ import { authedGet, authedMutation, harness } from "./_server";
  */
 
 let h: Awaited<ReturnType<typeof harness>>;
+const emitInvoiceDiagnostic = makeInvoiceDiagnosticEmitter((line) => process.stdout.write(line));
 
 async function patchSettings(values: Record<string, string>, session: "admin" | "reception" = "admin") {
   const current = await (await authedGet("/api/settings", h.sessions.admin)).json() as { __versions?: Record<string, unknown> };
@@ -18,12 +20,14 @@ async function patchSettings(values: Record<string, string>, session: "admin" | 
   }));
 }
 
-async function newInvoiceNumber(): Promise<string> {
+async function newInvoiceNumber(stage: "initial" | "before" | "after"): Promise<string> {
   const response = await authedMutation("/api/invoices", h.sessions.admin, "POST", JSON.stringify({
     patientId: h.seeded.patientAId, items: [{ description: "كشف بادئة", quantity: 1, price: "500" }],
   }));
+  emitInvoiceDiagnostic(stage, "status", response.status);
   expect(response.status).toBe(201);
   const body = await response.json() as { invoiceNumber: string };
+  emitInvoiceDiagnostic(stage, "number", body.invoiceNumber);
   return body.invoiceNumber;
 }
 
@@ -41,7 +45,7 @@ describe("P3-1 — بادئة الفاتورة من الإعدادات", () => {
     expect(response.status).toBe(400);
     const body = await response.json() as { message: string };
     expect(body.message).toContain("حروف لاتينية كبيرة");
-    expect(await newInvoiceNumber()).toMatch(/^INV-\d{5}$/);
+    expect(await newInvoiceNumber("initial")).toMatch(/^INV-\d{5}$/);
   });
 
   it("بادئة الفاتورة لا تساوي بادئة سند القبض", async () => {
@@ -56,9 +60,9 @@ describe("P3-1 — بادئة الفاتورة من الإعدادات", () => {
   });
 
   it("المدير يضبط FAC فتخرج الفاتورة التالية بها — والعدّاد يتابع", async () => {
-    const before = await newInvoiceNumber();
+    const before = await newInvoiceNumber("before");
     expect((await patchSettings({ "documents.invoice_prefix": "FAC" })).status).toBe(200);
-    const after = await newInvoiceNumber();
+    const after = await newInvoiceNumber("after");
     expect(after).toMatch(/^FAC-\d{5}$/);
     expect(Number(after.replace(/\D/g, ""))).toBe(Number(before.replace(/\D/g, "")) + 1);
   });
