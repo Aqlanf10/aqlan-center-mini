@@ -8,6 +8,7 @@ import { loadRestoreMigrationChecksums } from '../lib/restore/migration-provenan
 import { prepareBackupSql } from '../lib/restore/sql.mjs';
 import { insertStatement, sequenceResets } from '../lib/backup';
 import { patientNumberSequenceRestoreSql } from '../lib/patient-numbering-backup';
+import { createRestoreMigrationSnapshot, isRestoreMigrationSnapshot } from '../lib/restore/migration-catalog';
 
 const historical = '5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99';
 const ordinary = 'a'.repeat(64);
@@ -21,6 +22,13 @@ describe('source migration provenance before restoration', () => {
     const app = await loadMigrationFiles();
     const cli = await loadRestoreMigrationChecksums();
     expect(cli).toEqual(app.map(({ version, name, filename, checksum }) => ({ version, name, filename, checksum })));
+  });
+  it('brands only a locally loaded frozen catalogue; caller-constructed copies are not trusted', async () => {
+    const snapshot = await createRestoreMigrationSnapshot();
+    expect(isRestoreMigrationSnapshot(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot) && snapshot.every(Object.isFrozen)).toBe(true);
+    expect(isRestoreMigrationSnapshot([...snapshot])).toBe(false);
+    expect(isRestoreMigrationSnapshot([{version:'0090',checksum:ordinary}])).toBe(false);
   });
   it('accepts a known subset, keeps application literals intact and removes only the matching registry record', () => {
     const data = `INSERT INTO sample ("note") VALUES ('synthetic schema_migrations 0090');`;

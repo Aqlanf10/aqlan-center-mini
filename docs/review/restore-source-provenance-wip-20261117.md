@@ -7,6 +7,8 @@ a target, and before the raw SQL CLI connects. Unknown historical 0090 is not
 installed or adopted. The separately pinned 0079 name, checksum, adoption,
 source footprint and timestamp checks remain in force; a fresh target does not
 install it without its validated historical record.
+The admin drill passes a locally loaded, frozen and internally branded
+catalogue to staged restore; caller-constructed replacement arrays are refused.
 
 The guarded parser accepts the application's writer-style literal `INSERT`
 tuples, its three numeric relationship-fixup `UPDATE` forms, and its two
@@ -20,7 +22,7 @@ has no unrecorded history. Rejection preserves the source archive and target;
 it does not reconstruct an unknown 0090 schema. Native full-schema recovery
 and independently protected assets require separate verification.
 
-Synthetic unit and mocked-target tests on Node 22 passed **67/67** across seven
+Synthetic unit and mocked-target tests on Node 22 passed **69/69** across seven
 files. Their target connection is mocked; they do not prove PostgreSQL target
 preservation. The initial adversarial tests for `DO`, `COPY`, `set_config`, and
 `pg_sleep` were observed failing against the prior parser, and the executable

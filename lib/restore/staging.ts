@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { STAFF_AUTHORITY_RELATIONS, staffLifecycleLockKey } from "../legacy-staff-schema.mjs";
 import { RestoreHoldError, installRestoreHold } from "./restore-hold";
 import { loginPhotoRestoreProblem } from "./login-photo";
+import { isRestoreMigrationSnapshot } from "./migration-catalog";
 
 /**
  * الاستعادة بإعداد Staging/Cutover (P1.15) — لا حالة نصف مستعادة أبدًا.
@@ -178,6 +179,8 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   let prepared: ReturnType<typeof prepareBackupSql> & { historical0079: { appliedAt: string } | null };
   let migrationFiles: MigrationFile[];
   try {
+    if (options.migrationFilesSnapshot !== undefined && !isRestoreMigrationSnapshot(options.migrationFilesSnapshot))
+      throw new Error("Untrusted restore migration catalogue.");
     migrationFiles = options.migrationFilesSnapshot ?? await loadMigrationFiles();
     if (!Array.isArray(migrationFiles) || !migrationFiles.length) throw new Error("Restore migration catalogue unavailable.");
     prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true, migrationFiles });

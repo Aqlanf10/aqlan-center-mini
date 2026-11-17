@@ -29,7 +29,7 @@ beforeEach(() => { vi.clearAllMocks(); target.connect.mockRejectedValue(new Erro
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('administrative restore validation precedes target changes', () => {
-  it('refuses an empty migration catalogue before opening the staged target', async () => {
+  it.each([[[]], [[{version:'0090', name:'synthetic', filename:'0090_synthetic.sql', sql:'synthetic', checksum:'a'.repeat(64)}]]])('refuses an untrusted migration catalogue before opening the staged target', async supplied => {
     const directory = await mkdtemp(path.join(tmpdir(), 'synthetic-empty-catalog-'));
     try {
       const stage = path.join(directory, 'stage'); await mkdir(stage);
@@ -38,9 +38,9 @@ describe('administrative restore validation precedes target changes', () => {
       const manifest = { format:'aqlan-full-backup', version:1, createdAt:'2026-01-01T00:00:00.000Z', databaseSha256:hash(sql), documents:[] };
       const archive = tarGzBytes([{name:'database.sql',data:sql},{name:'manifest.json',data:Buffer.from(JSON.stringify(manifest))}]);
       const file=path.join(directory, 'synthetic.tar.gz'); await writeFile(file, archive);
-      const result=await staging.stagedRestore({archivePath:file,targetUrl:environment.RESTORE_DRILL_DATABASE_URL,stagingDir:stage,migrationFilesSnapshot:[]});
+      const result=await staging.stagedRestore({archivePath:file,targetUrl:environment.RESTORE_DRILL_DATABASE_URL,stagingDir:stage,migrationFilesSnapshot:supplied});
       expect(result.ok).toBe(false);
-      expect(result.errors.some(message => message.includes('Restore migration catalogue unavailable'))).toBe(true);
+      expect(result.errors.some(message => message.includes('Untrusted restore migration catalogue'))).toBe(true);
       expect(target.connect).not.toHaveBeenCalled(); expect(target.query).not.toHaveBeenCalled();
       expect(await readFile(path.join(stage, 'prior.txt'), 'utf8')).toBe('SYNTHETIC STAGE');
     } finally { await rm(directory, { recursive:true, force:true }); }
