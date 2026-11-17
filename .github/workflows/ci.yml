@@ -317,6 +317,21 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # Dedicated disposable service for the destructive synthetic restore
+      # witness; it never targets the HTTP suite's service or a deployed DB.
+      synthetic_restore_postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 55472:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
       TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
@@ -351,6 +366,16 @@ jobs:
           node scripts/dependency-security/verify-lint-tooling-runtime.mjs
       - name: Verify final preflight and copied assets
         run: node scripts/preflight-build-seal.mjs --verify
+      # Runs once on the isolated CI PostgreSQL service. The witness retains
+      # its synthetic databases and archive for the lifetime of this runner.
+      - name: Restore synthetic historical and fresh archives through standalone HTTP
+        if: matrix.shard == 1
+        env:
+          SYNTHETIC_PRESERVE_EVIDENCE: "1"
+          SYNTHETIC_STANDALONE_SERVER: ${{ github.workspace }}/.next/standalone/server.js
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
+          TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
+        run: npx vitest run --config vitest.config.standalone-restore-witness.mts
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
       # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
