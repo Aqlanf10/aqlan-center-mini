@@ -3,7 +3,7 @@ import { checksumOf, type MigrationFile } from './migration-files';
 import { PRESCRIPTION_ISSUANCE_SQL } from './prescription-issuance-schema';
 export const PRESCRIPTION_ISSUANCE_MIGRATIONS: MigrationFile[] = [{
   version: '0093', name: 'prescription_issuance_commands', filename: '0093_prescription_issuance_commands.sql',
-  sql: PRESCRIPTION_ISSUANCE_SQL, checksum: checksumOf(PRESCRIPTION_ISSUANCE_SQL),
+  sql: PRESCRIPTION_ISSUANCE_SQL, checksum: '7bf8a45c76d1a52b0efa0fae0b0427fb33a079b2be1aced8fc2560e8cf8336dc',
 }];
 const table = 'prescription_issuance_commands';
 const normalize = (value: string) => value.replace(/::(?:text|bpchar|integer)/g, '').replace(/[\s()"]/g, '').toLowerCase();
@@ -23,7 +23,8 @@ export async function validatePrescriptionIssuanceMigration(client: DbClient, fi
   const file = files.find(item => item.version === '0093');
   if (!file) return;
   const expected = PRESCRIPTION_ISSUANCE_MIGRATIONS[0];
-  if (file.name !== expected.name || file.checksum !== expected.checksum || checksumOf(file.sql) !== expected.checksum)
+  if (checksumOf(expected.sql) !== expected.checksum || file.name !== expected.name
+      || file.checksum !== expected.checksum || checksumOf(file.sql) !== expected.checksum)
     throw new Error('PRESCRIPTION_ISSUANCE_SOURCE_MISMATCH: 0093');
   const registry = applied.find(item => item.version === '0093');
   if (registry && (registry.name !== expected.name || registry.checksum !== expected.checksum || registry.adopted))
