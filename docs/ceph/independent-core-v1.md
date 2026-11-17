@@ -176,3 +176,29 @@ https://pmc.ncbi.nlm.nih.gov/articles/PMC9100433/ . The latter explicitly uses
 SN–GoGn (Methods); the former was blocked by a browser challenge during this
 verification. Neither is treated here as authorization to implement a new
 clinical construction or reinterpret the historical Go–Me measurement.
+
+### Wits mathematical characterization (2026-11-17, not a clinical implementation)
+
+`ceph-wits-geometric-witness.test.ts` tests the core projection primitives with
+an explicitly posterior-to-anterior directed synthetic line. Coincident valid
+AO/BO projections give zero in this test-only witness; the historical WITS
+implementation gives NaN because it normalizes BO-to-AO instead of the plane.
+The historical implementation also reverses the sign under horizontal image
+reflection: its sign depends on screen x rather than declared anatomy.
+Both behaviors are characterized, not modified. Stored results remain untouched.
+
+Witness checks: zero, +5 and -5 mm at synthetic 1 mm/pixel; isolated 10-degree
+plane rotation yielding -0.285406565 mm; reversed plane labels; translation,
+joint rotation, horizontal/vertical image reflection, coordinate scaling with
+inverse pixel-scale adjustment, invalid plane and scale rejection, and N
+independence. These establish arithmetic properties only, not landmark accuracy,
+clinical calibration, reproducibility or an accepted functional occlusal plane.
+
+Primary reference: Jacobson A. The Wits appraisal of jaw disharmony. Am J Orthod
+1975;67:125-138. DOI: 10.1016/0002-9416(75)90065-2.
+https://pubmed.ncbi.nlm.nih.gov/1054214/
+The abstract supports perpendicular AO/BO projections and signed separation.
+Full publisher access returned 403 during this check. Original figure and exact
+functional-plane construction review remain required; no clinical thresholds,
+diagnoses or population norms are introduced. No patient image was used.
+Wits is NOT added to Core-8, and `clinicalUseAllowed` remains false.
