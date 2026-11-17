@@ -13,7 +13,10 @@ const url=new URL(process.env.TEST_DATABASE_URL!);url.pathname=`/${databaseName}
 console.log(`Owned synthetic coverage database: ${databaseName}; no prior database dropped`);
 const db=await import("../../lib/db");
 const {sessionCredentialVersion}=await import("../../lib/auth");
-const coverage=await import("../../lib/ortho-followup-coverage-db");
+// Exercise every historical writer/authority/locking assertion on a synthetic
+// database with the exact archived implementation; product authoring is retired.
+const coverage=await import("./_historical-followup-coverage-writer");
+const migrations=await import("../../lib/migrations");
 const raw=new Pool({connectionString:url.toString(),ssl:false,max:4});
 const q=async(sql:string,args:unknown[]=[]) => (await db.getPool().query(sql,args)).rows;
 let admin:SessionPayload,provider:number,service:number;
@@ -40,6 +43,9 @@ async function command(f:Awaited<ReturnType<typeof fixture>>,decision:"included"
 async function append(f:Awaited<ReturnType<typeof fixture>>,c:FollowupCoverageCommand,session=admin){return coverage.appendFollowupCoverage({session,patientId:f.patient,orthoCaseId:f.ortho,command:c});}
 beforeAll(async()=>{
   await db.ensureSchema();
+  const historical=(await migrations.loadMigrationFiles()).find(file=>file.version==='0079');
+  if(!historical)throw new Error('Historical 0079 artifact missing');
+  await migrations.applyRuntimeMigrationFiles(db.getPool(),[historical]);
   const user=(await q("INSERT INTO users(username,display_name,password_hash,role) VALUES('synthetic-coverage-admin','Synthetic admin','synthetic-hash','admin') RETURNING id"))[0];
   admin={userId:user.id,username:"synthetic-coverage-admin",role:"admin",expiresAt:Date.now()+300_000,credentialVersion:sessionCredentialVersion("synthetic-hash")};
   provider=(await q("INSERT INTO parties(name,kind) VALUES('Synthetic treating provider','doctor') RETURNING id"))[0].id;

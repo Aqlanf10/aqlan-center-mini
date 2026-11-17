@@ -6,7 +6,12 @@ vi.stubEnv("USE_LOCAL_DB","true");vi.stubEnv("NODE_ENV","test");vi.stubEnv("RAIL
 vi.stubEnv("SESSION_SECRET","synthetic-followup-authority-test-only-0123456789");
 const db=await import("../lib/db");
 const {sessionCredentialVersion}=await import("../lib/auth");
-const coverage=await import("../lib/ortho-followup-coverage-db");
+// Preserve the historic authoring contract as a test-only fixture; all recovery
+// reads use the retired product implementation on the same synthetic database.
+const current=await import("../lib/ortho-followup-coverage-db");
+const historical=await import("./postgres/_historical-followup-coverage-writer");
+const migrations=await import("../lib/migrations");
+const coverage={...current,appendFollowupCoverage:historical.appendFollowupCoverage};
 const q=async(sql:string,args:unknown[]=[]) => (await db.getPool().query(sql,args)).rows;
 let admin:SessionPayload,provider:number,service:number;
 let seq=0;
@@ -32,6 +37,9 @@ async function command(f:Awaited<ReturnType<typeof fixture>>,decision:"included"
 async function append(f:Awaited<ReturnType<typeof fixture>>,c:FollowupCoverageCommand,session=admin){return coverage.appendFollowupCoverage({session,patientId:f.patient,orthoCaseId:f.ortho,command:c});}
 beforeAll(async()=>{
   await db.ensureSchema();
+  const old=(await migrations.loadMigrationFiles()).find(file=>file.version==='0079');
+  if(!old)throw new Error('Historical 0079 artifact missing');
+  await migrations.applyRuntimeMigrationFiles(db.getPool(),[old]);
   const user=(await q("INSERT INTO users(username,display_name,password_hash,role) VALUES('synthetic-recovery-admin','Synthetic admin','synthetic-hash','admin') RETURNING id"))[0];
   admin={userId:user.id,username:"synthetic-recovery-admin",role:"admin",expiresAt:Date.now()+300_000,credentialVersion:sessionCredentialVersion("synthetic-hash")};
   provider=(await q("INSERT INTO parties(name,kind) VALUES('Synthetic treating provider','doctor') RETURNING id"))[0].id;
@@ -48,7 +56,7 @@ describe("durable exact coverage command recovery",()=>{
     await q("UPDATE ortho_cases SET patient_id=$2 WHERE id=$1",[f.ortho,other.patient]);
     const input={session:admin,patientId:f.patient,orthoCaseId:f.ortho,command:c};
     expect(await coverage.readFollowupCoverageCommandStatus(input)).toEqual({state:'committed',revision:saved.revision});
-    expect((await coverage.appendFollowupCoverage(input)).replayed).toBe(true);
+    expect((await current.appendFollowupCoverage(input)).replayed).toBe(true);
     await expect(coverage.readFollowupCoverageCommandStatus({...input,command:{...c,reason:'Different command'}})).rejects.toMatchObject({code:'command_conflict'});
   });
   it("persists terminal refusal and never upgrades its command after source repair",async()=>{
@@ -58,7 +66,7 @@ describe("durable exact coverage command recovery",()=>{
     await q("UPDATE invoices SET status='unpaid' WHERE id=$1",[f.invoice]);
     const input={session:admin,patientId:f.patient,orthoCaseId:f.ortho,command:c};
     expect(await coverage.readFollowupCoverageCommandStatus(input)).toMatchObject({state:'rejected',rejection:{commandId:c.commandId,patientId:f.patient,orthoCaseId:f.ortho,actor:admin.username,terminal:true,command:c}});
-    await expect(append(f,c)).rejects.toMatchObject({code:'source_changed',rejection:{commandId:c.commandId}});
+    await expect(current.appendFollowupCoverage(input)).rejects.toMatchObject({code:'source_changed',rejection:{commandId:c.commandId}});
     expect(await q('SELECT id FROM ortho_followup_coverage_revisions WHERE command_id=$1',[c.commandId])).toEqual([]);
     for(const sql of ['DELETE FROM ortho_followup_coverage_rejections WHERE command_id=$1',"UPDATE ortho_followup_coverage_rejections SET code='case_closed' WHERE command_id=$1"])
       await expect(q(sql,[c.commandId])).rejects.toThrow('append-only');

@@ -6,7 +6,12 @@ vi.stubEnv("USE_LOCAL_DB","true");vi.stubEnv("NODE_ENV","test");vi.stubEnv("RAIL
 vi.stubEnv("SESSION_SECRET","synthetic-followup-authority-test-only-0123456789");
 const db=await import("../lib/db");
 const {sessionCredentialVersion}=await import("../lib/auth");
-const coverage=await import("../lib/ortho-followup-coverage-db");
+// Preserve the historic authoring contract as a test-only fixture; all recovery
+// reads use the retired product implementation on the same synthetic database.
+const current=await import("../lib/ortho-followup-coverage-db");
+const historical=await import("./postgres/_historical-followup-coverage-writer");
+const migrations=await import("../lib/migrations");
+const coverage={...current,appendFollowupCoverage:historical.appendFollowupCoverage};
 const {walkoutNeedsReview,adjustmentLabel}=await import("../lib/walkout-presentation");
 const {readVisitFinancialContext}=await import("../lib/visit-financial-context-db");
 const q=async(sql:string,args:unknown[]=[]) => (await db.getPool().query(sql,args)).rows;
@@ -34,6 +39,9 @@ async function command(f:Awaited<ReturnType<typeof fixture>>,decision:"included"
 async function append(f:Awaited<ReturnType<typeof fixture>>,c:FollowupCoverageCommand,session=admin){return coverage.appendFollowupCoverage({session,patientId:f.patient,orthoCaseId:f.ortho,command:c});}
 beforeAll(async()=>{
   await db.ensureSchema();
+  const old=(await migrations.loadMigrationFiles()).find(file=>file.version==='0079');
+  if(!old)throw new Error('Historical 0079 artifact missing');
+  await migrations.applyRuntimeMigrationFiles(db.getPool(),[old]);
   const user=(await q("INSERT INTO users(username,display_name,password_hash,role) VALUES('synthetic-coverage-admin','Synthetic admin','synthetic-hash','admin') RETURNING id"))[0];
   admin={userId:user.id,username:"synthetic-coverage-admin",role:"admin",expiresAt:Date.now()+300_000,credentialVersion:sessionCredentialVersion("synthetic-hash")};
   provider=(await q("INSERT INTO parties(name,kind) VALUES('Synthetic treating provider','doctor') RETURNING id"))[0].id;

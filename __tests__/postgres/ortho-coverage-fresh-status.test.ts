@@ -1,0 +1,24 @@
+import { randomUUID } from "node:crypto";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
+import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
+vi.mock("server-only",()=>({}));assertRealPostgresUrl();stubPostgresEnv();vi.stubEnv("SESSION_SECRET","synthetic-fresh-coverage-status-secret-0123456789");
+const db=await import("../../lib/db"), status=await import("../../lib/canonical-ortho-coverage-status"), writer=await import("../../lib/canonical-ortho-coverage-command");
+const accounts={owner:{username:"SYN-FRESH-OWNER",role:"admin"}} as const;
+let fx:CanonicalInventoryDatabase<keyof typeof accounts>;
+beforeAll(async()=>{fx=await openCanonicalInventoryDatabase(db,accounts,"owner");},180000);
+afterAll(async()=>{await fx?.close();});
+it("fresh database has no coverage substrate and an old command stays unresolved and unwritten",async()=>{
+ const pool=fx.pool;
+ expect((await pool.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS table_name")).rows[0].table_name).toBeNull();
+ expect((await pool.query("SELECT version FROM schema_migrations WHERE version='0079'")).rows).toEqual([]);
+ const patient=(await pool.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-FRESH-0079','Synthetic fresh patient') RETURNING id")).rows[0].id;
+ const ortho=(await pool.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id",[patient])).rows[0].id;
+ const original={schemaVersion:1,commandId:randomUUID(),expectedRevisionId:null,source:{patientId:patient,orthoCaseId:ortho,clinicalCaseId:1,planId:1,planItemId:1,invoiceId:1},expectedSourceFingerprint:'a'.repeat(64),scope:'routine_adjustments',decision:'included',reason:'Synthetic old journal'};
+ const before=(await pool.query("SELECT count(*)::int AS n FROM audit_log")).rows[0];const session=await fx.session('owner');
+ await expect(status.readCanonicalCoverageCommandStatus(session,patient,ortho,original)).rejects.toMatchObject({status:503,code:'coverage_not_ready'});
+ await expect(writer.commandCanonicalFollowupCoverage(session,patient,ortho,original)).rejects.toMatchObject({status:503,code:'coverage_not_ready'});
+ expect((await pool.query("SELECT count(*)::int AS n FROM audit_log")).rows[0]).toEqual(before);
+ expect((await pool.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS table_name")).rows[0].table_name).toBeNull();
+ expect((await pool.query("SELECT version FROM schema_migrations WHERE version='0079'")).rows).toEqual([]);
+},180000);
