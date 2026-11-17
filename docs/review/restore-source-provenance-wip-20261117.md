@@ -13,6 +13,11 @@ Historical 0079 timestamps are checked as finite calendar/time/offset values
 before reset, without Date normalization, and the accepted text is preserved
 at microsecond precision. Non-writer forms, including precision beyond six
 fractional digits, are conservatively refused.
+PostgreSQL `timestamptz` can also represent `infinity` and `-infinity`, and the
+backup writer can serialize them. The pre-existing stricter 0079 contract
+rejects those values; this candidate retains that refusal pending explicit
+historical-compatibility review. No real 0079 infinity round trip was tested,
+so this is not a claim of complete compatibility with every valid timestamp.
 
 Guarded registry records require all five historic fields. Version, checksum,
 and name must match the local catalogue. An adopted 0001 baseline remains
@@ -35,7 +40,7 @@ has no unrecorded history. Rejection preserves the source archive and target;
 it does not reconstruct an unknown 0090 schema. Native full-schema recovery
 and independently protected assets require separate verification.
 
-Synthetic unit and mocked-target tests on Node 22 passed **99/99** across seven
+Synthetic unit and mocked-target tests on Node 22 passed **101/101** across seven
 files. Their target connection is mocked; they do not prove PostgreSQL target
 preservation. The initial adversarial tests for `DO`, `COPY`, `set_config`, and
 `pg_sleep` were observed failing against the prior parser, and the executable

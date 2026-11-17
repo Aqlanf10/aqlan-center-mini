@@ -32,7 +32,7 @@ describe('historical coverage evidence in writer backup SQL', () => {
     '2026-01-01T24:00:00Z', '2026-01-01T23:60:00Z', '2026-01-01T23:59:60Z',
     '2026-01-01T00:00:00+16:00', '2026-01-01T00:00:00+03:60',
     '2026-01-01T00:00:00+03:00:60', '2026-01-01T00:00:00.1234567Z',
-    '2026-01-01T00:00:00+03:0', '2026-01-01T00:00:00',
+    '2026-01-01T00:00:00+03:0', '2026-01-01T00:00:00', 'infinity', '-infinity',
   ])('rejects impossible or non-writer 0079 timestamps: %s', appliedAt => {
     expect(() => inspect(row({ applied_at:appliedAt }))).toThrow('Invalid historical 0079 registry record');
   });
