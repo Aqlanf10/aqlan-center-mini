@@ -71,12 +71,61 @@ export interface MigrationStatus {
    */
   baselineDiff: BaselineSchemaDiff | null;
   consistent: boolean;
+  historical0079Problem: string | null;
 }
 
 export interface MigrationRunResult {
   adoptedBaseline: boolean;
   appliedVersions: string[];
   alreadyUpToDate: boolean;
+}
+
+// Retired feature: keep the exact published contract to recognize old registries,
+// but never install it in normal fresh migrations. Only archive restoration may
+// request the historical schema after validating its source registry.
+export const HISTORICAL_0079_SHA256 = "5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99";
+const historical0079Name = "ortho_followup_coverage";
+function validateHistorical0079(file: MigrationFile | undefined, row?: AppliedMigrationRow): void {
+  if (file && (file.version !== "0079" || file.name !== historical0079Name
+    || file.filename !== "0079_ortho_followup_coverage.sql"
+    || file.checksum !== HISTORICAL_0079_SHA256
+    || createHash("sha256").update(file.sql).digest("hex") !== HISTORICAL_0079_SHA256))
+    throw new Error("HISTORICAL_0079_SOURCE_MISMATCH");
+  if (row && (!file || row.name !== historical0079Name || row.checksum !== HISTORICAL_0079_SHA256 || row.adopted))
+    throw new Error("HISTORICAL_0079_REGISTRY_MISMATCH");
+}
+/** A registry alone is not proof of installed protection. Conversely, never
+ * adopt a hand-installed or partial footprint when there is no registry row. */
+async function validateHistorical0079Footprint(client: DbClient, row?: AppliedMigrationRow): Promise<void> {
+  const { rows: [state] } = await client.query<{ tables: number; columns: number; triggers: number }>(`SELECT
+    (SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relkind IN ('r','p') AND c.relname IN ('ortho_followup_coverage_revisions','ortho_followup_coverage_rejections')) AS tables,
+    (SELECT count(*)::int FROM information_schema.columns WHERE table_schema='public' AND
+       ((table_name='ortho_adjustments' AND column_name='followup_coverage_revision_id') OR
+        (table_name='visits' AND column_name='ortho_followup_coverage_proof'))) AS columns,
+    (SELECT count(*)::int FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND NOT t.tgisinternal AND t.tgenabled='O'
+       AND (c.relname,t.tgname) IN (('visits','ortho_followup_visit_manifest'),('visits','ortho_followup_manifest_children'),('visits','ortho_followup_visit_no_truncate'),
+         ('ortho_adjustments','ortho_followup_adjustment_proof'),('ortho_adjustments','ortho_followup_proof_parent'),('ortho_adjustments','ortho_followup_adjustment_no_truncate'),
+         ('ortho_followup_coverage_revisions','ortho_followup_coverage_no_rewrite'),('ortho_followup_coverage_revisions','ortho_followup_coverage_no_truncate'),
+         ('ortho_followup_coverage_revisions','ortho_followup_coverage_chain'),('ortho_followup_coverage_revisions','ortho_followup_coverage_00_command'),
+         ('ortho_followup_coverage_rejections','ortho_followup_rejection_immutable'),('ortho_followup_coverage_rejections','ortho_followup_rejection_no_truncate'))) AS triggers`);
+  if (!state || (row ? state.tables !== 2 || state.columns !== 2 || state.triggers !== 12
+    : state.tables !== 0 || state.columns !== 0 || state.triggers !== 0))
+    throw new Error("HISTORICAL_0079_FOOTPRINT_MISMATCH");
+}
+/** Check the retired runtime contract without applying or adopting it. */
+export async function validateRuntimeHistorical0079(pool: DbPool, file: MigrationFile): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
+    try {
+      const row = (await listAppliedMigrations(client)).find(item => item.version === "0079");
+      validateHistorical0079(file, row);
+      await validateHistorical0079Footprint(client, row);
+    }
+    finally { await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {}); }
+  } finally { client.release(); }
 }
 
 /**
@@ -254,8 +303,11 @@ export async function migrationStatus(pool: DbPool, files?: MigrationFile[]): Pr
   let emptyDatabase = false;
   let probe = { ok: true, missing: [] as string[] };
   let baselineDiff: BaselineSchemaDiff | null = null;
+  let historicalFootprintInvalid = false;
   try {
     applied = await listAppliedMigrations(client);
+    try { await validateHistorical0079Footprint(client, applied.find(row => row.version === "0079")); }
+    catch { historicalFootprintInvalid = true; }
     emptyDatabase = await databaseIsEmpty(client);
     const appliedVersionSet = new Set(applied.map((row) => row.version));
     probe = await criticalSchemaProbe(client, appliedVersionSet);
@@ -274,7 +326,10 @@ export async function migrationStatus(pool: DbPool, files?: MigrationFile[]): Pr
   const appliedVersions = new Set(applied.map((row) => row.version));
   const fileVersions = new Map(migrationFiles.map((file) => [file.version, file]));
 
-  const pending = migrationFiles.filter((file) => !appliedVersions.has(file.version));
+  let historical0079Problem: string | null = historicalFootprintInvalid ? "HISTORICAL_0079_FOOTPRINT_MISMATCH" : null;
+  try { validateHistorical0079(migrationFiles.find(file => file.version === "0079"), applied.find(row => row.version === "0079")); }
+  catch (error) { historical0079Problem = error instanceof Error ? error.message : "HISTORICAL_0079_INVALID"; }
+  const pending = migrationFiles.filter((file) => file.version !== "0079" && !appliedVersions.has(file.version));
   const unknownApplied = applied.filter((row) => !fileVersions.has(row.version));
   const checksumMismatches = [];
   for (const row of applied) {
@@ -289,7 +344,8 @@ export async function migrationStatus(pool: DbPool, files?: MigrationFile[]): Pr
   }
 
   const consistent =
-    pending.length === 0
+    historical0079Problem === null
+    && pending.length === 0
     && unknownApplied.length === 0
     && checksumMismatches.length === 0
     && probe.ok
@@ -297,7 +353,7 @@ export async function migrationStatus(pool: DbPool, files?: MigrationFile[]): Pr
 
   return {
     applied, files: migrationFiles, pending, unknownApplied, checksumMismatches,
-    emptyDatabase, probe, baselineDiff, consistent,
+    emptyDatabase, probe, baselineDiff, consistent, historical0079Problem,
   };
 }
 
@@ -320,7 +376,7 @@ export async function migrationStatus(pool: DbPool, files?: MigrationFile[]): Pr
  */
 export async function migrate(
   pool: DbPool,
-  options: { apply?: boolean; files?: MigrationFile[] } = {},
+  options: { apply?: boolean; files?: MigrationFile[]; historical0079?: true } = {},
 ): Promise<MigrationRunResult> {
   const apply = options.apply === true;
   const files = options.files ?? (await loadMigrationFiles());
@@ -331,7 +387,7 @@ export async function migrate(
     // لو مات الاتصال — لا تعليق دائم للمهاجرين.
     await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
     try {
-      return await migrateHoldingLock(client, files, apply);
+      return await migrateHoldingLock(client, files, apply, options.historical0079 === true);
     } finally {
       await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {
         /* الاتصال سيُغلق بعد لحظة في كل الأحوال — فكّ القفل هناك تلقائيًّا. */
@@ -346,8 +402,14 @@ async function migrateHoldingLock(
   client: DbClient,
   files: MigrationFile[],
   apply: boolean,
+  historical0079: boolean,
 ): Promise<MigrationRunResult> {
   let applied = await listAppliedMigrations(client);
+  const historicalFile = files.find(file => file.version === "0079");
+  const historicalRow = applied.find(row => row.version === "0079");
+  validateHistorical0079(historicalFile, historicalRow);
+  await validateHistorical0079Footprint(client, historicalRow);
+  if (historical0079 && !historicalFile) throw new Error("HISTORICAL_0079_SOURCE_MISSING");
   // Validate only the two pinned Ortho contracts before skipping applied files.
   for (const file of files) {
     if (file.version === "0051" || file.version === "0052") validateOrthoRevisionRegistry(file, applied.find(row => row.version === file.version));
@@ -397,6 +459,7 @@ async function migrateHoldingLock(
   // الخطوة ٢: هجرات ما بعد الأساس بالترتيب الحتمي.
   for (const file of files) {
     if (file.version === BASELINE_VERSION) continue;
+    if (file.version === "0079" && !historical0079 && !applied.some(row => row.version === "0079")) continue;
     if (applied.some((row) => row.version === file.version)) {
       // مطبَّقة سابقًا: تحقق البصمة — أي تعديل لملفٍ مرَّ تطبيقه يوقف كل شيء.
       const row = applied.find((entry) => entry.version === file.version);

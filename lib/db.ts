@@ -44,7 +44,7 @@ import type {InvoiceIdentityAmendment} from "./invoice-identity-amendments";
 import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { HR_STAFF_SQL } from "./hr-schema";
 import HR_TEMPORAL_RUNTIME_MIGRATIONS from './hr-temporal-schema.generated.json';
-import { applyRuntimeMigrationFiles } from './migrations';
+import { applyRuntimeMigrationFiles, validateRuntimeHistorical0079 } from './migrations';
 import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
@@ -2132,7 +2132,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0069", name: "unpaid_currency_transitions", filename: "0069_unpaid_currency_transitions.sql", sql: UNPAID_CURRENCY_TRANSITION_SQL, checksum: checksumOf(UNPAID_CURRENCY_TRANSITION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0074", name: "lab_work_intents", filename: "0074_lab_work_intents.sql", sql: LAB_WORK_INTENT_SQL, checksum: checksumOf(LAB_WORK_INTENT_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0078", name: "agreement_reconciliation", filename: "0078_agreement_reconciliation.sql", sql: AGREEMENT_RECONCILIATION_SQL, checksum: checksumOf(AGREEMENT_RECONCILIATION_SQL) }]);
-    await applyRuntimeMigrationFiles(getPool(), [{ version: "0079", name: "ortho_followup_coverage", filename: "0079_ortho_followup_coverage.sql", sql: ORTHO_FOLLOWUP_COVERAGE_SQL, checksum: checksumOf(ORTHO_FOLLOWUP_COVERAGE_SQL) }]);
+    await validateRuntimeHistorical0079(getPool(), { version: "0079", name: "ortho_followup_coverage", filename: "0079_ortho_followup_coverage.sql", sql: ORTHO_FOLLOWUP_COVERAGE_SQL, checksum: checksumOf(ORTHO_FOLLOWUP_COVERAGE_SQL) });
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0080", name: "patient_numbering", filename: "0080_patient_numbering.sql", sql: PATIENT_NUMBERING_SQL, checksum: checksumOf(PATIENT_NUMBERING_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0081", name: "invoice_archive", filename: "0081_invoice_archive.sql", sql: INVOICE_ARCHIVE_SQL, checksum: checksumOf(INVOICE_ARCHIVE_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0082", name: "invoice_service_additions", filename: "0082_invoice_service_additions.sql", sql: INVOICE_SERVICE_ADDITIONS_SQL, checksum: checksumOf(INVOICE_SERVICE_ADDITIONS_SQL) }]);
