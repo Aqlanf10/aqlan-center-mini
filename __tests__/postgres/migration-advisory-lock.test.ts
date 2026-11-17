@@ -87,6 +87,9 @@ describe("قفل advisory للمهاجرين (P1-FIX-2) — PostgreSQL حقيق�
       ].join("\n");
       const files = await filesWithCanary(dir, canary);
       expect(files.map((file) => file.version)).toContain(await canaryVersion());
+      const historical = files.find(file => file.version === "0079");
+      expect(historical?.checksum).toBe("5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99");
+      const activeVersions = files.filter(file => file.version !== "0079").map(file => file.version);
 
       const poolA = poolFor(url);
       const poolB = poolFor(url);
@@ -102,7 +105,7 @@ describe("قفل advisory للمهاجرين (P1-FIX-2) — PostgreSQL حقيق�
         const upToDate = [runA, runB].filter((run) => run.alreadyUpToDate);
         expect(applied).toHaveLength(1);
         expect(upToDate).toHaveLength(1);
-        expect(applied[0].appliedVersions.length).toBe(files.length);
+        expect(applied[0].appliedVersions).toEqual(activeVersions);
 
         // SQL الهجرة نُفِّذ مرة واحدة بالضبط: الكناري صفّ واحد
         const client = new Client({ connectionString: url, ssl: false });
@@ -115,10 +118,11 @@ describe("قفل advisory للمهاجرين (P1-FIX-2) — PostgreSQL حقيق�
 
           // وكل نسخة مسجَّلة مرة واحدة — لا صفوف ازدواج
           const { rows: versions } = await client.query<{ version: string; n: number }>(
-            "SELECT version, COUNT(*)::int AS n FROM schema_migrations GROUP BY version",
+            "SELECT version, COUNT(*)::int AS n FROM schema_migrations GROUP BY version ORDER BY version",
           );
-          expect(versions).toHaveLength(files.length);
+          expect(versions.map(row => row.version)).toEqual(activeVersions);
           for (const row of versions) expect(row.n).toBe(1);
+          expect((await client.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows).toEqual([{ name: null }]);
         } finally {
           await client.end();
         }
