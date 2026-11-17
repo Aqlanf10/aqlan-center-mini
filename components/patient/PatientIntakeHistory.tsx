@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { newRequestKey } from "@/lib/request-key";
-import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
+import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal-intake";
 import { friendlyDateLong } from "@/lib/reminders";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
