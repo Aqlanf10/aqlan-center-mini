@@ -41,7 +41,12 @@ export function verifyProductionToolingGraph(graph) {
   const visit = (node, edgeName = null) => {
     assert(record(node), "malformed production graph node");
     assert(!denied(edgeName) && !denied(node.name), `tooling in production dependency graph: ${node.name ?? edgeName}`);
-    assert(!node.invalid && !node.missing && !node.extraneous && (!node.problems || Array.isArray(node.problems) && node.problems.length === 0), "invalid production dependency graph");
+    // Keep each original rejection, but identify only the fixed reason. npm
+    // problem text and package paths may contain sensitive local metadata.
+    assert(!node.invalid, "invalid production dependency graph: invalid");
+    assert(!node.missing, "invalid production dependency graph: missing");
+    assert(!node.extraneous, "invalid production dependency graph: extraneous");
+    assert(!node.problems || Array.isArray(node.problems) && node.problems.length === 0, "invalid production dependency graph: problems");
     if (edgeName !== null) packages++;
     if (node.dependencies !== undefined) {
       assert(record(node.dependencies), "malformed production dependency edges");

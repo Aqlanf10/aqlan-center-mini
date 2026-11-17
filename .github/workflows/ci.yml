@@ -1169,6 +1169,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Match quality job npm version
+        run: npm install -g npm@11.21.1
       - name: Install locked dependencies
         run: npm ci
       - name: Build and inspect standalone assets

@@ -111,6 +111,15 @@ describe("read-only production npm graph", () => {
   it.each([{}, { dependencies: {} }, { dependencies: [] }, { dependencies: { bad: { invalid: true } } }, { dependencies: { bad: { problems: ["missing"] } } }])("rejects missing/invalid/empty graph %#", graph => {
     expect(() => verifyProductionToolingGraph(graph)).toThrow();
   });
+  it.each([
+    ["invalid", { invalid: true }], ["missing", { missing: true }],
+    ["extraneous", { extraneous: true }], ["problems", { problems: ["SYNTHETIC_PRIVATE_METADATA"] }],
+  ])("reports only the bounded %s graph reason", (reason, node) => {
+    let message = "";
+    try { verifyProductionToolingGraph({ dependencies: { safe: node } }); } catch (error) { message = error.message; }
+    expect(message).toBe(`LINT_TOOLING_RUNTIME_REJECTED: invalid production dependency graph: ${reason}`);
+    expect(message).not.toContain("SYNTHETIC_PRIVATE_METADATA");
+  });
   it("fails closed for malformed percent encoding", () => { expect(() => toolingSourcePath("node_modules/%ZZ/index.js")).toThrow(); });
 });
 

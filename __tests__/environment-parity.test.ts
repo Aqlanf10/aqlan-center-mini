@@ -681,6 +681,7 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     expect(final).toContain("exit 1");
     const privacy = jobSource.get("standalone_privacy_inventory")!;
     for (const gate of ["npm run build", "node scripts/verify-braces-runtime.mjs", "node scripts/dependency-security/verify-lint-tooling-runtime.mjs", "node scripts/preflight-build-seal.mjs --verify"]) expect(privacy).toContain(gate);
+    expect(privacy).toContain("npm install -g npm@11.21.1");
   });
 
   it("خطوة عقد المخطط وحدها هي التي تولّد الملتزم — وتستعيده بعدها (عين git checkout في CI)", async () => {
